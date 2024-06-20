@@ -16,7 +16,6 @@ if(CCACHE_PROGRAM)
   endforeach()
 endif()
 
-
 project(libsession-util
     VERSION 1.2.0
     DESCRIPTION "Session client utility library"
