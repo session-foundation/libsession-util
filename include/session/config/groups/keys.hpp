@@ -164,6 +164,11 @@ class Keys final : public ConfigSig {
     /// To construct a blank info object (i.e. with no pre-existing dumped data to load) pass
     /// `std::nullopt` as the last argument.
     ///
+    /// When no dump is provided the initial Keys object will be created with no keys loaded at all,
+    /// these will be loaded later into this and the info/members objects when loading keys via
+    /// received config messages. If this is a brand new group then rekey() MUST be called,
+    /// otherwise the group will be in an invalid state.
+    ///
     /// Inputs:
     /// - `user_ed25519_secretkey` is the ed25519 secret key backing the current user's session ID,
     ///   and is used to decrypt incoming keys.  It is required.
@@ -175,10 +180,6 @@ class Keys final : public ConfigSig {
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     ///   that was previously dumped from an instance of this class by calling `dump()`.
     /// - `info` and `members` -- will be loaded with the group keys, if present in the dump.
-    ///   Otherwise, if this is an admin Keys object, with a new one constructed for the initial
-    ///   Keys object; or with no keys loaded at all if this is a non-admin, non-dump construction.
-    ///   (Keys will also be loaded later into this and the info/members objects, when rekey()ing or
-    ///   loading keys via received config messages).
     Keys(ustring_view user_ed25519_secretkey,
          ustring_view group_ed25519_pubkey,
          std::optional<ustring_view> group_ed25519_secretkey,

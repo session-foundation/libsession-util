@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <session/config/user_profile.hpp>
 #include <string_view>
 
 #include "utils.hpp"
@@ -18,6 +19,52 @@ void log_msg(config_log_level lvl, const char* msg, void*) {
           : lvl == LOG_LEVEL_INFO    ? "Info"
                                      : "debug")
          << ": " << msg);
+}
+
+TEST_CASE("UserProfile", "[config][user_profile]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
+            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    session::config::UserProfile profile{ustring_view{seed}, std::nullopt};
+
+    CHECK_THROWS(
+            profile.set_name("123456789012345678901234567890123456789012345678901234567890123456789"
+                             "01"
+                             "23456789012345678901234567890A"));
+    CHECK_NOTHROW(
+            profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
+                                       "01"
+                                       "234567890123456789012345678901234567890A"));
+    CHECK(profile.get_name() ==
+          "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+          "901234567890");
+    CHECK_NOTHROW(
+            profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
+                                       "01"
+                                       "234567890123456789012345678901234567🎂"));
+    CHECK(profile.get_name() ==
+          "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+          "901234567");
+    CHECK_NOTHROW(
+            profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
+                                       "01"
+                                       "2345678901234567890123456789012345🎂🎂"));
+    CHECK(profile.get_name() ==
+          "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+          "9012345🎂");
 }
 
 TEST_CASE("user profile C API", "[config][user_profile][c]") {

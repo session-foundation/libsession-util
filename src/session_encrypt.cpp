@@ -584,7 +584,7 @@ ustring decrypt_push_notification(ustring_view payload, ustring_view enc_key) {
         throw std::runtime_error{"Failed to decrypt; perhaps the secret key is invalid?"};
 
     // Removing any null padding bytes from the end
-    if (auto pos = buf.find_last_not_of('\0'); pos != std::string::npos)
+    if (auto pos = buf.find_last_not_of((unsigned char)0); pos != std::string::npos)
         buf.resize(pos + 1);
 
     return buf;

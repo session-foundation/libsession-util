@@ -39,7 +39,7 @@ LIBSESSION_EXPORT int groups_info_init(
         const unsigned char* ed25519_secretkey,
         const unsigned char* dump,
         size_t dumplen,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: groups_info/groups_info_get_name
 ///
