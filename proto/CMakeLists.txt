@@ -1,21 +1,4 @@
 
-function(check_target target)
-    if (NOT TARGET ${target})
-        message(FATAL_ERROR "Project failed to compile required target: ${target}")
-    endif()
-endfunction()
-
-if (BUILD_SHARED_LIBS AND NOT BUILD_STATIC_DEPS)
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(PROTOBUF_LITE protobuf-lite>=3.21 IMPORTED_TARGET)
-    if(PROTOBUF_LITE_FOUND)
-        add_library(protobuf_lite INTERFACE IMPORTED)
-        target_link_libraries(protobuf_lite INTERFACE PkgConfig::PROTOBUF_LITE)
-        add_library(protobuf::libprotobuf-lite ALIAS protobuf_lite)
-    endif()
-endif()
-
-check_target(protobuf::libprotobuf-lite)
 libsession_static_bundle(protobuf::libprotobuf-lite)
 
 
