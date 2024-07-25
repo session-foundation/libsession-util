@@ -25,12 +25,20 @@ typedef struct onion_request_builder_object {
 ///
 /// Constructs an onion request builder and sets a pointer to it in `builder`.
 ///
-/// When done with the object the `builder` must be destroyed by either passing the pointer to
-/// onion_request_builder_free() or onion_request_builder_build().
+/// When done with the object the `builder` must be destroyed by passing the pointer to
+/// onion_request_builder_free().
 ///
 /// Inputs:
 /// - `builder` -- [out] Pointer to the builder object
 LIBSESSION_EXPORT void onion_request_builder_init(onion_request_builder_object** builder);
+
+/// API: groups/onion_request_builder_free
+///
+/// Properly destroys an onion request builder instance.
+///
+/// Inputs:
+/// - `builder` -- [out] Pointer to the builder object to be freed
+LIBSESSION_EXPORT void onion_request_builder_free(onion_request_builder_object* builder);
 
 /// API: onion_request_builder_set_enc_type
 ///

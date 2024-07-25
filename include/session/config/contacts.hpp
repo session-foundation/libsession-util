@@ -90,6 +90,7 @@ struct contact_info {
     /// - `name` -- Name to assign to the contact
     void set_name(std::string name);
     void set_nickname(std::string nickname);
+    void set_nickname_truncated(std::string nickname);
 
   private:
     friend class Contacts;
@@ -205,6 +206,17 @@ class Contacts : public ConfigBase {
     /// - `session_id` -- hex string of the session id
     /// - `nickname` -- string of the contacts nickname
     void set_nickname(std::string_view session_id, std::string nickname);
+
+    /// API: contacts/contacts::set_nickname_truncated
+    ///
+    /// Alternative to `set()` for setting a single field. The same as `set_name` except truncates
+    /// the value when it's too long.  (If setting multiple fields at once you should use `set()`
+    /// instead).
+    ///
+    /// Inputs:
+    /// - `session_id` -- hex string of the session id
+    /// - `nickname` -- string of the contacts nickname
+    void set_nickname_truncated(std::string_view session_id, std::string nickname);
 
     /// API: contacts/contacts::set_profile_pic
     ///
