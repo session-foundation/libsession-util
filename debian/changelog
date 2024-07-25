@@ -1,3 +1,9 @@
+libsession-util (1.2.0~pre20240129-1~ubuntu2404) noble; urgency=medium
+
+  * noble debs
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 24 Jul 2024 23:06:16 -0300
+
 libsession-util (1.2.0~pre20240129-1~ubuntu2310) mantic; urgency=medium
 
   [ Jason Rhinelander ]
