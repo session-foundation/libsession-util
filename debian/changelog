@@ -1,3 +1,65 @@
+libsession-util (1.2.0~pre20240624-1~ubuntu2204) jammy; urgency=medium
+
+  [ Jason Rhinelander ]
+  * rebuild from latest dev
+
+  [ Morgan Pretty ]
+  * Added missing 'mute_until' setting between C/C++ contact types
+  * Made length checks in explicit setters throw, truncating contact name
+  * Formatting
+  * Removed the default rekey from the Keys init
+  * Updated the group keys init docs
+  * Update src/config/contacts.cpp
+  * Updated CI script to latest changes
+  * Added the gnutls dep to the CI script
+  * Added some missing Ci script tweaks, ran formatter
+  * Bumped nlohmann-json to latest version
+
+  [ Audric Ackermann ]
+  * chore: fetch protobuf as git submodule
+
+  [ Morgan Pretty ]
+  * Added code to handle unwrapping double-wrapped config messages
+  * Removed a warning log since oxen::log isn't included yet
+
+  [ Audric Ackermann ]
+  * fix: build for msvc
+
+  [ Jason Rhinelander ]
+  * Clean up hash function
+
+  [ Audric Ackermann ]
+  * chore: replaced __attribute__((warn_unused_result)) with macro
+  * test: enable back hash.cpp and test_hash.cpp back for msvc builds
+  * fix: find_last_not_of(0) ambiguous for msvc
+  * chore: skip testing with libsession::onionreq when not building it
+
+  [ Jason Rhinelander ]
+  * Avoid extra variable in tests linkage
+
+  [ Morgan Pretty ]
+  * Added 'set_{x}_truncated' functions so clients have non-throwing versions
+  * Ran the formatter
+  * Additional invite/promotion state and missing C functions
+  * Renamed a couple of functions, updated docs, fixed 'promotion_x' funcs
+
+  [ Jason Rhinelander ]
+  * Fix C free functions
+
+  [ Morgan Pretty ]
+  * Added a utf8_truncate function and use it when truncating user content
+  * Small docs change
+  * Ran the formatter -_-
+  * Added some tests for the new utf8 truncation logic
+
+  [ yougotwill ]
+  * feat: moved community url max length and qs_pubkey to cpp header
+
+  [ Jason Rhinelander ]
+  * force oxenc submodule to avoid C++20 for now
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 24 Jul 2024 23:15:26 -0300
+
 libsession-util (1.2.0~pre20240129-1~ubuntu2204) jammy; urgency=medium
 
   [ Jason Rhinelander ]
