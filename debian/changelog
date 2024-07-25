@@ -1,3 +1,9 @@
+libsession-util (1.2.0~pre20240724-1~deb13) trixie; urgency=medium
+
+  * allow protobuf to come from the system lib
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 24 Jul 2024 23:40:59 -0300
+
 libsession-util (1.2.0~pre20240624-1~deb13) trixie; urgency=medium
 
   [ Jason Rhinelander ]
