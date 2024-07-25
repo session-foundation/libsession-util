@@ -12,4 +12,5 @@ export PYBUILD_NAME = session-util
 	dh $@ --buildsystem=cmake --parallel
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DBUILD_SHARED_LIBS=ON -DWITH_TESTS=OFF
+	dh_auto_configure -- -DBUILD_SHARED_LIBS=ON -DWITH_TESTS=OFF \
+		-DFORCE_OXENC_SUBMODULE=ON
