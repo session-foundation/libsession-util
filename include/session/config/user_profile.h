@@ -45,11 +45,7 @@ LIBSESSION_EXPORT int user_profile_init(
         const unsigned char* ed25519_secretkey,
         const unsigned char* dump,
         size_t dumplen,
-        char* error)
-#if defined(__GNUC__) || defined(__clang__)
-        __attribute__((warn_unused_result))
-#endif
-        ;
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: user_profile/user_profile_get_name
 ///

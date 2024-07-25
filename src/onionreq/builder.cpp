@@ -179,10 +179,14 @@ extern "C" {
 using session::ustring;
 
 LIBSESSION_C_API void onion_request_builder_init(onion_request_builder_object** builder) {
-    auto c = std::make_unique<session::onionreq::Builder>();
     auto c_builder = std::make_unique<onion_request_builder_object>();
-    c_builder->internals = c.release();
+    c_builder->internals = new session::onionreq::Builder{};
     *builder = c_builder.release();
+}
+
+LIBSESSION_C_API void onion_request_builder_free(onion_request_builder_object* builder) {
+    delete static_cast<session::onionreq::Builder*>(builder->internals);
+    delete builder;
 }
 
 LIBSESSION_C_API void onion_request_builder_set_enc_type(
@@ -252,7 +256,7 @@ LIBSESSION_C_API bool onion_request_builder_build(
     assert(builder && payload_in);
 
     try {
-        auto unboxed_builder = unbox(builder);
+        auto& unboxed_builder = unbox(builder);
         auto payload = unboxed_builder.build(ustring{payload_in, payload_in_len});
 
         if (unboxed_builder.final_hop_x25519_keypair) {

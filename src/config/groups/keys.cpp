@@ -59,8 +59,6 @@ Keys::Keys(
         auto key_list = group_keys();
         members.replace_keys(key_list, /*dirty=*/false);
         info.replace_keys(key_list, /*dirty=*/false);
-    } else if (admin()) {
-        rekey(info, members);
     }
 }
 
@@ -1288,7 +1286,7 @@ std::pair<std::string, ustring> Keys::decrypt_message(ustring_view ciphertext) c
     //
     // Removing any null padding bytes from the end
     //
-    if (auto pos = plain.find_last_not_of('\0'); pos != std::string::npos)
+    if (auto pos = plain.find_last_not_of((unsigned char)0); pos != std::string::npos)
         plain.resize(pos + 1);
 
     //
@@ -1434,6 +1432,15 @@ LIBSESSION_C_API int groups_keys_init(
     return SESSION_ERR_NONE;
 }
 
+LIBSESSION_C_API void groups_keys_free(config_group_keys* conf) {
+    delete static_cast<groups::Keys*>(conf->internals);
+    delete conf;
+}
+
+LIBSESSION_EXPORT int16_t groups_keys_storage_namespace(const config_group_keys* conf) {
+    return static_cast<int16_t>(unbox(conf).storage_namespace());
+}
+
 LIBSESSION_C_API size_t groups_keys_size(const config_group_keys* conf) {
     return unbox(conf).size();
 }
@@ -1472,7 +1479,7 @@ LIBSESSION_C_API bool groups_keys_rekey(
         config_object* members,
         const unsigned char** out,
         size_t* outlen) {
-    assert(info && members && out && outlen);
+    assert(info && members);
     auto& keys = unbox(conf);
     ustring_view to_push;
     try {
@@ -1481,8 +1488,10 @@ LIBSESSION_C_API bool groups_keys_rekey(
         set_error(conf, e.what());
         return false;
     }
-    *out = to_push.data();
-    *outlen = to_push.size();
+    if (out && outlen) {
+        *out = to_push.data();
+        *outlen = to_push.size();
+    }
     return true;
 }
 

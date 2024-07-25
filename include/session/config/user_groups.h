@@ -117,7 +117,7 @@ LIBSESSION_EXPORT int user_groups_init(
         const unsigned char* ed25519_secretkey,
         const unsigned char* dump,
         size_t dumplen,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: user_groups/user_groups_get_group
 ///
@@ -180,7 +180,7 @@ LIBSESSION_EXPORT bool user_groups_get_or_construct_group(
 /// - `bool` -- Whether the function succeeded or not
 LIBSESSION_EXPORT bool user_groups_get_community(
         config_object* conf, ugroups_community_info* comm, const char* base_url, const char* room)
-        __attribute__((warn_unused_result));
+        LIBSESSION_WARN_UNUSED;
 
 /// API: user_groups/user_groups_get_or_construct_community
 ///
@@ -222,7 +222,7 @@ LIBSESSION_EXPORT bool user_groups_get_or_construct_community(
         ugroups_community_info* comm,
         const char* base_url,
         const char* room,
-        unsigned const char* pubkey) __attribute__((warn_unused_result));
+        unsigned const char* pubkey) LIBSESSION_WARN_UNUSED;
 
 /// API: user_groups/user_groups_get_legacy_group
 ///
@@ -248,7 +248,7 @@ LIBSESSION_EXPORT bool user_groups_get_or_construct_community(
 /// Outputs:
 /// - `ugroupts_legacy_group_info*` -- Pointer containing conversation info
 LIBSESSION_EXPORT ugroups_legacy_group_info* user_groups_get_legacy_group(
-        config_object* conf, const char* id) __attribute__((warn_unused_result));
+        config_object* conf, const char* id) LIBSESSION_WARN_UNUSED;
 
 /// API: user_groups/user_groups_get_or_construct_legacy_group
 ///
@@ -282,7 +282,7 @@ LIBSESSION_EXPORT ugroups_legacy_group_info* user_groups_get_legacy_group(
 /// Outputs:
 /// - `ugroupts_legacy_group_info*` -- Pointer containing conversation info
 LIBSESSION_EXPORT ugroups_legacy_group_info* user_groups_get_or_construct_legacy_group(
-        config_object* conf, const char* id) __attribute__((warn_unused_result));
+        config_object* conf, const char* id) LIBSESSION_WARN_UNUSED;
 
 /// API: user_groups/ugroups_legacy_group_free
 ///

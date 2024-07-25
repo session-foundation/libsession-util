@@ -83,7 +83,10 @@ struct pseudo_client {
                  admin ? std::make_optional<ustring_view>({*gsk, 64}) : std::nullopt,
                  keys_dump,
                  info,
-                 members} {}
+                 members} {
+        if (gsk)
+            keys.rekey(info, members);
+    }
 };
 
 TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
@@ -538,21 +541,22 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
             admin1.info.dump(),
             admin1.members.dump(),
             admin1.keys.dump()};
-    admin1b.info.set_name(
-            "Test New Name Really long "
-            "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyz");
-    admin1b.info.set_description(std::string(2050, 'z'));
+    admin1b.info.set_name("Test New Name");
+    admin1b.info.set_description("Test New Desc");
+    CHECK_THROWS(
+            admin1b.info.set_name("Test New Name Really long "
+                                  "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijkl"
+                                  "mnopqrstuvwxyz"));
+    CHECK_THROWS(admin1b.info.set_description(std::string(2050, 'z')));
     CHECK_NOTHROW(admin1b.info.push());
     admin1b.members.set(
             admin1b.members.get_or_construct("05124076571076017981235497801235098712093870981273590"
                                              "8746387172343"));
     CHECK_NOTHROW(admin1b.members.push());
 
-    // Test truncation
-    CHECK(admin1b.info.get_name() ==
-          "Test New Name Really long "
-          "abcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuv");
-    CHECK(admin1b.info.get_description() == std::string(2000, 'z'));
+    // Test values weren't overrided
+    CHECK(admin1b.info.get_name() == "Test New Name");
+    CHECK(admin1b.info.get_description() == "Test New Desc");
 }
 
 TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
@@ -588,6 +592,9 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
                     0,
                     NULL);
             REQUIRE(rv == 0);
+
+            if (is_admin)
+                REQUIRE(groups_keys_rekey(keys, info, members, nullptr, nullptr));
         }
 
         ~pseudo_client() {

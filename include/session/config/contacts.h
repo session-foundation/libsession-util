@@ -74,7 +74,7 @@ LIBSESSION_EXPORT int contacts_init(
         const unsigned char* ed25519_secretkey,
         const unsigned char* dump,
         size_t dumplen,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: contacts/contacts_get
 ///
@@ -99,8 +99,9 @@ LIBSESSION_EXPORT int contacts_init(
 /// Output:
 /// - `bool` -- Returns true if contact exsts
 LIBSESSION_EXPORT bool contacts_get(
-        config_object* conf, contacts_contact* contact, const char* session_id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        contacts_contact* contact,
+        const char* session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: contacts/contacts_get_or_construct
 ///
@@ -130,8 +131,9 @@ LIBSESSION_EXPORT bool contacts_get(
 /// Output:
 /// - `bool` -- Returns true if contact exsts
 LIBSESSION_EXPORT bool contacts_get_or_construct(
-        config_object* conf, contacts_contact* contact, const char* session_id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        contacts_contact* contact,
+        const char* session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: contacts/contacts_set
 ///

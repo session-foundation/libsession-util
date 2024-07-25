@@ -104,11 +104,21 @@ class Info final : public ConfigBase {
     ///
     /// Sets the group name; if given an empty string then the name is removed.
     ///
-    /// If given a name longer than `Info::NAME_MAX_LENGTH` (100) bytes it will be truncated.
+    /// If given a name longer than `Info::NAME_MAX_LENGTH` (100) bytes an error will be thrown.
     ///
     /// Inputs:
     /// - `new_name` -- The name to be put into the group Info
     void set_name(std::string_view new_name);
+
+    /// API: groups/Info::set_name_truncated
+    ///
+    /// Sets the group name; if given an empty string then the name is removed.
+    ///
+    /// If given a name longer than `Info::NAME_MAX_LENGTH` (100) bytes it will be truncated.
+    ///
+    /// Inputs:
+    /// - `new_name` -- The name to be put into the group Info
+    void set_name_truncated(std::string new_name);
 
     /// API: groups/Info::get_description
     ///
@@ -131,6 +141,15 @@ class Info final : public ConfigBase {
     /// Inputs:
     /// - `new_desc` -- The new description to be put into the group Info
     void set_description(std::string_view new_desc);
+
+    /// API: groups/Info::set_description_truncated
+    ///
+    /// Sets the optional group description; if given an empty string then an existing description
+    /// is removed. The same as `set_description` but if the name is too long it'll be truncated.
+    ///
+    /// Inputs:
+    /// - `new_desc` -- The new description to be put into the group Info
+    void set_description_truncated(std::string new_desc);
 
     /// API: groups/Info::get_profile_pic
     ///
