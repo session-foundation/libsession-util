@@ -1,3 +1,9 @@
+libsession-util (1.2.0~pre20240724-1~ubuntu2404) noble; urgency=medium
+
+  * allow protobuf to come from the system lib
+
+ -- Jason Rhinelander <jason@imaginary.ca>  Wed, 24 Jul 2024 23:41:04 -0300
+
 libsession-util (1.2.0~pre20240624-1~ubuntu2404) noble; urgency=medium
 
   [ Morgan Pretty ]
