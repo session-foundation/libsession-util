@@ -131,6 +131,16 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(ginfo2.get_delete_before() == create_time + 50 * 86400);
     CHECK(ginfo2.get_delete_attach_before() == create_time + 70 * 86400);
     CHECK(ginfo2.is_destroyed());
+
+    CHECK_THROWS(
+            ginfo1.set_name("1234567890123456789012345678901234567890123456789012345678901234567890"
+                            "123456789012345678901234567890A"));
+    CHECK_NOTHROW(
+            ginfo1.set_name_truncated("123456789012345678901234567890123456789012345678901234567890"
+                                      "1234567890123456789012345678901234567890A"));
+    CHECK(ginfo1.get_name() ==
+          "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
+          "901234567890");
 }
 
 TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {

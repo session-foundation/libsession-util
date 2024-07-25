@@ -75,7 +75,19 @@ std::vector<std::string> ConfigBase::merge(
                         ustring_view{_keys.front().data(), _keys.front().size()},
                         c,
                         storage_namespace());
-                parsed.emplace_back(h, keep_alive.emplace_back(std::move(unwrapped)));
+
+                // There was a release of one of the clients which resulted in double-wrapped
+                // config messages so we now need to try to double-unwrap in order to better
+                // support multi-device for users running those old versions
+                try {
+                    auto unwrapped2 = protos::unwrap_config(
+                            ustring_view{_keys.front().data(), _keys.front().size()},
+                            unwrapped,
+                            storage_namespace());
+                    parsed.emplace_back(h, keep_alive.emplace_back(std::move(unwrapped2)));
+                } catch (...) {
+                    parsed.emplace_back(h, keep_alive.emplace_back(std::move(unwrapped)));
+                }
             } catch (...) {
                 parsed.emplace_back(h, c);
             }
@@ -611,6 +623,7 @@ using namespace session;
 using namespace session::config;
 
 LIBSESSION_EXPORT void config_free(config_object* conf) {
+    delete static_cast<internals<>*>(conf->internals);
     delete conf;
 }
 

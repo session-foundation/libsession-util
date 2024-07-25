@@ -8,7 +8,7 @@ extern "C" {
 #include "../profile_pic.h"
 #include "../util.h"
 
-enum groups_members_invite_status { INVITE_SENT = 1, INVITE_FAILED = 2 };
+enum groups_members_invite_status { INVITE_SENT = 1, INVITE_FAILED = 2, INVITE_NOT_SENT = 3 };
 enum groups_members_remove_status { REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2 };
 
 typedef struct config_group_member {
@@ -19,7 +19,8 @@ typedef struct config_group_member {
     user_profile_pic profile_pic;
 
     bool admin;
-    int invited;   // 0 == unset, INVITE_SENT = invited, INVITED_FAILED = invite failed to send
+    int invited;   // 0 == unset, INVITE_SENT = invited, INVITED_FAILED = invite failed to send,
+                   // INVITE_NOT_SENT = invite hasn't been sent yet
     int promoted;  // same value as `invited`, but for promotion-to-admin
     int removed;   // 0 == unset, REMOVED_MEMBER = removed, REMOVED_MEMBER_AND_MESSAGES = remove
                    // member and their messages
@@ -55,7 +56,7 @@ LIBSESSION_EXPORT int groups_members_init(
         const unsigned char* ed25519_secretkey,
         const unsigned char* dump,
         size_t dumplen,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: groups/groups_members_get
 ///
@@ -71,8 +72,9 @@ LIBSESSION_EXPORT int groups_members_init(
 /// Output:
 /// - `bool` -- Returns true if member exists
 LIBSESSION_EXPORT bool groups_members_get(
-        config_object* conf, config_group_member* member, const char* session_id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        config_group_member* member,
+        const char* session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: groups/groups_members_get_or_construct
 ///
@@ -94,8 +96,9 @@ LIBSESSION_EXPORT bool groups_members_get(
 /// - `bool` -- Returns true if the call succeeds, false if an error occurs (e.g. because of an
 ///   invalid session_id).
 LIBSESSION_EXPORT bool groups_members_get_or_construct(
-        config_object* conf, config_group_member* member, const char* session_id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        config_group_member* member,
+        const char* session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: groups/groups_members_set
 ///

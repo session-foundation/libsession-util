@@ -41,14 +41,19 @@ contact_info::contact_info(std::string sid) : session_id{std::move(sid)} {
 
 void contact_info::set_name(std::string n) {
     if (n.size() > MAX_NAME_LENGTH)
-        throw std::invalid_argument{"Invalid contact name: exceeds maximum length"};
-    name = std::move(n);
+        name = std::move(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
+    else
+        name = std::move(n);
 }
 
 void contact_info::set_nickname(std::string n) {
     if (n.size() > MAX_NAME_LENGTH)
         throw std::invalid_argument{"Invalid contact nickname: exceeds maximum length"};
     nickname = std::move(n);
+}
+
+void contact_info::set_nickname_truncated(std::string n) {
+    set_nickname(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
 }
 
 Contacts::Contacts(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
@@ -131,6 +136,7 @@ void contact_info::into(contacts_contact& c) const {
     c.blocked = blocked;
     c.priority = priority;
     c.notifications = static_cast<CONVO_NOTIFY_MODE>(notifications);
+    c.mute_until = mute_until;
     c.exp_mode = static_cast<CONVO_EXPIRATION_MODE>(exp_mode);
     c.exp_seconds = exp_timer.count();
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
@@ -153,6 +159,7 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     blocked = c.blocked;
     priority = c.priority;
     notifications = static_cast<notify_mode>(c.notifications);
+    mute_until = c.mute_until;
     exp_mode = static_cast<expiration_mode>(c.exp_mode);
     exp_timer = exp_mode == expiration_mode::none ? 0s : std::chrono::seconds{c.exp_seconds};
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
@@ -257,6 +264,11 @@ void Contacts::set_name(std::string_view session_id, std::string name) {
 void Contacts::set_nickname(std::string_view session_id, std::string nickname) {
     auto c = get_or_construct(session_id);
     c.set_nickname(std::move(nickname));
+    set(c);
+}
+void Contacts::set_nickname_truncated(std::string_view session_id, std::string nickname) {
+    auto c = get_or_construct(session_id);
+    c.set_nickname_truncated(std::move(nickname));
     set(c);
 }
 void Contacts::set_profile_pic(std::string_view session_id, profile_pic pic) {

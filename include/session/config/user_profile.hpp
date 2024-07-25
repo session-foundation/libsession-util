@@ -87,6 +87,15 @@ class UserProfile final : public ConfigBase {
     /// - `new_name` -- The name to be put into the user profile
     void set_name(std::string_view new_name);
 
+    /// API: user_profile/UserProfile::set_name_truncated
+    ///
+    /// Sets the user profile name; if given an empty string then the name is removed. Same as the
+    /// `set_name` function but truncates the name if it's too long.
+    ///
+    /// Inputs:
+    /// - `new_name` -- The name to be put into the user profile
+    void set_name_truncated(std::string new_name);
+
     /// API: user_profile/UserProfile::get_profile_pic
     ///
     /// Gets the user's current profile pic URL and decryption key.  The returned object will
