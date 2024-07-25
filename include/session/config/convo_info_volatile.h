@@ -80,7 +80,7 @@ LIBSESSION_EXPORT int convo_info_volatile_init(
         const unsigned char* ed25519_secretkey,
         const unsigned char* dump,
         size_t dumplen,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_1to1
 ///
@@ -107,8 +107,9 @@ LIBSESSION_EXPORT int convo_info_volatile_init(
 /// Outputs:
 /// - `bool` - Returns true if the conversation exists
 LIBSESSION_EXPORT bool convo_info_volatile_get_1to1(
-        config_object* conf, convo_info_volatile_1to1* convo, const char* session_id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        convo_info_volatile_1to1* convo,
+        const char* session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_or_construct_1to1
 ///
@@ -139,8 +140,9 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_1to1(
 /// Outputs:
 /// - `bool` - Returns true if the conversation exists
 LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_1to1(
-        config_object* conf, convo_info_volatile_1to1* convo, const char* session_id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        convo_info_volatile_1to1* convo,
+        const char* session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_community
 ///
@@ -173,7 +175,7 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_community(
         config_object* conf,
         convo_info_volatile_community* comm,
         const char* base_url,
-        const char* room) __attribute__((warn_unused_result));
+        const char* room) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_or_construct_community
 ///
@@ -218,7 +220,7 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_community(
         convo_info_volatile_community* convo,
         const char* base_url,
         const char* room,
-        unsigned const char* pubkey) __attribute__((warn_unused_result));
+        unsigned const char* pubkey) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_group
 ///
@@ -245,8 +247,9 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_community(
 /// Outputs:
 /// - `bool` - Returns true if the group exists
 LIBSESSION_EXPORT bool convo_info_volatile_get_group(
-        config_object* conf, convo_info_volatile_group* convo, const char* id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        convo_info_volatile_group* convo,
+        const char* id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_or_construct_group
 ///
@@ -277,8 +280,9 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_group(
 /// Outputs:
 /// - `bool` - Returns true if the call succeeds
 LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_group(
-        config_object* conf, convo_info_volatile_group* convo, const char* id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        convo_info_volatile_group* convo,
+        const char* id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_legacy_group
 ///
@@ -304,8 +308,9 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_group(
 /// Outputs:
 /// - `bool` - Returns true if the legacy group exists
 LIBSESSION_EXPORT bool convo_info_volatile_get_legacy_group(
-        config_object* conf, convo_info_volatile_legacy_group* convo, const char* id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        convo_info_volatile_legacy_group* convo,
+        const char* id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_or_construct_legacy_group
 ///
@@ -336,8 +341,9 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_legacy_group(
 /// Outputs:
 /// - `bool` - Returns true if the call succeeds
 LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_legacy_group(
-        config_object* conf, convo_info_volatile_legacy_group* convo, const char* id)
-        __attribute__((warn_unused_result));
+        config_object* conf,
+        convo_info_volatile_legacy_group* convo,
+        const char* id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_set_1to1
 ///

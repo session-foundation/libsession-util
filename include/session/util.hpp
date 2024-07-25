@@ -369,4 +369,63 @@ std::vector<ustring_view> to_view_vector(const Container& c) {
     return to_view_vector(c.begin(), c.end());
 }
 
+/// Truncates a utf-8 encoded string to at most `n` bytes long, but with care as to not truncate in
+/// the middle of a unicode codepoint.  If the `n` length would shorten the string such that it
+/// terminates in the middle of a utf-8 encoded unicode codepoint then the string is shortened
+/// further to not include the sliced unicode codepoint.
+///
+/// For example, "happy 🎂🎂🎂!!" in utf8 encoding is 20 bytes long:
+/// "happy \xf0\x9f\x8e\x82\xf0\x9f\x8e\x82\xf0\x9f\x8e\x82!!", that is:
+/// - "happy " (6 bytes)
+/// - 🎂 = 0xf0 0x9f 0x8e 0x82 (12 bytes = 3 × 4 bytes each)
+/// - "!!" (2 bytes)
+/// Truncating this to different lengths results in:
+/// - 20, 21, or higher - the 20-byte full string
+/// - 19: "happy 🎂🎂🎂!"
+/// - 18: "happy 🎂🎂🎂"
+/// - 17: "happy 🎂🎂" (14 bytes)
+/// - 16, 15, 14: same result as 17
+/// - 13, 12, 11, 10: "happy 🎂"
+/// - 9, 8, 7, 6: "happy "
+/// - 5: "happy"
+/// - 4: "happ"
+/// - 3: "hap"
+/// - 2: "ha"
+/// - 1: "a"
+/// - 0: ""
+///
+/// This function is *not* (currently) aware of unicode "characters", but merely codepoints (because
+/// grapheme clusters get incredibly complicated).  This is only designed to prevent invalid utf8
+/// encodings.  For example, the pair 🇦🇺 (REGIONAL INDICATOR SYMBOL LETTER A, REGIONAL INDICATOR
+/// SYMBOL LETTER U) is often rendered as a single Australian flag, but could get chopped here into
+/// just 🇦 (REGIONAL INDICATOR SYMBOL LETTER A) rather than removing the getting split in the middle
+/// of the pair, which would show up as a decorated A rather than an Australian flag.  Another
+/// example, é (LATIN SMALL LETTER E, COMBINING ACUTE ACCENT) could get chopped between the e and
+/// the accent modifier, and end up as just "e" in the truncated string.
+///
+inline std::string utf8_truncate(std::string val, size_t n) {
+    if (val.size() <= n)
+        return val;
+    // The *first* char in a utf8 sequence is either:
+    // 0b0....... -- single byte encoding, for values up to 0x7f (ascii)
+    // 0b11...... -- multi-byte encoding for values >= 0x80; the number of sequential high bit 1's
+    // in the first character indicate the sequence length (e.g. 0b1110.... starts a 3-byte
+    // sequence).  In our birthday cake encoding, the first byte is \xf0 == 0b11110000, and so it is
+    // a 4-byte sequence.
+    //
+    // That leaves 0x10...... bytes as continuation bytes, each one holding 6 bits of the unicode
+    // codepoint, in big endian order, so our birthday cake (in bits): 0b11110000 0b10011111
+    // 0b10001110 0b10000010 is the unicode value 0b000 011111 001110 000010 == 0x1f382 == U+1F382:
+    // BIRTHDAY CAKE).
+    //
+    // To prevent slicing, then, we just have to ensure the the first byte after the slice point is
+    // *not* a continuation byte (and therefore is either a plain ascii character codepoint, or is
+    // the start of a multi-character codepoint).
+    while (n > 0 && (val[n] & 0b1100'0000) == 0b1000'0000)
+        --n;
+
+    val.resize(n);
+    return val;
+}
+
 }  // namespace session

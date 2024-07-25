@@ -74,8 +74,6 @@ void community::set_room(std::string_view room) {
     localized_room_ = room;
 }
 
-static constexpr std::string_view qs_pubkey{"?public_key="};
-
 std::string community::full_url() const {
     return full_url(base_url(), room(), pubkey());
 }
@@ -230,8 +228,7 @@ LIBSESSION_C_API const size_t COMMUNITY_BASE_URL_MAX_LENGTH =
 LIBSESSION_C_API const size_t COMMUNITY_ROOM_MAX_LENGTH =
         session::config::community::ROOM_MAX_LENGTH;
 LIBSESSION_C_API const size_t COMMUNITY_FULL_URL_MAX_LENGTH =
-        COMMUNITY_BASE_URL_MAX_LENGTH + 3 /* '/r/' */ + COMMUNITY_ROOM_MAX_LENGTH +
-        session::config::qs_pubkey.size() + 64 /*pubkey hex*/ + 1 /*null terminator*/;
+        session::config::community::FULL_URL_MAX_LENGTH;
 
 LIBSESSION_C_API bool community_parse_full_url(
         const char* full_url, char* base_url, char* room_token, unsigned char* pubkey) {

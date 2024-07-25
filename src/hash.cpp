@@ -11,27 +11,20 @@ ustring hash(const size_t size, ustring_view msg, std::optional<ustring_view> ke
     if (size < crypto_generichash_blake2b_BYTES_MIN || size > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid size: expected between 16 and 64 bytes (inclusive)"};
 
-    if (key && static_cast<ustring_view>(*key).size() > crypto_generichash_blake2b_BYTES_MAX)
+    if (key && key->size() > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid key: expected less than 65 bytes"};
 
-    auto result_code = 0;
-    unsigned char result[size];
+    ustring result;
+    result.resize(size);
+    crypto_generichash_blake2b(
+            result.data(),
+            size,
+            msg.data(),
+            msg.size(),
+            key ? key->data() : nullptr,
+            key ? key->size() : 0);
 
-    if (key)
-        result_code = crypto_generichash_blake2b(
-                result,
-                size,
-                msg.data(),
-                msg.size(),
-                static_cast<ustring_view>(*key).data(),
-                static_cast<ustring_view>(*key).size());
-    else
-        result_code = crypto_generichash_blake2b(result, size, msg.data(), msg.size(), nullptr, 0);
-
-    if (result_code != 0)
-        throw std::runtime_error{"Hash generation failed"};
-
-    return {result, size};
+    return result;
 }
 
 }  // namespace session::hash
