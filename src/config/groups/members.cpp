@@ -49,7 +49,7 @@ void Members::set(const member& mem) {
             mem.profile_picture.key);
 
     set_flag(info["A"], mem.admin);
-    set_positive_int(info["P"], mem.admin ? 0 : mem.promotion_status);
+    set_positive_int(info["P"], mem.promotion_status);
     set_positive_int(info["I"], mem.admin ? 0 : mem.invite_status);
     set_flag(info["s"], mem.supplement);
     set_positive_int(info["R"], mem.removed_status);
@@ -69,7 +69,7 @@ void member::load(const dict& info_dict) {
 
     admin = maybe_int(info_dict, "A").value_or(0);
     invite_status = admin ? 0 : maybe_int(info_dict, "I").value_or(0);
-    promotion_status = admin ? 0 : maybe_int(info_dict, "P").value_or(0);
+    promotion_status = maybe_int(info_dict, "P").value_or(0);
     removed_status = maybe_int(info_dict, "R").value_or(0);
     supplement = invite_pending() && !promoted() ? maybe_int(info_dict, "s").value_or(0) : 0;
 }
@@ -161,6 +161,7 @@ void member::into(config_group_member& m) const {
     m.admin = admin;
     static_assert(groups::INVITE_SENT == ::INVITE_SENT);
     static_assert(groups::INVITE_FAILED == ::INVITE_FAILED);
+    static_assert(groups::INVITE_NOT_SENT == ::INVITE_NOT_SENT);
     m.invited = invite_status;
     m.promoted = promotion_status;
     m.removed = removed_status;
@@ -171,6 +172,10 @@ void member::set_name(std::string n) {
     if (n.size() > MAX_NAME_LENGTH)
         throw std::invalid_argument{"Invalid member name: exceeds maximum length"};
     name = std::move(n);
+}
+
+void member::set_name_truncated(std::string n) {
+    set_name(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
 }
 
 }  // namespace session::config::groups

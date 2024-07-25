@@ -31,6 +31,11 @@ typedef struct config_group_keys {
 /// `config_free()` and similar methods from `session/config/base.h`; instead it must be managed by
 /// the functions declared in the header.
 ///
+/// When no dump is provided the initial config_group_keys object will be created with no keys
+/// loaded at all, these will be loaded later into this and the info/members objects when loading
+/// keys via received config messages. If this is a brand new group then groups_keys_rekey() MUST be
+/// called, otherwise the group will be in an invalid state.
+///
 /// Inputs:
 /// - `conf` -- [out] Pointer-pointer to a `config_group_keys` pointer (i.e. double pointer); the
 ///   pointer will be set to a new config_group_keys object on success.
@@ -67,7 +72,26 @@ LIBSESSION_EXPORT int groups_keys_init(
         config_object* group_members_conf,
         const unsigned char* dump,
         size_t dumplen,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
+
+/// API: base/groups_keys_free
+///
+/// Frees a config keys object created with groups_keys_init.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to config_group_keys object
+LIBSESSION_EXPORT void groups_keys_free(config_group_keys* conf);
+
+/// API: base/groups_keys_storage_namespace
+///
+/// Returns the numeric namespace in which config_group_keys messages should be stored.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to config_group_keys object
+///
+/// Outputs:
+/// - `int16_t` -- integer of the namespace
+LIBSESSION_EXPORT int16_t groups_keys_storage_namespace(const config_group_keys* conf);
 
 /// API: groups/groups_keys_size
 ///
@@ -171,7 +195,7 @@ LIBSESSION_EXPORT bool groups_keys_rekey(
         config_object* info,
         config_object* members,
         const unsigned char** out,
-        size_t* outlen) __attribute__((warn_unused_result));
+        size_t* outlen) LIBSESSION_WARN_UNUSED;
 
 /// API: groups/groups_keys_pending_config
 ///
@@ -189,8 +213,9 @@ LIBSESSION_EXPORT bool groups_keys_rekey(
 /// - `bool` -- true if `out` and `outlen` have been updated to point to a pending config message;
 ///   false if there is no pending config message.
 LIBSESSION_EXPORT bool groups_keys_pending_config(
-        const config_group_keys* conf, const unsigned char** out, size_t* outlen)
-        __attribute__((warn_unused_result));
+        const config_group_keys* conf,
+        const unsigned char** out,
+        size_t* outlen) LIBSESSION_WARN_UNUSED;
 
 /// API: groups/groups_keys_load_message
 ///
@@ -219,7 +244,7 @@ LIBSESSION_EXPORT bool groups_keys_load_message(
         size_t datalen,
         int64_t timestamp_ms,
         config_object* info,
-        config_object* members) __attribute__((warn_unused_result));
+        config_object* members) LIBSESSION_WARN_UNUSED;
 
 /// API: groups/groups_keys_current_hashes
 ///
@@ -249,8 +274,7 @@ LIBSESSION_EXPORT config_string_list* groups_keys_current_hashes(const config_gr
 /// Outputs:
 /// - `bool` -- `true` if `rekey()` needs to be called, `false` otherwise.
 LIBSESSION_EXPORT bool groups_keys_needs_rekey(const config_group_keys* conf)
-        __attribute__((warn_unused_result));
-
+        LIBSESSION_WARN_UNUSED;
 /// API: groups/groups_keys_needs_dump
 ///
 /// Checks whether a groups_keys_dump needs to be called to save state.  This is analagous to
@@ -263,8 +287,7 @@ LIBSESSION_EXPORT bool groups_keys_needs_rekey(const config_group_keys* conf)
 ///
 /// Outputs:
 /// - `bool` -- `true` if a dump is needed, `false` otherwise.
-LIBSESSION_EXPORT bool groups_keys_needs_dump(const config_group_keys* conf)
-        __attribute__((warn_unused_result));
+LIBSESSION_EXPORT bool groups_keys_needs_dump(const config_group_keys* conf) LIBSESSION_WARN_UNUSED;
 
 /// API: groups/groups_keys_dump
 ///
