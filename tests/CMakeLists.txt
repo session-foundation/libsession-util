@@ -23,13 +23,18 @@ add_executable(testAll
     test_random.cpp
     test_session_encrypt.cpp
     test_xed25519.cpp
-    )
+)
+
 
 target_link_libraries(testAll PRIVATE
     libsession::config
-    libsession::onionreq
     libsodium::sodium-internal
-    Catch2::Catch2WithMain)
+    Catch2::Catch2WithMain
+)
+
+if (ENABLE_ONIONREQ)
+    target_link_libraries(testAll PRIVATE libsession::onionreq)
+endif()
 
 add_custom_target(check COMMAND testAll)
 

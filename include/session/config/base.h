@@ -136,11 +136,7 @@ LIBSESSION_EXPORT config_string_list* config_merge(
         const char** msg_hashes,
         const unsigned char** configs,
         const size_t* lengths,
-        size_t count)
-#ifdef __GNUC__
-        __attribute__((warn_unused_result))
-#endif
-        ;
+        size_t count) LIBSESSION_WARN_UNUSED;
 
 /// API: base/config_needs_push
 ///
@@ -290,10 +286,7 @@ LIBSESSION_EXPORT bool config_needs_dump(const config_object* conf);
 /// Outputs:
 /// - `config_string_list*` -- pointer to the list of hashes; the pointer belongs to the caller
 LIBSESSION_EXPORT config_string_list* config_current_hashes(const config_object* conf)
-#ifdef __GNUC__
-        __attribute__((warn_unused_result))
-#endif
-        ;
+        LIBSESSION_WARN_UNUSED;
 
 /// API: base/config_get_keys
 ///

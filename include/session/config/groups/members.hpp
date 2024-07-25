@@ -25,6 +25,7 @@ using namespace std::literals;
 ///   I - invite status; this will be one of:
 ///       - 1 if the invite has been issued but not yet accepted.
 ///       - 2 if an invite was created but failed to send for some reason (and thus can be resent)
+///       - 3 if a member has been added to the group but the invite hasn't been sent yet.
 ///       - omitted once an invite is accepted.  (This also gets omitted if the `A` admin flag gets
 ///         set).
 ///   s - invite supplemental keys flag (only set when `I` is set): if set (to 1) then this invite
@@ -37,9 +38,10 @@ using namespace std::literals;
 ///       - 1 if a promotion has been sent.
 ///       - 2 if a promotion was created but failed to send for some reason (and thus should be
 ///         resent)
+///       - 3 if a member has been marked for promotion but the promotion hasn't been sent yet.
 ///       - omitted once the promotion is accepted (i.e. once `A` gets set).
 
-constexpr int INVITE_SENT = 1, INVITE_FAILED = 2;
+constexpr int INVITE_SENT = 1, INVITE_FAILED = 2, INVITE_NOT_SENT = 3;
 constexpr int REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2;
 
 /// Struct containing member details
@@ -79,14 +81,12 @@ struct member {
     ///
     /// Member variable
     ///
-    /// Flag that is set to indicate to the group that this member is an admin.
+    /// Flag that is set to indicate to the group that this member is an admin or has been promoted
+    /// to admin.
     ///
     /// Note that this is only informative but isn't a permission gate: someone could still possess
     /// the admin keys without this (e.g. if they cleared the flag to appear invisible), or could
     /// have lost (or never had) the keys even if this is set.
-    ///
-    /// See also `promoted()` if you want to check for either an admin or someone being promoted to
-    /// admin.
     bool admin = false;
 
     /// API: groups/member::supplement
@@ -102,7 +102,7 @@ struct member {
 
     // Flags to track an invited user.  This value is typically not used directly, but rather via
     // the `set_invited()`, `invite_pending()` and similar methods.
-    int invite_status = 0;
+    int invite_status = INVITE_NOT_SENT;
 
     /// API: groups/member::set_invited
     ///
@@ -126,6 +126,17 @@ struct member {
         invite_status = 0;
         supplement = false;
     }
+
+    /// API: groups/member::invite_not_sent
+    ///
+    /// Returns true if there has never been an attempt to send an invitation to the user.  Returns
+    /// false otherwise.
+    ///
+    /// Inputs: none
+    ///
+    /// Outputs:
+    /// - `bool` -- true if the user needs an invitation to be sent, false otherwise.
+    bool invite_not_sent() const { return invite_status == INVITE_NOT_SENT; }
 
     /// API: groups/member::invite_pending
     ///
@@ -155,19 +166,54 @@ struct member {
 
     /// API: groups/member::set_promoted
     ///
-    /// Sets the "promoted" flag for this user.  This marks the user as having a pending
-    /// promotion-to-admin in the group.  The optional `failed` parameter can be specified as true
-    /// if the promotion was issued but failed to send for some reason (this is intended as a signal
-    /// to other clients that the promotion should be reissued).
-    ///
-    /// Note that this flag is ignored when the `admin` field is set to true.
-    ///
-    /// Inputs:
-    /// - `failed`: can be specified as true to mark the promotion status as "failed-to-send".  If
-    ///   omitted or false then the promotion status is set to "sent".
-    void set_promoted(bool failed = false) {
-        promotion_status = failed ? INVITE_FAILED : INVITE_SENT;
+    /// This marks the user as having a pending promotion-to-admin in the group, waiting for the
+    /// promotion message to be sent to them.
+    void set_promoted() {
+        admin = true;
+        invite_status = 0;
+        promotion_status = INVITE_NOT_SENT;
     }
+
+    /// API: groups/member::set_promotion_sent
+    ///
+    /// This marks the user as having a pending promotion-to-admin in the group, and that a
+    /// promotion message has been sent to them.
+    void set_promotion_sent() {
+        admin = true;
+        invite_status = 0;
+        promotion_status = INVITE_SENT;
+    }
+
+    /// API: groups/member::set_promotion_failed
+    ///
+    /// This marks the user as being promoted to an admin, but that their promotion message failed
+    /// to send (this is intended as a signal to other clients that the promotion should be
+    /// reissued).
+    void set_promotion_failed() {
+        admin = true;
+        invite_status = 0;
+        promotion_status = INVITE_FAILED;
+    }
+
+    /// API: groups/member::set_promotion_accepted
+    ///
+    /// This marks the user as having accepted a promotion to admin in the group.
+    void set_promotion_accepted() {
+        admin = true;
+        invite_status = 0;
+        promotion_status = 0;
+    }
+
+    /// API: groups/member::promotion_not_sent
+    ///
+    /// Returns true if the user is an admin but there has never been an attempt to send a promotion
+    /// to admin status sent to them. Returns false otherwise.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `bool` -- true if the user needs a promotion to be sent, false otherwise.
+    bool promotion_not_sent() const { return admin && promotion_status == INVITE_NOT_SENT; }
 
     /// API: groups/member::promotion_pending
     ///
@@ -178,7 +224,7 @@ struct member {
     ///
     /// Outputs:
     /// - `bool` -- true if the user has a pending promotion, false otherwise.
-    bool promotion_pending() const { return !admin && promotion_status > 0; }
+    bool promotion_pending() const { return admin && promotion_status > 0; }
 
     /// API: groups/member::promotion_failed
     ///
@@ -189,7 +235,7 @@ struct member {
     ///
     /// Outputs:
     /// - `bool` -- true if the user has a failed pending promotion
-    bool promotion_failed() const { return !admin && promotion_status == INVITE_FAILED; }
+    bool promotion_failed() const { return admin && promotion_status == INVITE_FAILED; }
 
     /// API: groups/member::promoted
     ///
@@ -215,6 +261,8 @@ struct member {
     /// - `messages`: can be specified as true to indicate any messages sent by the member
     ///   should also be removed upon a successful member removal.
     void set_removed(bool messages = false) {
+        invite_status = 0;
+        promotion_status = 0;
         removed_status = messages ? REMOVED_MEMBER_AND_MESSAGES : REMOVED_MEMBER;
     }
 
@@ -259,6 +307,18 @@ struct member {
     /// Inputs:
     /// - `name` -- Name to assign to the contact
     void set_name(std::string name);
+
+    /// API: groups/member::set_name_truncated
+    ///
+    /// Sets a name; this is exactly the same as assigning to .name directly, except that we
+    /// truncate if the given name is longer than MAX_NAME_LENGTH.
+    ///
+    /// Note that you can set a longer name directly into the `.name` member, but it will be
+    /// truncated when serializing the record.
+    ///
+    /// Inputs:
+    /// - `name` -- Name to assign to the contact
+    void set_name_truncated(std::string name);
 
   private:
     friend class Members;

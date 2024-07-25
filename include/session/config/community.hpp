@@ -18,6 +18,10 @@ struct community {
     // 267 = len('https://') + 253 (max valid DNS name length) + len(':XXXXX')
     static constexpr size_t BASE_URL_MAX_LENGTH = 267;
     static constexpr size_t ROOM_MAX_LENGTH = 64;
+    static constexpr std::string_view qs_pubkey{"?public_key="};
+    static const size_t FULL_URL_MAX_LENGTH = BASE_URL_MAX_LENGTH + 3 /* '/r/' */ +
+                                              ROOM_MAX_LENGTH + qs_pubkey.size() +
+                                              64 /*pubkey hex*/ + 1 /*null terminator*/;
 
     community() = default;
 
