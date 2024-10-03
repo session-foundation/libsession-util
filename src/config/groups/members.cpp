@@ -141,8 +141,14 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
         profile_picture.key = {m.profile_pic.key, 32};
     }
     admin = m.admin;
-    invite_status = (m.invited == INVITE_SENT || m.invited == INVITE_FAILED) ? m.invited : 0;
-    promotion_status = (m.promoted == INVITE_SENT || m.promoted == INVITE_FAILED) ? m.promoted : 0;
+    invite_status =
+            (m.invited == INVITE_SENT || m.invited == INVITE_FAILED || m.invited == INVITE_NOT_SENT)
+                    ? m.invited
+                    : 0;
+    promotion_status = (m.promoted == INVITE_SENT || m.promoted == INVITE_FAILED ||
+                        m.invited == INVITE_NOT_SENT)
+                             ? m.promoted
+                             : 0;
     removed_status = (m.removed == REMOVED_MEMBER || m.removed == REMOVED_MEMBER_AND_MESSAGES)
                            ? m.removed
                            : 0;
