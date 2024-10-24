@@ -456,6 +456,22 @@ ustring blind15_sign(ustring_view ed25519_sk, std::string_view server_pk_in, ust
     return result;
 }
 
+ustring blind_version_sign_request(ustring_view ed25519_sk, uint64_t timestamp, ustring_view method, ustring_view path, std::optional<ustring_view> body) {
+    auto [pk, sk] = blind_version_key_pair(ed25519_sk);
+
+    // Signature should be on `TIMESTAMP || METHOD || PATH || BODY_HASH`
+    ustring buf;
+    buf.reserve(10 + 6 + path.size() + body.value_or({}).size());
+    buf += to_unsigned_sv(std::to_string(timestamp));
+    buf += to_unsigned_sv(method);
+    buf += to_unsigned_sv(path);
+
+    if (body)
+        buf += blake2b(*body, 64);
+
+    return ed25519::sign({sk.data(), sk.size()}, buf);
+}
+
 ustring blind_version_sign(ustring_view ed25519_sk, Platform platform, uint64_t timestamp) {
     auto [pk, sk] = blind_version_key_pair(ed25519_sk);
 
