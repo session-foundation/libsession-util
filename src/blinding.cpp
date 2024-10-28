@@ -468,8 +468,8 @@ ustring blind_version_sign_request(
     ustring buf;
     buf.reserve(10 + 6 + path.size() + (body ? body->size() : 0));
     buf += to_unsigned_sv(std::to_string(timestamp));
-    buf += to_unsigned_sv(method);
-    buf += to_unsigned_sv(path);
+    buf += method;
+    buf += path;
 
     if (body)
         buf += *body;
@@ -597,6 +597,37 @@ LIBSESSION_C_API bool session_blind25_sign(
     try {
         auto sig = session::blind25_sign(
                 {ed25519_seckey, 64}, {from_unsigned(server_pk), 32}, {msg, msg_len});
+        std::memcpy(blinded_sig_out, sig.data(), sig.size());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool session_blind_version_sign_request(
+        const unsigned char* ed25519_seckey,
+        size_t timestamp,
+        const unsigned char* method,
+        size_t method_len,
+        const unsigned char* path,
+        size_t path_len,
+        const unsigned char* body,
+        size_t body_len,
+        unsigned char* blinded_sig_out) {
+    ustring_view method_sv{method, method_len};
+    ustring_view path_sv{path, path_len};
+
+    std::optional<ustring_view> body_sv{std::nullopt};
+    if (body)
+        body_sv = ustring_view{body, body_len};
+
+    try {
+        auto sig = session::blind_version_sign_request(
+                {ed25519_seckey, 64},
+                timestamp,
+                method_sv,
+                path_sv,
+                body_sv);
         std::memcpy(blinded_sig_out, sig.data(), sig.size());
         return true;
     } catch (...) {

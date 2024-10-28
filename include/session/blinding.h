@@ -118,12 +118,15 @@ LIBSESSION_EXPORT bool session_blind25_sign(
 ///
 /// Takes the Ed25519 secret key (64 bytes), unix timestamp, method, path, and optional body.
 /// Returns a version-blinded signature.
-LIBSESSION_EXPORT bool blind_version_sign_request(
+LIBSESSION_EXPORT bool session_blind_version_sign_request(
         const unsigned char* ed25519_seckey, /* 64 bytes */
         size_t timestamp,
-        const unsigned char* method, /* 6 bytes */
-        const unsigned char* path,   /* 6 bytes */
+        const unsigned char* method,
+        size_t method_len,
+        const unsigned char* path,
+        size_t path_len,
         const unsigned char* body,   /* optional */
+        size_t body_len,
         unsigned char* blinded_sig_out /* 64 byte output buffer */);
 
 /// Computes a verifiable version-blinded signature that validates with the version-blinded pubkey
