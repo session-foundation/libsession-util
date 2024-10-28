@@ -171,6 +171,19 @@ ustring blind25_sign(ustring_view ed25519_sk, std::string_view server_pk, ustrin
 /// Computes a verifiable version-blinded signature that validates with the version-blinded pubkey
 /// that would be returned from blind_version_key_pair.
 ///
+/// Takes the Ed25519 secret key (64 bytes, or 32-byte seed), unix timestamp, method, path, and
+/// optional body.
+/// Returns the version-blinded signature.
+ustring blind_version_sign_request(
+        ustring_view ed25519_sk,
+        uint64_t timestamp,
+        ustring_view method,
+        ustring_view path,
+        std::optional<ustring_view> body);
+
+/// Computes a verifiable version-blinded signature that validates with the version-blinded pubkey
+/// that would be returned from blind_version_key_pair.
+///
 /// Takes the Ed25519 secret key (64 bytes, or 32-byte seed), current platform and unix timestamp.
 /// Returns the version-blinded signature.
 ustring blind_version_sign(ustring_view ed25519_sk, Platform platform, uint64_t timestamp);

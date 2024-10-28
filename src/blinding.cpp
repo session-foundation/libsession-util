@@ -456,7 +456,12 @@ ustring blind15_sign(ustring_view ed25519_sk, std::string_view server_pk_in, ust
     return result;
 }
 
-ustring blind_version_sign_request(ustring_view ed25519_sk, uint64_t timestamp, ustring_view method, ustring_view path, std::optional<ustring_view> body) {
+ustring blind_version_sign_request(
+        ustring_view ed25519_sk,
+        uint64_t timestamp,
+        ustring_view method,
+        ustring_view path,
+        std::optional<ustring_view> body) {
     auto [pk, sk] = blind_version_key_pair(ed25519_sk);
 
     // Signature should be on `TIMESTAMP || METHOD || PATH || BODY`
