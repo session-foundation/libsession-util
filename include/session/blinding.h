@@ -125,7 +125,7 @@ LIBSESSION_EXPORT bool session_blind_version_sign_request(
         size_t method_len,
         const unsigned char* path,
         size_t path_len,
-        const unsigned char* body,   /* optional */
+        const unsigned char* body, /* optional */
         size_t body_len,
         unsigned char* blinded_sig_out /* 64 byte output buffer */);
 

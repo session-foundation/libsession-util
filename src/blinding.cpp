@@ -466,7 +466,7 @@ ustring blind_version_sign_request(
 
     // Signature should be on `TIMESTAMP || METHOD || PATH || BODY`
     ustring buf;
-    buf.reserve(10 + 6 + path.size() + (body ? body->size() : 0));
+    buf.reserve(10 /* timestamp */ + method.size() + path.size() + (body ? body->size() : 0));
     buf += to_unsigned_sv(std::to_string(timestamp));
     buf += method;
     buf += path;
@@ -623,11 +623,7 @@ LIBSESSION_C_API bool session_blind_version_sign_request(
 
     try {
         auto sig = session::blind_version_sign_request(
-                {ed25519_seckey, 64},
-                timestamp,
-                method_sv,
-                path_sv,
-                body_sv);
+                {ed25519_seckey, 64}, timestamp, method_sv, path_sv, body_sv);
         std::memcpy(blinded_sig_out, sig.data(), sig.size());
         return true;
     } catch (...) {

@@ -313,12 +313,16 @@ TEST_CASE("Version 07xxx-blinded signing", "[blinding07][sign]") {
     full_message += to_unsigned_sv(std::to_string(timestamp));
     full_message += method;
     full_message += path;
-    auto req_sig_no_body = blind_version_sign_request(to_usv(seed1), timestamp, method, path, std::nullopt);
-    CHECK(crypto_sign_verify_detached(req_sig_no_body.data(), full_message.data(), full_message.size(), pk.data()) == 0);
+    auto req_sig_no_body =
+            blind_version_sign_request(to_usv(seed1), timestamp, method, path, std::nullopt);
+    CHECK(crypto_sign_verify_detached(
+                  req_sig_no_body.data(), full_message.data(), full_message.size(), pk.data()) ==
+          0);
 
     full_message += body;
     auto req_sig = blind_version_sign_request(to_usv(seed1), timestamp, method, path, body);
-    CHECK(crypto_sign_verify_detached(req_sig.data(), full_message.data(), full_message.size(), pk.data()) == 0);
+    CHECK(crypto_sign_verify_detached(
+                  req_sig.data(), full_message.data(), full_message.size(), pk.data()) == 0);
 }
 
 TEST_CASE("Communities session id blinded id matching", "[blinding][matching]") {
