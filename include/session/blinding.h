@@ -120,7 +120,7 @@ LIBSESSION_EXPORT bool session_blind25_sign(
 /// Returns a version-blinded signature.
 LIBSESSION_EXPORT bool session_blind_version_sign_request(
         const unsigned char* ed25519_seckey, /* 64 bytes */
-        size_t timestamp,
+        uint64_t timestamp,
         const char* method,
         const char* path,
         const unsigned char* body, /* optional */
@@ -135,7 +135,7 @@ LIBSESSION_EXPORT bool session_blind_version_sign_request(
 LIBSESSION_EXPORT bool session_blind_version_sign(
         const unsigned char* ed25519_seckey, /* 64 bytes */
         CLIENT_PLATFORM platform,
-        size_t timestamp,
+        uint64_t timestamp,
         unsigned char* blinded_sig_out /* 64 byte output buffer */);
 
 /// API: crypto/session_blind25_sign
