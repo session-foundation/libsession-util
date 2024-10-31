@@ -178,8 +178,8 @@ ustring blind25_sign(ustring_view ed25519_sk, std::string_view server_pk, ustrin
 ustring blind_version_sign_request(
         ustring_view ed25519_sk,
         uint64_t timestamp,
-        ustring_view method,
-        ustring_view path,
+        std::string_view method,
+        std::string_view path,
         std::optional<ustring_view> body);
 
 /// Computes a verifiable version-blinded signature that validates with the version-blinded pubkey

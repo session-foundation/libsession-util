@@ -121,10 +121,8 @@ LIBSESSION_EXPORT bool session_blind25_sign(
 LIBSESSION_EXPORT bool session_blind_version_sign_request(
         const unsigned char* ed25519_seckey, /* 64 bytes */
         size_t timestamp,
-        const unsigned char* method,
-        size_t method_len,
-        const unsigned char* path,
-        size_t path_len,
+        const char* method,
+        const char* path,
         const unsigned char* body, /* optional */
         size_t body_len,
         unsigned char* blinded_sig_out /* 64 byte output buffer */);

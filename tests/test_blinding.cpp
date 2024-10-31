@@ -304,15 +304,15 @@ TEST_CASE("Version 07xxx-blinded signing", "[blinding07][sign]") {
           "0fa57daf4627c68f43fcbddb2d465d5ea11def523f3befb2bbee39c769676305");
 
     auto [pk, sk] = blind_version_key_pair(to_usv(seed1));
-    auto method = to_unsigned_sv("GET");
-    auto path = to_unsigned_sv("/path/to/somewhere");
+    auto method = "GET"sv;
+    auto path = "/path/to/somewhere"sv;
     auto body = to_unsigned_sv("some body (once told me)");
 
     uint64_t timestamp = 1234567890;
     ustring full_message;
     full_message += to_unsigned_sv(std::to_string(timestamp));
-    full_message += method;
-    full_message += path;
+    full_message += to_unsigned_sv(method);
+    full_message += to_unsigned_sv(path);
     auto req_sig_no_body =
             blind_version_sign_request(to_usv(seed1), timestamp, method, path, std::nullopt);
     CHECK(crypto_sign_verify_detached(
