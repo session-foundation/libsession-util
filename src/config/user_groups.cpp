@@ -206,6 +206,7 @@ group_info::group_info(const ugroups_group_info& c) : id{c.id, 66} {
     base_from(*this, c);
 
     name = c.name;
+    is_destroyed = c.is_destroyed;
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
 
     if (c.have_secretkey)
@@ -219,6 +220,7 @@ void group_info::into(ugroups_group_info& c) const {
     base_into(*this, c);
     copy_c_str(c.id, id);
     copy_c_str(c.name, name);
+    c.is_destroyed = is_destroyed;
     if ((c.have_secretkey = secretkey.size() == 64))
         std::memcpy(c.secretkey, secretkey.data(), 64);
     if ((c.have_auth_data = auth_data.size() == 100))
@@ -243,6 +245,8 @@ void group_info::load(const dict& info_dict) {
     }
     if (auto sig = maybe_ustring(info_dict, "s"); sig && sig->size() == 100)
         auth_data = std::move(*sig);
+
+    is_destroyed = maybe_int(info_dict, "d").value_or(0);
 }
 
 void group_info::setKicked() {
@@ -251,7 +255,16 @@ void group_info::setKicked() {
 }
 
 bool group_info::kicked() const {
-    return secretkey.empty() && auth_data.empty();
+    return secretkey.empty() && auth_data.empty() && !isDestroyed();
+}
+
+void group_info::destroyGroup() {
+    setKicked();
+    is_destroyed = true;
+}
+
+bool group_info::isDestroyed() const {
+    return is_destroyed;
 }
 
 void community_info::load(const dict& info_dict) {
@@ -420,6 +433,7 @@ void UserGroups::set(const group_info& g) {
 
     set_nonempty_str(
             info["n"], std::string_view{g.name}.substr(0, legacy_group_info::NAME_MAX_LENGTH));
+    set_flag(info["d"], g.is_destroyed);
 
     if (g.secretkey.size() == 64 &&
         // Make sure the secretkey's embedded pubkey matches the group id:
@@ -763,6 +777,15 @@ LIBSESSION_C_API void ugroups_group_set_kicked(ugroups_group_info* group) {
 }
 LIBSESSION_C_API bool ugroups_group_is_kicked(const ugroups_group_info* group) {
     return !(group->have_auth_data || group->have_secretkey);
+}
+
+LIBSESSION_C_API void ugroups_group_set_destroyed(ugroups_group_info* group) {
+    assert(group);
+    ugroups_group_set_kicked(group);
+    group->is_destroyed = true;
+}
+LIBSESSION_C_API bool ugroups_group_is_destroyed(const ugroups_group_info* group) {
+    return group->is_destroyed;
 }
 
 struct ugroups_legacy_members_iterator {

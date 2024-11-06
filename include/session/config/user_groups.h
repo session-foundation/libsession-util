@@ -67,6 +67,8 @@ typedef struct ugroups_group_info {
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
+    bool is_destroyed;  // True if this group was marked as permanently destroyed
+
 } ugroups_group_info;
 
 typedef struct ugroups_community_info {

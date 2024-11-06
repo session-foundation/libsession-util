@@ -541,13 +541,23 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK_FALSE(c3b->kicked());
     c3b->auth_data.resize(100);
     CHECK_FALSE(c3b->kicked());
+    // mark ourselves as kicked
     c3b->setKicked();
     CHECK(c3b->kicked());
     CHECK(c3b->secretkey.empty());
     CHECK(c3b->auth_data.empty());
+    // add a non empty auth_data, we shouldn't be kicked anymore
     c3b->auth_data.resize(100);
     CHECK_FALSE(c3b->kicked());
     c3b->auth_data.clear();
+    CHECK(c3b->kicked());
+    // we are not kicked, mark the group as destroyed
+    c3b->auth_data.resize(100);
+    c3b->destroyGroup();
+    CHECK(c3b->isDestroyed());
+    // the group was destroyed, so we are not `kicked` from it.
+    // We keep the states separate as `kicked` is not permanent but `destroyed` is.
+    CHECK_FALSE(c3b->kicked());
 
     auto gg = groups.get_or_construct_group(
             "030303030303030303030303030303030303030303030303030303030303030303");

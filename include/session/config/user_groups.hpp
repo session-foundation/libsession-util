@@ -50,6 +50,7 @@ namespace session::config {
 ///         non-empty.
 ///     n - the room name, from a the group invitation; this is intended to be removed once the
 ///         invitation has been accepted, as the name contained in the group info supercedes this).
+///     d - true if the group was marked as destroyed
 ///     @, !, +, i, j -- see common values, above.
 ///
 /// o - dict of communities (AKA open groups); within this dict (which deliberately has the same
@@ -198,6 +199,10 @@ struct group_info : base_group_info {
     /// Producing and using this value is done with the groups::Keys `swarm` methods.
     ustring auth_data;
 
+    /// Flag indicating if this group was marked as permanently deleted.
+    /// You should only use `destroyGroup` and `isDestroyed` to interact with this field.
+    bool is_destroyed = false;
+
     /// Constructs a new group info from an hex id (03 + pubkey).  Throws if id is invalid.
     explicit group_info(std::string gid);
 
@@ -212,6 +217,12 @@ struct group_info : base_group_info {
     /// Returns true if we don't have room access, i.e. we were kicked and both secretkey and
     /// auth_data are empty.
     bool kicked() const;
+
+    /// Mark the group as permanently destroyed. This cannot be unset once set.
+    void destroyGroup();
+
+    /// Returns true if the group was destroyed by one of the admin.
+    bool isDestroyed() const;
 
   private:
     friend class UserGroups;
