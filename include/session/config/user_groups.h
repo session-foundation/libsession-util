@@ -28,9 +28,9 @@ typedef struct ugroups_legacy_group_info {
                                    // terminator).
 
     int64_t disappearing_timer;  // Seconds. 0 == disabled.
-    int priority;  // pinned message priority; 0 = unpinned, negative = hidden, positive = pinned
-                   // (with higher meaning pinned higher).
-    int64_t joined_at;                // unix timestamp when joined (or re-joined)
+    int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
+                        // pinned (with higher meaning pinned higher).
+    int64_t joined_at;  // unix timestamp when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
     int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
                          // setting until the timestamp)
@@ -58,17 +58,17 @@ typedef struct ugroups_group_info {
                                    // signing value that can be used to produce signature values to
                                    // access the swarm.
 
-    int priority;  // pinned message priority; 0 = unpinned, negative = hidden, positive = pinned
-                   // (with higher meaning pinned higher).
-    int64_t joined_at;                // unix timestamp when joined (or re-joined)
+    int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
+                        // pinned (with higher meaning pinned higher).
+    int64_t joined_at;  // unix timestamp when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
     int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
                          // setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
-    bool is_destroyed;  // True if this group was marked as permanently destroyed
-
+    int removed_status;  // Tracks why we were removed from the group. Values are 0:NOT_REMOVED,
+                         // 1:KICKED_FROM_GROUP or 2:GROUP_DESTROYED
 } ugroups_group_info;
 
 typedef struct ugroups_community_info {
@@ -79,9 +79,9 @@ typedef struct ugroups_community_info {
                          // info (that one is always forced lower-cased).
     unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
 
-    int priority;  // pinned message priority; 0 = unpinned, negative = hidden, positive = pinned
-                   // (with higher meaning pinned higher).
-    int64_t joined_at;                // unix timestamp when joined (or re-joined)
+    int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
+                        // pinned (with higher meaning pinned higher).
+    int64_t joined_at;  // unix timestamp when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
     int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
                          // setting until the timestamp)

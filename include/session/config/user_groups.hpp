@@ -50,7 +50,7 @@ namespace session::config {
 ///         non-empty.
 ///     n - the room name, from a the group invitation; this is intended to be removed once the
 ///         invitation has been accepted, as the name contained in the group info supercedes this).
-///     d - true if the group was marked as destroyed
+///     r - removed_status, tracks why we were removed from the group.
 ///     @, !, +, i, j -- see common values, above.
 ///
 /// o - dict of communities (AKA open groups); within this dict (which deliberately has the same
@@ -183,6 +183,8 @@ struct legacy_group_info : base_group_info {
     void load(const dict& info_dict);
 };
 
+constexpr int NOT_REMOVED = 0, KICKED_FROM_GROUP = 1, GROUP_DESTROYED = 2;
+
 /// Struct containing new group info (aka "closed groups v2").
 struct group_info : base_group_info {
     std::string id;  // The group pubkey (66 hex digits); this is an ed25519 key, prefixed with "03"
@@ -199,9 +201,11 @@ struct group_info : base_group_info {
     /// Producing and using this value is done with the groups::Keys `swarm` methods.
     ustring auth_data;
 
-    /// Flag indicating if this group was marked as permanently deleted.
-    /// You should only use `destroyGroup` and `isDestroyed` to interact with this field.
-    bool is_destroyed = false;
+    /// Tracks why we were removed from the group. Values are:
+    /// - NOT_REMOVED: that we haven't been removed,
+    /// - KICKED_FROM_GROUP: we have been kicked from the group,
+    /// - GROUP_DESTROYED: the group was permanently destroyed so everyone got removed.
+    int removed_status = NOT_REMOVED;
 
     /// Constructs a new group info from an hex id (03 + pubkey).  Throws if id is invalid.
     explicit group_info(std::string gid);
@@ -210,16 +214,20 @@ struct group_info : base_group_info {
     group_info(const struct ugroups_group_info& c);  // From c struct
     void into(struct ugroups_group_info& c) const;   // Into c struct
 
-    /// Shortcut for clearing both secretkey and auth_data, which indicates that we were kicked from
-    /// the group.
-    void setKicked();
+    /// Marks the group as kicked and clears auth_data & secret_key
+    void markKicked();
+
+    /// Marks the group as reinvited (i.e. revert a `markKicked` call)
+    /// Note: this only works when the group was not permanently deleted.
+    void markInvited();
 
     /// Returns true if we don't have room access, i.e. we were kicked and both secretkey and
     /// auth_data are empty.
     bool kicked() const;
 
-    /// Mark the group as permanently destroyed. This cannot be unset once set.
-    void destroyGroup();
+    /// Mark the group as permanently destroyed and clears auth_data & secret_key. This cannot be
+    /// unset once set.
+    void markDestroyed();
 
     /// Returns true if the group was destroyed by one of the admin.
     bool isDestroyed() const;
