@@ -1,9 +1,9 @@
 [submodule "external/oxen-encoding"]
 	path = external/oxen-encoding
-	url = https://github.com/oxen-io/oxen-encoding.git
+	url = https://github.com/session-foundation/oxen-encoding.git
 [submodule "external/libsodium-internal"]
     path = external/libsodium-internal
-    url = https://github.com/jagerman/libsodium-internal.git
+    url = https://github.com/session-foundation/libsodium-internal.git
 [submodule "tests/Catch2"]
 	path = tests/Catch2
 	url = https://github.com/catchorg/Catch2
