@@ -143,7 +143,7 @@ std::pair<uc32, cleared_uc32> blind25_key_pair(
 /// Computes a version-blinded key pair.
 ///
 /// Takes the Ed25519 secret key (64 bytes, or 32-byte seed).  Returns the blinded public key and
-/// private key (NOT a seed).
+/// blinded libsodium seed value.
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
