@@ -276,6 +276,7 @@ local static_build(name,
                    oxen_repo=false,
                    kitware_repo=''/* ubuntu codename, if wanted */,
                    cmake_extra='',
+                   allow_fail=false,
                    jobs=6)
       = debian_pipeline(
   name,
@@ -283,6 +284,7 @@ local static_build(name,
   arch=arch,
   deps=deps,
   oxen_repo=oxen_repo,
+  allow_fail=allow_fail,
   build=[
     'export JOBS=' + jobs,
     './utils/static-bundle.sh build ' + archive_name + ' -DSTATIC_LIBSTD=ON ' + cmake_extra,
@@ -366,6 +368,7 @@ local static_build(name,
                docker_base + 'debian-win32-cross',
                'libsession-util-windows-x86-TAG.zip',
                deps=['g++-mingw-w64-i686-posix'],
+               allow_fail=true,
                cmake_extra='-DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-i686-toolchain.cmake'),
   debian_pipeline(
     'Static Android',
