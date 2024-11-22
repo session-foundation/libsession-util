@@ -60,7 +60,7 @@ if (m{^\s*<script>\s*$} .. m{^\s*</script>\s*$}) {
   <script>
     window.\$docsify = {
       name: "Libsession Utils API",
-      repo: "https://github.com/oxen-io/libsession-util",
+      repo: "https://github.com/session-foundation/libsession-util",
       loadSidebar: "sidebar.md",
       subMaxLevel: 2,
       homepage: "index.md",

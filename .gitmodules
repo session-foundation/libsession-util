@@ -1,6 +1,6 @@
 [submodule "external/libsodium-internal"]
     path = external/libsodium-internal
-    url = https://github.com/jagerman/libsodium-internal.git
+    url = https://github.com/session-foundation/libsodium-internal.git
 [submodule "tests/Catch2"]
 	path = tests/Catch2
 	url = https://github.com/catchorg/Catch2
@@ -19,5 +19,3 @@
 [submodule "external/protobuf"]
 	path = external/protobuf
 	url = https://github.com/protocolbuffers/protobuf.git
-[submodule "external/oxen-libquic/"]
-	url = https://github.com/oxen-io/oxen-libquic/
