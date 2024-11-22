@@ -453,7 +453,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     CHECK(m1b.members.size() == 5);
     auto m1b_m2 = m1b.members.get(members[2].session_id);
     REQUIRE(m1b_m2);
-    CHECK(m1b_m2->invite_pending());
+    CHECK(m1b_m2->status() == session::config::groups::member::Status::invite_sent);
     CHECK(m1b_m2->name == "fred");
 
     // Rekey after 10d, then again after 71d (10+61) and everything except those two new gens should
