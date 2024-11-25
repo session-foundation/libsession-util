@@ -218,7 +218,7 @@ struct member {
     ///
     /// Outputs:
     /// - `Status` -- an enum indicating the consolidated status of this member in the group.
-    Status status() {
+    Status status() const {
         // If the member has been removed that trumps all other statuses
         if (removed_status == REMOVED_MEMBER_AND_MESSAGES)
             return Status::removed_including_messages;
