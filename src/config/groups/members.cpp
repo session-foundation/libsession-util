@@ -272,7 +272,16 @@ LIBSESSION_C_API void groups_members_set(config_object* conf, const config_group
     unbox<groups::Members>(conf)->set(groups::member{*member});
 }
 
-LIBSESSION_C_API bool groups_member_set_invite_sent(config_object* conf, const char* session_id) {
+LIBSESSION_C_API GROUP_MEMBER_STATUS group_member_status(const config_group_member* member) {
+    try {
+        auto m = groups::member{*member};
+        return static_cast<GROUP_MEMBER_STATUS>(m.status());
+    } catch (...) {
+        return GROUP_MEMBER_STATUS_INVITE_NOT_SENT;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_invite_sent(config_object* conf, const char* session_id) {
     try {
         if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
             m->set_invited();
@@ -299,7 +308,8 @@ LIBSESSION_C_API bool groups_members_set_invite_failed(
     }
 }
 
-LIBSESSION_C_API bool groups_members_set_accepted(config_object* conf, const char* session_id) {
+LIBSESSION_C_API bool groups_members_set_invite_accepted(
+        config_object* conf, const char* session_id) {
     try {
         if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
             m->set_accepted();

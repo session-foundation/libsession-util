@@ -128,7 +128,20 @@ LIBSESSION_EXPORT bool groups_members_get_or_construct(
 /// - `member` -- [in] Pointer containing the member info data
 LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_group_member* member);
 
-/// API: groups/groups_member_set_invite_sent
+/// API: groups/group_member_status
+///
+/// This function goes through the various status values and returns a single consolidated
+/// status for the member.
+///
+/// Inputs:
+/// - `member` -- [in] The member to retrieve the status for
+///
+/// Outputs:
+/// - `GROUP_MEMBER_STATUS` -- Returns an enum indicating the consolidated status of this member in
+/// the group.
+LIBSESSION_EXPORT GROUP_MEMBER_STATUS group_member_status(const config_group_member* member);
+
+/// API: groups/groups_members_set_invite_sent
 ///
 /// This marks the user as having a pending invitation in the group, and that an invitation message
 /// has been sent to them.
@@ -139,7 +152,7 @@ LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_grou
 ///
 /// Outputs:
 /// - `bool` -- Returns true if the call succeeds, false if an error occurs.
-LIBSESSION_EXPORT bool groups_member_set_invite_sent(config_object* conf, const char* session_id);
+LIBSESSION_EXPORT bool groups_members_set_invite_sent(config_object* conf, const char* session_id);
 
 /// API: groups/groups_members_set_invite_failed
 ///
@@ -155,7 +168,7 @@ LIBSESSION_EXPORT bool groups_member_set_invite_sent(config_object* conf, const 
 LIBSESSION_EXPORT bool groups_members_set_invite_failed(
         config_object* conf, const char* session_id);
 
-/// API: groups/groups_members_set_accepted
+/// API: groups/groups_members_set_invite_accepted
 ///
 /// This clears the "invited" and "supplement" flags for this user, thus indicating that the
 /// user has accepted an invitation and is now a regular member of the group.
@@ -166,7 +179,8 @@ LIBSESSION_EXPORT bool groups_members_set_invite_failed(
 ///
 /// Outputs:
 /// - `bool` -- True if change was successful
-LIBSESSION_EXPORT bool groups_members_set_accepted(config_object* conf, const char* session_id);
+LIBSESSION_EXPORT bool groups_members_set_invite_accepted(
+        config_object* conf, const char* session_id);
 
 /// API: groups/groups_members_set_promoted
 ///
