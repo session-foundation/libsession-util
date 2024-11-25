@@ -184,7 +184,7 @@ void member::into(config_group_member& m) const {
             ::GROUP_MEMBER_STATUS_INVITE_SENT);
     static_assert(
             static_cast<int>(groups::member::Status::invite_accepted) ==
-            ::GROUP_MEMBER_STATUS_INVITE_ACCEPETED);
+            ::GROUP_MEMBER_STATUS_INVITE_ACCEPTED);
     static_assert(
             static_cast<int>(groups::member::Status::promotion_unknown) ==
             ::GROUP_MEMBER_STATUS_PROMOTION_UNKNOWN);
@@ -199,7 +199,7 @@ void member::into(config_group_member& m) const {
             ::GROUP_MEMBER_STATUS_PROMOTION_SENT);
     static_assert(
             static_cast<int>(groups::member::Status::promotion_accepted) ==
-            ::GROUP_MEMBER_STATUS_PROMOTION_ACCEPETED);
+            ::GROUP_MEMBER_STATUS_PROMOTION_ACCEPTED);
     static_assert(
             static_cast<int>(groups::member::Status::removed_unknown) ==
             ::GROUP_MEMBER_STATUS_REMOVED_UNKNOWN);
