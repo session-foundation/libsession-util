@@ -46,6 +46,27 @@ constexpr int REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2;
 
 /// Struct containing member details
 struct member {
+    /// A convenience status enum for the group member, this enum is returned by a function which
+    /// reviews the various member status values (eg. invite, promotion, etc.) and returns a single
+    /// consolidated value
+    enum class Status {
+        invite_unknown = 0,
+        invite_not_sent = 1,
+        invite_failed = 2,
+        invite_sent = 3,
+        invite_accepted = 4,
+
+        promotion_unknown = 5,
+        promotion_not_sent = 6,
+        promotion_failed = 7,
+        promotion_sent = 8,
+        promotion_accepted = 9,
+
+        removed_unknown = 10,
+        removed = 11,
+        removed_including_messages = 12,
+    };
+
     static constexpr size_t MAX_NAME_LENGTH = 100;
 
     explicit member(std::string sid);
@@ -127,39 +148,6 @@ struct member {
         supplement = false;
     }
 
-    /// API: groups/member::invite_not_sent
-    ///
-    /// Returns true if there has never been an attempt to send an invitation to the user.  Returns
-    /// false otherwise.
-    ///
-    /// Inputs: none
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user needs an invitation to be sent, false otherwise.
-    bool invite_not_sent() const { return invite_status == INVITE_NOT_SENT; }
-
-    /// API: groups/member::invite_pending
-    ///
-    /// Returns whether the user currently has a pending invitation.  Returns true if so (whether or
-    /// not that invitation has failed).
-    ///
-    /// Inputs: none
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a pending invitation, false otherwise.
-    bool invite_pending() const { return invite_status > 0; }
-
-    /// API: groups/member::invite_failed
-    ///
-    /// Returns true if the user has a pending invitation that is marked as failed (and thus should
-    /// be re-sent).
-    ///
-    /// Inputs: none
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a failed pending invitation
-    bool invite_failed() const { return invite_status == INVITE_FAILED; }
-
     // Flags to track a promoted-to-admin user.  This value is typically not used directly, but
     // rather via the `set_promoted()`, `promotion_pending()` and similar methods.
     int promotion_status = 0;
@@ -204,49 +192,6 @@ struct member {
         promotion_status = 0;
     }
 
-    /// API: groups/member::promotion_not_sent
-    ///
-    /// Returns true if the user is an admin but there has never been an attempt to send a promotion
-    /// to admin status sent to them. Returns false otherwise.
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user needs a promotion to be sent, false otherwise.
-    bool promotion_not_sent() const { return admin && promotion_status == INVITE_NOT_SENT; }
-
-    /// API: groups/member::promotion_pending
-    ///
-    /// Returns whether the user currently has a pending invitation/promotion to admin status.
-    /// Returns true if so (whether or not that invitation has failed).
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a pending promotion, false otherwise.
-    bool promotion_pending() const { return admin && promotion_status > 0; }
-
-    /// API: groups/member::promotion_failed
-    ///
-    /// Returns true if the user has a pending promotion-to-admin that is marked as failed (and thus
-    /// should be re-sent).
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a failed pending promotion
-    bool promotion_failed() const { return admin && promotion_status == INVITE_FAILED; }
-
-    /// API: groups/member::promoted
-    ///
-    /// Returns true if the user is already an admin *or* has a pending promotion to admin.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the member is promoted (or promotion-in-progress)
-    bool promoted() const { return admin || promotion_pending(); }
-
     // Flags to track a removed user.  This value is typically not used directly, but
     // rather via the `set_removed()`, `is_removed()` and similar methods.
     int removed_status = 0;
@@ -266,27 +211,49 @@ struct member {
         removed_status = messages ? REMOVED_MEMBER_AND_MESSAGES : REMOVED_MEMBER;
     }
 
-    /// API: groups/member::is_removed
+    /// API: groups/member::status
     ///
-    /// Returns true if the user should be removed from the group.
-    ///
-    /// Inputs: none.
+    /// This function goes through the various status values and returns a single consolidated
+    /// status for the member.
     ///
     /// Outputs:
-    /// - `bool` -- true if the member should be removed from the group
-    bool is_removed() const { return removed_status > 0; }
+    /// - `Status` -- an enum indicating the consolidated status of this member in the group.
+    Status status() {
+        // If the member has been removed that trumps all other statuses
+        if (removed_status == REMOVED_MEMBER_AND_MESSAGES)
+            return Status::removed_including_messages;
+        else if (removed_status == REMOVED_MEMBER)
+            return Status::removed;
+        else if (removed_status > 0)
+            return Status::removed_unknown;
 
-    /// API: groups/member::should_remove_messages
-    ///
-    /// Returns true if the users messages should be removed after they are
-    /// successfully removed.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the members messages should be removed after they are
-    /// successfully removed from the group
-    bool should_remove_messages() const { return removed_status == REMOVED_MEMBER_AND_MESSAGES; }
+        // If the member is promoted then we assume they had accepted the invite and return the
+        // relevant promoted status
+        if (admin) {
+            if (promotion_status == INVITE_NOT_SENT)
+                return Status::promotion_not_sent;
+            else if (promotion_status == INVITE_FAILED)
+                return Status::promotion_failed;
+            else if (promotion_status == INVITE_SENT)
+                return Status::promotion_sent;
+            else if (promotion_status != 0)
+                return Status::promotion_unknown;
+
+            return Status::promotion_accepted;
+        }
+
+        // Otherwise the member is a standard member
+        if (invite_status == INVITE_NOT_SENT)
+            return Status::invite_not_sent;
+        else if (invite_status == INVITE_FAILED)
+            return Status::invite_failed;
+        else if (invite_status == INVITE_SENT)
+            return Status::invite_sent;
+        else if (invite_status != 0)
+            return Status::invite_unknown;
+
+        return Status::invite_accepted;
+    }
 
     /// API: groups/member::into
     ///

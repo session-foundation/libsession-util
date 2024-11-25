@@ -113,24 +113,23 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         int i = 0;
         for (auto& m : gmem2) {
             CHECK(m.session_id == sids[i]);
-            CHECK_FALSE(m.invite_failed());
-            CHECK_FALSE(m.promotion_pending());
-            CHECK_FALSE(m.promotion_failed());
-            CHECK_FALSE(m.is_removed());
-            CHECK_FALSE(m.should_remove_messages());
+            CHECK_FALSE(m.status() == session::config::groups::member::Status::invite_failed);
+            CHECK_FALSE(m.status() == session::config::groups::member::Status::promotion_not_sent);
+            CHECK_FALSE(m.status() == session::config::groups::member::Status::promotion_failed);
+            CHECK_FALSE(m.status() == session::config::groups::member::Status::removed);
+            CHECK_FALSE(
+                    m.status() ==
+                    session::config::groups::member::Status::removed_including_messages);
             CHECK_FALSE(m.supplement);
             if (i < 10) {
-                CHECK_FALSE(m.invite_not_sent());
-                CHECK_FALSE(m.invite_pending());
+                CHECK_FALSE(m.status() == session::config::groups::member::Status::invite_not_sent);
                 CHECK(m.admin);
                 CHECK(m.name == "Admin " + std::to_string(i));
                 CHECK_FALSE(m.profile_picture.empty());
-                CHECK(m.promoted());
+                CHECK(m.status() == session::config::groups::member::Status::promotion_accepted);
             } else {
-                CHECK(m.invite_not_sent());
-                CHECK(m.invite_pending());
+                CHECK(m.status() == session::config::groups::member::Status::invite_not_sent);
                 CHECK_FALSE(m.admin);
-                CHECK_FALSE(m.promoted());
                 if (i < 20) {
                     CHECK(m.name == "Member " + std::to_string(i));
                     CHECK_FALSE(m.profile_picture.empty());
@@ -201,15 +200,24 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url ==
                   (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
-            CHECK(m.invite_not_sent() == (i >= 10 && i < 50));
-            CHECK(m.invite_pending() == (i >= 10 && i < 58));
-            CHECK(m.invite_failed() == (55 <= i && i < 58));
+            if (i >= 10 && i < 50)
+                CHECK(m.status() == session::config::groups::member::Status::invite_not_sent);
+            if (50 <= i && i < 55)
+                CHECK(m.status() == session::config::groups::member::Status::invite_sent);
+            if (55 <= i && i < 58)
+                CHECK(m.status() == session::config::groups::member::Status::invite_failed);
+            if (i < 10)
+                CHECK(m.status() == session::config::groups::member::Status::promotion_accepted);
+            if (i >= 58 && i < 60)
+                CHECK(m.status() == session::config::groups::member::Status::promotion_sent);
+            if (i >= 60 && i < 62)
+                CHECK(m.status() == session::config::groups::member::Status::promotion_failed);
+            if (i >= 62 && i < 64)
+                CHECK(m.status() == session::config::groups::member::Status::removed);
+            if (i >= 64 && i < 66)
+                CHECK(m.status() ==
+                      session::config::groups::member::Status::removed_including_messages);
             CHECK(m.supplement == (i % 2 && 50 < i && i < 58));
-            CHECK(m.promoted() == (i < 10 || (i >= 58 && i < 62)));
-            CHECK(m.promotion_pending() == (i >= 58 && i < 62));
-            CHECK(m.promotion_failed() == (i >= 60 && i < 62));
-            CHECK(m.is_removed() == (i >= 62 && i < 66));
-            CHECK(m.should_remove_messages() == (i >= 64 && i < 66));
             i++;
         }
         CHECK(i == 66);
@@ -255,15 +263,27 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url ==
                   (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
-            CHECK(m.invite_not_sent() == (i >= 10 && i < 50));
-            CHECK(m.invite_pending() == ((i >= 10 && i < 50) || i == 53 || (i >= 55 && i < 58)));
-            CHECK(m.invite_failed() == (i == 57));
+            if (i >= 10 && i < 50)
+                CHECK(m.status() == session::config::groups::member::Status::invite_not_sent);
+            if (i >= 50 && i < 54)
+                CHECK(m.status() == session::config::groups::member::Status::invite_accepted);
+            if (i == 53 || (i >= 55 && i < 57))
+                CHECK(m.status() == session::config::groups::member::Status::invite_sent);
+            if (i == 57)
+                CHECK(m.status() == session::config::groups::member::Status::invite_failed);
+            if (i < 10 || i == 58)
+                CHECK(m.status() == session::config::groups::member::Status::promotion_accepted);
+            if (i == 59)
+                CHECK(m.status() == session::config::groups::member::Status::promotion_sent);
+            if (i >= 60 && i < 62)
+                CHECK(m.status() == session::config::groups::member::Status::promotion_failed);
+            if (i >= 62 && i < 64)
+                CHECK(m.status() == session::config::groups::member::Status::removed);
+            if (i >= 64 && i < 66)
+                CHECK(m.status() ==
+                      session::config::groups::member::Status::removed_including_messages);
             CHECK(m.supplement == (i == 55 || i == 57));
-            CHECK(m.promoted() == (i < 10 || (i >= 58 && i < 62)));
-            CHECK(m.promotion_pending() == (i >= 59 && i <= 61));
-            CHECK(m.promotion_failed() == (i >= 60 && i <= 61));
-            CHECK(m.is_removed() == (i >= 62 && i < 66));
-            CHECK(m.should_remove_messages() == (i >= 64 && i < 66));
+
             do
                 i++;
             while (is_prime100(i));

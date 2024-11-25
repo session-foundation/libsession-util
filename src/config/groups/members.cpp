@@ -71,7 +71,9 @@ void member::load(const dict& info_dict) {
     invite_status = admin ? 0 : maybe_int(info_dict, "I").value_or(0);
     promotion_status = maybe_int(info_dict, "P").value_or(0);
     removed_status = maybe_int(info_dict, "R").value_or(0);
-    supplement = invite_pending() && !promoted() ? maybe_int(info_dict, "s").value_or(0) : 0;
+    supplement = invite_status > 0 && !(admin || promotion_status > 0)
+                       ? maybe_int(info_dict, "s").value_or(0)
+                       : 0;
 }
 
 /// Load _val from the current iterator position; if it is invalid, skip to the next key until we
@@ -168,6 +170,44 @@ void member::into(config_group_member& m) const {
     static_assert(groups::INVITE_SENT == ::INVITE_SENT);
     static_assert(groups::INVITE_FAILED == ::INVITE_FAILED);
     static_assert(groups::INVITE_NOT_SENT == ::INVITE_NOT_SENT);
+    static_assert(
+            static_cast<int>(groups::member::Status::invite_unknown) ==
+            ::GROUP_MEMBER_STATUS_INVITE_UNKNOWN);
+    static_assert(
+            static_cast<int>(groups::member::Status::invite_not_sent) ==
+            ::GROUP_MEMBER_STATUS_INVITE_NOT_SENT);
+    static_assert(
+            static_cast<int>(groups::member::Status::invite_failed) ==
+            ::GROUP_MEMBER_STATUS_INVITE_FAILED);
+    static_assert(
+            static_cast<int>(groups::member::Status::invite_sent) ==
+            ::GROUP_MEMBER_STATUS_INVITE_SENT);
+    static_assert(
+            static_cast<int>(groups::member::Status::invite_accepted) ==
+            ::GROUP_MEMBER_STATUS_INVITE_ACCEPTED);
+    static_assert(
+            static_cast<int>(groups::member::Status::promotion_unknown) ==
+            ::GROUP_MEMBER_STATUS_PROMOTION_UNKNOWN);
+    static_assert(
+            static_cast<int>(groups::member::Status::promotion_not_sent) ==
+            ::GROUP_MEMBER_STATUS_PROMOTION_NOT_SENT);
+    static_assert(
+            static_cast<int>(groups::member::Status::promotion_failed) ==
+            ::GROUP_MEMBER_STATUS_PROMOTION_FAILED);
+    static_assert(
+            static_cast<int>(groups::member::Status::promotion_sent) ==
+            ::GROUP_MEMBER_STATUS_PROMOTION_SENT);
+    static_assert(
+            static_cast<int>(groups::member::Status::promotion_accepted) ==
+            ::GROUP_MEMBER_STATUS_PROMOTION_ACCEPTED);
+    static_assert(
+            static_cast<int>(groups::member::Status::removed_unknown) ==
+            ::GROUP_MEMBER_STATUS_REMOVED_UNKNOWN);
+    static_assert(
+            static_cast<int>(groups::member::Status::removed) == ::GROUP_MEMBER_STATUS_REMOVED);
+    static_assert(
+            static_cast<int>(groups::member::Status::removed_including_messages) ==
+            ::GROUP_MEMBER_STATUS_REMOVED_MEMBER_AND_MESSAGES);
     m.invited = invite_status;
     m.promoted = promotion_status;
     m.removed = removed_status;
@@ -233,6 +273,125 @@ LIBSESSION_C_API bool groups_members_set(config_object* conf, const config_group
                 return true;
             },
             false);
+}
+
+LIBSESSION_C_API GROUP_MEMBER_STATUS group_member_status(const config_group_member* member) {
+    try {
+        auto m = groups::member{*member};
+        return static_cast<GROUP_MEMBER_STATUS>(m.status());
+    } catch (...) {
+        return GROUP_MEMBER_STATUS_INVITE_NOT_SENT;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_invite_sent(config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_invited();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_invite_failed(
+        config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_invited(/*failed*/ true);
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_invite_accepted(
+        config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_accepted();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_promoted(config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_promoted();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_promotion_sent(
+        config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_promotion_sent();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_promotion_failed(
+        config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_promotion_failed();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_promotion_accepted(
+        config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_promotion_accepted();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_removed(
+        config_object* conf, const char* session_id, bool messages) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_removed(messages);
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
 }
 
 LIBSESSION_C_API bool groups_members_erase(config_object* conf, const char* session_id) {
