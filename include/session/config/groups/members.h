@@ -11,6 +11,25 @@ extern "C" {
 enum groups_members_invite_status { INVITE_SENT = 1, INVITE_FAILED = 2, INVITE_NOT_SENT = 3 };
 enum groups_members_remove_status { REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2 };
 
+/// A convenience status enum for the group member, this enum is returned by a function which
+/// reviews the various member status values (eg. invite, promotion, etc.) and returns a single
+/// consolidated value
+typedef enum GROUP_MEMBER_STATUS {
+    GROUP_MEMBER_STATUS_INVITE_UNKNOWN = 0,
+    GROUP_MEMBER_STATUS_INVITE_NOT_SENT = 1,
+    GROUP_MEMBER_STATUS_INVITE_FAILED = 2,
+    GROUP_MEMBER_STATUS_INVITE_SENT = 3,
+    GROUP_MEMBER_STATUS_INVITE_ACCEPTED = 4,
+    GROUP_MEMBER_STATUS_PROMOTION_UNKNOWN = 5,
+    GROUP_MEMBER_STATUS_PROMOTION_NOT_SENT = 6,
+    GROUP_MEMBER_STATUS_PROMOTION_FAILED = 7,
+    GROUP_MEMBER_STATUS_PROMOTION_SENT = 8,
+    GROUP_MEMBER_STATUS_PROMOTION_ACCEPTED = 9,
+    GROUP_MEMBER_STATUS_REMOVED_UNKNOWN = 10,
+    GROUP_MEMBER_STATUS_REMOVED = 11,
+    GROUP_MEMBER_STATUS_REMOVED_MEMBER_AND_MESSAGES = 12,
+} GROUP_MEMBER_STATUS;
+
 typedef struct config_group_member {
     char session_id[67];  // in hex; 66 hex chars + null terminator.
 
@@ -108,6 +127,132 @@ LIBSESSION_EXPORT bool groups_members_get_or_construct(
 /// - `conf` -- [in, out] Pointer to the config object
 /// - `member` -- [in] Pointer containing the member info data
 LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_group_member* member);
+
+/// API: groups/group_member_status
+///
+/// This function goes through the various status values and returns a single consolidated
+/// status for the member.
+///
+/// Inputs:
+/// - `member` -- [in] The member to retrieve the status for
+///
+/// Outputs:
+/// - `GROUP_MEMBER_STATUS` -- Returns an enum indicating the consolidated status of this member in
+/// the group.
+LIBSESSION_EXPORT GROUP_MEMBER_STATUS group_member_status(const config_group_member* member);
+
+/// API: groups/groups_members_set_invite_sent
+///
+/// This marks the user as having a pending invitation in the group, and that an invitation message
+/// has been sent to them.
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool groups_members_set_invite_sent(config_object* conf, const char* session_id);
+
+/// API: groups/groups_members_set_invite_failed
+///
+/// This marks the user as being invited to the group, but that their invitation message failed to
+/// send (this is intended as a signal to other clients that the invitation should be reissued).
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- True if change was successful
+LIBSESSION_EXPORT bool groups_members_set_invite_failed(
+        config_object* conf, const char* session_id);
+
+/// API: groups/groups_members_set_invite_accepted
+///
+/// This clears the "invited" and "supplement" flags for this user, thus indicating that the
+/// user has accepted an invitation and is now a regular member of the group.
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- True if change was successful
+LIBSESSION_EXPORT bool groups_members_set_invite_accepted(
+        config_object* conf, const char* session_id);
+
+/// API: groups/groups_members_set_promoted
+///
+/// This marks the user as having a pending promotion-to-admin in the group, waiting for the
+/// promotion message to be sent to them.
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- True if change was successful
+LIBSESSION_EXPORT bool groups_members_set_promoted(config_object* conf, const char* session_id);
+
+/// API: groups/groups_members_set_promotion_sent
+///
+/// This marks the user as having a pending promotion-to-admin in the group, and that a
+/// promotion message has been sent to them.
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- True if change was successful
+LIBSESSION_EXPORT bool groups_members_set_promotion_sent(
+        config_object* conf, const char* session_id);
+
+/// API: groups/groups_members_set_promotion_failed
+///
+/// This marks the user as being promoted to an admin, but that their promotion message failed
+/// to send (this is intended as a signal to other clients that the promotion should be
+/// reissued).
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- True if change was successful
+LIBSESSION_EXPORT bool groups_members_set_promotion_failed(
+        config_object* conf, const char* session_id);
+
+/// API: groups/groups_members_set_promotion_accepted
+///
+/// This marks the user as having accepted a promotion to admin in the group.
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- True if change was successful
+LIBSESSION_EXPORT bool groups_members_set_promotion_accepted(
+        config_object* conf, const char* session_id);
+
+/// API: groups/groups_members_set_removed
+///
+/// Sets the "removed" flag for this user.  This marks the user as pending removal from the
+/// group.  The optional `messages` parameter can be specified as true if we want to remove
+/// any messages sent by the member upon a successful removal.
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+/// - `messages` -- [in] Flag which controls whether any messages sent by the member should also be
+/// removed upon a successful member removal.
+///
+/// Outputs:
+/// - `bool` -- True if change was successful
+LIBSESSION_EXPORT bool groups_members_set_removed(
+        config_object* conf, const char* session_id, bool messages);
 
 /// API: groups/groups_members_erase
 ///
