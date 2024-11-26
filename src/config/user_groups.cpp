@@ -780,6 +780,12 @@ LIBSESSION_C_API bool user_groups_erase_legacy_group(config_object* conf, const 
     }
 }
 
+LIBSESSION_C_API void ugroups_group_set_invited(ugroups_group_info* group) {
+    if (group->removed_status == KICKED_FROM_GROUP) {
+        group->removed_status = NOT_REMOVED;
+    }
+}
+
 LIBSESSION_C_API void ugroups_group_set_kicked(ugroups_group_info* group) {
     assert(group);
     group->have_auth_data = false;
