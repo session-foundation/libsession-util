@@ -439,6 +439,15 @@ LIBSESSION_EXPORT bool user_groups_erase_group(config_object* conf, const char* 
 /// - `bool` -- Returns True if conversation was found and removed
 LIBSESSION_EXPORT bool user_groups_erase_legacy_group(config_object* conf, const char* group_id);
 
+/// API: user_groups/ugroups_group_set_invited
+///
+/// Call when we have been invited to a group to reset the 'kicked' state.
+///
+/// Inputs:
+/// - `group` -- [in] pointer to the group info which we should set to kicked
+///
+LIBSESSION_EXPORT void ugroups_group_set_invited(ugroups_group_info* group);
+
 /// API: user_groups/ugroups_group_set_kicked
 ///
 /// Call when we have been kicked from a group; this clears group's secret key and auth key from the
@@ -457,6 +466,25 @@ LIBSESSION_EXPORT void ugroups_group_set_kicked(ugroups_group_info* group);
 /// - `group` -- [in] pointer to the group info to query
 ///
 LIBSESSION_EXPORT bool ugroups_group_is_kicked(const ugroups_group_info* group);
+
+/// API: user_groups/ugroups_group_set_destroyed
+///
+/// Mark the group as permanently destroyed and clears auth_data & secret_key. This cannot be
+/// unset once set.
+///
+/// Inputs:
+/// - `group` -- [in] pointer to the group info which we should set to kicked
+///
+LIBSESSION_EXPORT void ugroups_group_set_destroyed(ugroups_group_info* group);
+
+/// API: user_groups/ugroups_group_is_destroyed
+///
+/// Returns true if the group was destroyed by one of the admin.
+///
+/// Inputs:
+/// - `group` -- [in] pointer to the group info to query
+///
+LIBSESSION_EXPORT bool ugroups_group_is_destroyed(const ugroups_group_info* group);
 
 typedef struct ugroups_legacy_members_iterator ugroups_legacy_members_iterator;
 
