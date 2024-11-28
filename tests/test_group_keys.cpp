@@ -358,7 +358,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         auto& m = members.emplace_back(member_seeds[4 + i], false, group_pk.data(), std::nullopt);
 
         auto memb = admin1.members.get_or_construct(m.session_id);
-        memb.set_invited();
+        memb.set_invite_sent();
         memb.supplement = true;
         memb.name = i == 0 ? "fred" : "JOHN";
         admin1.members.set(memb);

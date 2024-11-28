@@ -41,7 +41,7 @@ using namespace std::literals;
 ///       - 3 if a member has been marked for promotion but the promotion hasn't been sent yet.
 ///       - omitted once the promotion is accepted (i.e. once `A` gets set).
 
-constexpr int INVITE_SENT = 1, INVITE_FAILED = 2, INVITE_NOT_SENT = 3;
+constexpr int STATUS_SENT = 1, STATUS_FAILED = 2, STATUS_NOT_SENT = 3;
 constexpr int REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2;
 
 /// Struct containing member details
@@ -123,27 +123,26 @@ struct member {
 
     // Flags to track an invited user.  This value is typically not used directly, but rather via
     // the `set_invited()`, `invite_pending()` and similar methods.
-    int invite_status = INVITE_NOT_SENT;
+    int invite_status = STATUS_NOT_SENT;
 
-    /// API: groups/member::set_invited
+    /// API: groups/member::set_invite_sent
     ///
-    /// Sets the "invited" flag for this user.  This marks the user as having a pending invitation
-    /// to the group.  The optional `failed` parameter can be specified as true if the invitation
-    /// was issued but failed to send for some reason (this is intended as a signal to other clients
-    /// that the invitation should be reissued).
-    ///
-    /// Inputs:
-    /// - `failed` can be specified and set to `true` to the invite status to "failed-to-send";
-    ///   otherwise omitting it or giving as `false` sets the invite status to "sent."
-    void set_invited(bool failed = false) { invite_status = failed ? INVITE_FAILED : INVITE_SENT; }
+    /// This marks the user as having had an invitation message sent to them.
+    void set_invite_sent() { invite_status = STATUS_SENT; }
 
-    /// API: groups/members::set_accepted
+    /// API: groups/member::set_invite_failed
+    ///
+    /// This marks the user to indicate that their invitation message failed to send (this is
+    /// intended as a signal to other clients that the invitation should be reissued).
+    void set_invite_failed() { invite_status = STATUS_FAILED; }
+
+    /// API: groups/members::set_invite_accepted
     ///
     /// This clears the "invited" and "supplement" flags for this user, thus indicating that the
     /// user has accepted an invitation and is now a regular member of the group.
     ///
     /// Inputs: none
-    void set_accepted() {
+    void set_invite_accepted() {
         invite_status = 0;
         supplement = false;
     }
@@ -159,7 +158,7 @@ struct member {
     void set_promoted() {
         admin = true;
         invite_status = 0;
-        promotion_status = INVITE_NOT_SENT;
+        promotion_status = STATUS_NOT_SENT;
     }
 
     /// API: groups/member::set_promotion_sent
@@ -169,7 +168,7 @@ struct member {
     void set_promotion_sent() {
         admin = true;
         invite_status = 0;
-        promotion_status = INVITE_SENT;
+        promotion_status = STATUS_SENT;
     }
 
     /// API: groups/member::set_promotion_failed
@@ -180,7 +179,7 @@ struct member {
     void set_promotion_failed() {
         admin = true;
         invite_status = 0;
-        promotion_status = INVITE_FAILED;
+        promotion_status = STATUS_FAILED;
     }
 
     /// API: groups/member::set_promotion_accepted
@@ -230,11 +229,11 @@ struct member {
         // If the member is promoted then we assume they had accepted the invite and return the
         // relevant promoted status
         if (admin) {
-            if (promotion_status == INVITE_NOT_SENT)
+            if (promotion_status == STATUS_NOT_SENT)
                 return Status::promotion_not_sent;
-            else if (promotion_status == INVITE_FAILED)
+            else if (promotion_status == STATUS_FAILED)
                 return Status::promotion_failed;
-            else if (promotion_status == INVITE_SENT)
+            else if (promotion_status == STATUS_SENT)
                 return Status::promotion_sent;
             else if (promotion_status != 0)
                 return Status::promotion_unknown;
@@ -243,11 +242,11 @@ struct member {
         }
 
         // Otherwise the member is a standard member
-        if (invite_status == INVITE_NOT_SENT)
+        if (invite_status == STATUS_NOT_SENT)
             return Status::invite_not_sent;
-        else if (invite_status == INVITE_FAILED)
+        else if (invite_status == STATUS_FAILED)
             return Status::invite_failed;
-        else if (invite_status == INVITE_SENT)
+        else if (invite_status == STATUS_SENT)
             return Status::invite_sent;
         else if (invite_status != 0)
             return Status::invite_unknown;

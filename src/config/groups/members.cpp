@@ -144,11 +144,11 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
     }
     admin = m.admin;
     invite_status =
-            (m.invited == INVITE_SENT || m.invited == INVITE_FAILED || m.invited == INVITE_NOT_SENT)
+            (m.invited == STATUS_SENT || m.invited == STATUS_FAILED || m.invited == STATUS_NOT_SENT)
                     ? m.invited
                     : 0;
-    promotion_status = (m.promoted == INVITE_SENT || m.promoted == INVITE_FAILED ||
-                        m.invited == INVITE_NOT_SENT)
+    promotion_status = (m.promoted == STATUS_SENT || m.promoted == STATUS_FAILED ||
+                        m.invited == STATUS_NOT_SENT)
                              ? m.promoted
                              : 0;
     removed_status = (m.removed == REMOVED_MEMBER || m.removed == REMOVED_MEMBER_AND_MESSAGES)
@@ -167,9 +167,9 @@ void member::into(config_group_member& m) const {
         copy_c_str(m.profile_pic.url, "");
     }
     m.admin = admin;
-    static_assert(groups::INVITE_SENT == ::INVITE_SENT);
-    static_assert(groups::INVITE_FAILED == ::INVITE_FAILED);
-    static_assert(groups::INVITE_NOT_SENT == ::INVITE_NOT_SENT);
+    static_assert(groups::STATUS_SENT == ::STATUS_SENT);
+    static_assert(groups::STATUS_FAILED == ::STATUS_FAILED);
+    static_assert(groups::STATUS_NOT_SENT == ::STATUS_NOT_SENT);
     static_assert(
             static_cast<int>(groups::member::Status::invite_unknown) ==
             ::GROUP_MEMBER_STATUS_INVITE_UNKNOWN);
@@ -284,7 +284,7 @@ LIBSESSION_C_API GROUP_MEMBER_STATUS group_member_status(const config_group_memb
 LIBSESSION_C_API bool groups_members_set_invite_sent(config_object* conf, const char* session_id) {
     try {
         if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
-            m->set_invited();
+            m->set_invite_sent();
             unbox<groups::Members>(conf)->set(*m);
             return true;
         }
@@ -298,7 +298,7 @@ LIBSESSION_C_API bool groups_members_set_invite_failed(
         config_object* conf, const char* session_id) {
     try {
         if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
-            m->set_invited(/*failed*/ true);
+            m->set_invite_failed();
             unbox<groups::Members>(conf)->set(*m);
             return true;
         }
@@ -312,7 +312,7 @@ LIBSESSION_C_API bool groups_members_set_invite_accepted(
         config_object* conf, const char* session_id) {
     try {
         if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
-            m->set_accepted();
+            m->set_invite_accepted();
             unbox<groups::Members>(conf)->set(*m);
             return true;
         }

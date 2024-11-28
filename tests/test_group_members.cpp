@@ -152,14 +152,14 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     }
     for (int i = 50; i < 55; i++) {
         auto m = gmem2.get_or_construct(sids[i]);
-        m.set_invited();  // failed invite
+        m.set_invite_sent();
         if (i % 2)
             m.supplement = true;
         gmem2.set(m);
     }
     for (int i = 55; i < 58; i++) {
         auto m = gmem2.get_or_construct(sids[i]);
-        m.set_invited(true);
+        m.set_invite_failed();
         if (i % 2)
             m.supplement = true;
         gmem2.set(m);
@@ -231,9 +231,9 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         else if (i >= 50 && i <= 56) {
             auto m = gmem1.get(sids[i]).value();
             if (i >= 55)
-                m.set_invited();
+                m.set_invite_sent();
             else
-                m.set_accepted();
+                m.set_invite_accepted();
             gmem1.set(m);
         } else if (i == 58) {
             auto m = gmem1.get(sids[i]).value();
