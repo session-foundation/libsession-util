@@ -226,8 +226,7 @@ struct member {
         else if (removed_status > 0)
             return Status::removed_unknown;
 
-        // If the member is promoted then we assume they had accepted the invite and return the
-        // relevant promoted status
+        // If the member is promoted then we return the relevant promoted status
         if (admin) {
             if (promotion_status == STATUS_NOT_SENT)
                 return Status::promotion_not_sent;
