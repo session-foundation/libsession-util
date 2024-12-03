@@ -10,6 +10,8 @@
 #include <string_view>
 #include <vector>
 
+#include <fmt/format.h>
+
 #include "session/config/base.h"
 
 using ustring = std::basic_string<unsigned char>;
@@ -63,6 +65,10 @@ inline std::string printable(ustring_view x) {
 }
 inline std::string printable(std::string_view x) {
     return printable(to_usv(x));
+}
+template <typename... T> requires (sizeof...(T) > 0)
+inline std::string printable(fmt::format_string<T...> format, T&&... args) {
+    return printable(to_usv(fmt::format(format, std::forward<T>(args)...)));
 }
 std::string printable(const unsigned char* x) = delete;
 inline std::string printable(const unsigned char* x, size_t n) {

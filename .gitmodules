@@ -19,3 +19,6 @@
 [submodule "external/protobuf"]
 	path = external/protobuf
 	url = https://github.com/protocolbuffers/protobuf.git
+[submodule "external/oxen-logging"]
+	path = external/oxen-logging
+	url = https://github.com/oxen-io/oxen-logging.git

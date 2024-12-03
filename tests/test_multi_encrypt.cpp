@@ -292,12 +292,12 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
             "test suite",
             nonce);
 
-    CHECK(printable(encrypted) ==
-          printable(
-                  "d1:#24:" + "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hex + "1:el" +
-                  "21:" + "e64937e5ea201b84f4e88a976dad900d91caaf6a17"_hex +
-                  "21:" + "bcb642c49c6da03f70cdaab2ed6666721318afd631"_hex +
-                  "21:" + "1ecee2215d226817edfdb097f05037eb799309103a"_hex + "ee"));
+    CHECK(printable(encrypted) == printable(
+                                          "d1:#24:{}1:el21:{}21:{}21:{}ee",
+                                          "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hex,
+                                          "e64937e5ea201b84f4e88a976dad900d91caaf6a17"_hex,
+                                          "bcb642c49c6da03f70cdaab2ed6666721318afd631"_hex,
+                                          "1ecee2215d226817edfdb097f05037eb799309103a"_hex));
 
     m1 = session::decrypt_for_multiple_simple(
             encrypted,
