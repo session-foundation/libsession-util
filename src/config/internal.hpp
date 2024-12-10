@@ -211,10 +211,10 @@ void load_unknowns(
 
 /// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
 /// serious error.
-ustring zstd_compress(ustring_view data, int level = 1, ustring_view prefix = {});
+ustring zstd_compress(ucspan data, int level = 1, ustring_view prefix = {});
 
 /// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
 /// then this returns nullopt if the decompressed size would exceed that limit.
-std::optional<ustring> zstd_decompress(ustring_view data, size_t max_size = 0);
+std::optional<ustring> zstd_decompress(ucspan data, size_t max_size = 0);
 
 }  // namespace session::config

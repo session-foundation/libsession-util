@@ -142,7 +142,7 @@ ustring sign_for_recipient(
 /// - `std::pair<ustring, ustring>` -- the plaintext binary data that was encrypted and the
 ///   sender's ED25519 pubkey, *if* the message decrypted and validated successfully.  Throws on
 ///   error.
-std::pair<ustring, ustring> decrypt_incoming(ustring_view ed25519_privkey, ustring_view ciphertext);
+std::pair<ustring, ustring> decrypt_incoming(ucspan ed25519_privkey, ucspan ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -162,7 +162,7 @@ std::pair<ustring, ustring> decrypt_incoming(ustring_view ed25519_privkey, ustri
 ///   sender's ED25519 pubkey, *if* the message decrypted and validated successfully.  Throws on
 ///   error.
 std::pair<ustring, ustring> decrypt_incoming(
-        ustring_view x25519_pubkey, ustring_view x25519_seckey, ustring_view ciphertext);
+        ucspan x25519_pubkey, ucspan x25519_seckey, ucspan ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///

@@ -1,7 +1,7 @@
 
 add_library(common INTERFACE)
 target_link_libraries(common INTERFACE
-    oxenc::oxenc)
+    oxenc::oxenc oxen::logging)
 
 target_include_directories(common INTERFACE ../include)
 if(WARNINGS_AS_ERRORS)

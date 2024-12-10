@@ -47,7 +47,13 @@ ustring encrypt(ustring_view message, ustring_view key_base, std::string_view do
 /// - `domain` -- short string for the keyed hash
 void encrypt_inplace(ustring& message, ustring_view key_base, std::string_view domain);
 
-/// Constant amount of extra bytes required to be appended when encrypting.
+/// API: encrypt/ENCRYPT_DATA_OVERHEAD
+///
+/// This value contains the constant amount of extra bytes required for encryption as performed by
+/// `encrypt()`/`decrypt()`/`encrypt_inplace()`/`decrypt_inplace()`.
+///
+/// That is, for some message `m`, encrypt_overhead() is the difference between m.size() and
+/// encrypt(m).size().
 constexpr size_t ENCRYPT_DATA_OVERHEAD = 40;  // ABYTES + NPUBBYTES
 
 /// Thrown if decrypt() fails.

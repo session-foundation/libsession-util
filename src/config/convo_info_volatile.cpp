@@ -262,7 +262,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         erase_community(base, room);
 }
 
-std::tuple<seqno_t, ustring, std::vector<std::string>> ConvoInfoVolatile::push() {
+std::tuple<seqno_t, std::vector<ustring>, std::vector<std::string>> ConvoInfoVolatile::push() {
     // Prune off any conversations with last_read timestamps more than PRUNE_HIGH ago (unless they
     // also have a `unread` flag set, in which case we keep them indefinitely).
     prune_stale();

@@ -28,7 +28,7 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
     c1.set_name("050000000000000000000000000000000000000000000000000000000000000000", "alfonso");
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
-    c1.confirm_pushed(seqno, "fakehash1");
+    c1.confirm_pushed(seqno, {"fakehash1"});
 
     session::config::Contacts c2{ustring_view{seed}, c1.dump()};
     session::config::Contacts c3{ustring_view{seed}, c1.dump()};
@@ -44,6 +44,8 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
 
     auto [seqno2, data2, obs2] = c2.push();
     auto [seqno3, data3, obs3] = c3.push();
+    REQUIRE(data2.size() == 1);
+    REQUIRE(data3.size() == 1);
 
     REQUIRE(seqno2 == 2);
     CHECK(obs2 == std::vector{"fakehash1"s});
@@ -51,8 +53,8 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
     CHECK(obs2 == std::vector{"fakehash1"s});
 
     auto r = c1.merge(std::vector<std::pair<std::string, ustring_view>>{
-            {{"fakehash2", data2}, {"fakehash3", data3}}});
-    CHECK(r == std::vector{{"fakehash2"s, "fakehash3"s}});
+            {{"fakehash2", data2[0]}, {"fakehash3", data3[0]}}});
+    CHECK(r == std::unordered_set{{"fakehash2"s, "fakehash3"s}});
     CHECK(c1.needs_dump());
     CHECK(c1.needs_push());  // because we have the merge conflict to push
     CHECK(c1.is_dirty());

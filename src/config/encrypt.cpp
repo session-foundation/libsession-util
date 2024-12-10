@@ -8,23 +8,11 @@
 #include <cassert>
 
 #include "session/export.h"
+#include "session/util.hpp"
 
 using namespace std::literals;
 
 namespace session::config {
-
-namespace {
-
-    // Helper function to go from char pointers to the unsigned char pointers sodium needs:
-    const unsigned char* to_unsigned(const char* x) {
-        return reinterpret_cast<const unsigned char*>(x);
-    }
-
-    ustring_view to_unsigned_sv(std::string_view v) {
-        return {to_unsigned(v.data()), v.size()};
-    }
-
-}  // namespace
 
 static constexpr size_t DOMAIN_MAX_SIZE = 24;
 static constexpr auto NONCE_KEY_PREFIX = "libsessionutil-config-encrypted-"sv;
@@ -56,9 +44,7 @@ static std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> ma
 
 ustring encrypt(ustring_view message, ustring_view key_base, std::string_view domain) {
     ustring msg;
-    msg.reserve(
-            message.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES +
-            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    msg.reserve(message.size() + ENCRYPT_DATA_OVERHEAD);
     msg.assign(message);
     encrypt_inplace(msg, key_base, domain);
     return msg;
@@ -79,9 +65,7 @@ void encrypt_inplace(ustring& message, ustring_view key_base, std::string_view d
             nonce_key.size());
 
     size_t plaintext_len = message.size();
-    message.resize(
-            plaintext_len + crypto_aead_xchacha20poly1305_ietf_ABYTES +
-            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    message.resize(plaintext_len + ENCRYPT_DATA_OVERHEAD);
 
     unsigned long long outlen = 0;
     crypto_aead_xchacha20poly1305_ietf_encrypt(
@@ -109,8 +93,7 @@ ustring decrypt(ustring_view ciphertext, ustring_view key_base, std::string_view
     return x;
 }
 void decrypt_inplace(ustring& ciphertext, ustring_view key_base, std::string_view domain) {
-    size_t message_len = ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES -
-                         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+    size_t message_len = ciphertext.size() - ENCRYPT_DATA_OVERHEAD;
     if (message_len > ciphertext.size())  // overflow
         throw decrypt_error{"Decryption failed: ciphertext is too short"};
 

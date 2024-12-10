@@ -183,7 +183,7 @@ namespace {
     using zstd_decomp_ptr = std::unique_ptr<ZSTD_DStream, zstd_decomp_freer>;
 }  // namespace
 
-ustring zstd_compress(ustring_view data, int level, ustring_view prefix) {
+ustring zstd_compress(ucspan data, int level, ustring_view prefix) {
     ustring compressed;
     if (prefix.empty())
         compressed.resize(ZSTD_compressBound(data.size()));
@@ -204,7 +204,7 @@ ustring zstd_compress(ustring_view data, int level, ustring_view prefix) {
     return compressed;
 }
 
-std::optional<ustring> zstd_decompress(ustring_view data, size_t max_size) {
+std::optional<ustring> zstd_decompress(ucspan data, size_t max_size) {
     zstd_decomp_ptr z_decompressor{ZSTD_createDStream()};
     auto* zds = z_decompressor.get();
 

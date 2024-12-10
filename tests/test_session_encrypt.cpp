@@ -7,9 +7,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 TEST_CASE("Session protocol encryption", "[session-protocol][encrypt]") {
 
     using namespace session;
@@ -54,7 +51,7 @@ TEST_CASE("Session protocol encryption", "[session-protocol][encrypt]") {
 
         auto [msg, sender] = decrypt_incoming(to_sv(ed_sk2), enc);
         CHECK(oxenc::to_hex(sender) == oxenc::to_hex(ed_pk.begin(), ed_pk.end()));
-        CHECK(from_unsigned_sv(msg) == "hello");
+        CHECK(oxenc::to_hex(from_unsigned_sv(msg)) == oxenc::to_hex("hello"));
 
         auto broken = enc;
         broken[2] ^= 0x02;

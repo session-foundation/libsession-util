@@ -7,23 +7,27 @@
 
 namespace session::hash {
 
-ustring hash(const size_t size, ustring_view msg, std::optional<ustring_view> key) {
+void hash(std::span<unsigned char> hash, ucspan msg, std::optional<ucspan> key) {
+    const auto size = hash.size();
     if (size < crypto_generichash_blake2b_BYTES_MIN || size > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid size: expected between 16 and 64 bytes (inclusive)"};
 
     if (key && key->size() > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid key: expected less than 65 bytes"};
 
-    ustring result;
-    result.resize(size);
     crypto_generichash_blake2b(
-            result.data(),
+            hash.data(),
             size,
             msg.data(),
             msg.size(),
             key ? key->data() : nullptr,
             key ? key->size() : 0);
+}
 
+ustring hash(const size_t size, ustring_view msg, std::optional<ustring_view> key) {
+    ustring result;
+    result.resize(size);
+    hash(result, msg, key);
     return result;
 }
 

@@ -1,18 +1,22 @@
 #pragma once
 
+#include <fmt/format.h>
 #include <oxenc/hex.h>
 
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <oxen/log/format.hpp>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
-#include <fmt/format.h>
-
 #include "session/config/base.h"
+
+using namespace std::literals;
+using namespace oxenc::literals;
+using namespace oxen::log::literals;
 
 using ustring = std::basic_string<unsigned char>;
 using ustring_view = std::basic_string_view<unsigned char>;
@@ -66,8 +70,9 @@ inline std::string printable(ustring_view x) {
 inline std::string printable(std::string_view x) {
     return printable(to_usv(x));
 }
-template <typename... T> requires (sizeof...(T) > 0)
-inline std::string printable(fmt::format_string<T...> format, T&&... args) {
+template <typename... T>
+requires(sizeof...(T) > 0) inline std::string
+        printable(fmt::format_string<T...> format, T&&... args) {
     return printable(to_usv(fmt::format(format, std::forward<T>(args)...)));
 }
 std::string printable(const unsigned char* x) = delete;

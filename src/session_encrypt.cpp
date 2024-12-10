@@ -345,8 +345,7 @@ std::pair<ustring, std::string> decrypt_incoming_session_id(
     return {buf, sender_session_id};
 }
 
-std::pair<ustring, ustring> decrypt_incoming(
-        ustring_view ed25519_privkey, ustring_view ciphertext) {
+std::pair<ustring, ustring> decrypt_incoming(ucspan ed25519_privkey, ucspan ciphertext) {
     cleared_uc64 ed_sk_from_seed;
     if (ed25519_privkey.size() == 32) {
         uc32 ignore_pk;
@@ -362,11 +361,11 @@ std::pair<ustring, ustring> decrypt_incoming(
     crypto_sign_ed25519_sk_to_curve25519(x_sec.data(), ed25519_privkey.data());
     crypto_scalarmult_base(x_pub.data(), x_sec.data());
 
-    return decrypt_incoming({x_pub.data(), 32}, {x_sec.data(), 32}, ciphertext);
+    return decrypt_incoming(x_pub, x_sec, ciphertext);
 }
 
 std::pair<ustring, ustring> decrypt_incoming(
-        ustring_view x25519_pubkey, ustring_view x25519_seckey, ustring_view ciphertext) {
+        ucspan x25519_pubkey, ucspan x25519_seckey, ucspan ciphertext) {
 
     if (ciphertext.size() < crypto_box_SEALBYTES + 32 + 64)
         throw std::runtime_error{"Invalid incoming message: ciphertext is too small"};

@@ -13,9 +13,6 @@ namespace session::config {
 void compress_message(ustring& msg, int level);
 }
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 TEST_CASE("compression", "[config][compression]") {
 
     auto data =

@@ -10,9 +10,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 TEST_CASE("Conversations", "[config][conversations]") {
 
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
@@ -98,7 +95,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(seqno == 1);
 
     // Pretend we uploaded it
-    convos.confirm_pushed(seqno, "hash1");
+    convos.confirm_pushed(seqno, {"hash1"});
     CHECK(convos.needs_dump());
     CHECK_FALSE(convos.needs_push());
 
@@ -146,10 +143,11 @@ TEST_CASE("Conversations", "[config][conversations]") {
 
     CHECK(seqno == 2);
 
+    REQUIRE(to_push.size() == 1);
     std::vector<std::pair<std::string, ustring_view>> merge_configs;
-    merge_configs.emplace_back("hash2", to_push);
+    merge_configs.emplace_back("hash2", to_push[0]);
     convos.merge(merge_configs);
-    convos2.confirm_pushed(seqno, "hash2");
+    convos2.confirm_pushed(seqno, {"hash2"});
 
     CHECK_FALSE(convos.needs_push());
     CHECK(std::get<seqno_t>(convos.push()) == seqno);
@@ -320,9 +318,12 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     auto seqno = to_push->seqno;
     free(to_push);
     CHECK(seqno == 1);
+    REQUIRE(to_push->n_configs == 1);
+
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
 
     // Pretend we uploaded it
-    config_confirm_pushed(conf, seqno, "hash1");
+    config_confirm_pushed(conf, seqno, &(tmphash = "hash1"), 1);
     CHECK(config_needs_dump(conf));
     CHECK_FALSE(config_needs_push(conf));
 
@@ -361,18 +362,19 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
 
     to_push = config_push(conf2);
     CHECK(to_push->seqno == 2);
+    REQUIRE(to_push->n_configs == 1);
 
     const char* hash_data[1];
     const unsigned char* merge_data[1];
     size_t merge_size[1];
     hash_data[0] = "hash123";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
     config_string_list* accepted = config_merge(conf, hash_data, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "hash123"sv);
     free(accepted);
-    config_confirm_pushed(conf2, seqno, "hash123");
+    config_confirm_pushed(conf2, seqno, &(tmphash = "hash123"), 1);
     free(to_push);
 
     CHECK_FALSE(config_needs_push(conf));
@@ -493,7 +495,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
         return "05" + oxenc::to_hex(pk.begin(), pk.end());
     };
     auto some_og_url = [&](unsigned char x) -> std::string {
-        return "https://example.com/r/room"s + std::to_string(x);
+        return "https://example.com/r/room{}"_format(x);
     };
     const auto now = std::chrono::system_clock::now() - 1ms;
     auto unix_timestamp = [&now](int days_ago) -> int64_t {
@@ -516,7 +518,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
             convos.set(c);
         } else {
             auto c = convos.get_or_construct_community(
-                    "https://example.org", "room" + std::to_string(i), some_pubkey(i));
+                    "https://example.org", "room{}"_format(i), some_pubkey(i));
             c.last_read = unix_timestamp(i);
             if (i % 5 == 0)
                 c.unread = true;
@@ -593,9 +595,13 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
     // Fake push:
     config_push_data* to_push = config_push(conf);
     seqno_t seqno = to_push->seqno;
+    REQUIRE(to_push->n_configs == 1);
     free(to_push);
     CHECK(seqno == 1);
-    config_confirm_pushed(conf, seqno, "somehash");
+
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
+
+    config_confirm_pushed(conf, seqno, &(tmphash = "somehash"), 1);
     CHECK(config_needs_dump(conf));
 
     // Dump:
@@ -619,7 +625,8 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
 
     to_push = config_push(conf);
     CHECK(to_push->seqno == 2);
-    config_confirm_pushed(conf, to_push->seqno, "hash5235");
+    REQUIRE(to_push->n_configs == 1);
+    config_confirm_pushed(conf, to_push->seqno, &(tmphash = "hash5235"), 1);
 
     // But *before* we load the push make a dirtying change to conf2 that we *don't* push (so that
     // we'll be merging into a dirty-state config):
@@ -635,8 +642,9 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
     const unsigned char* merge_data[1];
     size_t merge_size[1];
     merge_hash[0] = "hash5235";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    REQUIRE(to_push->n_configs == 1);
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
 
     config_string_list* accepted = config_merge(conf2, merge_hash, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
@@ -658,7 +666,8 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
     CHECK(config_needs_push(conf2));
     to_push = config_push(conf2);
     CHECK(to_push->seqno == 3);
-    config_confirm_pushed(conf2, to_push->seqno, "hashz");
+    REQUIRE(to_push->n_configs == 1);
+    config_confirm_pushed(conf2, to_push->seqno, &(tmphash = "hashz"), 1);
     CHECK_FALSE(config_needs_push(conf2));
 
     config_dump(conf2, &dump, &dumplen);

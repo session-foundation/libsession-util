@@ -7,9 +7,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 using x_pair = std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>>;
 
 // Returns X25519 privkey, pubkey from an Ed25519 seed

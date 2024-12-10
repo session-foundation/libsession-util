@@ -4,13 +4,12 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <random>
 #include <session/config/contacts.hpp>
 #include <string_view>
+#include <thread>
 
 #include "utils.hpp"
-
-using namespace std::literals;
-using namespace oxenc::literals;
 
 static constexpr int64_t created_ts = 1680064059;
 
@@ -89,7 +88,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(seqno == 1);
 
     // Pretend we uploaded it
-    contacts.confirm_pushed(seqno, "fakehash1");
+    contacts.confirm_pushed(seqno, {"fakehash1"});
     CHECK(contacts.needs_dump());
     CHECK_FALSE(contacts.needs_push());
 
@@ -123,13 +122,14 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(contacts2.needs_push());
 
     std::tie(seqno, to_push, obs) = contacts2.push();
+    REQUIRE(to_push.size() == 1);
 
     CHECK(seqno == 2);
 
     std::vector<std::pair<std::string, ustring_view>> merge_configs;
-    merge_configs.emplace_back("fakehash2", to_push);
+    merge_configs.emplace_back("fakehash2", to_push[0]);
     contacts.merge(merge_configs);
-    contacts2.confirm_pushed(seqno, "fakehash2");
+    contacts2.confirm_pushed(seqno, {"fakehash2"});
 
     CHECK_FALSE(contacts.needs_push());
     CHECK(std::get<seqno_t>(contacts.push()) == seqno);
@@ -176,22 +176,24 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(contacts2.needs_push());
     std::tie(seqno, to_push, obs) = contacts.push();
     auto [seqno2, to_push2, obs2] = contacts2.push();
+    REQUIRE(to_push.size() == 1);
+    REQUIRE(to_push2.size() == 1);
 
     CHECK(seqno == seqno2);
     CHECK(to_push != to_push2);
     CHECK(as_set(obs) == make_set("fakehash2"s));
     CHECK(as_set(obs2) == make_set("fakehash2"s));
 
-    contacts.confirm_pushed(seqno, "fakehash3a");
-    contacts2.confirm_pushed(seqno2, "fakehash3b");
+    contacts.confirm_pushed(seqno, {"fakehash3a"});
+    contacts2.confirm_pushed(seqno2, {"fakehash3b"});
 
     merge_configs.clear();
-    merge_configs.emplace_back("fakehash3b", to_push2);
+    merge_configs.emplace_back("fakehash3b", to_push2[0]);
     contacts.merge(merge_configs);
     CHECK(contacts.needs_push());
 
     merge_configs.clear();
-    merge_configs.emplace_back("fakehash3a", to_push);
+    merge_configs.emplace_back("fakehash3a", to_push[0]);
     contacts2.merge(merge_configs);
     CHECK(contacts2.needs_push());
 
@@ -206,8 +208,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(as_set(obs) == make_set("fakehash3a"s, "fakehash3b"));
     CHECK(as_set(obs2) == make_set("fakehash3a"s, "fakehash3b"));
 
-    contacts.confirm_pushed(seqno, "fakehash4");
-    contacts2.confirm_pushed(seqno2, "fakehash4");
+    contacts.confirm_pushed(seqno, {"fakehash4"});
+    contacts2.confirm_pushed(seqno2, {"fakehash4"});
 
     CHECK_FALSE(contacts.needs_push());
     CHECK_FALSE(contacts2.needs_push());
@@ -314,14 +316,17 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     const unsigned char* merge_data[1];
     size_t merge_size[1];
     merge_hash[0] = "fakehash1";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    REQUIRE(to_push->n_configs == 1);
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
     config_string_list* accepted = config_merge(conf2, merge_hash, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "fakehash1"sv);
     free(accepted);
 
-    config_confirm_pushed(conf, to_push->seqno, "fakehash1");
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
+
+    config_confirm_pushed(conf, to_push->seqno, &(tmphash = "fakehash1"), 1);
     free(to_push);
 
     contacts_contact c3;
@@ -349,14 +354,15 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     to_push = config_push(conf2);
 
     merge_hash[0] = "fakehash2";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    REQUIRE(to_push->n_configs == 1);
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
     accepted = config_merge(conf, merge_hash, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "fakehash2"sv);
     free(accepted);
 
-    config_confirm_pushed(conf2, to_push->seqno, "fakehash2");
+    config_confirm_pushed(conf2, to_push->seqno, &(tmphash = "fakehash2"), 1);
 
     REQUIRE(to_push->obsolete_len > 0);
     CHECK(to_push->obsolete_len == 1);
@@ -405,6 +411,8 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK_FALSE(contacts_get(conf, &ci, another_id));
 }
 
+static constexpr auto EXPECT_BIG_DUMP_SIZE = 1'597'004;
+
 TEST_CASE("huge contacts compression", "[config][compression][contacts]") {
     // Test that we can produce a config message whose *uncompressed* length exceeds the maximum
     // message length as long as its *compressed* length does not.
@@ -424,7 +432,7 @@ TEST_CASE("huge contacts compression", "[config][compression][contacts]") {
 
     session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
 
-    for (uint16_t i = 0; i < 10000; i++) {
+    for (uint16_t i = 0; i < 12000; i++) {
         char buf[2];
         oxenc::write_host_as_big(i, buf);
         std::string session_id = "05000000000000000000000000000000000000000000000000000000000000";
@@ -432,7 +440,7 @@ TEST_CASE("huge contacts compression", "[config][compression][contacts]") {
         REQUIRE(session_id.size() == 66);
 
         auto c = contacts.get_or_construct(session_id);
-        c.nickname = "My friend " + std::to_string(i);
+        c.nickname = "My friend {}"_format(i);
         c.approved = true;
         c.approved_me = true;
         contacts.set(c);
@@ -443,10 +451,384 @@ TEST_CASE("huge contacts compression", "[config][compression][contacts]") {
 
     auto [seqno, to_push, obs] = contacts.push();
     CHECK(seqno == 1);
-    CHECK(to_push.size() == 46'080 + 181);  // 181 == protobuf overhead
+    CHECK(to_push.size() == 1);
+    CHECK(to_push[0].size() == 56'320 + 181);  // 181 == protobuf overhead
     auto dump = contacts.dump();
-    // With tons of duplicate info the push should have been nicely compressible:
-    CHECK(dump.size() > 1'320'000);
+    // With tons of duplicate info the push should have been nicely compressible, but our dump
+    // (which currently isn't compressed) is much larger:
+    CHECK(dump.size() == EXPECT_BIG_DUMP_SIZE);
+
+    contacts.confirm_pushed(seqno, {"fakehash1"});
+    dump = contacts.dump();
+    CHECK(dump.size() == EXPECT_BIG_DUMP_SIZE + 11);  // We will have added '9:fakehash1'
+}
+
+TEST_CASE("huger contacts with multipart messages", "[config][multipart][contacts]") {
+    // Test that we can produce a config message whose *uncompressed* length exceeds the maximum
+    // message length as long as its *compressed* length does not.
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
+            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+
+    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+
+    std::string friend42;
+
+    std::array<unsigned char, 32> seedi = {0};
+    for (uint16_t i = 0; i < 12000; i++) {
+        // Unlike the above case where we have nearly identical Session IDs, here our session IDs
+        // are randomly generated from fixed seeds and thus not usefully compressible, which results
+        // in a much larger (compressed) config.
+        seedi[0] = i % 256;
+        seedi[1] = i >> 8;
+        std::array<unsigned char, 32> i_ed_pk, i_curve_pk;
+        std::array<unsigned char, 64> i_ed_sk;
+        crypto_sign_ed25519_seed_keypair(
+                i_ed_pk.data(),
+                i_ed_sk.data(),
+                reinterpret_cast<const unsigned char*>(seedi.data()));
+        rc = crypto_sign_ed25519_pk_to_curve25519(i_curve_pk.data(), i_ed_pk.data());
+        std::string session_id = "05" + oxenc::to_hex(i_curve_pk.begin(), i_curve_pk.end());
+
+        auto c = contacts.get_or_construct(session_id);
+        c.nickname = "My friend {}"_format(i);
+        c.approved = true;
+        c.approved_me = true;
+        contacts.set(c);
+
+        if (i == 42)
+            friend42 = std::move(session_id);
+    }
+
+    CHECK(contacts.needs_push());
+    CHECK(contacts.needs_dump());
+
+    auto [seqno, to_push, obs] = contacts.push();
+
+    CHECK(seqno == 1);
+    REQUIRE(to_push.size() == 12);
+    CHECK(to_push[0].size() == 76'800);   // maxed out
+    CHECK(to_push[1].size() == 76'800);   // maxed out
+    CHECK(to_push[2].size() == 76'800);   // maxed out
+    CHECK(to_push[3].size() == 76'800);   // maxed out
+    CHECK(to_push[4].size() == 76'800);   // maxed out
+    CHECK(to_push[5].size() == 76'800);   // maxed out
+    CHECK(to_push[6].size() == 76'800);   // maxed out
+    CHECK(to_push[7].size() == 76'800);   // maxed out
+    CHECK(to_push[8].size() == 76'800);   // maxed out
+    CHECK(to_push[9].size() == 76'800);   // maxed out
+    CHECK(to_push[10].size() == 76'800);  // maxed out
+    CHECK(to_push[11].size() == 1'040);   // last part
+
+    // Still compressible, but much less than the test case above
+    auto dump = contacts.dump();
+    constexpr auto base_dump_size = EXPECT_BIG_DUMP_SIZE
+                                  /**/
+                                  + 35   // 32:[finalhash]
+                                  + 2    // d...e
+                                  + 6    //   1:#i0e
+                                  + 18;  //   1:Ti1234567890555e
+
+    CHECK(dump.size() == base_dump_size);
+
+    {
+        std::unordered_set<std::string> fakehashes;
+        for (int i = 0; i < 12; i++)
+            fakehashes.insert("fakehash{:02d}"_format(i));
+        contacts.confirm_pushed(seqno, fakehashes);
+
+        CHECK(contacts.curr_hashes() == fakehashes);
+        CHECK(contacts.active_hashes() == fakehashes);
+    }
+
+    dump = contacts.dump();
+    CHECK(dump.size() == base_dump_size + 12 * 13);  // 12 x "10:fakehashNN"
+
+    auto c2 = std::make_unique<session::config::Contacts>(ustring_view{seed}, std::nullopt);
+
+    std::vector<std::pair<std::string, ustring_view>> merge_configs, merge_more;
+    bool dump_load_in_between = false;
+    std::mt19937_64 rng{12345};
+
+    auto old_seqno = std::get<seqno_t>(c2->push());
+    REQUIRE(old_seqno == 0);
+
+    CHECK_FALSE(c2->get(friend42));
+
+    // Test loading the push data back into a new config:
+    SECTION("all parts in expected order") {
+        for (int i = 0; i < 12; i++)
+            merge_configs.emplace_back("fakehash{:02d}"_format(i), to_push[i]);
+    }
+    SECTION("all parts, shuffled order") {
+        for (int i = 0; i < 12; i++)
+            merge_configs.emplace_back("fakehash{:02d}"_format(i), to_push[i]);
+        std::shuffle(merge_configs.begin(), merge_configs.end(), rng);
+    }
+    SECTION("missing parts") {
+        for (int i = 0; i < 12; i++)
+            merge_configs.emplace_back("fakehash{:02d}"_format(i), to_push[i]);
+        std::shuffle(merge_configs.begin(), merge_configs.end(), rng);
+
+        // Simulate a partial fetch where we got just 8 parts in random order, then we get the last
+        // 2 in a follow-up fetch.
+        for (int i = 8; i < 12; i++)
+            merge_more.push_back(std::move(merge_configs[i]));
+        merge_configs.resize(8);
+    }
+    SECTION("missing parts with dump in between") {
+        for (int i = 0; i < 12; i++)
+            merge_configs.emplace_back("fakehash{:02d}"_format(i), to_push[i]);
+        std::shuffle(merge_configs.begin(), merge_configs.end(), rng);
+
+        // Same as the above, except we are going to dump and reload from that dump in between
+        // fetching the first batch and the remaining ones.
+        dump_load_in_between = true;
+        for (int i = 0; i < 2; i++) {
+            merge_more.push_back(std::move(merge_configs.back()));
+            merge_configs.pop_back();
+        }
+    }
+
+    auto merge_hashes = [](const auto& merge_confs) {
+        std::unordered_set<std::string> result;
+        for (const auto& [hash, data] : merge_confs)
+            result.emplace(hash);
+        return result;
+    };
+
+    std::unordered_set<std::string> fakehashes;
+    for (auto& [h, d] : merge_configs)
+        fakehashes.insert(h);
+
+    int merged = 0;
+    std::unordered_set<std::string> accepted;
+    CHECK_FALSE(c2->needs_dump());
+    accepted = c2->merge(merge_configs);
+    merged += merge_configs.size();
+    CHECK(accepted == merge_hashes(merge_configs));
+    CHECK(c2->needs_dump());
+    CHECK_FALSE(c2->needs_push());
+    CHECK(c2->active_hashes() == fakehashes);
+
+    if (merged >= 12) {
+        CHECK(c2->curr_hashes() == fakehashes);
+    } else {
+        CHECK(c2->curr_hashes().empty());
+        CHECK(c2->active_hashes() == fakehashes);
+        dump = c2->dump();
+        size_t total_dumps = 0;
+        for (auto& [hash, data] : merge_configs)
+            total_dumps += hash.size() + data.size() - 90 /* multipart+encryption overhead */;
+        // Our dump should be storing all the partial bodies, with a little overhead:
+        CHECK(dump.size() > total_dumps);
+        CHECK(dump.size() < total_dumps + 500 /* ~ various other dump overhead */);
+
+        if (dump_load_in_between) {
+            auto c2b = std::make_unique<session::config::Contacts>(ustring_view{seed}, c2->dump());
+            CHECK_FALSE(c2b->needs_dump());
+            c2b->logger = c2->logger;
+            c2 = std::move(c2b);
+            CHECK_FALSE(c2->needs_dump());
+        }
+
+        CHECK(std::get<seqno_t>(c2->push()) == 0);
+        accepted = c2->merge(merge_more);
+        CHECK(accepted == merge_hashes(merge_more));
+        CHECK(c2->needs_dump());
+        for (auto& [h, d] : merge_more)
+            fakehashes.insert(h);
+        CHECK(c2->curr_hashes() == fakehashes);
+        CHECK(c2->active_hashes() == fakehashes);
+    }
+
+    CHECK_FALSE(c2->needs_push());
+    CHECK(std::get<seqno_t>(c2->push()) == 1);
+
+    auto myfriend = c2->get(friend42);
+    REQUIRE(myfriend);
+    CHECK(myfriend->nickname == "My friend 42");
+
+    dump = c2->dump();
+    CHECK(dump.size() == base_dump_size + 12 * 13);  // 12 x "10:fakehashNN"
+}
+
+TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
+    // Tests that stored multipart message expires as expected.
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
+            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+
+    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+
+    std::string friend42;
+
+    std::array<unsigned char, 32> seedi = {0};
+    for (uint16_t i = 0; i < 2000; i++) {
+        // Unlike the above case where we have nearly identical Session IDs, here our session IDs
+        // are randomly generated from fixed seeds and thus not usefully compressible, which results
+        // in a much larger (compressed) config.
+        seedi[0] = i % 256;
+        seedi[1] = i >> 8;
+        std::array<unsigned char, 32> i_ed_pk, i_curve_pk;
+        std::array<unsigned char, 64> i_ed_sk;
+        crypto_sign_ed25519_seed_keypair(
+                i_ed_pk.data(),
+                i_ed_sk.data(),
+                reinterpret_cast<const unsigned char*>(seedi.data()));
+        rc = crypto_sign_ed25519_pk_to_curve25519(i_curve_pk.data(), i_ed_pk.data());
+        std::string session_id = "05" + oxenc::to_hex(i_curve_pk.begin(), i_curve_pk.end());
+
+        auto c = contacts.get_or_construct(session_id);
+        c.nickname = "My friend {:04d}"_format(i);
+        c.approved = true;
+        c.approved_me = true;
+        contacts.set(c);
+
+        if (i == 42)
+            friend42 = std::move(session_id);
+    }
+
+    CHECK(contacts.needs_push());
+    CHECK(contacts.needs_dump());
+
+    auto [seqno, to_push, obs] = contacts.push();
+
+    CHECK(seqno == 1);
+    CHECK(to_push.size() == 2);
+    CHECK(to_push[0].size() == 76'800);  // maxed out
+    CHECK(to_push[1].size() == 35'980);  // last part
+
+    contacts.confirm_pushed(seqno, {"fakehash0", "fakehash1"});
+
+    auto c2 = std::make_unique<session::config::Contacts>(ustring_view{seed}, std::nullopt);
+
+    c2->MULTIPART_MAX_WAIT = 200ms;
+    c2->MULTIPART_MAX_REMEMBER = 400ms;
+    c2->logger = contacts.logger;
+
+    auto old_seqno = std::get<seqno_t>(c2->push());
+    REQUIRE(old_seqno == 0);
+
+    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    merge_configs.emplace_back("fakehash0", to_push[0]);
+
+    std::unordered_set<std::string> accepted;
+    CHECK_FALSE(c2->needs_dump());
+    accepted = c2->merge(merge_configs);
+    CHECK(accepted == std::unordered_set{{"fakehash0"s}});
+    CHECK(c2->needs_dump());
+    auto dump = c2->dump();
+    CHECK(dump.size() > 76'710);
+    CHECK(dump.size() < 77'000);
+    CHECK_FALSE(c2->needs_push());
+    CHECK(std::get<seqno_t>(c2->push()) == 0);
+
+    // Wait for the stored part to expire
+    std::this_thread::sleep_for(220ms);
+
+    // Dump should trigger a cleanup of cached parts:
+    dump = c2->dump();
+    CHECK(dump.size() < 200);
+
+    merge_configs.clear();
+    merge_configs.emplace_back("fakehash1", to_push[1]);
+    accepted = c2->merge(merge_configs);
+    CHECK(accepted == std::unordered_set{{"fakehash1"s}});
+    CHECK(c2->needs_dump());
+    // This should *not* have completed a set, because of the earlier expiry:
+    CHECK(std::get<seqno_t>(c2->push()) == 0);
+    dump = c2->dump();
+    CHECK(dump.size() > 35'890);
+    CHECK(dump.size() < 36'200);
+
+    merge_configs.clear();
+    merge_configs.emplace_back("fakehash0", to_push[0]);
+    accepted = c2->merge(merge_configs);
+    CHECK(accepted == std::unordered_set{{"fakehash0"s}});
+    CHECK(c2->needs_dump());
+    CHECK_FALSE(c2->needs_push());
+    // Now we should have completed the set
+    CHECK(std::get<seqno_t>(c2->push()) == 1);
+    auto myfriend = c2->get(friend42);
+    REQUIRE(myfriend);
+    CHECK(myfriend->nickname == "My friend 0042");
+    dump = c2->dump();
+    auto full_size = dump.size();
+    // We shouldn't be storing any part data, but we *are* now storing all the actual data.  Every
+    // contact here should be a dict pair encoded as:
+    CHECK(full_size > 266000);
+    CHECK(full_size < 266300);
+    // Go look for the 1:* where we store multipart info, and make sure it's within the last 100
+    // bytes of the dump (to make sure that we don't have cached data stored inside it):
+    auto x = dump.rfind(session::to_unsigned_sv("1:*"));
+    CHECK(x > full_size - 100);
+    CHECK(x < dump.size());
+
+    ////////////////////////////////////////////
+    // Now we check "done" expiry
+
+    // Initially reloading a part should do nothing, since we should have the "done" stubs still
+    // stored.  (It's still "accepted" because that just means we found it parseable and valid, even
+    // though we discard it.).
+    accepted = c2->merge(merge_configs);
+    CHECK(accepted == std::unordered_set{{"fakehash0"s}});
+    CHECK_FALSE(c2->needs_dump());
+    dump = c2->dump();
+    CHECK(dump.size() == full_size);
+
+    // test that the remember timer is getting properly applied for a completed set rather than the
+    // wait timer by making sure we don't lose anything in the repeated dump:
+    std::this_thread::sleep_for(220ms);
+    dump = c2->dump();
+    CHECK(dump.size() == full_size);  // expect no change
+
+    std::this_thread::sleep_for(220ms);
+    // Now we should hit the remember timer, and should discard the cached completed set data when
+    // we dump:
+    dump = c2->dump();
+    // We should have lost the entry pair for this set, which for a done set will be:
+    // 32:HASH
+    // d1:#i0e1:Ti1234567890123ee
+    CHECK(dump.size() == full_size - (35 + 26));
+    full_size -= 35 + 26;
+
+    // Since we've forgotten about the completed set, this time we *should* store it:
+    accepted = c2->merge(merge_configs);
+    CHECK(accepted == std::unordered_set{{"fakehash0"s}});
+    CHECK(c2->needs_dump());
+    dump = c2->dump();
+    CHECK(dump.size() > full_size + 76'710);
+    CHECK(dump.size() < full_size + 77'000);
+
+    // Complete the set; this should *not* change the seqno, as this should be recognized as a
+    // duplicate seqno/config hash with the regular hash handling:
+    merge_configs.emplace_back("fakehash1", to_push[1]);
+    accepted = c2->merge(merge_configs);
+    CHECK(accepted == std::unordered_set{{"fakehash0"s, "fakehash1"s}});
+    dump = c2->dump();
+    CHECK(dump.size() == full_size + 35 + 26);
+    CHECK(std::get<seqno_t>(contacts.push()) == 1);
 }
 
 TEST_CASE("needs_dump bug", "[config][needs_dump]") {

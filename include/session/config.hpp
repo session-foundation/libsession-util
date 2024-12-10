@@ -15,8 +15,20 @@
 
 namespace session::config {
 
-// FIXME: for multi-message we encode to longer and then split it up
-inline constexpr int MAX_MESSAGE_SIZE = 76800;  // 76.8kB = Storage server's limit
+// The maximum size of a single message in storage server.  For larger configs we have to split a
+// config message into a multipart message.
+inline constexpr int MAX_MESSAGE_SIZE = 76'800;  // 76.8kB = Storage server's limit
+
+// Maximum size of a post-compression outgoing multipart config message (before chopping into
+// multiple parts, and so not counting the small encryption and encoding overhead of each piece)
+// that we will allow.  This is not a strict network limit, but rather is simply to prevent bugs
+// that have some sort of accidental runaway size.  This limit does not apply to *incoming*
+// multipart messages so that if a future version changes the limit it will not break compatibility
+// with existing clients.
+//
+// Also note that we encode part index and length as 1 byte each, so this must be small enough to
+// not exceed 255 parts (but that would be insane anyway).
+inline constexpr int MAX_MULTIPART_SIZE = 5'000'000;
 
 // Application data data types:
 using scalar = std::variant<int64_t, std::string>;
@@ -334,11 +346,12 @@ class MutableConfigMessage : public ConfigMessage {
     /// pruning.
     bool prune();
 
-    /// Calculates the hash of the current message.  Can optionally be given the already-serialized
-    /// value, if available; if empty/omitted, `serialize()` will be called to compute it.
+    /// Calculates the hash of the current message.
     const hash_t& hash() override;
 
   protected:
+    /// Internal version of hash() that takes the already-serialized value, to avoid needing a call
+    /// to `serialize()` when such a call has already been done for other reasons.
     const hash_t& hash(ustring_view serialized);
     void increment_impl();
 };

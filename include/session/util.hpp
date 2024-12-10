@@ -1,5 +1,7 @@
 #pragma once
 
+#include <oxenc/common.h>
+
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -15,24 +17,13 @@
 namespace session {
 
 // Helper function to go to/from char pointers to unsigned char pointers:
-inline const unsigned char* to_unsigned(const char* x) {
+template <oxenc::basic_char Char>
+inline const unsigned char* to_unsigned(const Char* x) {
     return reinterpret_cast<const unsigned char*>(x);
 }
-inline unsigned char* to_unsigned(char* x) {
+template <oxenc::basic_char Char>
+inline unsigned char* to_unsigned(Char* x) {
     return reinterpret_cast<unsigned char*>(x);
-}
-inline const unsigned char* to_unsigned(const std::byte* x) {
-    return reinterpret_cast<const unsigned char*>(x);
-}
-inline unsigned char* to_unsigned(std::byte* x) {
-    return reinterpret_cast<unsigned char*>(x);
-}
-// These do nothing, but having them makes template metaprogramming easier:
-inline const unsigned char* to_unsigned(const unsigned char* x) {
-    return x;
-}
-inline unsigned char* to_unsigned(unsigned char* x) {
-    return x;
 }
 inline const char* from_unsigned(const unsigned char* x) {
     return reinterpret_cast<const char*>(x);
@@ -40,15 +31,19 @@ inline const char* from_unsigned(const unsigned char* x) {
 inline char* from_unsigned(unsigned char* x) {
     return reinterpret_cast<char*>(x);
 }
-// Helper function to switch between basic_string_view<C> and ustring_view
-inline ustring_view to_unsigned_sv(std::string_view v) {
+// Helper function to switch between basic_string_view<C> and ustring_view or ucspan
+template <size_t N>
+inline ustring_view to_unsigned_sv(const char (&v)[N]) {
+    return {to_unsigned(&v[0]), N - 1};
+}
+inline ustring_view to_unsigned_sv(std::span<const char> v) {
     return {to_unsigned(v.data()), v.size()};
 }
-inline ustring_view to_unsigned_sv(std::basic_string_view<std::byte> v) {
+inline ustring_view to_unsigned_sv(std::span<const std::byte> v) {
     return {to_unsigned(v.data()), v.size()};
 }
-inline ustring_view to_unsigned_sv(ustring_view v) {
-    return v;  // no-op, but helps with template metaprogamming
+inline ustring_view to_unsigned_sv(std::span<const unsigned char> v) {
+    return {v.data(), v.size()};
 }
 inline std::string_view from_unsigned_sv(ustring_view v) {
     return {from_unsigned(v.data()), v.size()};
@@ -61,7 +56,7 @@ template <typename T, typename A>
 inline std::string_view from_unsigned_sv(const std::vector<T, A>& v) {
     return {from_unsigned(v.data()), v.size()};
 }
-template <typename Char, size_t N>
+template <oxenc::basic_char Char, size_t N>
 inline std::basic_string_view<Char> to_sv(const std::array<Char, N>& v) {
     return {v.data(), N};
 }

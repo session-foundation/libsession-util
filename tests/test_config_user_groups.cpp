@@ -11,9 +11,6 @@
 #include "session/config/notify.hpp"
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 static constexpr int64_t created_ts = 1680064059;
 
 TEST_CASE("Open Group URLs", "[config][community_urls]") {
@@ -209,7 +206,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(obs.empty());
 
     // Pretend we uploaded it
-    groups.confirm_pushed(seqno, "fakehash1");
+    groups.confirm_pushed(seqno, {"fakehash1"});
     CHECK(groups.needs_dump());
     CHECK_FALSE(groups.needs_push());
 
@@ -219,7 +216,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     std::tie(seqno, to_push, obs) = groups.push();
     CHECK(seqno == 1);
     CHECK(obs.empty());
-    CHECK(groups.current_hashes() == std::vector{{"fakehash1"s}});
+    CHECK(groups.curr_hashes() == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(groups.needs_dump());  // Because we just called dump() above, to load up g2
 
     CHECK_FALSE(g2.needs_push());
@@ -228,7 +225,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(seqno == 1);
     CHECK_FALSE(g2.needs_dump());
     CHECK(obs.empty());
-    CHECK(g2.current_hashes() == std::vector{{"fakehash1"s}});
+    CHECK(g2.curr_hashes() == std::unordered_set{{"fakehash1"s}});
 
     CHECK(g2.size() == 3);
     CHECK(g2.size_communities() == 1);
@@ -261,8 +258,7 @@ TEST_CASE("User Groups", "[config][groups]") {
             if (auto* lg = std::get_if<session::config::legacy_group_info>(&group)) {
                 auto [admins, members] = lg->counts();
                 seen.push_back(
-                        "legacy: " + lg->name + ", " + std::to_string(admins) + " admins, " +
-                        std::to_string(members) + " members");
+                        "legacy: {}, {} admins, {} members"_format(lg->name, admins, members));
             } else if (auto* og = std::get_if<session::config::community_info>(&group)) {
                 seen.push_back("community: " + og->base_url() + "/r/" + og->room());
             } else if (auto* g = std::get_if<session::config::group_info>(&group)) {
@@ -297,13 +293,13 @@ TEST_CASE("User Groups", "[config][groups]") {
 
     CHECK(g2.needs_push());
     CHECK(g2.needs_dump());
-    CHECK(g2.current_hashes().empty());
+    CHECK(g2.curr_hashes().empty());
     std::tie(seqno, to_push, obs) = g2.push();
-    CHECK(g2.current_hashes().empty());
+    CHECK(g2.curr_hashes().empty());
     auto to_push2 = to_push;
     CHECK(seqno == 2);
-    g2.confirm_pushed(seqno, "fakehash2");
-    CHECK(g2.current_hashes() == std::vector{{"fakehash2"s}});
+    g2.confirm_pushed(seqno, {"fakehash2"});
+    CHECK(g2.curr_hashes() == std::unordered_set{{"fakehash2"s}});
     CHECK(as_set(obs) == make_set("fakehash1"s));
     g2.dump();
 
@@ -313,7 +309,8 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK_FALSE(g2.needs_dump());
 
     std::vector<std::pair<std::string, ustring>> to_merge;
-    to_merge.emplace_back("fakehash2", to_push);
+    REQUIRE(to_push.size() == 1);
+    to_merge.emplace_back("fakehash2", to_push[0]);
     groups.merge(to_merge);
     auto x3 = groups.get_community("http://example.org:5678", "SudokuRoom");
     REQUIRE(x3.has_value());
@@ -347,15 +344,16 @@ TEST_CASE("User Groups", "[config][groups]") {
     g2.erase_community("http://exAMple.ORG:5678/", "sudokuROOM");
 
     std::tie(seqno, to_push, obs) = g2.push();
-    g2.confirm_pushed(seqno, "fakehash3");
+    g2.confirm_pushed(seqno, {"fakehash3"});
     auto to_push3 = to_push;
 
     CHECK(seqno == 3);
     CHECK(as_set(obs) == make_set("fakehash2"s));
-    CHECK(g2.current_hashes() == std::vector{{"fakehash3"s}});
+    CHECK(g2.curr_hashes() == std::unordered_set{{"fakehash3"s}});
 
     to_merge.clear();
-    to_merge.emplace_back("fakehash3", to_push);
+    REQUIRE(to_push.size() == 1);
+    to_merge.emplace_back("fakehash3", to_push[0]);
     groups.merge(to_merge);
     CHECK(groups.size() == 2);
     CHECK(groups.size_communities() == 0);
@@ -377,20 +375,24 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(groups.size_groups() == 1);
 
     std::tie(seqno, to_push, obs) = groups.push();
-    groups.confirm_pushed(seqno, "fakehash4");
+    groups.confirm_pushed(seqno, {"fakehash4"});
     CHECK(seqno == 4);
     CHECK(as_set(obs) == make_set("fakehash1"s, "fakehash2", "fakehash3"));
 
+    REQUIRE(to_push.size() == 1);
+    REQUIRE(to_push1.size() == 1);
+    REQUIRE(to_push2.size() == 1);
+    REQUIRE(to_push3.size() == 1);
     to_merge.clear();
     // Load some obsolete ones in just to check that they get immediately obsoleted
-    to_merge.emplace_back("fakehash10", to_push3);
-    to_merge.emplace_back("fakehash11", to_push1);
-    to_merge.emplace_back("fakehash12", to_push2);
-    to_merge.emplace_back("fakehash4", to_push);
+    to_merge.emplace_back("fakehash10", to_push3[0]);
+    to_merge.emplace_back("fakehash11", to_push1[0]);
+    to_merge.emplace_back("fakehash12", to_push2[0]);
+    to_merge.emplace_back("fakehash4", to_push[0]);
     g2.merge(to_merge);
     CHECK(g2.needs_dump());
     CHECK_FALSE(g2.needs_push());
-    CHECK(g2.current_hashes() == std::vector{{"fakehash4"s}});
+    CHECK(g2.curr_hashes() == std::unordered_set{{"fakehash4"s}});
     std::tie(seqno, to_push, obs) = g2.push();
     CHECK(seqno == 4);
     CHECK(as_set(obs) == make_set("fakehash10"s, "fakehash11", "fakehash12", "fakehash3"));
@@ -401,8 +403,7 @@ TEST_CASE("User Groups", "[config][groups]") {
             if (auto* lg = std::get_if<session::config::legacy_group_info>(&group)) {
                 auto [admins, members] = lg->counts();
                 seen.push_back(
-                        "legacy: " + lg->name + ", " + std::to_string(admins) + " admins, " +
-                        std::to_string(members) + " members");
+                        "legacy: {}, {} admins, {} members"_format(lg->name, admins, members));
             } else if (auto* og = std::get_if<session::config::community_info>(&group)) {
                 seen.push_back("community: " + og->base_url() + "/r/" + og->room());
             } else if (auto* g = std::get_if<session::config::group_info>(&group)) {
@@ -476,7 +477,7 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(groups.needs_dump());
 
     auto [seqno, to_push, obs] = groups.push();
-    groups.confirm_pushed(seqno, "fakehash1");
+    groups.confirm_pushed(seqno, {"fakehash1"});
 
     auto d1 = groups.dump();
 
@@ -511,10 +512,11 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     g2.set(c2b);
 
     std::tie(seqno, to_push, obs) = g2.push();
-    g2.confirm_pushed(seqno, "fakehash2");
+    g2.confirm_pushed(seqno, {"fakehash2"});
 
     std::vector<std::pair<std::string, ustring>> to_merge;
-    to_merge.emplace_back("fakehash2", to_push);
+    REQUIRE(to_push.size() == 1);
+    to_merge.emplace_back("fakehash2", to_push[0]);
     groups.merge(to_merge);
 
     auto c3 = groups.get_group(definitely_real_id);
@@ -691,7 +693,7 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
     // The "normal" way to set a group when you're done with it (also properly frees `group`).
     user_groups_set_free_legacy_group(conf, group);
 
-    config_string_list* hashes = config_current_hashes(conf);
+    config_string_list* hashes = config_curr_hashes(conf);
     REQUIRE(hashes);
     CHECK(hashes->len == 0);
     free(hashes);
@@ -699,14 +701,16 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
     config_push_data* to_push = config_push(conf);
     CHECK(to_push->seqno == 1);
 
-    hashes = config_current_hashes(conf);
+    hashes = config_curr_hashes(conf);
     REQUIRE(hashes);
     CHECK(hashes->len == 0);
     free(hashes);
 
-    config_confirm_pushed(conf, to_push->seqno, "fakehash1");
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
 
-    hashes = config_current_hashes(conf);
+    config_confirm_pushed(conf, to_push->seqno, &(tmphash = "fakehash1"), 1);
+
+    hashes = config_curr_hashes(conf);
     REQUIRE(hashes);
     REQUIRE(hashes->len == 1);
     CHECK(hashes->value[0] == "fakehash1"sv);
@@ -720,8 +724,9 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
     session::config::UserGroups c2{ustring_view{seed}, std::nullopt};
 
     std::vector<std::pair<std::string, ustring_view>> to_merge;
-    to_merge.emplace_back("fakehash1", ustring_view{to_push->config, to_push->config_len});
-    CHECK(c2.merge(to_merge) == std::vector<std::string>{{"fakehash1"}});
+    REQUIRE(to_push->n_configs == 1);
+    to_merge.emplace_back("fakehash1", ustring_view{to_push->config[0], to_push->config_lens[0]});
+    CHECK(c2.merge(to_merge) == std::unordered_set<std::string>{{"fakehash1"}});
 
     auto grp = c2.get_legacy_group(definitely_real_id);
     REQUIRE(grp);
@@ -764,7 +769,7 @@ TEST_CASE("User groups empty member bug", "[config][groups][bug]") {
     auto [seqno, data, obs] = c.push();
     CHECK(seqno == 1);
     auto d = c.dump();
-    c.confirm_pushed(seqno, "fakehash1");
+    c.confirm_pushed(seqno, {"fakehash1"});
     CHECK_FALSE(c.needs_push());
 
     {

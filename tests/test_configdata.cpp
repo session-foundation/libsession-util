@@ -12,8 +12,6 @@
 #include "utils.hpp"
 
 using namespace session;
-using namespace std::literals;
-using namespace oxenc::literals;
 using namespace fmt::literals;
 using config::ConfigMessage;
 using config::MutableConfigMessage;
