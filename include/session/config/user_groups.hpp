@@ -215,11 +215,11 @@ struct group_info : base_group_info {
     void into(struct ugroups_group_info& c) const;   // Into c struct
 
     /// Marks the group as kicked and clears auth_data & secret_key
-    void markKicked();
+    void mark_kicked();
 
-    /// Marks the group as reinvited (i.e. revert a `markKicked` call)
+    /// Marks the group as reinvited (i.e. revert a `mark_kicked` call)
     /// Note: this only works when the group was not permanently deleted.
-    void markInvited();
+    void mark_invited();
 
     /// Returns true if we don't have room access, i.e. we were kicked and both secretkey and
     /// auth_data are empty.
@@ -227,10 +227,10 @@ struct group_info : base_group_info {
 
     /// Mark the group as permanently destroyed and clears auth_data & secret_key. This cannot be
     /// unset once set.
-    void markDestroyed();
+    void mark_destroyed();
 
     /// Returns true if the group was destroyed by one of the admin.
-    bool isDestroyed() const;
+    bool is_destroyed() const;
 
   private:
     friend class UserGroups;

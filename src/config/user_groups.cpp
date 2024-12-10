@@ -249,7 +249,7 @@ void group_info::load(const dict& info_dict) {
     removed_status = maybe_int(info_dict, "r").value_or(0);
 }
 
-void group_info::markKicked() {
+void group_info::mark_kicked() {
     secretkey.clear();
     auth_data.clear();
     if (removed_status != GROUP_DESTROYED) {
@@ -257,7 +257,7 @@ void group_info::markKicked() {
     }
 }
 
-void group_info::markInvited() {
+void group_info::mark_invited() {
     if (removed_status == KICKED_FROM_GROUP) {
         removed_status = NOT_REMOVED;
     }
@@ -267,13 +267,13 @@ bool group_info::kicked() const {
     return removed_status == KICKED_FROM_GROUP;
 }
 
-void group_info::markDestroyed() {
+void group_info::mark_destroyed() {
     secretkey.clear();
     auth_data.clear();
     removed_status = GROUP_DESTROYED;
 }
 
-bool group_info::isDestroyed() const {
+bool group_info::is_destroyed() const {
     return removed_status == GROUP_DESTROYED;
 }
 

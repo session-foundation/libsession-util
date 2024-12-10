@@ -538,17 +538,17 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     c3b->auth_data.resize(100);
     CHECK_FALSE(c3b->kicked());
     // mark ourselves as kicked
-    c3b->markKicked();
+    c3b->mark_kicked();
     CHECK(c3b->kicked());
     CHECK(c3b->secretkey.empty());
     CHECK(c3b->auth_data.empty());
     // add a non empty auth_data, and reset the removed_status: we shouldn't be kicked anymore
     c3b->auth_data.resize(100);
-    c3b->markInvited();
+    c3b->mark_invited();
     CHECK_FALSE(c3b->kicked());
     // we are not kicked, mark the group as destroyed
-    c3b->markDestroyed();
-    CHECK(c3b->isDestroyed());
+    c3b->mark_destroyed();
+    CHECK(c3b->is_destroyed());
     // the group was destroyed, so we are not `kicked` from it.
     // We keep the states separate as `kicked` is not permanent but `destroyed` is.
     CHECK_FALSE(c3b->kicked());
@@ -558,14 +558,14 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     c3b->removed_status = 0;
     CHECK_FALSE(c3b->kicked());
     // kicked->destroyed works
-    c3b->markKicked();
+    c3b->mark_kicked();
     CHECK(c3b->kicked());
-    c3b->markDestroyed();
-    CHECK(c3b->isDestroyed());
+    c3b->mark_destroyed();
+    CHECK(c3b->is_destroyed());
     // destroyed->kicked doesn't work
-    c3b->markKicked();
+    c3b->mark_kicked();
     CHECK_FALSE(c3b->kicked());
-    CHECK(c3b->isDestroyed());
+    CHECK(c3b->is_destroyed());
 
     auto gg = groups.get_or_construct_group(
             "030303030303030303030303030303030303030303030303030303030303030303");
