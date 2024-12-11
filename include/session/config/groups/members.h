@@ -130,18 +130,19 @@ LIBSESSION_EXPORT bool groups_members_get_or_construct(
 /// - `member` -- [in] Pointer containing the member info data
 LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_group_member* member);
 
-/// API: groups/group_member_status
+/// API: groups/groups_members_get_status
 ///
 /// This function goes through the various status values and returns a single consolidated
 /// status for the member.
 ///
 /// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
 /// - `member` -- [in] The member to retrieve the status for
 ///
 /// Outputs:
 /// - `GROUP_MEMBER_STATUS` -- Returns an enum indicating the consolidated status of this member in
 /// the group.
-LIBSESSION_EXPORT GROUP_MEMBER_STATUS groups_members_get_status(const config_group_member* member);
+LIBSESSION_EXPORT GROUP_MEMBER_STATUS groups_members_get_status(const config_object* conf, const config_group_member* member);
 
 /// API: groups/groups_members_set_invite_sent
 ///
