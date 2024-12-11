@@ -20,8 +20,11 @@ std::optional<member> Members::get(std::string_view pubkey_hex) const {
     if (!info_dict)
         return std::nullopt;
 
-    auto result = std::make_optional<member>(std::string{pubkey_hex});
-    result->load(*info_dict);
+    auto sid = std::string{pubkey_hex};
+    auto result = std::make_optional<member>(sid);
+    auto is_pending_send = (pending_send_ids && pending_send_ids->find(sid) != pending_send_ids->end());
+    result->load(*info_dict, {{"local_pending_send", (is_pending_send ? 1 : 0)}});
+
     return result;
 }
 
@@ -29,7 +32,9 @@ member Members::get_or_construct(std::string_view pubkey_hex) const {
     if (auto maybe = get(pubkey_hex))
         return *std::move(maybe);
 
-    return member{std::string{pubkey_hex}};
+    auto result = member{std::string{pubkey_hex}};
+    result.local_pending_send = true;   // Default to true when creating a new member
+    return result;
 }
 
 void Members::set(const member& mem) {
@@ -53,9 +58,17 @@ void Members::set(const member& mem) {
     set_positive_int(info["I"], mem.admin ? 0 : mem.invite_status);
     set_flag(info["s"], mem.supplement);
     set_positive_int(info["R"], mem.removed_status);
+
+    // Handle the local 'pending_send' flag
+    if (mem.local_pending_send && !pending_send_ids)
+        pending_send_ids = {mem.session_id};
+    else if (mem.local_pending_send)
+        pending_send_ids->emplace(mem.session_id);
+    else if (pending_send_ids)
+        pending_send_ids->erase(mem.session_id);
 }
 
-void member::load(const dict& info_dict) {
+void member::load(const dict& info_dict, const dict& extra_dict) {
     name = maybe_string(info_dict, "n").value_or("");
 
     auto url = maybe_string(info_dict, "p");
@@ -74,6 +87,8 @@ void member::load(const dict& info_dict) {
     supplement = invite_status > 0 && !(admin || promotion_status > 0)
                        ? maybe_int(info_dict, "s").value_or(0)
                        : 0;
+    
+    local_pending_send = maybe_int(extra_dict, "local_pending_send").value_or(0) > 0;
 }
 
 /// Load _val from the current iterator position; if it is invalid, skip to the next key until we
@@ -82,8 +97,10 @@ void Members::iterator::_load_info() {
     while (_it != _members->end()) {
         if (_it->first.size() == 33) {
             if (auto* info_dict = std::get_if<dict>(&_it->second)) {
-                _val = std::make_shared<member>(oxenc::to_hex(_it->first));
-                _val->load(*info_dict);
+                auto sid = oxenc::to_hex(_it->first);
+                auto is_pending_send = (_pending_send_ids && _pending_send_ids->find(sid) != _pending_send_ids->end());
+                _val = std::make_shared<member>(sid);
+                _val->load(*info_dict, {{"local_pending_send", (is_pending_send ? 1 : 0)}});
                 return;
             }
         }
@@ -143,6 +160,7 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
         profile_picture.key = {m.profile_pic.key, 32};
     }
     admin = m.admin;
+    local_pending_send = m.local_pending_send;
     invite_status =
             (m.invited == STATUS_SENT || m.invited == STATUS_FAILED || m.invited == STATUS_NOT_SENT)
                     ? m.invited
@@ -167,6 +185,7 @@ void member::into(config_group_member& m) const {
         copy_c_str(m.profile_pic.url, "");
     }
     m.admin = admin;
+    m.local_pending_send = local_pending_send;
     static_assert(groups::STATUS_SENT == ::STATUS_SENT);
     static_assert(groups::STATUS_FAILED == ::STATUS_FAILED);
     static_assert(groups::STATUS_NOT_SENT == ::STATUS_NOT_SENT);
@@ -176,6 +195,9 @@ void member::into(config_group_member& m) const {
     static_assert(
             static_cast<int>(groups::member::Status::invite_not_sent) ==
             ::GROUP_MEMBER_STATUS_INVITE_NOT_SENT);
+    static_assert(
+            static_cast<int>(groups::member::Status::invite_sending) ==
+            ::GROUP_MEMBER_STATUS_INVITE_SENDING);
     static_assert(
             static_cast<int>(groups::member::Status::invite_failed) ==
             ::GROUP_MEMBER_STATUS_INVITE_FAILED);
@@ -191,6 +213,9 @@ void member::into(config_group_member& m) const {
     static_assert(
             static_cast<int>(groups::member::Status::promotion_not_sent) ==
             ::GROUP_MEMBER_STATUS_PROMOTION_NOT_SENT);
+    static_assert(
+            static_cast<int>(groups::member::Status::promotion_sending) ==
+            ::GROUP_MEMBER_STATUS_PROMOTION_SENDING);
     static_assert(
             static_cast<int>(groups::member::Status::promotion_failed) ==
             ::GROUP_MEMBER_STATUS_PROMOTION_FAILED);
