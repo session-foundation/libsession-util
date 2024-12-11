@@ -17,7 +17,7 @@ void Members::extra_data(oxenc::bt_dict_producer&& extra) const {
     if (pending_send_ids.empty())
         return;
 
-    extra.append_list("pending_send_ids").extend(pending_send_ids.begin(), pending_send_ids.end());
+    extra.append_list("pending_send_ids").append(pending_send_ids.begin(), pending_send_ids.end());
 }
 
 void Members::load_extra_data(oxenc::bt_dict_consumer&& extra) {
