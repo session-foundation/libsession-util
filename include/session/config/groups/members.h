@@ -40,7 +40,6 @@ typedef struct config_group_member {
     user_profile_pic profile_pic;
 
     bool admin;
-    bool local_pending_send;
     int invited;   // 0 == unset, STATUS_SENT = invited, STATUS_FAILED = invite failed to send,
                    // STATUS_NOT_SENT = invite hasn't been sent yet
     int promoted;  // same value as `invited`, but for promotion-to-admin
@@ -142,7 +141,7 @@ LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_grou
 /// Outputs:
 /// - `GROUP_MEMBER_STATUS` -- Returns an enum indicating the consolidated status of this member in
 /// the group.
-LIBSESSION_EXPORT GROUP_MEMBER_STATUS group_member_status(const config_group_member* member);
+LIBSESSION_EXPORT GROUP_MEMBER_STATUS groups_members_get_status(const config_group_member* member);
 
 /// API: groups/groups_members_set_invite_sent
 ///

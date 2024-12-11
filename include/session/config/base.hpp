@@ -16,7 +16,8 @@
 
 namespace oxenc {
 class bt_dict_producer;
-}
+class bt_dict_consumer;
+}  // namespace oxenc
 
 namespace session::config {
 
@@ -795,7 +796,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Inputs:
     /// - `extra` -- An empty dict producer into which extra data can be added.
-    virtual void extra_data(oxenc::bt_dict_producer&& extra) const {}
+    virtual void extra_data(oxenc::bt_dict_producer&&) const {}
 
     /// API: base/ConfigBase::load_extra_data
     ///
@@ -804,7 +805,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Inputs:
     /// - `extra` -- bt_dict_consumer over the extra data subdict.
-    virtual void load_extra_data(oxenc::bt_dict_consumer&& extra) {}
+    virtual void load_extra_data(oxenc::bt_dict_consumer&&) {}
 
     /// API: base/ConfigBase::load_key
     ///

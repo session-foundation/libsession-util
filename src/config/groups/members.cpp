@@ -13,6 +13,18 @@ Members::Members(
         std::optional<ustring_view> dumped) :
         ConfigBase{dumped, ed25519_pubkey, ed25519_secretkey} {}
 
+void Members::extra_data(oxenc::bt_dict_producer&& extra) const {
+    if (pending_send_ids.empty())
+        return;
+
+    extra.append_list("pending_send_ids").extend(pending_send_ids.begin(), pending_send_ids.end());
+}
+
+void Members::load_extra_data(oxenc::bt_dict_consumer&& extra) {
+    if (extra.skip_until("pending_send_ids"))
+        pending_send_ids = extra.consume<std::unordered_set<std::string>>();
+}
+
 std::optional<member> Members::get(std::string_view pubkey_hex) const {
     std::string pubkey = session_id_to_bytes(pubkey_hex);
 
@@ -22,8 +34,7 @@ std::optional<member> Members::get(std::string_view pubkey_hex) const {
 
     auto sid = std::string{pubkey_hex};
     auto result = std::make_optional<member>(sid);
-    auto is_pending_send = (pending_send_ids && pending_send_ids->find(sid) != pending_send_ids->end());
-    result->load(*info_dict, {{"local_pending_send", (is_pending_send ? 1 : 0)}});
+    result->load(*info_dict);
 
     return result;
 }
@@ -32,9 +43,7 @@ member Members::get_or_construct(std::string_view pubkey_hex) const {
     if (auto maybe = get(pubkey_hex))
         return *std::move(maybe);
 
-    auto result = member{std::string{pubkey_hex}};
-    result.local_pending_send = true;   // Default to true when creating a new member
-    return result;
+    return member{std::string{pubkey_hex}};
 }
 
 void Members::set(const member& mem) {
@@ -59,16 +68,18 @@ void Members::set(const member& mem) {
     set_flag(info["s"], mem.supplement);
     set_positive_int(info["R"], mem.removed_status);
 
-    // Handle the local 'pending_send' flag
-    if (mem.local_pending_send && !pending_send_ids)
-        pending_send_ids = {mem.session_id};
-    else if (mem.local_pending_send)
-        pending_send_ids->emplace(mem.session_id);
-    else if (pending_send_ids)
-        pending_send_ids->erase(mem.session_id);
+    // When adding a new member, if their `invite_status` is `STATUS_NOT_SENT` then we should
+    // add them to the `pending_send_ids` until they are given a new status
+    if ((!mem.admin && mem.invite_status == STATUS_NOT_SENT) ||
+        (mem.admin && mem.promotion_status == STATUS_NOT_SENT))
+        pending_send_ids.emplace(mem.session_id);
+    else if (
+            (!mem.admin && mem.invite_status != STATUS_NOT_SENT) ||
+            (mem.admin && mem.promotion_status != STATUS_NOT_SENT))
+        pending_send_ids.erase(mem.session_id);
 }
 
-void member::load(const dict& info_dict, const dict& extra_dict) {
+void member::load(const dict& info_dict) {
     name = maybe_string(info_dict, "n").value_or("");
 
     auto url = maybe_string(info_dict, "p");
@@ -87,8 +98,6 @@ void member::load(const dict& info_dict, const dict& extra_dict) {
     supplement = invite_status > 0 && !(admin || promotion_status > 0)
                        ? maybe_int(info_dict, "s").value_or(0)
                        : 0;
-    
-    local_pending_send = maybe_int(extra_dict, "local_pending_send").value_or(0) > 0;
 }
 
 /// Load _val from the current iterator position; if it is invalid, skip to the next key until we
@@ -97,10 +106,8 @@ void Members::iterator::_load_info() {
     while (_it != _members->end()) {
         if (_it->first.size() == 33) {
             if (auto* info_dict = std::get_if<dict>(&_it->second)) {
-                auto sid = oxenc::to_hex(_it->first);
-                auto is_pending_send = (_pending_send_ids && _pending_send_ids->find(sid) != _pending_send_ids->end());
-                _val = std::make_shared<member>(sid);
-                _val->load(*info_dict, {{"local_pending_send", (is_pending_send ? 1 : 0)}});
+                _val = std::make_shared<member>(oxenc::to_hex(_it->first));
+                _val->load(*info_dict);
                 return;
             }
         }
@@ -160,7 +167,6 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
         profile_picture.key = {m.profile_pic.key, 32};
     }
     admin = m.admin;
-    local_pending_send = m.local_pending_send;
     invite_status =
             (m.invited == STATUS_SENT || m.invited == STATUS_FAILED || m.invited == STATUS_NOT_SENT)
                     ? m.invited
@@ -185,7 +191,6 @@ void member::into(config_group_member& m) const {
         copy_c_str(m.profile_pic.url, "");
     }
     m.admin = admin;
-    m.local_pending_send = local_pending_send;
     static_assert(groups::STATUS_SENT == ::STATUS_SENT);
     static_assert(groups::STATUS_FAILED == ::STATUS_FAILED);
     static_assert(groups::STATUS_NOT_SENT == ::STATUS_NOT_SENT);
@@ -297,10 +302,11 @@ LIBSESSION_C_API void groups_members_set(config_object* conf, const config_group
     unbox<groups::Members>(conf)->set(groups::member{*member});
 }
 
-LIBSESSION_C_API GROUP_MEMBER_STATUS group_member_status(const config_group_member* member) {
+LIBSESSION_C_API GROUP_MEMBER_STATUS
+groups_members_get_status(const config_object* conf, const config_group_member* member) {
     try {
         auto m = groups::member{*member};
-        return static_cast<GROUP_MEMBER_STATUS>(m.status());
+        return static_cast<GROUP_MEMBER_STATUS>(unbox<groups::Members>(conf)->get_status(m));
     } catch (...) {
         return GROUP_MEMBER_STATUS_INVITE_NOT_SENT;
     }
