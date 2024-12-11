@@ -21,8 +21,10 @@ void Members::extra_data(oxenc::bt_dict_producer&& extra) const {
 }
 
 void Members::load_extra_data(oxenc::bt_dict_consumer&& extra) {
-    if (extra.skip_until("pending_send_ids"))
-        pending_send_ids = extra.consume<std::unordered_set<std::string>>();
+    if (extra.skip_until("pending_send_ids")) {
+        auto value = extra.consume<std::vector<std::string>>();
+        pending_send_ids = {value.begin(), value.end()};
+    }
 }
 
 std::optional<member> Members::get(std::string_view pubkey_hex) const {

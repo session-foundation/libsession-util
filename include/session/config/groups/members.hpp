@@ -468,7 +468,7 @@ class Members : public ConfigBase {
     ///
     /// Outputs:
     /// - `iterator` - Returns an iterator for the end of the members
-    iterator end() const { return iterator{nullptr, std::nullopt}; }
+    iterator end() const { return iterator{nullptr}; }
 
     using iterator_category = std::input_iterator_tag;
     using value_type = member;
