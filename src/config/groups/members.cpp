@@ -22,8 +22,9 @@ void Members::extra_data(oxenc::bt_dict_producer&& extra) const {
 
 void Members::load_extra_data(oxenc::bt_dict_consumer&& extra) {
     if (extra.skip_until("pending_send_ids")) {
-        auto value = extra.consume<std::vector<std::string>>();
-        pending_send_ids = {value.begin(), value.end()};
+        auto lst = extra.consume_list_consumer();
+        while (!lst.is_finished())
+            pending_send_ids.insert(lst.consume_string());
     }
 }
 
