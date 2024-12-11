@@ -246,7 +246,7 @@ struct member {
 
   private:
     friend class Members;
-    void load(const dict& info_dict, const dict& extra_dict);
+    void load(const dict& info_dict);
 };
 
 class Members : public ConfigBase {
