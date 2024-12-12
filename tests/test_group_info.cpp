@@ -78,8 +78,8 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     ginfo2.set_expiry_timer(1h);
     constexpr int64_t create_time{1682529839};
     ginfo2.set_created(create_time);
-    ginfo2.set_delete_before(create_time + 50 * 86400);
-    ginfo2.set_delete_attach_before(create_time + 70 * 86400);
+    ginfo2.set_delete_before((create_time + 50 * 86400) * 1'000'000);     // as microseconds
+    ginfo2.set_delete_attach_before((create_time + 70 * 86400) * 1'000);  // as milliseconds
     ginfo2.destroy_group();
 
     auto [s2, p2, o2] = ginfo2.push();

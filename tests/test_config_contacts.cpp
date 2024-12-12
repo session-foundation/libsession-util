@@ -65,9 +65,9 @@ TEST_CASE("Contacts", "[config][contacts]") {
     c.set_nickname("Joey");
     c.approved = true;
     c.approved_me = true;
-    c.created = created_ts;
+    c.created = created_ts * 1'000;
     c.notifications = session::config::notify_mode::all;
-    c.mute_until = now + 1800;
+    c.mute_until = (now + 1800) * 1'000'000;
 
     contacts.set(c);
 

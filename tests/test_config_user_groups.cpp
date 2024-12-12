@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <iostream>
 #include <session/config/user_groups.hpp>
 #include <string_view>
 #include <variant>
@@ -138,7 +139,7 @@ TEST_CASE("User Groups", "[config][groups]") {
 
     c.name = "Englishmen";
     c.disappearing_timer = 60min;
-    c.joined_at = created_ts;
+    c.joined_at = created_ts * 1000;  // milliseconds
     c.notifications = session::config::notify_mode::mentions_only;
     c.mute_until = now + 3600;
     CHECK(c.insert(users[0], false));
@@ -494,9 +495,9 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(c2->name == "");
 
     c2->priority = 123;
-    c2->joined_at = 1234567890;
+    c2->joined_at = (int64_t)1'234'567'890 * 1'000;
     c2->notifications = session::config::notify_mode::mentions_only;
-    c2->mute_until = 456789012;
+    c2->mute_until = (int64_t)456'789'012 * 1'000'000;
     c2->invited = true;
     c2->name = "Magic Special Room";
 
@@ -812,6 +813,98 @@ TEST_CASE("User groups empty member bug", "[config][groups][bug]") {
         auto [admins, members] = lg.counts();
         CHECK(admins == 3);
         CHECK(members == 0);
+    }
+}
+
+TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][groups][bug]") {
+    // Tests a bug where setting legacy group with empty members (or empty admin) list would dirty
+    // the config, even when the current members (or admin) list is empty.  (This isn't strictly
+    // specific to user groups, but that's where the bug is easily encountered).
+
+    const auto seed = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa000000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    session::config::UserGroups c{ustring_view{seed}, std::nullopt};
+
+    CHECK_FALSE(c.needs_push());
+
+    {
+        auto lg = c.get_or_construct_legacy_group(
+                "051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        auto joined_at = get_timestamp_us();
+        auto mute_until = get_timestamp_s();
+        lg.joined_at = joined_at;
+        lg.mute_until = mute_until;
+        c.set(lg);
+        auto lg2 = c.get_or_construct_legacy_group(
+                "051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        CHECK(lg2.joined_at == joined_at / 1'000'000);  // joined_at was given in microseconds
+        CHECK(lg2.mute_until == mute_until);            // mute_until was given in seconds
+        c.erase_legacy_group("051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+    }
+
+    {
+        auto gr = c.get_or_construct_group(
+                "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        auto joined_at = get_timestamp_ms();
+        auto mute_until = get_timestamp_us();
+        gr.joined_at = joined_at;
+        gr.mute_until = mute_until;
+        c.set(gr);
+        auto gr2 = c.get_or_construct_group(
+                "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+        CHECK(gr2.joined_at == joined_at / 1'000);        // joined_at was given in milliseconds
+        CHECK(gr2.mute_until == mute_until / 1'000'000);  // mute_until was given in microseconds
+        c.erase_group("031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+    }
+
+    {
+        const auto open_group_pubkey =
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
+        const auto url = "http://example.org:5678";
+        const auto room = "sudoku_room";
+        auto comm = c.get_or_construct_community(url, room, open_group_pubkey);
+        auto joined_at = get_timestamp_ms();
+        auto mute_until = get_timestamp_ms();
+        comm.joined_at = joined_at;
+        comm.mute_until = mute_until;
+        c.set(comm);
+        auto comm2 = c.get_or_construct_community(url, room, open_group_pubkey);
+        CHECK(comm2.joined_at == joined_at / 1'000);    // joined_at was given in milliseconds
+        CHECK(comm2.mute_until == mute_until / 1'000);  // mute_until was given in milliseconds
+        c.erase_community(url, room);
+    }
+    {
+        // this dump has:
+        // - an invalid joined_at (1'733'979'503'520) and
+        // - an invalid mute_until (1'733'979'503'520'780) values
+        const auto dump_with_not_seconds =
+                "64313a21693165313a243231303a64313a23693165313a2664313a676433333a031234567890abcdef"
+                "1234"
+                "567890abcdef1234567890abcdef1234567890abcdef64313a21693137333339373935303335323037"
+                "3830"
+                "65313a4b303a313a6a693137333339373935303335323065656565313a3c6c6c69306533323aea173b"
+                "57be"
+                "ca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c96564656565313a3d64313a67643333"
+                "3a03"
+                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef64313a21303a313a4b"
+                "303a"
+                "313a6a303a65656565313a28303a313a296c6565"_hexbytes;
+        session::config::UserGroups c2{ustring_view{seed}, dump_with_not_seconds};
+
+        auto gr = c2.get_or_construct_group(
+                "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
+
+        CHECK(gr.joined_at == 1'733'979'503'520 / 1'000);
+        CHECK(gr.mute_until == 1'733'979'503'520'780 / 1'000'000);
     }
 }
 
