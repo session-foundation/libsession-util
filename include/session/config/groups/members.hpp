@@ -505,7 +505,6 @@ class Members : public ConfigBase {
     };
 
   protected:
-  protected:
     void extra_data(oxenc::bt_dict_producer&& extra) const override;
     void load_extra_data(oxenc::bt_dict_consumer&& extra) override;
 };

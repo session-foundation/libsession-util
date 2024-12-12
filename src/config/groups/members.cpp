@@ -148,6 +148,10 @@ bool Members::erase(std::string_view session_id) {
     auto info = data["m"][pk];
     bool ret = info.exists();
     info.erase();
+
+    if (pending_send_ids.erase(std::string(session_id)) > 0)
+        _needs_dump = true;
+
     return ret;
 }
 

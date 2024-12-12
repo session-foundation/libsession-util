@@ -211,7 +211,10 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url ==
                   (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
-            if (i >= 10 && i < 50)
+            if (i >= 10 && i < 25)
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_sending);
+            if (i >= 25 && i < 50)
                 CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_not_sent);
             if (50 <= i && i < 55)
@@ -279,9 +282,12 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url ==
                   (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
-            if (i >= 10 && i < 50)
-                CHECK(gmem2.get_status(m) ==
+            if (is_prime100(i) || (i >= 25 && i < 50))
+                CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_not_sent);
+            if (!is_prime100(i) && i >= 10 && i < 25)
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_sending);
             if (i >= 50 && i < 54)
                 CHECK(gmem2.get_status(m) ==
                       session::config::groups::member::Status::invite_accepted);
