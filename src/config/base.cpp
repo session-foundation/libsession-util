@@ -367,12 +367,7 @@ ConfigBase::ConfigBase(
     if (sodium_init() == -1)
         throw std::runtime_error{"libsodium initialization failed!"};
 
-    if (dump)
-        init_from_dump(from_unsigned_sv(*dump));
-    else
-        _config = std::make_unique<ConfigMessage>();
-
-    init_sig_keys(ed25519_pubkey, ed25519_secretkey);
+    init(dump, ed25519_pubkey, ed25519_secretkey);
 }
 
 void ConfigSig::init_sig_keys(
@@ -388,44 +383,59 @@ void ConfigSig::init_sig_keys(
     }
 }
 
-void ConfigBase::init_from_dump(std::string_view dump) {
-    oxenc::bt_dict_consumer d{dump};
-    if (!d.skip_until("!"))
-        throw std::runtime_error{"Unable to parse dumped config data: did not find '!' state key"};
-    _state = static_cast<ConfigState>(d.consume_integer<int>());
+void ConfigBase::init(
+        std::optional<ustring_view> dump,
+        std::optional<ustring_view> ed25519_pubkey,
+        std::optional<ustring_view> ed25519_secretkey) {
+    if (!dump) {
+        _state = ConfigState::Clean;
+        _config = std::make_unique<ConfigMessage>();
+    } else {
 
-    if (!d.skip_until("$"))
-        throw std::runtime_error{"Unable to parse dumped config data: did not find '$' data key"};
-    auto data = to_unsigned_sv(d.consume_string_view());
-    if (_state == ConfigState::Dirty)
-        // If we dumped dirty data then we need to reload it as a mutable config message so that the
-        // seqno gets incremented.  This "wastes" one seqno value (since we didn't send the old
-        // one), but that's minor and easier than extracting and restoring all the fields we set and
-        // is a little more robust against failure if we actually sent it but got killed before we
-        // could store a dump.
-        _config = std::make_unique<MutableConfigMessage>(
-                data,
-                nullptr,  // We omit verifier and signer for now because we don't want this dump to
-                nullptr,  // be signed (since it's just a dump).
-                config_lags());
-    else
-        _config = std::make_unique<ConfigMessage>(
-                data,
-                nullptr,
-                nullptr,
-                config_lags(),
-                /*trust_signature=*/true);
+        oxenc::bt_dict_consumer d{from_unsigned_sv(*dump)};
+        if (!d.skip_until("!"))
+            throw std::runtime_error{
+                    "Unable to parse dumped config data: did not find '!' state key"};
+        _state = static_cast<ConfigState>(d.consume_integer<int>());
 
-    if (d.skip_until("(")) {
-        _curr_hash = d.consume_string();
-        if (!d.skip_until(")"))
-            throw std::runtime_error{"Unable to parse dumped config data: found '(' without ')'"};
-        for (auto old = d.consume_list_consumer(); !old.is_finished();)
-            _old_hashes.insert(old.consume_string());
+        if (!d.skip_until("$"))
+            throw std::runtime_error{
+                    "Unable to parse dumped config data: did not find '$' data key"};
+        auto data = to_unsigned_sv(d.consume_string_view());
+        if (_state == ConfigState::Dirty)
+            // If we dumped dirty data then we need to reload it as a mutable config message so that
+            // the seqno gets incremented.  This "wastes" one seqno value (since we didn't send the
+            // old one), but that's minor and easier than extracting and restoring all the fields we
+            // set and is a little more robust against failure if we actually sent it but got killed
+            // before we could store a dump.
+            _config = std::make_unique<MutableConfigMessage>(
+                    data,
+                    nullptr,  // We omit verifier and signer for now because we don't want this dump
+                              // to
+                    nullptr,  // be signed (since it's just a dump).
+                    config_lags());
+        else
+            _config = std::make_unique<ConfigMessage>(
+                    data,
+                    nullptr,
+                    nullptr,
+                    config_lags(),
+                    /*trust_signature=*/true);
+
+        if (d.skip_until("(")) {
+            _curr_hash = d.consume_string();
+            if (!d.skip_until(")"))
+                throw std::runtime_error{
+                        "Unable to parse dumped config data: found '(' without ')'"};
+            for (auto old = d.consume_list_consumer(); !old.is_finished();)
+                _old_hashes.insert(old.consume_string());
+        }
+
+        if (d.skip_until("+"))
+            load_extra_data(d.consume_dict_consumer());
     }
 
-    if (d.skip_until("+"))
-        load_extra_data(d.consume_dict_consumer());
+    init_sig_keys(ed25519_pubkey, ed25519_secretkey);
 }
 
 int ConfigBase::key_count() const {

@@ -10,8 +10,9 @@ namespace session::config::groups {
 Members::Members(
         ustring_view ed25519_pubkey,
         std::optional<ustring_view> ed25519_secretkey,
-        std::optional<ustring_view> dumped) :
-        ConfigBase{dumped, ed25519_pubkey, ed25519_secretkey} {}
+        std::optional<ustring_view> dumped) {
+    init(dumped, ed25519_pubkey, ed25519_secretkey);
+}
 
 void Members::extra_data(oxenc::bt_dict_producer&& extra) const {
     if (pending_send_ids.empty())

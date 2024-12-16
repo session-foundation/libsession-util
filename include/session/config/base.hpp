@@ -151,8 +151,6 @@ class ConfigBase : public ConfigSig {
     // Tracks our current state
     ConfigState _state = ConfigState::Clean;
 
-    void init_from_dump(std::string_view dump);
-
     static constexpr size_t KEY_SIZE = 32;
 
     // Contains the base key(s) we use to encrypt/decrypt messages.  If non-empty, the .front()
@@ -180,6 +178,19 @@ class ConfigBase : public ConfigSig {
     // verification of incoming messages using the associated pubkey, and will be signed using the
     // secretkey (if a secret key is given).
     explicit ConfigBase(
+            std::optional<ustring_view> dump = std::nullopt,
+            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
+            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+
+    // Initializes the base config object with dump data and keys; this is typically invoked by the
+    // constructor, but is exposed to subclasses so that they can delay initial processing by
+    // default-constructing the base class and then calling this from their own constructor.  This
+    // two-step call pattern is *required* when using extra data in particular [because the virtual
+    // load_extra_data call and any derived class fields are not available before derived class
+    // construction].
+    //
+    // This method must not be called outside derived class construction!
+    void init(
             std::optional<ustring_view> dump = std::nullopt,
             std::optional<ustring_view> ed25519_pubkey = std::nullopt,
             std::optional<ustring_view> ed25519_secretkey = std::nullopt);
@@ -793,6 +804,13 @@ class ConfigBase : public ConfigSig {
     /// extra data; a subclass should either override both (if it needs to serialize extra data) or
     /// neither (if it needs no extra data).  Internally this extra data is stored in the "+" key of
     /// the dump.
+    ///
+    /// Note that loading extra properly requires two-step construction: the subclass constructor
+    /// must construct the ConfigBase object without extra data, and then call `init_from_dump()`
+    /// from within its own constructor to load the dump.  Failing to do this two-step
+    /// initialization will result in the subclass load_extra_data not being called (because the
+    /// subclass instance, and thus the overridden method, does not yet exist during the ConfigBase
+    /// constructor).
     ///
     /// Inputs:
     /// - `extra` -- An empty dict producer into which extra data can be added.

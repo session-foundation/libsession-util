@@ -142,7 +142,8 @@ LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_grou
 /// Outputs:
 /// - `GROUP_MEMBER_STATUS` -- Returns an enum indicating the consolidated status of this member in
 /// the group.
-LIBSESSION_EXPORT GROUP_MEMBER_STATUS groups_members_get_status(const config_object* conf, const config_group_member* member);
+LIBSESSION_EXPORT GROUP_MEMBER_STATUS
+groups_members_get_status(const config_object* conf, const config_group_member* member);
 
 /// API: groups/groups_members_set_invite_sent
 ///
