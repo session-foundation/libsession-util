@@ -138,6 +138,10 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                 CHECK(gmem2.get_status(m) ==
                       session::config::groups::member::Status::promotion_accepted);
             } else {
+                // on gmem1, our local extra data marks m as invite_sending
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_sending);
+                // that extra data is not pushed, so gmem2 doesn't know about it
                 CHECK(gmem2.get_status(m) ==
                       session::config::groups::member::Status::invite_not_sent);
                 CHECK_FALSE(m.admin);
@@ -329,4 +333,44 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     CHECK(m.name ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "901234567890");
+}
+
+TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    std::array<unsigned char, 32> ed_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "cbd569f56fb13ea95a3f0c05c331cc24139c0090feb412069dc49fab34406ece");
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    groups::Members gmem1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+
+    auto memberId1 = "050000000000000000000000000000000000000000000000000000000000000000";
+    auto memberId2 = "051111111111111111111111111111111111111111111111111111111111111111";
+
+    auto member1 = gmem1.get_or_construct(memberId1);
+    auto member2 = gmem1.get_or_construct(memberId2);
+
+    member2.set_promoted();
+    gmem1.set(member1);  // should be marked as "invite sending" right away
+    gmem1.set(member2);  // should be marked as "promotion sending" right away
+
+    CHECK(gmem1.get_status(gmem1.get_or_construct(memberId1)) ==
+          groups::member::Status::invite_sending);
+    CHECK(gmem1.get_status(gmem1.get_or_construct(memberId2)) ==
+          groups::member::Status::promotion_sending);
+
+    auto dumped = gmem1.dump();
+
+    groups::Members gmem2{to_usv(ed_pk), to_usv(ed_sk), dumped};
+
+    CHECK(gmem2.get_status(gmem1.get_or_construct(memberId1)) ==
+          groups::member::Status::invite_sending);
+    CHECK(gmem2.get_status(gmem1.get_or_construct(memberId2)) ==
+          groups::member::Status::promotion_sending);
 }

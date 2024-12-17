@@ -76,11 +76,11 @@ void Members::set(const member& mem) {
     // add them to the `pending_send_ids` until they are given a new status
     if ((!mem.admin && mem.invite_status == STATUS_NOT_SENT) ||
         (mem.admin && mem.promotion_status == STATUS_NOT_SENT))
-        pending_send_ids.emplace(mem.session_id);
+        set_pending_send(mem.session_id, true);
     else if (
             (!mem.admin && mem.invite_status != STATUS_NOT_SENT) ||
             (mem.admin && mem.promotion_status != STATUS_NOT_SENT))
-        pending_send_ids.erase(mem.session_id);
+        set_pending_send(mem.session_id, false);
 }
 
 void member::load(const dict& info_dict) {
@@ -150,8 +150,7 @@ bool Members::erase(std::string_view session_id) {
     bool ret = info.exists();
     info.erase();
 
-    if (pending_send_ids.erase(std::string(session_id)) > 0)
-        _needs_dump = true;
+    set_pending_send(std::string(session_id), false);
 
     return ret;
 }
@@ -160,6 +159,20 @@ size_t Members::size() const {
     if (auto d = data["m"].dict())
         return d->size();
     return 0;
+}
+
+bool Members::has_pending_send(std::string pubkey_hex) const {
+    return pending_send_ids.count(pubkey_hex);
+}
+
+void Members::set_pending_send(std::string pubkey_hex, bool pending) {
+    bool changed = false;
+    if (pending)
+        changed = pending_send_ids.insert(pubkey_hex).second;
+    else
+        changed = pending_send_ids.erase(pubkey_hex);
+    if(changed)
+        _needs_dump = true;
 }
 
 member::member(std::string sid) : session_id{std::move(sid)} {
