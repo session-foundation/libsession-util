@@ -150,8 +150,7 @@ bool Members::erase(std::string_view session_id) {
     bool ret = info.exists();
     info.erase();
 
-    if (set_pending_send(std::string(session_id), false))
-        _needs_dump = true;
+    set_pending_send(std::string(session_id), false);
 
     return ret;
 }
@@ -166,11 +165,14 @@ bool Members::has_pending_send(std::string pubkey_hex) const {
     return pending_send_ids.count(pubkey_hex);
 }
 
-bool Members::set_pending_send(std::string pubkey_hex, bool pending) {
+void Members::set_pending_send(std::string pubkey_hex, bool pending) {
+    bool changed = false;
     if (pending)
-        return pending_send_ids.insert(pubkey_hex).second;
+        changed = pending_send_ids.insert(pubkey_hex).second;
     else
-        return pending_send_ids.erase(pubkey_hex);
+        changed = pending_send_ids.erase(pubkey_hex);
+    if(changed)
+        _needs_dump = true;
 }
 
 member::member(std::string sid) : session_id{std::move(sid)} {

@@ -344,14 +344,13 @@ class Members : public ConfigBase {
     /// API: groups/Members::set_pending_send
     ///
     /// This function can be used to set the pending send state of a member.
+    /// If that effectively made a change, it will set _needs_dump to true.
     ///
     /// Inputs:
     /// - `pubkey_hex` -- hex string of the session id
     /// - `pending`  -- pending send state to set for that member
     ///
-    /// Outputs:
-    /// - `bool` - true if a change was made.
-    bool set_pending_send(std::string pubkey_hex, bool pending);
+    void set_pending_send(std::string pubkey_hex, bool pending);
 
     /// API: groups/Members::get_status
     ///
