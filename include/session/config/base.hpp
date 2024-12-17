@@ -15,6 +15,11 @@
 #include "base.h"
 #include "namespaces.hpp"
 
+namespace oxenc {
+class bt_dict_producer;
+class bt_dict_consumer;
+}  // namespace oxenc
+
 namespace session::config {
 
 template <typename T, typename... U>
@@ -144,8 +149,6 @@ class ConfigBase : public ConfigSig {
     // Tracks our current state
     ConfigState _state = ConfigState::Clean;
 
-    void init_from_dump(std::string_view dump);
-
     static constexpr size_t KEY_SIZE = 32;
 
     // Contains the base key(s) we use to encrypt/decrypt messages.  If non-empty, the .front()
@@ -173,6 +176,19 @@ class ConfigBase : public ConfigSig {
     // verification of incoming messages using the associated pubkey, and will be signed using the
     // secretkey (if a secret key is given).
     explicit ConfigBase(
+            std::optional<ustring_view> dump = std::nullopt,
+            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
+            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+
+    // Initializes the base config object with dump data and keys; this is typically invoked by the
+    // constructor, but is exposed to subclasses so that they can delay initial processing by
+    // default-constructing the base class and then calling this from their own constructor.  This
+    // two-step call pattern is *required* when using extra data in particular [because the virtual
+    // load_extra_data call and any derived class fields are not available before derived class
+    // construction].
+    //
+    // This method must not be called outside derived class construction!
+    void init(
             std::optional<ustring_view> dump = std::nullopt,
             std::optional<ustring_view> ed25519_pubkey = std::nullopt,
             std::optional<ustring_view> ed25519_secretkey = std::nullopt);
@@ -775,26 +791,31 @@ class ConfigBase : public ConfigSig {
     /// API: base/ConfigBase::extra_data
     ///
     /// Called when dumping to obtain any extra data that a subclass needs to store to reconstitute
-    /// the object.  The base implementation does nothing.  The counterpart to this,
-    /// `load_extra_data()`, is called when loading from a dump that has extra data; a subclass
-    /// should either override both (if it needs to serialize extra data) or neither (if it needs no
-    /// extra data).  Internally this extra data (if non-empty) is stored in the "+" key of the
-    /// dump.
+    /// the object.  The base implementation does nothing (i.e. extra data will be an empty dict).
+    /// The counterpart to this, `load_extra_data()`, is called when loading from a dump that has
+    /// extra data; a subclass should either override both (if it needs to serialize extra data) or
+    /// neither (if it needs no extra data).  Internally this extra data is stored in the "+" key of
+    /// the dump.
     ///
-    /// Inputs: None
+    /// Note that loading extra properly requires two-step construction: the subclass constructor
+    /// must construct the ConfigBase object without extra data, and then call `init_from_dump()`
+    /// from within its own constructor to load the dump.  Failing to do this two-step
+    /// initialization will result in the subclass load_extra_data not being called (because the
+    /// subclass instance, and thus the overridden method, does not yet exist during the ConfigBase
+    /// constructor).
     ///
-    /// Outputs:
-    /// - `oxenc::bt_dict` -- Returns a btdict of the data
-    virtual oxenc::bt_dict extra_data() const { return {}; }
+    /// Inputs:
+    /// - `extra` -- An empty dict producer into which extra data can be added.
+    virtual void extra_data(oxenc::bt_dict_producer&&) const {}
 
     /// API: base/ConfigBase::load_extra_data
     ///
-    /// Called when constructing from a dump that has extra data.  The base implementation does
-    /// nothing.
+    /// Called when constructing from a dump with the extra data dict.  The base implementation does
+    /// nothing.  See extra_data() for a description.
     ///
     /// Inputs:
-    /// - `extra` -- bt_dict containing a previous dump of data
-    virtual void load_extra_data([[maybe_unused]] oxenc::bt_dict extra) {}
+    /// - `extra` -- bt_dict_consumer over the extra data subdict.
+    virtual void load_extra_data(oxenc::bt_dict_consumer&&) {}
 
     /// API: base/ConfigBase::load_key
     ///

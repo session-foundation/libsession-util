@@ -52,19 +52,21 @@ struct member {
     enum class Status {
         invite_unknown = 0,
         invite_not_sent = 1,
-        invite_failed = 2,
-        invite_sent = 3,
-        invite_accepted = 4,
+        invite_sending = 2,
+        invite_failed = 3,
+        invite_sent = 4,
+        invite_accepted = 5,
 
-        promotion_unknown = 5,
-        promotion_not_sent = 6,
-        promotion_failed = 7,
-        promotion_sent = 8,
-        promotion_accepted = 9,
+        promotion_unknown = 6,
+        promotion_not_sent = 7,
+        promotion_sending = 8,
+        promotion_failed = 9,
+        promotion_sent = 10,
+        promotion_accepted = 11,
 
-        removed_unknown = 10,
-        removed = 11,
-        removed_including_messages = 12,
+        removed_unknown = 12,
+        removed = 13,
+        removed_including_messages = 14,
     };
 
     static constexpr size_t MAX_NAME_LENGTH = 100;
@@ -210,49 +212,6 @@ struct member {
         removed_status = messages ? REMOVED_MEMBER_AND_MESSAGES : REMOVED_MEMBER;
     }
 
-    /// API: groups/member::status
-    ///
-    /// This function goes through the various status values and returns a single consolidated
-    /// status for the member.
-    ///
-    /// Outputs:
-    /// - `Status` -- an enum indicating the consolidated status of this member in the group.
-    Status status() const {
-        // If the member has been removed that trumps all other statuses
-        if (removed_status == REMOVED_MEMBER_AND_MESSAGES)
-            return Status::removed_including_messages;
-        else if (removed_status == REMOVED_MEMBER)
-            return Status::removed;
-        else if (removed_status > 0)
-            return Status::removed_unknown;
-
-        // If the member is promoted then we return the relevant promoted status
-        if (admin) {
-            if (promotion_status == STATUS_NOT_SENT)
-                return Status::promotion_not_sent;
-            else if (promotion_status == STATUS_FAILED)
-                return Status::promotion_failed;
-            else if (promotion_status == STATUS_SENT)
-                return Status::promotion_sent;
-            else if (promotion_status != 0)
-                return Status::promotion_unknown;
-
-            return Status::promotion_accepted;
-        }
-
-        // Otherwise the member is a standard member
-        if (invite_status == STATUS_NOT_SENT)
-            return Status::invite_not_sent;
-        else if (invite_status == STATUS_FAILED)
-            return Status::invite_failed;
-        else if (invite_status == STATUS_SENT)
-            return Status::invite_sent;
-        else if (invite_status != 0)
-            return Status::invite_unknown;
-
-        return Status::invite_accepted;
-    }
-
     /// API: groups/member::into
     ///
     /// Converts the member info into a C struct.
@@ -291,6 +250,9 @@ struct member {
 };
 
 class Members : public ConfigBase {
+
+  private:
+    std::unordered_set<std::string> pending_send_ids;
 
   public:
     // No default constructor
@@ -367,6 +329,78 @@ class Members : public ConfigBase {
     /// Outputs:
     /// - `member` - Returns a filled out member struct
     member get_or_construct(std::string_view pubkey_hex) const;
+
+    /// API: groups/Members::has_pending_send
+    ///
+    /// This function can be used to check if a member is pending send locally.
+    ///
+    /// Inputs:
+    /// - `pubkey_hex` -- hex string of the session id
+    ///
+    /// Outputs:
+    /// - `bool` - true if that sessionid is marked as pending send locally
+    bool has_pending_send(std::string pubkey_hex) const;
+
+    /// API: groups/Members::set_pending_send
+    ///
+    /// This function can be used to set the pending send state of a member.
+    /// If that effectively made a change, it will set _needs_dump to true.
+    ///
+    /// Inputs:
+    /// - `pubkey_hex` -- hex string of the session id
+    /// - `pending`  -- pending send state to set for that member
+    ///
+    void set_pending_send(std::string pubkey_hex, bool pending);
+
+    /// API: groups/Members::get_status
+    ///
+    /// This function goes through the various status values and returns a single consolidated
+    /// status for the member.
+    ///
+    /// Inputs:
+    /// - `member` -- member value to to retrieve the status for
+    ///
+    /// Outputs:
+    /// - `status` - an enum indicating the consolidated status of this member in the group.
+    member::Status get_status(const member& member) const {
+        // If the member has been removed that trumps all other statuses
+        if (member.removed_status == REMOVED_MEMBER_AND_MESSAGES)
+            return member::Status::removed_including_messages;
+        else if (member.removed_status == REMOVED_MEMBER)
+            return member::Status::removed;
+        else if (member.removed_status > 0)
+            return member::Status::removed_unknown;
+
+        // If the member is promoted then we return the relevant promoted status
+        if (member.admin) {
+            if (member.promotion_status == STATUS_NOT_SENT && has_pending_send(member.session_id))
+                return member::Status::promotion_sending;
+            else if (member.promotion_status == STATUS_NOT_SENT)
+                return member::Status::promotion_not_sent;
+            else if (member.promotion_status == STATUS_FAILED)
+                return member::Status::promotion_failed;
+            else if (member.promotion_status == STATUS_SENT)
+                return member::Status::promotion_sent;
+            else if (member.promotion_status != 0)
+                return member::Status::promotion_unknown;
+
+            return member::Status::promotion_accepted;
+        }
+
+        // Otherwise the member is a standard member
+        if (member.invite_status == STATUS_NOT_SENT && has_pending_send(member.session_id))
+            return member::Status::invite_sending;
+        else if (member.invite_status == STATUS_NOT_SENT)
+            return member::Status::invite_not_sent;
+        else if (member.invite_status == STATUS_FAILED)
+            return member::Status::invite_failed;
+        else if (member.invite_status == STATUS_SENT)
+            return member::Status::invite_sent;
+        else if (member.invite_status != 0)
+            return member::Status::invite_unknown;
+
+        return member::Status::invite_accepted;
+    }
 
     /// API: groups/Members::set
     ///
@@ -489,6 +523,10 @@ class Members : public ConfigBase {
             return copy;
         }
     };
+
+  protected:
+    void extra_data(oxenc::bt_dict_producer&& extra) const override;
+    void load_extra_data(oxenc::bt_dict_consumer&& extra) override;
 };
 
 }  // namespace session::config::groups

@@ -13,6 +13,16 @@
 using namespace std::literals;
 using namespace oxenc::literals;
 
+void log_msg(config_log_level lvl, const char* msg, void*) {
+    INFO((lvl == LOG_LEVEL_ERROR     ? "ERROR"
+          : lvl == LOG_LEVEL_WARNING ? "Warning"
+          : lvl == LOG_LEVEL_INFO    ? "Info"
+                                     : "debug")
+         << ": " << msg);
+}
+
+auto empty_extra_data = "1:+de";
+
 TEST_CASE("UserProfile", "[config][user_profile]") {
 
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
@@ -211,7 +221,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
           "1:!" "i2e"
           "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
           "1:(" "0:"
-          "1:)" "le"
+          "1:)" "le" + empty_extra_data +
         "e"));
     // clang-format on
     free(dump1);  // done with the dump; don't leak!
@@ -230,7 +240,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
           "1:!" "i0e"
           "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
           "1:(" "9:fakehash1"
-          "1:)" "le"
+          "1:)" "le" + empty_extra_data +
         "e"));
     // clang-format on
     free(dump1);

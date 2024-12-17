@@ -28,7 +28,7 @@ using namespace std::literals;
 /// - it isn't compressed (since most of the data fields are encrypted or random, compression
 ///   reduction would be minimal).
 ///
-/// Fields used (in ascii order):
+/// Fields used for generating key messages (in ascii order):
 /// # -- 24-byte nonce used for all the encrypted values in this message; required.
 ///
 /// For non-supplemental messages:
@@ -55,6 +55,19 @@ using namespace std::literals;
 ///      to but not including the ~ keypair.  The signature must be the last key in the dict (thus
 ///      `~` since it is the largest 7-bit ascii character value).  Note that this signature
 ///      mechanism works exactly the same as the signature on regular config messages.
+///
+/// Fields used for dumping the config (in ascii order):
+/// A -- active config messages list. A list of lists, where each list has:
+///      - as first argument the generation number
+///      - the rest are the hashes valid for that generation number
+/// L -- a list of dict representing all the keys. Each dict has:
+///      - k -- same as "For supplemental messages"
+///      - g -- same as "For supplemental messages"
+///      - t -- same as "For supplemental messages"
+/// P -- pending key as a dict (if present).
+///      - c -- the pending config message to push
+///      - g -- same as "For supplemental messages"
+///      - k -- same as "For supplemental messages"
 ///
 /// Some extra details:
 ///

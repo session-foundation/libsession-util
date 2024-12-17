@@ -76,7 +76,7 @@ ustring Keys::dump() {
 ustring Keys::make_dump() const {
     oxenc::bt_dict_producer d;
     {
-        auto active = d.append_list("active");
+        auto active = d.append_list("A");
         for (const auto& [gen, hashes] : active_msgs_) {
             auto lst = active.append_list();
             lst.append(gen);
@@ -86,7 +86,7 @@ ustring Keys::make_dump() const {
     }
 
     {
-        auto keys = d.append_list("keys");
+        auto keys = d.append_list("L");
         for (auto& k : keys_) {
             auto ki = keys.append_dict();
             // NB: Keys must be in sorted order
@@ -101,7 +101,7 @@ ustring Keys::make_dump() const {
     }
 
     if (!pending_key_config_.empty()) {
-        auto pending = d.append_dict("pending");
+        auto pending = d.append_dict("P");
         // NB: Keys must be in sorted order
         pending.append("c", from_unsigned_sv(pending_key_config_));
         pending.append("g", pending_gen_);
@@ -114,7 +114,7 @@ ustring Keys::make_dump() const {
 void Keys::load_dump(ustring_view dump) {
     oxenc::bt_dict_consumer d{from_unsigned_sv(dump)};
 
-    if (d.skip_until("active")) {
+    if (d.skip_until("A")) {
         auto active = d.consume_list_consumer();
         while (!active.is_finished()) {
             auto lst = active.consume_list_consumer();
@@ -126,7 +126,7 @@ void Keys::load_dump(ustring_view dump) {
         throw config_value_error{"Invalid Keys dump: `active` not found"};
     }
 
-    if (d.skip_until("keys")) {
+    if (d.skip_until("L")) {
         auto keys = d.consume_list_consumer();
         while (!keys.is_finished()) {
             auto kd = keys.consume_dict_consumer();
@@ -156,7 +156,7 @@ void Keys::load_dump(ustring_view dump) {
         throw config_value_error{"Invalid Keys dump: `keys` not found"};
     }
 
-    if (d.skip_until("pending")) {
+    if (d.skip_until("P")) {
         auto pending = d.consume_dict_consumer();
 
         if (!pending.skip_until("c"))
