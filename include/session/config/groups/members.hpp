@@ -330,6 +330,29 @@ class Members : public ConfigBase {
     /// - `member` - Returns a filled out member struct
     member get_or_construct(std::string_view pubkey_hex) const;
 
+    /// API: groups/Members::has_pending_send
+    ///
+    /// This function can be used to check if a member is pending send locally.
+    ///
+    /// Inputs:
+    /// - `pubkey_hex` -- hex string of the session id
+    ///
+    /// Outputs:
+    /// - `bool` - true if that sessionid is marked as pending send locally
+    bool has_pending_send(std::string pubkey_hex) const;
+
+    /// API: groups/Members::set_pending_send
+    ///
+    /// This function can be used to set the pending send state of a member.
+    ///
+    /// Inputs:
+    /// - `pubkey_hex` -- hex string of the session id
+    /// - `pending`  -- pending send state to set for that member
+    ///
+    /// Outputs:
+    /// - `bool` - true if a change was made.
+    bool set_pending_send(std::string pubkey_hex, bool pending);
+
     /// API: groups/Members::get_status
     ///
     /// This function goes through the various status values and returns a single consolidated
@@ -351,8 +374,7 @@ class Members : public ConfigBase {
 
         // If the member is promoted then we return the relevant promoted status
         if (member.admin) {
-            if (member.promotion_status == STATUS_NOT_SENT &&
-                pending_send_ids.find(member.session_id) != pending_send_ids.end())
+            if (member.promotion_status == STATUS_NOT_SENT && has_pending_send(member.session_id))
                 return member::Status::promotion_sending;
             else if (member.promotion_status == STATUS_NOT_SENT)
                 return member::Status::promotion_not_sent;
@@ -367,8 +389,7 @@ class Members : public ConfigBase {
         }
 
         // Otherwise the member is a standard member
-        if (member.invite_status == STATUS_NOT_SENT &&
-            pending_send_ids.find(member.session_id) != pending_send_ids.end())
+        if (member.invite_status == STATUS_NOT_SENT && has_pending_send(member.session_id))
             return member::Status::invite_sending;
         else if (member.invite_status == STATUS_NOT_SENT)
             return member::Status::invite_not_sent;
