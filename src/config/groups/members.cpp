@@ -171,7 +171,7 @@ void Members::set_pending_send(std::string pubkey_hex, bool pending) {
         changed = pending_send_ids.insert(pubkey_hex).second;
     else
         changed = pending_send_ids.erase(pubkey_hex);
-    if(changed)
+    if (changed)
         _needs_dump = true;
 }
 
