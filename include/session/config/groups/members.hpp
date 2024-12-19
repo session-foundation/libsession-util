@@ -132,6 +132,11 @@ struct member {
     /// This marks the user as having had an invitation message sent to them.
     void set_invite_sent() { invite_status = STATUS_SENT; }
 
+    /// API: groups/member::set_invite_not_sent
+    ///
+    /// This resets the invite status of a user to `STATUS_NOT_SENT`.
+    void set_invite_not_sent() { invite_status = STATUS_NOT_SENT; }
+
     /// API: groups/member::set_invite_failed
     ///
     /// This marks the user to indicate that their invitation message failed to send (this is
