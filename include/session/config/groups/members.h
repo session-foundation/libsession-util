@@ -17,17 +17,19 @@ enum groups_members_remove_status { REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSA
 typedef enum GROUP_MEMBER_STATUS {
     GROUP_MEMBER_STATUS_INVITE_UNKNOWN = 0,
     GROUP_MEMBER_STATUS_INVITE_NOT_SENT = 1,
-    GROUP_MEMBER_STATUS_INVITE_FAILED = 2,
-    GROUP_MEMBER_STATUS_INVITE_SENT = 3,
-    GROUP_MEMBER_STATUS_INVITE_ACCEPTED = 4,
-    GROUP_MEMBER_STATUS_PROMOTION_UNKNOWN = 5,
-    GROUP_MEMBER_STATUS_PROMOTION_NOT_SENT = 6,
-    GROUP_MEMBER_STATUS_PROMOTION_FAILED = 7,
-    GROUP_MEMBER_STATUS_PROMOTION_SENT = 8,
-    GROUP_MEMBER_STATUS_PROMOTION_ACCEPTED = 9,
-    GROUP_MEMBER_STATUS_REMOVED_UNKNOWN = 10,
-    GROUP_MEMBER_STATUS_REMOVED = 11,
-    GROUP_MEMBER_STATUS_REMOVED_MEMBER_AND_MESSAGES = 12,
+    GROUP_MEMBER_STATUS_INVITE_SENDING = 2,
+    GROUP_MEMBER_STATUS_INVITE_FAILED = 3,
+    GROUP_MEMBER_STATUS_INVITE_SENT = 4,
+    GROUP_MEMBER_STATUS_INVITE_ACCEPTED = 5,
+    GROUP_MEMBER_STATUS_PROMOTION_UNKNOWN = 6,
+    GROUP_MEMBER_STATUS_PROMOTION_NOT_SENT = 7,
+    GROUP_MEMBER_STATUS_PROMOTION_SENDING = 8,
+    GROUP_MEMBER_STATUS_PROMOTION_FAILED = 9,
+    GROUP_MEMBER_STATUS_PROMOTION_SENT = 10,
+    GROUP_MEMBER_STATUS_PROMOTION_ACCEPTED = 11,
+    GROUP_MEMBER_STATUS_REMOVED_UNKNOWN = 12,
+    GROUP_MEMBER_STATUS_REMOVED = 13,
+    GROUP_MEMBER_STATUS_REMOVED_MEMBER_AND_MESSAGES = 14,
 } GROUP_MEMBER_STATUS;
 
 typedef struct config_group_member {
@@ -128,18 +130,20 @@ LIBSESSION_EXPORT bool groups_members_get_or_construct(
 /// - `member` -- [in] Pointer containing the member info data
 LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_group_member* member);
 
-/// API: groups/group_member_status
+/// API: groups/groups_members_get_status
 ///
 /// This function goes through the various status values and returns a single consolidated
 /// status for the member.
 ///
 /// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
 /// - `member` -- [in] The member to retrieve the status for
 ///
 /// Outputs:
 /// - `GROUP_MEMBER_STATUS` -- Returns an enum indicating the consolidated status of this member in
 /// the group.
-LIBSESSION_EXPORT GROUP_MEMBER_STATUS group_member_status(const config_group_member* member);
+LIBSESSION_EXPORT GROUP_MEMBER_STATUS
+groups_members_get_status(const config_object* conf, const config_group_member* member);
 
 /// API: groups/groups_members_set_invite_sent
 ///

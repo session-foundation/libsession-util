@@ -115,22 +115,35 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         int i = 0;
         for (auto& m : gmem2) {
             CHECK(m.session_id == sids[i]);
-            CHECK_FALSE(m.status() == session::config::groups::member::Status::invite_failed);
-            CHECK_FALSE(m.status() == session::config::groups::member::Status::promotion_not_sent);
-            CHECK_FALSE(m.status() == session::config::groups::member::Status::promotion_failed);
-            CHECK_FALSE(m.status() == session::config::groups::member::Status::removed);
             CHECK_FALSE(
-                    m.status() ==
+                    gmem2.get_status(m) == session::config::groups::member::Status::invite_failed);
+            CHECK_FALSE(
+                    gmem2.get_status(m) ==
+                    session::config::groups::member::Status::promotion_not_sent);
+            CHECK_FALSE(
+                    gmem2.get_status(m) ==
+                    session::config::groups::member::Status::promotion_failed);
+            CHECK_FALSE(gmem2.get_status(m) == session::config::groups::member::Status::removed);
+            CHECK_FALSE(
+                    gmem2.get_status(m) ==
                     session::config::groups::member::Status::removed_including_messages);
             CHECK_FALSE(m.supplement);
             if (i < 10) {
-                CHECK_FALSE(m.status() == session::config::groups::member::Status::invite_not_sent);
+                CHECK_FALSE(
+                        gmem2.get_status(m) ==
+                        session::config::groups::member::Status::invite_not_sent);
                 CHECK(m.admin);
                 CHECK(m.name == "Admin " + std::to_string(i));
                 CHECK_FALSE(m.profile_picture.empty());
-                CHECK(m.status() == session::config::groups::member::Status::promotion_accepted);
+                CHECK(gmem2.get_status(m) ==
+                      session::config::groups::member::Status::promotion_accepted);
             } else {
-                CHECK(m.status() == session::config::groups::member::Status::invite_not_sent);
+                // on gmem1, our local extra data marks m as invite_sending
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_sending);
+                // that extra data is not pushed, so gmem2 doesn't know about it
+                CHECK(gmem2.get_status(m) ==
+                      session::config::groups::member::Status::invite_not_sent);
                 CHECK_FALSE(m.admin);
                 if (i < 20) {
                     CHECK(m.name == "Member " + std::to_string(i));
@@ -202,22 +215,30 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url ==
                   (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
-            if (i >= 10 && i < 50)
-                CHECK(m.status() == session::config::groups::member::Status::invite_not_sent);
+            if (i >= 10 && i < 25)
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_sending);
+            if (i >= 25 && i < 50)
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_not_sent);
             if (50 <= i && i < 55)
-                CHECK(m.status() == session::config::groups::member::Status::invite_sent);
+                CHECK(gmem1.get_status(m) == session::config::groups::member::Status::invite_sent);
             if (55 <= i && i < 58)
-                CHECK(m.status() == session::config::groups::member::Status::invite_failed);
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_failed);
             if (i < 10)
-                CHECK(m.status() == session::config::groups::member::Status::promotion_accepted);
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::promotion_accepted);
             if (i >= 58 && i < 60)
-                CHECK(m.status() == session::config::groups::member::Status::promotion_sent);
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::promotion_sent);
             if (i >= 60 && i < 62)
-                CHECK(m.status() == session::config::groups::member::Status::promotion_failed);
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::promotion_failed);
             if (i >= 62 && i < 64)
-                CHECK(m.status() == session::config::groups::member::Status::removed);
+                CHECK(gmem1.get_status(m) == session::config::groups::member::Status::removed);
             if (i >= 64 && i < 66)
-                CHECK(m.status() ==
+                CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::removed_including_messages);
             CHECK(m.supplement == (i % 2 && 50 < i && i < 58));
             i++;
@@ -265,24 +286,33 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url ==
                   (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
-            if (i >= 10 && i < 50)
-                CHECK(m.status() == session::config::groups::member::Status::invite_not_sent);
+            if (is_prime100(i) || (i >= 25 && i < 50))
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_not_sent);
+            if (!is_prime100(i) && i >= 10 && i < 25)
+                CHECK(gmem1.get_status(m) ==
+                      session::config::groups::member::Status::invite_sending);
             if (i >= 50 && i < 54)
-                CHECK(m.status() == session::config::groups::member::Status::invite_accepted);
+                CHECK(gmem2.get_status(m) ==
+                      session::config::groups::member::Status::invite_accepted);
             if (i == 53 || (i >= 55 && i < 57))
-                CHECK(m.status() == session::config::groups::member::Status::invite_sent);
+                CHECK(gmem2.get_status(m) == session::config::groups::member::Status::invite_sent);
             if (i == 57)
-                CHECK(m.status() == session::config::groups::member::Status::invite_failed);
+                CHECK(gmem2.get_status(m) ==
+                      session::config::groups::member::Status::invite_failed);
             if (i < 10 || i == 58)
-                CHECK(m.status() == session::config::groups::member::Status::promotion_accepted);
+                CHECK(gmem2.get_status(m) ==
+                      session::config::groups::member::Status::promotion_accepted);
             if (i == 59)
-                CHECK(m.status() == session::config::groups::member::Status::promotion_sent);
+                CHECK(gmem2.get_status(m) ==
+                      session::config::groups::member::Status::promotion_sent);
             if (i >= 60 && i < 62)
-                CHECK(m.status() == session::config::groups::member::Status::promotion_failed);
+                CHECK(gmem2.get_status(m) ==
+                      session::config::groups::member::Status::promotion_failed);
             if (i >= 62 && i < 64)
-                CHECK(m.status() == session::config::groups::member::Status::removed);
+                CHECK(gmem2.get_status(m) == session::config::groups::member::Status::removed);
             if (i >= 64 && i < 66)
-                CHECK(m.status() ==
+                CHECK(gmem2.get_status(m) ==
                       session::config::groups::member::Status::removed_including_messages);
             CHECK(m.supplement == (i == 55 || i == 57));
 
@@ -303,4 +333,44 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     CHECK(m.name ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "901234567890");
+}
+
+TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    std::array<unsigned char, 32> ed_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "cbd569f56fb13ea95a3f0c05c331cc24139c0090feb412069dc49fab34406ece");
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    groups::Members gmem1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+
+    auto memberId1 = "050000000000000000000000000000000000000000000000000000000000000000";
+    auto memberId2 = "051111111111111111111111111111111111111111111111111111111111111111";
+
+    auto member1 = gmem1.get_or_construct(memberId1);
+    auto member2 = gmem1.get_or_construct(memberId2);
+
+    member2.set_promoted();
+    gmem1.set(member1);  // should be marked as "invite sending" right away
+    gmem1.set(member2);  // should be marked as "promotion sending" right away
+
+    CHECK(gmem1.get_status(gmem1.get_or_construct(memberId1)) ==
+          groups::member::Status::invite_sending);
+    CHECK(gmem1.get_status(gmem1.get_or_construct(memberId2)) ==
+          groups::member::Status::promotion_sending);
+
+    auto dumped = gmem1.dump();
+
+    groups::Members gmem2{to_usv(ed_pk), to_usv(ed_sk), dumped};
+
+    CHECK(gmem2.get_status(gmem1.get_or_construct(memberId1)) ==
+          groups::member::Status::invite_sending);
+    CHECK(gmem2.get_status(gmem1.get_or_construct(memberId2)) ==
+          groups::member::Status::promotion_sending);
 }
