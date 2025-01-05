@@ -158,6 +158,19 @@ groups_members_get_status(const config_object* conf, const config_group_member* 
 /// - `bool` -- Returns true if the call succeeds, false if an error occurs.
 LIBSESSION_EXPORT bool groups_members_set_invite_sent(config_object* conf, const char* session_id);
 
+/// API: groups/groups_members_set_invite_not_sent
+///
+/// This resets the invite status of a user to `STATUS_NOT_SENT`.
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `session_id` -- [in] null terminated hex string
+///
+/// Outputs:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool groups_members_set_invite_not_sent(
+        config_object* conf, const char* session_id);
+
 /// API: groups/groups_members_set_invite_failed
 ///
 /// This marks the user as being invited to the group, but that their invitation message failed to
