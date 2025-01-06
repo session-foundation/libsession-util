@@ -346,6 +346,20 @@ LIBSESSION_C_API bool groups_members_set_invite_sent(config_object* conf, const 
     }
 }
 
+LIBSESSION_C_API bool groups_members_set_invite_not_sent(
+        config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_invite_not_sent();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
 LIBSESSION_C_API bool groups_members_set_invite_failed(
         config_object* conf, const char* session_id) {
     try {
