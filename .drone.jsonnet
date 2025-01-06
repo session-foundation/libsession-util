@@ -28,6 +28,14 @@ local debian_backports(distro, pkgs) = [
   'eatmydata ' + apt_get_quiet + ' install -y ' + std.join(' ', std.map(function(x) x + '/' + distro + '-backports', pkgs)),
 ];
 
+local llvm_debports(llvm_version) = [
+  'curl -fsSL https://apt.llvm.org/llvm-snapshot.gpg.key | gpg --dearmor -o /etc/apt/keyrings/llvm-snapshot.gpg',
+  'chmod a+r /etc/apt/keyrings/llvm-snapshot.gpg',
+  'echo   "deb [arch="$(dpkg --print-architecture)" signed-by=/etc/apt/keyrings/llvm-snapshot.gpg] http://apt.llvm.org/unstable/ llvm-toolchain-' + llvm_version + ' main" > /etc/apt/sources.list.d/llvm-snapshot.list',
+  'eatmydata ' + apt_get_quiet + ' update',
+  'eatmydata ' + apt_get_quiet + ' install -y clang-' + llvm_version,
+];
+
 // Do something on a debian-like system
 local debian_pipeline(name,
                       image,
@@ -192,8 +200,9 @@ local windows_cross_pipeline(name,
 local clang(version) = debian_build(
   'Debian sid/clang-' + version,
   docker_base + 'debian-sid-clang',
-  deps=['clang-' + version] + default_deps_nocxx,
-  cmake_extra='-DCMAKE_C_COMPILER=clang-' + version + ' -DCMAKE_CXX_COMPILER=clang++-' + version + ' '
+  deps=default_deps_nocxx,
+  cmake_extra='-DCMAKE_C_COMPILER=clang-' + version + ' -DCMAKE_CXX_COMPILER=clang++-' + version + ' ',
+  extra_setup=llvm_debports('16')
 );
 
 local full_llvm(version) = debian_build(
@@ -208,7 +217,8 @@ local full_llvm(version) = debian_build(
               std.join(' ', [
                 '-DCMAKE_' + type + '_LINKER_FLAGS=-fuse-ld=lld-' + version
                 for type in ['EXE', 'MODULE', 'SHARED']
-              ])
+              ]),
+  extra_setup=llvm_debports('16')
 );
 
 // Macos build
