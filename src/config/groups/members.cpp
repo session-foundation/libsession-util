@@ -171,7 +171,7 @@ void Members::set_pending_send(std::string pubkey_hex, bool pending) {
         changed = pending_send_ids.insert(pubkey_hex).second;
     else
         changed = pending_send_ids.erase(pubkey_hex);
-    if(changed)
+    if (changed)
         _needs_dump = true;
 }
 
@@ -340,6 +340,20 @@ LIBSESSION_C_API bool groups_members_set_invite_sent(config_object* conf, const 
     try {
         if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
             m->set_invite_sent();
+            unbox<groups::Members>(conf)->set(*m);
+            return true;
+        }
+        return false;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool groups_members_set_invite_not_sent(
+        config_object* conf, const char* session_id) {
+    try {
+        if (auto m = unbox<groups::Members>(conf)->get(session_id)) {
+            m->set_invite_not_sent();
             unbox<groups::Members>(conf)->set(*m);
             return true;
         }

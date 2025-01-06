@@ -328,7 +328,7 @@ class ConfigBase : public ConfigSig {
         /// API: base/ConfigBase::DictFieldProxy::assign_if_changed
         ///
         /// Takes a value and assigns it to the dict only if that value is different.
-        /// Will avoid dirtying the config if the assignement isnt changing anything
+        /// Will avoid dirtying the config if the assignement isn't changing anything
         ///
         /// Inputs:
         /// - `value` -- This will be assigned to the dict if it has changed
@@ -945,12 +945,12 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `bool` -- Returns true if changes havent been serialized
+    /// - `bool` -- Returns true if changes haven't been serialized
     bool is_dirty() const { return _state == ConfigState::Dirty; }
 
     /// API: base/ConfigBase::is_clean
     ///
-    /// Returns true if we are curently clean (i.e. our current config is stored on the server and
+    /// Returns true if we are currently clean (i.e. our current config is stored on the server and
     /// unmodified).
     ///
     /// Inputs: None
@@ -986,7 +986,7 @@ class ConfigBase : public ConfigSig {
     ///   hashes.  Typically this is unlikely to be useful, as it is expected that only signers (who
     ///   can update and merge) are likely also the only ones who can actually push new configs to
     ///   the swarm.
-    /// - read-only configurations do not reliably track obsolete hashes as the obsolesence logic
+    /// - read-only configurations do not reliably track obsolete hashes as the obsolescence logic
     ///   depends on the results of merging, which read-only configs do not support.  (If you do
     ///   call `push()`, you'll always just get back an empty list of obsolete hashes).
     ///
