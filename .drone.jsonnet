@@ -193,7 +193,9 @@ local clang(version) = debian_build(
   'Debian sid/clang-' + version,
   docker_base + 'debian-sid-clang',
   deps=['clang-' + version] + default_deps_nocxx,
-  cmake_extra='-DCMAKE_C_COMPILER=clang-' + version + ' -DCMAKE_CXX_COMPILER=clang++-' + version + ' '
+  cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
+              ' -DCMAKE_CXX_COMPILER=clang++-' + version +
+              ' -DLOCAL_MIRROR="https://oxen.rocks/deps" '
 );
 
 local full_llvm(version) = debian_build(
@@ -205,6 +207,7 @@ local full_llvm(version) = debian_build(
   cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
               ' -DCMAKE_CXX_COMPILER=clang++-' + version +
               ' -DCMAKE_CXX_FLAGS="-stdlib=libc++ -fcolor-diagnostics" ' +
+              ' -DLOCAL_MIRROR="https://oxen.rocks/deps" ' +
               std.join(' ', [
                 '-DCMAKE_' + type + '_LINKER_FLAGS=-fuse-ld=lld-' + version
                 for type in ['EXE', 'MODULE', 'SHARED']
@@ -338,8 +341,8 @@ local static_build(name,
   debian_build('Debian sid', docker_base + 'debian-sid'),
   debian_build('Debian sid/Debug', docker_base + 'debian-sid', build_type='Debug'),
   debian_build('Debian testing', docker_base + 'debian-testing'),
-  clang(16),
-  full_llvm(16),
+  clang(17),
+  full_llvm(17),
   debian_build('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_build('Debian 11', docker_base + 'debian-bullseye', extra_setup=debian_backports('bullseye', ['cmake'])),
   debian_build('Ubuntu latest', docker_base + 'ubuntu-rolling'),
