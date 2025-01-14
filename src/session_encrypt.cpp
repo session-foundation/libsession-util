@@ -6,8 +6,10 @@
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_core_ed25519.h>
 #include <sodium/crypto_generichash_blake2b.h>
+#include <sodium/crypto_pwhash.h>
 #include <sodium/crypto_scalarmult.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
+#include <sodium/crypto_secretbox.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
@@ -508,10 +510,44 @@ std::pair<ustring, std::string> decrypt_from_blinded_recipient(
 }
 
 std::string decrypt_ons_response(
-        std::string_view lowercase_name, ustring_view ciphertext, ustring_view nonce) {
+        std::string_view lowercase_name,
+        ustring_view ciphertext,
+        std::optional<ustring_view> nonce) {
+    // Handle old Argon2-based encryption used before HF16
+    if (!nonce) {
+        if (ciphertext.size() < crypto_secretbox_MACBYTES)
+            throw std::invalid_argument{"Invalid ciphertext: expected to be greater than 16 bytes"};
+
+        uc32 key;
+        std::array<unsigned char, crypto_pwhash_SALTBYTES> salt = {0};
+
+        if (0 != crypto_pwhash(
+                         key.data(),
+                         key.size(),
+                         lowercase_name.data(),
+                         lowercase_name.size(),
+                         salt.data(),
+                         crypto_pwhash_OPSLIMIT_MODERATE,
+                         crypto_pwhash_MEMLIMIT_MODERATE,
+                         crypto_pwhash_ALG_ARGON2ID13))
+            throw std::runtime_error{"Failed to generate key"};
+
+        ustring msg;
+        msg.resize(ciphertext.size() - crypto_secretbox_MACBYTES);
+        std::array<unsigned char, crypto_secretbox_NONCEBYTES> nonce = {0};
+
+        if (0 !=
+            crypto_secretbox_open_easy(
+                    msg.data(), ciphertext.data(), ciphertext.size(), nonce.data(), key.data()))
+            throw std::runtime_error{"Failed to decrypt"};
+
+        std::string session_id = oxenc::to_hex(msg.begin(), msg.end());
+        return session_id;
+    }
+
     if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{"Invalid ciphertext: expected to be greater than 16 bytes"};
-    if (nonce.size() != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES)
+    if (nonce->size() != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES)
         throw std::invalid_argument{"Invalid nonce: expected to be 24 bytes"};
 
     // Hash the ONS name using BLAKE2b
@@ -543,7 +579,7 @@ std::string decrypt_ons_response(
                      ciphertext.size(),
                      nullptr,
                      0,
-                     nonce.data(),
+                     nonce->data(),
                      key.data()))
         throw std::runtime_error{"Failed to decrypt"};
 
@@ -718,16 +754,17 @@ LIBSESSION_C_API bool session_decrypt_for_blinded_recipient(
 
 LIBSESSION_C_API bool session_decrypt_ons_response(
         const char* name_in,
-        size_t name_len,
         const unsigned char* ciphertext_in,
         size_t ciphertext_len,
         const unsigned char* nonce_in,
         char* session_id_out) {
     try {
+        std::optional<ustring> nonce;
+        if (nonce_in)
+            nonce = ustring{nonce_in, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES};
+
         auto session_id = session::decrypt_ons_response(
-                std::string_view{name_in, name_len},
-                ustring_view{ciphertext_in, ciphertext_len},
-                ustring_view{nonce_in, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES});
+                name_in, ustring_view{ciphertext_in, ciphertext_len}, nonce);
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
         return true;

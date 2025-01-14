@@ -170,12 +170,11 @@ LIBSESSION_EXPORT bool session_decrypt_for_blinded_recipient(
 /// This function attempts to decrypt an ONS response.
 ///
 /// Inputs:
-/// - `lowercase_name_in` -- [in] Pointer to a buffer containing the lowercase name used to trigger
-/// the response.
-/// - `name_len` -- [in] Length of `name_in`.
+/// - `lowercase_name_in` -- [in] Pointer to a NULL-terminated buffer containing the lowercase name
+/// used to trigger the response.
 /// - `ciphertext_in` -- [in] Pointer to a data buffer containing the encrypted data.
 /// - `ciphertext_len` -- [in] Length of `ciphertext_in`.
-/// - `nonce_in` -- [in] Pointer to a data buffer containing the nonce (24 bytes).
+/// - `nonce_in` -- [in, optional] Pointer to a data buffer containing the nonce (24 bytes) or NULL.
 /// - `session_id_out` -- [out] pointer to a buffer of at least 67 bytes where the null-terminated,
 ///   hex-encoded session_id will be written if decryption was successful.
 ///
@@ -183,10 +182,9 @@ LIBSESSION_EXPORT bool session_decrypt_for_blinded_recipient(
 /// - `bool` -- True if the session ID was successfully decrypted, false if decryption failed.
 LIBSESSION_EXPORT bool session_decrypt_ons_response(
         const char* lowercase_name_in,
-        size_t name_len,
         const unsigned char* ciphertext_in,
         size_t ciphertext_len,
-        const unsigned char* nonce_in, /* 24 bytes */
+        const unsigned char* nonce_in, /* 24 bytes or NULL */
         char* session_id_out /* 67 byte output buffer */);
 
 /// API: crypto/session_decrypt_push_notification
