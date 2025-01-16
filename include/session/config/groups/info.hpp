@@ -239,8 +239,8 @@ class Info : public ConfigBase {
     /// the closed group history with a timestamp earlier than this value.  Returns nullopt if no
     /// delete-before timestamp is set.
     ///
-    /// The given value is not checked for sanity (e.g. if you pass milliseconds it will be
-    /// interpreted as deleting everything for the next 50000+ years).  Be careful!
+    /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
+    /// interpreted as such)
     ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete messages.  Pass 0
@@ -267,8 +267,8 @@ class Info : public ConfigBase {
     /// that) from any messages older than the given timestamp.  Returns nullopt if no
     /// delete-attachments-before timestamp is set.
     ///
-    /// The given value is not checked for sanity (e.g. if you pass milliseconds it will be
-    /// interpreted as deleting all attachments for the next 50000+ years).  Be careful!
+    /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
+    /// interpreted as such)
     ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete attachments. Pass

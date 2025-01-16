@@ -48,7 +48,7 @@ inline ustring_view to_unsigned_sv(std::basic_string_view<std::byte> v) {
     return {to_unsigned(v.data()), v.size()};
 }
 inline ustring_view to_unsigned_sv(ustring_view v) {
-    return v;  // no-op, but helps with template metaprogamming
+    return v;  // no-op, but helps with template metaprogramming
 }
 inline std::string_view from_unsigned_sv(ustring_view v) {
     return {from_unsigned(v.data()), v.size()};
@@ -64,10 +64,6 @@ inline std::string_view from_unsigned_sv(const std::vector<T, A>& v) {
 template <typename Char, size_t N>
 inline std::basic_string_view<Char> to_sv(const std::array<Char, N>& v) {
     return {v.data(), N};
-}
-
-inline uint64_t get_timestamp() {
-    return std::chrono::steady_clock::now().time_since_epoch().count();
 }
 
 /// Returns true if the first string is equal to the second string, compared case-insensitively.
@@ -203,6 +199,14 @@ inline std::string utf8_truncate(std::string val, size_t n) {
 
     val.resize(n);
     return val;
+}
+
+// Helper function to transform a timestamp provided in seconds, milliseconds or microseconds to
+// seconds
+inline int64_t to_seconds(int64_t timestamp) {
+    return timestamp > 9'000'000'000'000 ? timestamp / 1'000'000
+         : timestamp > 9'000'000'000     ? timestamp / 1'000
+                                         : timestamp;
 }
 
 }  // namespace session

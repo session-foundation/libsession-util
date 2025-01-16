@@ -62,11 +62,11 @@ struct contact_info {
                        // conversation.
     notify_mode notifications = notify_mode::defaulted;
     int64_t mute_until = 0;  // If non-zero, disable notifications until the given unix timestamp
-                             // (overriding whatever the current `notifications` value is until the
-                             // timestamp expires).
+                             // (seconds, overriding whatever the current `notifications` value is
+                             // until the timestamp expires).
     expiration_mode exp_mode = expiration_mode::none;  // The expiry time; none if not expiring.
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
-    int64_t created = 0;                               // Unix timestamp when this contact was added
+    int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
     explicit contact_info(std::string sid);
 

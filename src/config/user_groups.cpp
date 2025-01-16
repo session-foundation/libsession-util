@@ -36,18 +36,18 @@ namespace session::config {
 template <typename T>
 static void base_into(const base_group_info& self, T& c) {
     c.priority = self.priority;
-    c.joined_at = self.joined_at;
+    c.joined_at = to_seconds(self.joined_at);
     c.notifications = static_cast<CONVO_NOTIFY_MODE>(self.notifications);
-    c.mute_until = self.mute_until;
+    c.mute_until = to_seconds(self.mute_until);
     c.invited = self.invited;
 }
 
 template <typename T>
 static void base_from(base_group_info& self, const T& c) {
     self.priority = c.priority;
-    self.joined_at = c.joined_at;
+    self.joined_at = to_seconds(c.joined_at);
     self.notifications = static_cast<notify_mode>(c.notifications);
-    self.mute_until = c.mute_until;
+    self.mute_until = to_seconds(c.mute_until);
     self.invited = c.invited;
 }
 
@@ -129,7 +129,7 @@ void legacy_group_info::into(ugroups_legacy_group_info& c) && {
 
 void base_group_info::load(const dict& info_dict) {
     priority = maybe_int(info_dict, "+").value_or(0);
-    joined_at = std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0));
+    joined_at = to_seconds(std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0)));
 
     int notify = maybe_int(info_dict, "@").value_or(0);
     if (notify >= 0 && notify <= 3)
@@ -137,7 +137,7 @@ void base_group_info::load(const dict& info_dict) {
     else
         notifications = notify_mode::defaulted;
 
-    mute_until = maybe_int(info_dict, "!").value_or(0);
+    mute_until = to_seconds(maybe_int(info_dict, "!").value_or(0));
 
     invited = maybe_int(info_dict, "i").value_or(0);
 }
@@ -407,9 +407,9 @@ void UserGroups::set(const community_info& c) {
 
 void UserGroups::set_base(const base_group_info& bg, DictFieldProxy& info) const {
     set_nonzero_int(info["+"], bg.priority);
-    set_positive_int(info["j"], bg.joined_at);
+    set_positive_int(info["j"], to_seconds(bg.joined_at));
     set_positive_int(info["@"], static_cast<int>(bg.notifications));
-    set_positive_int(info["!"], bg.mute_until);
+    set_positive_int(info["!"], to_seconds(bg.mute_until));
     set_flag(info["i"], bg.invited);
     // We don't set n here because it's subtly different in the three group types
 }
