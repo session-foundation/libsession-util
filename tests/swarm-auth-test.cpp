@@ -21,9 +21,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 static constexpr int64_t created_ts = 1680064059;
 
 using namespace session::config;
@@ -115,8 +112,7 @@ int main() {
     auto msg = to_usv("hello world");
     std::array<unsigned char, 64> store_sig;
     ustring store_to_sign;
-    store_to_sign += to_usv("store999");
-    store_to_sign += to_usv(std::to_string(now));
+    store_to_sign += to_usv("store999{}"_format(now));
     crypto_sign_ed25519_detached(
             store_sig.data(), nullptr, store_to_sign.data(), store_to_sign.size(), group_sk.data());
 
@@ -133,8 +129,7 @@ int main() {
     std::cout << "STORE:\n\n" << store.dump() << "\n\n";
 
     ustring retrieve_to_sign;
-    retrieve_to_sign += to_usv("retrieve999");
-    retrieve_to_sign += to_usv(std::to_string(now));
+    retrieve_to_sign += to_usv("retrieve999{}"_format(now));
     auto subauth = member.keys.swarm_subaccount_sign(retrieve_to_sign, auth_data);
 
     nlohmann::json retrieve{

@@ -12,8 +12,6 @@
 #include "utils.hpp"
 
 using namespace session;
-using namespace std::literals;
-using namespace oxenc::literals;
 
 TEST_CASE("config message encryption", "[config][encrypt]") {
     auto message1 = "some message 1"_bytes;

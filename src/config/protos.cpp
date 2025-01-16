@@ -120,7 +120,7 @@ ustring wrap_config(
     return ustring{to_unsigned_sv(msg.SerializeAsString())};
 }
 
-ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namespace ns) {
+ustring unwrap_config(ucspan ed25519_sk, ucspan data, config::Namespace ns) {
     // Hurray, we get to undo everything from the above!
 
     std::array<unsigned char, 64> tmp_sk;
@@ -131,7 +131,7 @@ ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namesp
     } else if (ed25519_sk.size() != 64)
         throw std::invalid_argument{
                 "Error: ed25519_sk is not the expected 64-byte Ed25519 secret key"};
-    auto ed25519_pk = ed25519_sk.substr(32);
+    auto ed25519_pk = ed25519_sk.subspan<32>();
 
     WebSocketProtos::WebSocketMessage req{};
 
@@ -147,7 +147,7 @@ ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namesp
         throw std::runtime_error{"Failed to parse Envelope"};
 
     auto [content, sender] = decrypt_incoming(ed25519_sk, to_unsigned_sv(envelope.content()));
-    if (sender != ed25519_pk)
+    if (sender != to_unsigned_sv(ed25519_pk))
         throw std::runtime_error{"Incoming config data was not from us; ignoring"};
 
     if (content.empty())

@@ -226,9 +226,9 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Outputs:
     /// - `std::tuple<seqno_t, ustring, std::vector<std::string>>` - Returns a tuple containing
     ///   - `seqno_t` -- sequence number
-    ///   - `ustring` -- data message to push to the server
+    ///   - `std::vector<ustring>` -- data message(s) to push to the server
     ///   - `std::vector<std::string>` -- list of known message hashes
-    std::tuple<seqno_t, ustring, std::vector<std::string>> push() override;
+    std::tuple<seqno_t, std::vector<ustring>, std::vector<std::string>> push() override;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_1to1
     ///

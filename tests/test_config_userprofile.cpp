@@ -10,9 +10,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 void log_msg(config_log_level lvl, const char* msg, void*) {
     INFO((lvl == LOG_LEVEL_ERROR     ? "ERROR"
           : lvl == LOG_LEVEL_WARNING ? "Warning"
@@ -20,8 +17,6 @@ void log_msg(config_log_level lvl, const char* msg, void*) {
                                      : "debug")
          << ": " << msg);
 }
-
-auto empty_extra_data = "1:+de";
 
 TEST_CASE("UserProfile", "[config][user_profile]") {
 
@@ -107,14 +102,15 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     config_push_data* to_push = config_push(conf);
     REQUIRE(to_push);
     CHECK(to_push->seqno == 0);
-    CHECK(to_push->config_len == 256 + 176);  // 176 = protobuf overhead
+    REQUIRE(to_push->n_configs == 1);
+    CHECK(to_push->config_lens[0] == 256 + 176);  // 176 = protobuf overhead
     const char* enc_domain = "UserProfile";
     REQUIRE(config_encryption_domain(conf) == std::string_view{enc_domain});
 
     // There's nothing particularly profound about this value (it is multiple layers of nested
     // protobuf with some encryption and padding halfway through); this test is just here to ensure
     // that our pushed messages are deterministic:
-    CHECK(oxenc::to_hex(to_push->config, to_push->config + to_push->config_len) ==
+    CHECK(oxenc::to_hex(to_push->config[0], to_push->config[0] + to_push->config_lens[0]) ==
           "080112ab030a0012001aa20308062801429b0326ec9746282053eb119228e6c36012966e7d2642163169ba39"
           "98af44ca65f967768dd78ee80fffab6f809f6cef49c73a36c82a89622ff0de2ceee06b8c638e2c876fa9047f"
           "449dbe24b1fc89281a264fe90abdeffcdd44f797bd4572a6c5ae8d88bf372c3c717943ebd570222206fabf0e"
@@ -221,15 +217,19 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(printable(dump1, dump1len) == printable(
         "d"
           "1:!" "i2e"
-          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
-          "1:(" "0:"
-          "1:)" "le" + empty_extra_data +
-        "e"));
+          "1:${}:{}"
+          "1:(" "le"
+          "1:)" "le"
+          "1:*" "de"
+          "1:+" "de"
+        "e"_format(exp_push1_decrypted.size(), to_sv(exp_push1_decrypted))));
     // clang-format on
     free(dump1);  // done with the dump; don't leak!
 
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
+
     // So now imagine we got back confirmation from the swarm that the push has been stored:
-    config_confirm_pushed(conf, seqno, "fakehash1");
+    config_confirm_pushed(conf, seqno, &(tmphash = "fakehash1"), 1);
 
     CHECK_FALSE(config_needs_push(conf));
     CHECK(config_needs_dump(conf));  // The confirmation changes state, so this makes us need a dump
@@ -240,10 +240,12 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(printable(dump1, dump1len) == printable(
         "d"
           "1:!" "i0e"
-          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
-          "1:(" "9:fakehash1"
-          "1:)" "le" + empty_extra_data +
-        "e"));
+          "1:${}:{}"
+          "1:(" "l" "9:fakehash1" "e"
+          "1:)" "le"
+          "1:*" "de"
+          "1:+" "de"
+        "e"_format(exp_push1_decrypted.size(), to_sv(exp_push1_decrypted))));
     // clang-format on
     free(dump1);
 
@@ -309,12 +311,13 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(config_needs_push(conf));
     CHECK(config_needs_push(conf2));
     to_push = config_push(conf);
+
     CHECK(to_push->seqno == 2);  // incremented, since we made a field change
-    config_confirm_pushed(conf2, to_push->seqno, "fakehash2");
+    config_confirm_pushed(conf2, to_push->seqno, &(tmphash = "fakehash2"), 1);
 
     config_push_data* to_push2 = config_push(conf2);
     CHECK(to_push2->seqno == 2);  // incremented, since we made a field change
-    config_confirm_pushed(conf2, to_push2->seqno, "fakehash3");
+    config_confirm_pushed(conf2, to_push2->seqno, &(tmphash = "fakehash3"), 1);
 
     config_dump(conf, &dump1, &dump1len);
     config_dump(conf2, &dump2, &dump2len);
@@ -324,8 +327,10 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Since we set different things, we're going to get back different serialized data to be
     // pushed:
-    CHECK(printable(to_push->config, to_push->config_len) !=
-          printable(to_push2->config, to_push2->config_len));
+    REQUIRE(to_push->n_configs == 1);
+    REQUIRE(to_push2->n_configs == 1);
+    CHECK(printable(to_push->config[0], to_push->config_lens[0]) !=
+          printable(to_push2->config[0], to_push2->config_lens[0]));
 
     // Now imagine that each client pushed its `seqno=2` config to the swarm, but then each client
     // also fetches new messages and pulls down the other client's `seqno=2` value.
@@ -333,16 +338,16 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     // Feed the new config into each other.  (This array could hold multiple configs if we pulled
     // down more than one).
     merge_hash[0] = "fakehash2";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
     accepted = config_merge(conf2, merge_hash, merge_data, merge_size, 1);
     free(to_push);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "fakehash2"sv);
     free(accepted);
     merge_hash[0] = "fakehash3";
-    merge_data[0] = to_push2->config;
-    merge_size[0] = to_push2->config_len;
+    merge_data[0] = to_push2->config[0];
+    merge_size[0] = to_push2->config_lens[0];
     accepted = config_merge(conf, merge_hash, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "fakehash3"sv);
@@ -387,8 +392,8 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(user_profile_get_blinded_msgreqs(conf) == 1);
     CHECK(user_profile_get_blinded_msgreqs(conf2) == 1);
 
-    config_confirm_pushed(conf, to_push->seqno, "fakehash4");
-    config_confirm_pushed(conf2, to_push2->seqno, "fakehash4");
+    config_confirm_pushed(conf, to_push->seqno, &(tmphash = "fakehash4"), 1);
+    config_confirm_pushed(conf2, to_push2->seqno, &(tmphash = "fakehash4"), 1);
 
     config_dump(conf, &dump1, &dump1len);
     config_dump(conf2, &dump2, &dump2len);

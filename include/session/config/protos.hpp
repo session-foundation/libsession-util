@@ -40,6 +40,6 @@ ustring wrap_config(
 /// Throws a std::invalid_argument if the given ed25519_sk is invalid.  (It is recommended that only
 /// the std::runtime_error is caught for detecting non-wrapped input as the invalid secret key is
 /// more serious).
-ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namespace ns);
+ustring unwrap_config(ucspan ed25519_sk, ucspan data, config::Namespace ns);
 
 }  // namespace session::config::protos

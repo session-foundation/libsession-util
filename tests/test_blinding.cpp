@@ -10,7 +10,6 @@
 #include "session/util.hpp"
 #include "utils.hpp"
 
-using namespace std::literals;
 using namespace session;
 
 constexpr std::array<unsigned char, 64> seed1{
@@ -310,9 +309,7 @@ TEST_CASE("Version 07xxx-blinded signing", "[blinding07][sign]") {
 
     uint64_t timestamp = 1234567890;
     ustring full_message;
-    full_message += to_unsigned_sv(std::to_string(timestamp));
-    full_message += to_unsigned_sv(method);
-    full_message += to_unsigned_sv(path);
+    full_message += to_unsigned_sv("{}{}{}"_format(timestamp, method, path));
     auto req_sig_no_body =
             blind_version_sign_request(to_usv(seed1), timestamp, method, path, std::nullopt);
     CHECK(crypto_sign_verify_detached(

@@ -102,9 +102,9 @@ if(CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
+system_or_submodule(OXENC oxenc liboxenc>=1.2.0 oxen-encoding)
 
-system_or_submodule(OXENC oxenc liboxenc>=1.0.10 oxen-encoding)
-
+add_subdirectory(oxen-logging)
 
 if(CMAKE_C_COMPILER_LAUNCHER)
   set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")
