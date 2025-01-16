@@ -193,7 +193,7 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
                     ? m.invited
                     : 0;
     promotion_status = (m.promoted == STATUS_SENT || m.promoted == STATUS_FAILED ||
-                        m.invited == STATUS_NOT_SENT)
+                        m.promoted == STATUS_NOT_SENT)
                              ? m.promoted
                              : 0;
     removed_status = (m.removed == REMOVED_MEMBER || m.removed == REMOVED_MEMBER_AND_MESSAGES)
