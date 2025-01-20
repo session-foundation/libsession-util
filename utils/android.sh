@@ -48,8 +48,6 @@ pkg="${archive%%.tar.xz}"
 
 mkdir -p "$pkg"/include
 cp -rv ../include/session "$pkg"/include/
-mkdir -p "$pkg"/include/oxenc
-cp -v ../external/oxen-encoding/oxenc/*.h x86_64/external/oxen-encoding/oxenc/version.h "$pkg"/include/oxenc/
 
 for abi in "${abis[@]}"; do
     mkdir -p "$pkg"/lib/$abi

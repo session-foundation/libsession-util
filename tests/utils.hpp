@@ -8,6 +8,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "session/config/base.h"
@@ -88,3 +89,69 @@ std::vector<std::basic_string_view<C>> view_vec(const std::vector<std::basic_str
     std::copy(v.begin(), v.end(), std::back_inserter(vv));
     return vv;
 }
+
+template <std::invocable Call, std::invocable<typename std::invoke_result_t<Call>> Validator>
+auto eventually_impl(std::chrono::milliseconds timeout, Call&& f, Validator&& isValid)
+        -> std::invoke_result_t<Call> {
+    using ResultType = std::invoke_result_t<Call>;
+
+    // If we already have a value then don't bother with the loop
+    if (auto result = f(); isValid(result))
+        return result;
+
+    auto start = std::chrono::steady_clock::now();
+    auto sleep_duration = std::chrono::milliseconds{10};
+    while (std::chrono::steady_clock::now() - start < timeout) {
+        std::this_thread::sleep_for(sleep_duration);
+
+        if (auto result = f(); isValid(result))
+            return result;
+    }
+
+    return ResultType{};
+}
+
+template <std::invocable Call, std::invocable<typename std::invoke_result_t<Call>> Validator>
+bool always_impl(std::chrono::milliseconds duration, Call&& f, Validator&& isValid) {
+    auto start = std::chrono::steady_clock::now();
+    auto sleep_duration = std::chrono::milliseconds{10};
+    while (std::chrono::steady_clock::now() - start < duration) {
+        if (auto result = f(); !isValid(result))
+            return false;
+        std::this_thread::sleep_for(sleep_duration);
+    }
+    return true;
+}
+
+template <std::invocable Call>
+    requires std::is_same_v<std::invoke_result_t<Call>, bool>
+bool eventually_impl(std::chrono::milliseconds timeout, Call&& f) {
+    return eventually_impl(timeout, f, [](bool result) { return result; });
+}
+
+template <std::invocable Call>
+    requires std::is_same_v<
+            std::invoke_result_t<Call>,
+            std::vector<typename std::invoke_result_t<Call>::value_type>>
+auto eventually_impl(std::chrono::milliseconds timeout, Call&& f) -> std::invoke_result_t<Call> {
+    using ResultType = std::invoke_result_t<Call>;
+    return eventually_impl(timeout, f, [](const ResultType& result) { return !result.empty(); });
+}
+
+template <std::invocable Call>
+    requires std::is_same_v<std::invoke_result_t<Call>, bool>
+bool always_impl(std::chrono::milliseconds duration, Call&& f) {
+    return always_impl(duration, f, [](bool result) { return result; });
+}
+
+template <std::invocable Call>
+    requires std::is_same_v<
+            std::invoke_result_t<Call>,
+            std::vector<typename std::invoke_result_t<Call>::value_type>>
+bool always_impl(std::chrono::milliseconds duration, Call&& f) {
+    using ResultType = std::invoke_result_t<Call>;
+    return always_impl(duration, f, [](const ResultType& result) { return !result.empty(); });
+}
+
+#define EVENTUALLY(timeout, ...) eventually_impl(timeout, [&]() { return (__VA_ARGS__); })
+#define ALWAYS(duration, ...) always_impl(duration, [&]() { return (__VA_ARGS__); })

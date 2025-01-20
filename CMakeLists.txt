@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.14...3.23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Has to be set before `project()`, and ignored on non-macos:
-set(CMAKE_OSX_DEPLOYMENT_TARGET 10.13 CACHE STRING "macOS deployment target (Apple clang only)")
+set(CMAKE_OSX_DEPLOYMENT_TARGET 10.15 CACHE STRING "macOS deployment target (Apple clang only)")
 
 set(LANGS C CXX)
 find_program(CCACHE_PROGRAM ccache)
@@ -15,7 +15,6 @@ if(CCACHE_PROGRAM)
     endif()
   endforeach()
 endif()
-
 
 project(libsession-util
     VERSION 1.2.0
@@ -41,7 +40,7 @@ else()
 endif()
 
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -81,7 +80,7 @@ option(STATIC_LIBSTD "Statically link libstdc++/libgcc" ${default_static_libstd}
 
 option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 
-# Provide this as an option for now because GMP and iOS are sometimes unhappy with each other.
+# Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
 option(ENABLE_ONIONREQ "Build with onion request functionality" ON)
 
 if(USE_LTO)
@@ -118,6 +117,21 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 
 add_subdirectory(external)
+
+if(ENABLE_ONIONREQ)
+    if(NOT TARGET nettle::nettle)
+        if(BUILD_STATIC_DEPS)
+            message(FATAL_ERROR "Internal error: nettle::nettle target (expected via libquic BUILD_STATIC_DEPS) not found")
+        else()
+            find_package(PkgConfig REQUIRED)
+            pkg_check_modules(NETTLE REQUIRED IMPORTED_TARGET nettle)
+            add_library(nettle INTERFACE)
+            target_link_libraries(nettle INTERFACE PkgConfig::NETTLE)
+            add_library(nettle::nettle ALIAS nettle)
+        endif()
+    endif()
+endif()
+
 add_subdirectory(src)
 add_subdirectory(proto)
 

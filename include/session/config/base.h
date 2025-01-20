@@ -42,44 +42,6 @@ typedef struct config_object {
 /// - `conf` -- [in] Pointer to config_object object
 LIBSESSION_EXPORT void config_free(config_object* conf);
 
-typedef enum config_log_level {
-    LOG_LEVEL_DEBUG = 0,
-    LOG_LEVEL_INFO,
-    LOG_LEVEL_WARNING,
-    LOG_LEVEL_ERROR
-} config_log_level;
-
-/// API: base/config_set_logger
-///
-/// Sets a logging function; takes the log function pointer and a context pointer (which can be NULL
-/// if not needed).  The given function pointer will be invoked with one of the above values, a
-/// null-terminated c string containing the log message, and the void* context object given when
-/// setting the logger (this is for caller-specific state data and won't be touched).
-///
-/// The logging function must have signature:
-///
-/// void log(config_log_level lvl, const char* msg, void* ctx);
-///
-/// Can be called with callback set to NULL to clear an existing logger.
-///
-/// The config object itself has no log level: the caller should filter by level as needed.
-///
-/// Declaration:
-/// ```cpp
-/// VOID config_set_logger(
-///     [in, out]   config_object*                                  conf,
-///     [in]        void(*)(config_log_level, const char*, void*)   callback,
-///     [in]        void*                                           ctx
-/// );
-/// ```
-///
-/// Inputs:
-/// - `conf` -- [in] Pointer to config_object object
-/// - `callback` -- [in] Callback function
-/// - `ctx` --- [in, optional] Pointer to an optional context. Set to NULL if unused
-LIBSESSION_EXPORT void config_set_logger(
-        config_object* conf, void (*callback)(config_log_level, const char*, void*), void* ctx);
-
 /// API: base/config_storage_namespace
 ///
 /// Returns the numeric namespace in which config messages of this type should be stored.
@@ -242,7 +204,10 @@ LIBSESSION_EXPORT void config_confirm_pushed(
 /// - `conf` -- [in] Pointer to config_object object
 /// - `out` -- [out] Pointer to the output location
 /// - `outlen` -- [out] Length of output
-LIBSESSION_EXPORT void config_dump(config_object* conf, unsigned char** out, size_t* outlen);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_dump(config_object* conf, unsigned char** out, size_t* outlen);
 
 /// API: base/config_needs_dump
 ///
@@ -288,6 +253,33 @@ LIBSESSION_EXPORT bool config_needs_dump(const config_object* conf);
 LIBSESSION_EXPORT config_string_list* config_current_hashes(const config_object* conf)
         LIBSESSION_WARN_UNUSED;
 
+/// API: base/config_old_hashes
+///
+/// Obtains the known old hashes.  Note that this will be empty if there are no old hashes or
+/// the config is in a dirty state (in which case these should be retrieved via the `push`
+/// function). Calling this function, or the `push` function, will clear the stored old_hashes.
+///
+/// The returned pointer belongs to the caller and must be freed via `free()` when done with it.
+///
+/// Declaration:
+/// ```cpp
+/// CONFIG_STRING_LIST* config_old_hashes(
+///     [in]    const config_object*          conf
+/// );
+///
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to config_object object
+///
+/// Outputs:
+/// - `config_string_list*` -- pointer to the list of hashes; the pointer belongs to the caller
+LIBSESSION_EXPORT config_string_list* config_old_hashes(config_object* conf)
+#ifdef __GNUC__
+        __attribute__((warn_unused_result))
+#endif
+        ;
+
 /// API: base/config_get_keys
 ///
 /// Obtains the current group decryption keys.
@@ -322,7 +314,7 @@ LIBSESSION_EXPORT unsigned char* config_get_keys(const config_object* conf, size
 ///
 /// Declaration:
 /// ```cpp
-/// VOID config_add_key(
+/// BOOL config_add_key(
 ///     [in, out]       config_object*          conf,
 ///     [in]            const unsigned char*    key
 /// );
@@ -332,7 +324,10 @@ LIBSESSION_EXPORT unsigned char* config_get_keys(const config_object* conf, size
 /// Inputs:
 /// - `conf` -- [in, out] Pointer to config_object object
 /// - `key` -- [in] Pointer to the binary key object, must be 32 bytes
-LIBSESSION_EXPORT void config_add_key(config_object* conf, const unsigned char* key);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_add_key(config_object* conf, const unsigned char* key);
 
 /// API: base/config_add_key_low_prio
 ///
@@ -341,7 +336,7 @@ LIBSESSION_EXPORT void config_add_key(config_object* conf, const unsigned char* 
 ///
 /// Declaration:
 /// ```cpp
-/// VOID config_add_key_low_prio(
+/// BOOL config_add_key_low_prio(
 ///     [in, out]       config_object*          conf,
 ///     [in]            const unsigned char*    key
 /// );
@@ -351,7 +346,10 @@ LIBSESSION_EXPORT void config_add_key(config_object* conf, const unsigned char* 
 /// Inputs:
 /// - `conf` -- [in, out] Pointer to config_object object
 /// - `key` -- [in] Pointer to the binary key object, must be 32 bytes
-LIBSESSION_EXPORT void config_add_key_low_prio(config_object* conf, const unsigned char* key);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_add_key_low_prio(config_object* conf, const unsigned char* key);
 
 /// API: base/config_clear_keys
 ///
@@ -497,7 +495,10 @@ LIBSESSION_EXPORT const char* config_encryption_domain(const config_object* conf
 /// Inputs:
 /// - `secret` -- pointer to a 64-byte sodium-style Ed25519 "secret key" buffer (technically the
 ///   seed+precomputed pubkey concatenated together) that sets both the secret key and public key.
-LIBSESSION_EXPORT void config_set_sig_keys(config_object* conf, const unsigned char* secret);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_set_sig_keys(config_object* conf, const unsigned char* secret);
 
 /// API: base/config_set_sig_pubkey
 ///
@@ -507,7 +508,10 @@ LIBSESSION_EXPORT void config_set_sig_keys(config_object* conf, const unsigned c
 ///
 /// Inputs:
 /// - `pubkey` -- pointer to the 32-byte Ed25519 pubkey that must have signed incoming messages.
-LIBSESSION_EXPORT void config_set_sig_pubkey(config_object* conf, const unsigned char* pubkey);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_set_sig_pubkey(config_object* conf, const unsigned char* pubkey);
 
 /// API: base/config_get_sig_pubkey
 ///

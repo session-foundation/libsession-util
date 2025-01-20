@@ -16,6 +16,9 @@ class HopEncryption {
             public_key_{std::move(public_key)},
             server_{server} {}
 
+    // Returns true if the response is long enough to be a valid response.
+    static bool response_long_enough(EncryptType type, size_t response_size);
+
     // Encrypts `plaintext` message using encryption `type`. `pubkey` is the recipients public key.
     // `reply` should be false for a client-to-snode message, and true on a returning
     // snode-to-client message.

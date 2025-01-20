@@ -128,7 +128,10 @@ LIBSESSION_EXPORT bool groups_members_get_or_construct(
 /// Inputs:
 /// - `conf` -- [in, out] Pointer to the config object
 /// - `member` -- [in] Pointer containing the member info data
-LIBSESSION_EXPORT void groups_members_set(config_object* conf, const config_group_member* member);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool groups_members_set(config_object* conf, const config_group_member* member);
 
 /// API: groups/groups_members_get_status
 ///

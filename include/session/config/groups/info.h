@@ -6,7 +6,6 @@ extern "C" {
 
 #include "../base.h"
 #include "../profile_pic.h"
-#include "../util.h"
 
 LIBSESSION_EXPORT extern const size_t GROUP_INFO_NAME_MAX_LENGTH;
 LIBSESSION_EXPORT extern const size_t GROUP_INFO_DESCRIPTION_MAX_LENGTH;

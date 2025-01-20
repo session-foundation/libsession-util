@@ -5,21 +5,6 @@
 
 set(LOCAL_MIRROR "" CACHE STRING "local mirror path/URL for lib downloads")
 
-set(GMP_VERSION 6.3.0 CACHE STRING "gmp version")
-set(GMP_MIRROR ${LOCAL_MIRROR} https://gmplib.org/download/gmp
-    CACHE STRING "gmp mirror(s)")
-set(GMP_SOURCE gmp-${GMP_VERSION}.tar.xz)
-set(GMP_HASH SHA512=e85a0dab5195889948a3462189f0e0598d331d3457612e2d3350799dba2e244316d256f8161df5219538eb003e4b5343f989aaa00f96321559063ed8c8f29fd2
-    CACHE STRING "gmp source hash")
-
-set(NETTLE_VERSION 3.9.1 CACHE STRING "nettle version")
-set(NETTLE_MIRROR ${LOCAL_MIRROR} https://ftp.gnu.org/gnu/nettle
-    CACHE STRING "nettle mirror(s)")
-set(NETTLE_SOURCE nettle-${NETTLE_VERSION}.tar.gz)
-set(NETTLE_HASH SHA512=5939c4b43cf9ff6c6272245b85f123c81f8f4e37089fa4f39a00a570016d837f6e706a33226e4bbfc531b02a55b2756ff312461225ed88de338a73069e031ced
-    CACHE STRING "nettle source hash")
-
-
 include(ExternalProject)
 
 set(DEPS_DESTDIR ${CMAKE_BINARY_DIR}/static-deps)
@@ -228,32 +213,6 @@ if(APPLE AND CMAKE_CROSSCOMPILING)
     endif()
 elseif(gmp_build_host STREQUAL "")
     set(gmp_build_host "--build=${CMAKE_LIBRARY_ARCHITECTURE}")
-endif()
-
-if(ENABLE_ONIONREQ)
-    build_external(gmp
-        CONFIGURE_COMMAND ./configure ${gmp_build_host} --disable-shared --prefix=${DEPS_DESTDIR} --with-pic
-            "CC=${deps_cc}" "CXX=${deps_cxx}" "CFLAGS=${deps_CFLAGS}${apple_cflags_arch}" "CXXFLAGS=${deps_CXXFLAGS}${apple_cxxflags_arch}"
-            "LDFLAGS=${apple_ldflags_arch}" ${cross_rc} CC_FOR_BUILD=cc CPP_FOR_BUILD=cpp
-    )
-    add_static_target(gmp gmp_external libgmp.a)
-
-    build_external(nettle
-        CONFIGURE_COMMAND ./configure ${gmp_build_host} --disable-shared --prefix=${DEPS_DESTDIR} --libdir=${DEPS_DESTDIR}/lib
-            --with-pic --disable-openssl
-            "CC=${deps_cc}" "CXX=${deps_cxx}"
-            "CFLAGS=${deps_CFLAGS}${apple_cflags_arch}" "CXXFLAGS=${deps_CXXFLAGS}${apple_cxxflags_arch}"
-            "CPPFLAGS=-I${DEPS_DESTDIR}/include"
-            "LDFLAGS=-L${DEPS_DESTDIR}/lib${apple_ldflags_arch}"
-
-        DEPENDS gmp_external
-        BUILD_BYPRODUCTS
-        ${DEPS_DESTDIR}/lib/libnettle.a
-        ${DEPS_DESTDIR}/lib/libhogweed.a
-        ${DEPS_DESTDIR}/include/nettle/version.h
-    )
-    add_static_target(nettle nettle_external libnettle.a gmp)
-    add_static_target(hogweed nettle_external libhogweed.a nettle)
 endif()
 
 link_libraries(-static-libstdc++)

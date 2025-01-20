@@ -91,8 +91,6 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     rc = user_profile_init(&conf, ed_sk.data(), NULL, 0, err);
     REQUIRE(rc == 0);
 
-    config_set_logger(conf, log_msg, NULL);
-
     // We don't need to push anything, since this is an empty config
     CHECK_FALSE(config_needs_push(conf));
     // And we haven't changed anything so don't need to dump to db
@@ -148,8 +146,8 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(name == "Kallie"sv);
 
     pic = user_profile_get_pic(conf);
-    REQUIRE(pic.url);
-    REQUIRE(pic.key);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != to_usv(""s));
     CHECK(pic.url == "http://example.org/omg-pic-123.bmp"sv);
     CHECK(ustring_view{pic.key, 32} == "secret78901234567890123456789012"_bytes);
 
@@ -255,7 +253,6 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     // Start with an empty config, as above:
     config_object* conf2;
     REQUIRE(user_profile_init(&conf2, ed_sk.data(), NULL, 0, err) == 0);
-    config_set_logger(conf2, log_msg, NULL);
     CHECK_FALSE(config_needs_dump(conf2));
 
     // Now imagine we just pulled down the encrypted string from the swarm; we merge it into conf2:
@@ -368,15 +365,31 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Since only one of them set a profile pic there should be no conflict there:
     pic = user_profile_get_pic(conf);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.url);
+#else
+    REQUIRE(pic.url != nullptr);
+#endif
     CHECK(pic.url == "http://new.example.com/pic"sv);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.key);
+#else
+    REQUIRE(pic.key != nullptr);
+#endif
     CHECK(to_hex(ustring_view{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
     pic = user_profile_get_pic(conf2);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.url);
+#else
+    REQUIRE(pic.url != nullptr);
+#endif
     CHECK(pic.url == "http://new.example.com/pic"sv);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.key);
+#else
+    REQUIRE(pic.key != nullptr);
+#endif
     CHECK(to_hex(ustring_view{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
 

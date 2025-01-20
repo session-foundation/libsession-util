@@ -92,7 +92,6 @@ namespace {
 
         auto oldit = old.begin(), newit = new_.begin();
         while (oldit != old.end() || newit != new_.end()) {
-            bool is_new = false;
             if (oldit == old.end() || (newit != new_.end() && newit->first < oldit->first)) {
                 // newit is a new item; fall through to handle below
 
@@ -117,7 +116,6 @@ namespace {
                 if (o.index() != n.index()) {
                     // The fundamental type (scalar, dict, set) changed, so we'll treat this as a
                     // new value (which implicitly deletes a value of a wrong type when merging).
-                    is_new = true;
                     ++oldit;
                     // fall through to handler below
 
@@ -431,11 +429,9 @@ namespace {
 
 void verify_config_sig(
         oxenc::bt_dict_consumer dict,
-        ustring_view config_msg,
         const ConfigMessage::verify_callable& verifier,
         std::optional<std::array<unsigned char, 64>>* verified_signature,
         bool trust_signature) {
-    ustring_view to_verify, sig;
     if (dict.skip_until("~")) {
         dict.consume_signature([&](ustring_view to_verify, ustring_view sig) {
             if (sig.size() != 64)
@@ -558,7 +554,7 @@ ConfigMessage::ConfigMessage(
 
         load_unknowns(unknown_, dict, "=", "~");
 
-        verify_config_sig(dict, serialized, verifier, &verified_signature_, trust_signature);
+        verify_config_sig(dict, verifier, &verified_signature_, trust_signature);
     } catch (const oxenc::bt_deserialize_invalid& err) {
         throw config_parse_error{"Failed to parse config file: "s + err.what()};
     }
@@ -592,12 +588,12 @@ ConfigMessage::ConfigMessage(
 
     // prune out redundant messages (i.e. messages already included in another message's diff, and
     // duplicates)
-    for (int i = 0; i < configs.size(); i++) {
+    for (size_t i = 0; i < configs.size(); i++) {
         auto& [conf, redundant] = configs[i];
         if (conf.seqno() > max_seqno)
             max_seqno = conf.seqno();
 
-        for (int j = 0; !redundant && j < configs.size(); j++) {
+        for (size_t j = 0; !redundant && j < configs.size(); j++) {
             if (i == j)
                 continue;
             const auto& conf2 = configs[j].first;
@@ -619,7 +615,7 @@ ConfigMessage::ConfigMessage(
 
     if (curr_confs == 1) {
         // We have just one non-redundant config left after all that, so we become it directly as-is
-        for (int i = 0; i < configs.size(); i++) {
+        for (size_t i = 0; i < configs.size(); i++) {
             if (!configs[i].second) {
                 *this = std::move(configs[i].first);
                 unmerged_ = i;
@@ -647,7 +643,7 @@ ConfigMessage::ConfigMessage(
         return;
     }
 
-    unmerged_ = -1;
+    unmerged_ = std::nullopt;
 
     // Clear any redundant messages. (we do it *here* rather than above because, in the
     // single-good-config case, above, we need the index of the good config for `unmerged_`).

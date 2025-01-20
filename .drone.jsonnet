@@ -10,7 +10,7 @@ local submodules = {
 
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
 
-local libngtcp2_deps = ['libgnutls28-dev', 'libprotobuf-dev'];
+local libngtcp2_deps = ['libgnutls28-dev', 'libprotobuf-dev', 'libngtcp2-dev', 'libngtcp2-crypto-gnutls-dev'];
 
 local default_deps_nocxx = [
   'nlohmann-json3-dev',
@@ -367,12 +367,14 @@ local static_build(name,
                'libsession-util-windows-x64-TAG.zip',
                deps=['g++-mingw-w64-x86-64-posix'],
                cmake_extra='-DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-x86-64-toolchain.cmake'),
+  /*  currently broken:
   static_build('Static Windows x86',
                docker_base + 'debian-win32-cross',
                'libsession-util-windows-x86-TAG.zip',
                deps=['g++-mingw-w64-i686-posix'],
                allow_fail=true,
                cmake_extra='-DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-i686-toolchain.cmake'),
+  */
   debian_pipeline(
     'Static Android',
     docker_base + 'android',

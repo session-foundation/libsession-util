@@ -24,7 +24,7 @@ struct StringMaker<oxenc::bt_dict> {
 inline std::string StringMaker<oxenc::bt_value>::convert(const oxenc::bt_value& value) {
     return var::visit(
             [](const auto& x) {
-                return StringMaker<oxenc::remove_cvref_t<decltype(x)>>{}.convert(x);
+                return StringMaker<std::remove_cvref_t<decltype(x)>>{}.convert(x);
             },
             static_cast<const oxenc::bt_variant&>(value));
 }

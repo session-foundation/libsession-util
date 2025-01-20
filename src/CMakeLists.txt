@@ -1,7 +1,8 @@
 
 add_library(common INTERFACE)
 target_link_libraries(common INTERFACE
-    oxenc::oxenc)
+    oxenc::oxenc
+    oxen::logging)
 
 target_include_directories(common INTERFACE ../include)
 if(WARNINGS_AS_ERRORS)
@@ -34,16 +35,12 @@ macro(add_libsession_util_library name)
 endmacro()
 
 
-if(NOT BUILD_STATIC_DEPS)
-    find_package(PkgConfig REQUIRED)
 
-    if(NOT TARGET nettle)
-        pkg_check_modules(NETTLE nettle IMPORTED_TARGET REQUIRED)
-        add_library(nettle INTERFACE IMPORTED)
-        target_link_libraries(nettle INTERFACE PkgConfig::NETTLE)
-    endif()
-endif()
-
+add_libsession_util_library(util
+    file.cpp
+    logging.cpp
+    util.cpp
+)
 
 add_libsession_util_library(crypto
     blinding.cpp
@@ -54,7 +51,6 @@ add_libsession_util_library(crypto
     random.cpp
     session_encrypt.cpp
     sodium_array.cpp
-    util.cpp
     xed25519.cpp
 )
 
@@ -79,9 +75,15 @@ add_libsession_util_library(config
 
 
 
-target_link_libraries(crypto
+target_link_libraries(util
     PUBLIC
     common
+    oxen::logging
+)
+
+target_link_libraries(crypto
+    PUBLIC
+    util
     PRIVATE
     libsodium::sodium-internal
 )
@@ -89,7 +91,6 @@ target_link_libraries(crypto
 target_link_libraries(config
     PUBLIC
     crypto
-    common
     libsession::protos
     PRIVATE
     libsodium::sodium-internal
@@ -103,19 +104,19 @@ if(ENABLE_ONIONREQ)
         onionreq/key_types.cpp
         onionreq/parser.cpp
         onionreq/response_parser.cpp
+        network.cpp
     )
 
     target_link_libraries(onionreq
         PUBLIC
         crypto
-        common
+        quic
         PRIVATE
         nlohmann_json::nlohmann_json
         libsodium::sodium-internal
-        nettle
+        nettle::nettle
     )
 endif()
-
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
     # GCC 11 has an overzealous (and false) stringop-overread warning, but only when LTO is off.

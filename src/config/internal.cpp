@@ -211,7 +211,7 @@ std::optional<ustring> zstd_decompress(ustring_view data, size_t max_size) {
     ZSTD_initDStream(zds);
     ZSTD_inBuffer input{/*.src=*/data.data(), /*.size=*/data.size(), /*.pos=*/0};
     std::array<unsigned char, 4096> out_buf;
-    ZSTD_outBuffer output{/*.dst=*/out_buf.data(), /*.size=*/out_buf.size()};
+    ZSTD_outBuffer output{/*.dst=*/out_buf.data(), /*.size=*/out_buf.size(), /*.pos=*/0};
 
     ustring decompressed;
 

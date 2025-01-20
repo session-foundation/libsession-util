@@ -12,7 +12,7 @@ TEST_CASE("X25519 key pair generation", "[curve25519][keypair]") {
     auto kp2 = session::curve25519::curve25519_key_pair();
 
     CHECK(kp1.first.size() == 32);
-    CHECK(kp1.second.size() == 64);
+    CHECK(kp1.second.size() == 32);
     CHECK(kp1.first != kp2.first);
     CHECK(kp1.second != kp2.second);
 }

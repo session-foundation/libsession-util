@@ -72,8 +72,6 @@ fi
 mkdir -p "$pkg"/{lib,include}
 cp -v libsession-util.a "$pkg"/lib
 cp -rv "$projdir"/include/session "$pkg"/include
-mkdir -p "$pkg"/include/oxenc
-cp -v "$projdir"/external/oxen-encoding/oxenc/*.h external/oxen-encoding/oxenc/version.h "$pkg"/include/oxenc/
 
 if [ -z "$zip" ]; then
     tar cvJf "$archive" "$pkg"

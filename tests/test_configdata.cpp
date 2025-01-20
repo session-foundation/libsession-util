@@ -53,7 +53,7 @@ TEST_CASE("config data dict encoding", "[config][data][dict]") {
     d["D"] = config::dict{{"x", 1}, {"y", 2}};
     d["d"] = config::dict{{"e", config::dict{{"f", config::dict{{"g", ""}}}}}};
 
-    static_assert(oxenc::detail::is_bt_input_dict_container<config::dict>);
+    static_assert(oxenc::bt_input_dict_container<config::dict>);
 
     CHECK(oxenc::bt_serialize(d) ==
           "d1:B1:x1:Dd1:xi1e1:yi2ee1:ai23e1:cli-3ei4e1:11:2e1:dd1:ed1:fd1:g0:eeee");
@@ -202,12 +202,12 @@ TEST_CASE("config message serialization", "[config][serialization]") {
         "e"));
     // clang-format on
 
-    const auto hash0 = "d65738bba88b0f3455cef20fe09a7b4b10f25f9db82be24a6ce1bd06da197526"_hex;
+    const std::string hash0{"d65738bba88b0f3455cef20fe09a7b4b10f25f9db82be24a6ce1bd06da197526"_hex};
     CHECK(view_hex(m.hash()) == oxenc::to_hex(hash0));
 
     auto m1 = m.increment();
     m1.data().erase("foo");
-    const auto hash1 = "5b30b4abf4cba71db25dbc0d977cc25df1d0a8a87cad7f561cdec2b8caf65f5e"_hex;
+    const std::string hash1{"5b30b4abf4cba71db25dbc0d977cc25df1d0a8a87cad7f561cdec2b8caf65f5e"_hex};
     CHECK(view_hex(m1.hash()) == oxenc::to_hex(hash1));
 
     auto m2 = m1.increment();
@@ -220,7 +220,7 @@ TEST_CASE("config message serialization", "[config][serialization]") {
     s(d(m2.data()["bar"])[""]).erase("b");
     s(d(m2.data()["bar"])[""]).insert(42);  // already present
 
-    const auto hash2 = "027552203cf669070d3ecbeecfa65c65497d59aa4da490e0f68f8131ce081320"_hex;
+    const std::string hash2{"027552203cf669070d3ecbeecfa65c65497d59aa4da490e0f68f8131ce081320"_hex};
     CHECK(view_hex(m2.hash()) == oxenc::to_hex(hash2));
 
     // clang-format off
@@ -266,16 +266,18 @@ TEST_CASE("config message serialization", "[config][serialization]") {
             "3:foo" "0:"
           "e"
         "e"));
+    // clang-format on
 
     auto m5 = m2.increment().increment().increment();
-    const auto hash3 = "b83871ea06587f9254cdf2b2af8daff19bd7fb550fb90d5f8f9f546464c08bc5"_hex;
-    const auto hash4 = "c30e2cfa7ec93c64a1ab6420c9bccfb63da8e4c2940ed6509ffb64f3f0131860"_hex;
-    const auto hash5 = "3234eb7da8cf4b79b9eec2a144247279d10f6f118184f82429a42c5996bea60c"_hex;
+    const std::string hash3{"b83871ea06587f9254cdf2b2af8daff19bd7fb550fb90d5f8f9f546464c08bc5"_hex},
+            hash4{"c30e2cfa7ec93c64a1ab6420c9bccfb63da8e4c2940ed6509ffb64f3f0131860"_hex},
+            hash5{"3234eb7da8cf4b79b9eec2a144247279d10f6f118184f82429a42c5996bea60c"_hex};
 
     CHECK(view_hex(m2.increment().hash()) == oxenc::to_hex(hash3));
     CHECK(view_hex(m2.increment().increment().hash()) == oxenc::to_hex(hash4));
     CHECK(view_hex(m5.hash()) == oxenc::to_hex(hash5));
 
+    // clang-format off
     CHECK(printable(m5.serialize()) == printable(
         "d"
           "1:#" "i15e"

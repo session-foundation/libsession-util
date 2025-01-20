@@ -254,7 +254,7 @@ struct community_info : base_group_info, community {
     void load(const dict& info_dict);
 
     friend class UserGroups;
-    friend class comm_iterator_helper;
+    friend struct comm_iterator_helper;
 };
 
 using any_group_info = std::variant<group_info, community_info, legacy_group_info>;

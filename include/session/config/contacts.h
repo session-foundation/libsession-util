@@ -152,8 +152,8 @@ LIBSESSION_EXPORT bool contacts_get_or_construct(
 /// - `contact` -- [in] Pointer containing the contact info data
 ///
 /// Output:
-/// - `void` -- Returns Nothing
-LIBSESSION_EXPORT void contacts_set(config_object* conf, const contacts_contact* contact);
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool contacts_set(config_object* conf, const contacts_contact* contact);
 
 // NB: wrappers for set_name, set_nickname, etc. C++ methods are deliberately omitted as they would
 // save very little in actual calling code.  The procedure for updating a single field without them

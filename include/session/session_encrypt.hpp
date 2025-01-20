@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "types.hpp"
 
 // Helper functions for the "Session Protocol" encryption mechanism.  This is the encryption used
@@ -235,13 +237,15 @@ std::pair<ustring, std::string> decrypt_from_blinded_recipient(
 /// Inputs:
 /// - `lowercase_name` -- the lowercase name which was looked to up to retrieve this response.
 /// - `ciphertext` -- ciphertext returned from the server.
-/// - `nonce` -- the nonce returned from the server
+/// - `nonce` -- the nonce returned from the server if provided.
 ///
 /// Outputs:
 /// - `std::string` -- the session ID (in hex) returned from the server, *if* the server returned
 ///   a session ID.  Throws on error/failure.
 std::string decrypt_ons_response(
-        std::string_view lowercase_name, ustring_view ciphertext, ustring_view nonce);
+        std::string_view lowercase_name,
+        ustring_view ciphertext,
+        std::optional<ustring_view> nonce);
 
 /// API: crypto/decrypt_push_notification
 ///
@@ -256,5 +260,19 @@ std::string decrypt_ons_response(
 /// - `ustring` -- the decrypted push notification payload, *if* the decryption was
 ///   successful.  Throws on error/failure.
 ustring decrypt_push_notification(ustring_view payload, ustring_view enc_key);
+
+/// API: crypto/compute_message_hash
+///
+/// Computes the hash for a message.
+///
+/// Inputs:
+/// - `pubkey_hex` -- the pubkey as a 66 character hex string that the message will be stored in.
+/// - `ns` -- the namespace that the message will be stored in.
+/// - `data` -- the base64 encoded message data that will be stored for the message.
+///
+/// Outputs:
+/// - `std::string` -- a deterministic hash for the message.
+std::string compute_message_hash(
+        const std::string_view pubkey_hex, int16_t ns, std::string_view data);
 
 }  // namespace session

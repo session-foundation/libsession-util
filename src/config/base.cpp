@@ -8,6 +8,8 @@
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/utils.h>
 
+#include <oxen/log.hpp>
+#include <oxen/log/format.hpp>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -20,8 +22,13 @@
 #include "session/util.hpp"
 
 using namespace std::literals;
+using namespace oxen::log::literals;
 
 namespace session::config {
+
+namespace log = oxen::log;
+
+auto cat = log::Cat("config");
 
 void ConfigBase::set_state(ConfigState s) {
     if (s == ConfigState::Dirty && is_readonly())
@@ -86,6 +93,10 @@ std::vector<std::string> ConfigBase::merge(
                             ustring_view{_keys.front().data(), _keys.front().size()},
                             unwrapped,
                             storage_namespace());
+                    log::warning(
+                            cat,
+                            "Found double wraped message in namespace {}",
+                            static_cast<std::int16_t>(storage_namespace()));
                     parsed.emplace_back(h, keep_alive.emplace_back(std::move(unwrapped2)));
                 } catch (...) {
                     parsed.emplace_back(h, keep_alive.emplace_back(std::move(unwrapped)));
@@ -146,17 +157,21 @@ std::vector<std::string> ConfigBase::_merge(
                 plaintexts.emplace_back(hash, decrypt(conf, key(i), encryption_domain()));
                 decrypted = true;
             } catch (const decrypt_error&) {
-                log(LogLevel::debug,
-                    "Failed to decrypt message " + std::to_string(ci) + " using key " +
-                            std::to_string(i));
+                log::debug(cat, "Failed to decrypt message {} using key {}", ci, i);
             }
         }
         if (!decrypted)
-            log(LogLevel::warning, "Failed to decrypt message " + std::to_string(ci));
+            log::warning(
+                    cat,
+                    "Failed to decrypt message {} for namespace {}",
+                    ci,
+                    static_cast<std::int16_t>(storage_namespace()));
     }
-    log(LogLevel::debug,
-        "successfully decrypted " + std::to_string(plaintexts.size()) + " of " +
-                std::to_string(configs.size()) + " incoming messages");
+    log::debug(
+            cat,
+            "successfully decrypted {} of {} incoming messages",
+            plaintexts.size(),
+            configs.size());
 
     for (auto& [hash, plain] : plaintexts) {
         // Remove prefix padding:
@@ -165,13 +180,13 @@ std::vector<std::string> ConfigBase::_merge(
             plain.resize(plain.size() - p);
         }
         if (plain.empty()) {
-            log(LogLevel::error, "Invalid config message: contains no data");
+            log::error(cat, "Invalid config message: contains no data");
             continue;
         }
 
         // TODO FIXME (see above)
         if (plain[0] == 'm') {
-            log(LogLevel::warning, "multi-part messages not yet supported!");
+            log::warning(cat, "multi-part messages not yet supported!");
             continue;
         }
 
@@ -182,17 +197,18 @@ std::vector<std::string> ConfigBase::_merge(
                 decompressed && !decompressed->empty())
                 plain = std::move(*decompressed);
             else {
-                log(LogLevel::warning, "Invalid config message: decompression failed");
+                log::warning(cat, "Invalid config message: decompression failed");
                 continue;
             }
         }
 
         if (plain[0] != 'd')
-            log(LogLevel::error,
-                "invalid/unsupported config message with type " +
-                        (plain[0] >= 0x20 && plain[0] <= 0x7e
-                                 ? "'" + std::string{from_unsigned_sv(plain.substr(0, 1))} + "'"
-                                 : "0x" + oxenc::to_hex(plain.begin(), plain.begin() + 1)));
+            log::error(
+                    cat,
+                    "invalid/unsupported config message with type {}",
+                    (plain[0] >= 0x20 && plain[0] <= 0x7e
+                             ? "'{}'"_format(static_cast<char>(plain[0]))
+                             : "0x{:02x}"_format(plain[0])));
 
         all_hashes.emplace_back(hash);
         all_confs.emplace_back(plain);
@@ -207,7 +223,7 @@ std::vector<std::string> ConfigBase::_merge(
             _config->signer,
             config_lags(),
             [&](size_t i, const config_error& e) {
-                log(LogLevel::warning, e.what());
+                log::warning(cat, "{}", e.what());
                 assert(i > 0);  // i == 0 means we can't deserialize our own serialization
                 bad_confs.insert(i);
             });
@@ -217,9 +233,13 @@ std::vector<std::string> ConfigBase::_merge(
     //   might be our current config, or might be one single one of the new incoming messages).
     // - confs that failed to parse (we can't understand them, so leave them behind as they may be
     //   some future message).
-    int superconf = new_conf->unmerged_index();  // -1 if we had to merge
-    for (int i = 0; i < all_hashes.size(); i++) {
-        if (i != superconf && !bad_confs.count(i) && !all_hashes[i].empty())
+    std::optional<size_t> superconf = new_conf->unmerged_index();  // nullopt if we had to merge
+    std::string_view superconf_hash =
+            superconf && *superconf < all_hashes.size() ? all_hashes[*superconf] : "";
+
+    for (size_t i = 0; i < all_hashes.size(); i++) {
+        if (i != superconf && !bad_confs.count(i) && !all_hashes[i].empty() &&
+            superconf_hash != all_hashes[i])
             _old_hashes.emplace(all_hashes[i]);
     }
 
@@ -248,12 +268,13 @@ std::vector<std::string> ConfigBase::_merge(
             assert(((old_seqno == 0 && mine.empty()) || _config->unmerged_index() >= 1) &&
                    _config->unmerged_index() < all_hashes.size());
             set_state(ConfigState::Clean);
-            _curr_hash = all_hashes[_config->unmerged_index()];
+            _curr_hash = all_hashes[*_config->unmerged_index()];
         }
     } else {
-        // the merging affect nothing (if it had seqno would have been incremented), so don't
-        // pointlessly replace the inner config object.
-        assert(new_conf->unmerged_index() == 0);
+        // The for loop above can end up adding our _curr_hash into _old_hashes if given the
+        // *current* active config to merge a second time, so make sure we didn't do so by cleaning
+        // _curr_hash out of _old_hashes just in case:
+        _old_hashes.erase(_curr_hash);
     }
 
     std::vector<std::string> good_hashes;
@@ -269,6 +290,17 @@ std::vector<std::string> ConfigBase::current_hashes() const {
     std::vector<std::string> hashes;
     if (!_curr_hash.empty())
         hashes.push_back(_curr_hash);
+    return hashes;
+}
+
+std::vector<std::string> ConfigBase::old_hashes() {
+    std::vector<std::string> hashes;
+    if (!is_dirty()) {
+        for (auto& old : _old_hashes)
+            hashes.push_back(std::move(old));
+        _old_hashes.clear();
+    }
+
     return hashes;
 }
 
@@ -352,7 +384,7 @@ ustring ConfigBase::make_dump() const {
     d.append("$", data_sv);
     d.append("(", _curr_hash);
 
-    d.append_list(")").append(_old_hashes.begin(), _old_hashes.end());
+    d.append_list(")").extend(_old_hashes.begin(), _old_hashes.end());
 
     extra_data(d.append_dict("+"));
 
@@ -647,13 +679,15 @@ LIBSESSION_EXPORT config_string_list* config_merge(
         const unsigned char** configs,
         const size_t* lengths,
         size_t count) {
-    auto& config = *unbox(conf);
-    std::vector<std::pair<std::string, ustring_view>> confs;
-    confs.reserve(count);
-    for (size_t i = 0; i < count; i++)
-        confs.emplace_back(msg_hashes[i], ustring_view{configs[i], lengths[i]});
+    return wrap_exceptions(conf, [&] {
+        auto& config = *unbox(conf);
+        std::vector<std::pair<std::string, ustring_view>> confs;
+        confs.reserve(count);
+        for (size_t i = 0; i < count; i++)
+            confs.emplace_back(msg_hashes[i], ustring_view{configs[i], lengths[i]});
 
-    return make_string_list(config.merge(confs));
+        return make_string_list(config.merge(confs));
+    });
 }
 
 LIBSESSION_EXPORT bool config_needs_push(const config_object* conf) {
@@ -661,39 +695,41 @@ LIBSESSION_EXPORT bool config_needs_push(const config_object* conf) {
 }
 
 LIBSESSION_EXPORT config_push_data* config_push(config_object* conf) {
-    auto& config = *unbox(conf);
-    auto [seqno, data, obs] = config.push();
+    return wrap_exceptions(conf, [&] {
+        auto& config = *unbox(conf);
+        auto [seqno, data, obs] = config.push();
 
-    // We need to do one alloc here that holds everything:
-    // - the returned struct
-    // - pointers to the obsolete message hash strings
-    // - the data
-    // - the message hash strings
-    size_t buffer_size = sizeof(config_push_data) + obs.size() * sizeof(char*) + data.size();
-    for (auto& o : obs)
-        buffer_size += o.size();
-    buffer_size += obs.size();  // obs msg hash string NULL terminators
+        // We need to do one alloc here that holds everything:
+        // - the returned struct
+        // - pointers to the obsolete message hash strings
+        // - the data
+        // - the message hash strings
+        size_t buffer_size = sizeof(config_push_data) + obs.size() * sizeof(char*) + data.size();
+        for (auto& o : obs)
+            buffer_size += o.size();
+        buffer_size += obs.size();  // obs msg hash string NULL terminators
 
-    auto* ret = static_cast<config_push_data*>(std::malloc(buffer_size));
+        auto* ret = static_cast<config_push_data*>(std::malloc(buffer_size));
 
-    ret->seqno = seqno;
+        ret->seqno = seqno;
 
-    static_assert(alignof(config_push_data) >= alignof(char*));
-    ret->obsolete = reinterpret_cast<char**>(ret + 1);
-    ret->obsolete_len = obs.size();
+        static_assert(alignof(config_push_data) >= alignof(char*));
+        ret->obsolete = reinterpret_cast<char**>(ret + 1);
+        ret->obsolete_len = obs.size();
 
-    ret->config = reinterpret_cast<unsigned char*>(ret->obsolete + ret->obsolete_len);
-    ret->config_len = data.size();
+        ret->config = reinterpret_cast<unsigned char*>(ret->obsolete + ret->obsolete_len);
+        ret->config_len = data.size();
 
-    std::memcpy(ret->config, data.data(), data.size());
-    char* obsptr = reinterpret_cast<char*>(ret->config + ret->config_len);
-    for (size_t i = 0; i < obs.size(); i++) {
-        std::memcpy(obsptr, obs[i].c_str(), obs[i].size() + 1);
-        ret->obsolete[i] = obsptr;
-        obsptr += obs[i].size() + 1;
-    }
+        std::memcpy(ret->config, data.data(), data.size());
+        char* obsptr = reinterpret_cast<char*>(ret->config + ret->config_len);
+        for (size_t i = 0; i < obs.size(); i++) {
+            std::memcpy(obsptr, obs[i].c_str(), obs[i].size() + 1);
+            ret->obsolete[i] = obsptr;
+            obsptr += obs[i].size() + 1;
+        }
 
-    return ret;
+        return ret;
+    });
 }
 
 LIBSESSION_EXPORT void config_confirm_pushed(
@@ -701,12 +737,18 @@ LIBSESSION_EXPORT void config_confirm_pushed(
     unbox(conf)->confirm_pushed(seqno, msg_hash);
 }
 
-LIBSESSION_EXPORT void config_dump(config_object* conf, unsigned char** out, size_t* outlen) {
-    assert(out && outlen);
-    auto data = unbox(conf)->dump();
-    *outlen = data.size();
-    *out = static_cast<unsigned char*>(std::malloc(data.size()));
-    std::memcpy(*out, data.data(), data.size());
+LIBSESSION_EXPORT bool config_dump(config_object* conf, unsigned char** out, size_t* outlen) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                assert(out && outlen);
+                auto data = unbox(conf)->dump();
+                *outlen = data.size();
+                *out = static_cast<unsigned char*>(std::malloc(data.size()));
+                std::memcpy(*out, data.data(), data.size());
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_EXPORT bool config_needs_dump(const config_object* conf) {
@@ -717,10 +759,15 @@ LIBSESSION_EXPORT config_string_list* config_current_hashes(const config_object*
     return make_string_list(unbox(conf)->current_hashes());
 }
 
+LIBSESSION_EXPORT config_string_list* config_old_hashes(config_object* conf) {
+    return make_string_list(unbox(conf)->old_hashes());
+}
+
 LIBSESSION_EXPORT unsigned char* config_get_keys(const config_object* conf, size_t* len) {
     const auto keys = unbox(conf)->get_keys();
-    assert(std::count_if(keys.begin(), keys.end(), [](const auto& k) { return k.size() == 32; }) ==
-           keys.size());
+    assert(static_cast<size_t>(std::count_if(keys.begin(), keys.end(), [](const auto& k) {
+               return k.size() == 32;
+           })) == keys.size());
     assert(len);
     *len = keys.size();
     if (keys.empty())
@@ -735,11 +782,24 @@ LIBSESSION_EXPORT unsigned char* config_get_keys(const config_object* conf, size
     return buf;
 }
 
-LIBSESSION_EXPORT void config_add_key(config_object* conf, const unsigned char* key) {
-    unbox(conf)->add_key({key, 32});
+LIBSESSION_EXPORT bool config_add_key(config_object* conf, const unsigned char* key) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox(conf)->add_key({key, 32});
+                return true;
+            },
+            false);
 }
-LIBSESSION_EXPORT void config_add_key_low_prio(config_object* conf, const unsigned char* key) {
-    unbox(conf)->add_key({key, 32}, /*high_priority=*/false);
+
+LIBSESSION_EXPORT bool config_add_key_low_prio(config_object* conf, const unsigned char* key) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox(conf)->add_key({key, 32}, /*high_priority=*/false);
+                return true;
+            },
+            false);
 }
 LIBSESSION_EXPORT int config_clear_keys(config_object* conf) {
     return unbox(conf)->clear_keys();
@@ -751,7 +811,11 @@ LIBSESSION_EXPORT int config_key_count(const config_object* conf) {
     return unbox(conf)->key_count();
 }
 LIBSESSION_EXPORT bool config_has_key(const config_object* conf, const unsigned char* key) {
-    return unbox(conf)->has_key({key, 32});
+    try {
+        return unbox(conf)->has_key({key, 32});
+    } catch (...) {
+        return false;
+    }
 }
 LIBSESSION_EXPORT const unsigned char* config_key(const config_object* conf, size_t i) {
     return unbox(conf)->key(i).data();
@@ -761,12 +825,24 @@ LIBSESSION_EXPORT const char* config_encryption_domain(const config_object* conf
     return unbox(conf)->encryption_domain();
 }
 
-LIBSESSION_EXPORT void config_set_sig_keys(config_object* conf, const unsigned char* secret) {
-    unbox(conf)->set_sig_keys({secret, 64});
+LIBSESSION_EXPORT bool config_set_sig_keys(config_object* conf, const unsigned char* secret) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox(conf)->set_sig_keys({secret, 64});
+                return true;
+            },
+            false);
 }
 
-LIBSESSION_EXPORT void config_set_sig_pubkey(config_object* conf, const unsigned char* pubkey) {
-    unbox(conf)->set_sig_pubkey({pubkey, 32});
+LIBSESSION_EXPORT bool config_set_sig_pubkey(config_object* conf, const unsigned char* pubkey) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox(conf)->set_sig_pubkey({pubkey, 32});
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_EXPORT const unsigned char* config_get_sig_pubkey(const config_object* conf) {
@@ -778,16 +854,6 @@ LIBSESSION_EXPORT const unsigned char* config_get_sig_pubkey(const config_object
 
 LIBSESSION_EXPORT void config_clear_sig_keys(config_object* conf) {
     unbox(conf)->clear_sig_keys();
-}
-
-LIBSESSION_EXPORT void config_set_logger(
-        config_object* conf, void (*callback)(config_log_level, const char*, void*), void* ctx) {
-    if (!callback)
-        unbox(conf)->logger = nullptr;
-    else
-        unbox(conf)->logger = [callback, ctx](LogLevel lvl, std::string msg) {
-            callback(static_cast<config_log_level>(static_cast<int>(lvl)), msg.c_str(), ctx);
-        };
 }
 
 }  // extern "C"
