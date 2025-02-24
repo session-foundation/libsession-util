@@ -32,7 +32,7 @@ class Info : public ConfigBase {
     /// Limits for the name & description strings, in bytes.  If longer, we truncate to these
     /// lengths:
     static constexpr size_t NAME_MAX_LENGTH = 100;  // same as base_group_info::NAME_MAX_LENGTH
-    static constexpr size_t DESCRIPTION_MAX_LENGTH = 2000;
+    static constexpr size_t DESCRIPTION_MAX_LENGTH = 600;
 
     // No default constructor
     Info() = delete;

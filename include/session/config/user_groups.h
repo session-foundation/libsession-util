@@ -327,7 +327,10 @@ LIBSESSION_EXPORT void user_groups_set_community(
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a group info object
-LIBSESSION_EXPORT void user_groups_set_group(config_object* conf, const ugroups_group_info* group);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_group(config_object* conf, const ugroups_group_info* group);
 
 /// API: user_groups/user_groups_set_legacy_group
 ///
@@ -347,7 +350,10 @@ LIBSESSION_EXPORT void user_groups_set_group(config_object* conf, const ugroups_
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a legacy group info object
-LIBSESSION_EXPORT void user_groups_set_legacy_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_legacy_group(
         config_object* conf, const ugroups_legacy_group_info* group);
 
 /// API: user_groups/user_groups_set_free_legacy_group
@@ -367,7 +373,10 @@ LIBSESSION_EXPORT void user_groups_set_legacy_group(
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a legacy group info object
-LIBSESSION_EXPORT void user_groups_set_free_legacy_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_free_legacy_group(
         config_object* conf, ugroups_legacy_group_info* group);
 
 /// API: user_groups/user_groups_erase_community

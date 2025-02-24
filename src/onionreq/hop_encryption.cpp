@@ -80,6 +80,15 @@ namespace {
 
 }  // namespace
 
+bool HopEncryption::response_long_enough(EncryptType type, size_t response_size) {
+    switch (type) {
+        case EncryptType::xchacha20:
+            return (response_size >= crypto_aead_xchacha20poly1305_ietf_ABYTES);
+        case EncryptType::aes_gcm: return (response_size >= GCM_IV_SIZE + GCM_DIGEST_SIZE);
+    }
+    return false;
+}
+
 ustring HopEncryption::encrypt(
         EncryptType type, ustring plaintext, const x25519_pubkey& pubkey) const {
     switch (type) {
@@ -131,8 +140,9 @@ ustring HopEncryption::encrypt_aesgcm(ustring plaintext, const x25519_pubkey& pu
 ustring HopEncryption::decrypt_aesgcm(ustring ciphertext_, const x25519_pubkey& pubKey) const {
     ustring_view ciphertext = {ciphertext_.data(), ciphertext_.size()};
 
-    if (ciphertext.size() < GCM_IV_SIZE + GCM_DIGEST_SIZE)
-        throw std::runtime_error{"ciphertext data is too short"};
+    if (!response_long_enough(EncryptType::aes_gcm, ciphertext_.size()))
+        throw std::invalid_argument{
+                "Ciphertext data is too short: " + std::string(from_unsigned(ciphertext_.data()))};
 
     auto key = derive_symmetric_key(private_key_, pubKey);
 
@@ -198,8 +208,10 @@ ustring HopEncryption::decrypt_xchacha20(ustring ciphertext_, const x25519_pubke
     // Extract nonce from the beginning of the ciphertext:
     auto nonce = ciphertext.substr(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
     ciphertext.remove_prefix(nonce.size());
-    if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES)
-        throw std::runtime_error{"Invalid ciphertext: too short"};
+
+    if (!response_long_enough(EncryptType::xchacha20, ciphertext_.size()))
+        throw std::invalid_argument{
+                "Ciphertext data is too short: " + std::string(from_unsigned(ciphertext_.data()))};
 
     const auto key = xchacha20_shared_key(public_key_, private_key_, pubKey, !server_);
 

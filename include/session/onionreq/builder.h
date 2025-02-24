@@ -6,6 +6,7 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "../export.h"
 
@@ -44,14 +45,6 @@ LIBSESSION_EXPORT void onion_request_builder_free(onion_request_builder_object* 
 ///
 /// Wrapper around session::onionreq::Builder::onion_request_builder_set_enc_type.
 ///
-/// Declaration:
-/// ```cpp
-/// void onion_request_builder_set_enc_type(
-///     [in]    onion_request_builder_object*  builder
-///     [in]    ENCRYPT_TYPE                   enc_type
-/// );
-/// ```
-///
 /// Inputs:
 /// - `builder` -- [in] Pointer to the builder object
 /// - `enc_type` -- [in] The encryption type to use in the onion request
@@ -63,55 +56,49 @@ LIBSESSION_EXPORT void onion_request_builder_set_enc_type(
 /// Wrapper around session::onionreq::Builder::set_snode_destination.  ed25519_pubkey and
 /// x25519_pubkey are both hex strings and must both be exactly 64 characters.
 ///
-/// Declaration:
-/// ```cpp
-/// void onion_request_builder_set_snode_destination(
-///     [in]    onion_request_builder_object*  builder
-///     [in]    const char*                    ed25519_pubkey,
-///     [in]    const char*                    x25519_pubkey
-/// );
-/// ```
-///
 /// Inputs:
 /// - `builder` -- [in] Pointer to the builder object
+/// - `ip` -- [in] The IP address for the snode destination
+/// - `quic_port` -- [in] The Quic port request for the snode destination
 /// - `ed25519_pubkey` -- [in] The ed25519 public key for the snode destination
-/// - `x25519_pubkey` -- [in] The x25519 public key for the snode destination
 LIBSESSION_EXPORT void onion_request_builder_set_snode_destination(
         onion_request_builder_object* builder,
-        const char* ed25519_pubkey,
-        const char* x25519_pubkey);
+        const uint8_t ip[4],
+        const uint16_t quic_port,
+        const char* ed25519_pubkey);
 
 /// API: onion_request_builder_set_server_destination
 ///
 /// Wrapper around session::onionreq::Builder::set_server_destination.  x25519_pubkey
 /// is a hex string and must both be exactly 64 characters.
 ///
-/// Declaration:
-/// ```cpp
-/// void onion_request_builder_set_server_destination(
-///     [in]    onion_request_builder_object*  builder
-///     [in]    const char*                    host,
-///     [in]    const char*                    target,
-///     [in]    const char*                    protocol,
-///     [in]    uint16_t                       port,
-///     [in]    const char*                    x25519_pubkey
-/// );
-/// ```
+/// Inputs:
+/// - `builder` -- [in] Pointer to the builder object
+/// - `protocol` -- [in] The protocol to use
+/// - `host` -- [in] The server host
+/// - `endpoint` -- [in] The endpoint to call
+/// - `method` -- [in] The HTTP method to use
+/// - `port` -- [in] The port to use
+/// - `x25519_pubkey` -- [in] The x25519 public key for server
+LIBSESSION_EXPORT void onion_request_builder_set_server_destination(
+        onion_request_builder_object* builder,
+        const char* protocol,
+        const char* host,
+        const char* endpoint,
+        const char* method,
+        uint16_t port,
+        const char* x25519_pubkey);
+
+/// API: onion_request_builder_set_destination_pubkey
+///
+/// Wrapper around session::onionreq::Builder::set_destination_pubkey.
 ///
 /// Inputs:
 /// - `builder` -- [in] Pointer to the builder object
-/// - `host` -- [in] The host for the server destination
-/// - `target` -- [in] The target (endpoint) for the server destination
-/// - `protocol` -- [in] The protocol to use for the
-/// - `port` -- [in] The host for the server destination
-/// - `x25519_pubkey` -- [in] The x25519 public key for the snode destination
-LIBSESSION_EXPORT void onion_request_builder_set_server_destination(
-        onion_request_builder_object* builder,
-        const char* host,
-        const char* target,
-        const char* protocol,
-        uint16_t port,
-        const char* x25519_pubkey);
+/// - `x25519_pubkey` -- [in] The x25519 public key for server (Hex string of exactly 64
+/// characters).
+LIBSESSION_EXPORT void onion_request_builder_set_destination_pubkey(
+        onion_request_builder_object* builder, const char* x25519_pubkey);
 
 /// API: onion_request_builder_add_hop
 ///

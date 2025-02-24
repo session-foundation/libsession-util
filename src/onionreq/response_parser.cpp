@@ -23,6 +23,10 @@ ResponseParser::ResponseParser(session::onionreq::Builder builder) {
     x25519_keypair_ = builder.final_hop_x25519_keypair.value();
 }
 
+bool ResponseParser::response_long_enough(EncryptType enc_type, size_t response_size) {
+    return HopEncryption::response_long_enough(enc_type, response_size);
+}
+
 ustring ResponseParser::decrypt(ustring ciphertext) const {
     HopEncryption d{x25519_keypair_.second, x25519_keypair_.first, false};
 
@@ -32,13 +36,17 @@ ustring ResponseParser::decrypt(ustring ciphertext) const {
     try {
         return d.decrypt(enc_type_, ciphertext, destination_x25519_public_key_);
     } catch (const std::exception& e) {
-        if (enc_type_ == session::onionreq::EncryptType::xchacha20)
-            return d.decrypt(
-                    session::onionreq::EncryptType::aes_gcm,
-                    ciphertext,
-                    destination_x25519_public_key_);
-        else
-            throw e;
+        if (enc_type_ == session::onionreq::EncryptType::xchacha20) {
+            try {
+                return d.decrypt(
+                        session::onionreq::EncryptType::aes_gcm,
+                        ciphertext,
+                        destination_x25519_public_key_);
+            } catch (...) {
+                throw std::runtime_error{std::string(decryption_failed_error)};
+            }
+        } else
+            throw;
     }
 }
 

@@ -7,7 +7,7 @@
 namespace session::curve25519 {
 
 /// Generates a random curve25519 key pair
-std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> curve25519_key_pair();
+std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>> curve25519_key_pair();
 
 /// API: curve25519/to_curve25519_pubkey
 ///

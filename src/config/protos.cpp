@@ -138,7 +138,6 @@ ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namesp
     if (!req.ParseFromArray(data.data(), data.size()))
         throw std::runtime_error{"Failed to parse WebSocketMessage"};
 
-    const auto& msg_type = req.type();
     if (req.type() != WebSocketProtos::WebSocketMessage_Type_REQUEST)
         throw std::runtime_error{"Error: received invalid WebSocketRequest"};
 

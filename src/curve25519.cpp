@@ -10,9 +10,9 @@
 
 namespace session::curve25519 {
 
-std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> curve25519_key_pair() {
+std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>> curve25519_key_pair() {
     std::array<unsigned char, 32> curve_pk;
-    std::array<unsigned char, 64> curve_sk;
+    std::array<unsigned char, 32> curve_sk;
     crypto_box_keypair(curve_pk.data(), curve_sk.data());
 
     return {curve_pk, curve_sk};

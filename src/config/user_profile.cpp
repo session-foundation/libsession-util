@@ -48,12 +48,13 @@ void UserProfile::set_name_truncated(std::string new_name) {
     set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
 }
 LIBSESSION_C_API int user_profile_set_name(config_object* conf, const char* name) {
-    try {
-        unbox<UserProfile>(conf)->set_name(name);
-    } catch (const std::exception& e) {
-        return set_error(conf, SESSION_ERR_BAD_VALUE, e);
-    }
-    return 0;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserProfile>(conf)->set_name(name);
+                return 0;
+            },
+            static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
 profile_pic UserProfile::get_profile_pic() const {
@@ -90,13 +91,13 @@ LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic 
     if (!url.empty())
         key = {pic.key, 32};
 
-    try {
-        unbox<UserProfile>(conf)->set_profile_pic(url, key);
-    } catch (const std::exception& e) {
-        return set_error(conf, SESSION_ERR_BAD_VALUE, e);
-    }
-
-    return 0;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserProfile>(conf)->set_profile_pic(url, key);
+                return 0;
+            },
+            static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
 void UserProfile::set_nts_priority(int priority) {

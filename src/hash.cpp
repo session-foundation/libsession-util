@@ -14,15 +14,20 @@ ustring hash(const size_t size, ustring_view msg, std::optional<ustring_view> ke
     if (key && key->size() > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid key: expected less than 65 bytes"};
 
+    auto result_code = 0;
     ustring result;
     result.resize(size);
-    crypto_generichash_blake2b(
+
+    result_code = crypto_generichash_blake2b(
             result.data(),
             size,
             msg.data(),
             msg.size(),
             key ? key->data() : nullptr,
             key ? key->size() : 0);
+
+    if (result_code != 0)
+        throw std::runtime_error{"Hash generation failed"};
 
     return result;
 }

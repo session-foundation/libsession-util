@@ -7,6 +7,9 @@
 
 namespace session::onionreq {
 
+constexpr auto decryption_failed_error =
+        "Decryption failed (both XChaCha20-Poly1305 and AES256-GCM)"sv;
+
 class ResponseParser {
   public:
     /// Constructs a parser, parsing the given request sent to us.  Throws if parsing or decryption
@@ -19,6 +22,8 @@ class ResponseParser {
             destination_x25519_public_key_{std::move(destination_x25519_public_key)},
             x25519_keypair_{std::move(x25519_keypair)},
             enc_type_{enc_type} {}
+
+    static bool response_long_enough(EncryptType enc_type, size_t response_size);
 
     ustring decrypt(ustring ciphertext) const;
 

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <oxenc/common.h>
+
 #include <array>
 #include <cassert>
 #include <chrono>
@@ -7,6 +9,7 @@
 #include <cstring>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <vector>
 
@@ -39,6 +42,18 @@ inline const char* from_unsigned(const unsigned char* x) {
 }
 inline char* from_unsigned(unsigned char* x) {
     return reinterpret_cast<char*>(x);
+}
+// Helper to switch from basic_string_view<CFrom> to basic_string_view<CTo>.  Both CFrom and CTo
+// must be primitive, one-byte types.
+template <oxenc::basic_char CTo, oxenc::basic_char CFrom>
+inline std::basic_string_view<CTo> convert_sv(std::basic_string_view<CFrom> from) {
+    return {reinterpret_cast<const CTo*>(from.data()), from.size()};
+}
+// Same as above, but with a const basic_string<CFrom>& argument (to allow deduction of CFrom when
+// using a basic_string<CFrom>).
+template <oxenc::basic_char CTo, oxenc::basic_char CFrom>
+inline std::basic_string_view<CTo> convert_sv(const std::basic_string<CFrom>& from) {
+    return {reinterpret_cast<const CTo*>(from.data()), from.size()};
 }
 // Helper function to switch between basic_string_view<C> and ustring_view
 inline ustring_view to_unsigned_sv(std::string_view v) {
@@ -78,37 +93,9 @@ inline bool string_iequal(std::string_view s1, std::string_view s2) {
     });
 }
 
-// C++20 starts_/ends_with backport
-inline constexpr bool starts_with(std::string_view str, std::string_view prefix) {
-    return str.size() >= prefix.size() && str.substr(prefix.size()) == prefix;
-}
-
-inline constexpr bool end_with(std::string_view str, std::string_view suffix) {
-    return str.size() >= suffix.size() && str.substr(str.size() - suffix.size()) == suffix;
-}
-
 using uc32 = std::array<unsigned char, 32>;
 using uc33 = std::array<unsigned char, 33>;
 using uc64 = std::array<unsigned char, 64>;
-
-template <typename T>
-using string_view_char_type = std::conditional_t<
-        std::is_convertible_v<T, std::string_view>,
-        char,
-        std::conditional_t<
-                std::is_convertible_v<T, std::basic_string_view<unsigned char>>,
-                unsigned char,
-                std::conditional_t<
-                        std::is_convertible_v<T, std::basic_string_view<std::byte>>,
-                        std::byte,
-                        void>>>;
-
-template <typename T>
-constexpr bool is_char_array = false;
-template <typename Char, size_t N>
-inline constexpr bool is_char_array<std::array<Char, N>> =
-        std::is_same_v<Char, char> || std::is_same_v<Char, unsigned char> ||
-        std::is_same_v<Char, std::byte>;
 
 /// Takes a container of string-like binary values and returns a vector of ustring_views viewing
 /// those values.  This can be used on a container of any type with a `.data()` and a `.size()`
@@ -145,6 +132,29 @@ template <typename Container>
 std::vector<ustring_view> to_view_vector(const Container& c) {
     return to_view_vector(c.begin(), c.end());
 }
+
+/// Splits a string on some delimiter string and returns a vector of string_view's pointing into the
+/// pieces of the original string.  The pieces are valid only as long as the original string remains
+/// valid.  Leading and trailing empty substrings are not removed.  If delim is empty you get back a
+/// vector of string_views each viewing one character.  If `trim` is true then leading and trailing
+/// empty values will be suppressed.
+///
+///     auto v = split("ab--c----de", "--"); // v is {"ab", "c", "", "de"}
+///     auto v = split("abc", ""); // v is {"a", "b", "c"}
+///     auto v = split("abc", "c"); // v is {"ab", ""}
+///     auto v = split("abc", "c", true); // v is {"ab"}
+///     auto v = split("-a--b--", "-"); // v is {"", "a", "", "b", "", ""}
+///     auto v = split("-a--b--", "-", true); // v is {"a", "", "b"}
+///
+std::vector<std::string_view> split(
+        std::string_view str, std::string_view delim, bool trim = false);
+
+/// Returns protocol, host, port, path.  Port can be empty; throws on unparseable values.  protocol
+/// and host get normalized to lower-case.  Port will be null if not present in the URL, or if set
+/// to the default for the protocol.  Path can be empty (a single optional `/` after the domain will
+/// be ignored).
+std::tuple<std::string, std::string, std::optional<uint16_t>, std::optional<std::string>> parse_url(
+        std::string_view url);
 
 /// Truncates a utf-8 encoded string to at most `n` bytes long, but with care as to not truncate in
 /// the middle of a unicode codepoint.  If the `n` length would shorten the string such that it

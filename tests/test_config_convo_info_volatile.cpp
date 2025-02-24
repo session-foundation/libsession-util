@@ -295,7 +295,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
             "bad-url",
             "room",
             "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes.data()));
-    CHECK(conf->last_error == "Invalid community URL: invalid/missing protocol://"sv);
+    CHECK(conf->last_error == "Invalid URL: invalid/missing protocol://"sv);
     CHECK_FALSE(convo_info_volatile_get_or_construct_community(
             conf,
             &og,
@@ -491,9 +491,6 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     auto some_session_id = [&](unsigned char x) -> std::string {
         auto pk = some_pubkey(x);
         return "05" + oxenc::to_hex(pk.begin(), pk.end());
-    };
-    auto some_og_url = [&](unsigned char x) -> std::string {
-        return "https://example.com/r/room"s + std::to_string(x);
     };
     const auto now = std::chrono::system_clock::now() - 1ms;
     auto unix_timestamp = [&now](int days_ago) -> int64_t {

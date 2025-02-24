@@ -41,7 +41,7 @@ contact_info::contact_info(std::string sid) : session_id{std::move(sid)} {
 
 void contact_info::set_name(std::string n) {
     if (n.size() > MAX_NAME_LENGTH)
-        name = std::move(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
+        name = utf8_truncate(std::move(n), MAX_NAME_LENGTH);
     else
         name = std::move(n);
 }
@@ -181,17 +181,16 @@ std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
 
 LIBSESSION_C_API bool contacts_get(
         config_object* conf, contacts_contact* contact, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<Contacts>(conf)->get(session_id)) {
-            c->into(*contact);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<Contacts>(conf)->get(session_id)) {
+                    c->into(*contact);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 
 contact_info Contacts::get_or_construct(std::string_view pubkey_hex) const {
@@ -203,15 +202,13 @@ contact_info Contacts::get_or_construct(std::string_view pubkey_hex) const {
 
 LIBSESSION_C_API bool contacts_get_or_construct(
         config_object* conf, contacts_contact* contact, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        unbox<Contacts>(conf)->get_or_construct(session_id).into(*contact);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->get_or_construct(session_id).into(*contact);
+                return true;
+            },
+            false);
 }
 
 void Contacts::set(const contact_info& contact) {
@@ -252,8 +249,14 @@ void Contacts::set(const contact_info& contact) {
     set_positive_int(info["j"], contact.created);
 }
 
-LIBSESSION_C_API void contacts_set(config_object* conf, const contacts_contact* contact) {
-    unbox<Contacts>(conf)->set(contact_info{*contact});
+LIBSESSION_C_API bool contacts_set(config_object* conf, const contacts_contact* contact) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->set(contact_info{*contact});
+                return true;
+            },
+            false);
 }
 
 void Contacts::set_name(std::string_view session_id, std::string name) {

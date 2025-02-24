@@ -445,10 +445,6 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     constexpr auto definitely_real_id =
             "035000000000000000000000000000000000000000000000000000000000000000"sv;
 
-    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
-                          std::chrono::system_clock::now().time_since_epoch())
-                          .count();
-
     CHECK_FALSE(groups.get_group(definitely_real_id));
 
     CHECK(groups.empty());

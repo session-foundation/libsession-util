@@ -74,14 +74,6 @@ template <typename ConfigT>
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_pubkey, ed25519_secretkey, dump);
 }
 
-template <size_t N>
-void copy_c_str(char (&dest)[N], std::string_view src) {
-    if (src.size() >= N)
-        src.remove_suffix(src.size() - N - 1);
-    std::memcpy(dest, src.data(), src.size());
-    dest[src.size()] = 0;
-}
-
 // Copies a container of std::strings into a self-contained malloc'ed config_string_list for
 // returning to C code with the strings and pointers of the string list in the same malloced space,
 // hanging off the end (so that everything, including string values, is freed by a single `free()`).

@@ -1,3 +1,4 @@
+#include <fmt/core.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
 #include <sodium/crypto_sign_ed25519.h>
 
@@ -35,7 +36,7 @@ TEST_CASE("Multi-recipient encryption", "[encrypt][multi]") {
             "0123456789abcdef333333333333333300000000000000000000000000000000"_hexbytes};
 
     std::array<x_pair, seeds.size()> x_keys;
-    for (int i = 0; i < seeds.size(); i++)
+    for (size_t i = 0; i < seeds.size(); i++)
         x_keys[i] = to_x_keys(seeds[i]);
 
     CHECK(oxenc::to_hex(to_usv(x_keys[0].second)) ==
@@ -199,7 +200,7 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
             "0123456789abcdef333333333333333300000000000000000000000000000000"_hexbytes};
 
     std::array<x_pair, seeds.size()> x_keys;
-    for (int i = 0; i < seeds.size(); i++)
+    for (size_t i = 0; i < seeds.size(); i++)
         x_keys[i] = to_x_keys(seeds[i]);
 
     CHECK(oxenc::to_hex(to_usv(x_keys[0].second)) ==
@@ -292,12 +293,15 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
             "test suite",
             nonce);
 
-    CHECK(printable(encrypted) ==
-          printable(
-                  "d1:#24:" + "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hex + "1:el" +
-                  "21:" + "e64937e5ea201b84f4e88a976dad900d91caaf6a17"_hex +
-                  "21:" + "bcb642c49c6da03f70cdaab2ed6666721318afd631"_hex +
-                  "21:" + "1ecee2215d226817edfdb097f05037eb799309103a"_hex + "ee"));
+    CHECK(printable(encrypted) == printable(fmt::format(
+                                          "d"
+                                          "1:#24:{}"
+                                          "1:el21:{}21:{}21:{}e"
+                                          "e",
+                                          "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hex,
+                                          "e64937e5ea201b84f4e88a976dad900d91caaf6a17"_hex,
+                                          "bcb642c49c6da03f70cdaab2ed6666721318afd631"_hex,
+                                          "1ecee2215d226817edfdb097f05037eb799309103a"_hex)));
 
     m1 = session::decrypt_for_multiple_simple(
             encrypted,

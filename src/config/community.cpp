@@ -88,67 +88,6 @@ std::string community::full_url(
     return url;
 }
 
-// returns protocol, host, port.  Port can be empty; throws on unparseable values.  protocol and
-// host get normalized to lower-case.  Port will be 0 if not present in the URL, or if set to
-// the default for the protocol. The URL must not include a path (though a single optional `/`
-// after the domain is accepted and ignored).
-std::tuple<std::string, std::string, uint16_t> parse_url(std::string_view url) {
-    std::tuple<std::string, std::string, uint16_t> result{};
-    auto& [proto, host, port] = result;
-    if (auto pos = url.find("://"); pos != std::string::npos) {
-        auto proto_name = url.substr(0, pos);
-        url.remove_prefix(proto_name.size() + 3);
-        if (string_iequal(proto_name, "http"))
-            proto = "http://";
-        else if (string_iequal(proto_name, "https"))
-            proto = "https://";
-    }
-    if (proto.empty())
-        throw std::invalid_argument{"Invalid community URL: invalid/missing protocol://"};
-
-    bool next_allow_dot = false;
-    bool has_dot = false;
-    while (!url.empty()) {
-        auto c = url.front();
-        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == '-') {
-            host += c;
-            next_allow_dot = true;
-        } else if (c >= 'A' && c <= 'Z') {
-            host += c + ('a' - 'A');
-            next_allow_dot = true;
-        } else if (next_allow_dot && c == '.') {
-            host += '.';
-            has_dot = true;
-            next_allow_dot = false;
-        } else {
-            break;
-        }
-        url.remove_prefix(1);
-    }
-    if (host.size() < 4 || !has_dot || host.back() == '.')
-        throw std::invalid_argument{"Invalid community URL: invalid hostname"};
-
-    if (!url.empty() && url.front() == ':') {
-        url.remove_prefix(1);
-        if (auto [p, ec] = std::from_chars(url.data(), url.data() + url.size(), port);
-            ec == std::errc{})
-            url.remove_prefix(p - url.data());
-        else
-            throw std::invalid_argument{"Invalid community URL: invalid port"};
-        if ((port == 80 && proto == "http://") || (port == 443 && proto == "https://"))
-            port = 0;
-    }
-
-    if (!url.empty() && url.front() == '/')
-        url.remove_prefix(1);
-
-    // We don't (currently) allow a /path in a community URL
-    if (!url.empty())
-        throw std::invalid_argument{"Invalid community URL: found unexpected trailing value"};
-
-    return result;
-}
-
 void community::canonicalize_url(std::string& url) {
     if (auto new_url = canonical_url(url); new_url != url)
         url = std::move(new_url);
@@ -168,14 +107,17 @@ void community::canonicalize_room(std::string& room) {
 }
 
 std::string community::canonical_url(std::string_view url) {
-    const auto& [proto, host, port] = parse_url(url);
+    const auto& [proto, host, port, path] = parse_url(url);
     std::string result;
     result += proto;
     result += host;
-    if (port != 0) {
+    if (port) {
         result += ':';
-        result += std::to_string(port);
+        result += std::to_string(*port);
     }
+    // We don't (currently) allow a /path in a community URL
+    if (path)
+        throw std::invalid_argument{"Invalid community URL: found unexpected trailing value"};
     if (result.size() > BASE_URL_MAX_LENGTH)
         throw std::invalid_argument{"Invalid community URL: base URL is too long"};
     return result;
@@ -274,6 +216,5 @@ LIBSESSION_C_API void community_make_full_url(
     auto full =
             session::config::community::full_url(base_url, room, session::ustring_view{pubkey, 32});
     assert(full.size() <= COMMUNITY_FULL_URL_MAX_LENGTH);
-    size_t pos = 0;
     std::memcpy(full_url, full.data(), full.size() + 1);
 }

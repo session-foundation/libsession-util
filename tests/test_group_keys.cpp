@@ -23,8 +23,6 @@
 using namespace std::literals;
 using namespace oxenc::literals;
 
-static constexpr int64_t created_ts = 1680064059;
-
 using namespace session::config;
 
 static std::array<unsigned char, 64> sk_from_seed(ustring_view seed) {
@@ -198,7 +196,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     mem_configs.clear();
 
     // add non-admin members, re-key, distribute
-    for (int i = 0; i < members.size(); ++i) {
+    for (size_t i = 0; i < members.size(); ++i) {
         auto m = admin1.members.get_or_construct(members[i].session_id);
         m.admin = false;
         m.name = "Member" + std::to_string(i);
@@ -314,7 +312,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
               std::unordered_set{{"keyhash1"s, "keyhash2"s, "keyhash3"s, "keyhash4"s}});
     }
 
-    for (int i = 0; i < members.size(); i++) {
+    for (size_t i = 0; i < members.size(); i++) {
         auto& m = members[i];
         bool found_key = m.keys.load_key_message(
                 "keyhash4", new_keys_config2, get_timestamp_ms(), m.info, m.members);
@@ -512,7 +510,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.keys.current_hashes() == std::unordered_set{{"keyhash6"s, "keyhash7"s}});
     }
 
-    for (int i = 0; i < members.size(); i++) {
+    for (size_t i = 0; i < members.size(); i++) {
         auto& m = members[i];
         CHECK(m.keys.load_key_message(
                 "keyhash6",
@@ -729,11 +727,13 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
                 get_timestamp_ms(),
                 m.info,
                 m.members));
-        config_string_list* hashes;
-        REQUIRE_THROWS(
-                hashes = config_merge(m.info, merge_hash1, &merge_data1[0], &merge_size1[0], 1));
-        REQUIRE_THROWS(
-                hashes = config_merge(m.members, merge_hash1, &merge_data1[1], &merge_size1[1], 1));
+        [[maybe_unused]] config_string_list* hashes;
+        hashes = config_merge(m.info, merge_hash1, &merge_data1[0], &merge_size1[0], 1);
+        REQUIRE(m.info->last_error == "Cannot merge configs without any decryption keys"sv);
+        m.info->last_error = nullptr;
+        hashes = config_merge(m.members, merge_hash1, &merge_data1[1], &merge_size1[1], 1);
+        REQUIRE(m.members->last_error == "Cannot merge configs without any decryption keys"sv);
+        m.members->last_error = nullptr;
 
         REQUIRE(groups_members_size(m.members) == 0);
     }
@@ -741,7 +741,7 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
     free(new_info_config1);
     free(new_mem_config1);
 
-    for (int i = 0; i < members.size(); ++i) {
+    for (size_t i = 0; i < members.size(); ++i) {
         config_group_member new_mem;
 
         REQUIRE(groups_members_get_or_construct(
@@ -881,7 +881,7 @@ TEST_CASE("Group Keys - swarm authentication", "[config][groups][keys][swarm]") 
             member.info.id, to_usv(member.secret_key), auth_data));
 
     // Try flipping a bit in each position of the auth data and make sure it fails to validate:
-    for (int i = 0; i < auth_data.size(); i++) {
+    for (size_t i = 0; i < auth_data.size(); i++) {
         for (int b = 0; b < 8; b++) {
             if (i == 35 && b == 7)  // This is the sign bit of k, which can be flipped but gets
                                     // flipped back when dealing with the missing X->Ed conversion
