@@ -91,7 +91,7 @@ namespace {
 
     constexpr auto node_not_found_prefix = "502 Bad Gateway\n\nNext node not found: "sv;
     constexpr auto node_not_found_prefix_no_status = "Next node not found: "sv;
-    constexpr auto ALPN = "oxenstorage"sv;
+    constexpr auto ALPN = "oxenstorage";
     constexpr auto ONION = "onion_req";
 
     enum class PathSelectionBehaviour {
@@ -450,14 +450,14 @@ namespace detail {
 
 request_info request_info::make(
         onionreq::network_destination _dest,
-        std::optional<ustring> _original_body,
+        std::optional<std::vector<unsigned char>> _original_body,
         std::optional<session::onionreq::x25519_pubkey> _swarm_pk,
         std::chrono::milliseconds _request_timeout,
         std::optional<std::chrono::milliseconds> _request_and_path_build_timeout,
         PathType _type,
         std::optional<std::string> _req_id,
         std::optional<std::string> _ep,
-        std::optional<ustring> _body) {
+        std::optional<std::vector<unsigned char>> _body) {
     return request_info{
             _req_id.value_or("R-{}"_format(random::random_base32(4))),
             std::move(_dest),
@@ -1236,7 +1236,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     };
     auto info = request_info::make(
             target_node,
-            ustring{quic::to_usv(payload.dump())},
+            str_to_vec(payload.dump()),
             std::nullopt,
             quic::DEFAULT_TIMEOUT,
             std::nullopt,
@@ -1776,10 +1776,10 @@ void Network::send_request(
         return handle_response(
                 false, false, -1, {content_type_plain_text}, "Network is unreachable.");
 
-    quic::bstring_view payload{};
+    bspan payload{};
 
     if (info.body)
-        payload = convert_sv<std::byte>(*info.body);
+        payload = vec_to_span<std::byte>(*info.body);
 
     // Calculate the remaining timeout
     std::chrono::milliseconds timeout = info.request_timeout;
@@ -1846,7 +1846,7 @@ void Network::send_request(
 
 void Network::send_onion_request(
         onionreq::network_destination destination,
-        std::optional<ustring> body,
+        std::optional<std::vector<unsigned char>> body,
         std::optional<session::onionreq::x25519_pubkey> swarm_pubkey,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
@@ -2059,7 +2059,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
 }
 
 void Network::upload_file_to_server(
-        ustring data,
+        std::vector<unsigned char> data,
         onionreq::ServerDestination server,
         std::optional<std::string> file_name,
         network_response_callback_t handle_response,
@@ -2197,7 +2197,7 @@ Network::process_v3_onion_response(Builder builder, std::string response) {
     if (!oxenc::is_base64(base64_iv_and_ciphertext))
         throw std::runtime_error{"Invalid base64 encoded IV and ciphertext."};
 
-    ustring iv_and_ciphertext;
+    std::vector<unsigned char> iv_and_ciphertext;
     oxenc::from_base64(
             base64_iv_and_ciphertext.begin(),
             base64_iv_and_ciphertext.end(),
@@ -2233,12 +2233,12 @@ Network::process_v3_onion_response(Builder builder, std::string response) {
 
 std::tuple<int16_t, std::vector<std::pair<std::string, std::string>>, std::optional<std::string>>
 Network::process_v4_onion_response(Builder builder, std::string response) {
-    ustring response_data{to_unsigned(response.data()), response.size()};
+    auto response_data = str_to_vec(response);
     auto parser = ResponseParser(builder);
     auto result = parser.decrypt(response_data);
 
     // Process the bencoded response
-    oxenc::bt_list_consumer result_bencode{result};
+    oxenc::bt_list_consumer result_bencode{vec_to_span<std::byte>(result)};
 
     if (result_bencode.is_finished() || !result_bencode.is_string())
         throw std::runtime_error{"Invalid bencoded response"};
@@ -2924,9 +2924,9 @@ LIBSESSION_C_API void network_send_onion_request_to_snode_destination(
     assert(callback);
 
     try {
-        std::optional<ustring> body;
+        std::optional<std::vector<unsigned char>> body;
         if (body_size > 0)
-            body = {body_, body_size};
+            body.emplace(body_, body_ + body_size);
 
         std::optional<x25519_pubkey> swarm_pubkey;
         if (swarm_pubkey_hex)
@@ -3006,9 +3006,9 @@ LIBSESSION_C_API void network_send_onion_request_to_server_destination(
            server.x25519_pubkey && callback);
 
     try {
-        std::optional<ustring> body;
+        std::optional<std::vector<unsigned char>> body;
         if (body_size > 0)
-            body = {body_, body_size};
+            body.emplace(body_, body_ + body_size);
 
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout;
         if (request_and_path_build_timeout_ms > 0)
@@ -3087,7 +3087,7 @@ LIBSESSION_C_API void network_upload_to_server(
                     std::chrono::milliseconds{request_and_path_build_timeout_ms};
 
         unbox(network).upload_file_to_server(
-                {data, data_len},
+                {data, data + data_len},
                 network::detail::convert_server_destination(server),
                 file_name,
                 [cb = std::move(callback), ctx](

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <oxenc/hex.h>
+#include <oxenc/span.h>
 
 #include <array>
 #include <chrono>
@@ -13,6 +14,7 @@
 #include <vector>
 
 #include "session/config/base.h"
+#include "session/types.hpp"
 
 using ustring = std::basic_string<unsigned char>;
 using ustring_view = std::basic_string_view<unsigned char>;
@@ -54,6 +56,11 @@ inline ustring operator""_hexbytes(const char* x, size_t n) {
     oxenc::from_hex(x, x + n, std::back_inserter(bytes));
     return bytes;
 }
+inline std::vector<unsigned char> operator""_hexbytesv(const char* x, size_t n) {
+    auto bytes = oxenc::from_hex(x, x + n);
+    auto begin = reinterpret_cast<const char*>(bytes.data());
+    return {begin, begin + bytes.size()};
+}
 
 inline std::string to_hex(ustring_view bytes) {
     std::string hex;
@@ -63,6 +70,15 @@ inline std::string to_hex(ustring_view bytes) {
 
 inline constexpr auto operator""_kiB(unsigned long long kiB) {
     return kiB * 1024;
+}
+
+template <oxenc::const_span_type T>
+inline std::string_view sp_to_sv(const T& sp) {
+    return {reinterpret_cast<const char*>(sp.data()), sp.size()};
+}
+
+inline std::string_view vec_to_sv(const std::vector<unsigned char>& vec) {
+    return {reinterpret_cast<const char*>(vec.data()), vec.size()};
 }
 
 // Returns the current timestamp in milliseconds

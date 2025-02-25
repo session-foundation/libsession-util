@@ -1,6 +1,7 @@
 #pragma once
 
 #include <oxenc/common.h>
+#include <oxenc/span.h>
 
 #include <array>
 #include <cassert>
@@ -16,6 +17,69 @@
 #include "types.hpp"
 
 namespace session {
+
+using namespace oxenc;
+
+namespace detail {
+    // Base function: takes any basic_char in, outputs any other
+    template <oxenc::basic_char Out, oxenc::basic_char In>
+    inline const_span<Out> to_span(const In* data, size_t datalen) {
+        return {reinterpret_cast<const Out*>(data), datalen};
+    }
+}  // namespace detail
+
+// specialize base to return byte span, but accept ANY str/sv
+template <oxenc::string_like T>
+inline bspan str_to_bspan(const T& sv) {
+    return detail::to_span<std::byte>(sv.data(), sv.size());
+}
+
+// specialize base to return unsigned span, but accept ANY str/sv
+template <oxenc::string_like T>
+inline uspan str_to_uspan(const T& sv) {
+    return detail::to_span<unsigned char>(sv.data(), sv.size());
+}
+
+template <std::size_t N>
+inline uspan str_to_uspan(const char (&literal)[N]) {
+    return detail::to_span<unsigned char>(literal, N - 1);
+}
+
+// just accept string_view, output any span-type
+template <oxenc::basic_char Out>
+inline const_span<Out> sv_to_span(std::string_view in) {
+    return {reinterpret_cast<const Out*>(in.data()), in.size()};
+}
+
+template <oxenc::basic_char Out, oxenc::basic_char In>
+inline std::span<const Out> span_to_span(const std::span<const In>& sp) {
+    return detail::to_span<Out>(sp.data(), sp.size());
+}
+
+template <oxenc::basic_char In>
+std::string span_to_str(const std::span<const In>& sp) {
+    return std::string(reinterpret_cast<const char*>(sp.data()), sp.size());
+}
+
+template <oxenc::basic_char Out, oxenc::basic_char In>
+inline std::span<const Out> vec_to_span(const std::vector<In>& v) {
+    return detail::to_span<Out>(v.data(), v.size());
+}
+
+template <oxenc::basic_char Out, oxenc::basic_char In>
+inline std::vector<Out> span_to_vec(const std::span<const In>& sp) {
+    auto begin = reinterpret_cast<const Out*>(sp.data());
+    return {begin, begin + sp.size()};
+}
+
+inline std::vector<unsigned char> str_to_vec(std::string_view v) {
+    auto begin = reinterpret_cast<const char*>(v.data());
+    return {begin, begin + v.size()};
+}
+
+inline std::string vec_to_str(std::vector<unsigned char> v) {
+    return std::string(reinterpret_cast<const char*>(v.data()), v.size());
+}
 
 // Helper function to go to/from char pointers to unsigned char pointers:
 inline const unsigned char* to_unsigned(const char* x) {

@@ -25,7 +25,7 @@ class ResponseParser {
 
     static bool response_long_enough(EncryptType enc_type, size_t response_size);
 
-    ustring decrypt(ustring ciphertext) const;
+    std::vector<unsigned char> decrypt(std::vector<unsigned char> ciphertext) const;
 
   private:
     x25519_pubkey destination_x25519_public_key_;

@@ -146,14 +146,14 @@ namespace detail {
 struct request_info {
     static request_info make(
             onionreq::network_destination _dest,
-            std::optional<ustring> _original_body,
+            std::optional<std::vector<unsigned char>> _original_body,
             std::optional<session::onionreq::x25519_pubkey> _swarm_pk,
             std::chrono::milliseconds _request_timeout,
             std::optional<std::chrono::milliseconds> _request_and_path_build_timeout = std::nullopt,
             PathType _type = PathType::standard,
             std::optional<std::string> _req_id = std::nullopt,
             std::optional<std::string> endpoint = "onion_req",
-            std::optional<ustring> _body = std::nullopt);
+            std::optional<std::vector<unsigned char>> _body = std::nullopt);
 
     enum class RetryReason {
         none,
@@ -165,8 +165,8 @@ struct request_info {
     std::string request_id;
     session::onionreq::network_destination destination;
     std::string endpoint;
-    std::optional<ustring> body;
-    std::optional<ustring> original_body;
+    std::optional<std::vector<unsigned char>> body;
+    std::optional<std::vector<unsigned char>> original_body;
     std::optional<session::onionreq::x25519_pubkey> swarm_pubkey;
     PathType path_type;
     std::chrono::milliseconds request_timeout;
@@ -332,7 +332,7 @@ class Network {
     /// - 'type' - [in] the type of paths to send the request across.
     void send_onion_request(
             onionreq::network_destination destination,
-            std::optional<ustring> body,
+            std::optional<std::vector<unsigned char>> body,
             std::optional<session::onionreq::x25519_pubkey> swarm_pubkey,
             network_response_callback_t handle_response,
             std::chrono::milliseconds request_timeout,
@@ -356,7 +356,7 @@ class Network {
     /// it took to build the path.
     /// - `handle_response` -- [in] callback to be called with the result of the request.
     void upload_file_to_server(
-            ustring data,
+            std::vector<unsigned char> data,
             onionreq::ServerDestination server,
             std::optional<std::string> file_name,
             network_response_callback_t handle_response,

@@ -86,11 +86,11 @@ class Builder {
 
     void set_destination(network_destination destination);
     void set_destination_pubkey(session::onionreq::x25519_pubkey x25519_pubkey);
-    void add_hop(ustring_view remote_key);
+    void add_hop(uspan remote_key);
     void add_hop(std::pair<ed25519_pubkey, x25519_pubkey> keys) { hops_.push_back(keys); }
 
     void generate(network::request_info& info);
-    ustring build(ustring payload);
+    std::vector<unsigned char> build(std::vector<unsigned char> payload);
 
   private:
     std::vector<std::pair<ed25519_pubkey, x25519_pubkey>> hops_ = {};
@@ -109,7 +109,8 @@ class Builder {
     std::optional<std::vector<std::pair<std::string, std::string>>> headers_ = std::nullopt;
     std::optional<std::vector<std::pair<std::string, std::string>>> query_params_ = std::nullopt;
 
-    ustring _generate_payload(std::optional<ustring> body) const;
+    std::vector<unsigned char> _generate_payload(
+            std::optional<std::vector<unsigned char>> body) const;
 };
 
 }  // namespace session::onionreq

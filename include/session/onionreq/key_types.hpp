@@ -54,7 +54,10 @@ struct alignas(size_t) key_base : std::array<unsigned char, KeyLength> {
         detail::load_from_bytes(d.data(), d.size(), bytes);
         return d;
     }
-    static Derived from_bytes(ustring_view bytes) { return from_bytes(from_unsigned_sv(bytes)); }
+    static Derived from_bytes(std::vector<unsigned char> bytes) {
+        return from_bytes(vec_to_str(bytes));
+    }
+    static Derived from_bytes(uspan bytes) { return from_bytes(span_to_str(bytes)); }
 };
 
 template <typename Derived, size_t KeyLength>
@@ -92,7 +95,7 @@ using x25519_keypair = std::pair<x25519_pubkey, x25519_seckey>;
 legacy_pubkey parse_legacy_pubkey(std::string_view pubkey_in);
 ed25519_pubkey parse_ed25519_pubkey(std::string_view pubkey_in);
 x25519_pubkey parse_x25519_pubkey(std::string_view pubkey_in);
-x25519_pubkey compute_x25519_pubkey(ustring_view ed25519_pk);
+x25519_pubkey compute_x25519_pubkey(uspan ed25519_pk);
 
 }  // namespace session::onionreq
 

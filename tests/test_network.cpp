@@ -1098,7 +1098,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network.emplace(std::nullopt, true, true, false);
     network->send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
                bool,
@@ -1115,7 +1115,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
                bool,
@@ -1132,7 +1132,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&prom](bool success,
                     bool timeout,
@@ -1173,7 +1173,7 @@ TEST_CASE("Network requests", "[network][send_request]") {
                 network.send_request(
                         request_info::make(
                                 test_service_node,
-                                ustring{to_usv("{}")},
+                                str_to_vec("{}"),
                                 std::nullopt,
                                 3s,
                                 std::nullopt,
@@ -1218,7 +1218,7 @@ TEST_CASE("Network onion request", "[network][send_onion_request]") {
 
     network.send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&result_promise](
                     bool success,
