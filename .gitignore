@@ -3,3 +3,7 @@
 /.cache/
 /.vscode/
 .DS_STORE
+
+# Built iOS products
+libsession-util.xcframework
+libsession-util.xcframework.zip
