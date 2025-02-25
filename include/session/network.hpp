@@ -1,6 +1,7 @@
 #pragma once
 
 #include <limits>
+#include <filesystem>
 #include <oxen/quic.hpp>
 
 #include "onionreq/builder.hpp"

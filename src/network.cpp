@@ -1,6 +1,8 @@
 #include "session/network.hpp"
 
 #include <oxenc/hex.h>
+#include <oxenc/base64.h>
+#include <oxenc/bt_producer.h>
 #include <sodium/core.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
@@ -12,6 +14,7 @@
 #include <oxen/quic.hpp>
 #include <oxen/quic/opt.hpp>
 #include <oxen/quic/utils.hpp>
+#include <oxen/quic/gnutls_crypto.hpp>
 #include <string>
 #include <string_view>
 #include <thread>
