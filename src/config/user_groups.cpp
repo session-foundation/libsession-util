@@ -36,18 +36,18 @@ namespace session::config {
 template <typename T>
 static void base_into(const base_group_info& self, T& c) {
     c.priority = self.priority;
-    c.joined_at = self.joined_at;
+    c.joined_at = to_epoch_seconds(self.joined_at);
     c.notifications = static_cast<CONVO_NOTIFY_MODE>(self.notifications);
-    c.mute_until = self.mute_until;
+    c.mute_until = to_epoch_seconds(self.mute_until);
     c.invited = self.invited;
 }
 
 template <typename T>
 static void base_from(base_group_info& self, const T& c) {
     self.priority = c.priority;
-    self.joined_at = c.joined_at;
+    self.joined_at = to_epoch_seconds(c.joined_at);
     self.notifications = static_cast<notify_mode>(c.notifications);
-    self.mute_until = c.mute_until;
+    self.mute_until = to_epoch_seconds(c.mute_until);
     self.invited = c.invited;
 }
 
@@ -129,7 +129,7 @@ void legacy_group_info::into(ugroups_legacy_group_info& c) && {
 
 void base_group_info::load(const dict& info_dict) {
     priority = maybe_int(info_dict, "+").value_or(0);
-    joined_at = std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0));
+    joined_at = to_epoch_seconds(std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0)));
 
     int notify = maybe_int(info_dict, "@").value_or(0);
     if (notify >= 0 && notify <= 3)
@@ -137,7 +137,7 @@ void base_group_info::load(const dict& info_dict) {
     else
         notifications = notify_mode::defaulted;
 
-    mute_until = maybe_int(info_dict, "!").value_or(0);
+    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
 
     invited = maybe_int(info_dict, "i").value_or(0);
 }
@@ -206,6 +206,7 @@ group_info::group_info(const ugroups_group_info& c) : id{c.id, 66} {
     base_from(*this, c);
 
     name = c.name;
+    removed_status = c.removed_status;
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
 
     if (c.have_secretkey)
@@ -219,6 +220,7 @@ void group_info::into(ugroups_group_info& c) const {
     base_into(*this, c);
     copy_c_str(c.id, id);
     copy_c_str(c.name, name);
+    c.removed_status = removed_status;
     if ((c.have_secretkey = secretkey.size() == 64))
         std::memcpy(c.secretkey, secretkey.data(), 64);
     if ((c.have_auth_data = auth_data.size() == 100))
@@ -243,15 +245,36 @@ void group_info::load(const dict& info_dict) {
     }
     if (auto sig = maybe_ustring(info_dict, "s"); sig && sig->size() == 100)
         auth_data = std::move(*sig);
+
+    removed_status = maybe_int(info_dict, "r").value_or(0);
 }
 
-void group_info::setKicked() {
+void group_info::mark_kicked() {
     secretkey.clear();
     auth_data.clear();
+    if (removed_status != GROUP_DESTROYED) {
+        removed_status = KICKED_FROM_GROUP;
+    }
+}
+
+void group_info::mark_invited() {
+    if (removed_status == KICKED_FROM_GROUP) {
+        removed_status = NOT_REMOVED;
+    }
 }
 
 bool group_info::kicked() const {
-    return secretkey.empty() && auth_data.empty();
+    return removed_status == KICKED_FROM_GROUP;
+}
+
+void group_info::mark_destroyed() {
+    secretkey.clear();
+    auth_data.clear();
+    removed_status = GROUP_DESTROYED;
+}
+
+bool group_info::is_destroyed() const {
+    return removed_status == GROUP_DESTROYED;
 }
 
 void community_info::load(const dict& info_dict) {
@@ -384,9 +407,9 @@ void UserGroups::set(const community_info& c) {
 
 void UserGroups::set_base(const base_group_info& bg, DictFieldProxy& info) const {
     set_nonzero_int(info["+"], bg.priority);
-    set_positive_int(info["j"], bg.joined_at);
+    set_positive_int(info["j"], to_epoch_seconds(bg.joined_at));
     set_positive_int(info["@"], static_cast<int>(bg.notifications));
-    set_positive_int(info["!"], bg.mute_until);
+    set_positive_int(info["!"], to_epoch_seconds(bg.mute_until));
     set_flag(info["i"], bg.invited);
     // We don't set n here because it's subtly different in the three group types
 }
@@ -420,6 +443,7 @@ void UserGroups::set(const group_info& g) {
 
     set_nonempty_str(
             info["n"], std::string_view{g.name}.substr(0, legacy_group_info::NAME_MAX_LENGTH));
+    set_positive_int(info["r"], g.removed_status);
 
     if (g.secretkey.size() == 64 &&
         // Make sure the secretkey's embedded pubkey matches the group id:
@@ -761,13 +785,30 @@ LIBSESSION_C_API bool user_groups_erase_legacy_group(config_object* conf, const 
     }
 }
 
+LIBSESSION_C_API void ugroups_group_set_invited(ugroups_group_info* group) {
+    if (group->removed_status == KICKED_FROM_GROUP) {
+        group->removed_status = NOT_REMOVED;
+    }
+}
+
 LIBSESSION_C_API void ugroups_group_set_kicked(ugroups_group_info* group) {
     assert(group);
     group->have_auth_data = false;
     group->have_secretkey = false;
+    group->removed_status = KICKED_FROM_GROUP;
 }
 LIBSESSION_C_API bool ugroups_group_is_kicked(const ugroups_group_info* group) {
-    return !(group->have_auth_data || group->have_secretkey);
+    return group->removed_status == KICKED_FROM_GROUP;
+}
+
+LIBSESSION_C_API void ugroups_group_set_destroyed(ugroups_group_info* group) {
+    assert(group);
+    group->have_auth_data = false;
+    group->have_secretkey = false;
+    group->removed_status = GROUP_DESTROYED;
+}
+LIBSESSION_C_API bool ugroups_group_is_destroyed(const ugroups_group_info* group) {
+    return group->removed_status == GROUP_DESTROYED;
 }
 
 struct ugroups_legacy_members_iterator {

@@ -28,7 +28,7 @@ using namespace std::literals;
 /// - it isn't compressed (since most of the data fields are encrypted or random, compression
 ///   reduction would be minimal).
 ///
-/// Fields used (in ascii order):
+/// Fields used for generating key messages (in ascii order):
 /// # -- 24-byte nonce used for all the encrypted values in this message; required.
 ///
 /// For non-supplemental messages:
@@ -55,6 +55,19 @@ using namespace std::literals;
 ///      to but not including the ~ keypair.  The signature must be the last key in the dict (thus
 ///      `~` since it is the largest 7-bit ascii character value).  Note that this signature
 ///      mechanism works exactly the same as the signature on regular config messages.
+///
+/// Fields used for dumping the config (in ascii order):
+/// A -- active config messages list. A list of lists, where each list has:
+///      - as first argument the generation number
+///      - the rest are the hashes valid for that generation number
+/// L -- a list of dict representing all the keys. Each dict has:
+///      - k -- same as "For supplemental messages"
+///      - g -- same as "For supplemental messages"
+///      - t -- same as "For supplemental messages"
+/// P -- pending key as a dict (if present).
+///      - c -- the pending config message to push
+///      - g -- same as "For supplemental messages"
+///      - k -- same as "For supplemental messages"
 ///
 /// Some extra details:
 ///
@@ -125,12 +138,11 @@ class Keys : public ConfigSig {
 
   public:
     /// The multiple of members keys we include in the message; we add junk entries to the key list
-    /// to reach a multiple of this.  75 is chosen because it's a decently large human-round number
-    /// that should still fit within 4kiB page size on the storage server (allowing for some extra
-    /// row field storage).
-    static constexpr int MESSAGE_KEY_MULTIPLE = 75;
+    /// to reach a multiple of this.  45 is chosen because it's a decently large human-round number
+    /// that should still fit within 2.5kiB size limitation for push notifications.
+    static constexpr int MESSAGE_KEY_MULTIPLE = 45;
 
-    // 75 because:
+    // 45 because:
     // 2              // for the 'de' delimiters of the outer dict
     // + 3 + 2 + 12   // for the `1:g` and `iNNNNNNNNNNe` generation keypair
     // + 3 + 3 + 24   // for the `1:n`, `24:`, and 24 byte nonce
@@ -140,7 +152,9 @@ class Keys : public ConfigSig {
     // + 3 + 3 + 64;  // for the `1:~` and `64:` and 64 byte signature
     // = 177 + 48N
     //
-    // and N=75 puts us a little bit under 4kiB (which is sqlite's default page size).
+    // and N=45 puts us a little bit under 2.5kiB (which is the limit we have on the push
+    // notification server because after base64 encoding it gets close to the 4kiB limit for push
+    // notification content).
 
     /// A key expires when it has been surpassed by another key for at least this amount of time.
     /// We default this to double the 30 days that we strictly need to avoid race conditions with

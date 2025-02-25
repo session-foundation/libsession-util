@@ -3,9 +3,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
-#include <oxen/quic/network.hpp>
 #include <regex>
 #include <session/logging.hpp>
+
+#ifndef DISABLE_ONIONREQ
+#include <oxen/quic/network.hpp>
+#endif
 
 using namespace session;
 using namespace oxen;
@@ -56,12 +59,12 @@ TEST_CASE("Logging callbacks", "[logging]") {
     }
 
     log::critical(log::Cat("test.a"), "abc {}", 21 * 2);
-#if defined(__APPLE__) && defined(__clang__)
+#if defined(__APPLE__) && defined(__clang__) && (__clang_major__ <= 15)
 #else
     int line0 = __LINE__ - 3;
 #endif
     log::info(log::Cat("test.b"), "hi");
-#if defined(__APPLE__) && defined(__clang__)
+#if defined(__APPLE__) && defined(__clang__) && (__clang_major__ <= 15)
 #else
     int line1 = __LINE__ - 3;
 #endif
@@ -71,7 +74,7 @@ TEST_CASE("Logging callbacks", "[logging]") {
     REQUIRE(simple_logs.size() == 2);
     REQUIRE(full_logs.size() == 2);
 
-#if defined(__APPLE__) && defined(__clang__)
+#if defined(__APPLE__) && defined(__clang__) && (__clang_major__ <= 15)
     CHECK(fixup_log(simple_logs[0]) ==
           "[<timestamp>] [<reltime>] [test.a:critical|log.hpp:177] abc 42\n");
     CHECK(fixup_log(simple_logs[1]) == "[<timestamp>] [<reltime>] [test.b:info|log.hpp:98] hi\n");
@@ -94,6 +97,7 @@ TEST_CASE("Logging callbacks", "[logging]") {
 #endif
 }
 
+#ifndef DISABLE_ONIONREQ
 TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
     oxen::log::clear_sinks();
     simple_logs.clear();
@@ -114,3 +118,4 @@ TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
 #endif
     CHECK(simple_logs.back().find("Loop shutdown complete") != std::string::npos);
 }
+#endif

@@ -87,7 +87,7 @@ ustring sign_for_recipient(
     ustring buf;
     buf.reserve(message.size() + 96);  // 32+32 now, but 32+64 when we reuse it for the sealed box
     buf += message;
-    buf += ed25519_privkey.substr(32);
+    buf += ed25519_privkey.substr(32);  // [32:] of a libsodium full seed value is the *pubkey*
     buf += recipient_pubkey;
 
     uc64 sig;

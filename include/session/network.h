@@ -109,6 +109,12 @@ LIBSESSION_EXPORT void network_close_connections(network_object* network);
 /// initialization).
 LIBSESSION_EXPORT void network_clear_cache(network_object* network);
 
+/// API: network/network_get_cache_size
+///
+/// Retrieves the current size of the snode cache from memory (if a cache doesn't exist or
+/// hasn't been loaded then this will return 0).
+LIBSESSION_EXPORT size_t network_get_snode_cache_size(network_object* network);
+
 /// API: network/network_set_status_changed_callback
 ///
 /// Registers a callback to be called whenever the network connection status changes.

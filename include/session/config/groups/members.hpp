@@ -41,11 +41,34 @@ using namespace std::literals;
 ///       - 3 if a member has been marked for promotion but the promotion hasn't been sent yet.
 ///       - omitted once the promotion is accepted (i.e. once `A` gets set).
 
-constexpr int INVITE_SENT = 1, INVITE_FAILED = 2, INVITE_NOT_SENT = 3;
+constexpr int STATUS_SENT = 1, STATUS_FAILED = 2, STATUS_NOT_SENT = 3;
 constexpr int REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2;
 
 /// Struct containing member details
 struct member {
+    /// A convenience status enum for the group member, this enum is returned by a function which
+    /// reviews the various member status values (eg. invite, promotion, etc.) and returns a single
+    /// consolidated value
+    enum class Status {
+        invite_unknown = 0,
+        invite_not_sent = 1,
+        invite_sending = 2,
+        invite_failed = 3,
+        invite_sent = 4,
+        invite_accepted = 5,
+
+        promotion_unknown = 6,
+        promotion_not_sent = 7,
+        promotion_sending = 8,
+        promotion_failed = 9,
+        promotion_sent = 10,
+        promotion_accepted = 11,
+
+        removed_unknown = 12,
+        removed = 13,
+        removed_including_messages = 14,
+    };
+
     static constexpr size_t MAX_NAME_LENGTH = 100;
 
     explicit member(std::string sid);
@@ -102,63 +125,34 @@ struct member {
 
     // Flags to track an invited user.  This value is typically not used directly, but rather via
     // the `set_invited()`, `invite_pending()` and similar methods.
-    int invite_status = INVITE_NOT_SENT;
+    int invite_status = STATUS_NOT_SENT;
 
-    /// API: groups/member::set_invited
+    /// API: groups/member::set_invite_sent
     ///
-    /// Sets the "invited" flag for this user.  This marks the user as having a pending invitation
-    /// to the group.  The optional `failed` parameter can be specified as true if the invitation
-    /// was issued but failed to send for some reason (this is intended as a signal to other clients
-    /// that the invitation should be reissued).
-    ///
-    /// Inputs:
-    /// - `failed` can be specified and set to `true` to the invite status to "failed-to-send";
-    ///   otherwise omitting it or giving as `false` sets the invite status to "sent."
-    void set_invited(bool failed = false) { invite_status = failed ? INVITE_FAILED : INVITE_SENT; }
+    /// This marks the user as having had an invitation message sent to them.
+    void set_invite_sent() { invite_status = STATUS_SENT; }
 
-    /// API: groups/members::set_accepted
+    /// API: groups/member::set_invite_not_sent
+    ///
+    /// This resets the invite status of a user to `STATUS_NOT_SENT`.
+    void set_invite_not_sent() { invite_status = STATUS_NOT_SENT; }
+
+    /// API: groups/member::set_invite_failed
+    ///
+    /// This marks the user to indicate that their invitation message failed to send (this is
+    /// intended as a signal to other clients that the invitation should be reissued).
+    void set_invite_failed() { invite_status = STATUS_FAILED; }
+
+    /// API: groups/members::set_invite_accepted
     ///
     /// This clears the "invited" and "supplement" flags for this user, thus indicating that the
     /// user has accepted an invitation and is now a regular member of the group.
     ///
     /// Inputs: none
-    void set_accepted() {
+    void set_invite_accepted() {
         invite_status = 0;
         supplement = false;
     }
-
-    /// API: groups/member::invite_not_sent
-    ///
-    /// Returns true if there has never been an attempt to send an invitation to the user.  Returns
-    /// false otherwise.
-    ///
-    /// Inputs: none
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user needs an invitation to be sent, false otherwise.
-    bool invite_not_sent() const { return invite_status == INVITE_NOT_SENT; }
-
-    /// API: groups/member::invite_pending
-    ///
-    /// Returns whether the user currently has a pending invitation.  Returns true if so (whether or
-    /// not that invitation has failed).
-    ///
-    /// Inputs: none
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a pending invitation, false otherwise.
-    bool invite_pending() const { return invite_status > 0; }
-
-    /// API: groups/member::invite_failed
-    ///
-    /// Returns true if the user has a pending invitation that is marked as failed (and thus should
-    /// be re-sent).
-    ///
-    /// Inputs: none
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a failed pending invitation
-    bool invite_failed() const { return invite_status == INVITE_FAILED; }
 
     // Flags to track a promoted-to-admin user.  This value is typically not used directly, but
     // rather via the `set_promoted()`, `promotion_pending()` and similar methods.
@@ -171,7 +165,7 @@ struct member {
     void set_promoted() {
         admin = true;
         invite_status = 0;
-        promotion_status = INVITE_NOT_SENT;
+        promotion_status = STATUS_NOT_SENT;
     }
 
     /// API: groups/member::set_promotion_sent
@@ -181,7 +175,7 @@ struct member {
     void set_promotion_sent() {
         admin = true;
         invite_status = 0;
-        promotion_status = INVITE_SENT;
+        promotion_status = STATUS_SENT;
     }
 
     /// API: groups/member::set_promotion_failed
@@ -192,7 +186,7 @@ struct member {
     void set_promotion_failed() {
         admin = true;
         invite_status = 0;
-        promotion_status = INVITE_FAILED;
+        promotion_status = STATUS_FAILED;
     }
 
     /// API: groups/member::set_promotion_accepted
@@ -203,49 +197,6 @@ struct member {
         invite_status = 0;
         promotion_status = 0;
     }
-
-    /// API: groups/member::promotion_not_sent
-    ///
-    /// Returns true if the user is an admin but there has never been an attempt to send a promotion
-    /// to admin status sent to them. Returns false otherwise.
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user needs a promotion to be sent, false otherwise.
-    bool promotion_not_sent() const { return admin && promotion_status == INVITE_NOT_SENT; }
-
-    /// API: groups/member::promotion_pending
-    ///
-    /// Returns whether the user currently has a pending invitation/promotion to admin status.
-    /// Returns true if so (whether or not that invitation has failed).
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a pending promotion, false otherwise.
-    bool promotion_pending() const { return admin && promotion_status > 0; }
-
-    /// API: groups/member::promotion_failed
-    ///
-    /// Returns true if the user has a pending promotion-to-admin that is marked as failed (and thus
-    /// should be re-sent).
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the user has a failed pending promotion
-    bool promotion_failed() const { return admin && promotion_status == INVITE_FAILED; }
-
-    /// API: groups/member::promoted
-    ///
-    /// Returns true if the user is already an admin *or* has a pending promotion to admin.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the member is promoted (or promotion-in-progress)
-    bool promoted() const { return admin || promotion_pending(); }
 
     // Flags to track a removed user.  This value is typically not used directly, but
     // rather via the `set_removed()`, `is_removed()` and similar methods.
@@ -265,28 +216,6 @@ struct member {
         promotion_status = 0;
         removed_status = messages ? REMOVED_MEMBER_AND_MESSAGES : REMOVED_MEMBER;
     }
-
-    /// API: groups/member::is_removed
-    ///
-    /// Returns true if the user should be removed from the group.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the member should be removed from the group
-    bool is_removed() const { return removed_status > 0; }
-
-    /// API: groups/member::should_remove_messages
-    ///
-    /// Returns true if the users messages should be removed after they are
-    /// successfully removed.
-    ///
-    /// Inputs: none.
-    ///
-    /// Outputs:
-    /// - `bool` -- true if the members messages should be removed after they are
-    /// successfully removed from the group
-    bool should_remove_messages() const { return removed_status == REMOVED_MEMBER_AND_MESSAGES; }
 
     /// API: groups/member::into
     ///
@@ -326,6 +255,9 @@ struct member {
 };
 
 class Members : public ConfigBase {
+
+  private:
+    std::unordered_set<std::string> pending_send_ids;
 
   public:
     // No default constructor
@@ -402,6 +334,78 @@ class Members : public ConfigBase {
     /// Outputs:
     /// - `member` - Returns a filled out member struct
     member get_or_construct(std::string_view pubkey_hex) const;
+
+    /// API: groups/Members::has_pending_send
+    ///
+    /// This function can be used to check if a member is pending send locally.
+    ///
+    /// Inputs:
+    /// - `pubkey_hex` -- hex string of the session id
+    ///
+    /// Outputs:
+    /// - `bool` - true if that sessionid is marked as pending send locally
+    bool has_pending_send(std::string pubkey_hex) const;
+
+    /// API: groups/Members::set_pending_send
+    ///
+    /// This function can be used to set the pending send state of a member.
+    /// If that effectively made a change, it will set _needs_dump to true.
+    ///
+    /// Inputs:
+    /// - `pubkey_hex` -- hex string of the session id
+    /// - `pending`  -- pending send state to set for that member
+    ///
+    void set_pending_send(std::string pubkey_hex, bool pending);
+
+    /// API: groups/Members::get_status
+    ///
+    /// This function goes through the various status values and returns a single consolidated
+    /// status for the member.
+    ///
+    /// Inputs:
+    /// - `member` -- member value to to retrieve the status for
+    ///
+    /// Outputs:
+    /// - `status` - an enum indicating the consolidated status of this member in the group.
+    member::Status get_status(const member& member) const {
+        // If the member has been removed that trumps all other statuses
+        if (member.removed_status == REMOVED_MEMBER_AND_MESSAGES)
+            return member::Status::removed_including_messages;
+        else if (member.removed_status == REMOVED_MEMBER)
+            return member::Status::removed;
+        else if (member.removed_status > 0)
+            return member::Status::removed_unknown;
+
+        // If the member is promoted then we return the relevant promoted status
+        if (member.admin) {
+            if (member.promotion_status == STATUS_NOT_SENT && has_pending_send(member.session_id))
+                return member::Status::promotion_sending;
+            else if (member.promotion_status == STATUS_NOT_SENT)
+                return member::Status::promotion_not_sent;
+            else if (member.promotion_status == STATUS_FAILED)
+                return member::Status::promotion_failed;
+            else if (member.promotion_status == STATUS_SENT)
+                return member::Status::promotion_sent;
+            else if (member.promotion_status != 0)
+                return member::Status::promotion_unknown;
+
+            return member::Status::promotion_accepted;
+        }
+
+        // Otherwise the member is a standard member
+        if (member.invite_status == STATUS_NOT_SENT && has_pending_send(member.session_id))
+            return member::Status::invite_sending;
+        else if (member.invite_status == STATUS_NOT_SENT)
+            return member::Status::invite_not_sent;
+        else if (member.invite_status == STATUS_FAILED)
+            return member::Status::invite_failed;
+        else if (member.invite_status == STATUS_SENT)
+            return member::Status::invite_sent;
+        else if (member.invite_status != 0)
+            return member::Status::invite_unknown;
+
+        return member::Status::invite_accepted;
+    }
 
     /// API: groups/Members::set
     ///
@@ -524,6 +528,10 @@ class Members : public ConfigBase {
             return copy;
         }
     };
+
+  protected:
+    void extra_data(oxenc::bt_dict_producer&& extra) const override;
+    void load_extra_data(oxenc::bt_dict_consumer&& extra) override;
 };
 
 }  // namespace session::config::groups

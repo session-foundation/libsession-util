@@ -122,6 +122,8 @@ struct onion_path {
 
     std::string to_string() const;
 
+    bool contains_node(const service_node& sn) const;
+
     bool operator==(const onion_path& other) const {
         // The `conn_info` and failure/timeout counts can be reset for a path in a number
         // of situations so just use the nodes to determine if the paths match
@@ -277,6 +279,12 @@ class Network {
     /// Clears the cached from memory and from disk (if a cache path was provided during
     /// initialization).
     void clear_cache();
+
+    /// API: network/snode_cache_size
+    ///
+    /// Retrieves the current size of the snode cache from memory (if a cache doesn't exist or
+    /// hasn't been loaded then this will return 0).
+    size_t snode_cache_size();
 
     /// API: network/get_swarm
     ///

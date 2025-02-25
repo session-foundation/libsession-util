@@ -48,7 +48,8 @@ for i in arm64 x86_64; do
         ./utils/static-bundle.sh "$build" "" \
             -DCMAKE_SYSTEM_NAME=Darwin \
             -DARCH_TRIPLET="$i-apple-darwin16" \
-            -DCMAKE_OSX_ARCHITECTURES=$i
+            -DCMAKE_OSX_ARCHITECTURES=$i \
+            -DLOCAL_MIRROR=https://oxen.rocks/deps
     fi
 done
 

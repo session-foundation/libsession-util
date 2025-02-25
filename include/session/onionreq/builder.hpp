@@ -42,6 +42,11 @@ struct ServerDestination {
 
 using network_destination = std::variant<session::network::service_node, ServerDestination>;
 
+namespace detail {
+
+    session::onionreq::x25519_pubkey pubkey_for_destination(network_destination destination);
+}
+
 enum class EncryptType {
     aes_gcm,
     xchacha20,
@@ -61,7 +66,16 @@ inline constexpr std::string_view to_string(EncryptType type) {
 
 // Builder class for preparing onion request payloads.
 class Builder {
+    Builder(const network_destination& destination,
+            const std::vector<network::service_node>& nodes,
+            const EncryptType enc_type_);
+
   public:
+    static Builder make(
+            const network_destination& destination,
+            const std::vector<network::service_node>& nodes,
+            const EncryptType enc_type_ = EncryptType::xchacha20);
+
     EncryptType enc_type;
     std::optional<x25519_pubkey> destination_x25519_public_key = std::nullopt;
     std::optional<x25519_keypair> final_hop_x25519_keypair = std::nullopt;
@@ -72,9 +86,10 @@ class Builder {
 
     void set_destination(network_destination destination);
     void set_destination_pubkey(session::onionreq::x25519_pubkey x25519_pubkey);
+    void add_hop(ustring_view remote_key);
     void add_hop(std::pair<ed25519_pubkey, x25519_pubkey> keys) { hops_.push_back(keys); }
 
-    ustring generate_payload(std::optional<ustring> body) const;
+    void generate(network::request_info& info);
     ustring build(ustring payload);
 
   private:
@@ -93,6 +108,8 @@ class Builder {
     std::optional<uint16_t> port_ = std::nullopt;
     std::optional<std::vector<std::pair<std::string, std::string>>> headers_ = std::nullopt;
     std::optional<std::vector<std::pair<std::string, std::string>>> query_params_ = std::nullopt;
+
+    ustring _generate_payload(std::optional<ustring> body) const;
 };
 
 }  // namespace session::onionreq

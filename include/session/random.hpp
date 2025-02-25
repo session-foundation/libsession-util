@@ -1,6 +1,30 @@
 #pragma once
 
-#include "types.hpp"
+#include <sodium/randombytes.h>
+
+#include <algorithm>
+
+#include "util.hpp"
+
+namespace session {
+/// rng type that uses llarp::randint(), which is cryptographically secure
+struct CSRNG {
+    using result_type = uint64_t;
+
+    static constexpr uint64_t min() { return std::numeric_limits<uint64_t>::min(); };
+
+    static constexpr uint64_t max() { return std::numeric_limits<uint64_t>::max(); };
+
+    uint64_t operator()() {
+        uint64_t i;
+        randombytes((uint8_t*)&i, sizeof(i));
+        return i;
+    };
+};
+
+extern CSRNG csrng;
+
+}  // namespace session
 
 namespace session::random {
 

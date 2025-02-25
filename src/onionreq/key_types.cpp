@@ -81,5 +81,13 @@ ed25519_pubkey parse_ed25519_pubkey(std::string_view pubkey_in) {
 x25519_pubkey parse_x25519_pubkey(std::string_view pubkey_in) {
     return parse_pubkey<x25519_pubkey>(pubkey_in);
 }
+x25519_pubkey compute_x25519_pubkey(ustring_view ed25519_pk) {
+    std::array<unsigned char, 32> xpk;
+    if (0 != crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed25519_pk.data()))
+        throw std::runtime_error{
+                "An error occured while attempting to convert Ed25519 pubkey to X25519; "
+                "is the pubkey valid?"};
+    return x25519_pubkey::from_bytes({xpk.data(), 32});
+}
 
 }  // namespace session::onionreq

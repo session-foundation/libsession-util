@@ -456,6 +456,27 @@ ustring blind15_sign(ustring_view ed25519_sk, std::string_view server_pk_in, ust
     return result;
 }
 
+ustring blind_version_sign_request(
+        ustring_view ed25519_sk,
+        uint64_t timestamp,
+        std::string_view method,
+        std::string_view path,
+        std::optional<ustring_view> body) {
+    auto [pk, sk] = blind_version_key_pair(ed25519_sk);
+
+    // Signature should be on `TIMESTAMP || METHOD || PATH || BODY`
+    ustring buf;
+    buf.reserve(10 /* timestamp */ + method.size() + path.size() + (body ? body->size() : 0));
+    buf += to_unsigned_sv(std::to_string(timestamp));
+    buf += to_unsigned_sv(method);
+    buf += to_unsigned_sv(path);
+
+    if (body)
+        buf += *body;
+
+    return ed25519::sign({sk.data(), sk.size()}, buf);
+}
+
 ustring blind_version_sign(ustring_view ed25519_sk, Platform platform, uint64_t timestamp) {
     auto [pk, sk] = blind_version_key_pair(ed25519_sk);
 
@@ -576,6 +597,31 @@ LIBSESSION_C_API bool session_blind25_sign(
     try {
         auto sig = session::blind25_sign(
                 {ed25519_seckey, 64}, {from_unsigned(server_pk), 32}, {msg, msg_len});
+        std::memcpy(blinded_sig_out, sig.data(), sig.size());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool session_blind_version_sign_request(
+        const unsigned char* ed25519_seckey,
+        size_t timestamp,
+        const char* method,
+        const char* path,
+        const unsigned char* body,
+        size_t body_len,
+        unsigned char* blinded_sig_out) {
+    std::string_view method_sv{method};
+    std::string_view path_sv{path};
+
+    std::optional<ustring_view> body_sv{std::nullopt};
+    if (body)
+        body_sv = ustring_view{body, body_len};
+
+    try {
+        auto sig = session::blind_version_sign_request(
+                {ed25519_seckey, 64}, timestamp, method_sv, path_sv, body_sv);
         std::memcpy(blinded_sig_out, sig.data(), sig.size());
         return true;
     } catch (...) {

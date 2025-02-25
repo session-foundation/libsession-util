@@ -240,21 +240,6 @@ namespace {
     constexpr auto file_server_pubkey =
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
 
-    /// rng type that uses llarp::randint(), which is cryptographically secure
-    struct CSRNG {
-        using result_type = uint64_t;
-
-        static constexpr uint64_t min() { return std::numeric_limits<uint64_t>::min(); };
-
-        static constexpr uint64_t max() { return std::numeric_limits<uint64_t>::max(); };
-
-        uint64_t operator()() {
-            uint64_t i;
-            randombytes((uint8_t*)&i, sizeof(i));
-            return i;
-        };
-    };
-
     std::string node_to_disk(service_node node) {
         // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
         auto ed25519_pubkey_hex = oxenc::to_hex(node.view_remote_key());
@@ -328,16 +313,6 @@ namespace detail {
             return *dest;
 
         return std::nullopt;
-    }
-
-    session::onionreq::x25519_pubkey pubkey_for_destination(network_destination destination) {
-        if (auto* dest = std::get_if<service_node>(&destination))
-            return compute_xpk(dest->view_remote_key());
-
-        if (auto* dest = std::get_if<ServerDestination>(&destination))
-            return dest->x25519_pubkey;
-
-        throw std::runtime_error{"Invalid destination."};
     }
 
     nlohmann::json get_service_nodes_params(std::optional<int> limit) {
@@ -504,6 +479,15 @@ std::string onion_path::to_string() const {
             [](const service_node& node) { return node.to_string(); });
 
     return "{}"_format(fmt::join(node_descriptions, ", "));
+}
+
+bool onion_path::contains_node(const service_node& sn) const {
+    for (auto& n : nodes) {
+        if (n == sn)
+            return true;
+    }
+
+    return false;
 }
 
 // MARK: Initialization
@@ -696,6 +680,10 @@ void Network::clear_cache() {
     });
 }
 
+size_t Network::snode_cache_size() {
+    return net.call_get([this]() -> size_t { return snode_cache.size(); });
+}
+
 // MARK: Connection
 
 void Network::suspend() {
@@ -845,8 +833,7 @@ std::vector<service_node> Network::get_unused_nodes() {
                 });
 
     // Shuffle the `result` so anything that uses it would get random nodes
-    CSRNG rng;
-    std::shuffle(result.begin(), result.end(), rng);
+    std::shuffle(result.begin(), result.end(), csrng);
 
     return result;
 }
@@ -1054,8 +1041,7 @@ void Network::establish_and_store_connection(std::string path_id) {
 
 void Network::refresh_snode_cache_complete(std::vector<service_node> nodes) {
     // Shuffle the nodes so we don't have a specific order
-    CSRNG rng;
-    std::shuffle(nodes.begin(), nodes.end(), rng);
+    std::shuffle(nodes.begin(), nodes.end(), csrng);
 
     // Update the disk cache if the snode pool was updated
     {
@@ -1128,9 +1114,8 @@ void Network::refresh_snode_cache_from_seed_nodes(std::string request_id, bool r
                 request_id);
 
         // Shuffle to ensure we pick random nodes to fetch from
-        CSRNG rng;
         unused_snode_refresh_nodes = (use_testnet ? seed_nodes_testnet : seed_nodes_mainnet);
-        std::shuffle(unused_snode_refresh_nodes->begin(), unused_snode_refresh_nodes->end(), rng);
+        std::shuffle(unused_snode_refresh_nodes->begin(), unused_snode_refresh_nodes->end(), csrng);
     }
 
     auto target_node = unused_snode_refresh_nodes->back();
@@ -1519,12 +1504,7 @@ std::optional<onion_path> Network::find_valid_path(
                 possible_paths.begin(),
                 possible_paths.end(),
                 std::back_inserter(ip_excluded_paths),
-                [excluded_ip = target->to_ipv4()](const auto& path) {
-                    return std::none_of(
-                            path.nodes.begin(), path.nodes.end(), [&excluded_ip](const auto& node) {
-                                return node.to_ipv4() == excluded_ip;
-                            });
-                });
+                [&](const onion_path& p) { return not p.contains_node(*target); });
 
         if (single_path_mode && ip_excluded_paths.empty())
             log::warning(
@@ -1541,8 +1521,7 @@ std::optional<onion_path> Network::find_valid_path(
 
     // Randomise the possible paths (if all paths are equal for the PathSelectionBehaviour then we
     // want a random one to be selected)
-    CSRNG rng;
-    std::shuffle(possible_paths.begin(), possible_paths.end(), rng);
+    std::shuffle(possible_paths.begin(), possible_paths.end(), csrng);
 
     // Select from the possible paths based on the desired behaviour
     auto behaviour = path_selection_behaviour(info.path_type);
@@ -1922,20 +1901,11 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
     log::trace(cat, "{} got {} path for {}.", __PRETTY_FUNCTION__, path_name, info.request_id);
 
     // Construct the onion request
-    auto builder = Builder();
+    auto builder = Builder::make(info.destination, path->nodes);
     try {
-        builder.set_destination(info.destination);
-        builder.set_destination_pubkey(detail::pubkey_for_destination(info.destination));
-
-        for (auto& node : path->nodes)
-            builder.add_hop(
-                    {ed25519_pubkey::from_bytes(node.view_remote_key()),
-                     compute_xpk(node.view_remote_key())});
-
-        // Update the `request_info` to have the onion request payload
-        auto payload = builder.generate_payload(info.original_body);
-        info.body = builder.build(payload);
+        builder.generate(info);
     } catch (const std::exception& e) {
+        log::warning(cat, "Builder exception: {}", e.what());
         return handle_response(
                 false, false, error_building_onion_request, {content_type_plain_text}, e.what());
     }
@@ -2521,14 +2491,13 @@ void Network::handle_errors(
                             throw std::invalid_argument{
                                     "Unable to handle redirect due to lack of swarm."};
 
-                        CSRNG rng;
                         std::vector<service_node> swarm_copy;
                         std::copy_if(
                                 cached_swarm.second.begin(),
                                 cached_swarm.second.end(),
                                 std::back_inserter(swarm_copy),
                                 [&target = *target](const auto& node) { return node != target; });
-                        std::shuffle(swarm_copy.begin(), swarm_copy.end(), rng);
+                        std::shuffle(swarm_copy.begin(), swarm_copy.end(), csrng);
 
                         if (swarm_copy.empty())
                             throw std::invalid_argument{"No other nodes in the swarm."};
@@ -2578,7 +2547,6 @@ void Network::handle_errors(
                                         auto target =
                                                 detail::node_for_destination(info.destination);
 
-                                        CSRNG rng;
                                         std::vector<service_node> swarm_copy;
                                         std::copy_if(
                                                 swarm.begin(),
@@ -2587,7 +2555,7 @@ void Network::handle_errors(
                                                 [&target = *target](const auto& node) {
                                                     return node != target;
                                                 });
-                                        std::shuffle(swarm_copy.begin(), swarm_copy.end(), rng);
+                                        std::shuffle(swarm_copy.begin(), swarm_copy.end(), csrng);
 
                                         // If there are no nodes in the swarm then don't bother
                                         // trying again
@@ -2869,6 +2837,10 @@ LIBSESSION_C_API void network_close_connections(network_object* network) {
 
 LIBSESSION_C_API void network_clear_cache(network_object* network) {
     unbox(network).clear_cache();
+}
+
+LIBSESSION_C_API size_t network_get_snode_cache_size(network_object* network) {
+    return unbox(network).snode_cache_size();
 }
 
 LIBSESSION_C_API void network_set_status_changed_callback(

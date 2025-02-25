@@ -76,7 +76,7 @@ ustring Keys::dump() {
 ustring Keys::make_dump() const {
     oxenc::bt_dict_producer d;
     {
-        auto active = d.append_list("active");
+        auto active = d.append_list("A");
         for (const auto& [gen, hashes] : active_msgs_) {
             auto lst = active.append_list();
             lst.append(gen);
@@ -86,7 +86,7 @@ ustring Keys::make_dump() const {
     }
 
     {
-        auto keys = d.append_list("keys");
+        auto keys = d.append_list("L");
         for (auto& k : keys_) {
             auto ki = keys.append_dict();
             // NB: Keys must be in sorted order
@@ -101,7 +101,7 @@ ustring Keys::make_dump() const {
     }
 
     if (!pending_key_config_.empty()) {
-        auto pending = d.append_dict("pending");
+        auto pending = d.append_dict("P");
         // NB: Keys must be in sorted order
         pending.append("c", from_unsigned_sv(pending_key_config_));
         pending.append("g", pending_gen_);
@@ -114,7 +114,7 @@ ustring Keys::make_dump() const {
 void Keys::load_dump(ustring_view dump) {
     oxenc::bt_dict_consumer d{from_unsigned_sv(dump)};
 
-    if (d.skip_until("active")) {
+    if (d.skip_until("A")) {
         auto active = d.consume_list_consumer();
         while (!active.is_finished()) {
             auto lst = active.consume_list_consumer();
@@ -126,7 +126,7 @@ void Keys::load_dump(ustring_view dump) {
         throw config_value_error{"Invalid Keys dump: `active` not found"};
     }
 
-    if (d.skip_until("keys")) {
+    if (d.skip_until("L")) {
         auto keys = d.consume_list_consumer();
         while (!keys.is_finished()) {
             auto kd = keys.consume_dict_consumer();
@@ -156,7 +156,7 @@ void Keys::load_dump(ustring_view dump) {
         throw config_value_error{"Invalid Keys dump: `keys` not found"};
     }
 
-    if (d.skip_until("pending")) {
+    if (d.skip_until("P")) {
         auto pending = d.consume_dict_consumer();
 
         if (!pending.skip_until("c"))
@@ -1201,19 +1201,35 @@ ustring Keys::encrypt_message(ustring_view plaintext, bool compress, size_t padd
             compress = false;
         }
     }
+    // `plaintext` is now pointing at either the original input data, or at `_compressed` local
+    // variable containing the compressed form of that data.
 
     oxenc::bt_dict_producer dict{};
-    dict.append(
-            "", 1);  // encoded data version (bump this if something changes in an incompatible way)
-    dict.append("a", std::string_view{from_unsigned(user_ed25519_sk.data()) + 32, 32});
 
-    std::array<unsigned char, 64> signature;
-    crypto_sign_ed25519_detached(
-            signature.data(), nullptr, plaintext.data(), plaintext.size(), user_ed25519_sk.data());
+    // encoded data version (bump this if something changes in an incompatible way)
+    dict.append("", 1);
+
+    // Sender ed pubkey, by which the message can be validated.  Note that there are *two*
+    // components to this validation: first the regular signature validation of the "s" signature we
+    // add below, but then also validation that this Ed25519 converts to the Session ID of the
+    // claimed sender of the message inside the encoded message data.
+    dict.append("a", std::string_view{from_unsigned(user_ed25519_sk.data()) + 32, 32});
 
     if (!compress)
         dict.append("d", from_unsigned_sv(plaintext));
 
+    // We sign `plaintext || group_ed25519_pubkey` rather than just `plaintext` so that if this
+    // encrypted data will not validate if cross-posted to any other group.  We don't actually
+    // include the pubkey alongside, because that is implicitly known by the group members that
+    // receive it.
+    assert(_sign_pk);
+    std::vector<unsigned char> to_sign(plaintext.size() + _sign_pk->size());
+    std::memcpy(to_sign.data(), plaintext.data(), plaintext.size());
+    std::memcpy(to_sign.data() + plaintext.size(), _sign_pk->data(), _sign_pk->size());
+
+    std::array<unsigned char, 64> signature;
+    crypto_sign_ed25519_detached(
+            signature.data(), nullptr, to_sign.data(), to_sign.size(), user_ed25519_sk.data());
     dict.append("s", from_unsigned_sv(signature));
 
     if (compress)
@@ -1346,8 +1362,14 @@ std::pair<std::string, ustring> Keys::decrypt_message(ustring_view ciphertext) c
     } else if (raw_data.empty())
         throw std::runtime_error{"message must contain compressed (z) or uncompressed (d) data"};
 
+    // The value we verify is the raw data *followed by* the group Ed25519 pubkey.  (See the comment
+    // in encrypt_message).
+    assert(_sign_pk);
+    std::vector<unsigned char> to_verify(raw_data.size() + _sign_pk->size());
+    std::memcpy(to_verify.data(), raw_data.data(), raw_data.size());
+    std::memcpy(to_verify.data() + raw_data.size(), _sign_pk->data(), _sign_pk->size());
     if (0 != crypto_sign_ed25519_verify_detached(
-                     ed_sig.data(), raw_data.data(), raw_data.size(), ed_pk.data()))
+                     ed_sig.data(), to_verify.data(), to_verify.size(), ed_pk.data()))
         throw std::runtime_error{"message signature failed validation"};
 
     if (compressed) {

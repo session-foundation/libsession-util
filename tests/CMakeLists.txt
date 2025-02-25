@@ -54,6 +54,8 @@ target_link_libraries(testAll PRIVATE
 
 if (ENABLE_ONIONREQ)
     target_link_libraries(testAll PRIVATE libsession::onionreq)
+else()
+    target_compile_definitions(testAll PRIVATE DISABLE_ONIONREQ)
 endif()
 
 if(NOT TARGET check)

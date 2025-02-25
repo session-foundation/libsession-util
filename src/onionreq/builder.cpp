@@ -35,6 +35,18 @@ using session::ustring_view;
 
 namespace session::onionreq {
 
+namespace detail {
+    session::onionreq::x25519_pubkey pubkey_for_destination(network_destination destination) {
+        if (auto* dest = std::get_if<network::service_node>(&destination))
+            return compute_x25519_pubkey(dest->view_remote_key());
+
+        if (auto* dest = std::get_if<ServerDestination>(&destination))
+            return dest->x25519_pubkey;
+
+        throw std::runtime_error{"Invalid destination."};
+    }
+}  // namespace detail
+
 namespace {
 
     ustring encode_size(uint32_t s) {
@@ -51,6 +63,28 @@ EncryptType parse_enc_type(std::string_view enc_type) {
     if (enc_type == "aes-gcm" || enc_type == "gcm")
         return EncryptType::aes_gcm;
     throw std::runtime_error{"Invalid encryption type " + std::string{enc_type}};
+}
+
+Builder Builder::make(
+        const network_destination& destination,
+        const std::vector<network::service_node>& nodes,
+        const EncryptType enc_type_) {
+    return Builder{destination, nodes, enc_type_};
+}
+
+Builder::Builder(
+        const network_destination& destination,
+        const std::vector<network::service_node>& nodes,
+        const EncryptType enc_type_) :
+        enc_type{enc_type_},
+        destination_x25519_public_key{detail::pubkey_for_destination(destination)} {
+    set_destination(destination);
+    for (auto& n : nodes)
+        add_hop(n.view_remote_key());
+}
+
+void Builder::add_hop(ustring_view remote_key) {
+    hops_.push_back({ed25519_pubkey::from_bytes(remote_key), compute_x25519_pubkey(remote_key)});
 }
 
 void Builder::set_destination(network_destination destination) {
@@ -84,7 +118,11 @@ void Builder::set_destination_pubkey(session::onionreq::x25519_pubkey x25519_pub
     destination_x25519_public_key.emplace(x25519_pubkey);
 }
 
-ustring Builder::generate_payload(std::optional<ustring> body) const {
+void Builder::generate(network::request_info& info) {
+    info.body = build(_generate_payload(info.original_body));
+}
+
+ustring Builder::_generate_payload(std::optional<ustring> body) const {
     // If we don't have the data required for a server request, then assume it's targeting a
     // service node and, therefore, the `body` is the payload
     if (!host_ || !endpoint_ || !protocol_ || !method_ || !destination_x25519_public_key)

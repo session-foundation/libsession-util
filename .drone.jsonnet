@@ -22,6 +22,9 @@ local default_test_deps = libngtcp2_deps;
 
 local docker_base = 'registry.oxen.rocks/';
 
+// cmake options for static deps mirror
+local ci_dep_mirror(want_mirror) = (if want_mirror then ' -DLOCAL_MIRROR=https://oxen.rocks/deps ' else '');
+
 local debian_backports(distro, pkgs) = [
   'echo "deb http://deb.debian.org/debian ' + distro + '-backports main" >/etc/apt/sources.list.d/' + distro + '-backports.list',
   'eatmydata ' + apt_get_quiet + ' update',
@@ -90,6 +93,7 @@ local debian_build(name,
                    lto=false,
                    werror=true,
                    cmake_extra='',
+                   local_mirror=true,
                    shared_libs=true,
                    jobs=6,
                    tests=true,
@@ -113,7 +117,8 @@ local debian_build(name,
     (if shared_libs then '-DBUILD_SHARED_LIBS=ON ' else '') +
     '-DUSE_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_TESTS=' + (if tests then 'ON ' else 'OFF ') +
-    cmake_extra,
+    cmake_extra +
+    ci_dep_mirror(local_mirror),
     'make VERBOSE=1 -j' + jobs,
   ],
   extra_setup=extra_setup,
@@ -150,6 +155,7 @@ local windows_cross_pipeline(name,
                              lto=false,
                              werror=false,
                              cmake_extra='',
+                             local_mirror=true,
                              jobs=6,
                              tests=true,
                              winarch='x86-64',
@@ -171,7 +177,8 @@ local windows_cross_pipeline(name,
     '-DUSE_LTO=' + (if lto then 'ON ' else 'OFF ') +
     '-DWITH_TESTS=' + (if tests then 'ON ' else 'OFF ') +
     '-DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-' + winarch + '-toolchain.cmake ' +
-    cmake_extra,
+    cmake_extra +
+    ci_dep_mirror(local_mirror),
     'make VERBOSE=1 -j' + jobs,
   ],
   extra_steps=(if tests then
@@ -193,7 +200,8 @@ local clang(version) = debian_build(
   'Debian sid/clang-' + version,
   docker_base + 'debian-sid-clang',
   deps=['clang-' + version] + default_deps_nocxx,
-  cmake_extra='-DCMAKE_C_COMPILER=clang-' + version + ' -DCMAKE_CXX_COMPILER=clang++-' + version + ' '
+  cmake_extra='-DCMAKE_C_COMPILER=clang-' + version +
+              ' -DCMAKE_CXX_COMPILER=clang++-' + version
 );
 
 local full_llvm(version) = debian_build(
@@ -242,6 +250,7 @@ local mac_builder(name,
                   werror=true,
                   lto=false,
                   cmake_extra='',
+                  local_mirror=true,
                   jobs=6,
                   tests=true,
                   allow_fail=false)
@@ -253,7 +262,8 @@ local mac_builder(name,
   '-DBUILD_SHARED_LIBS=ON ' +
   '-DUSE_LTO=' + (if lto then 'ON ' else 'OFF ') +
   '-DWITH_TESTS=' + (if tests then 'ON ' else 'OFF ') +
-  cmake_extra,
+  cmake_extra +
+  ci_dep_mirror(local_mirror),
   'VERBOSE=1 make -j' + jobs,
 ], extra_steps=
                      (if tests then
@@ -276,6 +286,8 @@ local static_build(name,
                    oxen_repo=false,
                    kitware_repo=''/* ubuntu codename, if wanted */,
                    cmake_extra='',
+                   local_mirror=true,
+                   allow_fail=false,
                    jobs=6)
       = debian_pipeline(
   name,
@@ -283,9 +295,10 @@ local static_build(name,
   arch=arch,
   deps=deps,
   oxen_repo=oxen_repo,
+  allow_fail=allow_fail,
   build=[
     'export JOBS=' + jobs,
-    './utils/static-bundle.sh build ' + archive_name + ' -DSTATIC_LIBSTD=ON ' + cmake_extra,
+    './utils/static-bundle.sh build ' + archive_name + ' -DSTATIC_LIBSTD=ON ' + cmake_extra + ci_dep_mirror(local_mirror),
     'cd build && ../utils/ci/drone-static-upload.sh',
   ]
 );
@@ -336,8 +349,8 @@ local static_build(name,
   debian_build('Debian sid', docker_base + 'debian-sid'),
   debian_build('Debian sid/Debug', docker_base + 'debian-sid', build_type='Debug'),
   debian_build('Debian testing', docker_base + 'debian-testing'),
-  clang(16),
-  full_llvm(16),
+  clang(17),
+  full_llvm(17),
   debian_build('Debian stable (i386)', docker_base + 'debian-stable/i386'),
   debian_build('Debian 11', docker_base + 'debian-bullseye', extra_setup=debian_backports('bullseye', ['cmake'])),
   debian_build('Ubuntu latest', docker_base + 'ubuntu-rolling'),
@@ -367,6 +380,7 @@ local static_build(name,
                docker_base + 'debian-win32-cross',
                'libsession-util-windows-x86-TAG.zip',
                deps=['g++-mingw-w64-i686-posix'],
+               allow_fail=true,
                cmake_extra='-DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-i686-toolchain.cmake'),
   */
   debian_pipeline(

@@ -356,7 +356,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         auto& m = members.emplace_back(member_seeds[4 + i], false, group_pk.data(), std::nullopt);
 
         auto memb = admin1.members.get_or_construct(m.session_id);
-        memb.set_invited();
+        memb.set_invite_sent();
         memb.supplement = true;
         memb.name = i == 0 ? "fred" : "JOHN";
         admin1.members.set(memb);
@@ -451,7 +451,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     CHECK(m1b.members.size() == 5);
     auto m1b_m2 = m1b.members.get(members[2].session_id);
     REQUIRE(m1b_m2);
-    CHECK(m1b_m2->invite_pending());
+    CHECK(m1b.members.get_status(*m1b_m2) == session::config::groups::member::Status::invite_sent);
     CHECK(m1b_m2->name == "fred");
 
     // Rekey after 10d, then again after 71d (10+61) and everything except those two new gens should
