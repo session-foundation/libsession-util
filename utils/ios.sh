@@ -23,16 +23,19 @@ OUTPUT_DIR="${TARGET_BUILD_DIR:-build-ios}"
 IPHONEOS_DEPLOYMENT_TARGET=${IPHONEOS_DEPLOYMENT_TARGET:-13}
 ENABLE_BITCODE=${ENABLE_BITCODE:-OFF}
 CONFIGURATION=${CONFIGURATION:-App_Store_Release}
-SHOULD_ACHIVE=${2:-true}                 # Parameter 2 is a flag indicating whether we want to archive the result
+BUILD_STATIC_LIBS=${2:-true}             # Parameter 2 is a flag indicating whether we want to build the static libraries
+MERGE_STATIC_LIBS=${3:-true}             # Parameter 3 is a flag indicating whether we want to merge any static libraries
+CREATE_FRAMEWORK=${4:-true}              # Parameter 4 is a flag indicating whether we want to generate the framework
+SHOULD_ACHIVE=${5:-true}                 # Parameter 5 is a flag indicating whether we want to archive the result
 
 # We want to customise the env variable so can't just default the value
 if [ -z "${TARGET_TEMP_DIR}" ]; then
-    BUILD_DIR="build-ios"
+    BUILD_DIR="./build-ios"
 elif [ "${#ARCHS[@]}" = 1 ]; then
     BUILD_DIR="${TARGET_TEMP_DIR}/../libSession-util"
 fi
 
-# Can't dafault an array in the same way as above
+# Can't default an array in the same way as above
 if [ -z "${ARCHS}" ]; then
     ARCHS=(arm64 x86_64)
 elif [ "${#ARCHS[@]}" = 1 ]; then
@@ -101,94 +104,145 @@ fi
 submodule_check=ON
 build_type="Release"
 
-if [ "$CONFIGURATION" == "Debug" || "$CONFIGURATION" == "Debug_Compile_LibSession" ]; then
+# Make the logs look nicer
+SHOULD_BUILD_STATIC_LIBS=""
+SHOULD_MERGE_STATIC_LIBS=""
+SHOULD_CREATE_FRAMEWORK=""
+FINAL_SHOULD_ACHIVE=""
+
+if [ $BUILD_STATIC_LIBS = true ]; then
+    SHOULD_BUILD_STATIC_LIBS="SHOULD_BUILD_STATIC_LIBS"
+fi
+if [ $MERGE_STATIC_LIBS = true ]; then
+    SHOULD_MERGE_STATIC_LIBS="SHOULD_MERGE_STATIC_LIBS"
+fi
+if [ $CREATE_FRAMEWORK = true ]; then
+    SHOULD_CREATE_FRAMEWORK="SHOULD_CREATE_FRAMEWORK"
+fi
+if [ $SHOULD_ACHIVE = true ]; then
+    FINAL_SHOULD_ACHIVE="SHOULD_ACHIVE"
+fi
+
+if [ "$CONFIGURATION" == "Debug" ] || [ "$CONFIGURATION" == "Debug_Compile_LibSession" ]; then
     submodule_check=OFF
     build_type="Debug"
 fi
 
-for i in "${!TARGET_ARCHS[@]}"; do
-    build="${BUILD_DIR}/${TARGET_ARCHS[$i]}"
-    platform="${TARGET_PLATFORMS[$i]}"
-    echo "Building ${TARGET_ARCHS[$i]} for $platform in $build"
+if [ "${SHOULD_BUILD_STATIC_LIBS}" == "SHOULD_BUILD_STATIC_LIBS" ]; then
+    for i in "${!TARGET_ARCHS[@]}"; do
+        build="${BUILD_DIR}/${TARGET_ARCHS[$i]}"
+        platform="${TARGET_PLATFORMS[$i]}"
+        echo "Building ${TARGET_ARCHS[$i]} for $platform in $build"
 
-    ./utils/static-bundle.sh "$build" "" \
-        -DCMAKE_TOOLCHAIN_FILE="${projdir}/external/ios-cmake/ios.toolchain.cmake" \
-        -DPLATFORM=$platform \
-        -DDEPLOYMENT_TARGET=$IPHONEOS_DEPLOYMENT_TARGET \
-        -DENABLE_BITCODE=$ENABLE_BITCODE \
-        -DBUILD_STATIC_DEPS=ON \
-        -DENABLE_VISIBILITY=ON \
-        -DSUBMODULE_CHECK=$submodule_check \
-        -DCMAKE_BUILD_TYPE=$build_type \
-        -DLOCAL_MIRROR=https://oxen.rocks/deps
-done
-
-# If needed combine simulator builds into a multi-arch lib
-if [ "${#TARGET_SIM_ARCHS[@]}" -eq "1" ]; then
-    # Single device build
-    mkdir -p "${BUILD_DIR}/sim"
-    rm -rf "${BUILD_DIR}/sim/libsession-util.a"
-    cp "${BUILD_DIR}/${TARGET_SIM_ARCHS[0]}/libsession-util.a" "${BUILD_DIR}/sim/libsession-util.a"
-elif [ "${#TARGET_SIM_ARCHS[@]}" -gt "1" ]; then
-    # Combine multiple device builds into a multi-arch lib
-    mkdir -p "${BUILD_DIR}/sim"
-    lipo -create "${BUILD_DIR}"/sim-*/libsession-util.a -output "${BUILD_DIR}/sim/libsession-util.a"
+        env -i PATH="$PATH" SDKROOT="$(xcrun --sdk macosx --show-sdk-path)" \
+            ./utils/static-bundle.sh "$build" "" \
+            -DCMAKE_TOOLCHAIN_FILE="${projdir}/external/ios-cmake/ios.toolchain.cmake" \
+            -DPLATFORM=$platform \
+            -DDEPLOYMENT_TARGET=$IPHONEOS_DEPLOYMENT_TARGET \
+            -DENABLE_BITCODE=$ENABLE_BITCODE \
+            -DBUILD_TESTS=OFF \
+            -DBUILD_STATIC_DEPS=ON \
+            -DENABLE_VISIBILITY=ON \
+            -DSUBMODULE_CHECK=$submodule_check \
+            -DCMAKE_BUILD_TYPE=$build_type \
+            -DLOCAL_MIRROR=https://oxen.rocks/deps
+    done
 fi
 
-# If needed combine device builds into a multi-arch lib
-if [ "${#TARGET_DEVICE_ARCHS[@]}" -eq "1" ]; then
-    # Single device build
-    mkdir -p "${BUILD_DIR}/ios"
-    rm -rf "${BUILD_DIR}/ios/libsession-util.a"
-    cp "${BUILD_DIR}/${TARGET_DEVICE_ARCHS[0]}/libsession-util.a" "${BUILD_DIR}/ios/libsession-util.a"
-elif [ "${#TARGET_DEVICE_ARCHS[@]}" -gt "1" ]; then
-    # Combine multiple device builds into a multi-arch lib
-    mkdir -p "${BUILD_DIR}/ios"
-    lipo -create "${BUILD_DIR}"/ios-*/libsession-util.a -output "${BUILD_DIR}/ios/libsession-util.a"
+if [ "${SHOULD_MERGE_STATIC_LIBS}" == "SHOULD_MERGE_STATIC_LIBS" ]; then
+    # If needed combine simulator builds into a multi-arch lib
+    sim_files=( "${BUILD_DIR}/sim-"* )
+    if [ "${#TARGET_SIM_ARCHS[@]}" -eq "1" ] && [ -e "${sim_files[0]}" ]; then
+        # Single device build
+        mkdir -p "${BUILD_DIR}/sim"
+        rm -rf "${BUILD_DIR}/sim/libsession-util.a"
+        cp "${BUILD_DIR}/${TARGET_SIM_ARCHS[0]}/libsession-util.a" "${BUILD_DIR}/sim/libsession-util.a"
+    elif [ "${#TARGET_SIM_ARCHS[@]}" -gt "1" ] && [ -e "${sim_files[0]}" ]; then
+        # Combine multiple device builds into a multi-arch lib
+        mkdir -p "${BUILD_DIR}/sim"
+        lipo -create "${BUILD_DIR}"/sim-*/libsession-util.a -output "${BUILD_DIR}/sim/libsession-util.a"
+    else
+        echo "No sim build static libs found"
+    fi
+
+    # If needed combine device builds into a multi-arch lib
+    ios_files=( "${BUILD_DIR}/ios-"* )
+    if [ "${#TARGET_DEVICE_ARCHS[@]}" -eq "1" ] && [ -e "${ios_files[0]}" ]; then
+        # Single device build
+        mkdir -p "${BUILD_DIR}/ios"
+        rm -rf "${BUILD_DIR}/ios/libsession-util.a"
+        cp "${BUILD_DIR}/${TARGET_DEVICE_ARCHS[0]}/libsession-util.a" "${BUILD_DIR}/ios/libsession-util.a"
+    elif [ "${#TARGET_DEVICE_ARCHS[@]}" -gt "1" ] && [ -e "${ios_files[0]}" ]; then
+        # Combine multiple device builds into a multi-arch lib
+        mkdir -p "${BUILD_DIR}/ios"
+        lipo -create "${BUILD_DIR}"/ios-*/libsession-util.a -output "${BUILD_DIR}/ios/libsession-util.a"
+    else
+        echo "No ios build static libs found"
+    fi
 fi
 
+if [ "${SHOULD_CREATE_FRAMEWORK}" == "SHOULD_CREATE_FRAMEWORK" ]; then
+    # Create a '.xcframework' so XCode can deal with the different architectures
+    rm -rf "${OUTPUT_DIR}/libsession-util.xcframework"
+    sim_files=( "${BUILD_DIR}/sim-"* )
+    ios_files=( "${BUILD_DIR}/ios-"* )
 
-# Create a '.xcframework' so XCode can deal with the different architectures
-rm -rf "${OUTPUT_DIR}/libsession-util.xcframework"
+    if [ "${#TARGET_SIM_ARCHS}" -gt "0" ] && [ -e "${sim_files[0]}" ] && [ "${#TARGET_DEVICE_ARCHS}" -gt "0" ] && [ -e "${ios_files[0]}" ]; then
+        xcodebuild -create-xcframework \
+            -library "${BUILD_DIR}/ios/libsession-util.a" \
+            -headers "include" \
+            -library "${BUILD_DIR}/sim/libsession-util.a" \
+            -headers "include" \
+            -output "${OUTPUT_DIR}/libsession-util.xcframework"
+    elif [ "${#TARGET_DEVICE_ARCHS}" -gt "0" ] && [ -e "${ios_files[0]}" ]; then
+        xcodebuild -create-xcframework \
+            -library "${BUILD_DIR}/ios/libsession-util.a" \
+            -headers "include" \
+            -output "${OUTPUT_DIR}/libsession-util.xcframework"
+    elif [ -e "${sim_files[0]}" ]; then
+        xcodebuild -create-xcframework \
+            -library "${BUILD_DIR}/sim/libsession-util.a" \
+            -headers "include" \
+            -output "${OUTPUT_DIR}/libsession-util.xcframework"
+    else
+        echo "No static libraries to turn into framework"
+        exit 1
+    fi
 
-if [ "${#TARGET_SIM_ARCHS}" -gt "0" ] && [ "${#TARGET_DEVICE_ARCHS}" -gt "0" ]; then
-    xcodebuild -create-xcframework \
-        -library "${BUILD_DIR}/ios/libsession-util.a" \
-        -headers "include" \
-        -library "${BUILD_DIR}/sim/libsession-util.a" \
-        -headers "include" \
-        -output "${OUTPUT_DIR}/libsession-util.xcframework"
-elif [ "${#TARGET_DEVICE_ARCHS}" -gt "0" ]; then
-    xcodebuild -create-xcframework \
-        -library "${BUILD_DIR}/ios/libsession-util.a" \
-        -headers "include" \
-        -output "${OUTPUT_DIR}/libsession-util.xcframework"
+    # The 'module.modulemap' is needed for XCode to be able to find the headers
+    modmap="${OUTPUT_DIR}/module.modulemap"
+    echo "module SessionUtil {" >"$modmap"
+    echo "  module capi {" >>"$modmap"
+    for x in $(cd include && find session -name '*.h'); do
+        echo "    header \"$x\"" >>"$modmap"
+    done
+    echo -e "    export *\n  }" >>"$modmap"
+    echo "}" >>"$modmap"
+
+    # Need to add the module.modulemap into each architecture directory in the xcframework
+    for dir in "${OUTPUT_DIR}/libsession-util.xcframework"/*/; do
+        cp "${modmap}" "${dir}/Headers/module.modulemap"
+    done
+
+    rm -rf "${modmap}"
+
+    if [ $FINAL_SHOULD_ACHIVE = "FINAL_SHOULD_ACHIVE" ]; then
+        (cd "${OUTPUT_DIR}/.." && tar cvJf "${UNIQUE_NAME}.tar.xz" "${UNIQUE_NAME}")
+    fi
+        
+    echo "Packaged everything up at ${OUTPUT_DIR}/libsession-util.xcframework"
 else
-    xcodebuild -create-xcframework \
-        -library "${BUILD_DIR}/sim/libsession-util.a" \
-        -headers "include" \
-        -output "${OUTPUT_DIR}/libsession-util.xcframework"
+    # Copy the static libraries to the output
+    rm -rf "${OUTPUT_DIR}/libsession-util-sim.a"
+    rm -rf "${OUTPUT_DIR}/libsession-util-dev.a"
+
+    if [ -f "${BUILD_DIR}/sim/libsession-util.a" ]; then
+        cp "${BUILD_DIR}/sim/libsession-util.a" "${OUTPUT_DIR}/libsession-util-sim.a"
+    fi
+
+    if [ -f "${BUILD_DIR}/ios/libsession-util.a" ]; then
+        cp "${BUILD_DIR}/ios/libsession-util.a" "${OUTPUT_DIR}/libsession-util-dev.a"
+    fi
+
+    echo "Packaged everything up at ${OUTPUT_DIR}/libsession-util-{sim|dev}.a"
 fi
-
-# The 'module.modulemap' is needed for XCode to be able to find the headers
-modmap="${OUTPUT_DIR}/module.modulemap"
-echo "module SessionUtil {" >"$modmap"
-echo "  module capi {" >>"$modmap"
-for x in $(cd include && find session -name '*.h'); do
-    echo "    header \"$x\"" >>"$modmap"
-done
-echo -e "    export *\n  }" >>"$modmap"
-echo "}" >>"$modmap"
-
-# Need to add the module.modulemap into each architecture directory in the xcframework
-for dir in "${OUTPUT_DIR}/libsession-util.xcframework"/*/; do
-    cp "${modmap}" "${dir}/Headers/module.modulemap"
-done
-
-rm -rf "${modmap}"
-
-if [ $SHOULD_ACHIVE = true ]; then
-    (cd "${OUTPUT_DIR}/.." && tar cvJf "${UNIQUE_NAME}.tar.xz" "${UNIQUE_NAME}")
-fi
-    
-echo "Packaged everything up at ${OUTPUT_DIR}/libsession-util.xcframework"
