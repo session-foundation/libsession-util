@@ -226,7 +226,7 @@ if [ "${SHOULD_CREATE_FRAMEWORK}" == "SHOULD_CREATE_FRAMEWORK" ]; then
 
     rm -rf "${modmap}"
 
-    if [ $FINAL_SHOULD_ACHIVE = "FINAL_SHOULD_ACHIVE" ]; then
+    if [ $FINAL_SHOULD_ACHIVE = "SHOULD_ACHIVE" ]; then
         (cd "${OUTPUT_DIR}/.." && tar cvJf "${UNIQUE_NAME}.tar.xz" "${UNIQUE_NAME}")
     fi
         
