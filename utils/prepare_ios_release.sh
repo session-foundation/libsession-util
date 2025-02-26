@@ -442,6 +442,8 @@ make_release() {
 
 	local commit_message="libSession Swift Package Manager ${libSession_tag}"
 
+	cd "${src_dir}"
+	git add "${src_dir}/Package.swift"
 	git commit -m "$commit_message"
 
 	mv "${zip_path}" "${src_dir}/libsession-util.xcframework.zip"
