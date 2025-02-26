@@ -427,7 +427,7 @@ let package = Package(
     targets: [
         .binaryTarget(
             name: "SessionUtil",
-            url: "https://github.com/oxen-io/libsession-util/releases/download/${libSession_tag}/libsession-util.xcframework.zip",
+            url: "https://github.com/session-foundation/libsession-util/releases/download/${libSession_tag}/libsession-util.xcframework.zip",
             checksum: "${checksum}"
         )
     ]
