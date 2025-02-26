@@ -116,6 +116,10 @@ if(ENABLE_ONIONREQ)
         libsodium::sodium-internal
         nettle::nettle
     )
+
+    if (BUILD_STATIC_DEPS)
+        target_include_directories(onionreq PRIVATE ${CMAKE_BINARY_DIR}/static-deps/include)
+    endif()
 endif()
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
