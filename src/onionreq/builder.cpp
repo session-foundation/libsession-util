@@ -228,7 +228,8 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
                     {"enc_type", to_string(enc_type)},
             };
 
-            auto control_span = str_to_uspan(control.dump());
+            auto control_dump = control.dump();
+            auto control_span = str_to_uspan(control_dump);
             auto data = encode_size(payload.size());
             data.insert(data.end(), payload.begin(), payload.end());
             data.insert(data.end(), control_span.begin(), control_span.end());
