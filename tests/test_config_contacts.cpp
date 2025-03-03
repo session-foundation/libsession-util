@@ -129,7 +129,9 @@ TEST_CASE("Contacts", "[config][contacts]") {
     std::vector<std::pair<std::string, ustring_view>> merge_configs;
     merge_configs.emplace_back("fakehash2", to_push);
     contacts.merge(merge_configs);
+    CHECK(obs.empty());  // not confirmed yet
     contacts2.confirm_pushed(seqno, "fakehash2");
+    CHECK(as_set(contacts2.old_hashes()) == make_set("fakehash1"s));
 
     CHECK_FALSE(contacts.needs_push());
     CHECK(std::get<seqno_t>(contacts.push()) == seqno);
@@ -179,11 +181,15 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(seqno == seqno2);
     CHECK(to_push != to_push2);
-    CHECK(as_set(obs) == make_set("fakehash2"s));
-    CHECK(as_set(obs2) == make_set("fakehash2"s));
+    CHECK(obs.empty());   // not confirmed yet
+    CHECK(obs2.empty());  // not confirmed yet
+    CHECK(as_set(contacts.current_hashes()) == make_set("fakehash2"s));
+    CHECK(as_set(contacts2.current_hashes()) == make_set("fakehash2"s));
 
     contacts.confirm_pushed(seqno, "fakehash3a");
     contacts2.confirm_pushed(seqno2, "fakehash3b");
+    CHECK(as_set(contacts.old_hashes()) == make_set("fakehash2"s));   // confirmed
+    CHECK(as_set(contacts2.old_hashes()) == make_set("fakehash2"s));  // confirmed
 
     merge_configs.clear();
     merge_configs.emplace_back("fakehash3b", to_push2);
@@ -203,11 +209,13 @@ TEST_CASE("Contacts", "[config][contacts]") {
     // encryption in the middle of the protobuf wrapping).
     // TODO: reenable once protobuf isn't always-on.
     // CHECK(printable(to_push) == printable(to_push2));
-    CHECK(as_set(obs) == make_set("fakehash3a"s, "fakehash3b"));
-    CHECK(as_set(obs2) == make_set("fakehash3a"s, "fakehash3b"));
+    CHECK(as_set(obs) == make_set("fakehash3b"s));   // not confirmed yet
+    CHECK(as_set(obs2) == make_set("fakehash3a"s));  // not confirmed yet
 
     contacts.confirm_pushed(seqno, "fakehash4");
     contacts2.confirm_pushed(seqno2, "fakehash4");
+    CHECK(as_set(contacts.old_hashes()) == make_set("fakehash3a"s));
+    CHECK(as_set(contacts2.old_hashes()) == make_set("fakehash3b"s));
 
     CHECK_FALSE(contacts.needs_push());
     CHECK_FALSE(contacts2.needs_push());
@@ -356,11 +364,13 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK(accepted->value[0] == "fakehash2"sv);
     free(accepted);
 
+    CHECK(to_push->obsolete_len == 0);
     config_confirm_pushed(conf2, to_push->seqno, "fakehash2");
 
-    REQUIRE(to_push->obsolete_len > 0);
-    CHECK(to_push->obsolete_len == 1);
-    CHECK(to_push->obsolete[0] == "fakehash1"sv);
+    auto old_hashes = config_old_hashes(conf2);
+    REQUIRE(old_hashes->len > 0);
+    CHECK(old_hashes->len == 1);
+    CHECK(old_hashes->value[0] == "fakehash1"sv);
     free(to_push);
 
     // Iterate through and make sure we got everything we expected

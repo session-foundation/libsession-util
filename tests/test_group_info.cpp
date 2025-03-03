@@ -83,9 +83,10 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     auto [s2, p2, o2] = ginfo2.push();
     CHECK(s2 == 2);
     CHECK(p2.size() == 512);
-    CHECK(o2 == std::vector{"fakehash1"s});
+    CHECK(o2.empty());
 
     ginfo2.confirm_pushed(s2, "fakehash2");
+    CHECK(ginfo2.old_hashes() == std::vector{"fakehash1"s});
 
     ginfo1.set_name("Better name!");
 
@@ -352,7 +353,10 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     auto [s7, t7, o7] = ginfo_rw3.push();
     CHECK(s7 == s6 + 1);
     CHECK(t7 != t6);
-    CHECK(o7 == std::vector{{"fakehash23"s}});
+    CHECK(o7.empty());
+
+    ginfo_rw3.confirm_pushed(s7, "fakehash24");
+    CHECK(ginfo_rw3.old_hashes() == std::vector{{"fakehash23"s}});
 
     merge_configs.clear();
     merge_configs.emplace_back("fakehash7", t7);

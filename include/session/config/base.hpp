@@ -157,9 +157,8 @@ class ConfigBase : public ConfigSig {
     using Key = std::array<unsigned char, KEY_SIZE>;
     sodium_vector<Key> _keys;
 
-    // Contains the current active message hash, as fed into us in `confirm_pushed()`.  Empty if we
-    // don't know it yet.  When we dirty the config this value gets moved into `old_hashes_` to be
-    // removed by the next push.
+    // Contains the current active message hash, as fed into us in `confirm_pushed()` or after a
+    // merge results in a clean state.  Empty if we don't know it yet.
     std::string _curr_hash;
 
     // Contains obsolete known message hashes that are obsoleted by the most recent merge or push;

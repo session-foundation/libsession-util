@@ -298,14 +298,15 @@ TEST_CASE("User Groups", "[config][groups]") {
 
     CHECK(g2.needs_push());
     CHECK(g2.needs_dump());
-    CHECK(g2.current_hashes().empty());
+    CHECK(g2.current_hashes() == std::vector{"fakehash1"s});
     std::tie(seqno, to_push, obs) = g2.push();
-    CHECK(g2.current_hashes().empty());
+    CHECK(obs.empty());
+    CHECK(g2.current_hashes() == std::vector{"fakehash1"s});
     auto to_push2 = to_push;
     CHECK(seqno == 2);
     g2.confirm_pushed(seqno, "fakehash2");
     CHECK(g2.current_hashes() == std::vector{{"fakehash2"s}});
-    CHECK(as_set(obs) == make_set("fakehash1"s));
+    CHECK(as_set(g2.old_hashes()) == make_set("fakehash1"s));
     g2.dump();
 
     CHECK_FALSE(g2.needs_push());
@@ -348,11 +349,12 @@ TEST_CASE("User Groups", "[config][groups]") {
     g2.erase_community("http://exAMple.ORG:5678/", "sudokuROOM");
 
     std::tie(seqno, to_push, obs) = g2.push();
+    CHECK(obs.empty());
     g2.confirm_pushed(seqno, "fakehash3");
     auto to_push3 = to_push;
 
     CHECK(seqno == 3);
-    CHECK(as_set(obs) == make_set("fakehash2"s));
+    CHECK(as_set(g2.old_hashes()) == make_set("fakehash2"s));
     CHECK(g2.current_hashes() == std::vector{{"fakehash3"s}});
 
     to_merge.clear();
@@ -378,9 +380,10 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(groups.size_groups() == 1);
 
     std::tie(seqno, to_push, obs) = groups.push();
+    CHECK(as_set(obs) == make_set("fakehash1"s, "fakehash2"));  // haven't confirmed
     groups.confirm_pushed(seqno, "fakehash4");
     CHECK(seqno == 4);
-    CHECK(as_set(obs) == make_set("fakehash1"s, "fakehash2", "fakehash3"));
+    CHECK(as_set(groups.old_hashes()) == make_set("fakehash3"s));  // push confirmed
 
     to_merge.clear();
     // Load some obsolete ones in just to check that they get immediately obsoleted
