@@ -140,12 +140,21 @@ std::vector<std::string> ConfigBase::_merge(
     // (We skip this for seqno=0, but that's just a default-constructed, nothing-in-the-config case
     // for which we also can't have or produce a signature, so there's no point in even trying to
     // merge it).
+    //
+    // Where we put it matters, however: if we don't have a _curr_hash for it then we want to put it
+    // at the end (rather than the beginning) so that it is is identical to one of the incoming
+    // messages, *that* one becomes the config superset rather than our current, hash-unknown value.
 
     ustring mine;
+    bool mine_last = false;
     if (old_seqno != 0 || is_dirty()) {
         mine = _config->serialize();
-        all_hashes.emplace_back(_curr_hash);
-        all_confs.emplace_back(mine);
+        if (_curr_hash.empty())
+            mine_last = true;
+        else {
+            all_hashes.emplace_back(_curr_hash);
+            all_confs.emplace_back(mine);
+        }
     }
 
     std::vector<std::pair<std::string_view, ustring>> plaintexts;
@@ -238,6 +247,11 @@ std::vector<std::string> ConfigBase::_merge(
                 all_hashes.back());
     }
 
+    if (mine_last) {
+        all_hashes.emplace_back(_curr_hash);
+        all_confs.emplace_back(mine);
+    }
+
     std::set<size_t> bad_confs;
 
     auto new_conf = make_config_message(
@@ -261,13 +275,17 @@ std::vector<std::string> ConfigBase::_merge(
     std::string_view superconf_hash =
             superconf && *superconf < all_hashes.size() ? all_hashes[*superconf] : "";
 
+    const bool superconf_is_mine =
+            superconf && *superconf == (mine_last ? all_hashes.size() - 1 : 0);
+
     log::debug(
             cat,
             "Processed configs {}",
             superconf && *superconf < all_hashes.size()
-                    ? "with config superset [{}] (storage hash: {})"_format(
+                    ? "with config superset [{}] (storage hash: {}; {} config)"_format(
                               *superconf,
-                              all_hashes[*superconf].empty() ? "<unknown>" : all_hashes[*superconf])
+                              all_hashes[*superconf].empty() ? "<unknown>" : all_hashes[*superconf],
+                              superconf_is_mine ? "current" : "incoming")
                     : "with merge required");
 
     for (size_t i = 0; i < all_hashes.size(); i++) {
@@ -299,7 +317,7 @@ std::vector<std::string> ConfigBase::_merge(
             }
             set_state(ConfigState::Dirty);
         } else if (
-                _state == ConfigState::Dirty && *superconf == 0 &&
+                _state == ConfigState::Dirty && superconf_is_mine &&
                 new_conf->seqno() == old_seqno + 1) {
             log::debug(
                     cat,
@@ -311,7 +329,7 @@ std::vector<std::string> ConfigBase::_merge(
             /* do nothing */
         } else {
             _config = std::move(new_conf);
-            assert(((old_seqno == 0 && mine.empty()) || *superconf >= 1) &&
+            assert(((old_seqno == 0 && mine.empty()) || !superconf_is_mine) &&
                    *superconf < all_hashes.size());
             set_state(ConfigState::Clean);
             _curr_hash = all_hashes[*superconf];
@@ -329,9 +347,12 @@ std::vector<std::string> ConfigBase::_merge(
 
     std::vector<std::string> good_hashes;
     good_hashes.reserve(all_hashes.size() - (mine.empty() ? 0 : 1) - bad_confs.size());
-    for (size_t i = mine.empty() ? 0 : 1; i < all_hashes.size(); i++)
+    for (size_t i = 0; i < all_hashes.size(); i++) {
+        if (!mine.empty() && i == (mine_last ? all_hashes.size() - 1 : 0))
+            continue;
         if (!bad_confs.count(i))
             good_hashes.emplace_back(all_hashes[i]);
+    }
 
     log::info(
             cat,
