@@ -35,7 +35,9 @@ TEST_CASE("Logging callbacks", "[logging]") {
     oxen::log::clear_sinks();
     simple_logs.clear();
     full_logs.clear();
-    session::logger_reset_level(LogLevel::info);
+
+    session::logger_set_level("test.a", LogLevel::info);
+    session::logger_set_level("test.b", LogLevel::info);
 
     SECTION("C++ lambdas") {
         session::add_logger([&](std::string_view msg) { simple_logs.emplace_back(msg); });
