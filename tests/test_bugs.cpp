@@ -1,3 +1,4 @@
+#include <fmt/format.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -155,7 +156,7 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     CHECK_FALSE(c1.is_dirty());
     CHECK(c1.is_clean());
 
-    // Ensure if there are still changes after the merge we remain dirty
+    // Ensure if there are still changes after a merge where something was merged in we remain dirty
     c1.set_name("051111111111111111111111111111111111111111111111111111111111111112", "barney2");
     c1.set_name("051111111111111111111111111111111111111111111111111111111111111113", "barney3");
     c2.set_name("051111111111111111111111111111111111111111111111111111111111111112", "barney2");
@@ -163,6 +164,7 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     auto [seqno3, data3, obs3] = c2.push();
     REQUIRE(seqno3 == 3);
     CHECK(obs3 == std::vector{"fakehash2"s});
+    c2.confirm_pushed(seqno3, "fakehash3");
 
     CHECK(c1.is_dirty());  // already dirty before the merge
     auto r2 = c1.merge(std::vector<std::pair<std::string, ustring_view>>{{{"fakehash3", data3}}});
@@ -170,6 +172,38 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     CHECK(c1.needs_dump());
 
     CHECK(c1.needs_push());  // there are still changes after the merge
+    CHECK(c1.is_dirty());
+    CHECK_FALSE(c1.is_clean());
+
+    // Ensure if there are still changes after a merge where nothing was merged in we remain dirty
+    // (push enough changes that we have a seqNo larger than the `lag` setting we use)
+    for (auto i = 5; i < 20; ++i) {
+        c1.set_name(
+                fmt::format(
+                        "0511111111111111111111111111111111111111111111111111111111111111{:02}", i),
+                fmt::format("barney{}", i));
+        auto [seqno_i, data_i, obs_i] = c1.push();
+        REQUIRE(seqno_i == i);
+        c1.confirm_pushed(seqno_i, "fakehash" + std::to_string(i));
+        CHECK_FALSE(c1.needs_push());
+        CHECK_FALSE(c1.is_dirty());
+        CHECK(c1.is_clean());
+    }
+
+    c2.set_name("051111111111111111111111111111111111111111111111111111111111111150", "barney50");
+    auto [seqno4, data4, obs4] = c2.push();
+    REQUIRE(seqno4 == 4);
+    CHECK(obs4 == std::vector{"fakehash3"s});
+
+    c1.set_name("051111111111111111111111111111111111111111111111111111111111111140", "barney40");
+    auto size_before_merge = c1.size();  // retrieve size before trying to merge
+    CHECK(c1.is_dirty());                // already dirty before the merge
+    auto r4 = c1.merge(std::vector<std::pair<std::string, ustring_view>>{{{"fakehash21", data4}}});
+    CHECK(r4 == std::vector{{"fakehash21"s}});
+    CHECK(c1.needs_dump());
+
+    CHECK(c1.size() == size_before_merge);  // barney21 didn't get merged (seqNo too old)
+    CHECK(c1.needs_push());                 // there are still changes after the merge
     CHECK(c1.is_dirty());
     CHECK_FALSE(c1.is_clean());
 }
