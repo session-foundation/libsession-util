@@ -34,23 +34,14 @@ if (ENABLE_ONIONREQ)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
 endif()
 
-add_executable(testAll ${LIB_SESSION_UTESTS_SOURCES})
-
-add_library(Catch2Wrapper INTERFACE)
-target_link_libraries(Catch2Wrapper INTERFACE Catch2::Catch2WithMain)
-
-if(MSVC)
-    target_compile_options(Catch2Wrapper INTERFACE /W0)
-else()
-    target_compile_options(Catch2Wrapper INTERFACE -w)
-endif()
+add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
 
 target_link_libraries(testAll PRIVATE
     libsession::config
     libsodium::sodium-internal
     nlohmann_json::nlohmann_json
     oxen::logging
-    Catch2::Catch2WithMain)
+    Catch2::Catch2)
 
 if (ENABLE_ONIONREQ)
     target_link_libraries(testAll PRIVATE libsession::onionreq)
