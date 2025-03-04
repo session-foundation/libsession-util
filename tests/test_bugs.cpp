@@ -108,7 +108,7 @@ TEST_CASE("Merge existing config into clean state", "[config][merge_existing]") 
 // There was a bug where if the current config is in a dirty state and we merge a config which makes
 // the same change we would remain in the dirty state but the merged configs has would be included
 // in old_hashes (which ends up being the same hash the dirty config gets after pushing, resulting
-// in the current config getting deleted from the swarn)
+// in the current config getting deleted from the swarm)
 TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]") {
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
     std::array<unsigned char, 32> ed_pk, curve_pk;
