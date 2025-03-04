@@ -130,6 +130,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     merge_configs.emplace_back("fakehash2", to_push);
     contacts.merge(merge_configs);
     contacts2.confirm_pushed(seqno, "fakehash2");
+    CHECK(as_set(contacts2.old_hashes()) == make_set("fakehash1"s));
 
     CHECK_FALSE(contacts.needs_push());
     CHECK(std::get<seqno_t>(contacts.push()) == seqno);
@@ -179,11 +180,19 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(seqno == seqno2);
     CHECK(to_push != to_push2);
-    CHECK(as_set(obs) == make_set("fakehash2"s));
-    CHECK(as_set(obs2) == make_set("fakehash2"s));
+    CHECK(as_set(obs) == make_set("fakehash1"s, "fakehash2"s));
+    CHECK(as_set(obs2) == make_set("fakehash1"s, "fakehash2"s));
+    CHECK(contacts.current_hashes().empty());
+    CHECK(contacts2.current_hashes().empty());
 
     contacts.confirm_pushed(seqno, "fakehash3a");
     contacts2.confirm_pushed(seqno2, "fakehash3b");
+    CHECK(as_set(contacts.old_hashes()) == make_set("fakehash1"s, "fakehash2"s));
+    CHECK(as_set(contacts2.old_hashes()) == make_set("fakehash1"s, "fakehash2"s));
+    contacts.confirm_deleted({"fakehash1"s, "fakehash2"s});
+    contacts2.confirm_deleted({"fakehash1"s, "fakehash2"s});
+    CHECK(contacts.old_hashes().empty());
+    CHECK(contacts2.old_hashes().empty());
 
     merge_configs.clear();
     merge_configs.emplace_back("fakehash3b", to_push2);
@@ -362,6 +371,12 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK(to_push->obsolete_len == 1);
     CHECK(to_push->obsolete[0] == "fakehash1"sv);
     free(to_push);
+
+    const char* removed_hash[1];
+    removed_hash[0] = "fakehash1";
+    config_confirm_deleted(conf2, removed_hash, 1);
+    auto old_hashes2 = config_old_hashes(conf2);
+    CHECK(old_hashes2->len == 0);
 
     // Iterate through and make sure we got everything we expected
     std::vector<std::string> session_ids;

@@ -1084,6 +1084,17 @@ class ConfigBase : public ConfigSig {
     /// - `msg_hash` -- message hash that was pushed
     virtual void confirm_pushed(seqno_t seqno, std::string msg_hash);
 
+    /// API: base/ConfigBase::confirm_deleted
+    ///
+    /// Should be called after the obsolete hash deletion is confirmed by the storage server swarm
+    /// to let the object know it can stop tracking those old hashes.
+    ///
+    /// NB: If `needs_push` is `true` then _old_hashes will contain the hash of the current config message on the swarm so the deletion should only be triggered after a successful push request.
+    ///
+    /// Inputs:
+    /// - `hashes` -- message hashes that were deleted
+    virtual void confirm_deleted(const std::vector<std::string> hashes);
+
     /// API: base/ConfigBase::dump
     ///
     /// Returns a dump of the current state for storage in the database; this value would get passed

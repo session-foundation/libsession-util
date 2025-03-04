@@ -180,6 +180,18 @@ LIBSESSION_EXPORT config_push_data* config_push(config_object* conf);
 LIBSESSION_EXPORT void config_confirm_pushed(
         config_object* conf, seqno_t seqno, const char* msg_hash);
 
+/// API: base/config_confirm_deleted
+///
+/// Reports that hashes obtained from `config_push` or `old_hashes` have been successfully deleted
+/// on the server.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to config_object object
+/// - `msg_hash` -- [in] Array of null-terminated C strings for the hashes that were deleted
+/// - `msg_hash_len` -- [in] Number of values provided in `msg_hash`
+LIBSESSION_EXPORT void config_confirm_deleted(
+        config_object* conf, const char** msg_hash, size_t msg_hash_len);
+
 /// API: base/config_dump
 ///
 /// Returns a binary dump of the current state of the config object.  This dump can be used to

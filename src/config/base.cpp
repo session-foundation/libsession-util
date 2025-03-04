@@ -290,11 +290,8 @@ std::vector<std::string> ConfigBase::current_hashes() const {
 
 std::vector<std::string> ConfigBase::old_hashes() {
     std::vector<std::string> hashes;
-    if (!is_dirty()) {
-        for (auto& old : _old_hashes)
-            hashes.push_back(std::move(old));
-        _old_hashes.clear();
-    }
+    for (auto& old : _old_hashes)
+        hashes.push_back(std::move(old));
 
     return hashes;
 }
@@ -346,7 +343,6 @@ std::tuple<seqno_t, ustring, std::vector<std::string>> ConfigBase::push() {
     if (!is_readonly())
         for (auto& old : _old_hashes)
             obs.push_back(std::move(old));
-    _old_hashes.clear();
 
     return ret;
 }
@@ -358,6 +354,12 @@ void ConfigBase::confirm_pushed(seqno_t seqno, std::string msg_hash) {
         set_state(ConfigState::Clean);
         _curr_hash = std::move(msg_hash);
     }
+}
+
+void ConfigBase::confirm_deleted(const std::vector<std::string> hashes) {
+    for (auto& old : hashes)
+        if (auto it = _old_hashes.find(old); it != _old_hashes.end())
+            _old_hashes.erase(it);
 }
 
 ustring ConfigBase::dump() {
@@ -730,6 +732,17 @@ LIBSESSION_EXPORT config_push_data* config_push(config_object* conf) {
 LIBSESSION_EXPORT void config_confirm_pushed(
         config_object* conf, seqno_t seqno, const char* msg_hash) {
     unbox(conf)->confirm_pushed(seqno, msg_hash);
+}
+
+LIBSESSION_EXPORT void config_confirm_deleted(
+        config_object* conf, const char** msg_hash, size_t msh_hash_len) {
+    std::vector<std::string> hashes;
+    hashes.reserve(msh_hash_len);
+
+    for (auto i = 0; i < msh_hash_len; ++i)
+        hashes.push_back(msg_hash[i]);
+
+    unbox(conf)->confirm_deleted(hashes);
 }
 
 LIBSESSION_EXPORT bool config_dump(config_object* conf, unsigned char** out, size_t* outlen) {

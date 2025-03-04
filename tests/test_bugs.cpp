@@ -29,6 +29,7 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
     c1.confirm_pushed(seqno, "fakehash1");
+    CHECK(c1.current_hashes() == std::vector{{"fakehash1"s}});
 
     session::config::Contacts c2{ustring_view{seed}, c1.dump()};
     session::config::Contacts c3{ustring_view{seed}, c1.dump()};
@@ -68,4 +69,12 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
 
     CHECK(seqno4 == 3);  // The merge *and* change should go into the same message update/seqno
     CHECK(as_set(obs4) == make_set("fakehash1"s, "fakehash2"s, "fakehash3"s));
+
+    c1.confirm_pushed(seqno4, "fakehash4");
+    auto obs5 = c1.old_hashes();
+    CHECK(!c1.is_dirty());
+    CHECK(c1.is_clean());
+    CHECK(as_set(obs5) == make_set("fakehash1"s, "fakehash2"s, "fakehash3"s));
+    c1.confirm_deleted({"fakehash1"s, "fakehash2"s, "fakehash3"s});
+    CHECK(c1.old_hashes().empty());
 }
