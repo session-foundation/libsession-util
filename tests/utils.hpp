@@ -1,11 +1,11 @@
 #pragma once
 
 #include <oxenc/hex.h>
-#include <oxen/log.hpp>
 
 #include <array>
 #include <chrono>
 #include <cstddef>
+#include <oxen/log.hpp>
 #include <set>
 #include <string>
 #include <string_view>
@@ -19,37 +19,32 @@ using ustring_view = std::basic_string_view<unsigned char>;
 
 namespace session {
 
-    /// RAII class that resets the log level for the given category while the object is alive, then
-    /// resets it to what it was at construction when the object is destroyed.
-    struct log_level_override
-    {
-        oxen::log::Level previous;
-        std::string category;
+/// RAII class that resets the log level for the given category while the object is alive, then
+/// resets it to what it was at construction when the object is destroyed.
+struct log_level_override {
+    oxen::log::Level previous;
+    std::string category;
 
-        log_level_override(oxen::log::Level l, std::string category) : previous{oxen::log::get_level(category)}, category{category}
-        {
-            oxen::log::set_level(category, l);
-        }
-        ~log_level_override() { oxen::log::set_level(category, previous); }
-    };
+    log_level_override(oxen::log::Level l, std::string category) :
+            previous{oxen::log::get_level(category)}, category{category} {
+        oxen::log::set_level(category, l);
+    }
+    ~log_level_override() { oxen::log::set_level(category, previous); }
+};
 
-    /// Same as above, but only raises the log level to a more serious cutoff (leaving it alone if
-    /// already higher).
-    struct log_level_raiser : log_level_override
-    {
-        log_level_raiser(oxen::log::Level l, std::string category) :
-                log_level_override{std::max(l, oxen::log::get_level(category)), category}
-        {}
-    };
-    /// Same as above, but only lowers the log level to a more frivolous cutoff (leaving it alone if
-    /// already lower).
-    struct log_level_lowerer : log_level_override
-    {
-        log_level_lowerer(oxen::log::Level l, std::string category) :
-                log_level_override{std::min(l, oxen::log::get_level(category)), category}
-        {}
-    };
-} // session
+/// Same as above, but only raises the log level to a more serious cutoff (leaving it alone if
+/// already higher).
+struct log_level_raiser : log_level_override {
+    log_level_raiser(oxen::log::Level l, std::string category) :
+            log_level_override{std::max(l, oxen::log::get_level(category)), category} {}
+};
+/// Same as above, but only lowers the log level to a more frivolous cutoff (leaving it alone if
+/// already lower).
+struct log_level_lowerer : log_level_override {
+    log_level_lowerer(oxen::log::Level l, std::string category) :
+            log_level_override{std::min(l, oxen::log::get_level(category)), category} {}
+};
+}  // namespace session
 
 inline ustring operator""_bytes(const char* x, size_t n) {
     return {reinterpret_cast<const unsigned char*>(x), n};
