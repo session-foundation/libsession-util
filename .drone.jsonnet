@@ -143,6 +143,7 @@ local debian_build(name,
                        ] else []
                      ) + [
                        'cd build',
+                       './tests/testLogging --colour-mode ansi -d yes',
                        './tests/testAll --colour-mode ansi -d yes',
                      ],
                  }] else [])
@@ -191,6 +192,7 @@ local windows_cross_pipeline(name,
                    commands: [
                      apt_get_quiet + ' install -y --no-install-recommends wine64',
                      'cd build',
+                     'wine-stable ./tests/testLogging.exe --colour-mode ansi -d yes',
                      'wine-stable ./tests/testAll.exe --colour-mode ansi -d yes',
                    ],
                  }] else [])
@@ -272,6 +274,7 @@ local mac_builder(name,
                           [if allow_fail then 'failure']: 'ignore',
                           commands: [
                             'cd build',
+                            './tests/testLogging --colour-mode ansi -d yes',
                             './tests/testAll --colour-mode ansi -d yes',
                           ],
                         }] else []));

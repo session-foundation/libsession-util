@@ -124,6 +124,15 @@ std::vector<std::string> ConfigBase::_merge(
     all_hashes.reserve(configs.size() + 1);
     all_confs.reserve(configs.size() + 1);
 
+    log::debug(cat, "Beginning merge of {} incoming configs", configs.size());
+    log::trace(
+            cat,
+            "Current config is {} with seqno={}, storage hash {}",
+            current_state_string(),
+            old_seqno,
+            _curr_hash.empty() ? "<unknown>" : _curr_hash);
+    log::trace(cat, "Current old_hashes: {}", fmt::join(_old_hashes, ", "));
+
     // We serialize our current config and include it in the list of configs to be merged, as if it
     // had already been pushed to the server (so that this code will be identical whether or not the
     // value was pushed).
@@ -131,12 +140,21 @@ std::vector<std::string> ConfigBase::_merge(
     // (We skip this for seqno=0, but that's just a default-constructed, nothing-in-the-config case
     // for which we also can't have or produce a signature, so there's no point in even trying to
     // merge it).
+    //
+    // Where we put it matters, however: if we don't have a _curr_hash for it then we want to put it
+    // at the end (rather than the beginning) so that it is identical to one of the incoming
+    // messages, *that* one becomes the config superset rather than our current, hash-unknown value.
 
     ustring mine;
+    bool mine_last = false;
     if (old_seqno != 0 || is_dirty()) {
         mine = _config->serialize();
-        all_hashes.emplace_back(_curr_hash);
-        all_confs.emplace_back(mine);
+        if (_curr_hash.empty())
+            mine_last = true;
+        else {
+            all_hashes.emplace_back(_curr_hash);
+            all_confs.emplace_back(mine);
+        }
     }
 
     std::vector<std::pair<std::string_view, ustring>> plaintexts;
@@ -184,14 +202,17 @@ std::vector<std::string> ConfigBase::_merge(
             continue;
         }
 
+        bool was_multipart = plain[0] == 'm';
+
         // TODO FIXME (see above)
-        if (plain[0] == 'm') {
+        if (was_multipart) {
             log::warning(cat, "multi-part messages not yet supported!");
             continue;
         }
 
+        bool was_compressed = plain[0] == 'z';
         // 'z' prefix indicates zstd-compressed data:
-        if (plain[0] == 'z') {
+        if (was_compressed) {
             if (auto decompressed =
                         zstd_decompress(ustring_view{plain.data() + 1, plain.size() - 1});
                 decompressed && !decompressed->empty())
@@ -202,16 +223,33 @@ std::vector<std::string> ConfigBase::_merge(
             }
         }
 
-        if (plain[0] != 'd')
+        if (plain[0] != 'd') {
             log::error(
                     cat,
                     "invalid/unsupported config message with type {}",
                     (plain[0] >= 0x20 && plain[0] <= 0x7e
                              ? "'{}'"_format(static_cast<char>(plain[0]))
                              : "0x{:02x}"_format(plain[0])));
+            continue;
+        }
 
         all_hashes.emplace_back(hash);
         all_confs.emplace_back(plain);
+
+        log::trace(
+                cat,
+                "Successfully parsed {}B {} config message {}",
+                plain.size(),
+                was_compressed && was_multipart ? "multi-part compressed"
+                : was_compressed                ? "compressed"
+                : was_multipart                 ? "multi-part"
+                                                : "plaintext",
+                all_hashes.back());
+    }
+
+    if (mine_last) {
+        all_hashes.emplace_back(_curr_hash);
+        all_confs.emplace_back(mine);
     }
 
     std::set<size_t> bad_confs;
@@ -237,14 +275,37 @@ std::vector<std::string> ConfigBase::_merge(
     std::string_view superconf_hash =
             superconf && *superconf < all_hashes.size() ? all_hashes[*superconf] : "";
 
+    const bool superconf_is_mine =
+            superconf && *superconf == (mine_last ? all_hashes.size() - 1 : 0);
+
+    log::debug(
+            cat,
+            "Processed configs {}",
+            superconf && *superconf < all_hashes.size()
+                    ? "with config superset [{}] (storage hash: {}; {} config)"_format(
+                              *superconf,
+                              all_hashes[*superconf].empty() ? "<unknown>" : all_hashes[*superconf],
+                              superconf_is_mine ? "current" : "incoming")
+                    : "with merge required");
+
     for (size_t i = 0; i < all_hashes.size(); i++) {
         if (i != superconf && !bad_confs.count(i) && !all_hashes[i].empty() &&
-            superconf_hash != all_hashes[i])
-            _old_hashes.emplace(all_hashes[i]);
+            superconf_hash != all_hashes[i]) {
+            auto [it, ins] = _old_hashes.emplace(all_hashes[i]);
+            log::trace(
+                    cat,
+                    "Conf message {} {} obsolete",
+                    all_hashes[i],
+                    ins ? "is now" : "was already");
+        }
     }
 
     if (new_conf->seqno() != old_seqno) {
         if (new_conf->merged()) {
+            log::debug(
+                    cat,
+                    "New configs required merging: current state {}, new state DIRTY",
+                    current_state_string());
             if (_state != ConfigState::Dirty) {
                 // Merging resulted in a merge conflict resolution message, but won't currently be
                 // mutable (because we weren't dirty to start with).  Convert into a Mutable message
@@ -256,8 +317,11 @@ std::vector<std::string> ConfigBase::_merge(
             }
             set_state(ConfigState::Dirty);
         } else if (
-                _state == ConfigState::Dirty && new_conf->unmerged_index() == 0 &&
+                _state == ConfigState::Dirty && superconf_is_mine &&
                 new_conf->seqno() == old_seqno + 1) {
+            log::debug(
+                    cat,
+                    "Current DIRTY config already contains all incoming configs, nothing to do");
             // Constructing a new MutableConfigMessage always increments the seqno (by design) but
             // in this case nothing changed: every other config got ignored and we didn't change
             // anything, so we can ignore the new config and just keep our current one, despite the
@@ -265,18 +329,39 @@ std::vector<std::string> ConfigBase::_merge(
             /* do nothing */
         } else {
             _config = std::move(new_conf);
-            assert(((old_seqno == 0 && mine.empty()) || _config->unmerged_index() >= 1) &&
-                   _config->unmerged_index() < all_hashes.size());
+            assert(((old_seqno == 0 && mine.empty()) || !superconf_is_mine) &&
+                   *superconf < all_hashes.size());
             set_state(ConfigState::Clean);
-            _curr_hash = all_hashes[*_config->unmerged_index()];
+            _curr_hash = all_hashes[*superconf];
+
+            log::debug(
+                    cat,
+                    "Incoming config [{}] {} is super-set of current and incoming configs; "
+                    "adopting it as clean current config",
+                    *superconf,
+                    _curr_hash);
         }
+    } else {
+        log::debug(cat, "All incoming configs rejected or already included, nothing to do");
     }
 
     std::vector<std::string> good_hashes;
     good_hashes.reserve(all_hashes.size() - (mine.empty() ? 0 : 1) - bad_confs.size());
-    for (size_t i = mine.empty() ? 0 : 1; i < all_hashes.size(); i++)
+    for (size_t i = 0; i < all_hashes.size(); i++) {
+        if (!mine.empty() && i == (mine_last ? all_hashes.size() - 1 : 0))
+            continue;
         if (!bad_confs.count(i))
             good_hashes.emplace_back(all_hashes[i]);
+    }
+
+    log::info(
+            cat,
+            "New configs merged ({} good, {} bad); config state is now {} with seqno {} (was {})",
+            good_hashes.size(),
+            bad_confs.size(),
+            current_state_string(),
+            _config->seqno(),
+            old_seqno);
 
     return good_hashes;
 }

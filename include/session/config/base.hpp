@@ -959,6 +959,26 @@ class ConfigBase : public ConfigSig {
     /// - `bool` -- Returns true if changes have been serialized
     bool is_clean() const { return _state == ConfigState::Clean; }
 
+    /// API: base/ConfigBase::current_state_string()
+    ///
+    /// Returns one of "clean", "pending", or "DIRTY" depending on the current state.  This is
+    /// primarily intended for logging.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::string_view` -- fixed string (clean, DIRTY, or pending) describing the current
+    ///   state.
+    std::string_view current_state_string() const {
+        switch (_state) {
+            case ConfigState::Clean: return "clean";
+            case ConfigState::Dirty: return "DIRTY";
+            case ConfigState::Waiting: return "pending";
+        }
+        assert(!"invalid state value!");
+        return "<invalid-state>";
+    }
+
     /// API: base/ConfigBase::is_readonly
     ///
     /// Returns true if this config object is in read-only mode: specifically that means that this
