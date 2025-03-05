@@ -142,7 +142,7 @@ std::vector<std::string> ConfigBase::_merge(
     // merge it).
     //
     // Where we put it matters, however: if we don't have a _curr_hash for it then we want to put it
-    // at the end (rather than the beginning) so that it is is identical to one of the incoming
+    // at the end (rather than the beginning) so that it is identical to one of the incoming
     // messages, *that* one becomes the config superset rather than our current, hash-unknown value.
 
     ustring mine;

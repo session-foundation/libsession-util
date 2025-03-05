@@ -6,6 +6,8 @@
 #include <regex>
 #include <session/logging.hpp>
 
+#include "utils.hpp"
+
 #ifndef DISABLE_ONIONREQ
 #include <oxen/quic/network.hpp>
 #endif
@@ -35,9 +37,8 @@ TEST_CASE("Logging callbacks", "[logging]") {
     oxen::log::clear_sinks();
     simple_logs.clear();
     full_logs.clear();
-
-    session::logger_set_level("test.a", LogLevel::info);
-    session::logger_set_level("test.b", LogLevel::info);
+    log_level_lowerer log_relief_a{log::Level::info, "test.a"};
+    log_level_lowerer log_relief_b{log::Level::info, "test.b"};
 
     SECTION("C++ lambdas") {
         session::add_logger([&](std::string_view msg) { simple_logs.emplace_back(msg); });
@@ -103,7 +104,7 @@ TEST_CASE("Logging callbacks", "[logging]") {
 TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
     oxen::log::clear_sinks();
     simple_logs.clear();
-    session::logger_set_level("quic", LogLevel::debug);
+    log_level_lowerer log_relief{log::Level::debug, "quic"};
 
     session::add_logger([&](std::string_view msg) { simple_logs.emplace_back(msg); });
 
