@@ -21,7 +21,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_group_info.cpp
     test_group_members.cpp
     test_hash.cpp
-    test_logging.cpp
+    #test_logging.cpp  # Handled separately, see below
     test_multi_encrypt.cpp
     test_proto.cpp
     test_random.cpp
@@ -34,23 +34,36 @@ if (ENABLE_ONIONREQ)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
 endif()
 
-add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
+add_library(test_libs INTERFACE)
 
-target_link_libraries(testAll PRIVATE
+target_link_libraries(test_libs INTERFACE
     libsession::config
     libsodium::sodium-internal
     nlohmann_json::nlohmann_json
-    oxen::logging
-    Catch2::Catch2)
+    oxen::logging)
 
 if (ENABLE_ONIONREQ)
-    target_link_libraries(testAll PRIVATE libsession::onionreq)
+    target_link_libraries(test_libs INTERFACE libsession::onionreq)
 else()
-    target_compile_definitions(testAll PRIVATE DISABLE_ONIONREQ)
+    target_compile_definitions(test_libs INTERFACE DISABLE_ONIONREQ)
 endif()
 
+add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
+target_link_libraries(testAll PRIVATE
+    test_libs
+    Catch2::Catch2)
+
+# This one is compiled to a separate binary because it manipulates the logging level and sinks, and
+# thus breaks logging in any tests that would run after it if bundled into the main testAll:
+add_executable(testLogging test_logging.cpp)
+target_link_libraries(testLogging PRIVATE
+    test_libs
+    Catch2::Catch2WithMain)
+
 if(NOT TARGET check)
-    add_custom_target(check COMMAND testAll)
+    add_custom_target(check
+        COMMAND testLogging
+        COMMAND testAll)
 endif()
 
 add_executable(swarm-auth-test EXCLUDE_FROM_ALL swarm-auth-test.cpp)
