@@ -83,7 +83,7 @@ Builder::Builder(
         add_hop(n.view_remote_key());
 }
 
-void Builder::add_hop(uspan remote_key) {
+void Builder::add_hop(std::span<const unsigned char> remote_key) {
     hops_.push_back({ed25519_pubkey::from_bytes(remote_key), compute_x25519_pubkey(remote_key)});
 }
 
@@ -229,7 +229,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
             };
 
             auto control_dump = control.dump();
-            auto control_span = str_to_uspan(control_dump);
+            auto control_span = to_const_unsigned_span(control_dump);
             auto data = encode_size(payload.size());
             data.insert(data.end(), payload.begin(), payload.end());
             data.insert(data.end(), control_span.begin(), control_span.end());
@@ -265,7 +265,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
         }
 
         auto routing_dump = routing.dump();
-        auto routing_span = str_to_uspan(routing_dump);
+        auto routing_span = to_const_unsigned_span(routing_dump);
         auto data = encode_size(blob.size());
         data.insert(data.end(), blob.begin(), blob.end());
         data.insert(data.end(), routing_span.begin(), routing_span.end());
@@ -280,7 +280,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
     // how to decrypt the initial payload:
     auto wrapper_dump =
             nlohmann::json{{"ephemeral_key", A.hex()}, {"enc_type", to_string(enc_type)}}.dump();
-    auto wrapper_span = str_to_uspan(wrapper_dump);
+    auto wrapper_span = to_const_unsigned_span(wrapper_dump);
     auto result = encode_size(blob.size());
     result.insert(result.end(), blob.begin(), blob.end());
     result.insert(result.end(), wrapper_span.begin(), wrapper_span.end());

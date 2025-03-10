@@ -1779,7 +1779,7 @@ void Network::send_request(
         return handle_response(
                 false, false, -1, {content_type_plain_text}, "Network is unreachable.");
 
-    bspan payload{};
+    std::span<const std::byte> payload{};
 
     if (info.body)
         payload = vec_to_span<std::byte>(*info.body);

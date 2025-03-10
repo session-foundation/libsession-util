@@ -142,7 +142,7 @@ std::vector<unsigned char> HopEncryption::encrypt_aesgcm(
 
 std::vector<unsigned char> HopEncryption::decrypt_aesgcm(
         std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
-    uspan ciphertext = vec_to_span<unsigned char>(ciphertext_);
+    std::span<const unsigned char> ciphertext = vec_to_span<unsigned char>(ciphertext_);
 
     if (!response_long_enough(EncryptType::aes_gcm, ciphertext_.size()))
         throw std::invalid_argument{"Ciphertext data is too short: " + vec_to_str(ciphertext_)};
@@ -208,7 +208,7 @@ std::vector<unsigned char> HopEncryption::encrypt_xchacha20(
 
 std::vector<unsigned char> HopEncryption::decrypt_xchacha20(
         std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
-    uspan ciphertext = vec_to_span<unsigned char>(ciphertext_);
+    std::span<const unsigned char> ciphertext = vec_to_span<unsigned char>(ciphertext_);
 
     // Extract nonce from the beginning of the ciphertext:
     auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);

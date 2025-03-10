@@ -63,18 +63,18 @@ TEST_CASE("Onion request parser", "[onionreq][parser]") {
             "33393563613233353231396163336637613432313030323262316639313065363532227d"_hexbytesv;
 
     OnionReqParser parser_gcm{B, b, enc_gcm};
-    CHECK(span_to_str(parser_gcm.payload()) == "Hello world");
+    CHECK(from_const_unsigned_span(parser_gcm.payload()) == "Hello world");
     CHECK(sp_to_sv(parser_gcm.remote_pubkey()) == vec_to_sv(A));
-    auto aes_reply = parser_gcm.encrypt_reply(str_to_uspan("Goodbye world"));
+    auto aes_reply = parser_gcm.encrypt_reply(to_const_unsigned_span("Goodbye world"));
     CHECK(aes_reply.size() == 12 + 13 + 16);
 
     HopEncryption e{x25519_seckey::from_bytes(a), x25519_pubkey::from_bytes(A), false};
     CHECK(vec_to_str(e.decrypt_aesgcm(aes_reply, x25519_pubkey::from_bytes(B))) == "Goodbye world");
 
     OnionReqParser parser_xchacha20{B, b, enc_xchacha20};
-    CHECK(span_to_str(parser_xchacha20.payload()) == "Hello world");
+    CHECK(from_const_unsigned_span(parser_xchacha20.payload()) == "Hello world");
     CHECK(sp_to_sv(parser_xchacha20.remote_pubkey()) == vec_to_sv(A));
-    auto xcha_reply = parser_xchacha20.encrypt_reply(str_to_uspan("Goodbye world"));
+    auto xcha_reply = parser_xchacha20.encrypt_reply(to_const_unsigned_span("Goodbye world"));
     CHECK(xcha_reply.size() == 16 + 13 + 24);
     CHECK(vec_to_str(e.decrypt_xchacha20(xcha_reply, x25519_pubkey::from_bytes(B))) ==
           "Goodbye world");

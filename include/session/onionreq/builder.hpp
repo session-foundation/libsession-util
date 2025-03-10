@@ -86,7 +86,7 @@ class Builder {
 
     void set_destination(network_destination destination);
     void set_destination_pubkey(session::onionreq::x25519_pubkey x25519_pubkey);
-    void add_hop(uspan remote_key);
+    void add_hop(std::span<const unsigned char> remote_key);
     void add_hop(std::pair<ed25519_pubkey, x25519_pubkey> keys) { hops_.push_back(keys); }
 
     void generate(network::request_info& info);

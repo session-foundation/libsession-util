@@ -21,13 +21,13 @@ class OnionReqParser {
     /// Constructs a parser, parsing the given request sent to us.  Throws if parsing or decryption
     /// fails.
     OnionReqParser(
-            uspan x25519_pubkey,
-            uspan x25519_privkey,
-            uspan req,
+            std::span<const unsigned char> x25519_pubkey,
+            std::span<const unsigned char> x25519_privkey,
+            std::span<const unsigned char> req,
             size_t max_size = DEFAULT_MAX_SIZE);
 
     /// plaintext payload, decrypted from the incoming request during construction.
-    uspan payload() const { return vec_to_span<unsigned char>(payload_); }
+    std::span<const unsigned char> payload() const { return vec_to_span<unsigned char>(payload_); }
 
     /// Extracts payload from this object (via a std::move); after the call the object's payload
     /// will be empty.
@@ -37,11 +37,11 @@ class OnionReqParser {
         return ret;
     }
 
-    uspan remote_pubkey() const { return str_to_uspan(remote_pk.view()); }
+    std::span<const unsigned char> remote_pubkey() const { return to_const_unsigned_span(remote_pk.view()); }
 
     /// Encrypts a reply using the appropriate encryption as determined when parsing the
     /// request.
-    std::vector<unsigned char> encrypt_reply(uspan reply) const;
+    std::vector<unsigned char> encrypt_reply(std::span<const unsigned char> reply) const;
 };
 
 }  // namespace session::onionreq
