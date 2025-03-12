@@ -696,7 +696,7 @@ class Network {
     /// Outputs:
     /// - A tuple containing the status code, headers and body of the decrypted onion request
     /// response.
-    std::tuple<
+    virtual std::tuple<
             int16_t,
             std::vector<std::pair<std::string, std::string>>,
             std::optional<std::string>>
@@ -713,7 +713,7 @@ class Network {
     /// Outputs:
     /// - A tuple containing the status code, headers and body of the decrypted onion request
     /// response.
-    std::tuple<
+    virtual std::tuple<
             int16_t,
             std::vector<std::pair<std::string, std::string>>,
             std::optional<std::string>>
