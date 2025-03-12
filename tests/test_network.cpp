@@ -5,7 +5,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <nlohmann/json.hpp>
+#include <session/curve25519.hpp>
+#include <session/ed25519.hpp>
 #include <session/network.hpp>
+#include <session/onionreq/hop_encryption.hpp>
 #include <session/onionreq/key_types.hpp>
 #include <tuple>
 
@@ -51,6 +54,7 @@ class TestNetwork : public Network {
     std::chrono::milliseconds retry_delay_value = 0ms;
     std::optional<std::optional<onion_path>> find_valid_path_response;
     std::optional<request_info> last_request_info;
+    bool handle_onion_requests_as_plaintext = false;
 
     TestNetwork(
             std::optional<fs::path> cache_path,
@@ -173,6 +177,75 @@ class TestNetwork : public Network {
                    std::optional<std::string>) {});
     }
 
+    std::pair<std::shared_ptr<oxen::quic::Endpoint>, service_node> create_test_node(uint16_t port) {
+        oxen::quic::opt::inbound_alpns server_alpns{"oxenstorage"};
+        auto server_key_pair =
+                session::ed25519::ed25519_key_pair(to_unsigned_sv(fmt::format("{:032}", port)));
+        auto server_x25519_pubkey = session::curve25519::to_curve25519_pubkey(
+                {server_key_pair.first.data(), server_key_pair.first.size()});
+        auto server_x25519_seckey = session::curve25519::to_curve25519_seckey(
+                {server_key_pair.second.data(), server_key_pair.second.size()});
+        auto creds = oxen::quic::GNUTLSCreds::make_from_ed_seckey(
+                from_unsigned_sv(server_key_pair.second));
+        oxen::quic::Address server_local{port};
+        session::onionreq::HopEncryption decryptor{
+                x25519_seckey::from_bytes(to_usv(server_x25519_seckey)),
+                x25519_pubkey::from_bytes(to_usv(server_x25519_pubkey)),
+                true};
+
+        auto server_cb = [&](oxen::quic::message m) {
+            nlohmann::json response{{"hf", {1, 0, 0}}, {"t", 1234567890}, {"version", {2, 8, 0}}};
+            m.respond(response.dump(), false);
+        };
+
+        auto onion_cb = [&](oxen::quic::message m) {
+            nlohmann::json response{{"hf", {2, 0, 0}}, {"t", 1234567890}, {"version", {2, 8, 0}}};
+            m.respond(response.dump(), false);
+        };
+
+        oxen::quic::stream_constructor_callback server_constructor =
+                [&](oxen::quic::Connection& c, oxen::quic::Endpoint& e, std::optional<int64_t>) {
+                    auto s = e.make_shared<oxen::quic::BTRequestStream>(c, e);
+                    s->register_handler("info", server_cb);
+                    s->register_handler("onion_req", onion_cb);
+                    return s;
+                };
+
+        auto endpoint = net.endpoint(server_local, server_alpns);
+        endpoint->listen(creds, server_constructor);
+
+        auto node = service_node{
+                from_unsigned_sv(server_key_pair.first),
+                {2, 8, 0},
+                INVALID_SWARM_ID,
+                "127.0.0.1"s,
+                endpoint->local().port()};
+
+        return {endpoint, node};
+    }
+
+    onion_path create_test_path() {
+        std::vector<service_node> path_nodes;
+        path_nodes.reserve(3);
+
+        for (auto i = 0; i < 3; ++i)
+            path_nodes.emplace_back(create_test_node(static_cast<uint16_t>(1000 + i)).second);
+
+        std::promise<std::pair<connection_info, std::optional<std::string>>> prom;
+        establish_connection(
+                "Test",
+                path_nodes[0],
+                3s,
+                [&prom](connection_info conn_info, std::optional<std::string> error) {
+                    prom.set_value({std::move(conn_info), error});
+                });
+
+        // Wait for the result to be set
+        auto result = prom.get_future().get();
+        REQUIRE(result.first.is_valid());
+        return onion_path{"Test", std::move(result.first), path_nodes, uint8_t{0}};
+    }
+
     // Overridden Functions
 
     std::chrono::milliseconds retry_delay(int, std::chrono::milliseconds) override {
@@ -286,6 +359,32 @@ class TestNetwork : public Network {
                 std::move(handle_response));
     }
 
+    std::tuple<
+            int16_t,
+            std::vector<std::pair<std::string, std::string>>,
+            std::optional<std::string>>
+    process_v3_onion_response(session::onionreq::Builder builder, std::string response) override {
+        call_counts["process_v3_onion_response"]++;
+
+        if (handle_onion_requests_as_plaintext)
+            return {200, {}, response};
+
+        return Network::process_v3_onion_response(builder, response);
+    }
+
+    std::tuple<
+            int16_t,
+            std::vector<std::pair<std::string, std::string>>,
+            std::optional<std::string>>
+    process_v4_onion_response(session::onionreq::Builder builder, std::string response) override {
+        call_counts["process_v4_onion_response"]++;
+
+        if (handle_onion_requests_as_plaintext)
+            return {200, {}, response};
+
+        return Network::process_v4_onion_response(builder, response);
+    }
+
     // Mocking Functions
 
     template <typename... Strings>
@@ -307,7 +406,7 @@ class TestNetwork : public Network {
 };
 }  // namespace session::network
 
-TEST_CASE("Network Url Parsing", "[network][parse_url]") {
+TEST_CASE("Network", "[network][parse_url]") {
     auto [proto1, host1, port1, path1] = parse_url("HTTPS://example.com/test");
     auto [proto2, host2, port2, path2] = parse_url("http://example2.com:1234/test/123456");
     auto [proto3, host3, port3, path3] = parse_url("https://example3.com");
@@ -331,7 +430,7 @@ TEST_CASE("Network Url Parsing", "[network][parse_url]") {
     CHECK(path4.value_or("NULL") == "/test?value=test");
 }
 
-TEST_CASE("Network error handling", "[network]") {
+TEST_CASE("Network", "[network][handle_errors]") {
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
     auto ed_sk =
@@ -709,7 +808,7 @@ TEST_CASE("Network error handling", "[network]") {
     CHECK(network->get_failure_count(PathType::standard, path) == 0);
 }
 
-TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
+TEST_CASE("Network", "[network][get_unused_nodes]") {
     const auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     std::optional<TestNetwork> network;
     std::vector<service_node> snode_cache;
@@ -802,7 +901,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     CHECK(unused_nodes.front() == unique_node);
 }
 
-TEST_CASE("Network Path Building", "[network][build_path]") {
+TEST_CASE("Network", "[network][build_path]") {
     const auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     std::optional<TestNetwork> network;
     std::vector<service_node> snode_cache;
@@ -914,7 +1013,7 @@ TEST_CASE("Network Path Building", "[network][build_path]") {
     CHECK(network->called("paths_changed"));
 }
 
-TEST_CASE("Network Find Valid Path", "[network][find_valid_path]") {
+TEST_CASE("Network", "[network][find_valid_path]") {
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     auto target = test_node(ed_pk, 1);
     auto test_service_node = service_node{
@@ -970,7 +1069,7 @@ TEST_CASE("Network Find Valid Path", "[network][find_valid_path]") {
     CHECK(network_single_path.find_valid_path(shared_ip_info, {valid_path}).has_value());
 }
 
-TEST_CASE("Network Enqueue Path Build", "[network][build_path_if_needed]") {
+TEST_CASE("Network", "[network][build_path_if_needed]") {
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     auto target = test_node(ed_pk, 0);
     ;
@@ -1068,14 +1167,9 @@ TEST_CASE("Network Enqueue Path Build", "[network][build_path_if_needed]") {
           std::deque<PathType>{PathType::upload, PathType::upload});
 }
 
-TEST_CASE("Network requests", "[network][establish_connection]") {
-    auto test_service_node = service_node{
-            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"_hexbytes,
-            {2, 8, 0},
-            INVALID_SWARM_ID,
-            "144.76.164.202",
-            uint16_t{35400}};
+TEST_CASE("Network", "[network][establish_connection]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
+    auto test_service_node = network.create_test_node(500).second;
     std::promise<std::pair<connection_info, std::optional<std::string>>> prom;
 
     network.establish_connection(
@@ -1093,21 +1187,17 @@ TEST_CASE("Network requests", "[network][establish_connection]") {
     CHECK_FALSE(result.second.has_value());
 }
 
-TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
-    auto test_service_node = service_node{
-            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"_hexbytes,
-            {2, 8, 0},
-            INVALID_SWARM_ID,
-            "144.76.164.202",
-            uint16_t{35400}};
+TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     std::optional<TestNetwork> network;
+    std::optional<service_node> test_service_node;
     std::promise<Result> prom;
 
     // Test that it doesn't start checking for timeouts when the request doesn't have
     // a build paths timeout
     network.emplace(std::nullopt, true, true, false);
+    test_service_node.emplace(network->create_test_node(500).second);
     network->send_onion_request(
-            test_service_node,
+            *test_service_node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
@@ -1122,9 +1212,10 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     // Test that it does start checking for timeouts when the request has a
     // paths build timeout
     network.emplace(std::nullopt, true, true, false);
+    test_service_node.emplace(network->create_test_node(500).second);
     network->ignore_calls_to("build_path");
     network->send_onion_request(
-            test_service_node,
+            *test_service_node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
@@ -1139,9 +1230,10 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     // Test that it fails the request with a timeout if it has a build path timeout
     // and the path build takes too long
     network.emplace(std::nullopt, true, true, false);
+    test_service_node.emplace(network->create_test_node(500).second);
     network->ignore_calls_to("build_path");
     network->send_onion_request(
-            test_service_node,
+            *test_service_node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&prom](bool success,
@@ -1161,21 +1253,16 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     CHECK(result.timeout);
 }
 
-TEST_CASE("Network requests", "[network][send_request]") {
-    auto test_service_node = service_node{
-            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"_hexbytes,
-            {2, 8, 0},
-            INVALID_SWARM_ID,
-            "144.76.164.202",
-            uint16_t{35400}};
+TEST_CASE("Network", "[network][send_request]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
+    auto test_service_node = network.create_test_node(500).second;
     std::promise<Result> prom;
 
     network.establish_connection(
             "Test",
             test_service_node,
             3s,
-            [&prom, &network, test_service_node](
+            [&prom, &network, &test_service_node](
                     connection_info info, std::optional<std::string> error) {
                 if (!info.is_valid())
                     return prom.set_value({false, false, -1, {}, error.value_or("Unknown Error")});
@@ -1211,19 +1298,20 @@ TEST_CASE("Network requests", "[network][send_request]") {
     REQUIRE_NOTHROW([&] { [[maybe_unused]] auto _ = nlohmann::json::parse(*result.response); });
 
     auto response = nlohmann::json::parse(*result.response);
-    CHECK(response.contains("hf"));
+    REQUIRE(response.contains("hf"));
+    auto hf = response["hf"].get<std::vector<int>>();
+    CHECK(hf.size() == 3);
+    CHECK(hf[0] == 1);  // Called the info callback
     CHECK(response.contains("t"));
     CHECK(response.contains("version"));
 }
 
-TEST_CASE("Network onion request", "[network][send_onion_request]") {
-    auto test_service_node = service_node{
-            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"_hexbytes,
-            {2, 8, 0},
-            INVALID_SWARM_ID,
-            "144.76.164.202",
-            uint16_t{35400}};
-    auto network = Network(std::nullopt, true, true, false);
+TEST_CASE("Network", "[network][send_onion_request]") {
+    auto network = TestNetwork(std::nullopt, true, true, false);
+    auto test_service_node = network.create_test_node(500).second;
+    auto test_path = network.create_test_path();
+    network.handle_onion_requests_as_plaintext = true;
+    network.set_paths(PathType::standard, {test_path});
     std::promise<Result> result_promise;
 
     network.send_onion_request(
@@ -1252,21 +1340,40 @@ TEST_CASE("Network onion request", "[network][send_onion_request]") {
     REQUIRE_NOTHROW([&] { [[maybe_unused]] auto _ = nlohmann::json::parse(*result.response); });
 
     auto response = nlohmann::json::parse(*result.response);
-    CHECK(response.contains("hf"));
+    REQUIRE(response.contains("hf"));
+    auto hf = response["hf"].get<std::vector<int>>();
+    CHECK(hf.size() == 3);
+    CHECK(hf[0] == 2);  // Called the onion_req callback
     CHECK(response.contains("t"));
     CHECK(response.contains("version"));
 }
 
-TEST_CASE("Network direct request C API", "[network][network_send_request]") {
-    network_object* network;
-    REQUIRE(network_init(&network, nullptr, true, true, false, nullptr));
-    std::array<uint8_t, 4> target_ip = {144, 76, 164, 202};
+TEST_CASE("Network", "[network][c][network_send_onion_request]") {
+    auto test_network = std::make_unique<TestNetwork>(std::nullopt, true, true, false);
+    auto test_service_node_cpp = test_network->create_test_node(500).second;
+    auto test_path = test_network->create_test_path();
+    test_network->handle_onion_requests_as_plaintext = true;
+    test_network->set_paths(PathType::standard, {test_path});
+
+    // Convert TestNetwork to network_object to pass to C API
+    auto n_object = std::make_unique<network_object>();
+    n_object->internals = test_network.release();
+    network_object* network = n_object.release();
+
+    // Convert test_service_node_cpp to network_service_node to pass to C API
+    auto ip_v4 = test_service_node_cpp.to_ipv4();
+    std::array<uint8_t, 4> target_ip = {
+            static_cast<uint8_t>(ip_v4.addr >> 24),
+            static_cast<uint8_t>((ip_v4.addr >> 16) & 0xFF),
+            static_cast<uint8_t>((ip_v4.addr >> 8) & 0xFF),
+            static_cast<uint8_t>(ip_v4.addr & 0xFF)};
     auto test_service_node = network_service_node{};
-    test_service_node.quic_port = 35400;
+    test_service_node.quic_port = test_service_node_cpp.port();
     std::copy(target_ip.begin(), target_ip.end(), test_service_node.ip);
-    std::strcpy(
-            test_service_node.ed25519_pubkey_hex,
-            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9");
+    auto test_pubkey_hex = oxenc::to_hex(test_service_node_cpp.view_remote_key());
+    std::strcpy(test_service_node.ed25519_pubkey_hex, test_pubkey_hex.c_str());
+
+    // Make the request
     auto body = to_vector("{\"method\":\"info\",\"params\":{}}");
     auto result_promise = std::make_shared<std::promise<Result>>();
 
@@ -1317,13 +1424,16 @@ TEST_CASE("Network direct request C API", "[network][network_send_request]") {
     REQUIRE_NOTHROW([&] { [[maybe_unused]] auto _ = nlohmann::json::parse(*result.response); });
 
     auto response = nlohmann::json::parse(*result.response);
-    CHECK(response.contains("hf"));
+    REQUIRE(response.contains("hf"));
+    auto hf = response["hf"].get<std::vector<int>>();
+    CHECK(hf.size() == 3);
+    CHECK(hf[0] == 2);  // Called the onion_req callback
     CHECK(response.contains("t"));
     CHECK(response.contains("version"));
     network_free(network);
 }
 
-TEST_CASE("Network swarm", "[network][detail][pubkey_to_swarm_space]") {
+TEST_CASE("Network", "[network][detail][pubkey_to_swarm_space]") {
     x25519_pubkey pk;
 
     pk = x25519_pubkey::from_hex(
@@ -1361,7 +1471,7 @@ TEST_CASE("Network swarm", "[network][detail][pubkey_to_swarm_space]") {
     CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 0x0123456789abcdefULL);
 }
 
-TEST_CASE("Network swarm", "[network][get_swarm]") {
+TEST_CASE("Network", "[network][get_swarm]") {
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     std::vector<std::pair<swarm_id_t, std::vector<service_node>>> swarms = {
             {100, {}}, {200, {}}, {300, {}}, {399, {}}, {498, {}}, {596, {}}, {694, {}}};
