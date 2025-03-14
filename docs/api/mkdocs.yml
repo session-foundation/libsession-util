@@ -1,4 +1,83 @@
 # yaml-language-server: $schema=https://squidfunk.github.io/mkdocs-material/schema.json
 site_name: Libsession Utils API Functions
+repo_url: https://github.com/session-foundation/libsession-util
+nav:
+  - Getting Started: index.md
+  - Base: base.md
+  - Community: community.md
+  - Config: config.md
+  - Contacts: contacts.md
+  - Convo: convo_info_volatile.md
+  - Encrypt: encrypt.md
+  # TODO Currently doesn't have the new API comments 
+  # - Error: error.md
+  - Groups: groups.md
+  - Profile Pictures: profile_pic.md
+  - User Groups: user_groups.md
+  - User Profile: user_profile.md
+  # TODO Currently doesn't have the new API comments 
+  # - Utils: util.md
+extra:
+  social:
+    - icon: fontawesome/brands/github 
+      link: https://github.com/session-foundation/libsession-util
+extra_css:
+  - stylesheets/extra.css
+  - https://unpkg.com/katex@0/dist/katex.min.css
+extra_javascript:
+  - javascripts/katex.js
+  - https://unpkg.com/katex@0/dist/katex.min.js
+  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
+markdown_extensions:
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.critic
+  - pymdownx.caret
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tilde
+plugins:
+  - privacy
 theme:
   name: material
+  palette:
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom 
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+  # Content
+    - content.code.copy
+  # Navigation
+    - navigation.footer
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.path
+    - navigation.top
+    - navigation.tracking
+  # Table of Contents
+    - toc.follow
