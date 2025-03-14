@@ -362,7 +362,9 @@ class Keys : public ConfigSig {
     ///
     /// Returns the current generation number for the latest keys message.
     ///
-    /// Oututs:
+    /// Inputs: none.
+    ///
+    /// Outputs:
     /// - `int` -- latest keys generation number.
     int current_generation() const { return keys_.empty() ? 0 : keys_.back().generation; }
 

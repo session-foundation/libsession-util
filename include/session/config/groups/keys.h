@@ -328,7 +328,7 @@ LIBSESSION_EXPORT void groups_keys_dump(
 ///   not leak the message memory (but only if the function returns true).
 /// - `message_len` -- pointer to a `size_t` that will be set to the length of the `message` buffer.
 ///
-/// Oututs:
+/// Outputs:
 /// - `true` and sets `*message` and `*message_len` on success; returns `false` and does not set
 ///   them on failure.
 LIBSESSION_EXPORT bool groups_keys_key_supplement(
@@ -345,7 +345,7 @@ LIBSESSION_EXPORT bool groups_keys_key_supplement(
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 ///
-/// Oututs:
+/// Outputs:
 /// - `int` -- latest keys generation number
 LIBSESSION_EXPORT int groups_keys_current_generation(config_group_keys* conf);
 
