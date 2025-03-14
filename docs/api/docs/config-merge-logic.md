@@ -1,3 +1,5 @@
+## Config Merge Logic 
+
 When we have competing config message, we need completely consistent logic for merging them, that is
 both forwards and backwards compatible (that is: old clients with new data, and new clients with old
 data, need to produce an agreeable result).
@@ -16,7 +18,7 @@ The way this is implemented here is as follows:
 - whichever one wins, any client that observes a conflict (i.e. same seqno) needs to merge the two
   messages, increment the seqno, and push the new one to the swarm.
 
-# Structure of a config message
+## Structure of a config message
 
 A decrypted config message consists of outer data (which contains generic information about the
 config message), and the inner message data, which contains the actual application-specific
@@ -27,7 +29,7 @@ needs to decrypt it.  (How to obtain that key is use-case dependent and outside 
 document).  The specifics of encryption are covered in the [Message Encryption](#message-encryption)
 section, below.
 
-## Application-side config data
+### Application-side config data
 
 To start with the inner config data (which will be under the `"&"` key of the outermost data
 message; see description in the [outer metadata](#config-message-outer-metadata), this is a dict
@@ -52,7 +54,7 @@ allows arbitrary values inside lists, doesn't impose list ordering or uniqueness
 lists/dicts.  All of those are excluded from config data messages so as to make merging of messages
 feasible and deterministic.
 
-## Config message outer metadata
+### Config message outer metadata
 
 - The top-level structure of a config message is always a dict, with keys as follows (note that the
   restrictions described above for the application data do *not* apply to the outer config message
@@ -75,7 +77,7 @@ feasible and deterministic.
     where authentication of the message creator is required.  This field, when present, *must* be
     the last key (i.e. no top-level keys that sort after `~` are permitted).
 
-# Config diffs
+## Config diffs
 
 To enable clients to merge config messages (even of potential content from future clients it does
 not understand) any config changes are included in the "diff" section of the config (keys `"<"` and
@@ -99,7 +101,7 @@ not understand) any config changes are included in the "diff" section of the con
   the main application config data, but with placeholder values to indicate changes (rather than
   duplicating values).
 
-## Config diff updates
+### Config diff updates
 
 A config diff itself (i.e. the third element of a `"<"` tuple, or the `"="` value) is a dict that
 largely mirrors the inner config data structure (i.e.  under the `"&"` outer config key) but that
@@ -125,11 +127,11 @@ A diff update itself is a dict such that:
   empty if there were only additions or only removals.  Similarly to dict handling, removing *all*
   values implicitly removes the set itself, and adding to a non-existent set autovivifies the set.
 
-# Client update behaviour
+## Client update behaviour
 
 When there are multiple conflicting config messages clients resolve according to several rules.
 
-## Ignored updates
+### Ignored updates
 
 Clients ignore updates according to two criteria:
 
@@ -154,7 +156,7 @@ Clients ignore updates according to two criteria:
   - missing or invalid signature (in contexts where signatures are required)
   - etc.
 
-## Non-conflicting updates
+### Non-conflicting updates
 
 If a client is making a configuration change and there is only a single current valid config message
 (i.e. no conflicts to resolve) then the update procedure is straightforward:
@@ -169,7 +171,7 @@ If a client is making a configuration change and there is only a single current 
 4. A current diff is constructed for any values being assigned, and stored under the `"="` key of
    the config message.
 
-## Conflict resolution
+### Conflict resolution
 
 Conflict resolution logic kicks in if, after removing ignored messages from consideration, there are
 still multiple valid config messages: these messages must be merged and the merge update published.
@@ -205,7 +207,7 @@ Merging is performed as follows:
      constructed and written into the `"="` key.
    - Otherwise (i.e. only merge changes) the current diff key `"="` is set to an empty dict.
 
-# Examples
+## Examples
 
 The following depict several examples showing how update rules work.  Values are shown in
 not-quite-JSON (i.e. we add comments) for human readability, but in reality will be bt-encoded.
@@ -218,7 +220,7 @@ order of the hashes with the same XXX seqno value (lower letters = earlier-sorti
 All examples use a "within 5" rule for determining how the seqno cutoff for conflict resolution, and
 are not using signatures.
 
-## Ordinary update
+### Ordinary update
 
 Suppose an update begins from the following data (with seqno 122), and updates have all been linear
 and orderly (i.e. there have been no recent config conflicts):
@@ -286,7 +288,7 @@ like this:
 ```
 
 
-## Large, but still ordinary, update
+### Large, but still ordinary, update
 
 Suppose an update begins from the following data (with seqno 123), and updates have all been linear
 and orderly (i.e. there have been no recent config conflicts):
@@ -400,7 +402,7 @@ The overall record of this change looks as follows.
     }
 ```
 
-## Simple conflict resolution
+### Simple conflict resolution
 
 Suppose two clients now push update with `seqno=125` where one client sets `["int1"]` to `5` and
 another removes element `["dictB"]["foo"]`.
@@ -464,7 +466,7 @@ Since all clients will produce an identical message, even if multiple clients pu
 at once, it will simply be de-duplicated and stored only once.
 
 
-## Stale messages
+### Stale messages
 
 If a message arrives with a seqno that is not within the most recent five seqno values of the
 largest-seqno message then it is simply dropped.  For instance supposed we have seqno 126 (from the
@@ -473,7 +475,7 @@ out of date and has a delayed update still to go out).  This message neither com
 current seqno (126) nor any of the historic ones (122 through 125), and so it is discarded.
 
 
-## Complex conflict resolution
+### Complex conflict resolution
 
 Suppose that while the resolution from the previous example is happening there is another client
 that is somewhat out of date and submitting a configuration update with `seqno=124` (we'll label
@@ -621,7 +623,7 @@ This final 127 update thus becomes:
     }
 ```
 
-# Message Encryption
+## Message Encryption
 
 All messages are stored in encrypted form; we select XChaCha20-Poly1305 encryption for its excellent
 properties.
