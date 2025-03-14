@@ -50,6 +50,7 @@ markdown_extensions:
   - pymdownx.tilde
 plugins:
   - privacy
+  - search
 theme:
   name: material
   palette:
@@ -71,14 +72,18 @@ theme:
         icon: material/brightness-4
         name: Switch to light mode
   features:
-  # Content
+    # Content
     - content.code.copy
-  # Navigation
+    # Navigation
     - navigation.footer
     - navigation.instant
     - navigation.instant.progress
     - navigation.path
     - navigation.top
     - navigation.tracking
-  # Table of Contents
+    # Search
+    - search.highlight
+    - search.share
+    - search.suggest
+    # Table of Contents
     - toc.follow
