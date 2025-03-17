@@ -1,7 +1,7 @@
 #pragma once
 
-#include <limits>
 #include <filesystem>
+#include <limits>
 #include <oxen/quic.hpp>
 
 #include "onionreq/builder.hpp"
@@ -76,11 +76,14 @@ struct service_node : public oxen::quic::RemoteAddress {
         return *this;
     }
 
-    bool operator==(const service_node& other) const {
-        return static_cast<const oxen::quic::RemoteAddress&>(*this) ==
-                       static_cast<const oxen::quic::RemoteAddress&>(other) &&
-               storage_server_version == other.storage_server_version && swarm_id == other.swarm_id;
+    auto operator<=>(const service_node& other) const {
+        auto cmp = oxen::quic::RemoteAddress::operator<=>(other);
+        if (cmp == 0)
+            cmp = std::tie(storage_server_version, swarm_id) <=>
+                  std::tie(other.storage_server_version, other.swarm_id);
+        return cmp;
     }
+    bool operator==(const service_node& other) const { return (*this <=> other) == 0; }
 };
 
 struct connection_info {
