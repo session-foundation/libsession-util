@@ -331,21 +331,22 @@ local static_build(name,
     type: 'docker',
     steps: [{
       name: 'build',
-      image: 'node:19-bullseye',
+      image: docker_base + 'debian-stable',
       pull: 'always',
       environment: { SSH_KEY: { from_secret: 'SSH_KEY' } },
       commands: [
         'echo "Building on ${DRONE_STAGE_MACHINE}"',
         apt_get_quiet + ' update',
-        apt_get_quiet + ' install -y python3-requests rsync',
-        'npm i docsify-cli docsify-themeable docsify-katex@1.4.4 katex marked@4',
+        apt_get_quiet + ' install -y rsync',
+        'python3 -m pip install --upgrade pip',
+        'pip install -r requirements.txt',
         'cd docs/api/',
-        'export NODE_PATH=node_modules',
-        'make',
+        'make build-all',
         '../../utils/ci/drone-docs-upload.sh',
       ],
     }],
-    trigger: { branch: ['dev'], event: ['push'] },
+    // FIXME DO NOT MERGE
+    // trigger: { branch: ['dev'], event: ['push'] },
   },
 
   // Various debian builds
