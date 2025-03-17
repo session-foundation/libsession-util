@@ -3,3 +3,4 @@
 /.cache/
 /.vscode/
 .DS_STORE
+/.venv/
