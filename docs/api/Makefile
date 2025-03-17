@@ -28,7 +28,7 @@ serve-cpp:
 # NOTE: Any changes to dist/ will be hot-reloaded but are not tracked by git.
 
 .PHONY: dev-c
-dev-c: build-c
+dev-c: build-h
 	cd dist/libsession-util-c && mkdocs serve && cd -
 
 .PHONY: dev-cpp
