@@ -337,7 +337,7 @@ local static_build(name,
       commands: [
         'echo "Building on ${DRONE_STAGE_MACHINE}"',
         apt_get_quiet + ' update',
-        apt_get_quiet + ' install -y rsync',
+        apt_get_quiet + ' install -y rsync python3-venv',
         'python3 -m venv .venv',
         'source .venv/bin/activate',
         'pip install -r requirements.txt',
