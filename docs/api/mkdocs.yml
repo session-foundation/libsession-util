@@ -1,23 +1,6 @@
 # yaml-language-server: $schema=https://squidfunk.github.io/mkdocs-material/schema.json
 site_name: Libsession Utils API Functions
 repo_url: https://github.com/session-foundation/libsession-util
-nav:
-  - Getting Started: index.md
-  - Base: base.md
-  - Community: community.md
-  - Config: config.md
-  - Config Merge Logic: config-merge-logic.md
-  - Contacts: contacts.md
-  - Convo: convo_info_volatile.md
-  - Encrypt: encrypt.md
-  # TODO Currently doesn't have the new API comments 
-  # - Error: error.md
-  - Groups: groups.md
-  - Profile Pictures: profile_pic.md
-  - User Groups: user_groups.md
-  - User Profile: user_profile.md
-  # TODO Currently doesn't have the new API comments 
-  # - Utils: util.md
 extra:
   social:
     - icon: fontawesome/brands/github 

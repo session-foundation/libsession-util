@@ -1,3 +1,5 @@
+# Config Merge Logic 
+
 When we have competing config message, we need completely consistent logic for merging them, that is
 both forwards and backwards compatible (that is: old clients with new data, and new clients with old
 data, need to produce an agreeable result).

@@ -401,7 +401,7 @@ for cat, eps in endpoints.items():
             f.write("\n\n")
         else:
             print(f"Warning: {preamble} doesn't exist, writing generic preamble for {cat}", file=sys.stderr)
-            f.write(f"# {cat} endpoints\n\n")
+            f.write(f"# {cat.replace('_', ' ').title()}\n\n")
 
         for _, md in eps:
             f.write(md)
