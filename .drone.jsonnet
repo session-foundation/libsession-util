@@ -346,8 +346,7 @@ local static_build(name,
         '../../utils/ci/drone-docs-upload.sh',
       ],
     }],
-    // FIXME DO NOT MERGE
-    // trigger: { branch: ['dev'], event: ['push'] },
+    trigger: { branch: ['dev'], event: ['push'] },
   },
 
   // Various debian builds
