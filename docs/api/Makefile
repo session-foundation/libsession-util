@@ -14,8 +14,7 @@ build-h:
 	./make-docs.sh dist/libsession-util-c $(H_FILES)
 
 .PHONY: build-all
-all:
-	build-h build-hpp
+build-all: build-h build-hpp
 
 .PHONY: serve-c
 serve-c:
