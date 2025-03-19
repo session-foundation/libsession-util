@@ -83,6 +83,9 @@ option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 # Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
 option(ENABLE_ONIONREQ "Build with onion request functionality" ON)
 
+# Provide this as an option for now so clients that don't use any database logic can exclude it.
+option(ENABLE_DATABASE "Build with database functionality" ON)
+
 if(USE_LTO)
   include(CheckIPOSupported)
   check_ipo_supported(RESULT IPO_ENABLED OUTPUT ipo_error)

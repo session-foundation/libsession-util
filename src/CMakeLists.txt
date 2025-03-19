@@ -118,6 +118,19 @@ if(ENABLE_ONIONREQ)
     )
 endif()
 
+if(ENABLE_DATABASE)
+    add_libsession_util_library(database
+        database/connection.cpp
+    )
+
+    target_link_libraries(database
+        PUBLIC
+        util
+        PRIVATE
+        sqlcipher::sqlcipher
+    )
+endif()
+
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
     # GCC 11 has an overzealous (and false) stringop-overread warning, but only when LTO is off.
     # Um, yeah.
