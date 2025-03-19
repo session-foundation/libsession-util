@@ -5,6 +5,14 @@
 
 set(LOCAL_MIRROR "" CACHE STRING "local mirror path/URL for lib downloads")
 
+set(SQLCIPHER_VERSION v4.6.1 CACHE STRING "sqlcipher version")
+set(SQLCIPHER_MIRROR ${LOCAL_MIRROR} https://github.com/sqlcipher/sqlcipher/archive/refs/tags/${SQLCIPHER_VERSION}
+    CACHE STRING "sqlcipher mirror(s)")
+set(SQLCIPHER_SOURCE ${SQLCIPHER_VERSION}.tar.gz)
+set(SQLCIPHER_HASH SHA512=023b2fc7248fe38b758ef93dd8436677ff0f5d08b1061e7eab0adb9e38ad92d523e0ab69016ee69bd35c1fd53c10f61e99b01f7a2987a1f1d492e1f7216a0a9c
+    CACHE STRING "sqlcipher source hash")
+
+
 include(ExternalProject)
 
 set(DEPS_DESTDIR ${CMAKE_BINARY_DIR}/static-deps)
@@ -221,4 +229,37 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
 endif()
 if(MINGW)
     link_libraries(-Wl,-Bstatic -lpthread)
+endif()
+
+# SQLCipher configuration
+if(ENABLE_DATABASE)
+    set(sqlcipher_extra_configure)
+    set(sqlcipher_extra_cflags)
+    set(sqlcipher_extra_ldflags)
+    
+    if(APPLE)
+        # On macOS, use CommonCrypto (installed by default).
+        set(sqlcipher_extra_configure "--with-crypto-lib=commoncrypto")
+        set(sqlcipher_extra_cflags " -DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5 -DSQLCIPHER_CRYPTO_COMMONCRYPTO")
+        set(sqlcipher_extra_ldflags " -framework Security -framework Foundation -framework CoreFoundation")
+    else()
+        # On Linux, Windows, etc., use OpenSSL.
+        find_package(OpenSSL REQUIRED)
+        set(sqlcipher_extra_cflags " -DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5 -DSQLCIPHER_CRYPTO_OPENSSL")
+    endif()
+
+    build_external(sqlcipher
+        CONFIGURE_COMMAND ./configure ${build_host} --disable-shared --prefix=${DEPS_DESTDIR} --with-pic --enable-fts5 --enable-static ${sqlcipher_extra_configure}
+            "CC=${deps_cc}" "CXX=${deps_cxx}" "CFLAGS=${deps_CFLAGS}${apple_cflags_arch}${sqlcipher_extra_cflags}" "CXXFLAGS=${deps_CXXFLAGS}${apple_cxxflags_arch}"
+            "LDFLAGS=-L${DEPS_DESTDIR}/lib${apple_ldflags_arch}${sqlcipher_extra_ldflags}" ${cross_rc} CC_FOR_BUILD=cc CPP_FOR_BUILD=cpp
+            "--disable-tcl" "--disable-readline"
+    )
+    add_static_target(sqlcipher::sqlcipher sqlcipher_external libsqlcipher.a)
+
+    if(APPLE)
+        add_library(sqlcipher_frameworks INTERFACE)
+        target_link_libraries(sqlcipher_frameworks INTERFACE "-framework CoreFoundation" "-framework Security" "-framework Foundation")
+        add_dependencies(sqlcipher::sqlcipher sqlcipher_frameworks)
+        target_link_libraries(sqlcipher::sqlcipher INTERFACE sqlcipher_frameworks)
+    endif()
 endif()

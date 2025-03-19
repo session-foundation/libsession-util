@@ -42,6 +42,10 @@ if (ENABLE_ONIONREQ)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
 endif()
 
+if (ENABLE_DATABASE)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_database.cpp)
+endif()
+
 add_library(test_libs INTERFACE)
 
 target_link_libraries(test_libs INTERFACE
@@ -54,6 +58,10 @@ if (ENABLE_ONIONREQ)
     target_link_libraries(test_libs INTERFACE libsession::onionreq)
 else()
     target_compile_definitions(test_libs INTERFACE DISABLE_ONIONREQ)
+endif()
+
+if (ENABLE_DATABASE)
+    target_link_libraries(test_libs INTERFACE libsession::database)
 endif()
 
 add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
