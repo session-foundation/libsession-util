@@ -56,7 +56,7 @@ inline std::vector<unsigned char> operator""_hexbytes(const char* x, size_t n) {
     return bytes;
 }
 
-inline std::string to_hex(std::vector<const unsigned char> bytes) {
+inline std::string to_hex(std::vector<unsigned char> bytes) {
     std::string hex;
     oxenc::to_hex(bytes.begin(), bytes.end(), std::back_inserter(hex));
     return hex;

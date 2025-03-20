@@ -163,7 +163,7 @@ void encrypt_for_multiple(std::string_view message, Args&&... args) {
     return encrypt_for_multiple(to_span(message), std::forward<Args>(args)...);
 }
 template <typename... Args>
-void encrypt_for_multiple(std::basic_string_view<std::byte> message, Args&&... args) {
+void encrypt_for_multiple(std::span<const std::byte> message, Args&&... args) {
     return encrypt_for_multiple(to_span(message), std::forward<Args>(args)...);
 }
 
