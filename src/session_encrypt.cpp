@@ -20,6 +20,7 @@
 #include <cstring>
 #include <sstream>
 #include <stdexcept>
+#include <vector>
 
 #include "session/blinding.hpp"
 #include "session/sodium_array.hpp"

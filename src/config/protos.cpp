@@ -5,6 +5,7 @@
 
 #include <array>
 #include <stdexcept>
+#include <vector>
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
