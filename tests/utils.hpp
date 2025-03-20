@@ -126,16 +126,6 @@ std::set<std::common_type_t<T...>> make_set(T&&... args) {
     return {std::forward<T>(args)...};
 }
 
-template <typename C>
-std::vector<std::basic_string_view<C>> view_vec(std::vector<std::basic_string<C>>&& v) = delete;
-template <typename C>
-std::vector<std::basic_string_view<C>> view_vec(const std::vector<std::basic_string<C>>& v) {
-    std::vector<std::basic_string_view<C>> vv;
-    vv.reserve(v.size());
-    std::copy(v.begin(), v.end(), std::back_inserter(vv));
-    return vv;
-}
-
 template <std::invocable Call, std::invocable<typename std::invoke_result_t<Call>> Validator>
 auto eventually_impl(std::chrono::milliseconds timeout, Call&& f, Validator&& isValid)
         -> std::invoke_result_t<Call> {

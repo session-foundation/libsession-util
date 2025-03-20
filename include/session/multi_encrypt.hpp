@@ -198,9 +198,9 @@ template <
                 std::is_invocable_r_v<std::optional<std::string_view>, NextCiphertext> ||
                 std::is_invocable_r_v<std::optional<std::string>, NextCiphertext> ||
                 std::is_invocable_r_v<
-                        std::optional<std::basic_string_view<std::byte>>,
+                        std::optional<std::span<const std::byte>>,
                         NextCiphertext> ||
-                std::is_invocable_r_v<std::optional<std::basic_string<std::byte>>, NextCiphertext>>>
+                std::is_invocable_r_v<std::optional<std::span<const std::byte>>, NextCiphertext>>>
 std::optional<std::vector<unsigned char>> decrypt_for_multiple(
         NextCiphertext next_ciphertext,
         std::span<const unsigned char> nonce,
@@ -336,7 +336,7 @@ std::vector<unsigned char> encrypt_for_multiple_simple(std::string_view message,
 }
 template <typename... Args>
 std::vector<unsigned char> encrypt_for_multiple_simple(
-        std::basic_string_view<std::byte> message, Args&&... args) {
+        std::span<const std::byte> message, Args&&... args) {
     return encrypt_for_multiple_simple(to_span(message), std::forward<Args>(args)...);
 }
 
