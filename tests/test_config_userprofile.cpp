@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <session/config/user_profile.hpp>
+#include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
@@ -32,7 +33,7 @@ TEST_CASE("UserProfile", "[config][user_profile]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserProfile profile{ustring_view{seed}, std::nullopt};
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK_THROWS(
             profile.set_name("123456789012345678901234567890123456789012345678901234567890123456789"
@@ -139,9 +140,10 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     pic = user_profile_get_pic(conf);
     REQUIRE(pic.url != ""s);
-    REQUIRE(pic.key != to_usv(""s));
+    REQUIRE(pic.key != session::to_vector("").data());
     CHECK(pic.url == "http://example.org/omg-pic-123.bmp"sv);
-    CHECK(ustring_view{pic.key, 32} == "secret78901234567890123456789012"_bytes);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "secret78901234567890123456789012"_bytes);
 
     CHECK(user_profile_get_nts_priority(conf) == 9);
 
@@ -159,7 +161,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // The data to be actually pushed, expanded like this to make it somewhat human-readable:
     // clang-format off
-    auto exp_push1_decrypted =
+    auto exp_push1_decrypted = session::to_vector(
         "d"
           "1:#" "i1e"
           "1:&" "d"
@@ -169,7 +171,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "1:q" "32:secret78901234567890123456789012"
           "e"
           "1:<" "l"
-            "l" "i0e" "32:"_bytes + exp_hash0 + "de" "e"
+            "l" "i0e" "32:" + session::to_string(exp_hash0) + "de" "e"
           "e"
           "1:=" "d"
             "1:+" "0:"
@@ -177,7 +179,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "1:p" "0:"
             "1:q" "0:"
           "e"
-        "e"_bytes;
+        "e");
     // clang-format on
     auto exp_push1_encrypted =
             "9693a69686da3055f1ecdfb239c3bf8e746951a36d888c2fb7c02e856a5c2091b24e39a7e1af828f"
@@ -211,7 +213,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(printable(dump1, dump1len) == printable(
         "d"
           "1:!" "i2e"
-          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
+          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + session::to_string(exp_push1_decrypted) + ""
           "1:(" "0:"
           "1:)" "le" + empty_extra_data +
         "e"));
@@ -230,7 +232,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(printable(dump1, dump1len) == printable(
         "d"
           "1:!" "i0e"
-          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
+          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + session::to_string(exp_push1_decrypted) + ""
           "1:(" "9:fakehash1"
           "1:)" "le" + empty_extra_data +
         "e"));
@@ -368,7 +370,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 #else
     REQUIRE(pic.key != nullptr);
 #endif
-    CHECK(to_hex(ustring_view{pic.key, 32}) ==
+    CHECK(to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
     pic = user_profile_get_pic(conf2);
 #if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
@@ -382,7 +384,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 #else
     REQUIRE(pic.key != nullptr);
 #endif
-    CHECK(to_hex(ustring_view{pic.key, 32}) ==
+    CHECK(to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
 
     CHECK(user_profile_get_nts_priority(conf) == 9);

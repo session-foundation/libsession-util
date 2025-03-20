@@ -41,7 +41,7 @@ namespace {
             const x25519_seckey& seckey, const x25519_pubkey& pubkey) {
         auto key = calculate_shared_secret(seckey, pubkey);
 
-        auto usalt = to_unsigned_sv(salt);
+        auto usalt = to_span(salt);
 
         crypto_auth_hmacsha256_state state;
 
@@ -142,10 +142,11 @@ std::vector<unsigned char> HopEncryption::encrypt_aesgcm(
 
 std::vector<unsigned char> HopEncryption::decrypt_aesgcm(
         std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
-    std::span<const unsigned char> ciphertext = vec_to_span<unsigned char>(ciphertext_);
+    std::span<const unsigned char> ciphertext = to_span(ciphertext_);
 
     if (!response_long_enough(EncryptType::aes_gcm, ciphertext_.size()))
-        throw std::invalid_argument{"Ciphertext data is too short: " + vec_to_str(ciphertext_)};
+        throw std::invalid_argument{
+                "Ciphertext data is too short: " + session::to_string(ciphertext_)};
 
     auto key = derive_symmetric_key(private_key_, pubKey);
 
@@ -208,7 +209,7 @@ std::vector<unsigned char> HopEncryption::encrypt_xchacha20(
 
 std::vector<unsigned char> HopEncryption::decrypt_xchacha20(
         std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
-    std::span<const unsigned char> ciphertext = vec_to_span<unsigned char>(ciphertext_);
+    std::span<const unsigned char> ciphertext = to_span(ciphertext_);
 
     // Extract nonce from the beginning of the ciphertext:
     auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
@@ -216,7 +217,8 @@ std::vector<unsigned char> HopEncryption::decrypt_xchacha20(
 
     if (!response_long_enough(EncryptType::xchacha20, ciphertext_.size()))
         throw std::invalid_argument{
-                "Ciphertext data is too short: " + std::string(from_unsigned(ciphertext_.data()))};
+                "Ciphertext data is too short: " +
+                std::string(reinterpret_cast<const char*>(ciphertext_.data()))};
 
     const auto key = xchacha20_shared_key(public_key_, private_key_, pubKey, !server_);
 

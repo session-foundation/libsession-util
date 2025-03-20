@@ -346,7 +346,7 @@ namespace {
         return std::string_view{reinterpret_cast<const char*>(hash.data()), hash.size()};
     }
 
-    hash_t& hash_msg(hash_t& into, ustring_view serialized) {
+    hash_t& hash_msg(hash_t& into, std::span<const unsigned char> serialized) {
         crypto_generichash_blake2b(
                 into.data(), into.size(), serialized.data(), serialized.size(), nullptr, 0);
         return into;
@@ -433,17 +433,18 @@ void verify_config_sig(
         std::optional<std::array<unsigned char, 64>>* verified_signature,
         bool trust_signature) {
     if (dict.skip_until("~")) {
-        dict.consume_signature([&](ustring_view to_verify, ustring_view sig) {
-            if (sig.size() != 64)
-                throw signature_error{"Config signature is invalid (not 64B)"};
-            if (verifier && !verifier(to_verify, sig))
-                throw signature_error{"Config signature failed verification"};
-            if (verified_signature && (verifier || trust_signature)) {
-                if (!*verified_signature)
-                    verified_signature->emplace();
-                std::memcpy((*verified_signature)->data(), sig.data(), 64);
-            }
-        });
+        dict.consume_signature(
+                [&](std::span<const unsigned char> to_verify, std::span<const unsigned char> sig) {
+                    if (sig.size() != 64)
+                        throw signature_error{"Config signature is invalid (not 64B)"};
+                    if (verifier && !verifier(to_verify, sig))
+                        throw signature_error{"Config signature failed verification"};
+                    if (verified_signature && (verifier || trust_signature)) {
+                        if (!*verified_signature)
+                            verified_signature->emplace();
+                        std::memcpy((*verified_signature)->data(), sig.data(), 64);
+                    }
+                });
     } else if (verifier) {
         throw missing_signature{"Config signature is missing"};
     }
@@ -523,14 +524,14 @@ ConfigMessage::ConfigMessage() {
 }
 
 ConfigMessage::ConfigMessage(
-        ustring_view serialized,
+        std::span<const unsigned char> serialized,
         verify_callable verifier_,
         sign_callable signer_,
         int lag,
         bool trust_signature) :
         verifier{std::move(verifier_)}, signer{std::move(signer_)}, lag{lag} {
 
-    oxenc::bt_dict_consumer dict{from_unsigned_sv(serialized)};
+    oxenc::bt_dict_consumer dict{serialized};
 
     try {
         hash_msg(seqno_hash_.second, serialized);
@@ -561,7 +562,7 @@ ConfigMessage::ConfigMessage(
 }
 
 ConfigMessage::ConfigMessage(
-        const std::vector<ustring_view>& serialized_confs,
+        const std::vector<std::span<const unsigned char>>& serialized_confs,
         verify_callable verifier_,
         sign_callable signer_,
         int lag,
@@ -690,7 +691,7 @@ ConfigMessage::ConfigMessage(
 }
 
 MutableConfigMessage::MutableConfigMessage(
-        const std::vector<ustring_view>& serialized_confs,
+        const std::vector<std::span<const unsigned char>>& serialized_confs,
         verify_callable verifier,
         sign_callable signer,
         int lag,
@@ -706,7 +707,10 @@ MutableConfigMessage::MutableConfigMessage(
 }
 
 MutableConfigMessage::MutableConfigMessage(
-        ustring_view config, verify_callable verifier, sign_callable signer, int lag) :
+        std::span<const unsigned char> config,
+        verify_callable verifier,
+        sign_callable signer,
+        int lag) :
         MutableConfigMessage{
                 std::vector{{config}},
                 std::move(verifier),
@@ -725,13 +729,14 @@ const oxenc::bt_dict& MutableConfigMessage::diff() {
     return diff_;
 }
 
-ustring ConfigMessage::serialize(bool enable_signing) {
+std::vector<unsigned char> ConfigMessage::serialize(bool enable_signing) {
     return serialize_impl(
             diff(),  // implicitly prunes (if actually a mutable instance)
             enable_signing);
 }
 
-ustring ConfigMessage::serialize_impl(const oxenc::bt_dict& curr_diff, bool enable_signing) {
+std::vector<unsigned char> ConfigMessage::serialize_impl(
+        const oxenc::bt_dict& curr_diff, bool enable_signing) {
     oxenc::bt_dict_producer outer{};
 
     outer.append("#", seqno());
@@ -771,7 +776,7 @@ ustring ConfigMessage::serialize_impl(const oxenc::bt_dict& curr_diff, bool enab
                         reinterpret_cast<const char*>(verified_signature_->data()),
                         verified_signature_->size()});
     } else if (signer && enable_signing) {
-        outer.append_signature("~", [this](ustring_view to_sign) {
+        outer.append_signature("~", [this](std::span<const unsigned char> to_sign) {
             auto sig = signer(to_sign);
             if (sig.size() != 64)
                 throw std::logic_error{
@@ -779,13 +784,13 @@ ustring ConfigMessage::serialize_impl(const oxenc::bt_dict& curr_diff, bool enab
             return sig;
         });
     }
-    return ustring{to_unsigned_sv(outer.view())};
+    return to_vector(outer.view());
 }
 
 const hash_t& MutableConfigMessage::hash() {
     return hash(serialize());
 }
-const hash_t& MutableConfigMessage::hash(ustring_view serialized) {
+const hash_t& MutableConfigMessage::hash(std::span<const unsigned char> serialized) {
     return hash_msg(seqno_hash_.second, serialized);
 }
 

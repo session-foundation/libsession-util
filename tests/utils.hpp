@@ -15,9 +15,7 @@
 
 #include "session/config/base.h"
 #include "session/types.hpp"
-
-using ustring = std::basic_string<unsigned char>;
-using ustring_view = std::basic_string_view<unsigned char>;
+#include "session/util.hpp"
 
 namespace session {
 
@@ -48,21 +46,22 @@ struct log_level_lowerer : log_level_override {
 };
 }  // namespace session
 
-inline ustring operator""_bytes(const char* x, size_t n) {
-    return {reinterpret_cast<const unsigned char*>(x), n};
+inline std::vector<unsigned char> operator""_bytes(const char* x, size_t n) {
+    auto begin = reinterpret_cast<const unsigned char*>(x);
+    return {begin, begin + n};
 }
-inline ustring operator""_hexbytes(const char* x, size_t n) {
-    ustring bytes;
+inline std::vector<unsigned char> operator""_hexbytes(const char* x, size_t n) {
+    std::vector<unsigned char> bytes;
     oxenc::from_hex(x, x + n, std::back_inserter(bytes));
     return bytes;
 }
-inline std::vector<unsigned char> operator""_hexbytesv(const char* x, size_t n) {
-    auto bytes = oxenc::from_hex(x, x + n);
-    auto begin = reinterpret_cast<const char*>(bytes.data());
-    return {begin, begin + bytes.size()};
-}
 
-inline std::string to_hex(ustring_view bytes) {
+inline std::string to_hex(std::vector<const unsigned char> bytes) {
+    std::string hex;
+    oxenc::to_hex(bytes.begin(), bytes.end(), std::back_inserter(hex));
+    return hex;
+}
+inline std::string to_hex(std::span<const unsigned char> bytes) {
     std::string hex;
     oxenc::to_hex(bytes.begin(), bytes.end(), std::back_inserter(hex));
     return hex;
@@ -75,10 +74,6 @@ inline constexpr auto operator""_kiB(unsigned long long kiB) {
 template <oxenc::const_span_type T>
 inline std::string_view sp_to_sv(const T& sp) {
     return {reinterpret_cast<const char*>(sp.data()), sp.size()};
-}
-
-inline std::string_view vec_to_sv(const std::vector<unsigned char>& vec) {
-    return {reinterpret_cast<const char*>(vec.data()), vec.size()};
 }
 
 // Returns the current timestamp in milliseconds
@@ -103,18 +98,7 @@ inline int64_t get_timestamp_us() {
             .count();
 }
 
-inline std::string_view to_sv(ustring_view x) {
-    return {reinterpret_cast<const char*>(x.data()), x.size()};
-}
-inline ustring_view to_usv(std::string_view x) {
-    return {reinterpret_cast<const unsigned char*>(x.data()), x.size()};
-}
-template <size_t N>
-ustring_view to_usv(const std::array<unsigned char, N>& data) {
-    return {data.data(), N};
-}
-
-inline std::string printable(ustring_view x) {
+inline std::string printable(std::span<const unsigned char> x) {
     std::string p;
     for (auto c : x) {
         if (c >= 0x20 && c <= 0x7e)
@@ -125,7 +109,7 @@ inline std::string printable(ustring_view x) {
     return p;
 }
 inline std::string printable(std::string_view x) {
-    return printable(to_usv(x));
+    return printable(session::to_span(x));
 }
 std::string printable(const unsigned char* x) = delete;
 inline std::string printable(const unsigned char* x, size_t n) {

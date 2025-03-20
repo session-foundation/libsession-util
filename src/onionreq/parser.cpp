@@ -8,7 +8,11 @@
 
 namespace session::onionreq {
 
-OnionReqParser::OnionReqParser(std::span<const unsigned char> x25519_pk, std::span<const unsigned char> x25519_sk, std::span<const unsigned char> req, size_t max_size) :
+OnionReqParser::OnionReqParser(
+        std::span<const unsigned char> x25519_pk,
+        std::span<const unsigned char> x25519_sk,
+        std::span<const unsigned char> req,
+        size_t max_size) :
         keys{x25519_pubkey::from_bytes(x25519_pk), x25519_seckey::from_bytes(x25519_sk)},
         enc{keys.second, keys.first} {
     if (sodium_init() == -1)
@@ -35,11 +39,12 @@ OnionReqParser::OnionReqParser(std::span<const unsigned char> x25519_pk, std::sp
     else
         throw std::invalid_argument{"metadata does not have 'ephemeral_key' entry"};
 
-    payload_ = enc.decrypt(enc_type, span_to_vec<unsigned char>(ciphertext), remote_pk);
+    payload_ = enc.decrypt(enc_type, to_vector(ciphertext), remote_pk);
 }
 
-std::vector<unsigned char> OnionReqParser::encrypt_reply(std::span<const unsigned char> reply) const {
-    return enc.encrypt(enc_type, span_to_vec<unsigned char>(reply), remote_pk);
+std::vector<unsigned char> OnionReqParser::encrypt_reply(
+        std::span<const unsigned char> reply) const {
+    return enc.encrypt(enc_type, to_vector(reply), remote_pk);
 }
 
 }  // namespace session::onionreq

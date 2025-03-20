@@ -23,7 +23,8 @@ community::community(std::string_view base_url_, std::string_view room_) {
     set_room(std::move(room_));
 }
 
-community::community(std::string_view base_url, std::string_view room, ustring_view pubkey_) :
+community::community(
+        std::string_view base_url, std::string_view room, std::span<const unsigned char> pubkey_) :
         community{base_url, room} {
     set_pubkey(pubkey_);
 }
@@ -45,10 +46,10 @@ void community::set_base_url(std::string_view new_url) {
     base_url_ = canonical_url(new_url);
 }
 
-void community::set_pubkey(ustring_view pubkey) {
+void community::set_pubkey(std::span<const unsigned char> pubkey) {
     if (pubkey.size() != 32)
         throw std::invalid_argument{"Invalid pubkey: expected a 32-byte pubkey"};
-    pubkey_ = pubkey;
+    pubkey_.assign(pubkey.begin(), pubkey.end());
 }
 void community::set_pubkey(std::string_view pubkey) {
     pubkey_ = decode_pubkey(pubkey);
@@ -79,7 +80,7 @@ std::string community::full_url() const {
 }
 
 std::string community::full_url(
-        std::string_view base_url, std::string_view room, ustring_view pubkey) {
+        std::string_view base_url, std::string_view room, std::span<const unsigned char> pubkey) {
     std::string url{base_url};
     url += '/';
     url += room;
@@ -129,9 +130,9 @@ std::string community::canonical_room(std::string_view room) {
     return r;
 }
 
-std::tuple<std::string, std::string, std::optional<ustring>> community::parse_partial_url(
-        std::string_view url) {
-    std::tuple<std::string, std::string, std::optional<ustring>> result;
+std::tuple<std::string, std::string, std::optional<std::vector<unsigned char>>>
+community::parse_partial_url(std::string_view url) {
+    std::tuple<std::string, std::string, std::optional<std::vector<unsigned char>>> result;
     auto& [base_url, room_token, maybe_pubkey] = result;
 
     // Consume the URL from back to front; first the public key:
@@ -155,7 +156,8 @@ std::tuple<std::string, std::string, std::optional<ustring>> community::parse_pa
     return result;
 }
 
-std::tuple<std::string, std::string, ustring> community::parse_full_url(std::string_view full_url) {
+std::tuple<std::string, std::string, std::vector<unsigned char>> community::parse_full_url(
+        std::string_view full_url) {
     auto [base, rm, maybe_pk] = parse_partial_url(full_url);
     if (!maybe_pk)
         throw std::invalid_argument{"Invalid community URL: no valid server pubkey"};
@@ -213,8 +215,8 @@ LIBSESSION_C_API bool community_parse_partial_url(
 
 LIBSESSION_C_API void community_make_full_url(
         const char* base_url, const char* room, const unsigned char* pubkey, char* full_url) {
-    auto full =
-            session::config::community::full_url(base_url, room, session::ustring_view{pubkey, 32});
+    auto full = session::config::community::full_url(
+            base_url, room, std::span<const unsigned char>{pubkey, 32});
     assert(full.size() <= COMMUNITY_FULL_URL_MAX_LENGTH);
     std::memcpy(full_url, full.data(), full.size() + 1);
 }

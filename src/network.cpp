@@ -1,8 +1,8 @@
 #include "session/network.hpp"
 
-#include <oxenc/hex.h>
 #include <oxenc/base64.h>
 #include <oxenc/bt_producer.h>
+#include <oxenc/hex.h>
 #include <sodium/core.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
@@ -12,9 +12,9 @@
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <oxen/quic.hpp>
+#include <oxen/quic/gnutls_crypto.hpp>
 #include <oxen/quic/opt.hpp>
 #include <oxen/quic/utils.hpp>
-#include <oxen/quic/gnutls_crypto.hpp>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -256,7 +256,7 @@ namespace {
                 node.swarm_id);
     }
 
-    session::onionreq::x25519_pubkey compute_xpk(ustring_view ed25519_pk) {
+    session::onionreq::x25519_pubkey compute_xpk(std::span<const unsigned char> ed25519_pk) {
         std::array<unsigned char, 32> xpk;
         if (0 != crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed25519_pk.data()))
             throw std::runtime_error{
@@ -855,7 +855,7 @@ void Network::establish_connection(
                 {target, std::make_shared<size_t>(0), nullptr, nullptr}, "Network is suspended.");
 
     auto conn_key_pair = ed25519::ed25519_key_pair();
-    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(from_unsigned_sv(conn_key_pair.second));
+    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
     auto cb_called = std::make_shared<std::once_flag>();
     auto cb = std::make_shared<std::function<void(connection_info, std::optional<std::string>)>>(
             std::move(callback));
@@ -1239,7 +1239,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     };
     auto info = request_info::make(
             target_node,
-            str_to_vec(payload.dump()),
+            to_vector(payload.dump()),
             std::nullopt,
             quic::DEFAULT_TIMEOUT,
             std::nullopt,
@@ -1782,7 +1782,7 @@ void Network::send_request(
     std::span<const std::byte> payload{};
 
     if (info.body)
-        payload = vec_to_span<std::byte>(*info.body);
+        payload = to_span<std::byte>(*info.body);
 
     // Calculate the remaining timeout
     std::chrono::milliseconds timeout = info.request_timeout;
@@ -2151,11 +2151,11 @@ void Network::get_client_version(
     }
 
     // Generate the auth signature
-    auto blinded_keys = blind_version_key_pair(to_unsigned_sv(seckey.view()));
+    auto blinded_keys = blind_version_key_pair(to_span(seckey.view()));
     auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                              (std::chrono::system_clock::now()).time_since_epoch())
                              .count();
-    auto signature = blind_version_sign(to_unsigned_sv(seckey.view()), platform, timestamp);
+    auto signature = blind_version_sign(to_span(seckey.view()), platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(file_server_pubkey);
     std::string blinded_pk_hex;
     blinded_pk_hex.reserve(66);
@@ -2168,7 +2168,7 @@ void Network::get_client_version(
     auto headers = std::vector<std::pair<std::string, std::string>>{};
     headers.emplace_back("X-FS-Pubkey", blinded_pk_hex);
     headers.emplace_back("X-FS-Timestamp", "{}"_format(timestamp));
-    headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature));
+    headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature.begin(), signature.end()));
 
     send_onion_request(
             ServerDestination{
@@ -2236,12 +2236,12 @@ Network::process_v3_onion_response(Builder builder, std::string response) {
 
 std::tuple<int16_t, std::vector<std::pair<std::string, std::string>>, std::optional<std::string>>
 Network::process_v4_onion_response(Builder builder, std::string response) {
-    auto response_data = str_to_vec(response);
+    auto response_data = to_vector(response);
     auto parser = ResponseParser(builder);
     auto result = parser.decrypt(response_data);
 
     // Process the bencoded response
-    oxenc::bt_list_consumer result_bencode{vec_to_span<std::byte>(result)};
+    oxenc::bt_list_consumer result_bencode{to_span<std::byte>(result)};
 
     if (result_bencode.is_finished() || !result_bencode.is_string())
         throw std::runtime_error{"Invalid bencoded response"};
@@ -2680,7 +2680,7 @@ void Network::handle_errors(
             oxenc::is_hex(*ed25519PublicKey)) {
             session::onionreq::ed25519_pubkey edpk =
                     session::onionreq::ed25519_pubkey::from_hex(*ed25519PublicKey);
-            auto edpk_view = to_unsigned_sv(edpk.view());
+            auto edpk_view = to_span(edpk.view());
 
             auto snode_it = std::find_if(
                     updated_path.nodes.begin(),

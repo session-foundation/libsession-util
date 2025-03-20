@@ -25,14 +25,14 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts c1{ustring_view{seed}, std::nullopt};
+    session::config::Contacts c1{session::to_span(seed), std::nullopt};
     c1.set_name("050000000000000000000000000000000000000000000000000000000000000000", "alfonso");
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
     c1.confirm_pushed(seqno, "fakehash1");
 
-    session::config::Contacts c2{ustring_view{seed}, c1.dump()};
-    session::config::Contacts c3{ustring_view{seed}, c1.dump()};
+    session::config::Contacts c2{session::to_span(seed), c1.dump()};
+    session::config::Contacts c3{session::to_span(seed), c1.dump()};
 
     CHECK_FALSE(c2.needs_dump());
     CHECK_FALSE(c2.needs_push());
@@ -47,13 +47,13 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
     auto [seqno3, data3, obs3] = c3.push();
 
     REQUIRE(seqno2 == 2);
-    CHECK(obs2 == std::vector{"fakehash1"s});
+    CHECK(as_set(obs2) == make_set("fakehash1"s));
     REQUIRE(seqno3 == 2);
-    CHECK(obs2 == std::vector{"fakehash1"s});
+    CHECK(as_set(obs3) == make_set("fakehash1"s));
 
-    auto r = c1.merge(std::vector<std::pair<std::string, ustring_view>>{
+    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
             {{"fakehash2", data2}, {"fakehash3", data3}}});
-    CHECK(r == std::vector{{"fakehash2"s, "fakehash3"s}});
+    CHECK(as_set(r) == make_set("fakehash2"s, "fakehash3"s));
     CHECK(c1.needs_dump());
     CHECK(c1.needs_push());  // because we have the merge conflict to push
     CHECK(c1.is_dirty());
@@ -90,7 +90,7 @@ TEST_CASE("Merge existing config into clean state", "[config][merge_existing]") 
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts c1{ustring_view{seed}, std::nullopt};
+    session::config::Contacts c1{std::span<const unsigned char>{seed}, std::nullopt};
     c1.set_name("050000000000000000000000000000000000000000000000000000000000000000", "alfonso");
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
@@ -99,7 +99,8 @@ TEST_CASE("Merge existing config into clean state", "[config][merge_existing]") 
     CHECK(!c1.needs_dump());
     CHECK(!c1.needs_push());
 
-    auto r = c1.merge(std::vector<std::pair<std::string, ustring_view>>{{{"fakehash1", data}}});
+    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+            {{"fakehash1", data}}});
     CHECK(as_set(r) == make_set("fakehash1"s));
 
     auto old_hashes = c1.old_hashes();
@@ -126,13 +127,13 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts c1{ustring_view{seed}, std::nullopt};
+    session::config::Contacts c1{std::span<const unsigned char>{seed}, std::nullopt};
     c1.set_name("050000000000000000000000000000000000000000000000000000000000000000", "alfonso");
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
     c1.confirm_pushed(seqno, "fakehash1");
 
-    session::config::Contacts c2{ustring_view{seed}, c1.dump()};
+    session::config::Contacts c2{std::span<const unsigned char>{seed}, c1.dump()};
 
     CHECK_FALSE(c2.needs_dump());
     CHECK_FALSE(c2.needs_push());
@@ -148,7 +149,8 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     c2.confirm_pushed(seqno2, "fakehash2");
 
     CHECK(c1.is_dirty());  // already dirty before the merge
-    auto r = c1.merge(std::vector<std::pair<std::string, ustring_view>>{{{"fakehash2", data2}}});
+    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+            {{"fakehash2", data2}}});
     CHECK(r == std::vector{{"fakehash2"s}});
     CHECK(c1.needs_dump());
 
@@ -167,7 +169,8 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     c2.confirm_pushed(seqno3, "fakehash3");
 
     CHECK(c1.is_dirty());  // already dirty before the merge
-    auto r2 = c1.merge(std::vector<std::pair<std::string, ustring_view>>{{{"fakehash3", data3}}});
+    auto r2 = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+            {{"fakehash3", data3}}});
     CHECK(r2 == std::vector{{"fakehash3"s}});
     CHECK(c1.needs_dump());
 
@@ -198,7 +201,8 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     c1.set_name("051111111111111111111111111111111111111111111111111111111111111140", "barney40");
     auto size_before_merge = c1.size();  // retrieve size before trying to merge
     CHECK(c1.is_dirty());                // already dirty before the merge
-    auto r4 = c1.merge(std::vector<std::pair<std::string, ustring_view>>{{{"fakehash21", data4}}});
+    auto r4 = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+            {{"fakehash21", data4}}});
     CHECK(r4 == std::vector{{"fakehash21"s}});
     CHECK(c1.needs_dump());
 

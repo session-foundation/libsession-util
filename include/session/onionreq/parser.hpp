@@ -27,7 +27,7 @@ class OnionReqParser {
             size_t max_size = DEFAULT_MAX_SIZE);
 
     /// plaintext payload, decrypted from the incoming request during construction.
-    std::span<const unsigned char> payload() const { return vec_to_span<unsigned char>(payload_); }
+    std::span<const unsigned char> payload() const { return to_span(payload_); }
 
     /// Extracts payload from this object (via a std::move); after the call the object's payload
     /// will be empty.
@@ -37,7 +37,7 @@ class OnionReqParser {
         return ret;
     }
 
-    std::span<const unsigned char> remote_pubkey() const { return to_const_unsigned_span(remote_pk.view()); }
+    std::span<const unsigned char> remote_pubkey() const { return to_span(remote_pk.view()); }
 
     /// Encrypts a reply using the appropriate encryption as determined when parsing the
     /// request.

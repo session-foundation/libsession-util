@@ -78,8 +78,8 @@ class ConfigSig {
     //
     // Throws if given invalid data (i.e. wrong key size, or mismatched pubkey/secretkey).
     void init_sig_keys(
-            std::optional<ustring_view> ed25519_pubkey,
-            std::optional<ustring_view> ed25519_secretkey);
+            std::optional<std::span<const unsigned char>> ed25519_pubkey,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey);
 
   public:
     virtual ~ConfigSig() = default;
@@ -107,7 +107,7 @@ class ConfigSig {
     /// Inputs:
     /// - `secret` -- the 64-byte sodium-style Ed25519 "secret key" (actually the seed+pubkey
     ///   concatenated together) that sets both the secret key and public key.
-    void set_sig_keys(ustring_view secret);
+    void set_sig_keys(std::span<const unsigned char> secret);
 
     /// API: base/ConfigSig::set_sig_pubkey
     ///
@@ -117,7 +117,7 @@ class ConfigSig {
     ///
     /// Inputs:
     /// - `pubkey` -- the 32 byte Ed25519 pubkey that must have signed incoming messages
-    void set_sig_pubkey(ustring_view pubkey);
+    void set_sig_pubkey(std::span<const unsigned char> pubkey);
 
     /// API: base/ConfigSig::get_sig_pubkey
     ///
@@ -176,9 +176,9 @@ class ConfigBase : public ConfigSig {
     // verification of incoming messages using the associated pubkey, and will be signed using the
     // secretkey (if a secret key is given).
     explicit ConfigBase(
-            std::optional<ustring_view> dump = std::nullopt,
-            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
-            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+            std::optional<std::span<const unsigned char>> dump = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_pubkey = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey = std::nullopt);
 
     // Initializes the base config object with dump data and keys; this is typically invoked by the
     // constructor, but is exposed to subclasses so that they can delay initial processing by
@@ -189,9 +189,9 @@ class ConfigBase : public ConfigSig {
     //
     // This method must not be called outside derived class construction!
     void init(
-            std::optional<ustring_view> dump = std::nullopt,
-            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
-            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+            std::optional<std::span<const unsigned char>> dump = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_pubkey = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey = std::nullopt);
 
     // Tracks whether we need to dump again; most mutating methods should set this to true (unless
     // calling set_state, which sets to to true implicitly).
@@ -459,15 +459,18 @@ class ConfigBase : public ConfigSig {
 
         /// API: base/ConfigBase::DictFieldProxy::uview
         ///
-        /// Returns the value as a ustring_view, if it exists and is a string; nullopt otherwise.
+        /// Returns the value as a std::span<const unsigned char>, if it exists and is a string;
+        /// nullopt otherwise.
         ///
         /// Inputs: None
         ///
         /// Outputs:
-        /// - `std::optional<ustring_view>` -- Returns a value as a view if it exists
-        std::optional<ustring_view> uview() const {
+        /// - `std::optional<std::span<const unsigned char>>` -- Returns a value as a view if it
+        /// exists
+        std::optional<std::span<const unsigned char>> uview() const {
             if (auto* s = get_clean<std::string>())
-                return ustring_view{reinterpret_cast<const unsigned char*>(s->data()), s->size()};
+                return std::span<const unsigned char>{
+                        reinterpret_cast<const unsigned char*>(s->data()), s->size()};
             return std::nullopt;
         }
 
@@ -574,17 +577,17 @@ class ConfigBase : public ConfigSig {
         /// - `value` -- replaces current value with given string view
         void operator=(std::string_view value) { *this = std::string{value}; }
 
-        /// API: base/ConfigBase::DictFieldProxy::operator=(ustring_view)
+        /// API: base/ConfigBase::DictFieldProxy::operator=(std::span<const unsigned char>)
         ///
-        /// Replaces the current value with the given ustring_view.  This also auto-vivifies any
-        /// intermediate dicts needed to reach the given key, including replacing non-dict values if
-        /// they currently exist along the path (this makes a copy).
+        /// Replaces the current value with the given std::span<const unsigned char>.  This also
+        /// auto-vivifies any intermediate dicts needed to reach the given key, including replacing
+        /// non-dict values if they currently exist along the path (this makes a copy).
         ///
         /// Inputs:
-        /// - `value` -- replaces current value with given ustring_view
+        /// - `value` -- replaces current value with given std::span<const unsigned char>
         ///
-        /// Same as above, but takes a ustring_view
-        void operator=(ustring_view value) {
+        /// Same as above, but takes a std::span<const unsigned char>
+        void operator=(std::span<const unsigned char> value) {
             *this = std::string{reinterpret_cast<const char*>(value.data()), value.size()};
         }
 
@@ -786,7 +789,7 @@ class ConfigBase : public ConfigSig {
     ///   processed as a config message, even if it was too old to be useful (or was already known
     ///   to be included).  The hashes will be in the same order as in the input vector.
     std::vector<std::string> _merge(
-            const std::vector<std::pair<std::string, ustring_view>>& configs);
+            const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs);
 
     /// API: base/ConfigBase::extra_data
     ///
@@ -828,7 +831,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Inputs:
     /// - `ed25519_secret_key` -- key is loaded for encryption
-    void load_key(ustring_view ed25519_secretkey);
+    void load_key(std::span<const unsigned char> ed25519_secretkey);
 
   public:
     virtual ~ConfigBase() = default;
@@ -917,9 +920,9 @@ class ConfigBase : public ConfigSig {
     /// Declaration:
     /// ```cpp
     /// std::vector<std::string> merge(
-    ///     const std::vector<std::pair<std::string, ustring_view>>& configs);
+    ///     const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs);
     /// std::vector<std::string> merge(
-    ///     const std::vector<std::pair<std::string, ustring>>& configs);
+    ///     const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs);
     /// ```
     ///
     /// Inputs:
@@ -931,11 +934,13 @@ class ConfigBase : public ConfigSig {
     ///   that it changed the config, merely that the returned hash was properly parsed and
     ///   processed as a config message, even if it was too old to be useful (or was already known
     ///   to be included).  The hashes will be in the same order as in the input vector.
-    std::vector<std::string> merge(const std::vector<std::pair<std::string, ustring>>& configs);
-
-    // Same as above, but takes values as ustrings (because sometimes that is more convenient).
     std::vector<std::string> merge(
-            const std::vector<std::pair<std::string, ustring_view>>& configs);
+            const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs);
+
+    // Same as above, but takes values as std::span<const unsigned char>s (because sometimes that is
+    // more convenient).
+    std::vector<std::string> merge(
+            const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs);
 
     /// API: base/ConfigBase::is_dirty
     ///
@@ -1076,11 +1081,12 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::tuple<seqno_t, ustring, std::vector<std::string>>` - Returns a tuple containing
+    /// - `std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>` - Returns a
+    /// tuple containing
     ///   - `seqno_t` -- sequence number
-    ///   - `ustring` -- data message to push to the server
+    ///   - `std::vector<unsigned char>` -- data message to push to the server
     ///   - `std::vector<std::string>` -- list of known message hashes
-    virtual std::tuple<seqno_t, ustring, std::vector<std::string>> push();
+    virtual std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>> push();
 
     /// API: base/ConfigBase::confirm_pushed
     ///
@@ -1114,8 +1120,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `ustring` -- Returns binary data of the state dump
-    ustring dump();
+    /// - `std::vector<unsigned char>` -- Returns binary data of the state dump
+    std::vector<unsigned char> dump();
 
     /// API: base/ConfigBase::make_dump
     ///
@@ -1126,8 +1132,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `ustring` -- Returns binary data of the state dump
-    ustring make_dump() const;
+    /// - `std::vector<unsigned char>` -- Returns binary data of the state dump
+    std::vector<unsigned char> make_dump() const;
 
     /// API: base/ConfigBase::needs_dump
     ///
@@ -1163,13 +1169,16 @@ class ConfigBase : public ConfigSig {
     /// Will throw a std::invalid_argument if the key is not 32 bytes.
     ///
     /// Inputs:
-    /// - `ustring_view key` -- 32 byte binary key
+    /// - `std::span<const unsigned char> key` -- 32 byte binary key
     /// - `high_priority` -- Whether to add to front or back of key list. If true then key is added
     ///   to beginning and replace highest-priority key for encryption
     /// - `dirty_config` -- if true then mark the config as dirty (incrementing seqno and needing a
     ///   push) if the first key (i.e. the key used for encryption) is changed as a result of this
     ///   call.  Ignored if the config is not modifiable.
-    void add_key(ustring_view key, bool high_priority = true, bool dirty_config = false);
+    void add_key(
+            std::span<const unsigned char> key,
+            bool high_priority = true,
+            bool dirty_config = false);
 
     /// API: base/ConfigBase::clear_keys
     ///
@@ -1201,7 +1210,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if found and removed
-    bool remove_key(ustring_view key, size_t from = 0, bool dirty_config = false);
+    bool remove_key(std::span<const unsigned char> key, size_t from = 0, bool dirty_config = false);
 
     /// API: base/ConfigBase::replace_keys
     ///
@@ -1214,7 +1223,8 @@ class ConfigBase : public ConfigSig {
     /// - `dirty_config` -- if true then set the config status to dirty (incrementing seqno and
     ///   requiring a repush) if the old and new first key are not the same.  Ignored if the config
     ///   is not modifiable.
-    void replace_keys(const std::vector<ustring_view>& new_keys, bool dirty_config = false);
+    void replace_keys(
+            const std::vector<std::span<const unsigned char>>& new_keys, bool dirty_config = false);
 
     /// API: base/ConfigBase::get_keys
     ///
@@ -1228,8 +1238,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::vector<ustring_view>` -- Returns vector of encryption keys
-    std::vector<ustring_view> get_keys() const;
+    /// - `std::vector<std::span<const unsigned char>>` -- Returns vector of encryption keys
+    std::vector<std::span<const unsigned char>> get_keys() const;
 
     /// API: base/ConfigBase::key_count
     ///
@@ -1250,7 +1260,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if it does exist
-    bool has_key(ustring_view key) const;
+    bool has_key(std::span<const unsigned char> key) const;
 
     /// API: base/ConfigBase::key
     ///
@@ -1262,8 +1272,8 @@ class ConfigBase : public ConfigSig {
     /// - `i` -- keys position in key list
     ///
     /// Outputs:
-    /// - `ustring_view` -- binary data of the key
-    ustring_view key(size_t i = 0) const {
+    /// - `std::span<const unsigned char>` -- binary data of the key
+    std::span<const unsigned char> key(size_t i = 0) const {
         assert(i < _keys.size());
         return {_keys[i].data(), _keys[i].size()};
     }

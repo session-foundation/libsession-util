@@ -56,7 +56,7 @@ struct service_node : public oxen::quic::RemoteAddress {
 
     template <typename... Opt>
     service_node(
-            ustring_view remote_pk,
+            std::span<const unsigned char> remote_pk,
             std::vector<int> storage_server_version,
             swarm_id_t swarm_id,
             Opt&&... opts) :

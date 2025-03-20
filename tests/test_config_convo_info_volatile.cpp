@@ -30,7 +30,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{ustring_view{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
 
     constexpr auto definitely_real_id =
             "055000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -146,7 +146,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
 
     CHECK(seqno == 2);
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("hash2", to_push);
     convos.merge(merge_configs);
     convos2.confirm_pushed(seqno, "hash2");
@@ -481,10 +481,11 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{ustring_view{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
 
-    auto some_pubkey = [](unsigned char x) -> ustring {
-        ustring s = "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes;
+    auto some_pubkey = [](unsigned char x) -> std::vector<unsigned char> {
+        std::vector<unsigned char> s =
+                "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes;
         s[31] = x;
         return s;
     };

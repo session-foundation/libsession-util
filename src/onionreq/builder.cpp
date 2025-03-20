@@ -31,7 +31,6 @@
 
 using namespace std::literals;
 using namespace oxen::log::literals;
-using session::ustring_view;
 
 namespace session::onionreq {
 
@@ -149,10 +148,10 @@ std::vector<unsigned char> Builder::_generate_payload(
 
     // If we were given a body, add it to the payload
     if (body.has_value())
-        payload.emplace_back(vec_to_str(*body));
+        payload.emplace_back(session::to_string(*body));
 
     auto result = oxenc::bt_serialize(payload);
-    return str_to_vec(result);
+    return to_vector(result);
 }
 
 std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
@@ -229,7 +228,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
             };
 
             auto control_dump = control.dump();
-            auto control_span = to_const_unsigned_span(control_dump);
+            auto control_span = to_span(control_dump);
             auto data = encode_size(payload.size());
             data.insert(data.end(), payload.begin(), payload.end());
             data.insert(data.end(), control_span.begin(), control_span.end());
@@ -265,7 +264,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
         }
 
         auto routing_dump = routing.dump();
-        auto routing_span = to_const_unsigned_span(routing_dump);
+        auto routing_span = to_span(routing_dump);
         auto data = encode_size(blob.size());
         data.insert(data.end(), blob.begin(), blob.end());
         data.insert(data.end(), routing_span.begin(), routing_span.end());
@@ -280,7 +279,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
     // how to decrypt the initial payload:
     auto wrapper_dump =
             nlohmann::json{{"ephemeral_key", A.hex()}, {"enc_type", to_string(enc_type)}}.dump();
-    auto wrapper_span = to_const_unsigned_span(wrapper_dump);
+    auto wrapper_span = to_span(wrapper_dump);
     auto result = encode_size(blob.size());
     result.insert(result.end(), blob.begin(), blob.end());
     result.insert(result.end(), wrapper_span.begin(), wrapper_span.end());
@@ -299,8 +298,6 @@ session::onionreq::Builder& unbox(onion_request_builder_object* builder) {
 }  // namespace
 
 extern "C" {
-
-using session::ustring;
 
 LIBSESSION_C_API void onion_request_builder_init(onion_request_builder_object** builder) {
     auto c_builder = std::make_unique<onion_request_builder_object>();

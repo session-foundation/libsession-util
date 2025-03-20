@@ -97,7 +97,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups groups{ustring_view{seed}, std::nullopt};
+    session::config::UserGroups groups{std::span<const unsigned char>{seed}, std::nullopt};
 
     constexpr auto definitely_real_id =
             "055000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -169,8 +169,8 @@ TEST_CASE("User Groups", "[config][groups]") {
             lg_pk.data(), lg_sk.data(), reinterpret_cast<const unsigned char*>(lgroup_seed.data()));
     // Note: this isn't exactly what Session actually does here for legacy closed groups (rather it
     // uses X25519 keys) but for this test the distinction doesn't matter.
-    c.enc_pubkey.assign(lg_pk.data(), lg_pk.size());
-    c.enc_seckey.assign(lg_sk.data(), 32);
+    c.enc_pubkey.assign(lg_pk.data(), lg_pk.data() + lg_pk.size());
+    c.enc_seckey.assign(lg_sk.data(), lg_sk.data() + 32);
     c.priority = 3;
 
     CHECK(to_hex(c.enc_pubkey) == oxenc::to_hex(lg_pk.begin(), lg_pk.end()));
@@ -313,7 +313,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(std::get<seqno_t>(g2.push()) == 2);
     CHECK_FALSE(g2.needs_dump());
 
-    std::vector<std::pair<std::string, ustring>> to_merge;
+    std::vector<std::pair<std::string, std::vector<unsigned char>>> to_merge;
     to_merge.emplace_back("fakehash2", to_push);
     groups.merge(to_merge);
     auto x3 = groups.get_community("http://example.org:5678", "SudokuRoom");
@@ -441,7 +441,7 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups groups{ustring_view{seed}, std::nullopt};
+    session::config::UserGroups groups{std::span<const unsigned char>{seed}, std::nullopt};
 
     constexpr auto definitely_real_id =
             "035000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -460,8 +460,8 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(c.notifications == session::config::notify_mode::defaulted);
     CHECK(c.mute_until == 0);
 
-    c.secretkey = to_usv(ed_sk);  // This *isn't* the right secret key for the group, so won't
-                                  // propagate, and so auth data will:
+    c.secretkey = session::to_vector(ed_sk);  // This *isn't* the right secret key for the group, so
+                                              // won't propagate, and so auth data will:
     c.auth_data =
             "01020304050000000000000000000000000000000000000000000000000000000000000000000000000000"
             "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
@@ -477,7 +477,7 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
 
     auto d1 = groups.dump();
 
-    session::config::UserGroups g2{ustring_view{seed}, d1};
+    session::config::UserGroups g2{std::span<const unsigned char>{seed}, d1};
 
     auto c2 = g2.get_group(definitely_real_id);
     REQUIRE(c2.has_value());
@@ -500,8 +500,9 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     g2.set(*c2);
 
     auto c2b = g2.get_or_construct_group("03" + oxenc::to_hex(ed_pk.begin(), ed_pk.end()));
-    c2b.secretkey = to_usv(ed_sk);  // This one does match the group ID, so should propagate
-    c2b.auth_data =                 // should get ignored, since we have a valid secret key set:
+    c2b.secretkey =
+            session::to_vector(ed_sk);  // This one does match the group ID, so should propagate
+    c2b.auth_data =                     // should get ignored, since we have a valid secret key set:
             "01020304050000000000000000000000000000000000000000000000000000000000000000000000000000"
             "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
             "0000000000000000000000000000"_hexbytes;
@@ -510,7 +511,7 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     std::tie(seqno, to_push, obs) = g2.push();
     g2.confirm_pushed(seqno, "fakehash2");
 
-    std::vector<std::pair<std::string, ustring>> to_merge;
+    std::vector<std::pair<std::string, std::vector<unsigned char>>> to_merge;
     to_merge.emplace_back("fakehash2", to_push);
     groups.merge(to_merge);
 
@@ -714,10 +715,11 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
     REQUIRE(keys);
     REQUIRE(key_len == 1);
 
-    session::config::UserGroups c2{ustring_view{seed}, std::nullopt};
+    session::config::UserGroups c2{std::span<const unsigned char>{seed}, std::nullopt};
 
-    std::vector<std::pair<std::string, ustring_view>> to_merge;
-    to_merge.emplace_back("fakehash1", ustring_view{to_push->config, to_push->config_len});
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> to_merge;
+    to_merge.emplace_back(
+            "fakehash1", std::span<const unsigned char>{to_push->config, to_push->config_len});
     CHECK(c2.merge(to_merge) == std::vector<std::string>{{"fakehash1"}});
 
     auto grp = c2.get_legacy_group(definitely_real_id);
@@ -742,7 +744,7 @@ TEST_CASE("User groups empty member bug", "[config][groups][bug]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups c{ustring_view{seed}, std::nullopt};
+    session::config::UserGroups c{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK_FALSE(c.needs_push());
 
@@ -828,7 +830,7 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserGroups c{ustring_view{seed}, std::nullopt};
+    session::config::UserGroups c{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK_FALSE(c.needs_push());
 
@@ -894,7 +896,7 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
                 "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef64313a21303a313a4b"
                 "303a"
                 "313a6a303a65656565313a28303a313a296c6565"_hexbytes;
-        session::config::UserGroups c2{ustring_view{seed}, dump_with_not_seconds};
+        session::config::UserGroups c2{std::span<const unsigned char>{seed}, dump_with_not_seconds};
 
         auto gr = c2.get_or_construct_group(
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");

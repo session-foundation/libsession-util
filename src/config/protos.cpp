@@ -32,8 +32,11 @@ namespace {
 
 }  // namespace
 
-ustring wrap_config(
-        ustring_view ed25519_sk, ustring_view data, int64_t seqno, config::Namespace t) {
+std::vector<unsigned char> wrap_config(
+        std::span<const unsigned char> ed25519_sk,
+        std::span<const unsigned char> data,
+        int64_t seqno,
+        config::Namespace t) {
     std::array<unsigned char, 64> tmp_sk;
     if (ed25519_sk.size() == 32) {
         std::array<unsigned char, 32> ignore_pk;
@@ -56,7 +59,7 @@ ustring wrap_config(
     auto& shconf = *config.mutable_sharedconfigmessage();
     shconf.set_kind(encode_namespace(t));
     shconf.set_seqno(seqno);
-    *shconf.mutable_data() = from_unsigned_sv(data);
+    *shconf.mutable_data() = to_string_view(data);
 
     // Then we serialize that, pad it, and encrypt it.  Copying this relevant comment from the
     // Session codebase (the comment itself git blames to Signal):
@@ -87,7 +90,7 @@ ustring wrap_config(
     // derived from our private key, but old Session clients expect this.
     // NOTE: This is dumb.
     auto enc_shared_conf = encrypt_for_recipient_deterministic(
-            ed25519_sk, {my_xpk.data(), my_xpk.size()}, to_unsigned_sv(shared_conf));
+            ed25519_sk, {my_xpk.data(), my_xpk.size()}, to_span(shared_conf));
 
     // This is the point in session client code where this value got base64-encoded, passed to
     // another function, which then base64-decoded that value to put into the envelope.  We're going
@@ -97,7 +100,7 @@ ustring wrap_config(
 
     // Now we just keep on trucking with more protobuf:
     auto envelope = SessionProtos::Envelope();
-    *envelope.mutable_content() = from_unsigned_sv(enc_shared_conf);
+    *envelope.mutable_content() = to_string_view(enc_shared_conf);
     envelope.set_timestamp(1);  // Old session clients with their own unwrapping require this > 0
     envelope.set_type(SessionProtos::Envelope_Type::Envelope_Type_SESSION_MESSAGE);
 
@@ -117,10 +120,13 @@ ustring wrap_config(
     msg.set_type(WebSocketProtos::WebSocketMessage_Type_REQUEST);
     *msg.mutable_request() = webreq;
 
-    return ustring{to_unsigned_sv(msg.SerializeAsString())};
+    return to_vector(msg.SerializeAsString());
 }
 
-ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namespace ns) {
+std::vector<unsigned char> unwrap_config(
+        std::span<const unsigned char> ed25519_sk,
+        std::span<const unsigned char> data,
+        config::Namespace ns) {
     // Hurray, we get to undo everything from the above!
 
     std::array<unsigned char, 64> tmp_sk;
@@ -131,7 +137,7 @@ ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namesp
     } else if (ed25519_sk.size() != 64)
         throw std::invalid_argument{
                 "Error: ed25519_sk is not the expected 64-byte Ed25519 secret key"};
-    auto ed25519_pk = ed25519_sk.substr(32);
+    auto ed25519_pk = ed25519_sk.subspan(32);
 
     WebSocketProtos::WebSocketMessage req{};
 
@@ -145,7 +151,7 @@ ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namesp
     if (!envelope.ParseFromString(req.request().body()))
         throw std::runtime_error{"Failed to parse Envelope"};
 
-    auto [content, sender] = decrypt_incoming(ed25519_sk, to_unsigned_sv(envelope.content()));
+    auto [content, sender] = decrypt_incoming(ed25519_sk, to_span(envelope.content()));
     if (sender != ed25519_pk)
         throw std::runtime_error{"Incoming config data was not from us; ignoring"};
 
@@ -155,9 +161,10 @@ ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namesp
     if (!(content.back() == 0x00 || content.back() == 0x80))
         throw std::runtime_error{"Incoming config data doesn't have required padding"};
 
-    if (auto pos = content.find_last_not_of((unsigned char)0);
-        pos != std::string::npos && content[pos] == 0x80)
-        content.resize(pos);
+    if (auto it = std::find_if(
+                content.rbegin(), content.rend(), [](unsigned char c) { return c != 0; });
+        it != content.rend() && *it == 0x80)
+        content.resize(content.size() - std::distance(content.rbegin(), it) - 1);
     else
         throw std::runtime_error{"Incoming config data has invalid padding"};
 
@@ -172,7 +179,7 @@ ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namesp
         throw std::runtime_error{"SharedConfig has wrong kind for config namespace"};
 
     // if ParseFromString fails, we have a raw (not protobuf encoded) message
-    return ustring{to_unsigned_sv(shconf.data())};
+    return to_vector(shconf.data());
 }
 
 }  // namespace session::config::protos

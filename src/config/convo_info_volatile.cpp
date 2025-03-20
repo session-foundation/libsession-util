@@ -19,7 +19,6 @@
 #include "session/util.hpp"
 
 using namespace std::literals;
-using session::ustring_view;
 
 namespace session::config {
 
@@ -41,7 +40,7 @@ namespace convo {
     }
 
     community::community(const convo_info_volatile_community& c) :
-            config::community{c.base_url, c.room, ustring_view{c.pubkey, 32}},
+            config::community{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}},
             base{c.last_read, c.unread} {}
 
     void community::into(convo_info_volatile_community& c) const {
@@ -92,7 +91,8 @@ namespace convo {
 }  // namespace convo
 
 ConvoInfoVolatile::ConvoInfoVolatile(
-        ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
@@ -117,13 +117,12 @@ convo::one_to_one ConvoInfoVolatile::get_or_construct_1to1(std::string_view pubk
 }
 
 ConfigBase::DictFieldProxy ConvoInfoVolatile::community_field(
-        const convo::community& comm, ustring_view* get_pubkey) const {
+        const convo::community& comm, std::span<const unsigned char>* get_pubkey) const {
     auto record = data["o"][comm.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey =
-                    ustring_view{reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+            *get_pubkey = to_span(pk);
     }
     return record["R"][comm.room_norm()];
 }
@@ -132,7 +131,7 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
         std::string_view base_url, std::string_view room) const {
     convo::community og{base_url, community::canonical_room(room)};
 
-    ustring_view pubkey;
+    std::span<const unsigned char> pubkey;
     if (auto* info_dict = community_field(og, &pubkey).dict()) {
         og.load(*info_dict);
         if (!pubkey.empty())
@@ -149,7 +148,9 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
 }
 
 convo::community ConvoInfoVolatile::get_or_construct_community(
-        std::string_view base_url, std::string_view room, ustring_view pubkey) const {
+        std::string_view base_url,
+        std::string_view room,
+        std::span<const unsigned char> pubkey) const {
     convo::community result{base_url, community::canonical_room(room), pubkey};
 
     if (auto* info_dict = community_field(result).dict())
@@ -261,7 +262,8 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         erase_community(base, room);
 }
 
-std::tuple<seqno_t, ustring, std::vector<std::string>> ConvoInfoVolatile::push() {
+std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>
+ConvoInfoVolatile::push() {
     // Prune off any conversations with last_read timestamps more than PRUNE_HIGH ago (unless they
     // also have a `unread` flag set, in which case we keep them indefinitely).
     prune_stale();
@@ -545,7 +547,8 @@ LIBSESSION_C_API bool convo_info_volatile_get_or_construct_community(
             conf,
             [&] {
                 unbox<ConvoInfoVolatile>(conf)
-                        ->get_or_construct_community(base_url, room, ustring_view{pubkey, 32})
+                        ->get_or_construct_community(
+                                base_url, room, std::span<const unsigned char>{pubkey, 32})
                         .into(*convo);
                 return true;
             },

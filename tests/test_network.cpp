@@ -1,9 +1,9 @@
+#include <fmt/core.h>
 #include <session/network.h>
 #include <sodium/randombytes.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
-#include <fmt/core.h>
 #include <nlohmann/json.hpp>
 #include <session/network.hpp>
 #include <session/onionreq/key_types.hpp>
@@ -24,7 +24,8 @@ struct Result {
     std::optional<std::string> response;
 };
 
-service_node test_node(const ustring ed_pk, const uint16_t index, const bool unique_ip = true) {
+service_node test_node(
+        const std::vector<unsigned char> ed_pk, const uint16_t index, const bool unique_ip = true) {
     return service_node{
             ed_pk,
             {2, 8, 0},
@@ -1099,7 +1100,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network.emplace(std::nullopt, true, true, false);
     network->send_onion_request(
             test_service_node,
-            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
                bool,
@@ -1116,7 +1117,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             test_service_node,
-            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
                bool,
@@ -1133,7 +1134,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             test_service_node,
-            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&prom](bool success,
                     bool timeout,
@@ -1174,7 +1175,7 @@ TEST_CASE("Network requests", "[network][send_request]") {
                 network.send_request(
                         request_info::make(
                                 test_service_node,
-                                str_to_vec("{}"),
+                                to_vector("{}"),
                                 std::nullopt,
                                 3s,
                                 std::nullopt,
@@ -1219,7 +1220,7 @@ TEST_CASE("Network onion request", "[network][send_onion_request]") {
 
     network.send_onion_request(
             test_service_node,
-            str_to_vec("{\"method\":\"info\",\"params\":{}}"),
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&result_promise](
                     bool success,
@@ -1258,7 +1259,7 @@ TEST_CASE("Network direct request C API", "[network][network_send_request]") {
     std::strcpy(
             test_service_node.ed25519_pubkey_hex,
             "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9");
-    auto body = ustring{to_usv("{\"method\":\"info\",\"params\":{}}")};
+    auto body = to_vector("{\"method\":\"info\",\"params\":{}}");
     auto result_promise = std::make_shared<std::promise<Result>>();
 
     network_send_onion_request_to_snode_destination(

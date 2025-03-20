@@ -119,7 +119,9 @@ class Contacts : public ConfigBase {
     ///
     /// Outputs:
     /// - `Contact` - Constructor
-    Contacts(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped);
+    Contacts(
+            std::span<const unsigned char> ed25519_secretkey,
+            std::optional<std::span<const unsigned char>> dumped);
 
     /// API: contacts/Contacts::storage_namespace
     ///

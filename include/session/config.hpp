@@ -108,10 +108,12 @@ class ConfigMessage {
     /// message.  It can also throw to abort message construction (that is: returning false skips
     /// the message when loading multiple messages, but can still continue with other messages;
     /// throwing aborts the entire construction).
-    using verify_callable = std::function<bool(ustring_view data, ustring_view signature)>;
+    using verify_callable = std::function<bool(
+            std::span<const unsigned char> data, std::span<const unsigned char> signature)>;
 
     /// Signing function: this is passed the data to be signed and returns the 64-byte signature.
-    using sign_callable = std::function<ustring(ustring_view data)>;
+    using sign_callable =
+            std::function<std::vector<unsigned char>(std::span<const unsigned char> data)>;
 
     ConfigMessage();
     ConfigMessage(const ConfigMessage&) = default;
@@ -124,7 +126,7 @@ class ConfigMessage {
     /// Initializes a config message by parsing a serialized message.  Throws on any error.  See the
     /// vector version below for argument descriptions.
     explicit ConfigMessage(
-            ustring_view serialized,
+            std::span<const unsigned char> serialized,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -160,7 +162,7 @@ class ConfigMessage {
     /// `[](size_t, const auto& e) { throw e; }` can be used to make any parse error of any message
     /// fatal.
     explicit ConfigMessage(
-            const std::vector<ustring_view>& configs,
+            const std::vector<std::span<const unsigned char>>& configs,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -231,10 +233,11 @@ class ConfigMessage {
     /// typically for a local serialization value that isn't being pushed to the server).  Note that
     /// signing is always disabled if there is no signing callback set, regardless of the value of
     /// this argument.
-    virtual ustring serialize(bool enable_signing = true);
+    virtual std::vector<unsigned char> serialize(bool enable_signing = true);
 
   protected:
-    ustring serialize_impl(const oxenc::bt_dict& diff, bool enable_signing = true);
+    std::vector<unsigned char> serialize_impl(
+            const oxenc::bt_dict& diff, bool enable_signing = true);
 };
 
 // Constructor tag
@@ -282,7 +285,7 @@ class MutableConfigMessage : public ConfigMessage {
     /// constructor only increments seqno once while the indirect version would increment twice in
     /// the case of a required merge conflict resolution.
     explicit MutableConfigMessage(
-            const std::vector<ustring_view>& configs,
+            const std::vector<std::span<const unsigned char>>& configs,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -292,7 +295,7 @@ class MutableConfigMessage : public ConfigMessage {
     /// take an error handler and instead always throws on parse errors (the above also throws for
     /// an erroneous single message, but with a less specific "no valid config messages" error).
     explicit MutableConfigMessage(
-            ustring_view config,
+            std::span<const unsigned char> config,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS);
@@ -339,7 +342,7 @@ class MutableConfigMessage : public ConfigMessage {
     const hash_t& hash() override;
 
   protected:
-    const hash_t& hash(ustring_view serialized);
+    const hash_t& hash(std::span<const unsigned char> serialized);
     void increment_impl();
 };
 

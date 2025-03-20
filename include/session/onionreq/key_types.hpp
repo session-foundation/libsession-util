@@ -55,9 +55,11 @@ struct alignas(size_t) key_base : std::array<unsigned char, KeyLength> {
         return d;
     }
     static Derived from_bytes(std::vector<unsigned char> bytes) {
-        return from_bytes(vec_to_str(bytes));
+        return from_bytes(to_string(bytes));
     }
-    static Derived from_bytes(std::span<const unsigned char> bytes) { return from_bytes(from_const_unsigned_span(bytes)); }
+    static Derived from_bytes(std::span<const unsigned char> bytes) {
+        return from_bytes(to_string(bytes));
+    }
 };
 
 template <typename Derived, size_t KeyLength>
