@@ -1,6 +1,7 @@
 #include <fmt/core.h>
 #include <session/network.h>
 #include <sodium/randombytes.h>
+#include <oxen/quic/gnutls_crypto.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
@@ -177,7 +178,7 @@ class TestNetwork : public Network {
                    std::optional<std::string>) {});
     }
 
-    std::pair<std::shared_ptr<oxen::quic::Endpoint>, service_node> create_test_node(uint16_t port) {
+    std::pair<std::pair<std::shared_ptr<oxen::quic::Loop>, std::shared_ptr<oxen::quic::Endpoint>>, service_node> create_test_node(uint16_t port) {
         oxen::quic::opt::inbound_alpns server_alpns{"oxenstorage"};
         auto server_key_pair =
                 session::ed25519::ed25519_key_pair(to_unsigned_sv(fmt::format("{:032}", port)));
@@ -205,13 +206,14 @@ class TestNetwork : public Network {
 
         oxen::quic::stream_constructor_callback server_constructor =
                 [&](oxen::quic::Connection& c, oxen::quic::Endpoint& e, std::optional<int64_t>) {
-                    auto s = e.make_shared<oxen::quic::BTRequestStream>(c, e);
+                    auto s = e.loop.make_shared<oxen::quic::BTRequestStream>(c, e);
                     s->register_handler("info", server_cb);
                     s->register_handler("onion_req", onion_cb);
                     return s;
                 };
 
-        auto endpoint = net.endpoint(server_local, server_alpns);
+        auto loop = std::make_shared<oxen::quic::Loop>();
+        auto endpoint = oxen::quic::Endpoint::endpoint(*loop, server_local, server_alpns);
         endpoint->listen(creds, server_constructor);
 
         auto node = service_node{
@@ -221,7 +223,7 @@ class TestNetwork : public Network {
                 "127.0.0.1"s,
                 endpoint->local().port()};
 
-        return {endpoint, node};
+        return {{loop, endpoint}, node};
     }
 
     onion_path create_test_path() {

@@ -204,10 +204,10 @@ class Network {
     std::thread disk_write_thread;
 
     // General values
-    bool destroyed = false;
     bool suspended = false;
     ConnectionStatus status;
-    oxen::quic::Network net;
+    
+    std::shared_ptr<oxen::quic::Loop> loop;
     std::shared_ptr<oxen::quic::Endpoint> endpoint;
     std::unordered_map<PathType, std::vector<onion_path>> paths;
     std::vector<std::pair<onion_path, PathType>> paths_pending_drop;
