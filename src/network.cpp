@@ -1,5 +1,6 @@
 #include "session/network.hpp"
 
+#include <fmt/ranges.h>
 #include <oxenc/base64.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/hex.h>

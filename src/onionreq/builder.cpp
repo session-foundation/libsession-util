@@ -1,6 +1,7 @@
 #include "session/onionreq/builder.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <nettle/gcm.h>
 #include <oxenc/bt.h>
 #include <oxenc/endian.h>

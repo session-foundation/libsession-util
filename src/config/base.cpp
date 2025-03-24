@@ -1,5 +1,6 @@
 #include "session/config/base.hpp"
 
+#include <fmt/ranges.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/hex.h>
