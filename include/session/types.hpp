@@ -1,7 +1,5 @@
 #pragma once
 
-#include <oxenc/span.h>
-
 #include <cstdint>
 #include <string>
 #include <string_view>

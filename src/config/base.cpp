@@ -492,7 +492,8 @@ void ConfigSig::init_sig_keys(
         std::optional<std::span<const unsigned char>> ed25519_pubkey,
         std::optional<std::span<const unsigned char>> ed25519_secretkey) {
     if (ed25519_secretkey) {
-        if (ed25519_pubkey && *ed25519_pubkey != ed25519_secretkey->subspan(32))
+        if (ed25519_pubkey &&
+            to_string_view(*ed25519_pubkey) != to_string_view(ed25519_secretkey->subspan(32)))
             throw std::invalid_argument{"Invalid signing keys: secret key and pubkey do not match"};
         set_sig_keys(*ed25519_secretkey);
     } else if (ed25519_pubkey) {

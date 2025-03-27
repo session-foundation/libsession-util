@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <span>
 #include <vector>
 
 #include "types.hpp"

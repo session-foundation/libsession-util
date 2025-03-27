@@ -1,5 +1,6 @@
 #pragma once
 
+#include <span>
 #include <stdexcept>
 #include <vector>
 

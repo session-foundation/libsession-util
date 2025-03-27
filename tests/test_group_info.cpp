@@ -337,10 +337,10 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(ginfo_rw3.get_name() == "Super Group 2");
 
     auto [s6, t6, o6] = ginfo_rw3.push();
-    CHECK(to_hex(ginfo_rw3.key(0)) ==
+    CHECK(oxenc::to_hex(ginfo_rw3.key(0)) ==
           "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     REQUIRE(ginfo_rw3.key_count() == 2);
-    CHECK(to_hex(ginfo_rw3.key(1)) ==
+    CHECK(oxenc::to_hex(ginfo_rw3.key(1)) ==
           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     CHECK(s6 == s5);
     CHECK(t6.size() == t23.size());

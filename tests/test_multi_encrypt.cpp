@@ -209,15 +209,15 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
     for (size_t i = 0; i < seeds.size(); i++)
         x_keys[i] = to_x_keys(seeds[i]);
 
-    CHECK(to_hex(session::to_span(x_keys[0].second)) ==
+    CHECK(oxenc::to_hex(session::to_span(x_keys[0].second)) ==
           "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
-    CHECK(to_hex(session::to_span(x_keys[1].second)) ==
+    CHECK(oxenc::to_hex(session::to_span(x_keys[1].second)) ==
           "d673a8fb4800d2a252d2fc4e3342a88cdfa9412853934e8993d12d593be13371");
-    CHECK(to_hex(session::to_span(x_keys[2].second)) ==
+    CHECK(oxenc::to_hex(session::to_span(x_keys[2].second)) ==
           "afd9716ea69ab8c7f475e1b250c86a6539e260804faecf2a803e9281a4160738");
-    CHECK(to_hex(session::to_span(x_keys[3].second)) ==
+    CHECK(oxenc::to_hex(session::to_span(x_keys[3].second)) ==
           "03be14feabd59122349614b88bdc90db1d1af4c230e9a73c898beec833d51f11");
-    CHECK(to_hex(session::to_span(x_keys[4].second)) ==
+    CHECK(oxenc::to_hex(session::to_span(x_keys[4].second)) ==
           "27b5c1ea87cef76284c752fa6ee1b9186b1a95e74e8f5b88f8b47e5191ce6f08");
 
     auto nonce = "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hexbytes;

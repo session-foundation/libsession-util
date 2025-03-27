@@ -197,9 +197,7 @@ template <
                 std::is_invocable_r_v<std::optional<std::vector<unsigned char>>, NextCiphertext> ||
                 std::is_invocable_r_v<std::optional<std::string_view>, NextCiphertext> ||
                 std::is_invocable_r_v<std::optional<std::string>, NextCiphertext> ||
-                std::is_invocable_r_v<
-                        std::optional<std::span<const std::byte>>,
-                        NextCiphertext> ||
+                std::is_invocable_r_v<std::optional<std::span<const std::byte>>, NextCiphertext> ||
                 std::is_invocable_r_v<std::optional<std::span<const std::byte>>, NextCiphertext>>>
 std::optional<std::vector<unsigned char>> decrypt_for_multiple(
         NextCiphertext next_ciphertext,

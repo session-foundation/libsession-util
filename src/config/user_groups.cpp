@@ -450,10 +450,10 @@ void UserGroups::set(const group_info& g) {
 
     if (g.secretkey.size() == 64 &&
         // Make sure the secretkey's embedded pubkey matches the group id:
-        std::span<const unsigned char>{g.secretkey.data() + 32, 32} ==
-                std::span<const unsigned char>{
+        to_string_view(std::span<const unsigned char>{g.secretkey.data() + 32, 32}) ==
+                to_string_view(std::span<const unsigned char>{
                         reinterpret_cast<const unsigned char*>(pk_bytes.data() + 1),
-                        pk_bytes.size() - 1})
+                        pk_bytes.size() - 1}))
         info["K"] = std::span<const unsigned char>{g.secretkey.data(), 32};
     else {
         info["K"] = std::span<const unsigned char>{};

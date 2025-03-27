@@ -153,7 +153,7 @@ std::vector<unsigned char> unwrap_config(
         throw std::runtime_error{"Failed to parse Envelope"};
 
     auto [content, sender] = decrypt_incoming(ed25519_sk, to_span(envelope.content()));
-    if (sender != ed25519_pk)
+    if (to_string_view(sender) != to_string_view(ed25519_pk))
         throw std::runtime_error{"Incoming config data was not from us; ignoring"};
 
     if (content.empty())

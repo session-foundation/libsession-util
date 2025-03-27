@@ -108,7 +108,9 @@ TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
 
     session::add_logger([&](std::string_view msg) { simple_logs.emplace_back(msg); });
 
-    { quic::Network net; }
+    {
+        quic::Network net;
+    }
 
     oxen::log::clear_sinks();
 

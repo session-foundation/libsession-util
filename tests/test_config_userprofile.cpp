@@ -370,7 +370,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 #else
     REQUIRE(pic.key != nullptr);
 #endif
-    CHECK(to_hex(std::span<const unsigned char>{pic.key, 32}) ==
+    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
     pic = user_profile_get_pic(conf2);
 #if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
@@ -384,7 +384,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 #else
     REQUIRE(pic.key != nullptr);
 #endif
-    CHECK(to_hex(std::span<const unsigned char>{pic.key, 32}) ==
+    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
 
     CHECK(user_profile_get_nts_priority(conf) == 9);

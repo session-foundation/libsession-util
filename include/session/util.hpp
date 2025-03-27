@@ -1,7 +1,6 @@
 #pragma once
 
 #include <oxenc/common.h>
-#include <oxenc/span.h>
 
 #include <array>
 #include <cassert>
@@ -26,7 +25,7 @@ inline std::span<const OutChar> as_span(const std::span<const InChar>& sp) {
     return {reinterpret_cast<const OutChar*>(sp.data()), sp.size()};
 }
 
-template <typename OutChar = unsigned char, oxenc::string_like T>
+template <typename OutChar = unsigned char, oxenc::bt_input_string T>
 inline std::span<const OutChar> to_span(const T& c) {
     return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
 }
@@ -37,7 +36,7 @@ inline std::span<const OutChar> to_span(const char (&literal)[N]) {
 }
 
 template <typename OutChar = unsigned char, typename Container>
-    requires(!oxenc::string_like<Container>)
+    requires(!oxenc::bt_input_string<Container>)
 inline std::span<const OutChar> to_span(const Container& c) {
     return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
 }
@@ -55,7 +54,7 @@ inline std::vector<OutChar> to_vector(std::span<const InChar> sp) {
     return convert<std::vector<OutChar>>(sp);
 }
 
-template <typename OutChar = unsigned char, oxenc::string_like T>
+template <typename OutChar = unsigned char, oxenc::bt_input_string T>
 inline std::vector<OutChar> to_vector(const T& c) {
     return convert<std::vector<OutChar>>(to_span(c));
 }
@@ -66,7 +65,7 @@ inline std::vector<OutChar> to_vector(const std::array<InChar, N>& arr) {
 }
 
 template <typename OutChar = unsigned char, typename Container>
-    requires(!oxenc::string_like<Container>)
+    requires(!oxenc::bt_input_string<Container>)
 inline std::vector<OutChar> to_vector(const Container& c) {
     return convert<std::vector<OutChar>>(to_span(c));
 }

@@ -486,7 +486,7 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
                             ? blinded25_id_from_ed(to_span(ed_pk_from_seed), server_pk)
                             : blinded15_id_from_ed(to_span(ed_pk_from_seed), server_pk);
 
-    if (sender_id == blinded_id)
+    if (to_string_view(sender_id) == to_string_view(blinded_id))
         dec_key = blinded_shared_secret(ed25519_privkey, sender_id, recipient_id, server_pk, true);
     else
         dec_key = blinded_shared_secret(ed25519_privkey, recipient_id, sender_id, server_pk, false);
@@ -547,11 +547,11 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
                     ? blinded25_id_from_ed(to_span(sender_ed_pk), server_pk, &session_id)
                     : blinded15_id_from_ed(to_span(sender_ed_pk), server_pk, &session_id);
 
-    bool matched = sender_id == extracted_sender;
+    bool matched = to_string_view(sender_id) == to_string_view(extracted_sender);
     if (!matched && extracted_sender[0] == 0x15) {
         // With 15-blinding we might need the negative instead:
         extracted_sender[31] ^= 0x80;
-        matched = sender_id == extracted_sender;
+        matched = to_string_view(sender_id) == to_string_view(extracted_sender);
     }
     if (!matched)
         throw std::runtime_error{"Blinded sender id does not match the actual sender"};

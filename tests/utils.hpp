@@ -1,7 +1,6 @@
 #pragma once
 
 #include <oxenc/hex.h>
-#include <oxenc/span.h>
 
 #include <array>
 #include <chrono>
@@ -61,19 +60,9 @@ inline std::string to_hex(std::vector<unsigned char> bytes) {
     oxenc::to_hex(bytes.begin(), bytes.end(), std::back_inserter(hex));
     return hex;
 }
-inline std::string to_hex(std::span<const unsigned char> bytes) {
-    std::string hex;
-    oxenc::to_hex(bytes.begin(), bytes.end(), std::back_inserter(hex));
-    return hex;
-}
 
 inline constexpr auto operator""_kiB(unsigned long long kiB) {
     return kiB * 1024;
-}
-
-template <oxenc::const_span_type T>
-inline std::string_view sp_to_sv(const T& sp) {
-    return {reinterpret_cast<const char*>(sp.data()), sp.size()};
 }
 
 // Returns the current timestamp in milliseconds

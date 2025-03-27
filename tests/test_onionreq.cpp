@@ -64,7 +64,7 @@ TEST_CASE("Onion request parser", "[onionreq][parser]") {
 
     OnionReqParser parser_gcm{B, b, enc_gcm};
     CHECK(to_string(parser_gcm.payload()) == "Hello world");
-    CHECK(sp_to_sv(parser_gcm.remote_pubkey()) == to_string_view(A));
+    CHECK(to_string_view(parser_gcm.remote_pubkey()) == to_string_view(A));
     auto aes_reply = parser_gcm.encrypt_reply(to_span("Goodbye world"));
     CHECK(aes_reply.size() == 12 + 13 + 16);
 
@@ -73,7 +73,7 @@ TEST_CASE("Onion request parser", "[onionreq][parser]") {
 
     OnionReqParser parser_xchacha20{B, b, enc_xchacha20};
     CHECK(to_string(parser_xchacha20.payload()) == "Hello world");
-    CHECK(sp_to_sv(parser_xchacha20.remote_pubkey()) == to_string_view(A));
+    CHECK(to_string_view(parser_xchacha20.remote_pubkey()) == to_string_view(A));
     auto xcha_reply = parser_xchacha20.encrypt_reply(to_span("Goodbye world"));
     CHECK(xcha_reply.size() == 16 + 13 + 24);
     CHECK(to_string(e.decrypt_xchacha20(xcha_reply, x25519_pubkey::from_bytes(B))) ==

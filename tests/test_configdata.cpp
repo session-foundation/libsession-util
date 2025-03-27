@@ -1,5 +1,6 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
+#include <oxenc/variant.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 

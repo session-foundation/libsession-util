@@ -59,12 +59,12 @@ namespace session {
 
 /// Returns the blinding factor for 15 blinding.  Typically this isn't used directly, but is
 /// exposed for debugging/testing.  Takes server pk in bytes, not hex.
-uc32 blind15_factor(std::span<const unsigned char> server_pk);
+std::array<unsigned char, 32> blind15_factor(std::span<const unsigned char> server_pk);
 
 /// Returns the blinding factor for 25 blinding.  Typically this isn't used directly, but is
 /// exposed for debugging/testing.  Takes session id and server pk in bytes, not hex.  session
 /// id can be 05-prefixed (33 bytes) or unprefixed (32 bytes).
-uc32 blind25_factor(
+std::array<unsigned char, 32> blind25_factor(
         std::span<const unsigned char> session_id, std::span<const unsigned char> server_pk);
 
 /// Computes the two possible 15-blinded ids from a session id and server pubkey.  Values accepted
@@ -129,10 +129,10 @@ std::vector<unsigned char> blinded25_id_from_ed(
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::pair<uc32, cleared_uc32> blind15_key_pair(
+std::pair<std::array<unsigned char, 32>, cleared_uc32> blind15_key_pair(
         std::span<const unsigned char> ed25519_sk,
         std::span<const unsigned char> server_pk,
-        uc32* k = nullptr);
+        std::array<unsigned char, 32>* k = nullptr);
 
 /// Computes a 25-blinded key pair.
 ///
@@ -146,10 +146,10 @@ std::pair<uc32, cleared_uc32> blind15_key_pair(
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::pair<uc32, cleared_uc32> blind25_key_pair(
+std::pair<std::array<unsigned char, 32>, cleared_uc32> blind25_key_pair(
         std::span<const unsigned char> ed25519_sk,
         std::span<const unsigned char> server_pk,
-        uc32* k_prime = nullptr);
+        std::array<unsigned char, 32>* k_prime = nullptr);
 
 /// Computes a version-blinded key pair.
 ///
@@ -158,7 +158,8 @@ std::pair<uc32, cleared_uc32> blind25_key_pair(
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.
-std::pair<uc32, cleared_uc64> blind_version_key_pair(std::span<const unsigned char> ed25519_sk);
+std::pair<std::array<unsigned char, 32>, cleared_uc64> blind_version_key_pair(
+        std::span<const unsigned char> ed25519_sk);
 
 /// Computes a verifiable 15-blinded signature that validates with the blinded pubkey that would
 /// be returned from blind15_key_pair().

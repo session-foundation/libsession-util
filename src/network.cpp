@@ -2686,7 +2686,9 @@ void Network::handle_errors(
             auto snode_it = std::find_if(
                     updated_path.nodes.begin(),
                     updated_path.nodes.end(),
-                    [&edpk_view](const auto& node) { return node.view_remote_key() == edpk_view; });
+                    [&edpk_view](const auto& node) {
+                        return to_string_view(node.view_remote_key()) == to_string_view(edpk_view);
+                    });
 
             if (snode_it != updated_path.nodes.end()) {
                 found_invalid_node = true;
