@@ -1,16 +1,16 @@
 #include <fmt/core.h>
-#include <session/network.h>
+#include <session/session_network.h>
 #include <sodium/randombytes.h>
-#include <oxen/quic/gnutls_crypto.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <nlohmann/json.hpp>
+#include <oxen/quic/gnutls_crypto.hpp>
 #include <session/curve25519.hpp>
 #include <session/ed25519.hpp>
-#include <session/network.hpp>
 #include <session/onionreq/hop_encryption.hpp>
 #include <session/onionreq/key_types.hpp>
+#include <session/session_network.hpp>
 #include <tuple>
 
 #include "utils.hpp"
@@ -20,6 +20,18 @@ using namespace session::onionreq;
 using namespace session::network;
 
 namespace {
+struct TestServer {
+    std::shared_ptr<oxen::quic::Loop> loop;
+    std::shared_ptr<oxen::quic::Endpoint> endpoint;
+    service_node node;
+
+    ~TestServer() {
+        loop->call_get([&]() { endpoint->close_conns(); });
+        endpoint.reset();
+        loop.reset();
+    }
+};
+
 struct Result {
     bool success;
     bool timeout;
@@ -178,20 +190,20 @@ class TestNetwork : public Network {
                    std::optional<std::string>) {});
     }
 
-    std::pair<std::pair<std::shared_ptr<oxen::quic::Loop>, std::shared_ptr<oxen::quic::Endpoint>>, service_node> create_test_node(uint16_t port) {
+    std::shared_ptr<TestServer> create_test_node(uint16_t port) {
         oxen::quic::opt::inbound_alpns server_alpns{"oxenstorage"};
         auto server_key_pair =
-                session::ed25519::ed25519_key_pair(to_unsigned_sv(fmt::format("{:032}", port)));
+                session::ed25519::ed25519_key_pair(to_span(fmt::format("{:032}", port)));
         auto server_x25519_pubkey = session::curve25519::to_curve25519_pubkey(
                 {server_key_pair.first.data(), server_key_pair.first.size()});
         auto server_x25519_seckey = session::curve25519::to_curve25519_seckey(
                 {server_key_pair.second.data(), server_key_pair.second.size()});
         auto creds = oxen::quic::GNUTLSCreds::make_from_ed_seckey(
-                from_unsigned_sv(server_key_pair.second));
+                to_string_view(server_key_pair.second));
         oxen::quic::Address server_local{port};
         session::onionreq::HopEncryption decryptor{
-                x25519_seckey::from_bytes(to_usv(server_x25519_seckey)),
-                x25519_pubkey::from_bytes(to_usv(server_x25519_pubkey)),
+                x25519_seckey::from_bytes(to_span(server_x25519_seckey)),
+                x25519_pubkey::from_bytes(to_span(server_x25519_pubkey)),
                 true};
 
         auto server_cb = [&](oxen::quic::message m) {
@@ -217,21 +229,24 @@ class TestNetwork : public Network {
         endpoint->listen(creds, server_constructor);
 
         auto node = service_node{
-                from_unsigned_sv(server_key_pair.first),
+                to_string_view(server_key_pair.first),
                 {2, 8, 0},
                 INVALID_SWARM_ID,
                 "127.0.0.1"s,
                 endpoint->local().port()};
 
-        return {{loop, endpoint}, node};
+        return std::make_shared<TestServer>(loop, endpoint, node);
     }
 
-    onion_path create_test_path() {
+    std::pair<std::vector<std::shared_ptr<TestServer>>, onion_path> create_test_path() {
+        std::vector<std::shared_ptr<TestServer>> path_servers;
         std::vector<service_node> path_nodes;
         path_nodes.reserve(3);
 
-        for (auto i = 0; i < 3; ++i)
-            path_nodes.emplace_back(create_test_node(static_cast<uint16_t>(1000 + i)).second);
+        for (auto i = 0; i < 3; ++i) {
+            path_servers.emplace_back(create_test_node(static_cast<uint16_t>(1000 + i)));
+            path_nodes.emplace_back(path_servers[i]->node);
+        }
 
         std::promise<std::pair<connection_info, std::optional<std::string>>> prom;
         establish_connection(
@@ -245,7 +260,7 @@ class TestNetwork : public Network {
         // Wait for the result to be set
         auto result = prom.get_future().get();
         REQUIRE(result.first.is_valid());
-        return onion_path{"Test", std::move(result.first), path_nodes, uint8_t{0}};
+        return {path_servers, onion_path{"Test", std::move(result.first), path_nodes, uint8_t{0}}};
     }
 
     // Overridden Functions
@@ -524,7 +539,7 @@ TEST_CASE("Network", "[network][handle_errors]") {
     CHECK(network->get_failure_count(target3) == 0);
     CHECK(network->get_failure_count(PathType::standard, path) == 1);
 
-    // // Check general error handling with no response (too many path failures)
+    // Check general error handling with no response (too many path failures)
     path = onion_path{"Test", {target, nullptr, nullptr, nullptr}, {target, target2, target3}, 9};
     network.emplace(std::nullopt, true, true, false);
     network->set_suspended(true);  // Make no requests in this test
@@ -555,7 +570,7 @@ TEST_CASE("Network", "[network][handle_errors]") {
     CHECK(network->get_failure_count(target3) == 1);                   // Other nodes incremented
     CHECK(network->get_failure_count(PathType::standard, path) == 0);  // Path dropped and reset
 
-    // // Check general error handling with a path and specific node failure
+    // Check general error handling with a path and specific node failure
     path = onion_path{"Test", {target, nullptr, nullptr, nullptr}, {target, target2, target3}, 0};
     auto response = std::string{"Next node not found: "} + ed25519_pubkey::from_bytes(ed_pk2).hex();
     network.emplace(std::nullopt, true, true, false);
@@ -1171,12 +1186,12 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
 
 TEST_CASE("Network", "[network][establish_connection]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
-    auto test_service_node = network.create_test_node(500).second;
+    auto test_server = network.create_test_node(500);
     std::promise<std::pair<connection_info, std::optional<std::string>>> prom;
 
     network.establish_connection(
             "Test",
-            test_service_node,
+            test_server->node,
             3s,
             [&prom](connection_info info, std::optional<std::string> error) {
                 prom.set_value({info, error});
@@ -1191,15 +1206,15 @@ TEST_CASE("Network", "[network][establish_connection]") {
 
 TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     std::optional<TestNetwork> network;
-    std::optional<service_node> test_service_node;
+    std::optional<std::shared_ptr<TestServer>> test_server;
     std::promise<Result> prom;
 
     // Test that it doesn't start checking for timeouts when the request doesn't have
     // a build paths timeout
     network.emplace(std::nullopt, true, true, false);
-    test_service_node.emplace(network->create_test_node(500).second);
+    test_server.emplace(network->create_test_node(500));
     network->send_onion_request(
-            *test_service_node,
+            (*test_server)->node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
@@ -1214,10 +1229,10 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it does start checking for timeouts when the request has a
     // paths build timeout
     network.emplace(std::nullopt, true, true, false);
-    test_service_node.emplace(network->create_test_node(500).second);
+    test_server.emplace(network->create_test_node(500));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
-            *test_service_node,
+            (*test_server)->node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
@@ -1232,10 +1247,10 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it fails the request with a timeout if it has a build path timeout
     // and the path build takes too long
     network.emplace(std::nullopt, true, true, false);
-    test_service_node.emplace(network->create_test_node(500).second);
+    test_server.emplace(network->create_test_node(500));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
-            *test_service_node,
+            (*test_server)->node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&prom](bool success,
@@ -1257,21 +1272,21 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
 
 TEST_CASE("Network", "[network][send_request]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
-    auto test_service_node = network.create_test_node(500).second;
+    auto test_server = network.create_test_node(500);
     std::promise<Result> prom;
 
     network.establish_connection(
             "Test",
-            test_service_node,
+            test_server->node,
             3s,
-            [&prom, &network, &test_service_node](
+            [&prom, &network, &test_server](
                     connection_info info, std::optional<std::string> error) {
                 if (!info.is_valid())
                     return prom.set_value({false, false, -1, {}, error.value_or("Unknown Error")});
 
                 network.send_request(
                         request_info::make(
-                                test_service_node,
+                                test_server->node,
                                 to_vector("{}"),
                                 std::nullopt,
                                 3s,
@@ -1310,14 +1325,14 @@ TEST_CASE("Network", "[network][send_request]") {
 
 TEST_CASE("Network", "[network][send_onion_request]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
-    auto test_service_node = network.create_test_node(500).second;
-    auto test_path = network.create_test_path();
+    auto test_server = network.create_test_node(500);
+    auto [test_path_servers, test_path] = network.create_test_path();
     network.handle_onion_requests_as_plaintext = true;
     network.set_paths(PathType::standard, {test_path});
     std::promise<Result> result_promise;
 
     network.send_onion_request(
-            test_service_node,
+            test_server->node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&result_promise](
@@ -1352,27 +1367,27 @@ TEST_CASE("Network", "[network][send_onion_request]") {
 
 TEST_CASE("Network", "[network][c][network_send_onion_request]") {
     auto test_network = std::make_unique<TestNetwork>(std::nullopt, true, true, false);
-    auto test_service_node_cpp = test_network->create_test_node(500).second;
-    auto test_path = test_network->create_test_path();
+    auto test_server_cpp = test_network->create_test_node(500);
+    auto [test_path_servers_cpp, test_path_cpp] = test_network->create_test_path();
     test_network->handle_onion_requests_as_plaintext = true;
-    test_network->set_paths(PathType::standard, {test_path});
+    test_network->set_paths(PathType::standard, {test_path_cpp});
 
     // Convert TestNetwork to network_object to pass to C API
     auto n_object = std::make_unique<network_object>();
     n_object->internals = test_network.release();
     network_object* network = n_object.release();
 
-    // Convert test_service_node_cpp to network_service_node to pass to C API
-    auto ip_v4 = test_service_node_cpp.to_ipv4();
+    // Convert test_server_cpp->node to network_service_node to pass to C API
+    auto ip_v4 = test_server_cpp->node.to_ipv4();
     std::array<uint8_t, 4> target_ip = {
             static_cast<uint8_t>(ip_v4.addr >> 24),
             static_cast<uint8_t>((ip_v4.addr >> 16) & 0xFF),
             static_cast<uint8_t>((ip_v4.addr >> 8) & 0xFF),
             static_cast<uint8_t>(ip_v4.addr & 0xFF)};
     auto test_service_node = network_service_node{};
-    test_service_node.quic_port = test_service_node_cpp.port();
+    test_service_node.quic_port = test_server_cpp->node.port();
     std::copy(target_ip.begin(), target_ip.end(), test_service_node.ip);
-    auto test_pubkey_hex = oxenc::to_hex(test_service_node_cpp.view_remote_key());
+    auto test_pubkey_hex = oxenc::to_hex(test_server_cpp->node.view_remote_key());
     std::strcpy(test_service_node.ed25519_pubkey_hex, test_pubkey_hex.c_str());
 
     // Make the request

@@ -1,4 +1,4 @@
-#include "session/network.hpp"
+#include "session/session_network.hpp"
 
 #include <fmt/ranges.h>
 #include <oxenc/base64.h>
@@ -24,11 +24,11 @@
 #include "session/ed25519.hpp"
 #include "session/export.h"
 #include "session/file.hpp"
-#include "session/network.h"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/key_types.hpp"
 #include "session/onionreq/response_parser.hpp"
+#include "session/session_network.h"
 #include "session/util.hpp"
 
 using namespace oxen;
@@ -506,7 +506,7 @@ Network::Network(
         single_path_mode{single_path_mode},
         cache_path{cache_path.value_or(default_cache_path)} {
     loop = std::make_shared<quic::Loop>();
-    
+
     // Load the cache from disk and start the disk write thread
     if (should_cache_to_disk) {
         load_cache_from_disk();
@@ -523,7 +523,13 @@ Network::Network(
 }
 
 Network::~Network() {
-    _close_connections();
+    // Flag the network as suspended when we start destroying to ensure no new requests get started
+    // (which could result in additional calls being added to the `loop` incorrectly and cause bad
+    // memory crashes)
+    suspended = true;
+
+    // Trigger a 'call_get' to block until the endpoint has been destroyed
+    loop->call_get([this]() mutable { _close_connections(); });
 
     {
         std::lock_guard lock{snode_cache_mutex};
@@ -709,8 +715,9 @@ void Network::close_connections() {
 }
 
 void Network::_close_connections() {
-    // Explicitly reset the endpoint to close all connections
-    endpoint->close_conns();
+    // Explicitly close all connections then reset the endpoint
+    if (endpoint)
+        endpoint->close_conns();
     endpoint.reset();
 
     // Cancel any pending requests (they can't succeed once the connection is closed)
@@ -767,7 +774,8 @@ std::chrono::milliseconds Network::retry_delay(
 std::shared_ptr<quic::Endpoint> Network::get_endpoint() {
     return loop->call_get([this]() mutable {
         if (!endpoint)
-            endpoint = quic::Endpoint::endpoint(*loop, quic::Address{"0.0.0.0", 0}, quic::opt::alpns{ALPN});
+            endpoint = quic::Endpoint::endpoint(
+                    *loop, quic::Address{"0.0.0.0", 0}, quic::opt::alpns{ALPN});
 
         return endpoint;
     });
@@ -860,7 +868,7 @@ void Network::establish_connection(
     auto cb_called = std::make_shared<std::once_flag>();
     auto cb = std::make_shared<std::function<void(connection_info, std::optional<std::string>)>>(
             std::move(callback));
-    auto conn_promise = std::promise<std::shared_ptr<oxen::quic::connection_interface>>();
+    auto conn_promise = std::promise<std::shared_ptr<oxen::quic::Connection>>();
     auto conn_future = conn_promise.get_future().share();
     auto handshake_timeout =
             timeout ? std::optional{quic::opt::handshake_timeout{
@@ -872,7 +880,7 @@ void Network::establish_connection(
             creds,
             quic::opt::keep_alive{10s},
             handshake_timeout,
-            [this, id, target, cb, cb_called, conn_future](quic::connection_interface&) mutable {
+            [this, id, target, cb, cb_called, conn_future](quic::Connection&) mutable {
                 log::trace(cat, "Connection established for {}.", id);
 
                 // Just in case, call it within a `loop->call`
@@ -891,7 +899,7 @@ void Network::establish_connection(
                 });
             },
             [this, target, id, cb, cb_called, conn_future](
-                    quic::connection_interface& conn, uint64_t error_code) mutable {
+                    quic::Connection& conn, uint64_t error_code) mutable {
                 if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
                     log::info(
                             cat,
@@ -1410,7 +1418,8 @@ void Network::build_path(std::string path_id, PathType path_type) {
             path_build_failures++;
             unused_connections.push_front(std::move(conn_info));
             auto delay = retry_delay(path_build_failures);
-            loop->call_later(delay, [this, path_id, path_type]() { build_path(path_id, path_type); });
+            loop->call_later(
+                    delay, [this, path_id, path_type]() { build_path(path_id, path_type); });
             return;
         }
 
@@ -2275,7 +2284,7 @@ Network::process_v4_onion_response(Builder builder, std::string response) {
 // MARK: Error Handling
 
 std::pair<uint16_t, std::string> Network::validate_response(quic::message resp, bool is_bencoded) {
-    std::string body = resp.body_str();
+    std::string body = std::string(resp.body());
 
     if (resp.timed_out)
         throw std::runtime_error{"Timed out"};

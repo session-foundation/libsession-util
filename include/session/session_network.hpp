@@ -86,7 +86,7 @@ struct service_node : public oxen::quic::RemoteAddress {
 struct connection_info {
     service_node node;
     std::shared_ptr<size_t> pending_requests;
-    std::shared_ptr<oxen::quic::connection_interface> conn;
+    std::shared_ptr<oxen::quic::Connection> conn;
     std::shared_ptr<oxen::quic::BTRequestStream> stream;
 
     bool is_valid() const { return conn && stream && !stream->is_closing(); };
@@ -206,7 +206,7 @@ class Network {
     // General values
     bool suspended = false;
     ConnectionStatus status;
-    
+
     std::shared_ptr<oxen::quic::Loop> loop;
     std::shared_ptr<oxen::quic::Endpoint> endpoint;
     std::unordered_map<PathType, std::vector<onion_path>> paths;
