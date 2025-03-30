@@ -649,13 +649,13 @@ ustring Keys::swarm_subaccount_token(std::string_view session_id, bool write, bo
     return out;
 }
 
-Keys::swarm_auth Keys::swarm_subaccount_sign(
-        ustring_view msg, ustring_view sign_val, bool binary) const {
+Keys::swarm_auth Keys::swarm_subaccount_sign_as_user(
+        session::ustring_view user_ed25519_sk,
+        ustring_view msg,
+        ustring_view sign_val,
+        bool binary) {
     if (sign_val.size() != 100)
         throw std::logic_error{"Invalid signing value: size is wrong"};
-
-    if (!_sign_pk)
-        throw std::logic_error{"Unable to verify: group pubkey is not set (!?)"};
 
     Keys::swarm_auth result;
     auto& [token, sub_sig, sig] = result;
@@ -767,6 +767,12 @@ Keys::swarm_auth Keys::swarm_subaccount_sign(
     }
 
     return result;
+}
+
+Keys::swarm_auth Keys::swarm_subaccount_sign(
+        ustring_view msg, ustring_view sign_val, bool binary) const {
+    auto user_ed25519_sk_buf = this->user_ed25519_sk.data();
+    return Keys::swarm_subaccount_sign_as_user(user_ed25519_sk_buf, msg, sign_val, binary);
 }
 
 bool Keys::swarm_verify_subaccount(ustring_view sign_val, bool write, bool del) const {

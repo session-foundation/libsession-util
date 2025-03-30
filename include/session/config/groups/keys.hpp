@@ -482,6 +482,12 @@ class Keys : public ConfigSig {
     swarm_auth swarm_subaccount_sign(
             ustring_view msg, ustring_view signing_value, bool binary = false) const;
 
+    static Keys::swarm_auth swarm_subaccount_sign_as_user(
+            session::ustring_view user_ed25519_sk,
+            session::ustring_view msg,
+            session::ustring_view sign_val,
+            bool binary = false);
+
     /// API: groups/Keys::swarm_subaccount_token
     ///
     /// Constructs the subaccount token for a session id.  The main use of this is to submit a swarm
