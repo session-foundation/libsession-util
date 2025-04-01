@@ -78,7 +78,8 @@ struct service_node : public oxen::quic::RemoteAddress {
 
     auto operator<=>(const service_node& other) const = delete;
     bool operator==(const service_node& other) const {
-        return RemoteAddress::operator==(other) && storage_server_version == other.storage_server_version && swarm_id == other.swarm_id;
+        return RemoteAddress::operator==(other) &&
+               storage_server_version == other.storage_server_version && swarm_id == other.swarm_id;
     }
 };
 

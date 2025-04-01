@@ -723,9 +723,9 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     auto compare_service_nodes = [](const service_node& a, const service_node& b) {
         if (auto cmp = oxen::quic::Address(a) <=> oxen::quic::Address(b); cmp != 0)
             return cmp < 0;
-        
+
         return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
-            std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+               std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
     };
 
     // Should shuffle the result

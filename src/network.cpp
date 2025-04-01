@@ -1326,9 +1326,9 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                 auto compare_service_nodes = [](const service_node& a, const service_node& b) {
                     if (auto cmp = quic::Address(a) <=> quic::Address(b); cmp != 0)
                         return cmp < 0;
-                    
+
                     return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
-                        std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+                           std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
                 };
 
                 for (auto& nodes : *snode_refresh_results)
