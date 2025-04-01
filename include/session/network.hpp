@@ -76,35 +76,10 @@ struct service_node : public oxen::quic::RemoteAddress {
         return *this;
     }
 
-    auto operator<=>(const service_node& other) const {
-        auto cmp = oxen::quic::RemoteAddress::operator<=>(other);
-        if (cmp == 0) {
-            if (storage_server_version != other.storage_server_version) {
-#if defined(__ANDROID__) && __NDK_MAJOR__ < 27
-                if (storage_server_version.size() != other.storage_server_version.size())
-                    return storage_server_version.size() < other.storage_server_version.size()
-                                 ? std::strong_ordering::less
-                                 : std::strong_ordering::greater;
-
-                for (size_t i = 0; i < storage_server_version.size(); ++i) {
-                    if (storage_server_version[i] != other.storage_server_version[i])
-                        return storage_server_version[i] < other.storage_server_version[i]
-                                     ? std::strong_ordering::less
-                                     : std::strong_ordering::greater;
-                }
-
-                return std::strong_ordering::equal;
-#else
-                return storage_server_version <=> other.storage_server_version;
-#endif
-            }
-
-            return swarm_id <=> other.swarm_id;
-        }
-
-        return cmp;
+    auto operator<=>(const service_node& other) const = delete;
+    bool operator==(const service_node& other) const {
+        return RemoteAddress::operator==(other) && storage_server_version == other.storage_server_version && swarm_id == other.swarm_id;
     }
-    bool operator==(const service_node& other) const { return (*this <=> other) == 0; }
 };
 
 struct connection_info {

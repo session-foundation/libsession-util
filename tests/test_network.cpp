@@ -720,6 +720,14 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     auto path =
             onion_path{"Test", invalid_info, {snode_cache[0], snode_cache[1], snode_cache[2]}, 0};
 
+    auto compare_service_nodes = [](const service_node& a, const service_node& b) {
+        if (auto cmp = oxen::quic::Address(a) <=> oxen::quic::Address(b); cmp != 0)
+            return cmp < 0;
+        
+        return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
+            std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+    };
+
     // Should shuffle the result
     network.emplace(std::nullopt, true, false, false);
     network->set_snode_cache(snode_cache);
@@ -729,7 +737,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network.emplace(std::nullopt, true, false, false);
     network->set_snode_cache(snode_cache);
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == snode_cache);
 
     // Should exclude nodes used in paths
@@ -737,7 +745,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_paths(PathType::standard, {path});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 3, snode_cache.end()});
 
     // Should exclude nodes in unused connections
@@ -745,7 +753,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_unused_connections({invalid_info});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes in in-progress connections
@@ -753,7 +761,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_in_progress_connections({{"Test", snode_cache.front()}});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes destinations in pending requests
@@ -769,7 +777,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
                     std::nullopt,
                     PathType::standard));
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes which have passed the failure threshold
@@ -777,7 +785,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_failure_count(snode_cache.front(), 10);
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes which have the same IP if one was excluded
