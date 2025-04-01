@@ -3,7 +3,6 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
@@ -493,7 +492,7 @@ bool UserGroups::erase(const legacy_group_info& c) {
 }
 
 bool UserGroups::erase(const any_group_info& c) {
-    return var::visit([this](const auto& c) { return erase(c); }, c);
+    return std::visit([this](const auto& c) { return erase(c); }, c);
 }
 bool UserGroups::erase_community(std::string_view base_url, std::string_view room) {
     return erase(community_info{base_url, room});

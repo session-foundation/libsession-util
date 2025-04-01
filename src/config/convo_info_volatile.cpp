@@ -3,7 +3,6 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
 #include <charconv>
@@ -318,7 +317,7 @@ bool ConvoInfoVolatile::erase(const convo::legacy_group& c) {
 }
 
 bool ConvoInfoVolatile::erase(const convo::any& c) {
-    return var::visit([this](const auto& c) { return erase(c); }, c);
+    return std::visit([this](const auto& c) { return erase(c); }, c);
 }
 bool ConvoInfoVolatile::erase_1to1(std::string_view session_id) {
     return erase(convo::one_to_one{session_id});

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <oxenc/bt_value.h>
-#include <oxenc/variant.h>
 
 #include <catch2/catch_tostring.hpp>
+#include <variant>
 
 namespace Catch {
 
@@ -22,7 +22,7 @@ struct StringMaker<oxenc::bt_dict> {
 };
 
 inline std::string StringMaker<oxenc::bt_value>::convert(const oxenc::bt_value& value) {
-    return var::visit(
+    return std::visit(
             [](const auto& x) {
                 return StringMaker<std::remove_cvref_t<decltype(x)>>{}.convert(x);
             },

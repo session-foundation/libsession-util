@@ -1,6 +1,5 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
@@ -102,11 +101,11 @@ TEST_CASE("config pruning", "[config][prune]") {
 
 // shortcut to access a nested dict
 auto& d(config::dict_value& v) {
-    return var::get<config::dict>(v);
+    return std::get<config::dict>(v);
 }
 // or set
 auto& s(config::dict_value& v) {
-    return var::get<config::set>(v);
+    return std::get<config::set>(v);
 }
 
 std::vector<unsigned char> blake2b(std::span<const unsigned char> data) {
