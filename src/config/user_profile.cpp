@@ -10,11 +10,12 @@
 #include "session/types.hpp"
 
 using namespace session::config;
-using session::ustring_view;
 
 LIBSESSION_C_API const size_t PROFILE_PIC_MAX_URL_LENGTH = profile_pic::MAX_URL_LENGTH;
 
-UserProfile::UserProfile(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+UserProfile::UserProfile(
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
@@ -62,7 +63,9 @@ profile_pic UserProfile::get_profile_pic() const {
     if (auto* url = data["p"].string(); url && !url->empty())
         pic.url = *url;
     if (auto* key = data["q"].string(); key && key->size() == 32)
-        pic.key = {reinterpret_cast<const unsigned char*>(key->data()), 32};
+        pic.key.assign(
+                reinterpret_cast<const unsigned char*>(key->data()),
+                reinterpret_cast<const unsigned char*>(key->data()) + 32);
     return pic;
 }
 
@@ -77,7 +80,7 @@ LIBSESSION_C_API user_profile_pic user_profile_get_pic(const config_object* conf
     return p;
 }
 
-void UserProfile::set_profile_pic(std::string_view url, ustring_view key) {
+void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
     set_pair_if(!url.empty() && key.size() == 32, data["p"], url, data["q"], key);
 }
 
@@ -87,7 +90,7 @@ void UserProfile::set_profile_pic(profile_pic pic) {
 
 LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    ustring_view key;
+    std::span<const unsigned char> key;
     if (!url.empty())
         key = {pic.key, 32};
 

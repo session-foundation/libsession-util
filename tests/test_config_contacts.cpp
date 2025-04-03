@@ -31,7 +31,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
 
     constexpr auto definitely_real_id =
             "050000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -126,7 +126,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(seqno == 2);
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("fakehash2", to_push);
     contacts.merge(merge_configs);
     contacts2.confirm_pushed(seqno, "fakehash2");
@@ -165,7 +165,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     session::config::profile_pic p;
     {
         // These don't stay alive, so we use set_key/set_url to make a local copy:
-        ustring key = "qwerty78901234567890123456789012"_bytes;
+        std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
         std::string url = "http://example.com/huge.bmp";
         p.set_key(std::move(key));
         p.url = std::move(url);
@@ -422,7 +422,7 @@ TEST_CASE("huge contacts compression", "[config][compression][contacts]") {
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
 
     for (uint16_t i = 0; i < 10000; i++) {
         char buf[2];
@@ -453,7 +453,7 @@ TEST_CASE("needs_dump bug", "[config][needs_dump]") {
 
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK_FALSE(contacts.needs_dump());
 

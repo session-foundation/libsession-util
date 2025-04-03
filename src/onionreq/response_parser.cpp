@@ -27,7 +27,7 @@ bool ResponseParser::response_long_enough(EncryptType enc_type, size_t response_
     return HopEncryption::response_long_enough(enc_type, response_size);
 }
 
-ustring ResponseParser::decrypt(ustring ciphertext) const {
+std::vector<unsigned char> ResponseParser::decrypt(std::vector<unsigned char> ciphertext) const {
     HopEncryption d{x25519_keypair_.second, x25519_keypair_.first, false};
 
     // FIXME: The legacy PN server doesn't support 'xchacha20' onion requests so would return an
@@ -54,10 +54,8 @@ ustring ResponseParser::decrypt(ustring ciphertext) const {
 
 extern "C" {
 
-using session::ustring;
-
 LIBSESSION_C_API bool onion_request_decrypt(
-        const unsigned char* ciphertext,
+        const unsigned char* ciphertext_,
         size_t ciphertext_len,
         ENCRYPT_TYPE enc_type_,
         unsigned char* destination_x25519_pubkey,
@@ -65,7 +63,7 @@ LIBSESSION_C_API bool onion_request_decrypt(
         unsigned char* final_x25519_seckey,
         unsigned char** plaintext_out,
         size_t* plaintext_out_len) {
-    assert(ciphertext && destination_x25519_pubkey && final_x25519_pubkey && final_x25519_seckey &&
+    assert(ciphertext_ && destination_x25519_pubkey && final_x25519_pubkey && final_x25519_seckey &&
            ciphertext_len > 0);
 
     try {
@@ -89,7 +87,10 @@ LIBSESSION_C_API bool onion_request_decrypt(
                 session::onionreq::x25519_pubkey::from_bytes({final_x25519_pubkey, 32}),
                 false};
 
-        ustring result;
+        std::vector<unsigned char> result;
+        std::vector<unsigned char> ciphertext;
+        ciphertext.reserve(ciphertext_len);
+        ciphertext.assign(ciphertext_, ciphertext_ + ciphertext_len);
 
         // FIXME: The legacy PN server doesn't support 'xchacha20' onion requests so would return an
         // error encrypted with 'aes_gcm' so try to decrypt in case that is what happened - this
@@ -97,13 +98,13 @@ LIBSESSION_C_API bool onion_request_decrypt(
         try {
             result = d.decrypt(
                     enc_type,
-                    ustring{ciphertext, ciphertext_len},
+                    ciphertext,
                     session::onionreq::x25519_pubkey::from_bytes({destination_x25519_pubkey, 32}));
         } catch (...) {
             if (enc_type == session::onionreq::EncryptType::xchacha20)
                 result = d.decrypt(
                         session::onionreq::EncryptType::aes_gcm,
-                        ustring{ciphertext, ciphertext_len},
+                        ciphertext,
                         session::onionreq::x25519_pubkey::from_bytes(
                                 {destination_x25519_pubkey, 32}));
             else

@@ -1,5 +1,8 @@
 #include "session/network.hpp"
 
+#include <fmt/ranges.h>
+#include <oxenc/base64.h>
+#include <oxenc/bt_producer.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
 #include <sodium/crypto_sign_ed25519.h>
@@ -10,6 +13,7 @@
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <oxen/quic.hpp>
+#include <oxen/quic/gnutls_crypto.hpp>
 #include <oxen/quic/opt.hpp>
 #include <oxen/quic/utils.hpp>
 #include <string>
@@ -91,7 +95,7 @@ namespace {
 
     constexpr auto node_not_found_prefix = "502 Bad Gateway\n\nNext node not found: "sv;
     constexpr auto node_not_found_prefix_no_status = "Next node not found: "sv;
-    constexpr auto ALPN = "oxenstorage"sv;
+    constexpr auto ALPN = "oxenstorage";
     constexpr auto ONION = "onion_req";
 
     enum class PathSelectionBehaviour {
@@ -253,7 +257,7 @@ namespace {
                 node.swarm_id);
     }
 
-    session::onionreq::x25519_pubkey compute_xpk(ustring_view ed25519_pk) {
+    session::onionreq::x25519_pubkey compute_xpk(std::span<const unsigned char> ed25519_pk) {
         std::array<unsigned char, 32> xpk;
         if (0 != crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed25519_pk.data()))
             throw std::runtime_error{
@@ -450,14 +454,14 @@ namespace detail {
 
 request_info request_info::make(
         onionreq::network_destination _dest,
-        std::optional<ustring> _original_body,
+        std::optional<std::vector<unsigned char>> _original_body,
         std::optional<session::onionreq::x25519_pubkey> _swarm_pk,
         std::chrono::milliseconds _request_timeout,
         std::optional<std::chrono::milliseconds> _request_and_path_build_timeout,
         PathType _type,
         std::optional<std::string> _req_id,
         std::optional<std::string> _ep,
-        std::optional<ustring> _body) {
+        std::optional<std::vector<unsigned char>> _body) {
     return request_info{
             _req_id.value_or("R-{}"_format(random::random_base32(4))),
             std::move(_dest),
@@ -852,7 +856,7 @@ void Network::establish_connection(
                 {target, std::make_shared<size_t>(0), nullptr, nullptr}, "Network is suspended.");
 
     auto conn_key_pair = ed25519::ed25519_key_pair();
-    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(from_unsigned_sv(conn_key_pair.second));
+    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
     auto cb_called = std::make_shared<std::once_flag>();
     auto cb = std::make_shared<std::function<void(connection_info, std::optional<std::string>)>>(
             std::move(callback));
@@ -1236,7 +1240,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     };
     auto info = request_info::make(
             target_node,
-            ustring{quic::to_usv(payload.dump())},
+            to_vector(payload.dump()),
             std::nullopt,
             quic::DEFAULT_TIMEOUT,
             std::nullopt,
@@ -1319,8 +1323,16 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                 }
 
                 // Sort the vectors (so make it easier to find the intersection)
+                auto compare_service_nodes = [](const service_node& a, const service_node& b) {
+                    if (auto cmp = quic::Address(a) <=> quic::Address(b); cmp != 0)
+                        return cmp < 0;
+
+                    return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
+                           std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+                };
+
                 for (auto& nodes : *snode_refresh_results)
-                    std::stable_sort(nodes.begin(), nodes.end());
+                    std::stable_sort(nodes.begin(), nodes.end(), compare_service_nodes);
 
                 auto nodes = (*snode_refresh_results)[0];
 
@@ -1334,7 +1346,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                                 (*snode_refresh_results)[i].begin(),
                                 (*snode_refresh_results)[i].end(),
                                 std::back_inserter(temp),
-                                [](const auto& a, const auto& b) { return a == b; });
+                                compare_service_nodes);
                         nodes = std::move(temp);
                     }
                 }
@@ -1776,10 +1788,10 @@ void Network::send_request(
         return handle_response(
                 false, false, -1, {content_type_plain_text}, "Network is unreachable.");
 
-    quic::bstring_view payload{};
+    std::span<const std::byte> payload{};
 
     if (info.body)
-        payload = convert_sv<std::byte>(*info.body);
+        payload = to_span<std::byte>(*info.body);
 
     // Calculate the remaining timeout
     std::chrono::milliseconds timeout = info.request_timeout;
@@ -1846,7 +1858,7 @@ void Network::send_request(
 
 void Network::send_onion_request(
         onionreq::network_destination destination,
-        std::optional<ustring> body,
+        std::optional<std::vector<unsigned char>> body,
         std::optional<session::onionreq::x25519_pubkey> swarm_pubkey,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
@@ -2059,7 +2071,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
 }
 
 void Network::upload_file_to_server(
-        ustring data,
+        std::vector<unsigned char> data,
         onionreq::ServerDestination server,
         std::optional<std::string> file_name,
         network_response_callback_t handle_response,
@@ -2148,11 +2160,11 @@ void Network::get_client_version(
     }
 
     // Generate the auth signature
-    auto blinded_keys = blind_version_key_pair(to_unsigned_sv(seckey.view()));
+    auto blinded_keys = blind_version_key_pair(to_span(seckey.view()));
     auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                              (std::chrono::system_clock::now()).time_since_epoch())
                              .count();
-    auto signature = blind_version_sign(to_unsigned_sv(seckey.view()), platform, timestamp);
+    auto signature = blind_version_sign(to_span(seckey.view()), platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(file_server_pubkey);
     std::string blinded_pk_hex;
     blinded_pk_hex.reserve(66);
@@ -2165,7 +2177,7 @@ void Network::get_client_version(
     auto headers = std::vector<std::pair<std::string, std::string>>{};
     headers.emplace_back("X-FS-Pubkey", blinded_pk_hex);
     headers.emplace_back("X-FS-Timestamp", "{}"_format(timestamp));
-    headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature));
+    headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature.begin(), signature.end()));
 
     send_onion_request(
             ServerDestination{
@@ -2197,7 +2209,7 @@ Network::process_v3_onion_response(Builder builder, std::string response) {
     if (!oxenc::is_base64(base64_iv_and_ciphertext))
         throw std::runtime_error{"Invalid base64 encoded IV and ciphertext."};
 
-    ustring iv_and_ciphertext;
+    std::vector<unsigned char> iv_and_ciphertext;
     oxenc::from_base64(
             base64_iv_and_ciphertext.begin(),
             base64_iv_and_ciphertext.end(),
@@ -2233,12 +2245,12 @@ Network::process_v3_onion_response(Builder builder, std::string response) {
 
 std::tuple<int16_t, std::vector<std::pair<std::string, std::string>>, std::optional<std::string>>
 Network::process_v4_onion_response(Builder builder, std::string response) {
-    ustring response_data{to_unsigned(response.data()), response.size()};
+    auto response_data = to_vector(response);
     auto parser = ResponseParser(builder);
     auto result = parser.decrypt(response_data);
 
     // Process the bencoded response
-    oxenc::bt_list_consumer result_bencode{result};
+    oxenc::bt_list_consumer result_bencode{to_span<std::byte>(result)};
 
     if (result_bencode.is_finished() || !result_bencode.is_string())
         throw std::runtime_error{"Invalid bencoded response"};
@@ -2677,12 +2689,14 @@ void Network::handle_errors(
             oxenc::is_hex(*ed25519PublicKey)) {
             session::onionreq::ed25519_pubkey edpk =
                     session::onionreq::ed25519_pubkey::from_hex(*ed25519PublicKey);
-            auto edpk_view = to_unsigned_sv(edpk.view());
+            auto edpk_view = to_span(edpk.view());
 
             auto snode_it = std::find_if(
                     updated_path.nodes.begin(),
                     updated_path.nodes.end(),
-                    [&edpk_view](const auto& node) { return node.view_remote_key() == edpk_view; });
+                    [&edpk_view](const auto& node) {
+                        return to_string_view(node.view_remote_key()) == to_string_view(edpk_view);
+                    });
 
             if (snode_it != updated_path.nodes.end()) {
                 found_invalid_node = true;
@@ -2924,9 +2938,9 @@ LIBSESSION_C_API void network_send_onion_request_to_snode_destination(
     assert(callback);
 
     try {
-        std::optional<ustring> body;
+        std::optional<std::vector<unsigned char>> body;
         if (body_size > 0)
-            body = {body_, body_size};
+            body.emplace(body_, body_ + body_size);
 
         std::optional<x25519_pubkey> swarm_pubkey;
         if (swarm_pubkey_hex)
@@ -3006,9 +3020,9 @@ LIBSESSION_C_API void network_send_onion_request_to_server_destination(
            server.x25519_pubkey && callback);
 
     try {
-        std::optional<ustring> body;
+        std::optional<std::vector<unsigned char>> body;
         if (body_size > 0)
-            body = {body_, body_size};
+            body.emplace(body_, body_ + body_size);
 
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout;
         if (request_and_path_build_timeout_ms > 0)
@@ -3087,7 +3101,7 @@ LIBSESSION_C_API void network_upload_to_server(
                     std::chrono::milliseconds{request_and_path_build_timeout_ms};
 
         unbox(network).upload_file_to_server(
-                {data, data_len},
+                {data, data + data_len},
                 network::detail::convert_server_destination(server),
                 file_name,
                 [cb = std::move(callback), ctx](

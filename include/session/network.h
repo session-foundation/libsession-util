@@ -77,7 +77,7 @@ LIBSESSION_EXPORT bool network_init(
         bool use_testnet,
         bool single_path_mode,
         bool pre_build_paths,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: network/network_free
 ///

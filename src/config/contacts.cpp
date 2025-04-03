@@ -14,8 +14,6 @@
 
 using namespace std::literals;
 using namespace session::config;
-using session::ustring;
-using session::ustring_view;
 
 LIBSESSION_C_API const size_t CONTACT_MAX_NAME_LENGTH = contact_info::MAX_NAME_LENGTH;
 
@@ -56,7 +54,9 @@ void contact_info::set_nickname_truncated(std::string n) {
     set_nickname(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
 }
 
-Contacts::Contacts(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+Contacts::Contacts(
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
@@ -75,7 +75,7 @@ void contact_info::load(const dict& info_dict) {
     nickname = maybe_string(info_dict, "N").value_or("");
 
     auto url = maybe_string(info_dict, "p");
-    auto key = maybe_ustring(info_dict, "q");
+    auto key = maybe_vector(info_dict, "q");
     if (url && key && !url->empty() && key->size() == 32) {
         profile_picture.url = std::move(*url);
         profile_picture.key = std::move(*key);
@@ -152,7 +152,7 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(c.profile_pic.url)) {
         profile_picture.url = c.profile_pic.url;
-        profile_picture.key = {c.profile_pic.key, 32};
+        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
     }
     approved = c.approved;
     approved_me = c.approved_me;

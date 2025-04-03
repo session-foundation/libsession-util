@@ -1,11 +1,11 @@
 #include "session/onionreq/builder.hpp"
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <nettle/gcm.h>
 #include <oxenc/bt.h>
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
 #include <sodium/crypto_auth_hmacsha256.h>
 #include <sodium/crypto_box.h>
@@ -31,7 +31,6 @@
 
 using namespace std::literals;
 using namespace oxen::log::literals;
-using session::ustring_view;
 
 namespace session::onionreq {
 
@@ -49,8 +48,8 @@ namespace detail {
 
 namespace {
 
-    ustring encode_size(uint32_t s) {
-        ustring result;
+    std::vector<unsigned char> encode_size(uint32_t s) {
+        std::vector<unsigned char> result;
         result.resize(4);
         oxenc::write_host_as_little(s, result.data());
         return result;
@@ -83,7 +82,7 @@ Builder::Builder(
         add_hop(n.view_remote_key());
 }
 
-void Builder::add_hop(ustring_view remote_key) {
+void Builder::add_hop(std::span<const unsigned char> remote_key) {
     hops_.push_back({ed25519_pubkey::from_bytes(remote_key), compute_x25519_pubkey(remote_key)});
 }
 
@@ -122,11 +121,12 @@ void Builder::generate(network::request_info& info) {
     info.body = build(_generate_payload(info.original_body));
 }
 
-ustring Builder::_generate_payload(std::optional<ustring> body) const {
+std::vector<unsigned char> Builder::_generate_payload(
+        std::optional<std::vector<unsigned char>> body) const {
     // If we don't have the data required for a server request, then assume it's targeting a
     // service node and, therefore, the `body` is the payload
     if (!host_ || !endpoint_ || !protocol_ || !method_ || !destination_x25519_public_key)
-        return body.value_or(ustring{});
+        return body.value_or(std::vector<unsigned char>{});
 
     // Otherwise generate the payload for a server request
     auto headers_json = nlohmann::json::object();
@@ -148,14 +148,14 @@ ustring Builder::_generate_payload(std::optional<ustring> body) const {
 
     // If we were given a body, add it to the payload
     if (body.has_value())
-        payload.emplace_back(from_unsigned_sv(*body));
+        payload.emplace_back(session::to_string(*body));
 
     auto result = oxenc::bt_serialize(payload);
-    return {to_unsigned(result.data()), result.size()};
+    return to_vector(result);
 }
 
-ustring Builder::build(ustring payload) {
-    ustring blob;
+std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
+    std::vector<unsigned char> blob;
 
     // First hop:
     //
@@ -227,9 +227,11 @@ ustring Builder::build(ustring payload) {
                     {"enc_type", to_string(enc_type)},
             };
 
+            auto control_dump = control.dump();
+            auto control_span = to_span(control_dump);
             auto data = encode_size(payload.size());
-            data += payload;
-            data += to_unsigned_sv(control.dump());
+            data.insert(data.end(), payload.begin(), payload.end());
+            data.insert(data.end(), control_span.begin(), control_span.end());
             blob = e.encrypt(enc_type, data, *destination_x25519_public_key);
         } else {
             if (!destination_x25519_public_key.has_value())
@@ -261,9 +263,11 @@ ustring Builder::build(ustring payload) {
             };
         }
 
+        auto routing_dump = routing.dump();
+        auto routing_span = to_span(routing_dump);
         auto data = encode_size(blob.size());
-        data += blob;
-        data += to_unsigned_sv(routing.dump());
+        data.insert(data.end(), blob.begin(), blob.end());
+        data.insert(data.end(), routing_span.begin(), routing_span.end());
 
         // Generate eph key for *this* request and encrypt it:
         crypto_box_keypair(A.data(), a.data());
@@ -273,10 +277,12 @@ ustring Builder::build(ustring payload) {
 
     // The data going to the first hop needs to be wrapped in one more layer to tell the first hop
     // how to decrypt the initial payload:
+    auto wrapper_dump =
+            nlohmann::json{{"ephemeral_key", A.hex()}, {"enc_type", to_string(enc_type)}}.dump();
+    auto wrapper_span = to_span(wrapper_dump);
     auto result = encode_size(blob.size());
-    result += blob;
-    result += to_unsigned_sv(
-            nlohmann::json{{"ephemeral_key", A.hex()}, {"enc_type", to_string(enc_type)}}.dump());
+    result.insert(result.end(), blob.begin(), blob.end());
+    result.insert(result.end(), wrapper_span.begin(), wrapper_span.end());
 
     return result;
 }
@@ -292,8 +298,6 @@ session::onionreq::Builder& unbox(onion_request_builder_object* builder) {
 }  // namespace
 
 extern "C" {
-
-using session::ustring;
 
 LIBSESSION_C_API void onion_request_builder_init(onion_request_builder_object** builder) {
     auto c_builder = std::make_unique<onion_request_builder_object>();
@@ -392,7 +396,7 @@ LIBSESSION_C_API bool onion_request_builder_build(
 
     try {
         auto& unboxed_builder = unbox(builder);
-        auto payload = unboxed_builder.build(ustring{payload_in, payload_in_len});
+        auto payload = unboxed_builder.build({payload_in, payload_in + payload_in_len});
 
         if (unboxed_builder.final_hop_x25519_keypair) {
             auto key_pair = unboxed_builder.final_hop_x25519_keypair.value();

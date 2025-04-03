@@ -1,3 +1,4 @@
+#include <fmt/core.h>
 #include <session/network.h>
 #include <sodium/randombytes.h>
 
@@ -23,7 +24,8 @@ struct Result {
     std::optional<std::string> response;
 };
 
-service_node test_node(const ustring ed_pk, const uint16_t index, const bool unique_ip = true) {
+service_node test_node(
+        const std::vector<unsigned char> ed_pk, const uint16_t index, const bool unique_ip = true) {
     return service_node{
             ed_pk,
             {2, 8, 0},
@@ -718,6 +720,14 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     auto path =
             onion_path{"Test", invalid_info, {snode_cache[0], snode_cache[1], snode_cache[2]}, 0};
 
+    auto compare_service_nodes = [](const service_node& a, const service_node& b) {
+        if (auto cmp = oxen::quic::Address(a) <=> oxen::quic::Address(b); cmp != 0)
+            return cmp < 0;
+
+        return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
+               std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+    };
+
     // Should shuffle the result
     network.emplace(std::nullopt, true, false, false);
     network->set_snode_cache(snode_cache);
@@ -727,7 +737,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network.emplace(std::nullopt, true, false, false);
     network->set_snode_cache(snode_cache);
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == snode_cache);
 
     // Should exclude nodes used in paths
@@ -735,7 +745,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_paths(PathType::standard, {path});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 3, snode_cache.end()});
 
     // Should exclude nodes in unused connections
@@ -743,7 +753,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_unused_connections({invalid_info});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes in in-progress connections
@@ -751,7 +761,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_in_progress_connections({{"Test", snode_cache.front()}});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes destinations in pending requests
@@ -767,7 +777,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
                     std::nullopt,
                     PathType::standard));
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes which have passed the failure threshold
@@ -775,7 +785,7 @@ TEST_CASE("Network Path Building", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_failure_count(snode_cache.front(), 10);
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes which have the same IP if one was excluded
@@ -1098,7 +1108,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network.emplace(std::nullopt, true, true, false);
     network->send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
                bool,
@@ -1115,7 +1125,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [](bool,
                bool,
@@ -1132,7 +1142,7 @@ TEST_CASE("Network requests", "[network][check_request_queue_timeouts]") {
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&prom](bool success,
                     bool timeout,
@@ -1173,7 +1183,7 @@ TEST_CASE("Network requests", "[network][send_request]") {
                 network.send_request(
                         request_info::make(
                                 test_service_node,
-                                ustring{to_usv("{}")},
+                                to_vector("{}"),
                                 std::nullopt,
                                 3s,
                                 std::nullopt,
@@ -1218,7 +1228,7 @@ TEST_CASE("Network onion request", "[network][send_onion_request]") {
 
     network.send_onion_request(
             test_service_node,
-            ustring{to_usv("{\"method\":\"info\",\"params\":{}}")},
+            to_vector("{\"method\":\"info\",\"params\":{}}"),
             std::nullopt,
             [&result_promise](
                     bool success,
@@ -1257,7 +1267,7 @@ TEST_CASE("Network direct request C API", "[network][network_send_request]") {
     std::strcpy(
             test_service_node.ed25519_pubkey_hex,
             "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9");
-    auto body = ustring{to_usv("{\"method\":\"info\",\"params\":{}}")};
+    auto body = to_vector("{\"method\":\"info\",\"params\":{}}");
     auto result_promise = std::make_shared<std::promise<Result>>();
 
     network_send_onion_request_to_snode_destination(

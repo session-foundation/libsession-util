@@ -7,7 +7,10 @@
 
 namespace session::hash {
 
-ustring hash(const size_t size, ustring_view msg, std::optional<ustring_view> key) {
+std::vector<unsigned char> hash(
+        const size_t size,
+        std::span<const unsigned char> msg,
+        std::optional<std::span<const unsigned char>> key) {
     if (size < crypto_generichash_blake2b_BYTES_MIN || size > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid size: expected between 16 and 64 bytes (inclusive)"};
 
@@ -15,7 +18,7 @@ ustring hash(const size_t size, ustring_view msg, std::optional<ustring_view> ke
         throw std::invalid_argument{"Invalid key: expected less than 65 bytes"};
 
     auto result_code = 0;
-    ustring result;
+    std::vector<unsigned char> result;
     result.resize(size);
 
     result_code = crypto_generichash_blake2b(
@@ -34,9 +37,6 @@ ustring hash(const size_t size, ustring_view msg, std::optional<ustring_view> ke
 
 }  // namespace session::hash
 
-using session::ustring;
-using session::ustring_view;
-
 extern "C" {
 
 LIBSESSION_C_API bool session_hash(
@@ -47,12 +47,12 @@ LIBSESSION_C_API bool session_hash(
         size_t key_len,
         unsigned char* hash_out) {
     try {
-        std::optional<ustring_view> key;
+        std::optional<std::span<const unsigned char>> key;
 
         if (key_in && key_len)
             key = {key_in, key_len};
 
-        ustring result = session::hash::hash(size, {msg_in, msg_len}, key);
+        std::vector<unsigned char> result = session::hash::hash(size, {msg_in, msg_len}, key);
         std::memcpy(hash_out, result.data(), size);
         return true;
     } catch (...) {

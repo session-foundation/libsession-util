@@ -6,6 +6,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <session/config/groups/info.hpp>
+#include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
@@ -28,10 +29,10 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    std::vector<ustring> enc_keys{
+    std::vector<std::vector<unsigned char>> enc_keys{
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes};
 
-    groups::Info ginfo1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Info ginfo1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     // This is just for testing: normally you don't load keys manually but just make a groups::Keys
     // object that loads the keys into the Members object for you.
@@ -43,7 +44,7 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
     enc_keys.push_back("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hexbytes);
     enc_keys.push_back("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hexbytes);
-    groups::Info ginfo2{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Info ginfo2{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
         ginfo2.add_key(k, false);
@@ -63,7 +64,7 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(ginfo1.needs_dump());
     CHECK_FALSE(ginfo1.needs_push());
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("fakehash1", p1);
     CHECK(ginfo2.merge(merge_configs) == std::vector{{"fakehash1"s}});
     CHECK_FALSE(ginfo2.needs_push());
@@ -154,17 +155,17 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    std::vector<ustring> enc_keys1;
+    std::vector<std::vector<unsigned char>> enc_keys1;
     enc_keys1.push_back(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes);
-    std::vector<ustring> enc_keys2;
+    std::vector<std::vector<unsigned char>> enc_keys2;
     enc_keys2.push_back(
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
     enc_keys2.push_back(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes);
 
     // This Info object has only the public key, not the priv key, and so cannot modify things:
-    groups::Info ginfo{to_usv(ed_pk), std::nullopt, std::nullopt};
+    groups::Info ginfo{session::to_span(ed_pk), std::nullopt, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
         ginfo.add_key(k, false);
@@ -176,7 +177,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(!ginfo.is_dirty());
 
     // This one is good and has the right signature:
-    groups::Info ginfo_rw{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Info ginfo_rw{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
         ginfo_rw.add_key(k, false);
@@ -194,12 +195,12 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(ginfo_rw.needs_dump());
     CHECK_FALSE(ginfo_rw.needs_push());
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("fakehash1", to_push);
     CHECK(ginfo.merge(merge_configs) == std::vector{{"fakehash1"s}});
     CHECK_FALSE(ginfo.needs_push());
 
-    groups::Info ginfo_rw2{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Info ginfo_rw2{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
         ginfo_rw2.add_key(k, false);
@@ -226,13 +227,13 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
             ed_sk_bad1.data(),
             reinterpret_cast<const unsigned char*>(seed_bad1.data()));
 
-    groups::Info ginfo_bad1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Info ginfo_bad1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
         ginfo_bad1.add_key(k, false);
 
     ginfo_bad1.merge(merge_configs);
-    ginfo_bad1.set_sig_keys(to_usv(ed_sk_bad1));
+    ginfo_bad1.set_sig_keys(session::to_span(ed_sk_bad1));
     ginfo_bad1.set_name("Bad name, BAD!");
     auto [s_bad, p_bad, o_bad] = ginfo_bad1.push();
 
@@ -309,7 +310,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
 
     CHECK(ginfo.needs_dump());
     auto dump = ginfo.dump();
-    groups::Info ginfo2{to_usv(ed_pk), std::nullopt, dump};
+    groups::Info ginfo2{session::to_span(ed_pk), std::nullopt, dump};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
         ginfo2.add_key(k, false);
@@ -327,7 +328,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(o5.empty());
 
     // This account has a different primary decryption key
-    groups::Info ginfo_rw3{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Info ginfo_rw3{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     for (const auto& k : enc_keys2)  // Just for testing, as above.
         ginfo_rw3.add_key(k, false);
@@ -336,10 +337,10 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     CHECK(ginfo_rw3.get_name() == "Super Group 2");
 
     auto [s6, t6, o6] = ginfo_rw3.push();
-    CHECK(to_hex(ginfo_rw3.key(0)) ==
+    CHECK(oxenc::to_hex(ginfo_rw3.key(0)) ==
           "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
     REQUIRE(ginfo_rw3.key_count() == 2);
-    CHECK(to_hex(ginfo_rw3.key(1)) ==
+    CHECK(oxenc::to_hex(ginfo_rw3.key(1)) ==
           "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     CHECK(s6 == s5);
     CHECK(t6.size() == t23.size());

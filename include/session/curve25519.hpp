@@ -1,6 +1,8 @@
 #pragma once
 
 #include <array>
+#include <span>
+#include <vector>
 
 #include "types.hpp"
 
@@ -18,7 +20,7 @@ std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>> curve255
 ///
 /// Outputs:
 /// - The curve25519 public key
-std::array<unsigned char, 32> to_curve25519_pubkey(ustring_view ed25519_pubkey);
+std::array<unsigned char, 32> to_curve25519_pubkey(std::span<const unsigned char> ed25519_pubkey);
 
 /// API: curve25519/to_curve25519_seckey
 ///
@@ -30,6 +32,6 @@ std::array<unsigned char, 32> to_curve25519_pubkey(ustring_view ed25519_pubkey);
 ///
 /// Outputs:
 /// - The curve25519 secret key
-std::array<unsigned char, 32> to_curve25519_seckey(ustring_view ed25519_seckey);
+std::array<unsigned char, 32> to_curve25519_seckey(std::span<const unsigned char> ed25519_seckey);
 
 }  // namespace session::curve25519

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <optional>
+#include <span>
+#include <vector>
 
 #include "types.hpp"
 
@@ -60,8 +62,10 @@ namespace session {
 /// Outputs:
 /// - The encrypted ciphertext to send.
 /// - Throw if encryption fails or (which typically means invalid keys provided)
-ustring encrypt_for_recipient(
-        ustring_view ed25519_privkey, ustring_view recipient_pubkey, ustring_view message);
+std::vector<unsigned char> encrypt_for_recipient(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> recipient_pubkey,
+        std::span<const unsigned char> message);
 
 /// API: crypto/encrypt_for_recipient_deterministic
 ///
@@ -79,8 +83,10 @@ ustring encrypt_for_recipient(
 ///
 /// Outputs:
 /// Identical to `encrypt_for_recipient`.
-ustring encrypt_for_recipient_deterministic(
-        ustring_view ed25519_privkey, ustring_view recipient_pubkey, ustring_view message);
+std::vector<unsigned char> encrypt_for_recipient_deterministic(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> recipient_pubkey,
+        std::span<const unsigned char> message);
 
 /// API: crypto/session_encrypt_for_blinded_recipient
 ///
@@ -97,11 +103,11 @@ ustring encrypt_for_recipient_deterministic(
 /// Outputs:
 /// - The encrypted ciphertext to send.
 /// - Throw if encryption fails or (which typically means invalid keys provided)
-ustring encrypt_for_blinded_recipient(
-        ustring_view ed25519_privkey,
-        ustring_view server_pk,
-        ustring_view recipient_blinded_id,
-        ustring_view message);
+std::vector<unsigned char> encrypt_for_blinded_recipient(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> server_pk,
+        std::span<const unsigned char> recipient_blinded_id,
+        std::span<const unsigned char> message);
 
 /// API: crypto/sign_for_recipient
 ///
@@ -126,8 +132,10 @@ ustring encrypt_for_blinded_recipient(
 /// - `recipient_pubkey` -- the recipient X25519 pubkey, which may or may not be prefixed with the
 ///   0x05 session id prefix (33 bytes if prefixed, 32 if not prefixed).
 /// - `message` -- the message to embed and sign.
-ustring sign_for_recipient(
-        ustring_view ed25519_privkey, ustring_view recipient_pubkey, ustring_view message);
+std::vector<unsigned char> sign_for_recipient(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> recipient_pubkey,
+        std::span<const unsigned char> message);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -141,10 +149,12 @@ ustring sign_for_recipient(
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
-/// - `std::pair<ustring, ustring>` -- the plaintext binary data that was encrypted and the
+/// - `std::pair<std::vector<unsigned char>, std::vector<unsigned char>>` -- the plaintext binary
+/// data that was encrypted and the
 ///   sender's ED25519 pubkey, *if* the message decrypted and validated successfully.  Throws on
 ///   error.
-std::pair<ustring, ustring> decrypt_incoming(ustring_view ed25519_privkey, ustring_view ciphertext);
+std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
+        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -160,11 +170,14 @@ std::pair<ustring, ustring> decrypt_incoming(ustring_view ed25519_privkey, ustri
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
-/// - `std::pair<ustring, ustring>` -- the plaintext binary data that was encrypted and the
+/// - `std::pair<std::vector<unsigned char>, std::vector<unsigned char>>` -- the plaintext binary
+/// data that was encrypted and the
 ///   sender's ED25519 pubkey, *if* the message decrypted and validated successfully.  Throws on
 ///   error.
-std::pair<ustring, ustring> decrypt_incoming(
-        ustring_view x25519_pubkey, ustring_view x25519_seckey, ustring_view ciphertext);
+std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
+        std::span<const unsigned char> x25519_pubkey,
+        std::span<const unsigned char> x25519_seckey,
+        std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -178,10 +191,11 @@ std::pair<ustring, ustring> decrypt_incoming(
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
-/// - `std::pair<ustring, std::string>` -- the plaintext binary data that was encrypted and the
+/// - `std::pair<std::vector<unsigned char>, std::string>` -- the plaintext binary data that was
+/// encrypted and the
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
-std::pair<ustring, std::string> decrypt_incoming_session_id(
-        ustring_view ed25519_privkey, ustring_view ciphertext);
+std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
+        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_incoming
 ///
@@ -196,10 +210,13 @@ std::pair<ustring, std::string> decrypt_incoming_session_id(
 /// - `ciphertext` -- the encrypted data
 ///
 /// Outputs:
-/// - `std::pair<ustring, std::string>` -- the plaintext binary data that was encrypted and the
+/// - `std::pair<std::vector<unsigned char>, std::string>` -- the plaintext binary data that was
+/// encrypted and the
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
-std::pair<ustring, std::string> decrypt_incoming_session_id(
-        ustring_view x25519_pubkey, ustring_view x25519_seckey, ustring_view ciphertext);
+std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
+        std::span<const unsigned char> x25519_pubkey,
+        std::span<const unsigned char> x25519_seckey,
+        std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_from_blinded_recipient
 ///
@@ -221,14 +238,15 @@ std::pair<ustring, std::string> decrypt_incoming_session_id(
 /// - `ciphertext` -- Pointer to a data buffer containing the encrypted data.
 ///
 /// Outputs:
-/// - `std::pair<ustring, std::string>` -- the plaintext binary data that was encrypted and the
+/// - `std::pair<std::vector<unsigned char>, std::string>` -- the plaintext binary data that was
+/// encrypted and the
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
-std::pair<ustring, std::string> decrypt_from_blinded_recipient(
-        ustring_view ed25519_privkey,
-        ustring_view server_pk,
-        ustring_view sender_id,
-        ustring_view recipient_id,
-        ustring_view ciphertext);
+std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipient(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> server_pk,
+        std::span<const unsigned char> sender_id,
+        std::span<const unsigned char> recipient_id,
+        std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_ons_response
 ///
@@ -244,8 +262,8 @@ std::pair<ustring, std::string> decrypt_from_blinded_recipient(
 ///   a session ID.  Throws on error/failure.
 std::string decrypt_ons_response(
         std::string_view lowercase_name,
-        ustring_view ciphertext,
-        std::optional<ustring_view> nonce);
+        std::span<const unsigned char> ciphertext,
+        std::optional<std::span<const unsigned char>> nonce);
 
 /// API: crypto/decrypt_push_notification
 ///
@@ -257,9 +275,11 @@ std::string decrypt_ons_response(
 /// bytes).
 ///
 /// Outputs:
-/// - `ustring` -- the decrypted push notification payload, *if* the decryption was
+/// - `std::vector<unsigned char>` -- the decrypted push notification payload, *if* the decryption
+/// was
 ///   successful.  Throws on error/failure.
-ustring decrypt_push_notification(ustring_view payload, ustring_view enc_key);
+std::vector<unsigned char> decrypt_push_notification(
+        std::span<const unsigned char> payload, std::span<const unsigned char> enc_key);
 
 /// API: crypto/compute_message_hash
 ///

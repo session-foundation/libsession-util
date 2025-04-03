@@ -55,9 +55,9 @@ class Info : public ConfigBase {
     ///   push config changes.
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     ///   that was previously dumped from an instance of this class by calling `dump()`.
-    Info(ustring_view ed25519_pubkey,
-         std::optional<ustring_view> ed25519_secretkey,
-         std::optional<ustring_view> dumped);
+    Info(std::span<const unsigned char> ed25519_pubkey,
+         std::optional<std::span<const unsigned char>> ed25519_secretkey,
+         std::optional<std::span<const unsigned char>> dumped);
 
     /// API: groups/Info::storage_namespace
     ///
@@ -174,7 +174,7 @@ class Info : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, ustring_view key);
+    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -184,7 +184,7 @@ class Info : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, ustring_view key);
+    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     void set_profile_pic(profile_pic pic);
 
     /// API: groups/Info::set_expiry_timer

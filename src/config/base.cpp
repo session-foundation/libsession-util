@@ -1,5 +1,6 @@
 #include "session/config/base.hpp"
 
+#include <fmt/ranges.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/hex.h>
@@ -63,8 +64,8 @@ std::unique_ptr<ConfigMessage> make_config_message(bool from_dirty, Args&&... ar
 }
 
 std::vector<std::string> ConfigBase::merge(
-        const std::vector<std::pair<std::string, ustring>>& configs) {
-    std::vector<std::pair<std::string, ustring_view>> config_views;
+        const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs) {
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> config_views;
     config_views.reserve(configs.size());
     for (auto& [hash, data] : configs)
         config_views.emplace_back(hash, data);
@@ -72,16 +73,16 @@ std::vector<std::string> ConfigBase::merge(
 }
 
 std::vector<std::string> ConfigBase::merge(
-        const std::vector<std::pair<std::string, ustring_view>>& configs) {
+        const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs) {
     if (accepts_protobuf() && !_keys.empty()) {
-        std::list<ustring> keep_alive;
-        std::vector<std::pair<std::string, ustring_view>> parsed;
+        std::list<std::vector<unsigned char>> keep_alive;
+        std::vector<std::pair<std::string, std::span<const unsigned char>>> parsed;
         parsed.reserve(configs.size());
 
         for (auto& [h, c] : configs) {
             try {
                 auto unwrapped = protos::unwrap_config(
-                        ustring_view{_keys.front().data(), _keys.front().size()},
+                        std::span<const unsigned char>{_keys.front().data(), _keys.front().size()},
                         c,
                         storage_namespace());
 
@@ -90,7 +91,8 @@ std::vector<std::string> ConfigBase::merge(
                 // support multi-device for users running those old versions
                 try {
                     auto unwrapped2 = protos::unwrap_config(
-                            ustring_view{_keys.front().data(), _keys.front().size()},
+                            std::span<const unsigned char>{
+                                    _keys.front().data(), _keys.front().size()},
                             unwrapped,
                             storage_namespace());
                     log::warning(
@@ -113,14 +115,14 @@ std::vector<std::string> ConfigBase::merge(
 }
 
 std::vector<std::string> ConfigBase::_merge(
-        const std::vector<std::pair<std::string, ustring_view>>& configs) {
+        const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs) {
 
     if (_keys.empty())
         throw std::logic_error{"Cannot merge configs without any decryption keys"};
 
     const auto old_seqno = _config->seqno();
     std::vector<std::string_view> all_hashes;
-    std::vector<ustring_view> all_confs;
+    std::vector<std::span<const unsigned char>> all_confs;
     all_hashes.reserve(configs.size() + 1);
     all_confs.reserve(configs.size() + 1);
 
@@ -145,7 +147,7 @@ std::vector<std::string> ConfigBase::_merge(
     // at the end (rather than the beginning) so that it is identical to one of the incoming
     // messages, *that* one becomes the config superset rather than our current, hash-unknown value.
 
-    ustring mine;
+    std::vector<unsigned char> mine;
     bool mine_last = false;
     if (old_seqno != 0 || is_dirty()) {
         mine = _config->serialize();
@@ -157,7 +159,7 @@ std::vector<std::string> ConfigBase::_merge(
         }
     }
 
-    std::vector<std::pair<std::string_view, ustring>> plaintexts;
+    std::vector<std::pair<std::string_view, std::vector<unsigned char>>> plaintexts;
 
     // TODO:
     // - handle multipart messages.  Each part of a multipart message starts with `m` and then is
@@ -193,7 +195,10 @@ std::vector<std::string> ConfigBase::_merge(
 
     for (auto& [hash, plain] : plaintexts) {
         // Remove prefix padding:
-        if (auto p = plain.find_first_not_of((unsigned char)0); p > 0 && p != std::string::npos) {
+        if (auto it = std::find_if(
+                    plain.begin(), plain.end(), [](unsigned char c) { return c != 0; });
+            it != plain.begin() && it != plain.end()) {
+            auto p = std::distance(plain.begin(), it);
             std::memmove(plain.data(), plain.data() + p, plain.size() - p);
             plain.resize(plain.size() - p);
         }
@@ -213,8 +218,8 @@ std::vector<std::string> ConfigBase::_merge(
         bool was_compressed = plain[0] == 'z';
         // 'z' prefix indicates zstd-compressed data:
         if (was_compressed) {
-            if (auto decompressed =
-                        zstd_decompress(ustring_view{plain.data() + 1, plain.size() - 1});
+            if (auto decompressed = zstd_decompress(
+                        std::span<const unsigned char>{plain.data() + 1, plain.size() - 1});
                 decompressed && !decompressed->empty())
                 plain = std::move(*decompressed);
             else {
@@ -391,22 +396,23 @@ bool ConfigBase::needs_push() const {
 // Tries to compresses the message; if the compressed version (including the 'z' prefix tag) is
 // smaller than the source message then we modify `msg` to contain the 'z'-prefixed compressed
 // message, otherwise we leave it as-is.
-void compress_message(ustring& msg, int level) {
+void compress_message(std::vector<unsigned char>& msg, int level) {
     if (!level)
         return;
     // "z" is our zstd compression marker prefix byte
-    ustring compressed = zstd_compress(msg, level, to_unsigned_sv("z"sv));
+    std::vector<unsigned char> compressed = zstd_compress(msg, level, to_span("z"));
     if (compressed.size() < msg.size())
         msg = std::move(compressed);
 }
 
-std::tuple<seqno_t, ustring, std::vector<std::string>> ConfigBase::push() {
+std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>> ConfigBase::push() {
     if (_keys.empty())
         throw std::logic_error{"Cannot push data without an encryption key!"};
 
     auto s = _config->seqno();
 
-    std::tuple<seqno_t, ustring, std::vector<std::string>> ret{s, _config->serialize(), {}};
+    std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>> ret{
+            s, _config->serialize(), {}};
 
     auto& [seqno, msg, obs] = ret;
     if (auto lvl = compression_level())
@@ -417,7 +423,7 @@ std::tuple<seqno_t, ustring, std::vector<std::string>> ConfigBase::push() {
 
     if (accepts_protobuf() && !_keys.empty())
         msg = protos::wrap_config(
-                ustring_view{_keys.front().data(), _keys.front().size()},
+                std::span<const unsigned char>{_keys.front().data(), _keys.front().size()},
                 msg,
                 s,
                 storage_namespace());
@@ -445,7 +451,7 @@ void ConfigBase::confirm_pushed(seqno_t seqno, std::string msg_hash) {
     }
 }
 
-ustring ConfigBase::dump() {
+std::vector<unsigned char> ConfigBase::dump() {
     if (is_readonly())
         _old_hashes.clear();
 
@@ -454,9 +460,9 @@ ustring ConfigBase::dump() {
     return d;
 }
 
-ustring ConfigBase::make_dump() const {
+std::vector<unsigned char> ConfigBase::make_dump() const {
     auto data = _config->serialize(false /* disable signing for local storage */);
-    auto data_sv = from_unsigned_sv(data);
+    auto data_sv = to_string_view(data);
     oxenc::bt_list old_hashes;
 
     oxenc::bt_dict_producer d;
@@ -468,13 +474,13 @@ ustring ConfigBase::make_dump() const {
 
     extra_data(d.append_dict("+"));
 
-    return ustring{to_unsigned_sv(d.view())};
+    return to_vector(d.view());
 }
 
 ConfigBase::ConfigBase(
-        std::optional<ustring_view> dump,
-        std::optional<ustring_view> ed25519_pubkey,
-        std::optional<ustring_view> ed25519_secretkey) {
+        std::optional<std::span<const unsigned char>> dump,
+        std::optional<std::span<const unsigned char>> ed25519_pubkey,
+        std::optional<std::span<const unsigned char>> ed25519_secretkey) {
 
     if (sodium_init() == -1)
         throw std::runtime_error{"libsodium initialization failed!"};
@@ -483,9 +489,11 @@ ConfigBase::ConfigBase(
 }
 
 void ConfigSig::init_sig_keys(
-        std::optional<ustring_view> ed25519_pubkey, std::optional<ustring_view> ed25519_secretkey) {
+        std::optional<std::span<const unsigned char>> ed25519_pubkey,
+        std::optional<std::span<const unsigned char>> ed25519_secretkey) {
     if (ed25519_secretkey) {
-        if (ed25519_pubkey && *ed25519_pubkey != ed25519_secretkey->substr(32))
+        if (ed25519_pubkey &&
+            to_string_view(*ed25519_pubkey) != to_string_view(ed25519_secretkey->subspan(32)))
             throw std::invalid_argument{"Invalid signing keys: secret key and pubkey do not match"};
         set_sig_keys(*ed25519_secretkey);
     } else if (ed25519_pubkey) {
@@ -496,15 +504,14 @@ void ConfigSig::init_sig_keys(
 }
 
 void ConfigBase::init(
-        std::optional<ustring_view> dump,
-        std::optional<ustring_view> ed25519_pubkey,
-        std::optional<ustring_view> ed25519_secretkey) {
+        std::optional<std::span<const unsigned char>> dump,
+        std::optional<std::span<const unsigned char>> ed25519_pubkey,
+        std::optional<std::span<const unsigned char>> ed25519_secretkey) {
     if (!dump) {
         _state = ConfigState::Clean;
         _config = std::make_unique<ConfigMessage>();
     } else {
-
-        oxenc::bt_dict_consumer d{from_unsigned_sv(*dump)};
+        oxenc::bt_dict_consumer d{*dump};
         if (!d.skip_until("!"))
             throw std::runtime_error{
                     "Unable to parse dumped config data: did not find '!' state key"};
@@ -513,7 +520,7 @@ void ConfigBase::init(
         if (!d.skip_until("$"))
             throw std::runtime_error{
                     "Unable to parse dumped config data: did not find '$' data key"};
-        auto data = to_unsigned_sv(d.consume_string_view());
+        auto data = to_span(d.consume_string_view());
         if (_state == ConfigState::Dirty)
             // If we dumped dirty data then we need to reload it as a mutable config message so that
             // the seqno gets incremented.  This "wastes" one seqno value (since we didn't send the
@@ -554,7 +561,7 @@ int ConfigBase::key_count() const {
     return _keys.size();
 }
 
-bool ConfigBase::has_key(ustring_view key) const {
+bool ConfigBase::has_key(std::span<const unsigned char> key) const {
     if (key.size() != 32)
         throw std::invalid_argument{"invalid key given to has_key(): not 32-bytes"};
 
@@ -565,15 +572,16 @@ bool ConfigBase::has_key(ustring_view key) const {
     return false;
 }
 
-std::vector<ustring_view> ConfigBase::get_keys() const {
-    std::vector<ustring_view> ret;
+std::vector<std::span<const unsigned char>> ConfigBase::get_keys() const {
+    std::vector<std::span<const unsigned char>> ret;
     ret.reserve(_keys.size());
     for (const auto& key : _keys)
         ret.emplace_back(key.data(), key.size());
     return ret;
 }
 
-void ConfigBase::add_key(ustring_view key, bool high_priority, bool dirty_config) {
+void ConfigBase::add_key(
+        std::span<const unsigned char> key, bool high_priority, bool dirty_config) {
     static_assert(
             sizeof(Key) == KEY_SIZE, "std::array appears to have some overhead which seems bad");
 
@@ -611,7 +619,8 @@ int ConfigBase::clear_keys(bool dirty_config) {
     return ret;
 }
 
-void ConfigBase::replace_keys(const std::vector<ustring_view>& new_keys, bool dirty_config) {
+void ConfigBase::replace_keys(
+        const std::vector<std::span<const unsigned char>>& new_keys, bool dirty_config) {
     if (new_keys.empty()) {
         if (_keys.empty())
             return;
@@ -636,7 +645,7 @@ void ConfigBase::replace_keys(const std::vector<ustring_view>& new_keys, bool di
         dirty();
 }
 
-bool ConfigBase::remove_key(ustring_view key, size_t from, bool dirty_config) {
+bool ConfigBase::remove_key(std::span<const unsigned char> key, size_t from, bool dirty_config) {
     auto starting_size = _keys.size();
     if (from >= starting_size)
         return false;
@@ -659,15 +668,15 @@ bool ConfigBase::remove_key(ustring_view key, size_t from, bool dirty_config) {
     return _keys.size() < starting_size;
 }
 
-void ConfigBase::load_key(ustring_view ed25519_secretkey) {
+void ConfigBase::load_key(std::span<const unsigned char> ed25519_secretkey) {
     if (!(ed25519_secretkey.size() == 64 || ed25519_secretkey.size() == 32))
         throw std::invalid_argument{
                 encryption_domain() + " requires an Ed25519 64-byte secret key or 32-byte seed"s};
 
-    add_key(ed25519_secretkey.substr(0, 32));
+    add_key(ed25519_secretkey.subspan(0, 32));
 }
 
-void ConfigSig::set_sig_keys(ustring_view secret) {
+void ConfigSig::set_sig_keys(std::span<const unsigned char> secret) {
     if (secret.size() != 64)
         throw std::invalid_argument{"Invalid sodium secret: expected 64 bytes"};
     clear_sig_keys();
@@ -676,12 +685,12 @@ void ConfigSig::set_sig_keys(ustring_view secret) {
     _sign_pk.emplace();
     crypto_sign_ed25519_sk_to_pk(_sign_pk->data(), _sign_sk.data());
 
-    set_verifier([this](ustring_view data, ustring_view sig) {
+    set_verifier([this](std::span<const unsigned char> data, std::span<const unsigned char> sig) {
         return 0 == crypto_sign_ed25519_verify_detached(
                             sig.data(), data.data(), data.size(), _sign_pk->data());
     });
-    set_signer([this](ustring_view data) {
-        ustring sig;
+    set_signer([this](std::span<const unsigned char> data) {
+        std::vector<unsigned char> sig;
         sig.resize(64);
         if (0 != crypto_sign_ed25519_detached(
                          sig.data(), nullptr, data.data(), data.size(), _sign_sk.data()))
@@ -690,13 +699,13 @@ void ConfigSig::set_sig_keys(ustring_view secret) {
     });
 }
 
-void ConfigSig::set_sig_pubkey(ustring_view pubkey) {
+void ConfigSig::set_sig_pubkey(std::span<const unsigned char> pubkey) {
     if (pubkey.size() != 32)
         throw std::invalid_argument{"Invalid pubkey: expected 32 bytes"};
     _sign_pk.emplace();
     std::memcpy(_sign_pk->data(), pubkey.data(), 32);
 
-    set_verifier([this](ustring_view data, ustring_view sig) {
+    set_verifier([this](std::span<const unsigned char> data, std::span<const unsigned char> sig) {
         return 0 == crypto_sign_ed25519_verify_detached(
                             sig.data(), data.data(), data.size(), _sign_pk->data());
     });
@@ -761,10 +770,11 @@ LIBSESSION_EXPORT config_string_list* config_merge(
         size_t count) {
     return wrap_exceptions(conf, [&] {
         auto& config = *unbox(conf);
-        std::vector<std::pair<std::string, ustring_view>> confs;
+        std::vector<std::pair<std::string, std::span<const unsigned char>>> confs;
         confs.reserve(count);
         for (size_t i = 0; i < count; i++)
-            confs.emplace_back(msg_hashes[i], ustring_view{configs[i], lengths[i]});
+            confs.emplace_back(
+                    msg_hashes[i], std::span<const unsigned char>{configs[i], lengths[i]});
 
         return make_string_list(config.merge(confs));
     });

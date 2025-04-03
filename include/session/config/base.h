@@ -274,11 +274,7 @@ LIBSESSION_EXPORT config_string_list* config_current_hashes(const config_object*
 ///
 /// Outputs:
 /// - `config_string_list*` -- pointer to the list of hashes; the pointer belongs to the caller
-LIBSESSION_EXPORT config_string_list* config_old_hashes(config_object* conf)
-#ifdef __GNUC__
-        __attribute__((warn_unused_result))
-#endif
-        ;
+LIBSESSION_EXPORT config_string_list* config_old_hashes(config_object* conf) LIBSESSION_WARN_UNUSED;
 
 /// API: base/config_get_keys
 ///

@@ -8,6 +8,7 @@
 #include <cassert>
 
 #include "session/export.h"
+#include "session/util.hpp"
 
 using namespace std::literals;
 
@@ -20,10 +21,6 @@ namespace {
         return reinterpret_cast<const unsigned char*>(x);
     }
 
-    ustring_view to_unsigned_sv(std::string_view v) {
-        return {to_unsigned(v.data()), v.size()};
-    }
-
 }  // namespace
 
 static constexpr size_t DOMAIN_MAX_SIZE = 24;
@@ -31,7 +28,7 @@ static constexpr auto NONCE_KEY_PREFIX = "libsessionutil-config-encrypted-"sv;
 static_assert(NONCE_KEY_PREFIX.size() + DOMAIN_MAX_SIZE < crypto_generichash_blake2b_KEYBYTES_MAX);
 
 static std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> make_encrypt_key(
-        ustring_view key_base, uint64_t message_size, std::string_view domain) {
+        std::span<const unsigned char> key_base, uint64_t message_size, std::string_view domain) {
     if (key_base.size() != 32)
         throw std::invalid_argument{"encrypt called with key_base != 32 bytes"};
     if (domain.size() < 1 || domain.size() > DOMAIN_MAX_SIZE)
@@ -54,16 +51,22 @@ static std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> ma
     return key;
 }
 
-ustring encrypt(ustring_view message, ustring_view key_base, std::string_view domain) {
-    ustring msg;
+std::vector<unsigned char> encrypt(
+        std::span<const unsigned char> message,
+        std::span<const unsigned char> key_base,
+        std::string_view domain) {
+    std::vector<unsigned char> msg;
     msg.reserve(
             message.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES +
             crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    msg.assign(message);
+    msg.assign(message.begin(), message.end());
     encrypt_inplace(msg, key_base, domain);
     return msg;
 }
-void encrypt_inplace(ustring& message, ustring_view key_base, std::string_view domain) {
+void encrypt_inplace(
+        std::vector<unsigned char>& message,
+        std::span<const unsigned char> key_base,
+        std::string_view domain) {
     auto key = make_encrypt_key(key_base, message.size(), domain);
 
     std::string nonce_key{NONCE_KEY_PREFIX};
@@ -103,18 +106,24 @@ static_assert(
         ENCRYPT_DATA_OVERHEAD ==
         crypto_aead_xchacha20poly1305_IETF_ABYTES + crypto_aead_xchacha20poly1305_IETF_NPUBBYTES);
 
-ustring decrypt(ustring_view ciphertext, ustring_view key_base, std::string_view domain) {
-    ustring x{ciphertext};
+std::vector<unsigned char> decrypt(
+        std::span<const unsigned char> ciphertext,
+        std::span<const unsigned char> key_base,
+        std::string_view domain) {
+    std::vector<unsigned char> x = session::to_vector(ciphertext);
     decrypt_inplace(x, key_base, domain);
     return x;
 }
-void decrypt_inplace(ustring& ciphertext, ustring_view key_base, std::string_view domain) {
+void decrypt_inplace(
+        std::vector<unsigned char>& ciphertext,
+        std::span<const unsigned char> key_base,
+        std::string_view domain) {
     size_t message_len = ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES -
                          crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
     if (message_len > ciphertext.size())  // overflow
         throw decrypt_error{"Decryption failed: ciphertext is too short"};
 
-    ustring_view nonce = ustring_view{ciphertext}.substr(
+    std::span<const unsigned char> nonce = std::span<const unsigned char>{ciphertext}.subspan(
             ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
     auto key = make_encrypt_key(key_base, message_len, domain);
 
@@ -135,17 +144,15 @@ void decrypt_inplace(ustring& ciphertext, ustring_view key_base, std::string_vie
     ciphertext.resize(mlen_wrote);
 }
 
-void pad_message(ustring& data, size_t overhead) {
+void pad_message(std::vector<unsigned char>& data, size_t overhead) {
     size_t target_size = padded_size(data.size(), overhead);
     if (target_size > data.size())
-        data.insert(0, target_size - data.size(), '\0');
+        data.insert(data.begin(), target_size - data.size(), 0);
 }
 
 }  // namespace session::config
 
 extern "C" {
-
-using session::ustring;
 
 LIBSESSION_EXPORT unsigned char* config_encrypt(
         const unsigned char* plaintext,
@@ -154,7 +161,7 @@ LIBSESSION_EXPORT unsigned char* config_encrypt(
         const char* domain,
         size_t* ciphertext_size) {
 
-    ustring ciphertext;
+    std::vector<unsigned char> ciphertext;
     try {
         ciphertext = session::config::encrypt({plaintext, len}, {key_base, 32}, domain);
     } catch (...) {
@@ -174,7 +181,7 @@ LIBSESSION_EXPORT unsigned char* config_decrypt(
         const char* domain,
         size_t* plaintext_size) {
 
-    ustring plaintext;
+    std::vector<unsigned char> plaintext;
     try {
         plaintext = session::config::decrypt({ciphertext, clen}, {key_base, 32}, domain);
     } catch (const std::exception& e) {

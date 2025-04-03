@@ -16,8 +16,8 @@ namespace session::random {
 
 constexpr char base32_charset[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
 
-ustring random(size_t size) {
-    ustring result;
+std::vector<unsigned char> random(size_t size) {
+    std::vector<unsigned char> result;
     result.resize(size);
     randombytes_buf(result.data(), size);
 
