@@ -1,6 +1,10 @@
-# Libsession Utils Documentation Websites
+# Documentation Website
 
 # Getting Started
+
+## Writing Documentation
+
+The [api-to-markdown.py](./api-to-markdown.py) script parses specially formatted docstring comments to generate API documentation. We parse the file looking for `///` comment blocks beginning with `/// API: <category>/<name>`. You can read more about the format in the script itself.
 
 ## Install dependencies
 
