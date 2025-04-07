@@ -259,10 +259,10 @@ static unsigned char* to_c_buffer(std::span<const unsigned char> x, size_t* out_
 
 LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple(
         size_t* out_len,
-        const unsigned char** messages,
+        const unsigned char* const* messages,
         const size_t* message_lengths,
         size_t n_messages,
-        const unsigned char** recipients,
+        const unsigned char* const* recipients,
         size_t n_recipients,
         const unsigned char* x25519_privkey,
         const unsigned char* x25519_pubkey,
@@ -298,10 +298,10 @@ LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple(
 
 LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple_ed25519(
         size_t* out_len,
-        const unsigned char** messages,
+        const unsigned char* const* messages,
         const size_t* message_lengths,
         size_t n_messages,
-        const unsigned char** recipients,
+        const unsigned char* const* recipients,
         size_t n_recipients,
         const unsigned char* ed25519_secret_key,
         const char* domain,

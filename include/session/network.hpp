@@ -217,8 +217,8 @@ class Network {
     std::unordered_map<std::string, std::pair<swarm_id_t, std::vector<service_node>>> swarm_cache;
 
     // Snode refresh state
-    int snode_cache_refresh_failure_count;
-    int in_progress_snode_cache_refresh_count;
+    int snode_cache_refresh_failure_count = 0;
+    int in_progress_snode_cache_refresh_count = 0;
     std::optional<std::string> current_snode_cache_refresh_request_id;
     std::vector<std::function<void()>> after_snode_cache_refresh;
     std::optional<std::vector<service_node>> unused_snode_refresh_nodes;

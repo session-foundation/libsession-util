@@ -333,7 +333,7 @@ LIBSESSION_EXPORT void groups_keys_dump(
 ///   them on failure.
 LIBSESSION_EXPORT bool groups_keys_key_supplement(
         config_group_keys* conf,
-        const char** sids,
+        const char* const* sids,
         size_t sids_len,
         unsigned char** message,
         size_t* message_len);

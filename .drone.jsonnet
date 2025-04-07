@@ -397,7 +397,7 @@ local static_build(name,
     ]
   ),
 
-  mac_pipeline('Static macOS', build=[
+  mac_pipeline('Static macOS', arch='arm64', build=[
     'export JOBS=6',
     './utils/macos.sh',
     'cd build-macos && ../utils/ci/drone-static-upload.sh',
