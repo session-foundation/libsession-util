@@ -767,7 +767,10 @@ std::chrono::milliseconds Network::retry_delay(
 std::shared_ptr<quic::Endpoint> Network::get_endpoint() {
     return net.call_get([this]() mutable {
         if (!endpoint)
-            endpoint = net.endpoint(quic::Address{"0.0.0.0", 0}, quic::opt::alpns{ALPN}, quic::opt::disable_mtu_discovery{});
+            endpoint = net.endpoint(
+                    quic::Address{"0.0.0.0", 0},
+                    quic::opt::alpns{ALPN},
+                    quic::opt::disable_mtu_discovery{});
 
         return endpoint;
     });
