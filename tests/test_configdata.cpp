@@ -491,7 +491,7 @@ const auto m123_expected = to_vector(
 const auto h123 = "d9398c597b058ac7e28e3febb76ed68eb8c5b6c369610562ab5f2b596775d73c"_hexbytes;
 
 TEST_CASE("config message example 1", "[config][example]") {
-    /// This is the "Ordinary update" example described in docs/config-merge-logic.md
+    /// This is the "Ordinary update" example described in docs/api/docs/config-merge-logic.md
     MutableConfigMessage m118{118, 5};
     CHECK(m118.seqno() == 118);
     CHECK(m118.lag == 5);
@@ -722,7 +722,7 @@ const auto h124 = "8b73f316178765b9b3b37168e865c84bb5a78610cbb59b84d0fa4d3b4b3c1
 
 TEST_CASE("config message example 2", "[config][example]") {
     /// This is the "Large, but still ordinary, update" example described in
-    /// docs/config-merge-logic.md
+    /// docs/api/docs/config-merge-logic.md
     MutableConfigMessage m{m123_expected};
     REQUIRE(m.seqno() == 124);
 
@@ -899,7 +899,7 @@ const auto m126_expected = to_vector(
 // clang-format on
 
 TEST_CASE("config message example 3 - simple conflict", "[config][example][conflict]") {
-    /// This is the "Simple conflict resolution" example described in docs/config-merge-logic.md
+    /// This is the "Simple conflict resolution" example described in docs/api/docs/config-merge-logic.md
     MutableConfigMessage m124{m123_expected};
     REQUIRE(m124.seqno() == 124);
 
@@ -958,7 +958,7 @@ TEST_CASE("config message example 3 - simple conflict", "[config][example][confl
 
 TEST_CASE("config message example 4 - complex conflict resolution", "[config][example][conflict]") {
     /// This is the "Complex conflict resolution" example described in
-    /// docs/config-merge-logic.md
+    /// docs/api/docs/config-merge-logic.md
 
     ConfigMessage m123{m123_expected};
 
