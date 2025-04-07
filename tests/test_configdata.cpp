@@ -902,7 +902,8 @@ const auto m126_expected =
 // clang-format on
 
 TEST_CASE("config message example 3 - simple conflict", "[config][example][conflict]") {
-    /// This is the "Simple conflict resolution" example described in docs/api/docs/config-merge-logic.md
+    /// This is the "Simple conflict resolution" example described in docs/api/
+    /// docs/config-merge-logic.md
     MutableConfigMessage m124{m123_expected};
     REQUIRE(m124.seqno() == 124);
 
