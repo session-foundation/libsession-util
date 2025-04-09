@@ -1,11 +1,11 @@
 #include <fmt/core.h>
-#include <session/network.h>
+#include <session/session_network.h>
 #include <sodium/randombytes.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <nlohmann/json.hpp>
-#include <session/network.hpp>
+#include <session/session_network.hpp>
 #include <session/onionreq/key_types.hpp>
 #include <tuple>
 
