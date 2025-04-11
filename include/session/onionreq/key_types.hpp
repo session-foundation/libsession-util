@@ -9,6 +9,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "../types.hpp"
 #include "../util.hpp"
@@ -54,7 +55,12 @@ struct alignas(size_t) key_base : std::array<unsigned char, KeyLength> {
         detail::load_from_bytes(d.data(), d.size(), bytes);
         return d;
     }
-    static Derived from_bytes(ustring_view bytes) { return from_bytes(from_unsigned_sv(bytes)); }
+    static Derived from_bytes(std::vector<unsigned char> bytes) {
+        return from_bytes(to_string(bytes));
+    }
+    static Derived from_bytes(std::span<const unsigned char> bytes) {
+        return from_bytes(to_string(bytes));
+    }
 };
 
 template <typename Derived, size_t KeyLength>
@@ -92,6 +98,7 @@ using x25519_keypair = std::pair<x25519_pubkey, x25519_seckey>;
 legacy_pubkey parse_legacy_pubkey(std::string_view pubkey_in);
 ed25519_pubkey parse_ed25519_pubkey(std::string_view pubkey_in);
 x25519_pubkey parse_x25519_pubkey(std::string_view pubkey_in);
+x25519_pubkey compute_x25519_pubkey(std::span<const unsigned char> ed25519_pk);
 
 }  // namespace session::onionreq
 

@@ -171,7 +171,9 @@ class ConvoInfoVolatile : public ConfigBase {
     /// the secret key.
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     /// that was previously dumped from an instance of this class by calling `dump()`.
-    ConvoInfoVolatile(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped);
+    ConvoInfoVolatile(
+            std::span<const unsigned char> ed25519_secretkey,
+            std::optional<std::span<const unsigned char>> dumped);
 
     /// API: convo_info_volatile/ConvoInfoVolatile::storage_namespace
     ///
@@ -224,11 +226,13 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::tuple<seqno_t, ustring, std::vector<std::string>>` - Returns a tuple containing
+    /// - `std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>` - Returns a
+    /// tuple containing
     ///   - `seqno_t` -- sequence number
-    ///   - `std::vector<ustring>` -- data message(s) to push to the server
+    ///   - `std::vector<std::vector<unsigned char>>` -- data message(s) to push to the server
     ///   - `std::vector<std::string>` -- list of known message hashes
-    std::tuple<seqno_t, std::vector<ustring>, std::vector<std::string>> push() override;
+    std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>> push()
+            override;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_1to1
     ///
@@ -351,7 +355,8 @@ class ConvoInfoVolatile : public ConfigBase {
     ///         std::string_view base_url, std::string_view room, std::string_view pubkey_hex)
     ///         const;
     /// convo::community get_or_construct_community(
-    ///         std::string_view base_url, std::string_view room, ustring_view pubkey) const;
+    ///         std::string_view base_url, std::string_view room, std::span<const unsigned char>
+    ///         pubkey) const;
     /// ```
     ///
     /// Inputs:
@@ -364,7 +369,9 @@ class ConvoInfoVolatile : public ConfigBase {
     convo::community get_or_construct_community(
             std::string_view base_url, std::string_view room, std::string_view pubkey_hex) const;
     convo::community get_or_construct_community(
-            std::string_view base_url, std::string_view room, ustring_view pubkey) const;
+            std::string_view base_url,
+            std::string_view room,
+            std::span<const unsigned char> pubkey) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_or_construct_community(full_url)
     ///
@@ -412,7 +419,7 @@ class ConvoInfoVolatile : public ConfigBase {
     // Drills into the nested dicts to access community details; if the second argument is
     // non-nullptr then it will be set to the community's pubkey, if it exists.
     DictFieldProxy community_field(
-            const convo::community& og, ustring_view* get_pubkey = nullptr) const;
+            const convo::community& og, std::span<const unsigned char>* get_pubkey = nullptr) const;
 
   public:
     /// API: convo_info_volatile/ConvoInfoVolatile::erase_1to1

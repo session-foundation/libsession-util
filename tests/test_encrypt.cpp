@@ -25,9 +25,9 @@ TEST_CASE("config message encryption", "[config][encrypt]") {
     CHECK(to_hex(enc2) != to_hex(enc1));
     auto enc3 = config::encrypt(message1, key2, "test-suite1");
     CHECK(to_hex(enc3) != to_hex(enc1));
-    auto nonce = enc1.substr(enc1.size() - 24);
-    auto nonce2 = enc2.substr(enc2.size() - 24);
-    auto nonce3 = enc3.substr(enc3.size() - 24);
+    auto nonce = std::vector<unsigned char>{enc1.begin() + (enc1.size() - 24), enc1.end()};
+    auto nonce2 = std::vector<unsigned char>{enc2.begin() + (enc2.size() - 24), enc2.end()};
+    auto nonce3 = std::vector<unsigned char>{enc3.begin() + (enc3.size() - 24), enc3.end()};
     CHECK(to_hex(nonce) == "af2f4860cb4d0f8ba7e09d29e31f5e4a18f65847287a54a0");
     CHECK(to_hex(nonce2) == "277e639d36ba46470dfff509a68cb73d9a96386c51739bdd");
     CHECK(to_hex(nonce3) == to_hex(nonce));

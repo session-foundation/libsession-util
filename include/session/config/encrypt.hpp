@@ -1,6 +1,8 @@
 #pragma once
 
+#include <span>
 #include <stdexcept>
+#include <vector>
 
 #include "../types.hpp"
 
@@ -33,8 +35,11 @@ namespace session::config {
 /// - `domain` -- short string for the keyed hash
 ///
 /// Outputs:
-/// - `ustring` -- Returns the encrypted message bytes
-ustring encrypt(ustring_view message, ustring_view key_base, std::string_view domain);
+/// - `std::vector<unsigned char>` -- Returns the encrypted message bytes
+std::vector<unsigned char> encrypt(
+        std::span<const unsigned char> message,
+        std::span<const unsigned char> key_base,
+        std::string_view domain);
 
 /// API: encrypt/encrypt_inplace
 ///
@@ -45,7 +50,10 @@ ustring encrypt(ustring_view message, ustring_view key_base, std::string_view do
 /// - `message` -- message to encrypt
 /// - `key_base` -- Fixed key that all clients, must be 32 bytes.
 /// - `domain` -- short string for the keyed hash
-void encrypt_inplace(ustring& message, ustring_view key_base, std::string_view domain);
+void encrypt_inplace(
+        std::vector<unsigned char>& message,
+        std::span<const unsigned char> key_base,
+        std::string_view domain);
 
 /// API: encrypt/ENCRYPT_DATA_OVERHEAD
 ///
@@ -73,8 +81,11 @@ struct decrypt_error : std::runtime_error {
 /// - `domain` -- short string for the keyed hash
 ///
 /// Outputs:
-/// - `ustring` -- Returns the decrypt message bytes
-ustring decrypt(ustring_view ciphertext, ustring_view key_base, std::string_view domain);
+/// - `std::vector<unsigned char>` -- Returns the decrypt message bytes
+std::vector<unsigned char> decrypt(
+        std::span<const unsigned char> ciphertext,
+        std::span<const unsigned char> key_base,
+        std::string_view domain);
 
 /// API: encrypt/decrypt_inplace
 ///
@@ -85,7 +96,10 @@ ustring decrypt(ustring_view ciphertext, ustring_view key_base, std::string_view
 /// - `ciphertext` -- message to decrypt
 /// - `key_base` -- Fixed key that all clients, must be 32 bytes.
 /// - `domain` -- short string for the keyed hash
-void decrypt_inplace(ustring& ciphertext, ustring_view key_base, std::string_view domain);
+void decrypt_inplace(
+        std::vector<unsigned char>& ciphertext,
+        std::span<const unsigned char> key_base,
+        std::string_view domain);
 
 /// Returns the target size of the message with padding, assuming an additional `overhead` bytes of
 /// overhead (e.g. from encrypt() overhead) will be appended.  Will always return a value >= s +
@@ -111,6 +125,6 @@ inline constexpr size_t padded_size(size_t s, size_t overhead = ENCRYPT_DATA_OVE
 /// - `data` -- the data; this is modified in place
 /// - `overhead` -- encryption overhead to account for to reach the desired padded size.  The
 /// default, if omitted, is the space used by the `encrypt()` function defined above.
-void pad_message(ustring& data, size_t overhead = ENCRYPT_DATA_OVERHEAD);
+void pad_message(std::vector<unsigned char>& data, size_t overhead = ENCRYPT_DATA_OVERHEAD);
 
 }  // namespace session::config

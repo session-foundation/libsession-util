@@ -10,8 +10,7 @@
 
 #include "utils.hpp"
 
-static constexpr int64_t created_ts = 1680064059;
-
+using namespace std::literals;
 using namespace session::config;
 
 constexpr bool is_prime100(int i) {
@@ -36,10 +35,10 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    std::vector<ustring> enc_keys{
+    std::vector<std::vector<unsigned char>> enc_keys{
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes};
 
-    groups::Members gmem1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Members gmem1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     // This is just for testing: normally you don't load keys manually but just make a groups::Keys
     // object that loads the keys into the Members object for you.
@@ -51,7 +50,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
     enc_keys.push_back("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hexbytes);
     enc_keys.push_back("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hexbytes);
-    groups::Members gmem2{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Members gmem2{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
         gmem2.add_key(k, false);
@@ -101,7 +100,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     CHECK(gmem1.needs_dump());
     CHECK_FALSE(gmem1.needs_push());
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("fakehash1", p1.at(0));
     CHECK(gmem2.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(gmem2.needs_push());
@@ -344,7 +343,7 @@ TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    groups::Members gmem1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Members gmem1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     auto memberId1 = "050000000000000000000000000000000000000000000000000000000000000000";
     auto memberId2 = "051111111111111111111111111111111111111111111111111111111111111111";
@@ -363,7 +362,7 @@ TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
 
     auto dumped = gmem1.dump();
 
-    groups::Members gmem2{to_usv(ed_pk), to_usv(ed_sk), dumped};
+    groups::Members gmem2{session::to_span(ed_pk), session::to_span(ed_sk), dumped};
 
     CHECK(gmem2.get_status(gmem1.get_or_construct(memberId1)) ==
           groups::member::Status::invite_sending);

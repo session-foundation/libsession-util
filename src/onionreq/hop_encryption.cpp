@@ -41,7 +41,7 @@ namespace {
             const x25519_seckey& seckey, const x25519_pubkey& pubkey) {
         auto key = calculate_shared_secret(seckey, pubkey);
 
-        auto usalt = to_unsigned_sv(salt);
+        auto usalt = to_span(salt);
 
         crypto_auth_hmacsha256_state state;
 
@@ -80,8 +80,17 @@ namespace {
 
 }  // namespace
 
-ustring HopEncryption::encrypt(
-        EncryptType type, ustring plaintext, const x25519_pubkey& pubkey) const {
+bool HopEncryption::response_long_enough(EncryptType type, size_t response_size) {
+    switch (type) {
+        case EncryptType::xchacha20:
+            return (response_size >= crypto_aead_xchacha20poly1305_ietf_ABYTES);
+        case EncryptType::aes_gcm: return (response_size >= GCM_IV_SIZE + GCM_DIGEST_SIZE);
+    }
+    return false;
+}
+
+std::vector<unsigned char> HopEncryption::encrypt(
+        EncryptType type, std::vector<unsigned char> plaintext, const x25519_pubkey& pubkey) const {
     switch (type) {
         case EncryptType::xchacha20: return encrypt_xchacha20(plaintext, pubkey);
         case EncryptType::aes_gcm: return encrypt_aesgcm(plaintext, pubkey);
@@ -89,8 +98,10 @@ ustring HopEncryption::encrypt(
     throw std::runtime_error{"Invalid encryption type"};
 }
 
-ustring HopEncryption::decrypt(
-        EncryptType type, ustring ciphertext, const x25519_pubkey& pubkey) const {
+std::vector<unsigned char> HopEncryption::decrypt(
+        EncryptType type,
+        std::vector<unsigned char> ciphertext,
+        const x25519_pubkey& pubkey) const {
     switch (type) {
         case EncryptType::xchacha20: return decrypt_xchacha20(ciphertext, pubkey);
         case EncryptType::aes_gcm: return decrypt_aesgcm(ciphertext, pubkey);
@@ -98,7 +109,8 @@ ustring HopEncryption::decrypt(
     throw std::runtime_error{"Invalid decryption type"};
 }
 
-ustring HopEncryption::encrypt_aesgcm(ustring plaintext, const x25519_pubkey& pubKey) const {
+std::vector<unsigned char> HopEncryption::encrypt_aesgcm(
+        std::vector<unsigned char> plaintext, const x25519_pubkey& pubKey) const {
     auto key = derive_symmetric_key(private_key_, pubKey);
 
     // Initialise cipher context with the key
@@ -106,7 +118,7 @@ ustring HopEncryption::encrypt_aesgcm(ustring plaintext, const x25519_pubkey& pu
     static_assert(key.size() == AES256_KEY_SIZE);
     gcm_aes256_set_key(&ctx, key.data());
 
-    ustring output;
+    std::vector<unsigned char> output;
     output.resize(GCM_IV_SIZE + plaintext.size() + GCM_DIGEST_SIZE);
 
     // Start the output with the random IV, and load it into ctx
@@ -128,11 +140,13 @@ ustring HopEncryption::encrypt_aesgcm(ustring plaintext, const x25519_pubkey& pu
     return output;
 }
 
-ustring HopEncryption::decrypt_aesgcm(ustring ciphertext_, const x25519_pubkey& pubKey) const {
-    ustring_view ciphertext = {ciphertext_.data(), ciphertext_.size()};
+std::vector<unsigned char> HopEncryption::decrypt_aesgcm(
+        std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
+    std::span<const unsigned char> ciphertext = to_span(ciphertext_);
 
-    if (ciphertext.size() < GCM_IV_SIZE + GCM_DIGEST_SIZE)
-        throw std::runtime_error{"ciphertext data is too short"};
+    if (!response_long_enough(EncryptType::aes_gcm, ciphertext_.size()))
+        throw std::invalid_argument{
+                "Ciphertext data is too short: " + session::to_string(ciphertext_)};
 
     auto key = derive_symmetric_key(private_key_, pubKey);
 
@@ -143,11 +157,11 @@ ustring HopEncryption::decrypt_aesgcm(ustring ciphertext_, const x25519_pubkey& 
 
     gcm_aes256_set_iv(&ctx, GCM_IV_SIZE, ciphertext.data());
 
-    ciphertext.remove_prefix(GCM_IV_SIZE);
-    auto digest_in = ciphertext.substr(ciphertext.size() - GCM_DIGEST_SIZE);
-    ciphertext.remove_suffix(GCM_DIGEST_SIZE);
+    ciphertext = ciphertext.subspan(GCM_IV_SIZE);
+    auto digest_in = ciphertext.subspan(ciphertext.size() - GCM_DIGEST_SIZE);
+    ciphertext = ciphertext.subspan(0, ciphertext.size() - GCM_DIGEST_SIZE);
 
-    ustring plaintext;
+    std::vector<unsigned char> plaintext;
     plaintext.resize(ciphertext.size());
 
     gcm_aes256_decrypt(&ctx, ciphertext.size(), plaintext.data(), ciphertext.data());
@@ -161,9 +175,10 @@ ustring HopEncryption::decrypt_aesgcm(ustring ciphertext_, const x25519_pubkey& 
     return plaintext;
 }
 
-ustring HopEncryption::encrypt_xchacha20(ustring plaintext, const x25519_pubkey& pubKey) const {
+std::vector<unsigned char> HopEncryption::encrypt_xchacha20(
+        std::vector<unsigned char> plaintext, const x25519_pubkey& pubKey) const {
 
-    ustring ciphertext;
+    std::vector<unsigned char> ciphertext;
     ciphertext.resize(
             crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + plaintext.size() +
             crypto_aead_xchacha20poly1305_ietf_ABYTES);
@@ -192,18 +207,22 @@ ustring HopEncryption::encrypt_xchacha20(ustring plaintext, const x25519_pubkey&
     return ciphertext;
 }
 
-ustring HopEncryption::decrypt_xchacha20(ustring ciphertext_, const x25519_pubkey& pubKey) const {
-    ustring_view ciphertext = {ciphertext_.data(), ciphertext_.size()};
+std::vector<unsigned char> HopEncryption::decrypt_xchacha20(
+        std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
+    std::span<const unsigned char> ciphertext = to_span(ciphertext_);
 
     // Extract nonce from the beginning of the ciphertext:
-    auto nonce = ciphertext.substr(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    ciphertext.remove_prefix(nonce.size());
-    if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES)
-        throw std::runtime_error{"Invalid ciphertext: too short"};
+    auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    ciphertext = ciphertext.subspan(nonce.size());
+
+    if (!response_long_enough(EncryptType::xchacha20, ciphertext_.size()))
+        throw std::invalid_argument{
+                "Ciphertext data is too short: " +
+                std::string(reinterpret_cast<const char*>(ciphertext_.data()))};
 
     const auto key = xchacha20_shared_key(public_key_, private_key_, pubKey, !server_);
 
-    ustring plaintext;
+    std::vector<unsigned char> plaintext;
     plaintext.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
     auto* m = reinterpret_cast<unsigned char*>(plaintext.data());
     unsigned long long mlen;

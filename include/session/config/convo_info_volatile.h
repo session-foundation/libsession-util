@@ -360,7 +360,10 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_legacy_group(
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 /// - `convo` -- [in] Pointer to conversation info structure
-LIBSESSION_EXPORT void convo_info_volatile_set_1to1(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool convo_info_volatile_set_1to1(
         config_object* conf, const convo_info_volatile_1to1* convo);
 
 /// API: convo_info_volatile/convo_info_volatile_set_community
@@ -378,7 +381,10 @@ LIBSESSION_EXPORT void convo_info_volatile_set_1to1(
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 /// - `convo` -- [in] Pointer to community info structure
-LIBSESSION_EXPORT void convo_info_volatile_set_community(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool convo_info_volatile_set_community(
         config_object* conf, const convo_info_volatile_community* convo);
 
 /// API: convo_info_volatile/convo_info_volatile_set_group
@@ -396,7 +402,10 @@ LIBSESSION_EXPORT void convo_info_volatile_set_community(
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 /// - `convo` -- [in] Pointer to group info structure
-LIBSESSION_EXPORT void convo_info_volatile_set_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool convo_info_volatile_set_group(
         config_object* conf, const convo_info_volatile_group* convo);
 
 /// API: convo_info_volatile/convo_info_volatile_set_legacy_group
@@ -414,7 +423,10 @@ LIBSESSION_EXPORT void convo_info_volatile_set_group(
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 /// - `convo` -- [in] Pointer to legacy group info structure
-LIBSESSION_EXPORT void convo_info_volatile_set_legacy_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool convo_info_volatile_set_legacy_group(
         config_object* conf, const convo_info_volatile_legacy_group* convo);
 
 /// API: convo_info_volatile/convo_info_volatile_erase_1to1

@@ -12,6 +12,14 @@ set_target_properties(
     OUTPUT_NAME session-protos
     SOVERSION ${LIBSESSION_LIBVERSION})
 
+# -Wunused-parameter triggers in the protobuf dependency
+message(STATUS "Disabling -Werror for proto unused-parameter")
+
+if (MSVC)
+else()
+    target_compile_options(protos PUBLIC -Wno-error=unused-parameter)
+endif()
+
 libsession_static_bundle(protos)
 
 add_library(libsession::protos ALIAS protos)

@@ -45,8 +45,8 @@ template <typename ConfigT>
         size_t dumplen,
         char* error) {
     assert(ed25519_secretkey_bytes);
-    ustring_view ed25519_secretkey{ed25519_secretkey_bytes, 64};
-    std::optional<ustring_view> dump;
+    std::span<const unsigned char> ed25519_secretkey{ed25519_secretkey_bytes, 64};
+    std::optional<std::span<const unsigned char>> dump;
     if (dumpstr && dumplen)
         dump.emplace(dumpstr, dumplen);
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_secretkey, dump);
@@ -63,23 +63,15 @@ template <typename ConfigT>
 
     assert(ed25519_pubkey_bytes);
 
-    ustring_view ed25519_pubkey{ed25519_pubkey_bytes, 32};
-    std::optional<ustring_view> ed25519_secretkey;
+    std::span<const unsigned char> ed25519_pubkey{ed25519_pubkey_bytes, 32};
+    std::optional<std::span<const unsigned char>> ed25519_secretkey;
     if (ed25519_secretkey_bytes)
         ed25519_secretkey.emplace(ed25519_secretkey_bytes, 64);
-    std::optional<ustring_view> dump;
+    std::optional<std::span<const unsigned char>> dump;
     if (dump_bytes && dumplen)
         dump.emplace(dump_bytes, dumplen);
 
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_pubkey, ed25519_secretkey, dump);
-}
-
-template <size_t N>
-void copy_c_str(char (&dest)[N], std::string_view src) {
-    if (src.size() >= N)
-        src.remove_suffix(src.size() - N - 1);
-    std::memcpy(dest, src.data(), src.size());
-    dest[src.size()] = 0;
 }
 
 // Copies a container of std::strings into a self-contained malloc'ed config_string_list for
@@ -144,7 +136,7 @@ void check_encoded_pubkey(std::string_view pk);
 
 // Takes a 32-byte pubkey value encoded as hex, base32z, or base64 and returns the decoded 32 bytes.
 // Throws if invalid.
-ustring decode_pubkey(std::string_view pk);
+std::vector<unsigned char> decode_pubkey(std::string_view pk);
 
 // Modifies a string to be (ascii) lowercase.
 void make_lc(std::string& s);
@@ -158,8 +150,10 @@ std::optional<int64_t> maybe_int(const session::config::dict& d, const char* key
 // Digs into a config `dict` to get out a string; nullopt if not there (or not string)
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key);
 
-// Digs into a config `dict` to get out a ustring; nullopt if not there (or not string)
-std::optional<ustring> maybe_ustring(const session::config::dict& d, const char* key);
+// Digs into a config `dict` to get out a std::vector<unsigned char>; nullopt if not there (or not
+// string)
+std::optional<std::vector<unsigned char>> maybe_vector(
+        const session::config::dict& d, const char* key);
 
 // Digs into a config `dict` to get out a string view; nullopt if not there (or not string).  The
 // string view is only valid as long as the dict stays unchanged.
@@ -211,10 +205,14 @@ void load_unknowns(
 
 /// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
 /// serious error.
-ustring zstd_compress(ucspan data, int level = 1, ustring_view prefix = {});
+std::vector<unsigned char> zstd_compress(
+        std::span<const unsigned char> data,
+        int level = 1,
+        std::span<const unsigned char> prefix = {});
 
 /// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
 /// then this returns nullopt if the decompressed size would exceed that limit.
-std::optional<ustring> zstd_decompress(ucspan data, size_t max_size = 0);
+std::optional<std::vector<unsigned char>> zstd_decompress(
+        std::span<const unsigned char> data, size_t max_size = 0);
 
 }  // namespace session::config

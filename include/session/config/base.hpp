@@ -8,12 +8,14 @@
 #include <memory>
 #include <session/config.hpp>
 #include <session/util.hpp>
+#include <span>
 #include <type_traits>
 #include <unordered_set>
 #include <variant>
 #include <vector>
 
 #include "../hash.hpp"
+#include "../logging.hpp"
 #include "../sodium_array.hpp"
 #include "base.h"
 #include "namespaces.hpp"
@@ -38,9 +40,6 @@ static constexpr bool is_dict_subtype = is_one_of<T, config::scalar, config::set
 template <typename T>
 static constexpr bool is_dict_value =
         is_dict_subtype<T> || is_one_of<T, dict_value, int64_t, std::string>;
-
-// Levels for the logging callback
-enum class LogLevel { debug = 0, info, warning, error };
 
 /// Our current config state
 enum class ConfigState : int {
@@ -86,8 +85,8 @@ class ConfigSig {
     //
     // Throws if given invalid data (i.e. wrong key size, or mismatched pubkey/secretkey).
     void init_sig_keys(
-            std::optional<ustring_view> ed25519_pubkey,
-            std::optional<ustring_view> ed25519_secretkey);
+            std::optional<std::span<const unsigned char>> ed25519_pubkey,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey);
 
   public:
     virtual ~ConfigSig() = default;
@@ -115,7 +114,7 @@ class ConfigSig {
     /// Inputs:
     /// - `secret` -- the 64-byte sodium-style Ed25519 "secret key" (actually the seed+pubkey
     ///   concatenated together) that sets both the secret key and public key.
-    void set_sig_keys(ustring_view secret);
+    void set_sig_keys(std::span<const unsigned char> secret);
 
     /// API: base/ConfigSig::set_sig_pubkey
     ///
@@ -125,7 +124,7 @@ class ConfigSig {
     ///
     /// Inputs:
     /// - `pubkey` -- the 32 byte Ed25519 pubkey that must have signed incoming messages
-    void set_sig_pubkey(ustring_view pubkey);
+    void set_sig_pubkey(std::span<const unsigned char> pubkey);
 
     /// API: base/ConfigSig::get_sig_pubkey
     ///
@@ -172,15 +171,16 @@ class ConfigBase : public ConfigSig {
     std::unordered_set<std::string> _curr_hashes;
 
     // Contains obsolete known message hashes that are obsoleted by the most recent merge or push;
-    // these are returned (and cleared) when `push` is called.
+    // these are returned (and cleared) when `push` or `old_hashes` are called.
     std::unordered_set<std::string> _old_hashes;
 
     struct PartialMessage {
-        int index;               // 0-based index of this part
-        std::string message_id;  // storage server message hash of this part
-        uvec data;               // Data chunk
+        int index;                        // 0-based index of this part
+        std::string message_id;           // storage server message hash of this part
+        std::vector<unsigned char> data;  // Data chunk
 
-        PartialMessage(int index, std::string_view message_id, ucspan data) :
+        PartialMessage(
+                int index, std::string_view message_id, std::span<const unsigned char> data) :
                 index{index}, message_id{message_id}, data{data.begin(), data.end()} {}
     };
     struct PartialMessages {
@@ -231,8 +231,8 @@ class ConfigBase : public ConfigSig {
     //
     //   For new parts that don't complete a set, errors, and already seen messages the optional
     //   value will be nullopt.
-    std::pair<bool, std::optional<std::pair<std::list<std::string>, ustring>>> _handle_multipart(
-            std::string_view msg_id, std::span<const unsigned char> message);
+    std::pair<bool, std::optional<std::pair<std::list<std::string>, std::vector<unsigned char>>>>
+    _handle_multipart(std::string_view msg_id, std::span<const unsigned char> message);
 
     // Writes multipart data into the sub-dict of the dump data.
     void _dump_multiparts(oxenc::bt_dict_producer&& multi) const;
@@ -253,9 +253,9 @@ class ConfigBase : public ConfigSig {
     // verification of incoming messages using the associated pubkey, and will be signed using the
     // secretkey (if a secret key is given).
     explicit ConfigBase(
-            std::optional<ustring_view> dump = std::nullopt,
-            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
-            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+            std::optional<std::span<const unsigned char>> dump = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_pubkey = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey = std::nullopt);
 
     // Initializes the base config object with dump data and keys; this is typically invoked by the
     // constructor, but is exposed to subclasses so that they can delay initial processing by
@@ -266,9 +266,9 @@ class ConfigBase : public ConfigSig {
     //
     // This method must not be called outside derived class construction!
     void init(
-            std::optional<ustring_view> dump = std::nullopt,
-            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
-            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+            std::optional<std::span<const unsigned char>> dump = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_pubkey = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey = std::nullopt);
 
     // Tracks whether we need to dump again; most mutating methods should set this to true (unless
     // calling set_state, which sets to to true implicitly).
@@ -278,16 +278,6 @@ class ConfigBase : public ConfigSig {
     // state and we know our current message hash, that hash gets added to `old_hashes_` to be
     // deleted at the next push.
     void set_state(ConfigState s);
-
-    // Invokes the `logger` callback if set, does nothing if there is no logger.  Arguments go
-    // through fmt::format.
-    //
-    // TODO: replace used of this with oxen-logging!
-    template <typename... Args>
-    void log(LogLevel lvl, fmt::format_string<Args...> fmt, Args&&... args) const {
-        if (logger)
-            logger(lvl, fmt::format(fmt, std::forward<Args>(args)...));
-    }
 
     // Returns a reference to the current MutableConfigMessage.  If the current message is not
     // already dirty (i.e. Clean or Waiting) then calling this increments the seqno counter.
@@ -546,15 +536,18 @@ class ConfigBase : public ConfigSig {
 
         /// API: base/ConfigBase::DictFieldProxy::uview
         ///
-        /// Returns the value as a ustring_view, if it exists and is a string; nullopt otherwise.
+        /// Returns the value as a std::span<const unsigned char>, if it exists and is a string;
+        /// nullopt otherwise.
         ///
         /// Inputs: None
         ///
         /// Outputs:
-        /// - `std::optional<ustring_view>` -- Returns a value as a view if it exists
-        std::optional<ustring_view> uview() const {
+        /// - `std::optional<std::span<const unsigned char>>` -- Returns a value as a view if it
+        /// exists
+        std::optional<std::span<const unsigned char>> uview() const {
             if (auto* s = get_clean<std::string>())
-                return ustring_view{reinterpret_cast<const unsigned char*>(s->data()), s->size()};
+                return std::span<const unsigned char>{
+                        reinterpret_cast<const unsigned char*>(s->data()), s->size()};
             return std::nullopt;
         }
 
@@ -661,17 +654,17 @@ class ConfigBase : public ConfigSig {
         /// - `value` -- replaces current value with given string view
         void operator=(std::string_view value) { *this = std::string{value}; }
 
-        /// API: base/ConfigBase::DictFieldProxy::operator=(ustring_view)
+        /// API: base/ConfigBase::DictFieldProxy::operator=(std::span<const unsigned char>)
         ///
-        /// Replaces the current value with the given ustring_view.  This also auto-vivifies any
-        /// intermediate dicts needed to reach the given key, including replacing non-dict values if
-        /// they currently exist along the path (this makes a copy).
+        /// Replaces the current value with the given std::span<const unsigned char>.  This also
+        /// auto-vivifies any intermediate dicts needed to reach the given key, including replacing
+        /// non-dict values if they currently exist along the path (this makes a copy).
         ///
         /// Inputs:
-        /// - `value` -- replaces current value with given ustring_view
+        /// - `value` -- replaces current value with given std::span<const unsigned char>
         ///
-        /// Same as above, but takes a ustring_view
-        void operator=(ustring_view value) {
+        /// Same as above, but takes a std::span<const unsigned char>
+        void operator=(std::span<const unsigned char> value) {
             *this = std::string{reinterpret_cast<const char*>(value.data()), value.size()};
         }
 
@@ -873,7 +866,7 @@ class ConfigBase : public ConfigSig {
     ///   and processed as a config message, even if it was too old to be useful (or was already
     ///   known to be included).
     std::unordered_set<std::string> _merge(
-            std::span<const std::pair<std::string, ustring_view>> configs);
+            std::span<const std::pair<std::string, std::span<const unsigned char>>> configs);
 
     /// API: base/ConfigBase::extra_data
     ///
@@ -915,7 +908,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Inputs:
     /// - `ed25519_secret_key` -- key is loaded for encryption
-    void load_key(ustring_view ed25519_secretkey);
+    void load_key(std::span<const unsigned char> ed25519_secretkey);
 
   public:
     virtual ~ConfigBase() = default;
@@ -929,9 +922,6 @@ class ConfigBase : public ConfigSig {
 
     // Proxy class providing read and write access to the contained config data.
     const DictFieldRoot data{*this};
-
-    // If set then we log things by calling this callback
-    std::function<void(LogLevel lvl, std::string msg)> logger;
 
     /// API: base/ConfigBase::storage_namespace
     ///
@@ -1008,9 +998,9 @@ class ConfigBase : public ConfigSig {
     /// Declaration:
     /// ```cpp
     /// std::unordered_set<std::string> merge(
-    ///     const std::vector<std::pair<std::string, ustring_view>>& configs);
+    ///     const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs);
     /// std::unordered_set<std::string> merge(
-    ///     const std::vector<std::pair<std::string, ustring>>& configs);
+    ///     const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs);
     /// ```
     ///
     /// Inputs:
@@ -1027,11 +1017,12 @@ class ConfigBase : public ConfigSig {
     ///   parts that do not complete a message set, inclusion in the return value is based only on
     ///   whether the multipart part itself looked valid.
     std::unordered_set<std::string> merge(
-            const std::vector<std::pair<std::string, ustring>>& configs);
+            const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs);
 
-    // Same as above, but takes values as views (because sometimes that is more convenient).
+    // Same as above, but takes values as std::span<const unsigned char>s (because sometimes that is
+    // more convenient).
     std::unordered_set<std::string> merge(
-            const std::vector<std::pair<std::string, ustring_view>>& configs);
+            const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs);
 
     /// API: base/ConfigBase::is_dirty
     ///
@@ -1054,6 +1045,26 @@ class ConfigBase : public ConfigSig {
     /// Outputs:
     /// - `bool` -- Returns true if changes have been serialized
     bool is_clean() const { return _state == ConfigState::Clean; }
+
+    /// API: base/ConfigBase::current_state_string()
+    ///
+    /// Returns one of "clean", "pending", or "DIRTY" depending on the current state.  This is
+    /// primarily intended for logging.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::string_view` -- fixed string (clean, DIRTY, or pending) describing the current
+    ///   state.
+    std::string_view current_state_string() const {
+        switch (_state) {
+            case ConfigState::Clean: return "clean";
+            case ConfigState::Dirty: return "DIRTY";
+            case ConfigState::Waiting: return "pending";
+        }
+        assert(!"invalid state value!");
+        return "<invalid-state>";
+    }
 
     /// API: base/ConfigBase::is_readonly
     ///
@@ -1121,6 +1132,18 @@ class ConfigBase : public ConfigSig {
     ///   config hashes
     std::unordered_set<std::string> active_hashes() const;
 
+    /// API: base/ConfigBase::old_hashes
+    ///
+    /// The old config hash(es); this can be empty if there are no old hashes or if the config is in
+    /// a dirty state (in which case these should be retrieved via the `push` function). Calling
+    /// this function or the `push` function will clear the stored old_hashes.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::vector<std::string>` -- Returns old config hashes
+    std::vector<std::string> old_hashes();
+
     /// API: base/ConfigBase::needs_push
     ///
     /// Returns true if this object contains updated data that has not yet been confirmed stored on
@@ -1159,11 +1182,13 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::tuple<seqno_t, ustring, std::vector<std::string>>` - Returns a tuple containing
+    /// - `std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>` - Returns a
+    /// tuple containing
     ///   - `seqno_t` -- sequence number
-    ///   - `ustring` -- data message to push to the server
+    ///   - `std::vector<unsigned char>` -- data message to push to the server
     ///   - `std::vector<std::string>` -- list of known message hashes
-    virtual std::tuple<seqno_t, std::vector<ustring>, std::vector<std::string>> push();
+    virtual std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
+    push();
 
     /// API: base/ConfigBase::confirm_pushed
     ///
@@ -1199,8 +1224,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `ustring` -- Returns binary data of the state dump
-    ustring dump();
+    /// - `std::vector<unsigned char>` -- Returns binary data of the state dump
+    std::vector<unsigned char> dump();
 
     /// API: base/ConfigBase::make_dump
     ///
@@ -1211,8 +1236,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `ustring` -- Returns binary data of the state dump
-    ustring make_dump() const;
+    /// - `std::vector<unsigned char>` -- Returns binary data of the state dump
+    std::vector<unsigned char> make_dump() const;
 
     /// API: base/ConfigBase::needs_dump
     ///
@@ -1271,13 +1296,16 @@ class ConfigBase : public ConfigSig {
     /// Will throw a std::invalid_argument if the key is not 32 bytes.
     ///
     /// Inputs:
-    /// - `ustring_view key` -- 32 byte binary key
+    /// - `std::span<const unsigned char> key` -- 32 byte binary key
     /// - `high_priority` -- Whether to add to front or back of key list. If true then key is added
     ///   to beginning and replace highest-priority key for encryption
     /// - `dirty_config` -- if true then mark the config as dirty (incrementing seqno and needing a
     ///   push) if the first key (i.e. the key used for encryption) is changed as a result of this
     ///   call.  Ignored if the config is not modifiable.
-    void add_key(ustring_view key, bool high_priority = true, bool dirty_config = false);
+    void add_key(
+            std::span<const unsigned char> key,
+            bool high_priority = true,
+            bool dirty_config = false);
 
     /// API: base/ConfigBase::clear_keys
     ///
@@ -1309,7 +1337,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if found and removed
-    bool remove_key(ustring_view key, size_t from = 0, bool dirty_config = false);
+    bool remove_key(std::span<const unsigned char> key, size_t from = 0, bool dirty_config = false);
 
     /// API: base/ConfigBase::replace_keys
     ///
@@ -1322,7 +1350,8 @@ class ConfigBase : public ConfigSig {
     /// - `dirty_config` -- if true then set the config status to dirty (incrementing seqno and
     ///   requiring a repush) if the old and new first key are not the same.  Ignored if the config
     ///   is not modifiable.
-    void replace_keys(const std::vector<ustring_view>& new_keys, bool dirty_config = false);
+    void replace_keys(
+            const std::vector<std::span<const unsigned char>>& new_keys, bool dirty_config = false);
 
     /// API: base/ConfigBase::get_keys
     ///
@@ -1336,8 +1365,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::vector<ustring_view>` -- Returns vector of encryption keys
-    std::vector<ustring_view> get_keys() const;
+    /// - `std::vector<std::span<const unsigned char>>` -- Returns vector of encryption keys
+    std::vector<std::span<const unsigned char>> get_keys() const;
 
     /// API: base/ConfigBase::key_count
     ///
@@ -1358,7 +1387,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if it does exist
-    bool has_key(ustring_view key) const;
+    bool has_key(std::span<const unsigned char> key) const;
 
     /// API: base/ConfigBase::key
     ///
@@ -1370,8 +1399,8 @@ class ConfigBase : public ConfigSig {
     /// - `i` -- keys position in key list
     ///
     /// Outputs:
-    /// - `ustring_view` -- binary data of the key
-    ustring_view key(size_t i = 0) const {
+    /// - `std::span<const unsigned char>` -- binary data of the key
+    std::span<const unsigned char> key(size_t i = 0) const {
         assert(i < _keys.size());
         return {_keys[i].data(), _keys[i].size()};
     }
@@ -1419,24 +1448,47 @@ inline const internals<T>& unbox(const config_object* conf) {
     return *static_cast<const internals<T>*>(conf->internals);
 }
 
-// Sets an error message in the internals.error string and updates the last_error pointer in the
-// outer (C) config_object struct to point at it.
-void set_error(config_object* conf, std::string e);
-
-// Same as above, but gets the error string out of an exception and passed through a return value.
-// Intended to simplify catch-and-return-error such as:
-//     try {
-//         whatever();
-//     } catch (const std::exception& e) {
-//         return set_error(conf, LIB_SESSION_ERR_OHNOES, e);
-//     }
-inline int set_error(config_object* conf, int errcode, const std::exception& e) {
-    set_error(conf, e.what());
-    return errcode;
+template <size_t N>
+void copy_c_str(char (&dest)[N], std::string_view src) {
+    if (src.size() >= N)
+        src.remove_suffix(src.size() - N - 1);
+    std::memcpy(dest, src.data(), src.size());
+    dest[src.size()] = 0;
 }
 
-// Copies a value contained in a string into a new malloced char buffer, returning the buffer and
-// size via the two pointer arguments.
-void copy_out(ustring_view data, unsigned char** out, size_t* outlen);
+// Wraps a labmda and, if an exception is thrown, sets an error message in the internals.error
+// string and updates the last_error pointer in the outer (C) config_object struct to point at it.
+//
+// No return value: accepts void and pointer returns; pointer returns will become nullptr on error
+template <std::invocable Call>
+decltype(auto) wrap_exceptions(config_object* conf, Call&& f) {
+    using Ret = std::invoke_result_t<Call>;
+
+    try {
+        conf->last_error = nullptr;
+        return std::invoke(std::forward<Call>(f));
+    } catch (const std::exception& e) {
+        copy_c_str(conf->_error_buf, e.what());
+        conf->last_error = conf->_error_buf;
+    }
+    if constexpr (std::is_pointer_v<Ret>)
+        return static_cast<Ret>(nullptr);
+    else
+        static_assert(std::is_void_v<Ret>, "Don't know how to return an error value!");
+}
+
+// Same as above but accepts callbacks with value returns on errors: returns `f()` on success,
+// `error_return` on exception
+template <std::invocable Call, typename Ret>
+Ret wrap_exceptions(config_object* conf, Call&& f, Ret error_return) {
+    try {
+        conf->last_error = nullptr;
+        return std::invoke(std::forward<Call>(f));
+    } catch (const std::exception& e) {
+        copy_c_str(conf->_error_buf, e.what());
+        conf->last_error = conf->_error_buf;
+    }
+    return error_return;
+}
 
 }  // namespace session::config

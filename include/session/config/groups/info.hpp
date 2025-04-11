@@ -32,7 +32,7 @@ class Info : public ConfigBase {
     /// Limits for the name & description strings, in bytes.  If longer, we truncate to these
     /// lengths:
     static constexpr size_t NAME_MAX_LENGTH = 100;  // same as base_group_info::NAME_MAX_LENGTH
-    static constexpr size_t DESCRIPTION_MAX_LENGTH = 2000;
+    static constexpr size_t DESCRIPTION_MAX_LENGTH = 600;
 
     // No default constructor
     Info() = delete;
@@ -55,9 +55,9 @@ class Info : public ConfigBase {
     ///   push config changes.
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     ///   that was previously dumped from an instance of this class by calling `dump()`.
-    Info(ustring_view ed25519_pubkey,
-         std::optional<ustring_view> ed25519_secretkey,
-         std::optional<ustring_view> dumped);
+    Info(std::span<const unsigned char> ed25519_pubkey,
+         std::optional<std::span<const unsigned char>> ed25519_secretkey,
+         std::optional<std::span<const unsigned char>> dumped);
 
     /// API: groups/Info::storage_namespace
     ///
@@ -174,7 +174,7 @@ class Info : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, ustring_view key);
+    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -184,7 +184,7 @@ class Info : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, ustring_view key);
+    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     void set_profile_pic(profile_pic pic);
 
     /// API: groups/Info::set_expiry_timer
@@ -239,8 +239,8 @@ class Info : public ConfigBase {
     /// the closed group history with a timestamp earlier than this value.  Returns nullopt if no
     /// delete-before timestamp is set.
     ///
-    /// The given value is not checked for sanity (e.g. if you pass milliseconds it will be
-    /// interpreted as deleting everything for the next 50000+ years).  Be careful!
+    /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
+    /// interpreted as such)
     ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete messages.  Pass 0
@@ -267,8 +267,8 @@ class Info : public ConfigBase {
     /// that) from any messages older than the given timestamp.  Returns nullopt if no
     /// delete-attachments-before timestamp is set.
     ///
-    /// The given value is not checked for sanity (e.g. if you pass milliseconds it will be
-    /// interpreted as deleting all attachments for the next 50000+ years).  Be careful!
+    /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
+    /// interpreted as such)
     ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete attachments. Pass

@@ -100,8 +100,8 @@ struct base_group_info {
 /// Struct containing legacy group info (aka "closed groups").
 struct legacy_group_info : base_group_info {
     std::string session_id;                      // The legacy group "session id" (33 bytes).
-    ustring enc_pubkey;                          // bytes (32 or empty)
-    ustring enc_seckey;                          // bytes (32 or empty)
+    std::vector<unsigned char> enc_pubkey;       // bytes (32 or empty)
+    std::vector<unsigned char> enc_seckey;       // bytes (32 or empty)
     std::chrono::seconds disappearing_timer{0};  // 0 == disabled.
 
     /// Constructs a new legacy group info from an id (which must look like a session_id).  Throws
@@ -191,7 +191,7 @@ struct group_info : base_group_info {
                      // (to distinguish it from a 05 x25519 pubkey session id).
 
     /// Group secret key (64 bytes); this is only possessed by admins.
-    ustring secretkey;
+    std::vector<unsigned char> secretkey;
 
     /// Group authentication signing value (100 bytes); this is used by non-admins to authenticate
     /// (using the swarm key generation functions in config::groups::Keys).  This value will be
@@ -199,7 +199,7 @@ struct group_info : base_group_info {
     /// is an admin), and so does not need to be explicitly cleared when being promoted to admin.
     ///
     /// Producing and using this value is done with the groups::Keys `swarm` methods.
-    ustring auth_data;
+    std::vector<unsigned char> auth_data;
 
     /// Tracks why we were removed from the group. Values are:
     /// - NOT_REMOVED: that we haven't been removed,
@@ -254,7 +254,7 @@ struct community_info : base_group_info, community {
     void load(const dict& info_dict);
 
     friend class UserGroups;
-    friend class comm_iterator_helper;
+    friend struct comm_iterator_helper;
 };
 
 using any_group_info = std::variant<group_info, community_info, legacy_group_info>;
@@ -281,7 +281,9 @@ class UserGroups : public ConfigBase {
     ///
     /// Outputs:
     /// - `UserGroups` - Constructor
-    UserGroups(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped);
+    UserGroups(
+            std::span<const unsigned char> ed25519_secretkey,
+            std::optional<std::span<const unsigned char>> dumped);
 
     /// API: user_groups/UserGroups::storage_namespace
     ///
@@ -366,7 +368,8 @@ class UserGroups : public ConfigBase {
     ///         std::string_view room,
     ///         std::string_view pubkey_encoded) const;
     /// community_info get_or_construct_community(
-    ///         std::string_view base_url, std::string_view room, ustring_view pubkey) const;
+    ///         std::string_view base_url, std::string_view room, std::span<const unsigned char>
+    ///         pubkey) const;
     /// ```
     ///
     /// Inputs:
@@ -389,7 +392,9 @@ class UserGroups : public ConfigBase {
             std::string_view room,
             std::string_view pubkey_encoded) const;
     community_info get_or_construct_community(
-            std::string_view base_url, std::string_view room, ustring_view pubkey) const;
+            std::string_view base_url,
+            std::string_view room,
+            std::span<const unsigned char> pubkey) const;
 
     /// API: user_groups/UserGroups::get_or_construct_community(string_view)
     ///
@@ -465,7 +470,7 @@ class UserGroups : public ConfigBase {
   protected:
     // Drills into the nested dicts to access open group details
     DictFieldProxy community_field(
-            const community_info& og, ustring_view* get_pubkey = nullptr) const;
+            const community_info& og, std::span<const unsigned char>* get_pubkey = nullptr) const;
 
     void set_base(const base_group_info& bg, DictFieldProxy& info) const;
 

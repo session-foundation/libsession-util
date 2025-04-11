@@ -3,7 +3,6 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
@@ -20,7 +19,6 @@
 #include "session/util.hpp"
 
 using namespace std::literals;
-using session::ustring_view;
 
 LIBSESSION_C_API const size_t GROUP_NAME_MAX_LENGTH =
         session::config::legacy_group_info::NAME_MAX_LENGTH;
@@ -36,18 +34,18 @@ namespace session::config {
 template <typename T>
 static void base_into(const base_group_info& self, T& c) {
     c.priority = self.priority;
-    c.joined_at = self.joined_at;
+    c.joined_at = to_epoch_seconds(self.joined_at);
     c.notifications = static_cast<CONVO_NOTIFY_MODE>(self.notifications);
-    c.mute_until = self.mute_until;
+    c.mute_until = to_epoch_seconds(self.mute_until);
     c.invited = self.invited;
 }
 
 template <typename T>
 static void base_from(base_group_info& self, const T& c) {
     self.priority = c.priority;
-    self.joined_at = c.joined_at;
+    self.joined_at = to_epoch_seconds(c.joined_at);
     self.notifications = static_cast<notify_mode>(c.notifications);
-    self.mute_until = c.mute_until;
+    self.mute_until = to_epoch_seconds(c.mute_until);
     self.invited = c.invited;
 }
 
@@ -60,7 +58,7 @@ legacy_group_info::legacy_group_info(std::string sid) : session_id{std::move(sid
 }
 
 community_info::community_info(const ugroups_community_info& c) :
-        community_info{c.base_url, c.room, ustring_view{c.pubkey, 32}} {
+        community_info{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}} {
     base_from(*this, c);
 }
 
@@ -82,8 +80,8 @@ legacy_group_info::legacy_group_info(const ugroups_legacy_group_info& c, impl_t)
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
     base_from(*this, c);
     if (c.have_enc_keys) {
-        enc_pubkey.assign(c.enc_pubkey, 32);
-        enc_seckey.assign(c.enc_seckey, 32);
+        enc_pubkey.assign(c.enc_pubkey, c.enc_pubkey + 32);
+        enc_seckey.assign(c.enc_seckey, c.enc_seckey + 32);
     }
 }
 
@@ -129,7 +127,7 @@ void legacy_group_info::into(ugroups_legacy_group_info& c) && {
 
 void base_group_info::load(const dict& info_dict) {
     priority = maybe_int(info_dict, "+").value_or(0);
-    joined_at = std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0));
+    joined_at = to_epoch_seconds(std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0)));
 
     int notify = maybe_int(info_dict, "@").value_or(0);
     if (notify >= 0 && notify <= 3)
@@ -137,7 +135,7 @@ void base_group_info::load(const dict& info_dict) {
     else
         notifications = notify_mode::defaulted;
 
-    mute_until = maybe_int(info_dict, "!").value_or(0);
+    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
 
     invited = maybe_int(info_dict, "i").value_or(0);
 }
@@ -150,8 +148,8 @@ void legacy_group_info::load(const dict& info_dict) {
     else
         name.clear();
 
-    auto enc_pub = maybe_ustring(info_dict, "k");
-    auto enc_sec = maybe_ustring(info_dict, "K");
+    auto enc_pub = maybe_vector(info_dict, "k");
+    auto enc_sec = maybe_vector(info_dict, "K");
     if (enc_pub && enc_sec && enc_pub->size() == 32 && enc_sec->size() == 32) {
         enc_pubkey = std::move(*enc_pub);
         enc_seckey = std::move(*enc_sec);
@@ -210,9 +208,9 @@ group_info::group_info(const ugroups_group_info& c) : id{c.id, 66} {
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
 
     if (c.have_secretkey)
-        secretkey.assign(c.secretkey, 64);
+        secretkey.assign(c.secretkey, c.secretkey + 64);
     if (c.have_auth_data)
-        auth_data.assign(c.auth_data, sizeof(c.auth_data));
+        auth_data.assign(c.auth_data, c.auth_data + sizeof(c.auth_data));
 }
 
 void group_info::into(ugroups_group_info& c) const {
@@ -235,7 +233,7 @@ void group_info::load(const dict& info_dict) {
     else
         name.clear();
 
-    if (auto seed = maybe_ustring(info_dict, "K"); seed && seed->size() == 32) {
+    if (auto seed = maybe_vector(info_dict, "K"); seed && seed->size() == 32) {
         std::array<unsigned char, 33> pk;
         pk[0] = 0x03;
         secretkey.resize(64);
@@ -243,7 +241,7 @@ void group_info::load(const dict& info_dict) {
         if (id != oxenc::to_hex(pk.begin(), pk.end()))
             secretkey.clear();
     }
-    if (auto sig = maybe_ustring(info_dict, "s"); sig && sig->size() == 100)
+    if (auto sig = maybe_vector(info_dict, "s"); sig && sig->size() == 100)
         auth_data = std::move(*sig);
 
     removed_status = maybe_int(info_dict, "r").value_or(0);
@@ -284,19 +282,21 @@ void community_info::load(const dict& info_dict) {
         set_room(std::move(*n));
 }
 
-UserGroups::UserGroups(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+UserGroups::UserGroups(
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
 
 ConfigBase::DictFieldProxy UserGroups::community_field(
-        const community_info& og, ustring_view* get_pubkey) const {
+        const community_info& og, std::span<const unsigned char>* get_pubkey) const {
     auto record = data["o"][og.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey =
-                    ustring_view{reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+            *get_pubkey = std::span<const unsigned char>{
+                    reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
     }
     return record["R"][og.room_norm()];
 }
@@ -305,12 +305,12 @@ std::optional<community_info> UserGroups::get_community(
         std::string_view base_url, std::string_view room) const {
     community_info og{base_url, room};
 
-    ustring_view pubkey;
+    std::span<const unsigned char> pubkey;
     if (auto* info_dict = community_field(og, &pubkey).dict()) {
         og.load(*info_dict);
         if (!pubkey.empty())
             og.set_pubkey(pubkey);
-        return std::move(og);
+        return og;
     }
     return std::nullopt;
 }
@@ -321,7 +321,9 @@ std::optional<community_info> UserGroups::get_community(std::string_view partial
 }
 
 community_info UserGroups::get_or_construct_community(
-        std::string_view base_url, std::string_view room, ustring_view pubkey) const {
+        std::string_view base_url,
+        std::string_view room,
+        std::span<const unsigned char> pubkey) const {
     community_info result{base_url, room, pubkey};
 
     if (auto* info_dict = community_field(result).dict())
@@ -385,7 +387,7 @@ group_info UserGroups::get_or_construct_group(std::string_view pubkey_hex) const
 
 group_info UserGroups::create_group() const {
     std::array<unsigned char, 32> pk;
-    ustring sk;
+    std::vector<unsigned char> sk;
     sk.resize(64);
     crypto_sign_keypair(pk.data(), sk.data());
     std::string pk_hex;
@@ -407,9 +409,9 @@ void UserGroups::set(const community_info& c) {
 
 void UserGroups::set_base(const base_group_info& bg, DictFieldProxy& info) const {
     set_nonzero_int(info["+"], bg.priority);
-    set_positive_int(info["j"], bg.joined_at);
+    set_positive_int(info["j"], to_epoch_seconds(bg.joined_at));
     set_positive_int(info["@"], static_cast<int>(bg.notifications));
-    set_positive_int(info["!"], bg.mute_until);
+    set_positive_int(info["!"], to_epoch_seconds(bg.mute_until));
     set_flag(info["i"], bg.invited);
     // We don't set n here because it's subtly different in the three group types
 }
@@ -447,13 +449,13 @@ void UserGroups::set(const group_info& g) {
 
     if (g.secretkey.size() == 64 &&
         // Make sure the secretkey's embedded pubkey matches the group id:
-        ustring_view{g.secretkey.data() + 32, 32} ==
-                ustring_view{
+        to_string_view(std::span<const unsigned char>{g.secretkey.data() + 32, 32}) ==
+                to_string_view(std::span<const unsigned char>{
                         reinterpret_cast<const unsigned char*>(pk_bytes.data() + 1),
-                        pk_bytes.size() - 1})
-        info["K"] = ustring_view{g.secretkey.data(), 32};
+                        pk_bytes.size() - 1}))
+        info["K"] = std::span<const unsigned char>{g.secretkey.data(), 32};
     else {
-        info["K"] = ustring_view{};
+        info["K"] = std::span<const unsigned char>{};
         if (g.auth_data.size() == 100)
             info["s"] = g.auth_data;
         else
@@ -490,7 +492,7 @@ bool UserGroups::erase(const legacy_group_info& c) {
 }
 
 bool UserGroups::erase(const any_group_info& c) {
-    return var::visit([this](const auto& c) { return erase(c); }, c);
+    return std::visit([this](const auto& c) { return erase(c); }, c);
 }
 bool UserGroups::erase_community(std::string_view base_url, std::string_view room) {
     return erase(community_info{base_url, room});
@@ -647,17 +649,16 @@ int user_groups_init(
 
 LIBSESSION_C_API bool user_groups_get_community(
         config_object* conf, ugroups_community_info* comm, const char* base_url, const char* room) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<UserGroups>(conf)->get_community(base_url, room)) {
-            c->into(*comm);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<UserGroups>(conf)->get_community(base_url, room)) {
+                    c->into(*comm);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 LIBSESSION_C_API bool user_groups_get_or_construct_community(
         config_object* conf,
@@ -665,41 +666,39 @@ LIBSESSION_C_API bool user_groups_get_or_construct_community(
         const char* base_url,
         const char* room,
         unsigned const char* pubkey) {
-    try {
-        conf->last_error = nullptr;
-        unbox<UserGroups>(conf)
-                ->get_or_construct_community(base_url, room, ustring_view{pubkey, 32})
-                .into(*comm);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserGroups>(conf)
+                        ->get_or_construct_community(
+                                base_url, room, std::span<const unsigned char>{pubkey, 32})
+                        .into(*comm);
+                return true;
+            },
+            false);
 }
 LIBSESSION_C_API bool user_groups_get_group(
         config_object* conf, ugroups_group_info* group, const char* group_id) {
-    try {
-        conf->last_error = nullptr;
-        if (auto g = unbox<UserGroups>(conf)->get_group(group_id)) {
-            g->into(*group);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        set_error(conf, e.what());
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto g = unbox<UserGroups>(conf)->get_group(group_id)) {
+                    g->into(*group);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 LIBSESSION_C_API bool user_groups_get_or_construct_group(
         config_object* conf, ugroups_group_info* group, const char* group_id) {
-    try {
-        conf->last_error = nullptr;
-        unbox<UserGroups>(conf)->get_or_construct_group(group_id).into(*group);
-        return true;
-    } catch (const std::exception& e) {
-        set_error(conf, e.what());
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserGroups>(conf)->get_or_construct_group(group_id).into(*group);
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_C_API void ugroups_legacy_group_free(ugroups_legacy_group_info* group) {
@@ -711,50 +710,59 @@ LIBSESSION_C_API void ugroups_legacy_group_free(ugroups_legacy_group_info* group
 
 LIBSESSION_C_API ugroups_legacy_group_info* user_groups_get_legacy_group(
         config_object* conf, const char* id) {
-    try {
-        conf->last_error = nullptr;
+    return wrap_exceptions(conf, [&] {
         auto group = std::make_unique<ugroups_legacy_group_info>();
         group->_internal = nullptr;
         if (auto c = unbox<UserGroups>(conf)->get_legacy_group(id)) {
             std::move(c)->into(*group);
             return group.release();
         }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return nullptr;
+        return static_cast<ugroups_legacy_group_info*>(nullptr);
+    });
 }
 
 LIBSESSION_C_API ugroups_legacy_group_info* user_groups_get_or_construct_legacy_group(
         config_object* conf, const char* id) {
-    try {
-        conf->last_error = nullptr;
+    return wrap_exceptions(conf, [&] {
         auto group = std::make_unique<ugroups_legacy_group_info>();
         group->_internal = nullptr;
         unbox<UserGroups>(conf)->get_or_construct_legacy_group(id).into(*group);
         return group.release();
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return nullptr;
-    }
+    });
 }
 
 LIBSESSION_C_API void user_groups_set_community(
         config_object* conf, const ugroups_community_info* comm) {
     unbox<UserGroups>(conf)->set(community_info{*comm});
 }
-LIBSESSION_C_API void user_groups_set_group(config_object* conf, const ugroups_group_info* group) {
-    unbox<UserGroups>(conf)->set(group_info{*group});
+LIBSESSION_C_API bool user_groups_set_group(config_object* conf, const ugroups_group_info* group) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserGroups>(conf)->set(group_info{*group});
+                return true;
+            },
+            false);
 }
-LIBSESSION_C_API void user_groups_set_legacy_group(
+LIBSESSION_C_API bool user_groups_set_legacy_group(
         config_object* conf, const ugroups_legacy_group_info* group) {
-    unbox<UserGroups>(conf)->set(legacy_group_info{*group});
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserGroups>(conf)->set(legacy_group_info{*group});
+                return true;
+            },
+            false);
 }
-LIBSESSION_C_API void user_groups_set_free_legacy_group(
+LIBSESSION_C_API bool user_groups_set_free_legacy_group(
         config_object* conf, ugroups_legacy_group_info* group) {
-    unbox<UserGroups>(conf)->set(legacy_group_info{std::move(*group)});
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserGroups>(conf)->set(legacy_group_info{std::move(*group)});
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool user_groups_erase_community(

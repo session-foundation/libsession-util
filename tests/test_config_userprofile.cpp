@@ -6,17 +6,12 @@
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <session/config/user_profile.hpp>
+#include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
 
-void log_msg(config_log_level lvl, const char* msg, void*) {
-    INFO((lvl == LOG_LEVEL_ERROR     ? "ERROR"
-          : lvl == LOG_LEVEL_WARNING ? "Warning"
-          : lvl == LOG_LEVEL_INFO    ? "Info"
-                                     : "debug")
-         << ": " << msg);
-}
+using namespace std::literals;
 
 TEST_CASE("UserProfile", "[config][user_profile]") {
 
@@ -35,7 +30,7 @@ TEST_CASE("UserProfile", "[config][user_profile]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserProfile profile{ustring_view{seed}, std::nullopt};
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK_THROWS(
             profile.set_name("123456789012345678901234567890123456789012345678901234567890123456789"
@@ -85,8 +80,6 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     config_object* conf;
     rc = user_profile_init(&conf, ed_sk.data(), NULL, 0, err);
     REQUIRE(rc == 0);
-
-    config_set_logger(conf, log_msg, NULL);
 
     // We don't need to push anything, since this is an empty config
     CHECK_FALSE(config_needs_push(conf));
@@ -144,10 +137,11 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(name == "Kallie"sv);
 
     pic = user_profile_get_pic(conf);
-    REQUIRE(pic.url);
-    REQUIRE(pic.key);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
     CHECK(pic.url == "http://example.org/omg-pic-123.bmp"sv);
-    CHECK(ustring_view{pic.key, 32} == "secret78901234567890123456789012"_bytes);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "secret78901234567890123456789012"_bytes);
 
     CHECK(user_profile_get_nts_priority(conf) == 9);
 
@@ -165,7 +159,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // The data to be actually pushed, expanded like this to make it somewhat human-readable:
     // clang-format off
-    auto exp_push1_decrypted =
+    auto exp_push1_decrypted = session::to_vector(
         "d"
           "1:#" "i1e"
           "1:&" "d"
@@ -175,7 +169,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "1:q" "32:secret78901234567890123456789012"
           "e"
           "1:<" "l"
-            "l" "i0e" "32:"_bytes + exp_hash0 + "de" "e"
+            "l" "i0e" "32:" + session::to_string(exp_hash0) + "de" "e"
           "e"
           "1:=" "d"
             "1:+" "0:"
@@ -183,7 +177,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "1:p" "0:"
             "1:q" "0:"
           "e"
-        "e"_bytes;
+        "e");
     // clang-format on
     auto exp_push1_encrypted =
             "9693a69686da3055f1ecdfb239c3bf8e746951a36d888c2fb7c02e856a5c2091b24e39a7e1af828f"
@@ -222,7 +216,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
           "1:)" "le"
           "1:*" "de"
           "1:+" "de"
-        "e"_format(exp_push1_decrypted.size(), to_sv(exp_push1_decrypted))));
+        "e"_format(exp_push1_decrypted.size(), session::to_string(exp_push1_decrypted))));
     // clang-format on
     free(dump1);  // done with the dump; don't leak!
 
@@ -245,7 +239,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
           "1:)" "le"
           "1:*" "de"
           "1:+" "de"
-        "e"_format(exp_push1_decrypted.size(), to_sv(exp_push1_decrypted))));
+        "e"_format(exp_push1_decrypted.size(), session::to_string(exp_push1_decrypted))));
     // clang-format on
     free(dump1);
 
@@ -257,7 +251,6 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     // Start with an empty config, as above:
     config_object* conf2;
     REQUIRE(user_profile_init(&conf2, ed_sk.data(), NULL, 0, err) == 0);
-    config_set_logger(conf2, log_msg, NULL);
     CHECK_FALSE(config_needs_dump(conf2));
 
     // Now imagine we just pulled down the encrypted string from the swarm; we merge it into conf2:
@@ -373,16 +366,32 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Since only one of them set a profile pic there should be no conflict there:
     pic = user_profile_get_pic(conf);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.url);
+#else
+    REQUIRE(pic.url != nullptr);
+#endif
     CHECK(pic.url == "http://new.example.com/pic"sv);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.key);
-    CHECK(to_hex(ustring_view{pic.key, 32}) ==
+#else
+    REQUIRE(pic.key != nullptr);
+#endif
+    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
     pic = user_profile_get_pic(conf2);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.url);
+#else
+    REQUIRE(pic.url != nullptr);
+#endif
     CHECK(pic.url == "http://new.example.com/pic"sv);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.key);
-    CHECK(to_hex(ustring_view{pic.key, 32}) ==
+#else
+    REQUIRE(pic.key != nullptr);
+#endif
+    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
 
     CHECK(user_profile_get_nts_priority(conf) == 9);

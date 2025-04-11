@@ -14,8 +14,6 @@
 
 using namespace std::literals;
 using namespace session::config;
-using session::ustring;
-using session::ustring_view;
 
 LIBSESSION_C_API const size_t CONTACT_MAX_NAME_LENGTH = contact_info::MAX_NAME_LENGTH;
 
@@ -41,7 +39,7 @@ contact_info::contact_info(std::string sid) : session_id{std::move(sid)} {
 
 void contact_info::set_name(std::string n) {
     if (n.size() > MAX_NAME_LENGTH)
-        name = std::move(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
+        name = utf8_truncate(std::move(n), MAX_NAME_LENGTH);
     else
         name = std::move(n);
 }
@@ -56,7 +54,9 @@ void contact_info::set_nickname_truncated(std::string n) {
     set_nickname(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
 }
 
-Contacts::Contacts(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+Contacts::Contacts(
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
@@ -75,7 +75,7 @@ void contact_info::load(const dict& info_dict) {
     nickname = maybe_string(info_dict, "N").value_or("");
 
     auto url = maybe_string(info_dict, "p");
-    auto key = maybe_ustring(info_dict, "q");
+    auto key = maybe_vector(info_dict, "q");
     if (url && key && !url->empty() && key->size() == 32) {
         profile_picture.url = std::move(*url);
         profile_picture.key = std::move(*key);
@@ -97,7 +97,7 @@ void contact_info::load(const dict& info_dict) {
     } else {
         notifications = notify_mode::defaulted;
     }
-    mute_until = maybe_int(info_dict, "!").value_or(0);
+    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
 
     int exp_mode_ = maybe_int(info_dict, "e").value_or(0);
     if (exp_mode_ >= static_cast<int>(expiration_mode::none) &&
@@ -118,7 +118,7 @@ void contact_info::load(const dict& info_dict) {
         }
     }
 
-    created = maybe_int(info_dict, "j").value_or(0);
+    created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
 }
 
 void contact_info::into(contacts_contact& c) const {
@@ -136,12 +136,12 @@ void contact_info::into(contacts_contact& c) const {
     c.blocked = blocked;
     c.priority = priority;
     c.notifications = static_cast<CONVO_NOTIFY_MODE>(notifications);
-    c.mute_until = mute_until;
+    c.mute_until = to_epoch_seconds(mute_until);
     c.exp_mode = static_cast<CONVO_EXPIRATION_MODE>(exp_mode);
     c.exp_seconds = exp_timer.count();
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
         c.exp_mode = CONVO_EXPIRATION_NONE;
-    c.created = created;
+    c.created = to_epoch_seconds(created);
 }
 
 contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id, 66} {
@@ -152,19 +152,19 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(c.profile_pic.url)) {
         profile_picture.url = c.profile_pic.url;
-        profile_picture.key = {c.profile_pic.key, 32};
+        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
     }
     approved = c.approved;
     approved_me = c.approved_me;
     blocked = c.blocked;
     priority = c.priority;
     notifications = static_cast<notify_mode>(c.notifications);
-    mute_until = c.mute_until;
+    mute_until = to_epoch_seconds(c.mute_until);
     exp_mode = static_cast<expiration_mode>(c.exp_mode);
     exp_timer = exp_mode == expiration_mode::none ? 0s : std::chrono::seconds{c.exp_seconds};
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
         exp_mode = expiration_mode::none;
-    created = c.created;
+    created = to_epoch_seconds(c.created);
 }
 
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
@@ -181,17 +181,16 @@ std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
 
 LIBSESSION_C_API bool contacts_get(
         config_object* conf, contacts_contact* contact, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<Contacts>(conf)->get(session_id)) {
-            c->into(*contact);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<Contacts>(conf)->get(session_id)) {
+                    c->into(*contact);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 
 contact_info Contacts::get_or_construct(std::string_view pubkey_hex) const {
@@ -203,15 +202,13 @@ contact_info Contacts::get_or_construct(std::string_view pubkey_hex) const {
 
 LIBSESSION_C_API bool contacts_get_or_construct(
         config_object* conf, contacts_contact* contact, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        unbox<Contacts>(conf)->get_or_construct(session_id).into(*contact);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->get_or_construct(session_id).into(*contact);
+                return true;
+            },
+            false);
 }
 
 void Contacts::set(const contact_info& contact) {
@@ -240,7 +237,7 @@ void Contacts::set(const contact_info& contact) {
     if (notify == notify_mode::mentions_only)
         notify = notify_mode::all;
     set_positive_int(info["@"], static_cast<int>(notify));
-    set_positive_int(info["!"], contact.mute_until);
+    set_positive_int(info["!"], to_epoch_seconds(contact.mute_until));
 
     set_pair_if(
             contact.exp_mode != expiration_mode::none && contact.exp_timer > 0s,
@@ -249,11 +246,17 @@ void Contacts::set(const contact_info& contact) {
             info["E"],
             contact.exp_timer.count());
 
-    set_positive_int(info["j"], contact.created);
+    set_positive_int(info["j"], to_epoch_seconds(contact.created));
 }
 
-LIBSESSION_C_API void contacts_set(config_object* conf, const contacts_contact* contact) {
-    unbox<Contacts>(conf)->set(contact_info{*contact});
+LIBSESSION_C_API bool contacts_set(config_object* conf, const contacts_contact* contact) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->set(contact_info{*contact});
+                return true;
+            },
+            false);
 }
 
 void Contacts::set_name(std::string_view session_id, std::string name) {
@@ -314,7 +317,7 @@ void Contacts::set_expiry(
 
 void Contacts::set_created(std::string_view session_id, int64_t timestamp) {
     auto c = get_or_construct(session_id);
-    c.created = timestamp;
+    c.created = to_epoch_seconds(timestamp);
     set(c);
 }
 

@@ -130,17 +130,25 @@ struct member {
     /// API: groups/member::set_invite_sent
     ///
     /// This marks the user as having had an invitation message sent to them.
+    /// Inputs: none.
+    ///
     void set_invite_sent() { invite_status = STATUS_SENT; }
 
     /// API: groups/member::set_invite_not_sent
     ///
     /// This resets the invite status of a user to `STATUS_NOT_SENT`.
+    ///
+    /// Inputs: none.
+    ///
     void set_invite_not_sent() { invite_status = STATUS_NOT_SENT; }
 
     /// API: groups/member::set_invite_failed
     ///
     /// This marks the user to indicate that their invitation message failed to send (this is
     /// intended as a signal to other clients that the invitation should be reissued).
+    ///
+    /// Inputs: none.
+    ///
     void set_invite_failed() { invite_status = STATUS_FAILED; }
 
     /// API: groups/members::set_invite_accepted
@@ -162,6 +170,9 @@ struct member {
     ///
     /// This marks the user as having a pending promotion-to-admin in the group, waiting for the
     /// promotion message to be sent to them.
+    ///
+    /// Inputs: none.
+    ///
     void set_promoted() {
         admin = true;
         invite_status = 0;
@@ -172,6 +183,9 @@ struct member {
     ///
     /// This marks the user as having a pending promotion-to-admin in the group, and that a
     /// promotion message has been sent to them.
+    ///
+    /// Inputs: none.
+    ///
     void set_promotion_sent() {
         admin = true;
         invite_status = 0;
@@ -183,6 +197,9 @@ struct member {
     /// This marks the user as being promoted to an admin, but that their promotion message failed
     /// to send (this is intended as a signal to other clients that the promotion should be
     /// reissued).
+    ///
+    /// Inputs: none.
+    ///
     void set_promotion_failed() {
         admin = true;
         invite_status = 0;
@@ -192,6 +209,9 @@ struct member {
     /// API: groups/member::set_promotion_accepted
     ///
     /// This marks the user as having accepted a promotion to admin in the group.
+    ///
+    /// Inputs: none.
+    ///
     void set_promotion_accepted() {
         admin = true;
         invite_status = 0;
@@ -282,9 +302,9 @@ class Members : public ConfigBase {
     ///   push config changes.
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     ///   that was previously dumped from an instance of this class by calling `dump()`.
-    Members(ustring_view ed25519_pubkey,
-            std::optional<ustring_view> ed25519_secretkey,
-            std::optional<ustring_view> dumped);
+    Members(std::span<const unsigned char> ed25519_pubkey,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey,
+            std::optional<std::span<const unsigned char>> dumped);
 
     /// API: groups/Members::storage_namespace
     ///

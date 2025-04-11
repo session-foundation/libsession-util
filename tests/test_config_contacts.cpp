@@ -30,7 +30,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
 
     constexpr auto definitely_real_id =
             "050000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -64,9 +64,9 @@ TEST_CASE("Contacts", "[config][contacts]") {
     c.set_nickname("Joey");
     c.approved = true;
     c.approved_me = true;
-    c.created = created_ts;
+    c.created = created_ts * 1'000;
     c.notifications = session::config::notify_mode::all;
-    c.mute_until = now + 1800;
+    c.mute_until = (now + 1800) * 1'000'000;
 
     contacts.set(c);
 
@@ -126,7 +126,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(seqno == 2);
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("fakehash2", to_push[0]);
     contacts.merge(merge_configs);
     contacts2.confirm_pushed(seqno, {"fakehash2"});
@@ -165,7 +165,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     session::config::profile_pic p;
     {
         // These don't stay alive, so we use set_key/set_url to make a local copy:
-        ustring key = "qwerty78901234567890123456789012"_bytes;
+        std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
         std::string url = "http://example.com/huge.bmp";
         p.set_key(std::move(key));
         p.url = std::move(url);
@@ -430,7 +430,7 @@ TEST_CASE("huge contacts compression", "[config][compression][contacts]") {
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
 
     for (uint16_t i = 0; i < 12000; i++) {
         char buf[2];
@@ -480,7 +480,7 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{session::to_span(seed), std::nullopt};
 
     std::string friend42;
 
@@ -554,9 +554,9 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
     dump = contacts.dump();
     CHECK(dump.size() == base_dump_size + 12 * 13);  // 12 x "10:fakehashNN"
 
-    auto c2 = std::make_unique<session::config::Contacts>(ustring_view{seed}, std::nullopt);
+    auto c2 = std::make_unique<session::config::Contacts>(session::to_span(seed), std::nullopt);
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs, merge_more;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs, merge_more;
     bool dump_load_in_between = false;
     std::mt19937_64 rng{12345};
 
@@ -635,9 +635,9 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
         CHECK(dump.size() < total_dumps + 500 /* ~ various other dump overhead */);
 
         if (dump_load_in_between) {
-            auto c2b = std::make_unique<session::config::Contacts>(ustring_view{seed}, c2->dump());
+            auto c2b =
+                    std::make_unique<session::config::Contacts>(session::to_span(seed), c2->dump());
             CHECK_FALSE(c2b->needs_dump());
-            c2b->logger = c2->logger;
             c2 = std::move(c2b);
             CHECK_FALSE(c2->needs_dump());
         }
@@ -679,7 +679,7 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{session::to_span(seed), std::nullopt};
 
     std::string friend42;
 
@@ -721,16 +721,15 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
 
     contacts.confirm_pushed(seqno, {"fakehash0", "fakehash1"});
 
-    auto c2 = std::make_unique<session::config::Contacts>(ustring_view{seed}, std::nullopt);
+    auto c2 = std::make_unique<session::config::Contacts>(session::to_span(seed), std::nullopt);
 
     c2->MULTIPART_MAX_WAIT = 200ms;
     c2->MULTIPART_MAX_REMEMBER = 400ms;
-    c2->logger = contacts.logger;
 
     auto old_seqno = std::get<seqno_t>(c2->push());
     REQUIRE(old_seqno == 0);
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("fakehash0", to_push[0]);
 
     std::unordered_set<std::string> accepted;
@@ -781,7 +780,10 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
     CHECK(full_size < 266300);
     // Go look for the 1:* where we store multipart info, and make sure it's within the last 100
     // bytes of the dump (to make sure that we don't have cached data stored inside it):
-    auto x = dump.rfind(session::to_unsigned_sv("1:*"));
+    auto pattern = session::to_span("1:*");
+    auto it = std::find_end(dump.begin(), dump.end(), pattern.begin(), pattern.end());
+    REQUIRE(it != dump.end());
+    auto x = std::distance(dump.begin(), it);
     CHECK(x > full_size - 100);
     CHECK(x < dump.size());
 
@@ -835,7 +837,7 @@ TEST_CASE("needs_dump bug", "[config][needs_dump]") {
 
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
 
-    session::config::Contacts contacts{ustring_view{seed}, std::nullopt};
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK_FALSE(contacts.needs_dump());
 

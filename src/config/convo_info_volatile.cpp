@@ -3,7 +3,6 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
 #include <charconv>
@@ -19,7 +18,6 @@
 #include "session/util.hpp"
 
 using namespace std::literals;
-using session::ustring_view;
 
 namespace session::config {
 
@@ -41,7 +39,7 @@ namespace convo {
     }
 
     community::community(const convo_info_volatile_community& c) :
-            config::community{c.base_url, c.room, ustring_view{c.pubkey, 32}},
+            config::community{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}},
             base{c.last_read, c.unread} {}
 
     void community::into(convo_info_volatile_community& c) const {
@@ -92,7 +90,8 @@ namespace convo {
 }  // namespace convo
 
 ConvoInfoVolatile::ConvoInfoVolatile(
-        ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
@@ -117,13 +116,12 @@ convo::one_to_one ConvoInfoVolatile::get_or_construct_1to1(std::string_view pubk
 }
 
 ConfigBase::DictFieldProxy ConvoInfoVolatile::community_field(
-        const convo::community& comm, ustring_view* get_pubkey) const {
+        const convo::community& comm, std::span<const unsigned char>* get_pubkey) const {
     auto record = data["o"][comm.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey =
-                    ustring_view{reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+            *get_pubkey = to_span(pk);
     }
     return record["R"][comm.room_norm()];
 }
@@ -132,7 +130,7 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
         std::string_view base_url, std::string_view room) const {
     convo::community og{base_url, community::canonical_room(room)};
 
-    ustring_view pubkey;
+    std::span<const unsigned char> pubkey;
     if (auto* info_dict = community_field(og, &pubkey).dict()) {
         og.load(*info_dict);
         if (!pubkey.empty())
@@ -149,7 +147,9 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
 }
 
 convo::community ConvoInfoVolatile::get_or_construct_community(
-        std::string_view base_url, std::string_view room, ustring_view pubkey) const {
+        std::string_view base_url,
+        std::string_view room,
+        std::span<const unsigned char> pubkey) const {
     convo::community result{base_url, community::canonical_room(room), pubkey};
 
     if (auto* info_dict = community_field(result).dict())
@@ -235,10 +235,9 @@ void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
 }
 
 void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
-    const int64_t cutoff =
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                    (std::chrono::system_clock::now() - PRUNE_HIGH).time_since_epoch())
-                    .count();
+    const int64_t cutoff = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   (std::chrono::system_clock::now() - prune).time_since_epoch())
+                                   .count();
 
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)
@@ -262,7 +261,8 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         erase_community(base, room);
 }
 
-std::tuple<seqno_t, std::vector<ustring>, std::vector<std::string>> ConvoInfoVolatile::push() {
+std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
+ConvoInfoVolatile::push() {
     // Prune off any conversations with last_read timestamps more than PRUNE_HIGH ago (unless they
     // also have a `unread` flag set, in which case we keep them indefinitely).
     prune_stale();
@@ -317,7 +317,7 @@ bool ConvoInfoVolatile::erase(const convo::legacy_group& c) {
 }
 
 bool ConvoInfoVolatile::erase(const convo::any& c) {
-    return var::visit([this](const auto& c) { return erase(c); }, c);
+    return std::visit([this](const auto& c) { return erase(c); }, c);
 }
 bool ConvoInfoVolatile::erase_1to1(std::string_view session_id) {
     return erase(convo::one_to_one{session_id});
@@ -497,30 +497,27 @@ int convo_info_volatile_init(
 
 LIBSESSION_C_API bool convo_info_volatile_get_1to1(
         config_object* conf, convo_info_volatile_1to1* convo, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<ConvoInfoVolatile>(conf)->get_1to1(session_id)) {
-            c->into(*convo);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<ConvoInfoVolatile>(conf)->get_1to1(session_id)) {
+                    c->into(*convo);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_or_construct_1to1(
         config_object* conf, convo_info_volatile_1to1* convo, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        unbox<ConvoInfoVolatile>(conf)->get_or_construct_1to1(session_id).into(*convo);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->get_or_construct_1to1(session_id).into(*convo);
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_community(
@@ -528,17 +525,16 @@ LIBSESSION_C_API bool convo_info_volatile_get_community(
         convo_info_volatile_community* og,
         const char* base_url,
         const char* room) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<ConvoInfoVolatile>(conf)->get_community(base_url, room)) {
-            c->into(*og);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<ConvoInfoVolatile>(conf)->get_community(base_url, room)) {
+                    c->into(*og);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 LIBSESSION_C_API bool convo_info_volatile_get_or_construct_community(
         config_object* conf,
@@ -546,121 +542,130 @@ LIBSESSION_C_API bool convo_info_volatile_get_or_construct_community(
         const char* base_url,
         const char* room,
         unsigned const char* pubkey) {
-    try {
-        conf->last_error = nullptr;
-        unbox<ConvoInfoVolatile>(conf)
-                ->get_or_construct_community(base_url, room, ustring_view{pubkey, 32})
-                .into(*convo);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)
+                        ->get_or_construct_community(
+                                base_url, room, std::span<const unsigned char>{pubkey, 32})
+                        .into(*convo);
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_group(
         config_object* conf, convo_info_volatile_group* convo, const char* id) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<ConvoInfoVolatile>(conf)->get_group(id)) {
-            c->into(*convo);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<ConvoInfoVolatile>(conf)->get_group(id)) {
+                    c->into(*convo);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_or_construct_group(
         config_object* conf, convo_info_volatile_group* convo, const char* id) {
-    try {
-        conf->last_error = nullptr;
-        unbox<ConvoInfoVolatile>(conf)->get_or_construct_group(id).into(*convo);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->get_or_construct_group(id).into(*convo);
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_legacy_group(
         config_object* conf, convo_info_volatile_legacy_group* convo, const char* id) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<ConvoInfoVolatile>(conf)->get_legacy_group(id)) {
-            c->into(*convo);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<ConvoInfoVolatile>(conf)->get_legacy_group(id)) {
+                    c->into(*convo);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_or_construct_legacy_group(
         config_object* conf, convo_info_volatile_legacy_group* convo, const char* id) {
-    try {
-        conf->last_error = nullptr;
-        unbox<ConvoInfoVolatile>(conf)->get_or_construct_legacy_group(id).into(*convo);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->get_or_construct_legacy_group(id).into(*convo);
+                return true;
+            },
+            false);
 }
 
-LIBSESSION_C_API void convo_info_volatile_set_1to1(
+LIBSESSION_C_API bool convo_info_volatile_set_1to1(
         config_object* conf, const convo_info_volatile_1to1* convo) {
-    unbox<ConvoInfoVolatile>(conf)->set(convo::one_to_one{*convo});
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->set(convo::one_to_one{*convo});
+                return true;
+            },
+            false);
 }
-LIBSESSION_C_API void convo_info_volatile_set_community(
+LIBSESSION_C_API bool convo_info_volatile_set_community(
         config_object* conf, const convo_info_volatile_community* convo) {
-    unbox<ConvoInfoVolatile>(conf)->set(convo::community{*convo});
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->set(convo::community{*convo});
+                return true;
+            },
+            false);
 }
-LIBSESSION_C_API void convo_info_volatile_set_group(
+LIBSESSION_C_API bool convo_info_volatile_set_group(
         config_object* conf, const convo_info_volatile_group* convo) {
-    unbox<ConvoInfoVolatile>(conf)->set(convo::group{*convo});
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->set(convo::group{*convo});
+                return true;
+            },
+            false);
 }
-LIBSESSION_C_API void convo_info_volatile_set_legacy_group(
+LIBSESSION_C_API bool convo_info_volatile_set_legacy_group(
         config_object* conf, const convo_info_volatile_legacy_group* convo) {
-    unbox<ConvoInfoVolatile>(conf)->set(convo::legacy_group{*convo});
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->set(convo::legacy_group{*convo});
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool convo_info_volatile_erase_1to1(config_object* conf, const char* session_id) {
-    try {
-        return unbox<ConvoInfoVolatile>(conf)->erase_1to1(session_id);
-    } catch (...) {
-        return false;
-    }
+    return wrap_exceptions(
+            conf, [&] { return unbox<ConvoInfoVolatile>(conf)->erase_1to1(session_id); }, false);
 }
 LIBSESSION_C_API bool convo_info_volatile_erase_community(
         config_object* conf, const char* base_url, const char* room) {
-    try {
-        return unbox<ConvoInfoVolatile>(conf)->erase_community(base_url, room);
-    } catch (...) {
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] { return unbox<ConvoInfoVolatile>(conf)->erase_community(base_url, room); },
+            false);
 }
 LIBSESSION_C_API bool convo_info_volatile_erase_group(config_object* conf, const char* group_id) {
-    try {
-        return unbox<ConvoInfoVolatile>(conf)->erase_group(group_id);
-    } catch (...) {
-        return false;
-    }
+    return wrap_exceptions(
+            conf, [&] { return unbox<ConvoInfoVolatile>(conf)->erase_group(group_id); }, false);
 }
 LIBSESSION_C_API bool convo_info_volatile_erase_legacy_group(
         config_object* conf, const char* group_id) {
-    try {
-        return unbox<ConvoInfoVolatile>(conf)->erase_legacy_group(group_id);
-    } catch (...) {
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] { return unbox<ConvoInfoVolatile>(conf)->erase_legacy_group(group_id); },
+            false);
 }
 
 LIBSESSION_C_API size_t convo_info_volatile_size(const config_object* conf) {

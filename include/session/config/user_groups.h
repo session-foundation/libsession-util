@@ -30,10 +30,10 @@ typedef struct ugroups_legacy_group_info {
     int64_t disappearing_timer;  // Seconds. 0 == disabled.
     int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
                         // pinned (with higher meaning pinned higher).
-    int64_t joined_at;  // unix timestamp when joined (or re-joined)
+    int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
-                         // setting until the timestamp)
+    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
+                                      // `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
@@ -60,10 +60,10 @@ typedef struct ugroups_group_info {
 
     int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
                         // pinned (with higher meaning pinned higher).
-    int64_t joined_at;  // unix timestamp when joined (or re-joined)
+    int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
-                         // setting until the timestamp)
+    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
+                                      // `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
@@ -81,10 +81,10 @@ typedef struct ugroups_community_info {
 
     int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
                         // pinned (with higher meaning pinned higher).
-    int64_t joined_at;  // unix timestamp when joined (or re-joined)
+    int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
-                         // setting until the timestamp)
+    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
+                                      // `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
@@ -327,7 +327,10 @@ LIBSESSION_EXPORT void user_groups_set_community(
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a group info object
-LIBSESSION_EXPORT void user_groups_set_group(config_object* conf, const ugroups_group_info* group);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_group(config_object* conf, const ugroups_group_info* group);
 
 /// API: user_groups/user_groups_set_legacy_group
 ///
@@ -347,7 +350,10 @@ LIBSESSION_EXPORT void user_groups_set_group(config_object* conf, const ugroups_
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a legacy group info object
-LIBSESSION_EXPORT void user_groups_set_legacy_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_legacy_group(
         config_object* conf, const ugroups_legacy_group_info* group);
 
 /// API: user_groups/user_groups_set_free_legacy_group
@@ -367,7 +373,10 @@ LIBSESSION_EXPORT void user_groups_set_legacy_group(
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a legacy group info object
-LIBSESSION_EXPORT void user_groups_set_free_legacy_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_free_legacy_group(
         config_object* conf, ugroups_legacy_group_info* group);
 
 /// API: user_groups/user_groups_erase_community

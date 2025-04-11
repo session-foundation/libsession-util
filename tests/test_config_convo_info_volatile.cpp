@@ -27,7 +27,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{ustring_view{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
 
     constexpr auto definitely_real_id =
             "055000000000000000000000000000000000000000000000000000000000000000"sv;
@@ -144,7 +144,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(seqno == 2);
 
     REQUIRE(to_push.size() == 1);
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
     merge_configs.emplace_back("hash2", to_push[0]);
     convos.merge(merge_configs);
     convos2.confirm_pushed(seqno, {"hash2"});
@@ -293,7 +293,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
             "bad-url",
             "room",
             "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes.data()));
-    CHECK(conf->last_error == "Invalid community URL: invalid/missing protocol://"sv);
+    CHECK(conf->last_error == "Invalid URL: invalid/missing protocol://"sv);
     CHECK_FALSE(convo_info_volatile_get_or_construct_community(
             conf,
             &og,
@@ -316,9 +316,9 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
 
     config_push_data* to_push = config_push(conf);
     auto seqno = to_push->seqno;
-    free(to_push);
     CHECK(seqno == 1);
     REQUIRE(to_push->n_configs == 1);
+    free(to_push);
 
     const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
 
@@ -483,19 +483,17 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{ustring_view{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
 
-    auto some_pubkey = [](unsigned char x) -> ustring {
-        ustring s = "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes;
+    auto some_pubkey = [](unsigned char x) -> std::vector<unsigned char> {
+        std::vector<unsigned char> s =
+                "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes;
         s[31] = x;
         return s;
     };
     auto some_session_id = [&](unsigned char x) -> std::string {
         auto pk = some_pubkey(x);
         return "05" + oxenc::to_hex(pk.begin(), pk.end());
-    };
-    auto some_og_url = [&](unsigned char x) -> std::string {
-        return "https://example.com/r/room{}"_format(x);
     };
     const auto now = std::chrono::system_clock::now() - 1ms;
     auto unix_timestamp = [&now](int days_ago) -> int64_t {

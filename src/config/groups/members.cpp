@@ -8,9 +8,9 @@
 namespace session::config::groups {
 
 Members::Members(
-        ustring_view ed25519_pubkey,
-        std::optional<ustring_view> ed25519_secretkey,
-        std::optional<ustring_view> dumped) {
+        std::span<const unsigned char> ed25519_pubkey,
+        std::optional<std::span<const unsigned char>> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) {
     init(dumped, ed25519_pubkey, ed25519_secretkey);
 }
 
@@ -87,7 +87,7 @@ void member::load(const dict& info_dict) {
     name = maybe_string(info_dict, "n").value_or("");
 
     auto url = maybe_string(info_dict, "p");
-    auto key = maybe_ustring(info_dict, "q");
+    auto key = maybe_vector(info_dict, "q");
     if (url && key && !url->empty() && key->size() == 32) {
         profile_picture.url = std::move(*url);
         profile_picture.key = std::move(*key);
@@ -185,7 +185,7 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
     assert(std::strlen(m.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(m.profile_pic.url)) {
         profile_picture.url = m.profile_pic.url;
-        profile_picture.key = {m.profile_pic.key, 32};
+        profile_picture.key.assign(m.profile_pic.key, m.profile_pic.key + 32);
     }
     admin = m.admin;
     invite_status =
@@ -193,7 +193,7 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
                     ? m.invited
                     : 0;
     promotion_status = (m.promoted == STATUS_SENT || m.promoted == STATUS_FAILED ||
-                        m.invited == STATUS_NOT_SENT)
+                        m.promoted == STATUS_NOT_SENT)
                              ? m.promoted
                              : 0;
     removed_status = (m.removed == REMOVED_MEMBER || m.removed == REMOVED_MEMBER_AND_MESSAGES)
@@ -293,34 +293,37 @@ LIBSESSION_C_API int groups_members_init(
 
 LIBSESSION_C_API bool groups_members_get(
         config_object* conf, config_group_member* member, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        if (auto c = unbox<groups::Members>(conf)->get(session_id)) {
-            c->into(*member);
-            return true;
-        }
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return false;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<groups::Members>(conf)->get(session_id)) {
+                    c->into(*member);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 
 LIBSESSION_C_API bool groups_members_get_or_construct(
         config_object* conf, config_group_member* member, const char* session_id) {
-    try {
-        conf->last_error = nullptr;
-        unbox<groups::Members>(conf)->get_or_construct(session_id).into(*member);
-        return true;
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-        return false;
-    }
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<groups::Members>(conf)->get_or_construct(session_id).into(*member);
+                return true;
+            },
+            false);
 }
 
-LIBSESSION_C_API void groups_members_set(config_object* conf, const config_group_member* member) {
-    unbox<groups::Members>(conf)->set(groups::member{*member});
+LIBSESSION_C_API bool groups_members_set(config_object* conf, const config_group_member* member) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<groups::Members>(conf)->set(groups::member{*member});
+                return true;
+            },
+            false);
 }
 
 LIBSESSION_C_API GROUP_MEMBER_STATUS
