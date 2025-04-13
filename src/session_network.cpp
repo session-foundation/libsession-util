@@ -24,11 +24,11 @@
 #include "session/ed25519.hpp"
 #include "session/export.h"
 #include "session/file.hpp"
-#include "session/session_network.h"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/key_types.hpp"
 #include "session/onionreq/response_parser.hpp"
+#include "session/session_network.h"
 #include "session/util.hpp"
 
 using namespace oxen;
