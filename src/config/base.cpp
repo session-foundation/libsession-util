@@ -543,9 +543,11 @@ std::unordered_set<std::string> ConfigBase::_merge(
     // - confs that failed to parse (we can't understand them, so leave them behind as they may be
     //   some future message).
     std::optional<size_t> superconf = new_conf->unmerged_index();  // nullopt if we had to merge
-    std::unordered_set<std::string> superconf_hashes = superconf && *superconf < all_hashes.size()
-                                                    ? std::unordered_set<std::string>{all_hashes[*superconf].begin(), all_hashes[*superconf].end()}
-                                                    : std::unordered_set<std::string>{};
+    std::unordered_set<std::string> superconf_hashes =
+            superconf && *superconf < all_hashes.size()
+                    ? std::unordered_set<
+                              std::string>{all_hashes[*superconf].begin(), all_hashes[*superconf].end()}
+                    : std::unordered_set<std::string>{};
 
     const bool superconf_is_mine =
             superconf && *superconf == (mine_last ? all_hashes.size() - 1 : 0);
@@ -561,10 +563,11 @@ std::unordered_set<std::string> ConfigBase::_merge(
                                       : fmt::format("{}", fmt::join(all_hashes[*superconf], ", ")),
                               superconf_is_mine ? "current" : "incoming")
                     : "with merge required");
-    
+
     for (size_t i = 0; i < all_hashes.size(); i++) {
         if (i != superconf && !bad_confs.count(i) && !all_hashes[i].empty() &&
-            superconf_hashes != std::unordered_set<std::string>{all_hashes[i].begin(), all_hashes[i].end()}) {
+            superconf_hashes !=
+                    std::unordered_set<std::string>{all_hashes[i].begin(), all_hashes[i].end()}) {
             bool all_already_existed = true;
 
             for (const auto& hash : all_hashes[i]) {
@@ -628,7 +631,7 @@ std::unordered_set<std::string> ConfigBase::_merge(
     } else {
         log::debug(cat, "All incoming configs rejected or already included, nothing to do");
     }
-    
+
     for (size_t i = 0; i < all_hashes.size(); i++) {
         if (!mine.empty() && i == (mine_last ? all_hashes.size() - 1 : 0))
             continue;
