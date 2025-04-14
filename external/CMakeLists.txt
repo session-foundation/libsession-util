@@ -102,7 +102,7 @@ endif()
 
 set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
 if(ENABLE_ONIONREQ)
-  libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.2.0 oxen-libquic)
+  libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.3.0 oxen-libquic)
 endif()
 
 if(NOT TARGET oxenc::oxenc)
