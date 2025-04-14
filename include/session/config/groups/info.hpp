@@ -124,7 +124,7 @@ class Info : public ConfigBase {
     ///
     /// Returns the group description, or std::nullopt if there is no group description set.
     ///
-    /// If given a description longer than `Info::DESCRIPTION_MAX_LENGTH` (2000) bytes it will be
+    /// If given a description longer than `Info::DESCRIPTION_MAX_LENGTH` bytes it will be
     /// truncated.
     ///
     /// Inputs: None
