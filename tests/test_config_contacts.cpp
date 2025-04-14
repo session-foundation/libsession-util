@@ -484,21 +484,17 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
 
     std::string friend42;
 
-    std::array<unsigned char, 32> seedi = {0};
-    for (uint16_t i = 0; i < 12000; i++) {
+    for (size_t i = 0; i < 12000; i++) {
         // Unlike the above case where we have nearly identical Session IDs, here our session IDs
-        // are randomly generated from fixed seeds and thus not usefully compressible, which results
-        // in a much larger (compressed) config.
-        seedi[0] = i % 256;
-        seedi[1] = i >> 8;
-        std::array<unsigned char, 32> i_ed_pk, i_curve_pk;
-        std::array<unsigned char, 64> i_ed_sk;
-        crypto_sign_ed25519_seed_keypair(
-                i_ed_pk.data(),
-                i_ed_sk.data(),
-                reinterpret_cast<const unsigned char*>(seedi.data()));
-        rc = crypto_sign_ed25519_pk_to_curve25519(i_curve_pk.data(), i_ed_pk.data());
-        std::string session_id = "05" + oxenc::to_hex(i_curve_pk.begin(), i_curve_pk.end());
+        // are randomly generated and thus not usefully compressible, which results in a much larger
+        // (compressed) config.
+        std::mt19937_64 rng{i};
+        std::array<unsigned char, 33> random_sessionid;
+        random_sessionid[0] = 0x05;
+        for (int i = 1; i < 33; i += 8)
+            oxenc::write_host_as_little(rng(), random_sessionid.data() + i);
+
+        std::string session_id = oxenc::to_hex(random_sessionid);
 
         auto c = contacts.get_or_construct(session_id);
         c.nickname = "My friend {}"_format(i);
