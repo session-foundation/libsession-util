@@ -680,7 +680,7 @@ void Network::disk_write_thread_loop() {
 }
 
 void Network::clear_cache() {
-    loop->call([this]() mutable {
+    loop->call([this] {
         {
             std::lock_guard lock{snode_cache_mutex};
             need_clear_cache = true;
@@ -696,7 +696,7 @@ size_t Network::snode_cache_size() {
 // MARK: Connection
 
 void Network::suspend() {
-    loop->call([this]() mutable {
+    loop->call([this] {
         suspended = true;
         close_connections();
         log::info(cat, "Suspended.");
@@ -704,14 +704,14 @@ void Network::suspend() {
 }
 
 void Network::resume() {
-    loop->call([this]() mutable {
+    loop->call([this] {
         suspended = false;
         log::info(cat, "Resumed.");
     });
 }
 
 void Network::close_connections() {
-    loop->call([this]() mutable { _close_connections(); });
+    loop->call([this] { _close_connections(); });
 }
 
 void Network::_close_connections() {
