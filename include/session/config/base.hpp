@@ -211,8 +211,9 @@ class ConfigBase : public ConfigSig {
     // Partial message sets that we have received but not yet been able to join into a full message.
     // The key is a hash of the final combined data (included in each part to identify related
     // parts) used as a unique identifier and checksum; the value is the PartialMessages struct
-    // containing set metadata and individual parts.
-    std::unordered_map<hash_t, PartialMessages, hash::identity_hasher> _multiparts;
+    // containing set metadata and individual parts.  (This is an ordered hash, because we relying
+    // on the keys being sorted when dumping our state to a config item.)
+    std::map<hash_t, PartialMessages> _multiparts;
 
     // Parses a new multipart message, handling parsing, adding to _multiparts, etc.  This is called
     // by _merge when it finds a `m`-type message for handling.
