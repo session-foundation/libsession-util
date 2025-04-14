@@ -331,17 +331,18 @@ local static_build(name,
     type: 'docker',
     steps: [{
       name: 'build',
-      image: 'node:19-bullseye',
+      image: docker_base + 'debian-stable',
       pull: 'always',
       environment: { SSH_KEY: { from_secret: 'SSH_KEY' } },
       commands: [
         'echo "Building on ${DRONE_STAGE_MACHINE}"',
         apt_get_quiet + ' update',
-        apt_get_quiet + ' install -y python3-requests rsync',
-        'npm i docsify-cli docsify-themeable docsify-katex@1.4.4 katex marked@4',
+        apt_get_quiet + ' install -y rsync python3-venv',
         'cd docs/api/',
-        'export NODE_PATH=node_modules',
-        'make',
+        'python3 -m venv .venv',
+        '. .venv/bin/activate',
+        'pip install -r requirements.txt',
+        'make build-all',
         '../../utils/ci/drone-docs-upload.sh',
       ],
     }],
@@ -397,7 +398,7 @@ local static_build(name,
     ]
   ),
 
-  mac_pipeline('Static macOS', build=[
+  mac_pipeline('Static macOS', arch='arm64', build=[
     'export JOBS=6',
     './utils/macos.sh',
     'cd build-macos && ../utils/ci/drone-static-upload.sh',

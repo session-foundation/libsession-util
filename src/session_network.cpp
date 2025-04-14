@@ -775,7 +775,10 @@ std::shared_ptr<quic::Endpoint> Network::get_endpoint() {
     return loop->call_get([this]() mutable {
         if (!endpoint)
             endpoint = quic::Endpoint::endpoint(
-                    *loop, quic::Address{"0.0.0.0", 0}, quic::opt::alpns{ALPN});
+                    *loop,
+                    quic::Address{"0.0.0.0", 0},
+                    quic::opt::alpns{ALPN},
+                    quic::opt::disable_mtu_discovery{});
 
         return endpoint;
     });
@@ -1209,6 +1212,8 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     // `snode_refresh_results` so we can use it to track the results from the different requests)
     if (!current_snode_cache_refresh_request_id) {
         log::info(cat, "Refreshing snode cache ({}).", request_id);
+        snode_cache_refresh_failure_count = 0;
+        in_progress_snode_cache_refresh_count = 0;
         current_snode_cache_refresh_request_id = request_id;
         snode_refresh_results = std::make_shared<std::vector<std::vector<service_node>>>();
     }
@@ -1288,7 +1293,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                     log::error(
                             cat,
                             "Failed to retrieve nodes from one target when refreshing cache due to "
-                            "error: {} Will try another target after {}ms ({}).",
+                            "error: {}, Will try another target after {}ms ({}).",
                             e.what(),
                             cache_refresh_retry_delay.count(),
                             request_id);

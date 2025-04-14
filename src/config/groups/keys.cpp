@@ -1659,7 +1659,7 @@ LIBSESSION_C_API bool groups_keys_decrypt_message(
 
 LIBSESSION_C_API bool groups_keys_key_supplement(
         config_group_keys* conf,
-        const char** sids,
+        const char* const* sids,
         size_t sids_len,
         unsigned char** message,
         size_t* message_len) {

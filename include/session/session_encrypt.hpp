@@ -295,4 +295,30 @@ std::vector<unsigned char> decrypt_push_notification(
 std::string compute_message_hash(
         const std::string_view pubkey_hex, int16_t ns, std::string_view data);
 
+/// API: crypto/encrypt_xchacha20
+///
+/// Encrypts a value with a given key using xchacha20.
+///
+/// Inputs:
+/// - `plaintext` -- the data to encrypt.
+/// - `enc_key` -- the key to use for encryption (32 bytes).
+///
+/// Outputs:
+/// - `std::vector<unsigned char>` -- the resulting ciphertext.
+std::vector<unsigned char> encrypt_xchacha20(
+        std::span<const unsigned char> plaintext, std::span<const unsigned char> enc_key);
+
+/// API: crypto/decrypt_xchacha20
+///
+/// Decrypts a value that was encrypted with the `encrypt_xchacha20` function.
+///
+/// Inputs:
+/// - `ciphertext` -- the data to decrypt.
+/// - `enc_key` -- the key to use for decryption (32 bytes).
+///
+/// Outputs:
+/// - `std::vector<unsigned char>` -- the resulting plaintext.
+std::vector<unsigned char> decrypt_xchacha20(
+        std::span<const unsigned char> ciphertext, std::span<const unsigned char> enc_key);
+
 }  // namespace session

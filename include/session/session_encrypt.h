@@ -229,6 +229,54 @@ LIBSESSION_EXPORT bool session_decrypt_push_notification(
 LIBSESSION_EXPORT bool session_compute_message_hash(
         const char* pubkey_hex_in, int16_t ns, const char* base64_data_in, char* hash_out);
 
+/// API: crypto/session_encrypt_xchacha20
+///
+/// Encrypts a value with a given key using xchacha20.
+///
+/// Inputs:
+/// - `plaintext_in` -- [in] the data to encrypt.
+/// - `plaintext_len` -- [in] the length of `plaintext_in`.
+/// - `enc_key_in` -- [in] the key to use for encryption (32 bytes).
+/// - `ciphertext_out` -- [out] Pointer-pointer to an output buffer; a new buffer is allocated, the
+///   encrypted data written to it, and then the pointer to that buffer is stored here.
+///   This buffer must be `free()`d by the caller when done with it *unless* the function returns
+///   false, in which case the buffer pointer will not be set.
+/// - `ciphertext_len` -- [out] Pointer to a size_t where the length of `ciphertext_out` is stored.
+///   Not touched if the function returns false.
+///
+/// Outputs:
+/// - `bool` -- True if the encryption was successful, false if encryption failed.
+LIBSESSION_EXPORT bool session_encrypt_xchacha20(
+        const unsigned char* plaintext_in,
+        size_t plaintext_len,
+        const unsigned char* enc_key_in, /* 32 bytes */
+        unsigned char** ciphertext_out,
+        size_t* ciphertext_len);
+
+/// API: crypto/session_decrypt_xchacha20
+///
+/// Decrypts a value that was encrypted with the `encrypt_xchacha20` function.
+///
+/// Inputs:
+/// - `ciphertext_in` -- [in] the data to decrypt.
+/// - `ciphertext_len` -- [in] the length of `ciphertext_in`.
+/// - `enc_key_in` -- [in] the key to use for decryption (32 bytes).
+/// - `plaintext_out` -- [out] Pointer-pointer to an output buffer; a new buffer is allocated, the
+///   decrypted data written to it, and then the pointer to that buffer is stored here.
+///   This buffer must be `free()`d by the caller when done with it *unless* the function returns
+///   false, in which case the buffer pointer will not be set.
+/// - `plaintext_len` -- [out] Pointer to a size_t where the length of `plaintext_out` is stored.
+///   Not touched if the function returns false.
+///
+/// Outputs:
+/// - `bool` -- True if the decryption was successful, false if decryption failed.
+LIBSESSION_EXPORT bool session_decrypt_xchacha20(
+        const unsigned char* ciphertext_in,
+        size_t ciphertext_len,
+        const unsigned char* enc_key_in, /* 32 bytes */
+        unsigned char** plaintext_out,
+        size_t* plaintext_len);
+
 #ifdef __cplusplus
 }
 #endif

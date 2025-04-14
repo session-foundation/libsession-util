@@ -764,8 +764,8 @@ LIBSESSION_EXPORT int16_t config_storage_namespace(const config_object* conf) {
 
 LIBSESSION_EXPORT config_string_list* config_merge(
         config_object* conf,
-        const char** msg_hashes,
-        const unsigned char** configs,
+        const char* const* msg_hashes,
+        const unsigned char* const* configs,
         const size_t* lengths,
         size_t count) {
     return wrap_exceptions(conf, [&] {
