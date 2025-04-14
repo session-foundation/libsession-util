@@ -104,7 +104,7 @@ if(ENABLE_ONIONREQ)
         onionreq/key_types.cpp
         onionreq/parser.cpp
         onionreq/response_parser.cpp
-        network.cpp
+        session_network.cpp
     )
 
     target_link_libraries(onionreq
