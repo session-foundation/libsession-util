@@ -745,7 +745,74 @@ std::string compute_message_hash(
             decoded_data);
 }
 
+std::vector<unsigned char> encrypt_xchacha20(
+        std::span<const unsigned char> plaintext, std::span<const unsigned char> enc_key) {
+    if (enc_key.size() != 32)
+        throw std::invalid_argument{"Invalid enc_key: expected 32 bytes"};
+
+    std::vector<unsigned char> ciphertext;
+    ciphertext.resize(
+            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + plaintext.size() +
+            crypto_aead_xchacha20poly1305_ietf_ABYTES);
+
+    // Generate random nonce, and stash it at the beginning of ciphertext:
+    randombytes_buf(ciphertext.data(), crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+
+    auto* c = reinterpret_cast<unsigned char*>(ciphertext.data()) +
+              crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+    unsigned long long clen;
+
+    crypto_aead_xchacha20poly1305_ietf_encrypt(
+            c,
+            &clen,
+            plaintext.data(),
+            plaintext.size(),
+            nullptr,
+            0,        // additional data
+            nullptr,  // nsec (always unused)
+            reinterpret_cast<const unsigned char*>(ciphertext.data()),
+            enc_key.data());
+    assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + clen <= ciphertext.size());
+    ciphertext.resize(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + clen);
+    return ciphertext;
+}
+
+std::vector<unsigned char> decrypt_xchacha20(
+        std::span<const unsigned char> ciphertext, std::span<const unsigned char> enc_key) {
+    if (ciphertext.size() <
+        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+        throw std::invalid_argument{
+                "Invalid ciphertext: too short to contain valid encrypted data"};
+    if (enc_key.size() != 32)
+        throw std::invalid_argument{"Invalid enc_key: expected 32 bytes"};
+
+    // Extract nonce from the beginning of the ciphertext:
+    auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    ciphertext = ciphertext.subspan(nonce.size());
+
+    std::vector<unsigned char> plaintext;
+    plaintext.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
+    auto* m = reinterpret_cast<unsigned char*>(plaintext.data());
+    unsigned long long mlen;
+    if (0 != crypto_aead_xchacha20poly1305_ietf_decrypt(
+                     m,
+                     &mlen,
+                     nullptr,  // nsec (always unused)
+                     ciphertext.data(),
+                     ciphertext.size(),
+                     nullptr,
+                     0,  // additional data
+                     nonce.data(),
+                     enc_key.data()))
+        throw std::runtime_error{"Could not decrypt (XChaCha20-Poly1305)"};
+    assert(mlen <= plaintext.size());
+    plaintext.resize(mlen);
+    return plaintext;
+}
+
 }  // namespace session
+
+extern "C" {
 
 using namespace session;
 
@@ -925,3 +992,45 @@ LIBSESSION_C_API bool session_compute_message_hash(
         return false;
     }
 }
+
+LIBSESSION_C_API bool session_encrypt_xchacha20(
+        const unsigned char* plaintext_in,
+        size_t plaintext_len,
+        const unsigned char* enc_key_in,
+        unsigned char** ciphertext_out,
+        size_t* ciphertext_len) {
+    try {
+        auto ciphertext = session::encrypt_xchacha20(
+                std::span<const unsigned char>{plaintext_in, plaintext_len},
+                std::span<const unsigned char>{enc_key_in, 32});
+
+        *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
+        *ciphertext_len = ciphertext.size();
+        std::memcpy(*ciphertext_out, ciphertext.data(), ciphertext.size());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API bool session_decrypt_xchacha20(
+        const unsigned char* ciphertext_in,
+        size_t ciphertext_len,
+        const unsigned char* enc_key_in,
+        unsigned char** plaintext_out,
+        size_t* plaintext_len) {
+    try {
+        auto plaintext = session::decrypt_xchacha20(
+                std::span<const unsigned char>{ciphertext_in, ciphertext_len},
+                std::span<const unsigned char>{enc_key_in, 32});
+
+        *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
+        *plaintext_len = plaintext.size();
+        std::memcpy(*plaintext_out, plaintext.data(), plaintext.size());
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+}  // extern "C"
