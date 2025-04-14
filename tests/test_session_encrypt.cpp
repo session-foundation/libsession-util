@@ -504,7 +504,8 @@ TEST_CASE("Session message hash", "[session][message-hash]") {
 TEST_CASE("xchacha20", "[session][xchacha20]") {
     using namespace session;
 
-    auto payload = "da74ac6e96afda1c5a07d5bde1b8b1e1c05be73cb3c84112f31f00369d67154d00ff029090b069b48c3cf603d838d4ef623d54"_hexbytes;
+    auto payload =
+            "da74ac6e96afda1c5a07d5bde1b8b1e1c05be73cb3c84112f31f00369d67154d00ff029090b069b48c3cf603d838d4ef623d54"_hexbytes;
     auto enc_key = "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
 
     CHECK(decrypt_xchacha20(payload, enc_key) == to_vector("TestMessage"));
