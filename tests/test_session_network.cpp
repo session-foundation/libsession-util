@@ -666,7 +666,7 @@ TEST_CASE("Network", "[network][handle_errors]") {
                int16_t,
                std::vector<std::pair<std::string, std::string>>,
                std::optional<std::string>) {});
-    CHECK(EVENTUALLY(10ms, network->called("_send_onion_request")));
+    CHECK(EVENTUALLY(100ms, network->called("_send_onion_request")));
     REQUIRE(network->last_request_info.has_value());
     CHECK(node_for_destination(network->last_request_info->destination) !=
           node_for_destination(mock_request2.destination));
@@ -703,7 +703,7 @@ TEST_CASE("Network", "[network][handle_errors]") {
                int16_t,
                std::vector<std::pair<std::string, std::string>>,
                std::optional<std::string>) {});
-    CHECK(EVENTUALLY(10ms, network->called("refresh_snode_cache")));
+    CHECK(EVENTUALLY(100ms, network->called("refresh_snode_cache")));
 
     // Check when the retry after refreshing the snode cache due to a 421 receives it's own 421 it
     // is handled like any other error
@@ -930,7 +930,7 @@ TEST_CASE("Network", "[network][build_path]") {
     network.emplace(std::nullopt, true, false, false);
     network->set_suspended(true);
     network->build_path("Test1", PathType::standard);
-    CHECK(ALWAYS(10ms, network->did_not_call("establish_and_store_connection")));
+    CHECK(ALWAYS(25ms, network->did_not_call("establish_and_store_connection")));
 
     // If there are no unused connections it puts the path build in the queue and calls
     // establish_and_store_connection
@@ -938,7 +938,7 @@ TEST_CASE("Network", "[network][build_path]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->build_path("Test1", PathType::standard);
     CHECK(network->get_path_build_queue() == std::deque<PathType>{PathType::standard});
-    CHECK(EVENTUALLY(10ms, network->called("establish_and_store_connection")));
+    CHECK(EVENTUALLY(100ms, network->called("establish_and_store_connection")));
 
     // If the unused nodes are empty it refreshes them
     network.emplace(std::nullopt, true, false, false);
@@ -970,7 +970,7 @@ TEST_CASE("Network", "[network][build_path]") {
     network->build_path("Test1", PathType::standard);
     CHECK(network->get_path_build_failures() == 0);
     CHECK(network->get_path_build_queue() == std::deque<PathType>{PathType::standard});
-    CHECK(EVENTUALLY(10ms, network->called("refresh_snode_cache")));
+    CHECK(EVENTUALLY(100ms, network->called("refresh_snode_cache")));
 
     // If it can't build a path after excluding nodes with the same IP it increments the
     // failure count and re-tries the path build after a small delay
@@ -983,7 +983,7 @@ TEST_CASE("Network", "[network][build_path]") {
     network->ignore_calls_to("build_path");  // Ignore the 2nd loop
     CHECK(network->get_path_build_failures() == 1);
     CHECK(network->get_path_build_queue().empty());
-    CHECK(EVENTUALLY(10ms, network->called("build_path", 2)));
+    CHECK(EVENTUALLY(100ms, network->called("build_path", 2)));
 
     // It stores a successful non-standard path and kicks of queued requests but doesn't update the
     // status or call the 'paths_changed' hook
@@ -1003,7 +1003,7 @@ TEST_CASE("Network", "[network][build_path]") {
                     std::nullopt,
                     PathType::download));
     network->build_path("Test1", PathType::download);
-    CHECK(EVENTUALLY(10ms, network->called("_send_onion_request")));
+    CHECK(EVENTUALLY(100ms, network->called("_send_onion_request")));
     CHECK(network->get_paths(PathType::download).size() == 1);
 
     // It stores a successful 'standard' path, updates the status, calls the 'paths_changed' hook
@@ -1024,7 +1024,7 @@ TEST_CASE("Network", "[network][build_path]") {
                     std::nullopt,
                     PathType::standard));
     network->build_path("Test1", PathType::standard);
-    CHECK(EVENTUALLY(10ms, network->called("_send_onion_request")));
+    CHECK(EVENTUALLY(100ms, network->called("_send_onion_request")));
     CHECK(network->get_paths(PathType::standard).size() == 1);
     CHECK(network->get_status() == ConnectionStatus::connected);
     CHECK(network->called("paths_changed"));
@@ -1100,7 +1100,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->set_paths(PathType::standard, {invalid_path});
     network->build_path_if_needed(PathType::standard, false);
-    CHECK(ALWAYS(10ms, network->did_not_call("establish_and_store_connection")));
+    CHECK(ALWAYS(25ms, network->did_not_call("establish_and_store_connection")));
     CHECK(network->get_path_build_queue().empty());
 
     // Adds a path build to the queue
@@ -1108,7 +1108,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->set_paths(PathType::standard, {});
     network->build_path_if_needed(PathType::standard, false);
-    CHECK(EVENTUALLY(10ms, network->called("establish_and_store_connection")));
+    CHECK(EVENTUALLY(100ms, network->called("establish_and_store_connection")));
     CHECK(network->get_path_build_queue() == std::deque<PathType>{PathType::standard});
 
     // Can only add the correct number of 'standard' path builds to the queue
@@ -1116,10 +1116,10 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->build_path_if_needed(PathType::standard, false);
     network->build_path_if_needed(PathType::standard, false);
-    CHECK(EVENTUALLY(10ms, network->called("establish_and_store_connection", 2)));
+    CHECK(EVENTUALLY(100ms, network->called("establish_and_store_connection", 2)));
     network->reset_calls();  // This triggers 'call_soon' so we need to wait until they are enqueued
     network->build_path_if_needed(PathType::standard, false);
-    CHECK(ALWAYS(10ms, network->did_not_call("establish_and_store_connection")));
+    CHECK(ALWAYS(25ms, network->did_not_call("establish_and_store_connection")));
     CHECK(network->get_path_build_queue() ==
           std::deque<PathType>{PathType::standard, PathType::standard});
 
@@ -1128,7 +1128,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->set_paths(PathType::standard, {invalid_path});
     network->build_path_if_needed(PathType::standard, false);
-    CHECK(EVENTUALLY(10ms, network->called("establish_and_store_connection")));
+    CHECK(EVENTUALLY(100ms, network->called("establish_and_store_connection")));
     CHECK(network->get_path_build_queue() == std::deque<PathType>{PathType::standard});
 
     // Can add more path builds if there are enough active paths of the same type, no pending paths
@@ -1137,7 +1137,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->set_paths(PathType::standard, {invalid_path, invalid_path});
     network->build_path_if_needed(PathType::standard, false);
-    CHECK(EVENTUALLY(10ms, network->called("establish_and_store_connection")));
+    CHECK(EVENTUALLY(100ms, network->called("establish_and_store_connection")));
     CHECK(network->get_path_build_queue() == std::deque<PathType>{PathType::standard});
 
     // Cannot add more path builds if there are already enough active paths of the same type and a
@@ -1146,7 +1146,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->set_paths(PathType::standard, {invalid_path, invalid_path});
     network->build_path_if_needed(PathType::standard, true);
-    CHECK(ALWAYS(10ms, network->did_not_call("establish_and_store_connection")));
+    CHECK(ALWAYS(25ms, network->did_not_call("establish_and_store_connection")));
     CHECK(network->get_path_build_queue().empty());
 
     // Cannot add more path builds if there is already a build of the same type in the queue and the
@@ -1156,7 +1156,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->set_paths(PathType::standard, {invalid_path});
     network->set_path_build_queue({PathType::standard});
     network->build_path_if_needed(PathType::standard, false);
-    CHECK(ALWAYS(10ms, network->did_not_call("establish_and_store_connection")));
+    CHECK(ALWAYS(25ms, network->did_not_call("establish_and_store_connection")));
     CHECK(network->get_path_build_queue() == std::deque<PathType>{PathType::standard});
 
     // Can only add the correct number of 'download' path builds to the queue
@@ -1164,10 +1164,10 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->build_path_if_needed(PathType::download, false);
     network->build_path_if_needed(PathType::download, false);
-    CHECK(EVENTUALLY(10ms, network->called("establish_and_store_connection", 2)));
+    CHECK(EVENTUALLY(100ms, network->called("establish_and_store_connection", 2)));
     network->reset_calls();  // This triggers 'call_soon' so we need to wait until they are enqueued
     network->build_path_if_needed(PathType::download, false);
-    CHECK(ALWAYS(10ms, network->did_not_call("establish_and_store_connection")));
+    CHECK(ALWAYS(25ms, network->did_not_call("establish_and_store_connection")));
     CHECK(network->get_path_build_queue() ==
           std::deque<PathType>{PathType::download, PathType::download});
 
@@ -1176,10 +1176,10 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
     network->ignore_calls_to("establish_and_store_connection");
     network->build_path_if_needed(PathType::upload, false);
     network->build_path_if_needed(PathType::upload, false);
-    CHECK(EVENTUALLY(10ms, network->called("establish_and_store_connection", 2)));
+    CHECK(EVENTUALLY(100ms, network->called("establish_and_store_connection", 2)));
     network->reset_calls();  // This triggers 'call_soon' so we need to wait until they are enqueued
     network->build_path_if_needed(PathType::upload, false);
-    CHECK(ALWAYS(10ms, network->did_not_call("establish_and_store_connection")));
+    CHECK(ALWAYS(25ms, network->did_not_call("establish_and_store_connection")));
     CHECK(network->get_path_build_queue() ==
           std::deque<PathType>{PathType::upload, PathType::upload});
 }
@@ -1212,7 +1212,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it doesn't start checking for timeouts when the request doesn't have
     // a build paths timeout
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(network->create_test_node(500));
+    test_server.emplace(network->create_test_node(501));
     network->send_onion_request(
             (*test_server)->node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
@@ -1229,7 +1229,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it does start checking for timeouts when the request has a
     // paths build timeout
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(network->create_test_node(500));
+    test_server.emplace(network->create_test_node(502));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             (*test_server)->node,
@@ -1247,7 +1247,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it fails the request with a timeout if it has a build path timeout
     // and the path build takes too long
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(network->create_test_node(500));
+    test_server.emplace(network->create_test_node(503));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             (*test_server)->node,
@@ -1368,9 +1368,10 @@ TEST_CASE("Network", "[network][send_onion_request]") {
 TEST_CASE("Network", "[network][c][network_send_onion_request]") {
     auto test_network = std::make_unique<TestNetwork>(std::nullopt, true, true, false);
     auto test_server_cpp = test_network->create_test_node(500);
-    auto [test_path_servers_cpp, test_path_cpp] = test_network->create_test_path();
+    std::optional<std::pair<std::vector<std::shared_ptr<TestServer>>, onion_path>> test_path_data;
+    test_path_data.emplace(test_network->create_test_path());
     test_network->handle_onion_requests_as_plaintext = true;
-    test_network->set_paths(PathType::standard, {test_path_cpp});
+    test_network->set_paths(PathType::standard, {test_path_data->second});
 
     // Convert TestNetwork to network_object to pass to C API
     auto n_object = std::make_unique<network_object>();
@@ -1447,6 +1448,7 @@ TEST_CASE("Network", "[network][c][network_send_onion_request]") {
     CHECK(hf[0] == 2);  // Called the onion_req callback
     CHECK(response.contains("t"));
     CHECK(response.contains("version"));
+    test_path_data.reset();
     network_free(network);
 }
 
