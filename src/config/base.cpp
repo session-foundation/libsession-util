@@ -1181,27 +1181,43 @@ LIBSESSION_EXPORT config_push_data* config_push(config_object* conf) {
         auto& config = *unbox(conf);
         auto [seqno, data, obs] = config.push();
 
-        // We need to do one alloc here that holds everything.  We pack it as follows:
-        // - the returned struct
-        // - data pointers: [*configdata1][*configdata2]...  <-- `config` points to the beginning of
-        // this
-        // - size_t [size1][size2]... <-- `config_lens` points to the beginning of this
-        // - obsolete hash pointers: [*obs1][*obs2]...  <-- `obsolete` points to the beginning of
-        // this
-        // - data: [configdata1][configdata2]...[obs1\0][obs2\0]...
+        // We need to do one alloc here that holds everything.  We overallocate the struct, using
+        // the extra allocated space beyond the end of the struct to store all the values the struct
+        // points at.
+        //
+        // In particular, in the beyond-the-end space, for N configdata and M obsolete hashes, we
+        // lay it out as follows:
+        //
+        // - N data pointers; `ret->config` points to the beginning of this:
+        //      [*configdata1][*configdata2]...[*configdataN]
+        // - N size_t values; `ret->config_lens` points to the beginning of this:
+        //      [size1][size2]...[sizeN]
+        // - M obsolete hash c string pointers; `ret->obsolete` points to the beginning of this:
+        //      [*obs1][*obs2]...[*obsM]
+        // - packed data containing all the N config data and M obsolete hash null-terminated c
+        //   strings pointed at in the above layout:
+        //      [configdata1][configdata2]...[configdataN][obs1\0][obs2\0]...[obsM\0]
+        //
+        // For example:
+        // - `ret->config[1]` is the pointer `*configdata2`, which points at the beginning of
+        // [configdata2] in the packed data.  `ret->config_lens[1]` is the length of that
+        // [configdata2].
+        // - `ret->obs[0]` is the c string pointer containing the first obsolete hash, `obs1`; it
+        //   points at the actual `[obs1\0]` value in the final packed data.
+        //
         static_assert(alignof(config_push_data) >= alignof(char*));
         static_assert(sizeof(config_push_data) % alignof(char*) == 0);
         static_assert(alignof(char*) == alignof(size_t*));
         static_assert(alignof(size_t) == alignof(char*));
-        size_t buffer_size = sizeof(config_push_data)      // struct data
-                           + data.size() * sizeof(char**)  // data pointer array
-                           + data.size() * sizeof(size_t)  // data sizes
-                           + obs.size() * sizeof(char**);  // obsolete pointer array
+        size_t buffer_size = sizeof(config_push_data)              // struct data
+                           + data.size() * sizeof(unsigned char*)  // data pointer array
+                           + data.size() * sizeof(size_t)          // data sizes
+                           + obs.size() * sizeof(char*);           // obsolete pointer array
 
-        // + configdata array data:
+        // + configdata array data off the end:
         for (auto& d : data)
             buffer_size += d.size();
-        // + obsolete hash data (including null terminator for each):
+        // + obsolete hash data (including null terminator for each) off the end:
         for (auto& o : obs)
             buffer_size += o.size() + 1;
 
@@ -1213,9 +1229,9 @@ LIBSESSION_EXPORT config_push_data* config_push(config_object* conf) {
 
         ret->seqno = seqno;
         ret->config = reinterpret_cast<unsigned char**>(ret + 1);
-        ret->config_lens = reinterpret_cast<size_t*>(ret->config + 1);
+        ret->config_lens = reinterpret_cast<size_t*>(ret->config + data.size());
         ret->n_configs = data.size();
-        ret->obsolete = reinterpret_cast<char**>(ret->config_lens + 1);
+        ret->obsolete = reinterpret_cast<char**>(ret->config_lens + data.size());
         ret->obsolete_len = obs.size();
 
         unsigned char* pos = reinterpret_cast<unsigned char*>(ret->obsolete + ret->obsolete_len);
