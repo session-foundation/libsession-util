@@ -44,7 +44,6 @@ target_link_libraries(test_libs INTERFACE
 
 if (ENABLE_ONIONREQ)
     target_link_libraries(test_libs INTERFACE libsession::onionreq)
-    target_include_directories(test_libs INTERFACE ${CMAKE_BINARY_DIR}/static-deps/include)
 else()
     target_compile_definitions(test_libs INTERFACE DISABLE_ONIONREQ)
 endif()
