@@ -415,14 +415,14 @@ class TestNetwork : public Network {
         }
 
         if (notify)
-           call_cv.notify_all();
+            call_cv.notify_all();
     }
 
     void reset_calls() {
         std::lock_guard<std::mutex> lock_counts(call_counts_mutex);
         call_counts.clear();
     }
-    
+
     int get_call_count(const std::string& name) {
         std::lock_guard<std::mutex> lock(call_counts_mutex);
         auto it = call_counts.find(name);
@@ -431,8 +431,10 @@ class TestNetwork : public Network {
 
     bool called(const std::string& name, int times = 1) { return (get_call_count(name) >= times); }
 
-    [[nodiscard]] bool called(const std::string& name, std::chrono::milliseconds timeout, int times = 1) {
-        if (times <= 0) times = 1;
+    [[nodiscard]] bool called(
+            const std::string& name, std::chrono::milliseconds timeout, int times = 1) {
+        if (times <= 0)
+            times = 1;
 
         std::unique_lock<std::mutex> lock(call_counts_mutex);
 
@@ -451,12 +453,10 @@ class TestNetwork : public Network {
 
     [[nodiscard]] bool did_not_call(const std::string& name, std::chrono::milliseconds duration) {
         std::unique_lock<std::mutex> lock(call_counts_mutex);
-        auto predicate = [&]() {
-            return call_counts.contains(name);
-        };
+        auto predicate = [&]() { return call_counts.contains(name); };
 
         if (predicate())
-            return false; // Already called
+            return false;  // Already called
 
         bool was_called_during_wait = call_cv.wait_for(lock, duration, predicate);
         return !was_called_during_wait;
