@@ -118,7 +118,7 @@ if(ENABLE_ONIONREQ)
     )
 
     if (BUILD_STATIC_DEPS)
-        target_include_directories(onionreq PRIVATE ${CMAKE_BINARY_DIR}/static-deps/include)
+        target_include_directories(onionreq PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
     endif()
 endif()
 

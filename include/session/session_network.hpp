@@ -86,7 +86,7 @@ struct service_node : public oxen::quic::RemoteAddress {
 struct connection_info {
     service_node node;
     std::shared_ptr<size_t> pending_requests;
-    std::shared_ptr<oxen::quic::connection_interface> conn;
+    std::shared_ptr<oxen::quic::Connection> conn;
     std::shared_ptr<oxen::quic::BTRequestStream> stream;
 
     bool is_valid() const { return conn && stream && !stream->is_closing(); };
@@ -204,10 +204,10 @@ class Network {
     std::thread disk_write_thread;
 
     // General values
-    bool destroyed = false;
     bool suspended = false;
     ConnectionStatus status;
-    oxen::quic::Network net;
+
+    std::shared_ptr<oxen::quic::Loop> loop;
     std::shared_ptr<oxen::quic::Endpoint> endpoint;
     std::unordered_map<PathType, std::vector<onion_path>> paths;
     std::vector<std::pair<onion_path, PathType>> paths_pending_drop;
@@ -672,7 +672,7 @@ class Network {
     /// Outputs:
     /// - A tuple containing the status code, headers and body of the decrypted onion request
     /// response.
-    std::tuple<
+    virtual std::tuple<
             int16_t,
             std::vector<std::pair<std::string, std::string>>,
             std::optional<std::string>>
@@ -689,7 +689,7 @@ class Network {
     /// Outputs:
     /// - A tuple containing the status code, headers and body of the decrypted onion request
     /// response.
-    std::tuple<
+    virtual std::tuple<
             int16_t,
             std::vector<std::pair<std::string, std::string>>,
             std::optional<std::string>>
