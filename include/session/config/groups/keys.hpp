@@ -584,7 +584,7 @@ class Keys : public ConfigSig {
             Info& info,
             Members& members);
 
-    /// API: groups/Keys::current_hashes
+    /// API: groups/Keys::active_hashes
     ///
     /// Returns a set of message hashes of messages that contain currently active decryption keys.
     /// These are the messages that should be periodically renewed by clients with write access to
@@ -594,7 +594,7 @@ class Keys : public ConfigSig {
     ///
     /// Outputs:
     /// - vector of message hashes
-    std::unordered_set<std::string> current_hashes() const;
+    std::unordered_set<std::string> active_hashes() const;
 
     /// API: groups/Keys::needs_rekey
     ///
