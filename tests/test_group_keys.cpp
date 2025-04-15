@@ -491,12 +491,12 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.members.merge(mem_configs) == std::unordered_set{{"mfakehash6"s}});
         CHECK(a.members.size() == 5);
         CHECK(a.keys.active_hashes() == std::unordered_set{
-                                                 {"keyhash1"s,
-                                                  "keyhash2"s,
-                                                  "keyhash3"s,
-                                                  "keyhash4"s,
-                                                  "keyhash5"s,
-                                                  "keyhash6"s}});
+                                                {"keyhash1"s,
+                                                 "keyhash2"s,
+                                                 "keyhash3"s,
+                                                 "keyhash4"s,
+                                                 "keyhash5"s,
+                                                 "keyhash6"s}});
     }
 
     std::vector<unsigned char> new_keys_config7 =
