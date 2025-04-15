@@ -181,7 +181,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.info.merge(info_configs) == std::unordered_set{{"fakehash1"s}});
         CHECK(a.members.merge(mem_configs) == std::unordered_set{{"fakehash1"s}});
         CHECK(a.members.size() == 1);
-        CHECK(a.keys.current_hashes() == std::unordered_set{{"keyhash1"s}});
+        CHECK(a.keys.active_hashes() == std::unordered_set{{"keyhash1"s}});
     }
 
     /*  All attempts to merge non-admin members will throw, as none of the non admin members
@@ -193,7 +193,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK_THROWS(m.info.merge(info_configs));
         CHECK_THROWS(m.members.merge(mem_configs));
         CHECK(m.members.size() == 0);
-        CHECK(m.keys.current_hashes().empty());
+        CHECK(m.keys.active_hashes().empty());
     }
 
     info_configs.clear();
@@ -228,7 +228,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.info.merge(info_configs) == std::unordered_set{{"fakehash2"s}});
         CHECK(a.members.merge(mem_configs) == std::unordered_set{{"fakehash2"s}});
         CHECK(a.members.size() == 5);
-        CHECK(a.keys.current_hashes() == std::unordered_set{{"keyhash1"s, "keyhash2"s}});
+        CHECK(a.keys.active_hashes() == std::unordered_set{{"keyhash1"s, "keyhash2"s}});
     }
 
     for (auto& m : members) {
@@ -237,7 +237,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(m.info.merge(info_configs) == std::unordered_set{{"fakehash2"s}});
         CHECK(m.members.merge(mem_configs) == std::unordered_set{{"fakehash2"s}});
         CHECK(m.members.size() == 5);
-        CHECK(m.keys.current_hashes() == std::unordered_set{{"keyhash2"s}});
+        CHECK(m.keys.active_hashes() == std::unordered_set{{"keyhash2"s}});
     }
 
     info_configs.clear();
@@ -270,7 +270,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.info.get_name() == "tomatosauce"s);
         CHECK(a.info.get_description() ==
               "this is where you go to play in the tomato sauce, I guess"s);
-        CHECK(a.keys.current_hashes() ==
+        CHECK(a.keys.active_hashes() ==
               std::unordered_set{{"keyhash1"s, "keyhash2"s, "keyhash3"s}});
     }
 
@@ -282,7 +282,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(m.info.get_name() == "tomatosauce"s);
         CHECK(m.info.get_description() ==
               "this is where you go to play in the tomato sauce, I guess"s);
-        CHECK(m.keys.current_hashes() == std::unordered_set{{"keyhash2"s, "keyhash3"s}});
+        CHECK(m.keys.active_hashes() == std::unordered_set{{"keyhash2"s, "keyhash3"s}});
     }
 
     info_configs.clear();
@@ -318,7 +318,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.info.merge(info_configs) == std::unordered_set{{"fakehash4"s}});
         CHECK(a.members.merge(mem_configs) == std::unordered_set{{"fakehash4"s}});
         CHECK(a.members.size() == 3);
-        CHECK(a.keys.current_hashes() ==
+        CHECK(a.keys.active_hashes() ==
               std::unordered_set{{"keyhash1"s, "keyhash2"s, "keyhash3"s, "keyhash4"s}});
     }
 
@@ -327,7 +327,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         bool found_key = m.keys.load_key_message(
                 "keyhash4", new_keys_config2, get_timestamp_ms(), m.info, m.members);
 
-        CHECK(m.keys.current_hashes() ==
+        CHECK(m.keys.active_hashes() ==
               std::unordered_set{{"keyhash2"s, "keyhash3"s, "keyhash4"s}});
         if (i < 2) {  // We should still be in the group
             CHECK(found_key);
@@ -425,10 +425,10 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(m.members.size() == 5);
 
         if (i < 2)
-            CHECK(m.keys.current_hashes() ==
+            CHECK(m.keys.active_hashes() ==
                   std::unordered_set{{"keyhash2"s, "keyhash3"s, "keyhash4"s, "keyhash5"s}});
         else
-            CHECK(m.keys.current_hashes() == std::unordered_set{{"keyhash5"s}});
+            CHECK(m.keys.active_hashes() == std::unordered_set{{"keyhash5"s}});
     }
 
     std::pair<std::string, std::vector<unsigned char>> decrypted1, decrypted2;
@@ -457,7 +457,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
             members[1].keys.dump());
     CHECK(m1b.keys.size() == 4);
     CHECK(m1b.keys.group_keys().size() == 4);
-    CHECK(m1b.keys.current_hashes() ==
+    CHECK(m1b.keys.active_hashes() ==
           std::unordered_set{{"keyhash2"s, "keyhash3"s, "keyhash4"s, "keyhash5"s}});
     CHECK(m1b.members.size() == 5);
     auto m1b_m2 = m1b.members.get(members[2].session_id);
@@ -490,13 +490,13 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.info.merge(info_configs) == std::unordered_set{{"ifakehash6"s}});
         CHECK(a.members.merge(mem_configs) == std::unordered_set{{"mfakehash6"s}});
         CHECK(a.members.size() == 5);
-        CHECK(a.keys.current_hashes() == std::unordered_set{
-                                                 {"keyhash1"s,
-                                                  "keyhash2"s,
-                                                  "keyhash3"s,
-                                                  "keyhash4"s,
-                                                  "keyhash5"s,
-                                                  "keyhash6"s}});
+        CHECK(a.keys.active_hashes() == std::unordered_set{
+                                                {"keyhash1"s,
+                                                 "keyhash2"s,
+                                                 "keyhash3"s,
+                                                 "keyhash4"s,
+                                                 "keyhash5"s,
+                                                 "keyhash6"s}});
     }
 
     std::vector<unsigned char> new_keys_config7 =
@@ -526,7 +526,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(a.info.merge(info_configs) == std::unordered_set{{"ifakehash6"s, "ifakehash7"s}});
         CHECK(a.members.merge(mem_configs) == std::unordered_set{{"mfakehash6"s, "mfakehash7"s}});
         CHECK(a.members.size() == 5);
-        CHECK(a.keys.current_hashes() == std::unordered_set{{"keyhash6"s, "keyhash7"s}});
+        CHECK(a.keys.active_hashes() == std::unordered_set{{"keyhash6"s, "keyhash7"s}});
     }
 
     for (size_t i = 0; i < members.size(); i++) {
@@ -546,7 +546,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
         CHECK(m.info.merge(info_configs) == std::unordered_set{{"ifakehash6"s, "ifakehash7"s}});
         CHECK(m.members.merge(mem_configs) == std::unordered_set{{"mfakehash6"s, "mfakehash7"s}});
         CHECK(m.members.size() == 5);
-        CHECK(m.keys.current_hashes() == std::unordered_set{{"keyhash6"s, "keyhash7"s}});
+        CHECK(m.keys.active_hashes() == std::unordered_set{{"keyhash6"s, "keyhash7"s}});
     }
 
     // Make sure keys propagate on dump restore to info/members:

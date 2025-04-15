@@ -1124,7 +1124,7 @@ bool Keys::load_key_message(
     return false;
 }
 
-std::unordered_set<std::string> Keys::current_hashes() const {
+std::unordered_set<std::string> Keys::active_hashes() const {
     std::unordered_set<std::string> hashes;
     for (const auto& [g, hash] : active_msgs_)
         hashes.insert(hash.begin(), hash.end());
@@ -1592,8 +1592,8 @@ LIBSESSION_C_API bool groups_keys_load_message(
             false);
 }
 
-LIBSESSION_C_API config_string_list* groups_keys_current_hashes(const config_group_keys* conf) {
-    return make_string_list(unbox(conf).current_hashes());
+LIBSESSION_C_API config_string_list* groups_keys_active_hashes(const config_group_keys* conf) {
+    return make_string_list(unbox(conf).active_hashes());
 }
 
 LIBSESSION_C_API bool groups_keys_needs_rekey(const config_group_keys* conf) {

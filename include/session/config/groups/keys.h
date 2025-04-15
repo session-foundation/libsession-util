@@ -246,7 +246,7 @@ LIBSESSION_EXPORT bool groups_keys_load_message(
         config_object* info,
         config_object* members) LIBSESSION_WARN_UNUSED;
 
-/// API: groups/groups_keys_current_hashes
+/// API: groups/groups_keys_active_hashes
 ///
 /// Returns the hashes of currently active keys messages, that is, messages that have a decryption
 /// key that new devices or clients might require; these are the messages that should have their
@@ -258,7 +258,7 @@ LIBSESSION_EXPORT bool groups_keys_load_message(
 /// Outputs:
 /// - `config_string_list*` -- pointer to an array of message hashes.  The returned pointer belongs
 ///   to the caller and must be free()d when done.
-LIBSESSION_EXPORT config_string_list* groups_keys_current_hashes(const config_group_keys* conf);
+LIBSESSION_EXPORT config_string_list* groups_keys_active_hashes(const config_group_keys* conf);
 
 /// API: groups/groups_keys_needs_rekey
 ///
