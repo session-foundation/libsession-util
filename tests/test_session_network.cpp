@@ -1390,9 +1390,9 @@ TEST_CASE("Network", "[network][send_onion_request]") {
     // Wait for the result to be set
     auto result = result_promise.get_future().get();
 
-    CHECK(result.success);
     CHECK_FALSE(result.timeout);
     CHECK(result.status_code == 200);
+    REQUIRE(result.success);
     REQUIRE(result.response.has_value());
     INFO("*result.response is: " << *result.response);
     REQUIRE_NOTHROW([&] { [[maybe_unused]] auto _ = nlohmann::json::parse(*result.response); });

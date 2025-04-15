@@ -27,6 +27,8 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_random.cpp
     test_session_encrypt.cpp
     test_xed25519.cpp
+
+    case_logger.cpp
 )
 
 if (ENABLE_ONIONREQ)

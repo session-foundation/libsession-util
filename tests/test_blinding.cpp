@@ -10,7 +10,6 @@
 #include "session/util.hpp"
 #include "utils.hpp"
 
-using namespace std::literals;
 using namespace session;
 
 constexpr std::array<unsigned char, 64> seed1{
@@ -302,12 +301,8 @@ TEST_CASE("Version 07xxx-blinded signing", "[blinding07][sign]") {
     auto body = to_span("some body (once told me)");
 
     uint64_t timestamp = 1234567890;
-    std::vector<unsigned char> ts = to_vector(std::to_string(timestamp));
-    std::vector<unsigned char> full_message;
-    full_message.reserve(10 /* timestamp */ + method.size() + path.size() + body.size());
-    full_message.insert(full_message.end(), ts.begin(), ts.end());
-    full_message.insert(full_message.end(), method_span.begin(), method_span.end());
-    full_message.insert(full_message.end(), path_span.begin(), path_span.end());
+    std::vector<unsigned char> full_message = to_vector("{}{}{}"_format(timestamp, method, path));
+
     auto req_sig_no_body =
             blind_version_sign_request(to_span(seed1), timestamp, method, path, std::nullopt);
     CHECK(crypto_sign_verify_detached(

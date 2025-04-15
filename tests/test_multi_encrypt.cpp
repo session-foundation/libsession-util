@@ -8,9 +8,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 using x_pair = std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>>;
 
 // Returns X25519 privkey, pubkey from an Ed25519 seed
@@ -299,15 +296,12 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
             "test suite",
             nonce);
 
-    CHECK(printable(encrypted) == printable(fmt::format(
-                                          "d"
-                                          "1:#24:{}"
-                                          "1:el21:{}21:{}21:{}e"
-                                          "e",
+    CHECK(printable(encrypted) == printable(
+                                          "d1:#24:{}1:el21:{}21:{}21:{}ee",
                                           "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hex,
                                           "e64937e5ea201b84f4e88a976dad900d91caaf6a17"_hex,
                                           "bcb642c49c6da03f70cdaab2ed6666721318afd631"_hex,
-                                          "1ecee2215d226817edfdb097f05037eb799309103a"_hex)));
+                                          "1ecee2215d226817edfdb097f05037eb799309103a"_hex));
 
     m1 = session::decrypt_for_multiple_simple(
             encrypted,

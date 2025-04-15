@@ -10,6 +10,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -91,10 +92,12 @@ inline std::string_view to_string_view(const Container& c) {
 }
 
 // Helper function to go to/from char pointers to unsigned char pointers:
-inline const unsigned char* to_unsigned(const char* x) {
+template <oxenc::basic_char Char>
+inline const unsigned char* to_unsigned(const Char* x) {
     return reinterpret_cast<const unsigned char*>(x);
 }
-inline unsigned char* to_unsigned(char* x) {
+template <oxenc::basic_char Char>
+inline unsigned char* to_unsigned(Char* x) {
     return reinterpret_cast<unsigned char*>(x);
 }
 inline const unsigned char* to_unsigned(const std::byte* x) {
@@ -109,6 +112,10 @@ inline const unsigned char* to_unsigned(const unsigned char* x) {
 }
 inline unsigned char* to_unsigned(unsigned char* x) {
     return x;
+}
+
+inline uint64_t get_timestamp() {
+    return std::chrono::steady_clock::now().time_since_epoch().count();
 }
 
 /// Returns true if the first string is equal to the second string, compared case-insensitively.

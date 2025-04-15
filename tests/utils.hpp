@@ -1,11 +1,13 @@
 #pragma once
 
+#include <fmt/format.h>
 #include <oxenc/hex.h>
 
 #include <array>
 #include <chrono>
 #include <cstddef>
 #include <oxen/log.hpp>
+#include <oxen/log/format.hpp>
 #include <set>
 #include <string>
 #include <string_view>
@@ -15,6 +17,10 @@
 #include "session/config/base.h"
 #include "session/types.hpp"
 #include "session/util.hpp"
+
+using namespace std::literals;
+using namespace oxenc::literals;
+using namespace oxen::log::literals;
 
 namespace session {
 
@@ -99,6 +105,11 @@ inline std::string printable(std::span<const unsigned char> x) {
 }
 inline std::string printable(std::string_view x) {
     return printable(session::to_span(x));
+}
+template <typename... T>
+    requires(sizeof...(T) > 0)
+inline std::string printable(fmt::format_string<T...> format, T&&... args) {
+    return printable(session::to_span(fmt::format(format, std::forward<T>(args)...)));
 }
 std::string printable(const unsigned char* x) = delete;
 inline std::string printable(const unsigned char* x, size_t n) {

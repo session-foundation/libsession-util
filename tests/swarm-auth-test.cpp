@@ -22,9 +22,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 static constexpr int64_t created_ts = 1680064059;
 
 using namespace session::config;
@@ -115,14 +112,13 @@ int main() {
     auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
                        std::chrono::system_clock::now().time_since_epoch())
                        .count();
-    auto now_vec = session::str_to_vec(std::to_string(now));
 
     auto msg = to_usv("hello world");
     std::array<unsigned char, 64> store_sig;
     std::vector<unsigned char> store_to_sign;
-    auto store_vec = session::str_to_vec("store999");
+    auto store_vec = session::str_to_vec("store999{}"_format(now));
     store_to_sign.insert(store_to_sign.end(), store_vec.begin(), store_vec.end());
-    store_to_sign.insert(store_to_sign.end(), now_vec.begin(), now_vec.end());
+
     crypto_sign_ed25519_detached(
             store_sig.data(), nullptr, store_to_sign.data(), store_to_sign.size(), group_sk.data());
 
@@ -139,10 +135,8 @@ int main() {
     std::cout << "STORE:\n\n" << store.dump() << "\n\n";
 
     std::vector<unsigned char> retrieve_to_sign;
-    auto retrieve_vec = session::str_to_vec("retrieve999");
-    auto now_vec = session::str_to_vec(std::to_string(now));
+    auto retrieve_vec = session::str_to_vec("retrieve999{}"_format(now));
     retrieve_to_sign.insert(retrieve_to_sign.end(), retrieve_vec.begin(), retrieve_vec.end());
-    retrieve_to_sign.insert(retrieve_to_sign.end(), now_vec.begin(), now_vec.end());
     auto subauth = member.keys.swarm_subaccount_sign(retrieve_to_sign, auth_data);
 
     nlohmann::json retrieve{

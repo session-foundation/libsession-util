@@ -7,30 +7,33 @@
 
 namespace session::hash {
 
-std::vector<unsigned char> hash(
-        const size_t size,
+void hash(
+        std::span<unsigned char> hash,
         std::span<const unsigned char> msg,
         std::optional<std::span<const unsigned char>> key) {
+    const auto size = hash.size();
     if (size < crypto_generichash_blake2b_BYTES_MIN || size > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid size: expected between 16 and 64 bytes (inclusive)"};
 
     if (key && key->size() > crypto_generichash_blake2b_BYTES_MAX)
         throw std::invalid_argument{"Invalid key: expected less than 65 bytes"};
 
-    auto result_code = 0;
-    std::vector<unsigned char> result;
-    result.resize(size);
-
-    result_code = crypto_generichash_blake2b(
-            result.data(),
+    crypto_generichash_blake2b(
+            hash.data(),
             size,
             msg.data(),
             msg.size(),
             key ? key->data() : nullptr,
             key ? key->size() : 0);
+}
 
-    if (result_code != 0)
-        throw std::runtime_error{"Hash generation failed"};
+std::vector<unsigned char> hash(
+        const size_t size,
+        std::span<const unsigned char> msg,
+        std::optional<std::span<const unsigned char>> key) {
+    std::vector<unsigned char> result;
+    result.resize(size);
+    hash(result, msg, key);
 
     return result;
 }

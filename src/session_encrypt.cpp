@@ -419,7 +419,7 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
     crypto_sign_ed25519_sk_to_curve25519(x_sec.data(), ed25519_privkey.data());
     crypto_scalarmult_base(x_pub.data(), x_sec.data());
 
-    return decrypt_incoming({x_pub.data(), 32}, {x_sec.data(), 32}, ciphertext);
+    return decrypt_incoming(x_pub, x_sec, ciphertext);
 }
 
 std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(

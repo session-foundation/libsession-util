@@ -8,9 +8,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 TEST_CASE("Session protocol encryption", "[session-protocol][encrypt]") {
 
     using namespace session;

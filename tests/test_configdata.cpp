@@ -13,8 +13,7 @@
 #include "utils.hpp"
 
 using namespace session;
-using namespace std::literals;
-using namespace oxenc::literals;
+using namespace fmt::literals;
 using config::ConfigMessage;
 using config::MutableConfigMessage;
 using oxenc::bt_dict;
@@ -231,7 +230,7 @@ TEST_CASE("config message serialization", "[config][serialization]") {
           "1:<" "l"
             "l"
               "i10e"
-              "32:" + hash0 +
+              "32:{hash0}"
               "d"
                 "3:bar" "d"
                   "0:" "lli42e1:a1:belee"
@@ -243,7 +242,7 @@ TEST_CASE("config message serialization", "[config][serialization]") {
             "e"
             "l"
               "i11e"
-              "32:" + hash1 +
+              "32:{hash1}"
               "d"
                 "3:foo" "1:-"
               "e"
@@ -257,7 +256,8 @@ TEST_CASE("config message serialization", "[config][serialization]") {
             "e"
             "3:foo" "0:"
           "e"
-        "e"));
+        "e",
+        "hash0"_a=hash0, "hash1"_a=hash1));
     // clang-format on
 
     auto m5 = m2.increment().increment().increment();
@@ -285,14 +285,14 @@ TEST_CASE("config message serialization", "[config][serialization]") {
           "1:<" "l"
             "l"
               "i11e"
-              "32:" + hash1 +
+              "32:{hash1}"
               "d"
                 "3:foo" "1:-"
               "e"
             "e"
             "l"
               "i12e"
-              "32:" + hash2 +
+              "32:{hash2}"
               "d"
                 "3:bar" "d"
                   "0:" "l" "li99e1:ce" "l1:be" "e"
@@ -304,18 +304,19 @@ TEST_CASE("config message serialization", "[config][serialization]") {
             "e"
             "l"
               "i13e"
-              "32:" + hash3 +
+              "32:{hash3}"
               "de"
             "e"
             "l"
               "i14e"
-              "32:" + hash4 +
+              "32:{hash4}"
               "de"
             "e"
           "e"
           "1:=" "d"
           "e"
-        "e"));
+        "e",
+        "hash1"_a=hash1, "hash2"_a=hash2, "hash3"_a=hash3, "hash4"_a=hash4));
 
     // clang-format on
 }

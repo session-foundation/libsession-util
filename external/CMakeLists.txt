@@ -126,7 +126,6 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang AND NOT CMAKE_CXX_COMPILE
     oxen_logging_add_source_dir("${CMAKE_CURRENT_SOURCE_DIR}/oxen-libquic/external/oxen-logging/include/oxen")
 endif()
 
-
 if(CMAKE_C_COMPILER_LAUNCHER)
   set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")
 endif()
