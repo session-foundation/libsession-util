@@ -655,7 +655,7 @@ class ConfigBase : public ConfigSig {
         /// - `value` -- replaces current value with given string view
         void operator=(std::string_view value) { *this = std::string{value}; }
 
-        /// API: base/ConfigBase::DictFieldProxy::operator=(std::span<const unsigned char>)
+        /// API: base/ConfigBase::DictFieldProxy::operator
         ///
         /// Replaces the current value with the given std::span<const unsigned char>.  This also
         /// auto-vivifies any intermediate dicts needed to reach the given key, including replacing
@@ -1263,6 +1263,9 @@ class ConfigBase : public ConfigSig {
     ///
     /// Note that only *incomplete* partial sets are affected by this (and stored); we also
     /// separately retain metadata about *completed* multipart sets (see MULTIPART_MAX_REMEMBER).
+    ///
+    /// Inputs: None
+    ///
     std::chrono::milliseconds MULTIPART_MAX_WAIT = 7 * 24h;
 
     /// API: base/ConfigBase::MULTIPART_MAX_REMEMBER
@@ -1272,6 +1275,9 @@ class ConfigBase : public ConfigSig {
     ///
     /// Unlike MULTIPART_MAX_WAIT, such storage does not include the data itself, but merely the
     /// (final) config hash and timestamp of the recombined parts needed for deduplication.
+    ///
+    /// Inputs: None
+    ///
     std::chrono::milliseconds MULTIPART_MAX_REMEMBER = 14 * 24h;
 
     /// API: base/ConfigBase::add_key

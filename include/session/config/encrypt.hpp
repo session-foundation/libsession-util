@@ -62,6 +62,9 @@ void encrypt_inplace(
 ///
 /// That is, for some message `m`, encrypt_overhead() is the difference between m.size() and
 /// encrypt(m).size().
+///
+/// Inputs: None
+///
 constexpr size_t ENCRYPT_DATA_OVERHEAD = 40;  // ABYTES + NPUBBYTES
 
 /// Thrown if decrypt() fails.
