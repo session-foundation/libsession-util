@@ -63,12 +63,14 @@ std::vector<unsigned char> sign(
         throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
     }
 
-    std::array<unsigned char, 64> sig;
+    std::vector<unsigned char> sig;
+    sig.resize(64);
+
     if (0 != crypto_sign_ed25519_detached(
                      sig.data(), nullptr, msg.data(), msg.size(), ed25519_privkey.data()))
         throw std::runtime_error{"Failed to sign; perhaps the secret key is invalid?"};
 
-    return {sig.data(), sig.data() + sig.size()};
+    return sig;
 }
 
 bool verify(
