@@ -415,3 +415,48 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK_FALSE(config_needs_push(conf));
     CHECK_FALSE(config_needs_push(conf2));
 }
+
+TEST_CASE("UserProfile", "[config][user_profile][local_settings]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
+            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+
+    CHECK_NOTHROW(profile.set_name_truncated("Test"));
+    CHECK(profile.get_name() == "Test");
+    CHECK(profile.needs_push());
+    CHECK(profile.needs_dump());
+
+    auto [seqno, to_push, obs] = profile.push();
+    CHECK(seqno == 1);
+    profile.confirm_pushed(seqno, {"fakehash1"});
+    CHECK(profile.needs_dump());
+    CHECK_FALSE(profile.needs_push());
+    
+    profile.dump();
+    CHECK_FALSE(profile.needs_dump());
+    
+    profile.set_local_setting("test_setting", 123);
+    CHECK(profile.get_local_setting("test_setting") == 123);
+    CHECK_FALSE(profile.get_local_setting("test_setting2").has_value());    // nullopt when it doesn't have a value
+    CHECK(profile.needs_dump());
+    CHECK_FALSE(profile.needs_push());  // It's a local setting so shouldn't need to be pushed
+
+    session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+    CHECK_FALSE(profile.needs_dump());
+
+    CHECK(profile2.get_local_setting("test_setting") == 123);   // It was stored in the dump an loaded correctly
+}

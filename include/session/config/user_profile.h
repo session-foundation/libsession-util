@@ -245,6 +245,50 @@ LIBSESSION_EXPORT int user_profile_get_blinded_msgreqs(const config_object* conf
 /// - `void` -- Returns Nothing
 LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int enabled);
 
+/// API: user_profile/user_profile_get_local_setting
+///
+/// Returns the locally stored setting for the provided key.
+///
+/// Declaration:
+/// ```cpp
+/// INT user_profile_get_local_setting(
+///     [in]    const config_object*    conf,
+///     [in]    const char*             key
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `key` -- [in] Pointer to the key as a null-terminated C string
+///
+/// Outputs:
+/// - `int` -- Will be -1 if the config does not have the value explicitly set, otherwise it will
+/// return the stored value.
+LIBSESSION_EXPORT int user_profile_get_local_setting(
+        const config_object* conf, const char* key);
+
+/// API: user_profile/user_profile_set_local_setting
+///
+/// Sets a locally stored setting for the provided key.
+///
+/// Declaration:
+/// ```cpp
+/// VOID user_profile_set_local_setting(
+///     [in]    config_object*      conf,
+///     [in]    const char*         key,
+///     [in]    int                 value
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `key` -- [in] Pointer to the key as a null-terminated C string
+/// - `value` -- [in] the value which should be stored
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_local_setting(config_object* conf, const char* key, int value);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -27,6 +27,9 @@ using namespace std::literals;
 
 class UserProfile : public ConfigBase {
 
+  private:
+    std::map<std::string, uint16_t> local_settings;
+
   public:
     // No default constructor
     UserProfile() = delete;
@@ -199,7 +202,33 @@ class UserProfile : public ConfigBase {
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
 
+    /// API: user_profile/UserProfile::get_local_setting
+    ///
+    /// Accesses the locally stored setting for the provided key.  When `std::nullopt` is returned then an explicit value has not been set so the client should use its default.
+    ///
+    /// Inputs:
+    /// - `key` -- key that a setting was previously stored against.
+    ///
+    /// Outputs:
+    /// - `std::optional<uint16_t>` - unsigned integer if the value has been set;
+    ///   `std::nullopt` if the value has not been set.
+    std::optional<uint16_t> get_local_setting(std::string key) const;
+
+    /// API: user_profile/UserProfile::set_local_setting
+    ///
+    /// Sets the locally stored setting.  This is typically invoked with an unsigned integer value, but can also be called with `std::nullopt` to explicitly clear the value.
+    ///
+    /// Inputs:
+    /// - `key` -- key that a setting was previously stored against.
+    /// - `value` -- value that should be stored locally against the key, or `std::nullopt` to drop
+    /// the setting from the local storage (and thus use the client's default).
+    void set_local_setting(std::string key, std::optional<uint16_t> value);
+
     bool accepts_protobuf() const override { return true; }
+
+    protected:
+      void extra_data(oxenc::bt_dict_producer&& extra) const override;
+      void load_extra_data(oxenc::bt_dict_consumer&& extra) override;
 };
 
 }  // namespace session::config
