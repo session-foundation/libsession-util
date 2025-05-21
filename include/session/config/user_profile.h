@@ -264,8 +264,7 @@ LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int
 /// Outputs:
 /// - `int` -- Will be -1 if the config does not have the value explicitly set, otherwise it will
 /// return the stored value.
-LIBSESSION_EXPORT int user_profile_get_local_setting(
-        const config_object* conf, const char* key);
+LIBSESSION_EXPORT int user_profile_get_local_setting(const config_object* conf, const char* key);
 
 /// API: user_profile/user_profile_set_local_setting
 ///
@@ -287,7 +286,8 @@ LIBSESSION_EXPORT int user_profile_get_local_setting(
 ///
 /// Outputs:
 /// - `void` -- Returns Nothing
-LIBSESSION_EXPORT void user_profile_set_local_setting(config_object* conf, const char* key, int value);
+LIBSESSION_EXPORT void user_profile_set_local_setting(
+        config_object* conf, const char* key, int value);
 
 #ifdef __cplusplus
 }  // extern "C"

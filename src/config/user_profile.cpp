@@ -12,8 +12,8 @@
 using namespace session::config;
 
 UserProfile::UserProfile(
-    std::span<const unsigned char> ed25519_secretkey,
-    std::optional<std::span<const unsigned char>> dumped) {
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) {
     init(dumped);
     load_key(ed25519_secretkey);
 }
@@ -114,8 +114,7 @@ void UserProfile::set_local_setting(std::string key, std::optional<uint16_t> val
             it->second = *value;
             changed = true;
         }
-    }
-    else
+    } else
         changed = local_settings.erase(key);
     if (changed)
         _needs_dump = true;
@@ -214,7 +213,8 @@ LIBSESSION_C_API int user_profile_get_local_setting(const config_object* conf, c
     return -1;
 }
 
-LIBSESSION_C_API void user_profile_set_local_setting(config_object* conf, const char* key, int value) {
+LIBSESSION_C_API void user_profile_set_local_setting(
+        config_object* conf, const char* key, int value) {
     std::optional<uint16_t> val;
     if (value >= 0)
         val = static_cast<uint16_t>(value);

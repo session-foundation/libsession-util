@@ -445,18 +445,20 @@ TEST_CASE("UserProfile", "[config][user_profile][local_settings]") {
     profile.confirm_pushed(seqno, {"fakehash1"});
     CHECK(profile.needs_dump());
     CHECK_FALSE(profile.needs_push());
-    
+
     profile.dump();
     CHECK_FALSE(profile.needs_dump());
-    
+
     profile.set_local_setting("test_setting", 123);
     CHECK(profile.get_local_setting("test_setting") == 123);
-    CHECK_FALSE(profile.get_local_setting("test_setting2").has_value());    // nullopt when it doesn't have a value
+    CHECK_FALSE(profile.get_local_setting("test_setting2")
+                        .has_value());  // nullopt when it doesn't have a value
     CHECK(profile.needs_dump());
     CHECK_FALSE(profile.needs_push());  // It's a local setting so shouldn't need to be pushed
 
     session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
     CHECK_FALSE(profile.needs_dump());
 
-    CHECK(profile2.get_local_setting("test_setting") == 123);   // It was stored in the dump an loaded correctly
+    CHECK(profile2.get_local_setting("test_setting") ==
+          123);  // It was stored in the dump an loaded correctly
 }
