@@ -154,108 +154,51 @@ namespace {
         return result;
     }
 
-    service_node node_from_json(nlohmann::json json) {
-        auto pk_ed = json["pubkey_ed25519"].get<std::string_view>();
-        if (pk_ed.size() != 64 || !oxenc::is_hex(pk_ed))
-            throw std::invalid_argument{
-                    "Invalid service node json: pubkey_ed25519 is not a valid, hex pubkey"};
-
-        // When parsing a node from JSON it'll generally be from the 'get_swarm` endpoint or a 421
-        // error neither of which contain the `storage_server_version` - luckily we don't need the
-        // version for these two cases so can just default it to `0`
-        std::vector<int> storage_server_version = {0};
-        if (json.contains("storage_server_version")) {
-            if (json["storage_server_version"].is_array()) {
-                if (json["storage_server_version"].size() > 0) {
-                    // Convert the version to a string and parse it back into a version code to
-                    // ensure the version formats remain consistent throughout
-                    storage_server_version = json["storage_server_version"].get<std::vector<int>>();
-                    storage_server_version =
-                            parse_version("{}"_format(fmt::join(storage_server_version, ".")));
-                }
-            } else
-                storage_server_version =
-                        parse_version(json["storage_server_version"].get<std::string>());
-        }
-
-        std::string ip;
-        if (json.contains("public_ip"))
-            ip = json["public_ip"].get<std::string>();
-        else
-            ip = json["ip"].get<std::string>();
-
-        uint16_t port;
-        if (json.contains("storage_lmq_port"))
-            port = json["storage_lmq_port"].get<uint16_t>();
-        else
-            port = json["port_omq"].get<uint16_t>();
-
-        swarm_id_t swarm_id = INVALID_SWARM_ID;
-        if (json.contains("swarm_id"))
-            swarm_id = json["swarm_id"].get<swarm_id_t>();
-
-        return {oxenc::from_hex(pk_ed), storage_server_version, swarm_id, ip, port};
-    }
-
-    service_node node_from_disk(std::string_view str, bool can_ignore_version = false) {
-        // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
-        auto parts = split(str, "|");
-        if (parts.size() != 5)
-            throw std::invalid_argument("Invalid service node serialisation: {}"_format(str));
-        if (parts[3].size() != 64 || !oxenc::is_hex(parts[3]))
-            throw std::invalid_argument{
-                    "Invalid service node serialisation: pubkey is not hex or has wrong size"};
-
-        uint16_t port;
-        if (!quic::parse_int(parts[1], port))
-            throw std::invalid_argument{"Invalid service node serialization: invalid port"};
-
-        std::vector<int> storage_server_version = parse_version(parts[2]);
-        if (!can_ignore_version && storage_server_version == std::vector<int>{0})
-            throw std::invalid_argument{"Invalid service node serialization: invalid version"};
-
-        swarm_id_t swarm_id = INVALID_SWARM_ID;
-        quic::parse_int(parts[4], swarm_id);
-
-        return {
-                oxenc::from_hex(parts[3]),  // ed25519_pubkey
-                storage_server_version,     // storage_server_version
-                swarm_id,                   // swarm_id
-                std::string(parts[0]),      // ip
-                port,                       // port
-        };
-    }
-
-    const std::vector<service_node> seed_nodes_testnet{
-            node_from_disk("144.76.164.202|35400|2.8.0|"
-                           "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
+    const std::vector<service_node> seed_nodes_testnet{service_node{
+            oxenc::from_hex("decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"),
+            {2, 10, 0},
+            INVALID_SWARM_ID,
+            "144.76.164.202",
+            uint16_t{35400}}};
     const std::vector<service_node> seed_nodes_mainnet{
-            node_from_disk("144.76.164.202|20200|2.8.0|"
-                           "1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef|"sv),
-            node_from_disk("88.99.102.229|20201|2.8.0|"
-                           "1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7ce|"sv),
-            node_from_disk("195.16.73.17|20202|2.8.0|"
-                           "1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e06199919f|"sv),
-            node_from_disk("104.194.11.120|20203|2.8.0|"
-                           "1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d78b|"sv),
-            node_from_disk("104.194.8.115|20204|2.8.0|"
-                           "1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7b0|"sv)};
+            service_node{
+                    oxenc::from_hex("1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1f"
+                                    "ef"),
+                    {2, 10, 0},
+                    INVALID_SWARM_ID,
+                    "144.76.164.202",
+                    uint16_t{20200}},
+            service_node{
+                    oxenc::from_hex("1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7"
+                                    "ce"),
+                    {2, 10, 0},
+                    INVALID_SWARM_ID,
+                    "88.99.102.229",
+                    uint16_t{20201}},
+            service_node{
+                    oxenc::from_hex("1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e0619991"
+                                    "9f"),
+                    {2, 10, 0},
+                    INVALID_SWARM_ID,
+                    "195.16.73.17",
+                    uint16_t{20202}},
+            service_node{
+                    oxenc::from_hex("1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d7"
+                                    "8b"),
+                    {2, 10, 0},
+                    INVALID_SWARM_ID,
+                    "104.194.11.120",
+                    uint16_t{20203}},
+            service_node{
+                    oxenc::from_hex("1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7"
+                                    "b0"),
+                    {2, 10, 0},
+                    INVALID_SWARM_ID,
+                    "104.194.8.115",
+                    uint16_t{20204}}};
     constexpr auto file_server = "filev2.getsession.org"sv;
     constexpr auto file_server_pubkey =
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
-
-    std::string node_to_disk(service_node node) {
-        // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
-        auto ed25519_pubkey_hex = oxenc::to_hex(node.view_remote_key());
-
-        return fmt::format(
-                "{}|{}|{}|{}|{}",
-                node.host(),
-                node.port(),
-                "{}"_format(fmt::join(node.storage_server_version, ".")),
-                ed25519_pubkey_hex,
-                node.swarm_id);
-    }
 
     session::onionreq::x25519_pubkey compute_xpk(std::span<const unsigned char> ed25519_pk) {
         std::array<unsigned char, 32> xpk;
@@ -319,71 +262,96 @@ namespace detail {
         return std::nullopt;
     }
 
-    nlohmann::json get_service_nodes_params(std::optional<int> limit) {
-        nlohmann::json params{
-                {"active_only", true},
-                {"fields",
-                 {{"public_ip", true},
-                  {"pubkey_ed25519", true},
-                  {"storage_lmq_port", true},
-                  {"storage_server_version", true},
-                  {"swarm_id", true}}}};
+    std::pair<std::vector<service_node>, int> process_snode_cache_bin(
+            std::vector<std::byte> cache_bin) {
+        constexpr size_t SNODE_SIZE = 51;
+        constexpr size_t PK_SIZE = 32;
+        constexpr size_t SWARM_ID_SIZE = 8;
+        constexpr size_t IP_SIZE = 4;
+        constexpr size_t HTTPS_PORT_SIZE = 2;
+        constexpr size_t OMQ_PORT_SIZE = 2;
+        constexpr size_t VERSION_SIZE = 3;
 
-        if (limit)
-            params["limit"] = *limit;
+        // Sanity check field sizes
+        static_assert(
+                PK_SIZE + SWARM_ID_SIZE + IP_SIZE + HTTPS_PORT_SIZE + OMQ_PORT_SIZE +
+                                VERSION_SIZE ==
+                        SNODE_SIZE,
+                "Field sizes do not sum to snode size");
 
-        return params;
-    }
-
-    std::vector<service_node> process_get_service_nodes_response(
-            oxenc::bt_list_consumer result_bencode) {
-        std::vector<service_node> result;
-        result_bencode.skip_value();  // Skip the status code (already validated)
-        auto response_dict = result_bencode.consume_dict_consumer();
-        response_dict.skip_until("result");
-
-        auto result_dict = response_dict.consume_dict_consumer();
-        result_dict.skip_until("service_node_states");
-
-        // Process the node list
-        auto node = result_dict.consume_list_consumer();
-
-        while (!node.is_finished()) {
-            auto node_consumer = node.consume_dict_consumer();
-            auto pubkey_ed25519 = oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
-            auto public_ip = consume_string(node_consumer, "public_ip");
-            auto storage_lmq_port = consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
-
-            std::vector<int> storage_server_version;
-            node_consumer.skip_until("storage_server_version");
-            auto version_consumer = node_consumer.consume_list_consumer();
-            auto swarm_id = consume_integer<uint64_t>(node_consumer, "swarm_id");
-
-            while (!version_consumer.is_finished()) {
-                storage_server_version.emplace_back(version_consumer.consume_integer<int>());
-            }
-
-            result.emplace_back(
-                    pubkey_ed25519, storage_server_version, swarm_id, public_ip, storage_lmq_port);
+        if (cache_bin.size() % SNODE_SIZE != 0) {
+            log::error(cat, "Snode cache size is not a multiple of snode size ({}).", SNODE_SIZE);
+            return {{}, 0};
         }
 
-        return result;
-    }
+        // Parse the binary
+        int failed_nodes = 0;
+        std::vector<service_node> nodes;
+        nodes.reserve(cache_bin.size() / SNODE_SIZE);
 
-    std::vector<service_node> process_get_service_nodes_response(nlohmann::json response_json) {
-        if (!response_json.contains("result") || !response_json["result"].is_object())
-            throw std::runtime_error{"JSON missing result field."};
+        const std::byte* current_ptr = cache_bin.data();
+        const std::byte* const end_ptr = cache_bin.data() + cache_bin.size();
 
-        nlohmann::json result_json = response_json["result"];
-        if (!result_json.contains("service_node_states") ||
-            !result_json["service_node_states"].is_array())
-            throw std::runtime_error{"JSON missing service_node_states field."};
+        while (current_ptr < end_ptr) {
+            const std::byte* note_ptr = current_ptr;
 
-        std::vector<service_node> result;
-        for (auto& snode : result_json["service_node_states"])
-            result.emplace_back(node_from_json(snode));
+            try {
+                // Pubkey
+                std::span<const unsigned char> pk_span(
+                        reinterpret_cast<const unsigned char*>(current_ptr), PK_SIZE);
+                note_ptr += PK_SIZE;
 
-        return result;
+                // Swarm ID
+                uint64_t swarm_id_u64 = 0;
+                for (int i = 0; i < SWARM_ID_SIZE; ++i) {
+                    swarm_id_u64 = (swarm_id_u64 << 8) |
+                                   static_cast<uint64_t>(static_cast<unsigned char>(note_ptr[i]));
+                }
+                swarm_id_t swarm_id = static_cast<swarm_id_t>(swarm_id_u64);
+                note_ptr += SWARM_ID_SIZE;
+
+                // Public IP
+                std::span<const uint8_t, IP_SIZE> ip_bytes_span(
+                        reinterpret_cast<const uint8_t*>(note_ptr), IP_SIZE);
+                quic::ipv4 ip(ip_bytes_span);
+                note_ptr += IP_SIZE;
+
+                // IP can be 0 (ie. node is not in a valid state for use yet)
+                if (ip.addr == 0)
+                    throw std::runtime_error{"Invalid IP"};
+
+                // HTTPS port (ignored for now)
+                note_ptr += HTTPS_PORT_SIZE;
+
+                // QUIC port
+                uint16_t quic_port =
+                        (static_cast<uint16_t>(static_cast<unsigned char>(note_ptr[0])) << 8) |
+                        (static_cast<uint16_t>(static_cast<unsigned char>(note_ptr[1])));
+                note_ptr += OMQ_PORT_SIZE;
+
+                // quic_port can be 0 (ie. node is not in a valid state for use yet)
+                if (quic_port == 0)
+                    throw std::runtime_error{"Invalid QUIC port"};
+
+                // Storage server version
+                std::vector<int> version_vec;
+                version_vec.reserve(VERSION_SIZE);
+                for (size_t i = 0; i < VERSION_SIZE; ++i) {
+                    version_vec.push_back(
+                            static_cast<int>(static_cast<unsigned char>(note_ptr[i])));
+                }
+                note_ptr += VERSION_SIZE;
+
+                nodes.emplace_back(pk_span, std::move(version_vec), swarm_id, ip, quic_port);
+            } catch (...) {
+                failed_nodes++;
+            }
+
+            // Move the ptr to the start of the next node
+            current_ptr += SNODE_SIZE;
+        }
+
+        return {nodes, failed_nodes};
     }
 
     void log_retry_result_if_needed(request_info info, bool single_path_mode) {
@@ -567,18 +535,12 @@ void Network::load_cache_from_disk() {
                             ftime - fs::file_time_type::clock::now() +
                             std::chrono::system_clock::now());
 
-            auto file = open_for_reading(pool_path);
-            std::vector<service_node> loaded_cache;
-            std::string line;
-            auto invalid_entries = 0;
+            std::vector<std::byte> loaded_cache_bin = read_whole_file(pool_path);
+            auto [loaded_cache, invalid_entries] =
+                    detail::process_snode_cache_bin(loaded_cache_bin);
 
-            while (std::getline(file, line)) {
-                try {
-                    loaded_cache.push_back(node_from_disk(line));
-                } catch (...) {
-                    ++invalid_entries;
-                }
-            }
+            if (loaded_cache_bin.size() > 0 && loaded_cache.size() == 0 && invalid_entries == 0)
+                throw std::runtime_error{"Snode cache has invalid format."};
 
             if (invalid_entries > 0)
                 log::warning(cat, "Skipped {} invalid entries in snode cache.", invalid_entries);
@@ -628,11 +590,15 @@ void Network::disk_write_thread_loop() {
         if (need_write) {
             // Make a local copy so that we can release the lock and not
             // worry about other threads wanting to change things
-            auto snode_cache_write = snode_cache;
+            auto snode_cache_write = std::move(snode_cache_bin);
+            snode_cache_bin = std::vector<std::byte>{};
 
             lock.unlock();
             {
                 try {
+                    if (snode_cache_write.empty())
+                        throw std::runtime_error{"cache was empty."};
+
                     // Create the cache directories if needed
                     fs::create_directories(cache_path);
 
@@ -647,12 +613,10 @@ void Network::disk_write_thread_loop() {
                     pool_tmp += u8"_new";
 
                     {
-                        std::stringstream ss;
-                        for (auto& snode : snode_cache_write)
-                            ss << node_to_disk(snode) << '\n';
-
                         std::ofstream file(pool_tmp, std::ios::binary);
-                        file << ss.rdbuf();
+                        file.write(
+                                reinterpret_cast<const char*>(snode_cache_write.data()),
+                                snode_cache_write.size());
                     }
 
                     fs::rename(pool_tmp, pool_path);
@@ -661,6 +625,7 @@ void Network::disk_write_thread_loop() {
                     log::debug(cat, "Finished writing snode cache to disk.");
                 } catch (const std::exception& e) {
                     log::error(cat, "Failed to write snode cache: {}", e.what());
+                    need_write = false;
                 }
             }
             lock.lock();
@@ -1048,14 +1013,22 @@ void Network::establish_and_store_connection(std::string path_id) {
             });
 }
 
-void Network::refresh_snode_cache_complete(std::vector<service_node> nodes) {
+void Network::refresh_snode_cache_complete(
+        std::string request_id, std::vector<std::byte> updated_snode_cache_bin) {
+    auto [nodes, invalid_count] = detail::process_snode_cache_bin(updated_snode_cache_bin);
+
+    // Log the number of nodes received
+    log::info(cat, "Received {} nodes, {} invalid ({}).", nodes.size(), invalid_count, request_id);
+
     // Shuffle the nodes so we don't have a specific order
     std::shuffle(nodes.begin(), nodes.end(), csrng);
 
     // Update the disk cache if the snode pool was updated
     {
         std::lock_guard lock{snode_cache_mutex};
+        snode_cache_bin = updated_snode_cache_bin;
         snode_cache = nodes;
+        seed_node_cache_size = nodes.size();
         last_snode_cache_update = std::chrono::system_clock::now();
         need_write = true;
     }
@@ -1156,9 +1129,10 @@ void Network::refresh_snode_cache_from_seed_nodes(std::string request_id, bool r
                         info,
                         std::nullopt,
                         [this, request_id](
-                                std::vector<service_node> nodes, std::optional<std::string> error) {
+                                std::vector<std::byte> updated_snode_cache_bin,
+                                std::optional<std::string> error) {
                             // If we got no nodes then we will need to try again
-                            if (nodes.empty()) {
+                            if (updated_snode_cache_bin.empty()) {
                                 snode_cache_refresh_failure_count++;
                                 auto cache_refresh_retry_delay =
                                         retry_delay(snode_cache_refresh_failure_count);
@@ -1177,12 +1151,9 @@ void Network::refresh_snode_cache_from_seed_nodes(std::string request_id, bool r
 
                             log::info(
                                     cat,
-                                    "Refreshing snode cache from seed nodes completed with {} "
-                                    "nodes ({}).",
-                                    nodes.size(),
+                                    "Refreshing snode cache from seed nodes completed ({}).",
                                     request_id);
-                            seed_node_cache_size = nodes.size();
-                            refresh_snode_cache_complete(nodes);
+                            refresh_snode_cache_complete(request_id, updated_snode_cache_bin);
                         });
             });
 }
@@ -1240,11 +1211,10 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
 
     // Prepare and send the request to retrieve service nodes
     nlohmann::json payload{
-            {"method", "oxend_request"},
-            {"params",
-             {{"endpoint", "get_service_nodes"},
-              {"params", detail::get_service_nodes_params(std::nullopt)}}},
+        {"method", "active_nodes_bin"},
+        {"params", "{}"sv},
     };
+    // TODO: Need to fix this payload
     auto info = request_info::make(
             target_node,
             to_vector(payload.dump()),
@@ -1278,9 +1248,10 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                         throw std::runtime_error{response.value_or("Unknown error.")};
 
                     nlohmann::json response_json = nlohmann::json::parse(*response);
-                    std::vector<service_node> result =
-                            detail::process_get_service_nodes_response(response_json);
-                    snode_refresh_results->emplace_back(result);
+                    // TODO: Need to parse the response properly
+                    // std::vector<service_node> result =
+                    //         detail::process_get_service_nodes_response(response_json);
+                    // snode_refresh_results->emplace_back(result);
 
                     // Update the in progress request count
                     in_progress_snode_cache_refresh_count--;
@@ -1609,7 +1580,8 @@ void Network::get_service_nodes(
         std::string request_id,
         connection_info conn_info,
         std::optional<int> limit,
-        std::function<void(std::vector<service_node> nodes, std::optional<std::string> error)>
+        std::function<void(
+                std::vector<std::byte> updated_snode_cache_bin, std::optional<std::string> error)>
                 callback) {
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, request_id);
 
@@ -1617,22 +1589,22 @@ void Network::get_service_nodes(
         return callback({}, "Connection is not valid.");
 
     oxenc::bt_dict_producer payload;
-    payload.append("endpoint", "get_service_nodes");
-    payload.append("params", detail::get_service_nodes_params(limit).dump());
+    payload.append("endpoint", "active_nodes_bin");
 
     conn_info.add_pending_request();
     conn_info.stream->command(
-            "oxend_request",
+            "active_nodes_bin",
             payload.view(),
             [this, request_id, conn_info, cb = std::move(callback)](quic::message resp) {
                 log::trace(cat, "{} got response for {}.", __PRETTY_FUNCTION__, request_id);
-                std::vector<service_node> result;
+                std::vector<std::byte> result;
                 conn_info.remove_pending_request();
 
                 try {
-                    auto [status_code, body] = validate_response(resp, true);
-                    oxenc::bt_list_consumer result_bencode{body};
-                    result = detail::process_get_service_nodes_response(result_bencode);
+                    auto [status_code, body] = validate_response(resp, response_type::binary);
+                    result.assign(
+                            reinterpret_cast<const std::byte*>(body.data()),
+                            reinterpret_cast<const std::byte*>(body.data() + body.length()));
                 } catch (const std::exception& e) {
                     return cb({}, e.what());
                 }
@@ -1834,7 +1806,7 @@ void Network::send_request(
                 conn_info.remove_pending_request();
 
                 try {
-                    result = validate_response(resp, false);
+                    result = validate_response(resp, response_type::json);
                 } catch (const status_code_exception& e) {
                     return handle_errors(
                             info,
@@ -2288,7 +2260,8 @@ Network::process_v4_onion_response(Builder builder, std::string response) {
 
 // MARK: Error Handling
 
-std::pair<uint16_t, std::string> Network::validate_response(quic::message resp, bool is_bencoded) {
+std::pair<uint16_t, std::string> Network::validate_response(
+        quic::message resp, response_type type) {
     std::string body = std::string(resp.body());
 
     if (resp.timed_out)
@@ -2296,54 +2269,62 @@ std::pair<uint16_t, std::string> Network::validate_response(quic::message resp, 
     if (resp.is_error())
         throw std::runtime_error{body.empty() ? "Unknown error" : body};
 
-    if (is_bencoded) {
-        // Process the bencoded response
-        oxenc::bt_list_consumer result_bencode{body};
+    switch (type) {
+        case response_type::json: {
+            // Default to a 200 success if the response is empty but didn't timeout or error
+            int16_t status_code = 200;
+            std::pair<std::string, std::string> content_type;
+            std::string response_string;
 
-        if (result_bencode.is_finished() || !result_bencode.is_integer())
-            throw std::runtime_error{"Invalid bencoded response"};
+            try {
+                nlohmann::json response_json = nlohmann::json::parse(body);
+                content_type = content_type_json;
 
-        // If we have a status code that is not in the 2xx range, return the error
-        auto status_code = result_bencode.consume_integer<int16_t>();
+                if (response_json.is_array() && response_json.size() == 2) {
+                    status_code = response_json[0].get<int16_t>();
+                    response_string = response_json[1].dump();
+                } else
+                    response_string = body;
+            } catch (...) {
+                response_string = body;
+                content_type = content_type_plain_text;
+            }
 
-        if (status_code < 200 || status_code > 299) {
-            if (result_bencode.is_finished() || !result_bencode.is_string())
-                throw status_code_exception{
-                        status_code,
-                        {content_type_plain_text},
-                        "Request failed with status code: " + std::to_string(status_code)};
+            if (status_code < 200 || status_code > 299)
+                throw status_code_exception{status_code, {content_type}, response_string};
 
-            throw status_code_exception{
-                    status_code, {content_type_plain_text}, result_bencode.consume_string()};
+            return {status_code, response_string};
         }
 
-        // Can't convert the data to a string so just return the response body itself
-        return {status_code, body};
+        case response_type::bencoded: {
+            // Process the bencoded response
+            oxenc::bt_list_consumer result_bencode{body};
+
+            if (result_bencode.is_finished() || !result_bencode.is_integer())
+                throw std::runtime_error{"Invalid bencoded response"};
+
+            // If we have a status code that is not in the 2xx range, return the error
+            auto status_code = result_bencode.consume_integer<int16_t>();
+
+            if (status_code < 200 || status_code > 299) {
+                if (result_bencode.is_finished() || !result_bencode.is_string())
+                    throw status_code_exception{
+                            status_code,
+                            {content_type_plain_text},
+                            "Request failed with status code: " + std::to_string(status_code)};
+
+                throw status_code_exception{
+                        status_code, {content_type_plain_text}, result_bencode.consume_string()};
+            }
+
+            // Can't convert the data to a string so just return the response body itself
+            return {status_code, body};
+        }
+
+        case response_type::binary: return {200, body};
     }
 
-    // Default to a 200 success if the response is empty but didn't timeout or error
-    int16_t status_code = 200;
-    std::pair<std::string, std::string> content_type;
-    std::string response_string;
-
-    try {
-        nlohmann::json response_json = nlohmann::json::parse(body);
-        content_type = content_type_json;
-
-        if (response_json.is_array() && response_json.size() == 2) {
-            status_code = response_json[0].get<int16_t>();
-            response_string = response_json[1].dump();
-        } else
-            response_string = body;
-    } catch (...) {
-        response_string = body;
-        content_type = content_type_plain_text;
-    }
-
-    if (status_code < 200 || status_code > 299)
-        throw status_code_exception{status_code, {content_type}, response_string};
-
-    return {status_code, response_string};
+    throw std::runtime_error{"Unknown response type"};
 }
 
 void Network::drop_path_when_empty(std::string id, PathType path_type, onion_path path) {

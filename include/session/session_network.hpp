@@ -181,6 +181,12 @@ struct request_info {
     bool node_destination{detail::node_for_destination(destination).has_value()};
 };
 
+enum class response_type {
+    json = 0,
+    bencoded = 1,
+    binary = 2,
+};
+
 class Network {
   private:
     const bool use_testnet;
@@ -199,6 +205,7 @@ class Network {
     // Values persisted to disk
     std::optional<size_t> seed_node_cache_size;
     std::vector<service_node> snode_cache;
+    std::vector<std::byte> snode_cache_bin;
     std::chrono::system_clock::time_point last_snode_cache_update{};
 
     std::thread disk_write_thread;
@@ -552,8 +559,9 @@ class Network {
     /// updated cache to disk.
     ///
     /// Inputs:
-    /// - 'nodes' - [in] the nodes to use as the updated cache.
-    void refresh_snode_cache_complete(std::vector<service_node> nodes);
+    /// - 'updated_snode_cache_bin' - [in] the nodes to use as the updated cache in binary form.
+    void refresh_snode_cache_complete(
+            std::string request_id, std::vector<std::byte> updated_snode_cache_bin);
 
     /// API: network/refresh_snode_cache_from_seed_nodes
     ///
@@ -625,14 +633,15 @@ class Network {
     /// - 'request_id' - [in] id for the request which triggered the call.
     /// - `conn_info` -- [in] the connection info to retrieve service nodes from.
     /// - `limit` -- [in, optional] the number of service nodes to retrieve.
-    /// - `callback` -- [in] callback to be triggered once we receive nodes.  NOTE: If an error
-    /// occurs an empty list and an error will be provided.
+    /// - `callback` -- [in] callback to be triggered once we receive snode cache.  NOTE: If an
+    /// error occurs an empty vector and an error will be provided.
     void get_service_nodes(
             std::string request_id,
             connection_info conn_info,
             std::optional<int> limit,
-            std::function<void(std::vector<service_node> nodes, std::optional<std::string> error)>
-                    callback);
+            std::function<
+                    void(std::vector<std::byte> updated_snode_cache_bin,
+                         std::optional<std::string> error)> callback);
 
     /// API: network/check_request_queue_timeouts
     ///
@@ -702,13 +711,14 @@ class Network {
     ///
     /// Inputs:
     /// - `resp` -- [in] the quic response.
-    /// - `is_bencoded` -- [in] flag indicating whether the response will be bencoded or JSON.
+    /// - `response_type` -- [in] enum indicating what response type to expect.
     ///
     /// Returns:
     /// - `std::pair<uint16_t, std::string>` -- the status code and response body (for a bencoded
     /// response this is just the direct response body from quic as it simplifies consuming the
     /// response elsewhere).
-    std::pair<uint16_t, std::string> validate_response(oxen::quic::message resp, bool is_bencoded);
+    std::pair<uint16_t, std::string> validate_response(
+            oxen::quic::message resp, response_type type);
 
     /// API: network/drop_path_when_empty
     ///
