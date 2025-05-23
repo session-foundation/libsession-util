@@ -21,6 +21,14 @@ UserProfile::UserProfile(
 void UserProfile::extra_data(oxenc::bt_dict_producer&& extra) const {
     if (!local_settings.empty())
         extra.append_dict("local_settings").extend(local_settings.begin(), local_settings.end());
+    if (notification_content_setting != notify_content::defaulted)
+        extra.append("notify_content", static_cast<uint16_t>(notification_content_setting));
+    if (notification_sound_setting != notify_sound::defaulted)
+        extra.append("notify_sound", static_cast<uint16_t>(notification_sound_setting));
+    if (theme_setting != theme::defaulted)
+        extra.append("theme", static_cast<uint16_t>(theme_setting));
+    if (theme_primary_color_setting != theme_primary_color::defaulted)
+        extra.append("theme_primary_color", static_cast<uint16_t>(theme_primary_color_setting));
 }
 
 void UserProfile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
@@ -31,6 +39,16 @@ void UserProfile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
             local_settings.emplace(key, value);
         }
     }
+    if (extra.skip_until("notify_content"))
+        notification_content_setting =
+                static_cast<notify_content>(extra.consume_integer<uint16_t>());
+    if (extra.skip_until("notify_sound"))
+        notification_sound_setting = static_cast<notify_sound>(extra.consume_integer<uint16_t>());
+    if (extra.skip_until("theme"))
+        theme_setting = static_cast<theme>(extra.consume_integer<uint16_t>());
+    if (extra.skip_until("theme_primary_color"))
+        theme_primary_color_setting =
+                static_cast<theme_primary_color>(extra.consume_integer<uint16_t>());
 }
 
 std::optional<std::string_view> UserProfile::get_name() const {
@@ -98,20 +116,64 @@ std::optional<bool> UserProfile::get_blinded_msgreqs() const {
     return std::nullopt;
 }
 
-std::optional<uint16_t> UserProfile::get_local_setting(std::string key) const {
+notify_content UserProfile::get_notification_content() const {
+    return notification_content_setting;
+}
+
+void UserProfile::set_notification_content(notify_content value) {
+    if (value != notification_content_setting) {
+        notification_content_setting = value;
+        _needs_dump = true;
+    }
+}
+
+notify_sound UserProfile::get_notification_sound() const {
+    return notification_sound_setting;
+}
+
+void UserProfile::set_notification_sound(notify_sound value) {
+    if (value != notification_sound_setting) {
+        notification_sound_setting = value;
+        _needs_dump = true;
+    }
+}
+
+theme UserProfile::get_theme() const {
+    return theme_setting;
+}
+
+void UserProfile::set_theme(theme value) {
+    if (value != theme_setting) {
+        theme_setting = value;
+        _needs_dump = true;
+    }
+}
+
+theme_primary_color UserProfile::get_theme_primary_color() const {
+    return theme_primary_color_setting;
+}
+
+void UserProfile::set_theme_primary_color(theme_primary_color value) {
+    if (value != theme_primary_color_setting) {
+        theme_primary_color_setting = value;
+        _needs_dump = true;
+    }
+}
+
+std::optional<bool> UserProfile::get_local_setting(std::string key) const {
     if (auto it = local_settings.find(key); it != local_settings.end())
-        return it->second;
+        return static_cast<bool>(it->second);
     return std::nullopt;
 }
 
-void UserProfile::set_local_setting(std::string key, std::optional<uint16_t> value) {
+void UserProfile::set_local_setting(std::string key, std::optional<bool> enabled) {
     bool changed = false;
-    if (value) {
-        auto [it, inserted] = local_settings.try_emplace(std::move(key), *value);
+    if (enabled) {
+        auto [it, inserted] = local_settings.try_emplace(std::move(key), *enabled);
         changed = inserted;
 
-        if (!inserted && it->second != *value) {
-            it->second = *value;
+        if (!inserted && it->second != *enabled) {
+            it->second = *enabled;
             changed = true;
         }
     } else
@@ -207,6 +269,45 @@ LIBSESSION_C_API void user_profile_set_blinded_msgreqs(config_object* conf, int 
     unbox<UserProfile>(conf)->set_blinded_msgreqs(std::move(val));
 }
 
+LIBSESSION_C_API CLIENT_NOTIFY_CONTENT
+user_profile_get_notification_content(const config_object* conf) {
+    return static_cast<CLIENT_NOTIFY_CONTENT>(unbox<UserProfile>(conf)->get_notification_content());
+}
+
+LIBSESSION_C_API void user_profile_set_notification_content(
+        config_object* conf, CLIENT_NOTIFY_CONTENT value) {
+    unbox<UserProfile>(conf)->set_notification_content(static_cast<notify_content>(value));
+}
+
+LIBSESSION_C_API CLIENT_NOTIFY_SOUND
+user_profile_get_notification_sound(const config_object* conf) {
+    return static_cast<CLIENT_NOTIFY_SOUND>(unbox<UserProfile>(conf)->get_notification_sound());
+}
+
+LIBSESSION_C_API void user_profile_set_notification_sound(
+        config_object* conf, CLIENT_NOTIFY_SOUND value) {
+    unbox<UserProfile>(conf)->set_notification_sound(static_cast<notify_sound>(value));
+}
+
+LIBSESSION_C_API CLIENT_THEME user_profile_get_theme(const config_object* conf) {
+    return static_cast<CLIENT_THEME>(unbox<UserProfile>(conf)->get_theme());
+}
+
+LIBSESSION_C_API void user_profile_set_theme(config_object* conf, CLIENT_THEME value) {
+    unbox<UserProfile>(conf)->set_theme(static_cast<theme>(value));
+}
+
+LIBSESSION_C_API CLIENT_THEME_PRIMARY_COLOR
+user_profile_get_theme_primary_color(const config_object* conf) {
+    return static_cast<CLIENT_THEME_PRIMARY_COLOR>(
+            unbox<UserProfile>(conf)->get_theme_primary_color());
+}
+
+LIBSESSION_C_API void user_profile_set_theme_primary_color(
+        config_object* conf, CLIENT_THEME_PRIMARY_COLOR value) {
+    unbox<UserProfile>(conf)->set_theme_primary_color(static_cast<theme_primary_color>(value));
+}
+
 LIBSESSION_C_API int user_profile_get_local_setting(const config_object* conf, const char* key) {
     if (auto opt = unbox<UserProfile>(conf)->get_local_setting(key))
         return static_cast<int>(*opt);
@@ -215,9 +316,9 @@ LIBSESSION_C_API int user_profile_get_local_setting(const config_object* conf, c
 
 LIBSESSION_C_API void user_profile_set_local_setting(
         config_object* conf, const char* key, int value) {
-    std::optional<uint16_t> val;
+    std::optional<bool> val;
     if (value >= 0)
-        val = static_cast<uint16_t>(value);
+        val = static_cast<bool>(value);
     unbox<UserProfile>(conf)->set_local_setting(key, std::move(val));
 }
 

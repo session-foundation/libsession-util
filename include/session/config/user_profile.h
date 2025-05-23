@@ -5,7 +5,9 @@ extern "C" {
 #endif
 
 #include "base.h"
+#include "notify.h"
 #include "profile_pic.h"
+#include "theme.h"
 
 /// API: user_profile/user_profile_init
 ///
@@ -245,6 +247,168 @@ LIBSESSION_EXPORT int user_profile_get_blinded_msgreqs(const config_object* conf
 /// - `void` -- Returns Nothing
 LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int enabled);
 
+/// API: user_profile/user_profile_get_notification_content
+///
+/// Returns the locally stored setting indicating what notification content should be displayed.
+///
+/// Declaration:
+/// ```cpp
+/// CLIENT_NOTIFY_CONTENT user_profile_get_notification_content(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `CLIENT_NOTIFY_CONTENT` -- enum indicating the content that should be shown within a
+/// notification.
+LIBSESSION_EXPORT CLIENT_NOTIFY_CONTENT
+user_profile_get_notification_content(const config_object* conf);
+
+/// API: user_profile/user_profile_set_notification_content
+///
+/// Sets the locally stored setting indicating what notification content should be displayed.
+///
+/// Declaration:
+/// ```cpp
+/// void user_profile_set_notification_content(
+///     [in]    const config_object*    conf
+///     [in[    CLIENT_NOTIFY_CONTENT   value
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `value` -- [in] Updated notification content setting
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_notification_content(
+        config_object* conf, CLIENT_NOTIFY_CONTENT value);
+
+/// API: user_profile/user_profile_get_notification_sound
+///
+/// Returns the locally stored setting indicating which sound should play when receiving a
+/// notification.
+///
+/// Declaration:
+/// ```cpp
+/// CLIENT_NOTIFY_SOUND user_profile_get_notification_sound(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `CLIENT_NOTIFY_SOUND` -- enum indicating the sound that should be played when receiving a
+/// notification.
+LIBSESSION_EXPORT CLIENT_NOTIFY_SOUND
+user_profile_get_notification_sound(const config_object* conf);
+
+/// API: user_profile/user_profile_set_notification_sound
+///
+/// Sets the locally stored setting indicating which sound should be played when receiving receiving
+/// a notification.
+///
+/// Declaration:
+/// ```cpp
+/// void user_profile_set_notification_sound(
+///     [in]    const config_object*    conf
+///     [in[    CLIENT_NOTIFY_SOUND   value
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `value` -- [in] Updated notification sound setting
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_notification_sound(
+        config_object* conf, CLIENT_NOTIFY_SOUND value);
+
+/// API: user_profile/user_profile_get_theme
+///
+/// Returns the locally stored setting indicating which theme the client should use.
+///
+/// Declaration:
+/// ```cpp
+/// CLIENT_THEME user_profile_get_theme(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `CLIENT_THEME` -- enum indicating which theme the client should use.
+LIBSESSION_EXPORT CLIENT_THEME user_profile_get_theme(const config_object* conf);
+
+/// API: user_profile/user_profile_set_theme
+///
+/// Sets the locally stored setting indicating which theme the client should use.
+///
+/// Declaration:
+/// ```cpp
+/// void user_profile_set_theme(
+///     [in]    const config_object*    conf
+///     [in[    CLIENT_THEME   value
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `value` -- [in] Updated theme setting
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_theme(config_object* conf, CLIENT_THEME value);
+
+/// API: user_profile/user_profile_get_theme_primary_color
+///
+/// Returns the locally stored setting indicating which primary color the client should use.
+///
+/// Declaration:
+/// ```cpp
+/// CLIENT_THEME_PRIMARY_COLOR user_profile_get_theme_primary_color(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `CLIENT_THEME` -- enum indicating which primary color the client should use.
+LIBSESSION_EXPORT CLIENT_THEME_PRIMARY_COLOR
+user_profile_get_theme_primary_color(const config_object* conf);
+
+/// API: user_profile/user_profile_set_theme_primary_color
+///
+/// Sets the locally stored setting indicating which primary color the client should use.
+///
+/// Declaration:
+/// ```cpp
+/// void user_profile_set_theme_primary_color(
+///     [in]    const config_object*    conf
+///     [in[    CLIENT_THEME_PRIMARY_COLOR   value
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `value` -- [in] Updated primary color setting
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_theme_primary_color(
+        config_object* conf, CLIENT_THEME_PRIMARY_COLOR value);
+
 /// API: user_profile/user_profile_get_local_setting
 ///
 /// Returns the locally stored setting for the provided key.
@@ -262,8 +426,8 @@ LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int
 /// - `key` -- [in] Pointer to the key as a null-terminated C string
 ///
 /// Outputs:
-/// - `int` -- Will be -1 if the config does not have the value explicitly set, otherwise it will
-/// return the stored value.
+/// - `int` -- Will be -1 if the config does not have the value explicitly set, 0 if the setting is
+///   explicitly disabled, and 1 if the setting is explicitly enabled.
 LIBSESSION_EXPORT int user_profile_get_local_setting(const config_object* conf, const char* key);
 
 /// API: user_profile/user_profile_set_local_setting
@@ -275,19 +439,19 @@ LIBSESSION_EXPORT int user_profile_get_local_setting(const config_object* conf, 
 /// VOID user_profile_set_local_setting(
 ///     [in]    config_object*      conf,
 ///     [in]    const char*         key,
-///     [in]    int                 value
+///     [in]    int                 enabled
 /// );
 /// ```
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 /// - `key` -- [in] Pointer to the key as a null-terminated C string
-/// - `value` -- [in] the value which should be stored
+/// - `enabled` -- [in] the value which should be stored
 ///
 /// Outputs:
 /// - `void` -- Returns Nothing
 LIBSESSION_EXPORT void user_profile_set_local_setting(
-        config_object* conf, const char* key, int value);
+        config_object* conf, const char* key, int enabled);
 
 #ifdef __cplusplus
 }  // extern "C"

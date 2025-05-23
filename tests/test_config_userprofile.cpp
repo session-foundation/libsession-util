@@ -5,6 +5,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <session/config/notify.hpp>
+#include <session/config/theme.hpp>
 #include <session/config/user_profile.hpp>
 #include <session/util.hpp>
 #include <string_view>
@@ -435,6 +437,11 @@ TEST_CASE("UserProfile", "[config][user_profile][local_settings]") {
 
     session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
 
+    CHECK(profile.get_notification_content() == session::config::notify_content::defaulted);
+    CHECK(profile.get_notification_sound() == session::config::notify_sound::defaulted);
+    CHECK(profile.get_theme() == session::config::theme::defaulted);
+    CHECK(profile.get_theme_primary_color() == session::config::theme_primary_color::defaulted);
+
     CHECK_NOTHROW(profile.set_name_truncated("Test"));
     CHECK(profile.get_name() == "Test");
     CHECK(profile.needs_push());
@@ -449,16 +456,53 @@ TEST_CASE("UserProfile", "[config][user_profile][local_settings]") {
     profile.dump();
     CHECK_FALSE(profile.needs_dump());
 
-    profile.set_local_setting("test_setting", 123);
-    CHECK(profile.get_local_setting("test_setting") == 123);
+    // Check the notification content setting needs a dump but not a push
+    profile.set_notification_content(session::config::notify_content::name_no_preview);
+    CHECK(profile.get_notification_content() == session::config::notify_content::name_no_preview);
+    CHECK(profile.needs_dump());
+    CHECK_FALSE(profile.needs_push());
+    profile.dump();
+    CHECK_FALSE(profile.needs_dump());
+
+    // Check the notification sound setting needs a dump but not a push
+    profile.set_notification_sound(session::config::notify_sound::bamboo);
+    CHECK(profile.get_notification_sound() == session::config::notify_sound::bamboo);
+    CHECK(profile.needs_dump());
+    CHECK_FALSE(profile.needs_push());
+    profile.dump();
+    CHECK_FALSE(profile.needs_dump());
+
+    // Check the theme setting needs a dump but not a push
+    profile.set_theme(session::config::theme::ocean_dark);
+    CHECK(profile.get_theme() == session::config::theme::ocean_dark);
+    CHECK(profile.needs_dump());
+    CHECK_FALSE(profile.needs_push());
+    profile.dump();
+    CHECK_FALSE(profile.needs_dump());
+
+    // Check the theme primary color setting needs a dump but not a push
+    profile.set_theme_primary_color(session::config::theme_primary_color::orange);
+    CHECK(profile.get_theme_primary_color() == session::config::theme_primary_color::orange);
+    CHECK(profile.needs_dump());
+    CHECK_FALSE(profile.needs_push());
+    profile.dump();
+    CHECK_FALSE(profile.needs_dump());
+
+    // Check the local settings need dumps but not pushes
+    profile.set_local_setting("test_setting", true);
+    CHECK(profile.get_local_setting("test_setting"));
     CHECK_FALSE(profile.get_local_setting("test_setting2")
                         .has_value());  // nullopt when it doesn't have a value
     CHECK(profile.needs_dump());
     CHECK_FALSE(profile.needs_push());  // It's a local setting so shouldn't need to be pushed
 
+    // Ensure all of these local settings were stored in the dump and loaded correctly
     session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
     CHECK_FALSE(profile.needs_dump());
 
-    CHECK(profile2.get_local_setting("test_setting") ==
-          123);  // It was stored in the dump an loaded correctly
+    CHECK(profile2.get_notification_content() == session::config::notify_content::name_no_preview);
+    CHECK(profile2.get_notification_sound() == session::config::notify_sound::bamboo);
+    CHECK(profile2.get_theme() == session::config::theme::ocean_dark);
+    CHECK(profile2.get_theme_primary_color() == session::config::theme_primary_color::orange);
+    CHECK(profile2.get_local_setting("test_setting"));
 }
