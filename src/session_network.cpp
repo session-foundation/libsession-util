@@ -357,9 +357,11 @@ namespace detail {
         while (!node.is_finished()) {
             try {
                 auto node_consumer = node.consume_dict_consumer();
-                auto pubkey_ed25519 = oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
+                auto pubkey_ed25519 =
+                        oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
                 auto public_ip = consume_string(node_consumer, "public_ip");
-                auto storage_lmq_port = consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
+                auto storage_lmq_port =
+                        consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
 
                 if (public_ip == "0.0.0.0")
                     throw std::runtime_error{"Invalid IP address"};
@@ -377,7 +379,11 @@ namespace detail {
                 }
 
                 result.emplace_back(
-                        pubkey_ed25519, storage_server_version, swarm_id, public_ip, storage_lmq_port);
+                        pubkey_ed25519,
+                        storage_server_version,
+                        swarm_id,
+                        public_ip,
+                        storage_lmq_port);
             } catch (const std::exception& e) {
                 log::warning(cat, "Ignoring invalid snode: {}.", e.what());
             }
