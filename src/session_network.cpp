@@ -184,11 +184,17 @@ namespace {
         else
             ip = json["ip"].get<std::string>();
 
+        if (ip == "0.0.0.0")
+            throw std::runtime_error{"Invalid IP address"};
+
         uint16_t port;
         if (json.contains("storage_lmq_port"))
             port = json["storage_lmq_port"].get<uint16_t>();
         else
             port = json["port_omq"].get<uint16_t>();
+
+        if (port == 0)
+            throw std::runtime_error{"Invalid lmq port"};
 
         swarm_id_t swarm_id = INVALID_SWARM_ID;
         if (json.contains("swarm_id"))
