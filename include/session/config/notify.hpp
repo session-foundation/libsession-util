@@ -16,7 +16,7 @@ enum class notify_content {
     no_name_no_preview = 3,
 };
 
-typedef enum notify_sound {
+enum class notify_sound {
     defaulted = 0,
     none = 1,
     aurora = 2,
