@@ -5,8 +5,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
-#include <session/config/notify.hpp>
-#include <session/config/theme.hpp>
 #include <session/config/user_profile.hpp>
 #include <session/util.hpp>
 #include <string_view>
@@ -416,93 +414,4 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK_FALSE(config_needs_dump(conf2));
     CHECK_FALSE(config_needs_push(conf));
     CHECK_FALSE(config_needs_push(conf2));
-}
-
-TEST_CASE("UserProfile", "[config][user_profile][local_settings]") {
-
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
-
-    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
-            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
-    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
-            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
-    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
-          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
-
-    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
-
-    CHECK(profile.get_notification_content() == session::config::notify_content::defaulted);
-    CHECK(profile.get_notification_sound() == session::config::notify_sound::defaulted);
-    CHECK(profile.get_theme() == session::config::theme::defaulted);
-    CHECK(profile.get_theme_primary_color() == session::config::theme_primary_color::defaulted);
-
-    CHECK_NOTHROW(profile.set_name_truncated("Test"));
-    CHECK(profile.get_name() == "Test");
-    CHECK(profile.needs_push());
-    CHECK(profile.needs_dump());
-
-    auto [seqno, to_push, obs] = profile.push();
-    CHECK(seqno == 1);
-    profile.confirm_pushed(seqno, {"fakehash1"});
-    CHECK(profile.needs_dump());
-    CHECK_FALSE(profile.needs_push());
-
-    profile.dump();
-    CHECK_FALSE(profile.needs_dump());
-
-    // Check the notification content setting needs a dump but not a push
-    profile.set_notification_content(session::config::notify_content::name_no_preview);
-    CHECK(profile.get_notification_content() == session::config::notify_content::name_no_preview);
-    CHECK(profile.needs_dump());
-    CHECK_FALSE(profile.needs_push());
-    profile.dump();
-    CHECK_FALSE(profile.needs_dump());
-
-    // Check the notification sound setting needs a dump but not a push
-    profile.set_notification_sound(session::config::notify_sound::bamboo);
-    CHECK(profile.get_notification_sound() == session::config::notify_sound::bamboo);
-    CHECK(profile.needs_dump());
-    CHECK_FALSE(profile.needs_push());
-    profile.dump();
-    CHECK_FALSE(profile.needs_dump());
-
-    // Check the theme setting needs a dump but not a push
-    profile.set_theme(session::config::theme::ocean_dark);
-    CHECK(profile.get_theme() == session::config::theme::ocean_dark);
-    CHECK(profile.needs_dump());
-    CHECK_FALSE(profile.needs_push());
-    profile.dump();
-    CHECK_FALSE(profile.needs_dump());
-
-    // Check the theme primary color setting needs a dump but not a push
-    profile.set_theme_primary_color(session::config::theme_primary_color::orange);
-    CHECK(profile.get_theme_primary_color() == session::config::theme_primary_color::orange);
-    CHECK(profile.needs_dump());
-    CHECK_FALSE(profile.needs_push());
-    profile.dump();
-    CHECK_FALSE(profile.needs_dump());
-
-    // Check the local settings need dumps but not pushes
-    profile.set_local_setting("test_setting", true);
-    CHECK(profile.get_local_setting("test_setting"));
-    CHECK_FALSE(profile.get_local_setting("test_setting2")
-                        .has_value());  // nullopt when it doesn't have a value
-    CHECK(profile.needs_dump());
-    CHECK_FALSE(profile.needs_push());  // It's a local setting so shouldn't need to be pushed
-
-    // Ensure all of these local settings were stored in the dump and loaded correctly
-    session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
-    CHECK_FALSE(profile.needs_dump());
-
-    CHECK(profile2.get_notification_content() == session::config::notify_content::name_no_preview);
-    CHECK(profile2.get_notification_sound() == session::config::notify_sound::bamboo);
-    CHECK(profile2.get_theme() == session::config::theme::ocean_dark);
-    CHECK(profile2.get_theme_primary_color() == session::config::theme_primary_color::orange);
-    CHECK(profile2.get_local_setting("test_setting"));
 }

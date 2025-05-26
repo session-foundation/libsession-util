@@ -7,9 +7,7 @@
 
 #include "base.hpp"
 #include "namespaces.hpp"
-#include "notify.hpp"
 #include "profile_pic.hpp"
-#include "theme.hpp"
 
 namespace session::config {
 
@@ -28,13 +26,6 @@ using namespace std::literals;
 ///     reason).
 
 class UserProfile : public ConfigBase {
-
-  private:
-    notify_content notification_content_setting = notify_content::defaulted;
-    notify_sound notification_sound_setting = notify_sound::defaulted;
-    theme theme_setting = theme::defaulted;
-    theme_primary_color theme_primary_color_setting = theme_primary_color::defaulted;
-    std::map<std::string, uint16_t> local_settings;
 
   public:
     // No default constructor
@@ -208,116 +199,7 @@ class UserProfile : public ConfigBase {
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
 
-    /// API: user_profile/UserProfile::get_notification_content
-    ///
-    /// Returns the locally stored setting indicating what notification content should be displayed.
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `notify_content` -- enum indicating the content that should be shown within a
-    /// notification.
-    notify_content get_notification_content() const;
-
-    /// API: user_profile/UserProfile::set_notification_content
-    ///
-    /// Sets the locally stored setting indicating what notification content should be displayed.
-    ///
-    /// Inputs:
-    /// - `value` -- Updated notification content setting
-    void set_notification_content(notify_content value);
-
-    /// API: user_profile/UserProfile::get_notification_sound
-    ///
-    /// Returns the locally stored setting indicating which sound should play when receiving a
-    /// notification.
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `notify_sound` -- enum indicating the sound that should be played when receiving a
-    /// notification.
-    notify_sound get_notification_sound() const;
-
-    /// API: user_profile/UserProfile::set_notification_sound
-    ///
-    /// Sets the locally stored setting indicating which sound should be played when
-    /// receiving receiving a notification.
-    ///
-    /// Inputs:
-    /// - `value` -- Updated notification sound setting
-    void set_notification_sound(notify_sound value);
-
-    /// API: user_profile/UserProfile::get_theme
-    ///
-    /// Returns the locally stored setting indicating which theme the client should use.
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `theme` -- enum indicating which theme the client should use.
-    theme get_theme() const;
-
-    /// API: user_profile/UserProfile::set_theme
-    ///
-    /// Sets the locally stored setting indicating which theme the client should use.
-    ///
-    /// Inputs:
-    /// - `value` -- Updated theme setting
-    void set_theme(theme value);
-
-    /// API: user_profile/UserProfile::get_theme_primary_color
-    ///
-    /// Returns the locally stored setting indicating which primary color the client should use.
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `theme_primary_color` -- enum indicating which primary color the client should use.
-    theme_primary_color get_theme_primary_color() const;
-
-    /// API: user_profile/UserProfile::set_theme_primary_color
-    ///
-    /// Sets the locally stored setting indicating which primary color the client should use.
-    ///
-    /// Inputs:
-    /// - `value` -- Updated primary color setting
-    void set_theme_primary_color(theme_primary_color value);
-
-    /// API: user_profile/UserProfile::get_local_setting
-    ///
-    /// Accesses the locally stored setting for the provided key.  Can have three
-    /// values:
-    ///
-    /// - std::nullopt -- the value has not been given an explicit value so the client should use
-    ///   its default.
-    /// - true -- the value is explicitly enabled
-    /// - false -- the value is explicitly disabled
-    ///
-    /// Inputs:
-    /// - `key` -- key that a setting was previously stored against.
-    ///
-    /// Outputs:
-    /// - `std::optional<bool>` - true/false if the value has been set;
-    ///   `std::nullopt` if the value has not been set.
-    std::optional<bool> get_local_setting(std::string key) const;
-
-    /// API: user_profile/UserProfile::set_local_setting
-    ///
-    /// Sets the locally stored setting.  This is typically invoked with either `true` or `false,
-    /// but can also be called with `std::nullopt` to explicitly clear the value.
-    ///
-    /// Inputs:
-    /// - `key` -- key that a setting was previously stored against.
-    /// - `enabled` -- value that should be stored locally against the key, or `std::nullopt` to
-    /// drop the setting from the local storage (and thus use the client's default).
-    void set_local_setting(std::string key, std::optional<bool> enabled);
-
     bool accepts_protobuf() const override { return true; }
-
-  protected:
-    void extra_data(oxenc::bt_dict_producer&& extra) const override;
-    void load_extra_data(oxenc::bt_dict_consumer&& extra) override;
 };
 
 }  // namespace session::config
