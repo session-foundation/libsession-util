@@ -32,6 +32,7 @@ class val_loader;
 ///     Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
 /// o - community conversations.  This is a nested dict where the outer keys are the BASE_URL of the
@@ -41,12 +42,14 @@ class val_loader;
 ///       containing keys:
 ///       r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///           included, but will be 0 if no messages are read.
+///       l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
 ///       u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
 /// g - group conversations (aka new, non-legacy closed groups).  The key is the group identifier
 ///     (beginning with 03).  Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
 /// C - legacy group conversations (aka closed groups).  The key is the group identifier (which
@@ -54,12 +57,14 @@ class val_loader;
 ///     are dicts with keys:
 ///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,
 ///         but will be 0 if no messages are read.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 
 namespace convo {
 
     struct base {
         int64_t last_read = 0;
+        int64_t last_active = 0;
         bool unread = false;
 
       protected:
@@ -194,45 +199,6 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Outputs:
     /// - `const char*` - Will return "ConvoInfoVolatile"
     const char* encryption_domain() const override { return "ConvoInfoVolatile"; }
-
-    /// Our pruning ages.  We ignore added conversations that are more than PRUNE_LOW before now,
-    /// and we actively remove (when doing a new push) any conversations that are more than
-    /// PRUNE_HIGH before now.  Clients can mostly ignore these and just add all conversations; the
-    /// class just transparently ignores (or removes) pruned values.
-    static constexpr auto PRUNE_LOW = 30 * 24h;
-    static constexpr auto PRUNE_HIGH = 45 * 24h;
-
-    /// API: convo_info_volatile/ConvoInfoVolatile::prune_stale
-    ///
-    /// Prunes any "stale" conversations: that is, ones with a last read more than `prune` ago that
-    /// are not specifically "marked as unread" by the client.
-    ///
-    /// This method is called automatically by `push()` and does not typically need to be invoked
-    /// directly.
-    ///
-    /// Inputs:
-    /// - `prune` the "too old" time; any conversations with a last_read time more than this
-    ///   duration ago will be removed (unless they have the explicit `unread` flag set).  If
-    ///   omitted, defaults to the PRUNE_HIGH constant (45 days).
-    ///
-    /// Outputs:
-    /// - returns nothing.
-    void prune_stale(std::chrono::milliseconds prune = PRUNE_HIGH);
-
-    /// API: convo_info_volatile/ConvoInfoVolatile::push
-    ///
-    /// Overrides push() to prune stale last-read values before we do the push.
-    ///
-    /// Inputs: None
-    ///
-    /// Outputs:
-    /// - `std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>` - Returns a
-    /// tuple containing
-    ///   - `seqno_t` -- sequence number
-    ///   - `std::vector<std::vector<unsigned char>>` -- data message(s) to push to the server
-    ///   - `std::vector<std::string>` -- list of known message hashes
-    std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>> push()
-            override;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_1to1
     ///

@@ -10,8 +10,9 @@ extern "C" {
 typedef struct convo_info_volatile_1to1 {
     char session_id[67];  // in hex; 66 hex chars + null terminator.
 
-    int64_t last_read;  // milliseconds since unix epoch
-    bool unread;        // true if the conversation is explicitly marked unread
+    int64_t last_read;   // ms since unix epoch
+    int64_t last_active; // ms since unix epoch
+    bool unread;         // true if the conversation is explicitly marked unread
 } convo_info_volatile_1to1;
 
 typedef struct convo_info_volatile_community {
@@ -20,22 +21,25 @@ typedef struct convo_info_volatile_community {
     char room[65];       // null-terminated (max length 64), normalized (always lower-case)
     unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
 
-    int64_t last_read;  // ms since unix epoch
-    bool unread;        // true if marked unread
+    int64_t last_read;   // ms since unix epoch
+    int64_t last_active; // ms since unix epoch
+    bool unread;         // true if marked unread
 } convo_info_volatile_community;
 
 typedef struct convo_info_volatile_group {
-    char group_id[67];  // in hex; 66 hex chars + null terminator.  Begins with "03".
-    int64_t last_read;  // ms since unix epoch
-    bool unread;        // true if marked unread
+    char group_id[67];   // in hex; 66 hex chars + null terminator.  Begins with "03".
+    int64_t last_read;   // ms since unix epoch
+    int64_t last_active; // ms since unix epoch
+    bool unread;         // true if marked unread
 } convo_info_volatile_group;
 
 typedef struct convo_info_volatile_legacy_group {
-    char group_id[67];  // in hex; 66 hex chars + null terminator.  Looks just like a Session ID,
-                        // though isn't really one.
+    char group_id[67];   // in hex; 66 hex chars + null terminator.  Looks just like a Session ID,
+                         // though isn't really one.
 
-    int64_t last_read;  // ms since unix epoch
-    bool unread;        // true if marked unread
+    int64_t last_read;   // ms since unix epoch
+    int64_t last_active; // ms since unix epoch
+    bool unread;         // true if marked unread
 } convo_info_volatile_legacy_group;
 
 /// API: convo_info_volatile/convo_info_volatile_init

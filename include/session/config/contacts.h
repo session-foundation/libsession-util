@@ -36,6 +36,23 @@ typedef struct contacts_contact {
 
 } contacts_contact;
 
+typedef struct contacts_blinded_contact {
+    char session_id[67];  // in hex; 66 hex chars + null terminator.
+
+    char name[101]; // This will be a 0-length strings when unset
+    user_profile_pic profile_pic;
+
+    int64_t created;  // unix timestamp (seconds)
+
+} contacts_blinded_contact;
+
+typedef struct contacts_deleted_contact {
+    char session_id[67];  // in hex; 66 hex chars + null terminator.
+
+    int64_t deleted;  // unix timestamp (seconds)
+
+} contacts_deleted_contact;
+
 /// API: contacts/contacts_init
 ///
 /// Constructs a contacts config object and sets a pointer to it in `conf`.

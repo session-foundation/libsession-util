@@ -52,6 +52,14 @@ void UserProfile::set_profile_pic(profile_pic pic) {
     set_profile_pic(pic.url, pic.key);
 }
 
+void UserProfile::set_nts_last_active(int64_t last_active) {
+    set_nonzero_int(data["l"], last_active);
+}
+
+int64_t UserProfile::get_nts_last_active() const {
+    return data["l"].integer_or(0);
+}
+
 void UserProfile::set_nts_priority(int priority) {
     set_nonzero_int(data["+"], priority);
 }
@@ -139,6 +147,14 @@ LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic 
                 return 0;
             },
             static_cast<int>(SESSION_ERR_BAD_VALUE));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_nts_last_active(const config_object* conf) {
+    return unbox<UserProfile>(conf)->get_nts_last_active();
+}
+
+LIBSESSION_EXPORT void user_profile_set_nts_last_active(config_object* conf, int64_t last_active) {
+    unbox<UserProfile>(conf)->set_nts_last_active(last_active);
 }
 
 LIBSESSION_C_API int user_profile_get_nts_priority(const config_object* conf) {

@@ -97,6 +97,42 @@ struct contact_info {
     void load(const dict& info_dict);
 };
 
+struct blinded_contact_info : community {
+    using community::community;
+
+    const std::string& session_id() const { return room(); }  // in hex
+    std::string name;
+    profile_pic profile_picture;
+    int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
+
+    explicit blinded_contact_info(std::string sid);
+
+    // Internal ctor/method for C API implementations:
+    blinded_contact_info(const struct contacts_blinded_contact& c);  // From c struct
+
+    /// API: contacts/blinded_contact_info::into
+    ///
+    /// converts the contact info into a c struct
+    ///
+    /// Inputs:
+    /// - `c` -- Return Parameter that will be filled with data in blinded_contact_info
+    void into(contacts_blinded_contact& c) const;
+
+    /// API: contacts/contact_info::set_name
+    ///
+    /// Sets a name; this is exactly the same as assigning to .name directly,
+    /// except that we throw an exception if the given name is longer than MAX_NAME_LENGTH.
+    ///
+    /// Inputs:
+    /// - `name` -- Name to assign to the contact
+    void set_name(std::string name);
+
+  private:
+    friend class Contacts;
+    friend struct session::config::comm_iterator_helper;
+    void load(const dict& info_dict);
+};
+
 class Contacts : public ConfigBase {
 
   public:
@@ -336,6 +372,9 @@ class Contacts : public ConfigBase {
     /// Outputs:
     /// - `bool` - Returns true if the contact list is empty
     bool empty() const { return size() == 0; }
+
+    std::vector<blinded_contact_info> blinded_contacts() const;
+    std::vector<std::pair<std::string, uint64_t>> last_deleted_contacts() const;
 
     bool accepts_protobuf() const override { return true; }
 

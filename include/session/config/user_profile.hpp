@@ -18,6 +18,7 @@ using namespace std::literals;
 /// n - user profile name
 /// p - user profile url
 /// q - user profile decryption key (binary)
+/// l - the timestamp (in ms since epoch) that the "Note to Self" conversation was last active
 /// + - the priority value for the "Note to Self" pseudo-conversation (higher = higher in the
 ///     conversation list).  Omitted when 0.  -1 means hidden.
 /// e - the expiry timer (in seconds) for the "Note to Self" pseudo-conversation.  Omitted when 0.
@@ -128,6 +129,24 @@ class UserProfile : public ConfigBase {
     ///    - `pic` -- Profile pic object
     void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     void set_profile_pic(profile_pic pic);
+
+    /// API: user_profile/UserProfile::get_nts_last_active
+    ///
+    /// Gets the Note-to-self conversation last_active timestamp in integer milliseconds.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `int64_t` - Timestamp, in integer milliseconds, when the Note-to-self was last active
+    int64_t get_nts_last_active() const;
+
+    /// API: user_profile/UserProfile::set_nts_last_active
+    ///
+    /// Sets the Note-to-self conversation last_active value.
+    ///
+    /// Inputs:
+    /// - `last_active` -- Timestamp, in integer milliseconds, that the conversation was last active
+    void set_nts_last_active(int64_t last_active);
 
     /// API: user_profile/UserProfile::get_nts_priority
     ///

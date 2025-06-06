@@ -16,11 +16,13 @@ namespace session::config {
 
 template <typename ConfigT, typename... Args>
 [[nodiscard]] int c_wrapper_init_generic(config_object** conf, char* error, Args&&... args) {
-    auto c = std::make_unique<internals<ConfigT>>();
+    std::unique_ptr<IInternalsBase> internal_wrapper;
     auto c_conf = std::make_unique<config_object>();
 
     try {
-        c->config = std::make_unique<ConfigT>(std::forward<Args>(args)...);
+        internal_wrapper = std::make_unique<internals<ConfigT>>(
+            std::in_place_type_t<std::unique_ptr<ConfigBase>>{},
+            std::forward<Args>(args)...);
     } catch (const std::exception& e) {
         if (error) {
             std::string msg = e.what();
@@ -31,7 +33,7 @@ template <typename ConfigT, typename... Args>
         return SESSION_ERR_INVALID_DUMP;
     }
 
-    c_conf->internals = c.release();
+    c_conf->internals = internal_wrapper.release();
     c_conf->last_error = nullptr;
     *conf = c_conf.release();
     return SESSION_ERR_NONE;

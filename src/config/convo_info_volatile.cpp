@@ -30,17 +30,18 @@ namespace convo {
         check_session_id(session_id);
     }
     one_to_one::one_to_one(const convo_info_volatile_1to1& c) :
-            base{c.last_read, c.unread}, session_id{c.session_id, 66} {}
+            base{c.last_read, c.last_active, c.unread}, session_id{c.session_id, 66} {}
 
     void one_to_one::into(convo_info_volatile_1to1& c) const {
         std::memcpy(c.session_id, session_id.data(), 67);
         c.last_read = last_read;
+        c.last_active = last_active;
         c.unread = unread;
     }
 
     community::community(const convo_info_volatile_community& c) :
             config::community{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}},
-            base{c.last_read, c.unread} {}
+            base{c.last_read, c.last_active, c.unread} {}
 
     void community::into(convo_info_volatile_community& c) const {
         static_assert(sizeof(c.base_url) == BASE_URL_MAX_LENGTH + 1);
@@ -49,6 +50,7 @@ namespace convo {
         copy_c_str(c.room, room_norm());
         std::memcpy(c.pubkey, pubkey().data(), 32);
         c.last_read = last_read;
+        c.last_active = last_active;
         c.unread = unread;
     }
 
@@ -59,11 +61,12 @@ namespace convo {
         check_session_id(id, "03");
     }
     group::group(const convo_info_volatile_group& c) :
-            base{c.last_read, c.unread}, id{c.group_id, 66} {}
+            base{c.last_read, c.last_active, c.unread}, id{c.group_id, 66} {}
 
     void group::into(convo_info_volatile_group& c) const {
         std::memcpy(c.group_id, id.c_str(), 67);
         c.last_read = last_read;
+        c.last_active = last_active;
         c.unread = unread;
     }
 
@@ -74,16 +77,18 @@ namespace convo {
         check_session_id(id);
     }
     legacy_group::legacy_group(const convo_info_volatile_legacy_group& c) :
-            base{c.last_read, c.unread}, id{c.group_id, 66} {}
+            base{c.last_read, c.last_active, c.unread}, id{c.group_id, 66} {}
 
     void legacy_group::into(convo_info_volatile_legacy_group& c) const {
         std::memcpy(c.group_id, id.data(), 67);
         c.last_read = last_read;
+        c.last_active = last_active;
         c.unread = unread;
     }
 
     void base::load(const dict& info_dict) {
         last_read = maybe_int(info_dict, "r").value_or(0);
+        last_active = maybe_int(info_dict, "l").value_or(0);
         unread = (bool)maybe_int(info_dict, "u").value_or(0);
     }
 
@@ -219,56 +224,11 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
 }
 
 void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
-    auto r = info["r"];
-
-    // If we're making the last_read value *older* for some reason then ignore the prune cutoff
-    // (because we might be intentionally resetting the value after a deletion, for instance).
-    if (auto* val = r.integer(); val && c.last_read < *val)
-        r = c.last_read;
-    else {
-        std::chrono::system_clock::time_point last_read{std::chrono::milliseconds{c.last_read}};
-        if (last_read > std::chrono::system_clock::now() - PRUNE_LOW)
-            info["r"] = c.last_read;
-    }
-
+    set_nonzero_int(info["r"], c.last_read);
+    set_nonzero_int(info["l"], c.last_active);
     set_flag(info["u"], c.unread);
 }
 
-void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
-    const int64_t cutoff = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   (std::chrono::system_clock::now() - prune).time_since_epoch())
-                                   .count();
-
-    std::vector<std::string> stale;
-    for (auto it = begin_1to1(); it != end(); ++it)
-        if (!it->unread && it->last_read < cutoff)
-            stale.push_back(it->session_id);
-    for (const auto& sid : stale)
-        erase_1to1(sid);
-
-    stale.clear();
-    for (auto it = begin_legacy_groups(); it != end(); ++it)
-        if (!it->unread && it->last_read < cutoff)
-            stale.push_back(it->id);
-    for (const auto& id : stale)
-        erase_legacy_group(id);
-
-    std::vector<std::pair<std::string, std::string>> stale_comms;
-    for (auto it = begin_communities(); it != end(); ++it)
-        if (!it->unread && it->last_read < cutoff)
-            stale_comms.emplace_back(it->base_url(), it->room());
-    for (const auto& [base, room] : stale_comms)
-        erase_community(base, room);
-}
-
-std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
-ConvoInfoVolatile::push() {
-    // Prune off any conversations with last_read timestamps more than PRUNE_HIGH ago (unless they
-    // also have a `unread` flag set, in which case we keep them indefinitely).
-    prune_stale();
-
-    return ConfigBase::push();
-}
 
 void ConvoInfoVolatile::set(const convo::community& c) {
     auto info = community_field(c);

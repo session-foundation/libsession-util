@@ -1407,37 +1407,121 @@ class ConfigBase : public ConfigSig {
     }
 };
 
+struct IInternalsBase {
+    virtual ~IInternalsBase() = default;
+    virtual ConfigBase* getConfigBasePtr() = 0;
+    virtual const ConfigBase* getConfigBasePtr() const = 0;
+};
+
 // The C++ struct we hold opaquely inside the C internals struct.  This is designed so that any
 // internals<T> has the same layout so that it doesn't matter whether we unbox to an
 // internals<ConfigBase> or internals<SubType>.
 template <
         typename ConfigT = ConfigBase,
         std::enable_if_t<std::is_base_of_v<ConfigBase, ConfigT>, int> = 0>
-struct internals final {
-    std::unique_ptr<ConfigBase> config;
-    std::string error;
+struct internals final : public IInternalsBase {
+    private:
+        std::variant<std::unique_ptr<ConfigBase>, ConfigBase*> m_config_holder;
+
+    public:
+        std::string error;
+
+        template <typename... Args>
+        explicit internals(std::in_place_type_t<std::unique_ptr<ConfigBase>>, Args&&... args)
+            : m_config_holder(std::make_unique<ConfigT>(std::forward<Args>(args)...)), error() {}
+
+        explicit internals(ConfigBase* config_ptr_managed_externally)
+        : m_config_holder(config_ptr_managed_externally), error() {
+            if (!config_ptr_managed_externally) {
+                throw std::invalid_argument("Externally managed config pointer cannot be null.");
+            }
+        }
+
+        ~internals() override {
+            // std::variant handles destruction of unique_ptr if it holds one and the raw pointer needs no special cleanup here
+        }
+
+        internals(const internals&) = delete;
+        internals& operator=(const internals&) = delete;
+        internals(internals&&) = delete;
+        internals& operator=(internals&&) = delete;
+
+    private:
+        ConfigBase* getConfigBasePtr() override {
+            return std::visit(
+                [](auto&& arg) -> ConfigBase* {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, std::unique_ptr<ConfigBase>>) {
+                        return arg.get();
+                    } else if constexpr (std::is_same_v<T, ConfigBase*>) {
+                        return arg;
+                    }
+                    return nullptr; // Should not happen
+                },
+                m_config_holder);
+        }
+
+        const ConfigBase* getConfigBasePtr() const override {
+            return std::visit(
+                [](auto&& arg) -> const ConfigBase* {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, std::unique_ptr<ConfigBase>>) {
+                        return arg.get();
+                    } else if constexpr (std::is_same_v<T, ConfigBase*>) {
+                        return arg;
+                    }
+                    return nullptr; // Should not happen
+                },
+                m_config_holder);
+        }
+
+    public:
 
     /// Dereferencing falls through to the ConfigBase object
     ConfigT* operator->() {
+        ConfigBase* base_ptr = getConfigBasePtr();
+        if (!base_ptr) {
+            assert(false && "ConfigBase pointer is null in internals::operator->");
+            return nullptr;
+        }
+
         if constexpr (std::is_same_v<ConfigT, ConfigBase>)
-            return config.get();
+            return static_cast<ConfigT*>(base_ptr);
         else {
-            auto* c = dynamic_cast<ConfigT*>(config.get());
+            auto* c = dynamic_cast<ConfigT*>(base_ptr);
             assert(c);
             return c;
         }
     }
     const ConfigT* operator->() const {
+        const ConfigBase* base_ptr = getConfigBasePtr();
+        if (!base_ptr) {
+            assert(false && "ConfigBase pointer is null in internals::operator-> const");
+            return nullptr;
+        }
+
         if constexpr (std::is_same_v<ConfigT, ConfigBase>)
-            return config.get();
+            return static_cast<const ConfigT*>(base_ptr);
         else {
-            auto* c = dynamic_cast<ConfigT*>(config.get());
+            auto* c = dynamic_cast<const ConfigT*>(base_ptr);
             assert(c);
             return c;
         }
     }
-    ConfigT& operator*() { return *operator->(); }
-    const ConfigT& operator*() const { return *operator->(); }
+    ConfigT& operator*() {
+        ConfigT* ptr = operator->();
+        if (!ptr) {
+            throw std::runtime_error("Attempted to dereference a null config pointer via internals::operator*");
+        }
+        return *ptr;
+    }
+    const ConfigT& operator*() const {
+        const ConfigT* ptr = operator->();
+        if (!ptr) {
+            throw std::runtime_error("Attempted to dereference a null config pointer via internals::operator* const");
+        }
+        return *ptr;
+    }
 };
 
 template <typename T = ConfigBase, std::enable_if_t<std::is_base_of_v<ConfigBase, T>, int> = 0>

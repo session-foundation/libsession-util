@@ -18,7 +18,8 @@ enum class Namespace : std::int16_t {
     GroupInfo = 13,
     GroupMembers = 14,
 
-    // The local config should never be pushed but this gives us a nice identifier for each config type
+    // The local config should never be pushed but this gives us a nice identifier for each config
+    // type
     Local = 9999,
 };
 

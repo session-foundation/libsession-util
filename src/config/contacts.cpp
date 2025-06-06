@@ -34,12 +34,24 @@ LIBSESSION_C_API bool session_id_is_valid(const char* session_id) {
 }
 
 contact_info::contact_info(std::string sid) : session_id{std::move(sid)} {
-    check_session_id(session_id);
+    check_session_id(session_id, "05");
+}
+
+blinded_contact_info::blinded_contact_info(std::string sid) : session_id{std::move(sid)} {
+    try { check_session_id(session_id, "25"); }
+    catch(...) { check_session_id(session_id, "15"); }
 }
 
 void contact_info::set_name(std::string n) {
     if (n.size() > MAX_NAME_LENGTH)
         name = utf8_truncate(std::move(n), MAX_NAME_LENGTH);
+    else
+        name = std::move(n);
+}
+
+void blinded_contact_info::set_name(std::string n) {
+    if (n.size() > contact_info::MAX_NAME_LENGTH)
+        name = utf8_truncate(std::move(n), contact_info::MAX_NAME_LENGTH);
     else
         name = std::move(n);
 }
@@ -121,6 +133,20 @@ void contact_info::load(const dict& info_dict) {
     created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
 }
 
+void blinded_contact_info::load(const dict& info_dict) {
+    name = maybe_string(info_dict, "n").value_or("");
+
+    auto url = maybe_string(info_dict, "p");
+    auto key = maybe_vector(info_dict, "q");
+    if (url && key && !url->empty() && key->size() == 32) {
+        profile_picture.url = std::move(*url);
+        profile_picture.key = std::move(*key);
+    } else {
+        profile_picture.clear();
+    }
+    created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
+}
+
 void contact_info::into(contacts_contact& c) const {
     std::memcpy(c.session_id, session_id.data(), 67);
     copy_c_str(c.name, name);
@@ -144,6 +170,18 @@ void contact_info::into(contacts_contact& c) const {
     c.created = to_epoch_seconds(created);
 }
 
+void blinded_contact_info::into(contacts_blinded_contact& c) const {
+    std::memcpy(c.session_id, session_id.data(), 67);
+    copy_c_str(c.name, name);
+    if (profile_picture) {
+        copy_c_str(c.profile_pic.url, profile_picture.url);
+        std::memcpy(c.profile_pic.key, profile_picture.key.data(), 32);
+    } else {
+        copy_c_str(c.profile_pic.url, "");
+    }
+    c.created = to_epoch_seconds(created);
+}
+
 contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id, 66} {
     assert(std::strlen(c.name) <= MAX_NAME_LENGTH);
     name = c.name;
@@ -164,6 +202,17 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     exp_timer = exp_mode == expiration_mode::none ? 0s : std::chrono::seconds{c.exp_seconds};
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
         exp_mode = expiration_mode::none;
+    created = to_epoch_seconds(c.created);
+}
+
+blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) : session_id{c.session_id, 66} {
+    assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
+    name = c.name;
+    assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
+    if (std::strlen(c.profile_pic.url)) {
+        profile_picture.url = c.profile_pic.url;
+        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
+    }
     created = to_epoch_seconds(c.created);
 }
 
@@ -326,6 +375,36 @@ bool Contacts::erase(std::string_view session_id) {
     auto info = data["c"][pk];
     bool ret = info.exists();
     info.erase();
+    return ret;
+}
+
+std::vector<blinded_contact_info> Contacts::blinded_contacts() const {
+    std::vector<blinded_contact_info> ret;
+
+    if (auto* b = data["b"].dict()) {
+        auto comm = comm_iterator_helper{b->begin(), b->end()};
+        std::shared_ptr<blinded_contact_info> val;
+
+        while (!comm.done()) {
+            comm.load<blinded_contact_info>(val);
+            ret.emplace_back(val.get());
+            comm.advance();
+        }
+    }
+    
+    return ret;
+}
+
+std::vector<std::pair<std::string, uint64_t>> Contacts::last_deleted_contacts() const {
+    std::vector<std::pair<std::string, uint64_t>> ret;
+
+    if (auto info = data["d"].dict()) {
+        ret.reserve(info->size());
+
+        for (auto it = info->begin(); it != info->end(); ++it)
+            ret.emplace_back(it->first, it->second);
+    }
+
     return ret;
 }
 
