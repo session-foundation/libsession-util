@@ -184,11 +184,17 @@ namespace {
         else
             ip = json["ip"].get<std::string>();
 
+        if (ip == "0.0.0.0")
+            throw std::runtime_error{"Invalid IP address"};
+
         uint16_t port;
         if (json.contains("storage_lmq_port"))
             port = json["storage_lmq_port"].get<uint16_t>();
         else
             port = json["port_omq"].get<uint16_t>();
+
+        if (port == 0)
+            throw std::runtime_error{"Invalid lmq port"};
 
         swarm_id_t swarm_id = INVALID_SWARM_ID;
         if (json.contains("swarm_id"))
@@ -349,22 +355,38 @@ namespace detail {
         auto node = result_dict.consume_list_consumer();
 
         while (!node.is_finished()) {
-            auto node_consumer = node.consume_dict_consumer();
-            auto pubkey_ed25519 = oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
-            auto public_ip = consume_string(node_consumer, "public_ip");
-            auto storage_lmq_port = consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
+            try {
+                auto node_consumer = node.consume_dict_consumer();
+                auto pubkey_ed25519 =
+                        oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
+                auto public_ip = consume_string(node_consumer, "public_ip");
+                auto storage_lmq_port =
+                        consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
 
-            std::vector<int> storage_server_version;
-            node_consumer.skip_until("storage_server_version");
-            auto version_consumer = node_consumer.consume_list_consumer();
-            auto swarm_id = consume_integer<uint64_t>(node_consumer, "swarm_id");
+                if (public_ip == "0.0.0.0")
+                    throw std::runtime_error{"Invalid IP address"};
 
-            while (!version_consumer.is_finished()) {
-                storage_server_version.emplace_back(version_consumer.consume_integer<int>());
+                if (storage_lmq_port == 0)
+                    throw std::runtime_error{"Invalid lmq port"};
+
+                std::vector<int> storage_server_version;
+                node_consumer.skip_until("storage_server_version");
+                auto version_consumer = node_consumer.consume_list_consumer();
+                auto swarm_id = consume_integer<uint64_t>(node_consumer, "swarm_id");
+
+                while (!version_consumer.is_finished()) {
+                    storage_server_version.emplace_back(version_consumer.consume_integer<int>());
+                }
+
+                result.emplace_back(
+                        pubkey_ed25519,
+                        storage_server_version,
+                        swarm_id,
+                        public_ip,
+                        storage_lmq_port);
+            } catch (const std::exception& e) {
+                log::warning(cat, "Ignoring invalid snode: {}.", e.what());
             }
-
-            result.emplace_back(
-                    pubkey_ed25519, storage_server_version, swarm_id, public_ip, storage_lmq_port);
         }
 
         return result;
@@ -381,7 +403,11 @@ namespace detail {
 
         std::vector<service_node> result;
         for (auto& snode : result_json["service_node_states"])
-            result.emplace_back(node_from_json(snode));
+            try {
+                result.emplace_back(node_from_json(snode));
+            } catch (const std::exception& e) {
+                log::warning(cat, "Ignoring invalid snode: {}.", e.what());
+            }
 
         return result;
     }
