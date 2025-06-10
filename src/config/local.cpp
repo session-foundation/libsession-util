@@ -30,17 +30,12 @@ void Local::set_notification_content(notify_content value) {
     set_positive_int(data["notify_content"], static_cast<int>(value));
 }
 
-notify_sound Local::get_notification_sound() const {
-    int notify_sound_ = data["notify_sound"].integer_or(0);
-    if (notify_sound_ >= static_cast<int>(notify_sound::defaulted) &&
-        notify_sound_ <= static_cast<int>(notify_sound::synth))
-        return static_cast<notify_sound>(notify_sound_);
-    else
-        return notify_sound::defaulted;
+int64_t Local::get_ios_notification_sound() const {
+    return data["notify_sound"].integer_or(0);
 }
 
-void Local::set_notification_sound(notify_sound value) {
-    set_positive_int(data["notify_sound"], static_cast<int>(value));
+void Local::set_ios_notification_sound(int64_t value) {
+    set_positive_int(data["notify_sound"], value);
 }
 
 theme Local::get_theme() const {
@@ -116,12 +111,12 @@ LIBSESSION_C_API void local_set_notification_content(
     unbox<Local>(conf)->set_notification_content(static_cast<notify_content>(value));
 }
 
-LIBSESSION_C_API CLIENT_NOTIFY_SOUND local_get_notification_sound(const config_object* conf) {
-    return static_cast<CLIENT_NOTIFY_SOUND>(unbox<Local>(conf)->get_notification_sound());
+LIBSESSION_C_API int64_t local_get_ios_notification_sound(const config_object* conf) {
+    return unbox<Local>(conf)->get_ios_notification_sound();
 }
 
-LIBSESSION_C_API void local_set_notification_sound(config_object* conf, CLIENT_NOTIFY_SOUND value) {
-    unbox<Local>(conf)->set_notification_sound(static_cast<notify_sound>(value));
+LIBSESSION_C_API void local_set_ios_notification_sound(config_object* conf, int64_t value) {
+    unbox<Local>(conf)->set_ios_notification_sound(value);
 }
 
 LIBSESSION_C_API CLIENT_THEME local_get_theme(const config_object* conf) {

@@ -35,14 +35,14 @@ TEST_CASE("Local", "[config][local]") {
     session::config::Local local{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK(local.get_notification_content() == session::config::notify_content::defaulted);
-    CHECK(local.get_notification_sound() == session::config::notify_sound::defaulted);
+    CHECK(local.get_ios_notification_sound() == 0);
     CHECK(local.get_theme() == session::config::theme::defaulted);
     CHECK(local.get_theme_primary_color() == session::config::theme_primary_color::defaulted);
 
     local.set_notification_content(session::config::notify_content::name_no_preview);
     CHECK(local.get_notification_content() == session::config::notify_content::name_no_preview);
-    local.set_notification_sound(session::config::notify_sound::bamboo);
-    CHECK(local.get_notification_sound() == session::config::notify_sound::bamboo);
+    local.set_ios_notification_sound(5);
+    CHECK(local.get_ios_notification_sound() == 5);
     local.set_theme(session::config::theme::ocean_dark);
     CHECK(local.get_theme() == session::config::theme::ocean_dark);
     local.set_theme_primary_color(session::config::theme_primary_color::orange);
@@ -64,7 +64,7 @@ TEST_CASE("Local", "[config][local]") {
     CHECK_FALSE(local.needs_dump());
 
     CHECK(local2.get_notification_content() == session::config::notify_content::name_no_preview);
-    CHECK(local2.get_notification_sound() == session::config::notify_sound::bamboo);
+    CHECK(local2.get_ios_notification_sound() == 5);
     CHECK(local2.get_theme() == session::config::theme::ocean_dark);
     CHECK(local2.get_theme_primary_color() == session::config::theme_primary_color::orange);
     CHECK(local2.get_setting("test_setting"));

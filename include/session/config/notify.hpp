@@ -16,21 +16,4 @@ enum class notify_content {
     no_name_no_preview = 3,
 };
 
-enum class notify_sound {
-    defaulted = 0,
-    none = 1,
-    aurora = 2,
-    bamboo = 3,
-    chord = 4,
-    circles = 5,
-    complete = 6,
-    hello = 7,
-    input = 8,
-    keys = 9,
-    note = 10,
-    popcorn = 11,
-    pulse = 12,
-    synth = 13,
-};
-
 }  // namespace session::config
