@@ -67,6 +67,7 @@ add_libsession_util_library(config
     config/groups/keys.cpp
     config/groups/members.cpp
     config/internal.cpp
+    config/local.cpp
     config/protos.cpp
     config/user_groups.cpp
     config/user_profile.cpp

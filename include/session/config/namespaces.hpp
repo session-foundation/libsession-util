@@ -17,6 +17,10 @@ enum class Namespace : std::int16_t {
     GroupKeys = 12,
     GroupInfo = 13,
     GroupMembers = 14,
+
+    // The local config should never be pushed but this gives us a nice identifier for each config
+    // type
+    Local = 9999,
 };
 
 }  // namespace session::config
