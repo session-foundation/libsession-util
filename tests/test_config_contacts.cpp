@@ -720,7 +720,7 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
     auto c2 = std::make_unique<session::config::Contacts>(session::to_span(seed), std::nullopt);
 
     c2->MULTIPART_MAX_WAIT = 200ms;
-    c2->MULTIPART_MAX_REMEMBER = 400ms;
+    c2->MULTIPART_MAX_REMEMBER = 600ms;
 
     auto old_seqno = std::get<seqno_t>(c2->push());
     REQUIRE(old_seqno == 0);
@@ -801,7 +801,7 @@ TEST_CASE("multipart message expiry", "[config][multipart][contacts][expiry]") {
     dump = c2->dump();
     CHECK(dump.size() == full_size);  // expect no change
 
-    std::this_thread::sleep_for(220ms);
+    std::this_thread::sleep_for(420ms);
     // Now we should hit the remember timer, and should discard the cached completed set data when
     // we dump:
     dump = c2->dump();

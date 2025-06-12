@@ -115,26 +115,26 @@ class Local : public ConfigBase {
     /// - `value` -- Updated notification content setting
     void set_notification_content(notify_content value);
 
-    /// API: local/Local::get_notification_sound
+    /// API: local/Local::get_ios_notification_sound
     ///
     /// Returns the setting indicating which sound should play when receiving a
-    /// notification.
+    /// notification on iOS.
     ///
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `notify_sound` -- enum indicating the sound that should be played when receiving a
-    /// notification.
-    notify_sound get_notification_sound() const;
+    /// - `notify_sound` -- integer indicating the sound that should be played when receiving a
+    /// notification on iOS.
+    int64_t get_ios_notification_sound() const;
 
-    /// API: local/Local::set_notification_sound
+    /// API: local/Local::set_ios_notification_sound
     ///
     /// Sets the setting indicating which sound should be played when
-    /// receiving receiving a notification.
+    /// receiving receiving a notification on iOS.
     ///
     /// Inputs:
     /// - `value` -- Updated notification sound setting
-    void set_notification_sound(notify_sound value);
+    void set_ios_notification_sound(int64_t value);
 
     /// API: local/Local::get_theme
     ///

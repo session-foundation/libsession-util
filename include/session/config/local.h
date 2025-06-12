@@ -88,13 +88,13 @@ LIBSESSION_EXPORT CLIENT_NOTIFY_CONTENT local_get_notification_content(const con
 LIBSESSION_EXPORT void local_set_notification_content(
         config_object* conf, CLIENT_NOTIFY_CONTENT value);
 
-/// API: local/local_get_notification_sound
+/// API: local/local_get_ios_notification_sound
 ///
-/// Returns the setting indicating which sound should play when receiving a notification.
+/// Returns the setting indicating which sound should play when receiving a notification on iOS.
 ///
 /// Declaration:
 /// ```cpp
-/// CLIENT_NOTIFY_SOUND local_get_notification_sound(
+/// CLIENT_NOTIFY_SOUND local_get_ios_notification_sound(
 ///     [in]    const config_object*    conf
 /// );
 /// ```
@@ -103,20 +103,20 @@ LIBSESSION_EXPORT void local_set_notification_content(
 /// - `conf` -- [in] Pointer to the config object
 ///
 /// Outputs:
-/// - `CLIENT_NOTIFY_SOUND` -- enum indicating the sound that should be played when receiving a
-/// notification.
-LIBSESSION_EXPORT CLIENT_NOTIFY_SOUND local_get_notification_sound(const config_object* conf);
+/// - `int64_t` -- enum indicating the sound that should be played when receiving a
+/// notification on iOS.
+LIBSESSION_EXPORT int64_t local_get_ios_notification_sound(const config_object* conf);
 
-/// API: local/local_set_notification_sound
+/// API: local/local_set_ios_notification_sound
 ///
 /// Sets the setting indicating which sound should be played when receiving receiving a
-/// notification.
+/// notification on iOS.
 ///
 /// Declaration:
 /// ```cpp
-/// void local_set_notification_sound(
+/// void local_set_ios_notification_sound(
 ///     [in]    const config_object*    conf
-///     [in[    CLIENT_NOTIFY_SOUND   value
+///     [in[    int64_t                 value
 /// );
 /// ```
 ///
@@ -126,7 +126,7 @@ LIBSESSION_EXPORT CLIENT_NOTIFY_SOUND local_get_notification_sound(const config_
 ///
 /// Outputs:
 /// - `void` -- Returns Nothing
-LIBSESSION_EXPORT void local_set_notification_sound(config_object* conf, CLIENT_NOTIFY_SOUND value);
+LIBSESSION_EXPORT void local_set_ios_notification_sound(config_object* conf, int64_t value);
 
 /// API: local/local_get_theme
 ///
