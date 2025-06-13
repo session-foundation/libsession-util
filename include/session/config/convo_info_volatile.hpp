@@ -32,8 +32,9 @@ class val_loader;
 ///     Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
-///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 for empty conversations.
-///     u - will be present and set to 1 if this conversation is specifically marked unread.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///     included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///     conversation is specifically marked unread.
 ///
 /// o - community conversations.  This is a nested dict where the outer keys are the BASE_URL of the
 ///     community and the outer value is a dict containing:
@@ -42,23 +43,26 @@ class val_loader;
 ///       containing keys:
 ///       r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///           included, but will be 0 if no messages are read.
-///       l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 for empty conversations.
-///       u - will be present and set to 1 if this conversation is specifically marked unread.
+///       l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///       included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///       conversation is specifically marked unread.
 ///
 /// g - group conversations (aka new, non-legacy closed groups).  The key is the group identifier
 ///     (beginning with 03).  Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
-///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 for empty conversations.
-///     u - will be present and set to 1 if this conversation is specifically marked unread.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///     included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///     conversation is specifically marked unread.
 ///
 /// C - legacy group conversations (aka closed groups).  The key is the group identifier (which
 ///     looks indistinguishable from a Session ID, but isn't really a proper Session ID).  Values
 ///     are dicts with keys:
 ///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,
 ///         but will be 0 if no messages are read.
-///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 for empty conversations.
-///     u - will be present and set to 1 if this conversation is specifically marked unread.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///     included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///     conversation is specifically marked unread.
 
 namespace convo {
 
