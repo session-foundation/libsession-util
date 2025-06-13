@@ -1,8 +1,12 @@
 #include "session/config/contacts.hpp"
 
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
+#include <oxen/log.hpp>
+#include <oxen/log/format.hpp>
 #include <variant>
 
 #include "internal.hpp"
@@ -14,8 +18,7 @@
 
 using namespace std::literals;
 using namespace session::config;
-
-LIBSESSION_C_API const size_t CONTACT_MAX_NAME_LENGTH = contact_info::MAX_NAME_LENGTH;
+using namespace oxen::log::literals;
 
 // Check for agreement between various C/C++ types
 static_assert(sizeof(contacts_contact::name) == contact_info::MAX_NAME_LENGTH + 1);
@@ -59,15 +62,6 @@ Contacts::Contacts(
         std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
-}
-
-LIBSESSION_C_API int contacts_init(
-        config_object** conf,
-        const unsigned char* ed25519_secretkey_bytes,
-        const unsigned char* dumpstr,
-        size_t dumplen,
-        char* error) {
-    return c_wrapper_init<Contacts>(conf, ed25519_secretkey_bytes, dumpstr, dumplen, error);
 }
 
 void contact_info::load(const dict& info_dict) {
@@ -170,6 +164,73 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     created = to_epoch_seconds(c.created);
 }
 
+blinded_contact_info::blinded_contact_info(
+        std::string_view base_url,
+        std::string_view blinded_id,
+        std::span<const unsigned char> pubkey,
+        bool legacy_blinding) :
+        legacy_blinding{legacy_blinding},
+        community(std::move(base_url), blinded_id.substr(2), std::move(pubkey)) {
+    check_session_id(blinded_id, legacy_blinding ? "15" : "25");
+}
+
+const std::string blinded_contact_info::session_id() const {
+    return "{}{}"_format(legacy_blinding ? "15" : "25", room());
+}
+
+void blinded_contact_info::set_name(std::string n) {
+    if (n.size() > contact_info::MAX_NAME_LENGTH)
+        name = utf8_truncate(std::move(n), contact_info::MAX_NAME_LENGTH);
+    else
+        name = std::move(n);
+}
+
+void blinded_contact_info::load(const dict& info_dict) {
+    name = maybe_string(info_dict, "n").value_or("");
+
+    auto url = maybe_string(info_dict, "p");
+    auto key = maybe_vector(info_dict, "q");
+    if (url && key && !url->empty() && key->size() == 32) {
+        profile_picture.url = std::move(*url);
+        profile_picture.key = std::move(*key);
+    } else {
+        profile_picture.clear();
+    }
+    legacy_blinding = maybe_int(info_dict, "y").value_or(0);
+    created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
+}
+
+void blinded_contact_info::into(contacts_blinded_contact& c) const {
+    copy_c_str(c.base_url, base_url());
+    c.session_id[0] = (legacy_blinding ? '1' : '2');
+    c.session_id[1] = '5';
+    std::memcpy(c.session_id + 2, session_id().data(), 64);
+    c.session_id[66] = '\0';
+    std::memcpy(c.pubkey, pubkey().data(), 32);
+    copy_c_str(c.name, name);
+    if (profile_picture) {
+        copy_c_str(c.profile_pic.url, profile_picture.url);
+        std::memcpy(c.profile_pic.key, profile_picture.key.data(), 32);
+    } else {
+        copy_c_str(c.profile_pic.url, "");
+    }
+    c.legacy_blinding = legacy_blinding;
+    c.created = to_epoch_seconds(created);
+}
+
+blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) :
+        community(c.base_url, {c.session_id + 2, 64}, c.pubkey) {
+    assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
+    name = c.name;
+    assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
+    if (std::strlen(c.profile_pic.url)) {
+        profile_picture.url = c.profile_pic.url;
+        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
+    }
+    legacy_blinding = c.legacy_blinding;
+    created = to_epoch_seconds(c.created);
+}
+
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
     std::string pubkey = session_id_to_bytes(pubkey_hex);
 
@@ -182,36 +243,11 @@ std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
     return result;
 }
 
-LIBSESSION_C_API bool contacts_get(
-        config_object* conf, contacts_contact* contact, const char* session_id) {
-    return wrap_exceptions(
-            conf,
-            [&] {
-                if (auto c = unbox<Contacts>(conf)->get(session_id)) {
-                    c->into(*contact);
-                    return true;
-                }
-                return false;
-            },
-            false);
-}
-
 contact_info Contacts::get_or_construct(std::string_view pubkey_hex) const {
     if (auto maybe = get(pubkey_hex))
         return *std::move(maybe);
 
     return contact_info{std::string{pubkey_hex}};
-}
-
-LIBSESSION_C_API bool contacts_get_or_construct(
-        config_object* conf, contacts_contact* contact, const char* session_id) {
-    return wrap_exceptions(
-            conf,
-            [&] {
-                unbox<Contacts>(conf)->get_or_construct(session_id).into(*contact);
-                return true;
-            },
-            false);
 }
 
 void Contacts::set(const contact_info& contact) {
@@ -252,16 +288,6 @@ void Contacts::set(const contact_info& contact) {
             contact.exp_timer.count());
 
     set_positive_int(info["j"], to_epoch_seconds(contact.created));
-}
-
-LIBSESSION_C_API bool contacts_set(config_object* conf, const contacts_contact* contact) {
-    return wrap_exceptions(
-            conf,
-            [&] {
-                unbox<Contacts>(conf)->set(contact_info{*contact});
-                return true;
-            },
-            false);
 }
 
 void Contacts::set_name(std::string_view session_id, std::string name) {
@@ -340,22 +366,92 @@ bool Contacts::erase(std::string_view session_id) {
     return ret;
 }
 
-LIBSESSION_C_API bool contacts_erase(config_object* conf, const char* session_id) {
-    try {
-        return unbox<Contacts>(conf)->erase(session_id);
-    } catch (...) {
-        return false;
-    }
-}
-
 size_t Contacts::size() const {
     if (auto* c = data["c"].dict())
         return c->size();
     return 0;
 }
 
-LIBSESSION_C_API size_t contacts_size(const config_object* conf) {
-    return unbox<Contacts>(conf)->size();
+ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
+        const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey) const {
+    auto record = data["b"][bc.base_url()];
+    if (get_pubkey) {
+        auto pkrec = record["#"];
+        if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
+            *get_pubkey = std::span<const unsigned char>{
+                    reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+    }
+    return record["R"][bc.room()];  // The `room` value is the blinded id without the prefix
+}
+
+using any_blinded_contact = std::variant<blinded_contact_info>;
+
+std::optional<blinded_contact_info> Contacts::get_blinded(
+        std::string_view pubkey_hex, bool legacy_blinding) const {
+    check_session_id(pubkey_hex, legacy_blinding ? "15" : "25");
+
+    if (auto* b = data["b"].dict()) {
+        auto comm = comm_iterator_helper{b->begin(), b->end()};
+        std::shared_ptr<any_blinded_contact> val;
+
+        while (!comm.done()) {
+            if (comm.load<blinded_contact_info>(val))  // TODO: This is untested
+                if (auto* ptr = std::get_if<blinded_contact_info>(val.get());
+                    ptr && ptr->session_id() == pubkey_hex)
+                    return *ptr;
+            comm.advance();
+        }
+    }
+
+    return std::nullopt;
+}
+
+std::vector<blinded_contact_info> Contacts::blinded_contacts() const {
+    std::vector<blinded_contact_info> ret;
+
+    if (auto* b = data["b"].dict()) {
+        auto comm = comm_iterator_helper{b->begin(), b->end()};
+        std::shared_ptr<any_blinded_contact> val;
+
+        while (!comm.done()) {
+            if (comm.load<blinded_contact_info>(val))
+                if (auto* ptr = std::get_if<blinded_contact_info>(val.get()))
+                    ret.emplace_back(*ptr);
+            comm.advance();
+        }
+    }
+
+    return ret;
+}
+
+bool Contacts::set_blinded_contact(const blinded_contact_info& bc) {
+    data["b"][bc.base_url()]["#"] = bc.pubkey();
+    auto info = blinded_contact_field(bc);  // data["b"][base]["R"][bc_session_id_without_prefix]
+
+    // Always set the name, even if empty, to keep the dict from getting pruned if there are no
+    // other entries.
+    info["n"] = bc.name.substr(0, contact_info::MAX_NAME_LENGTH);
+
+    set_pair_if(
+            bc.profile_picture,
+            info["p"],
+            bc.profile_picture.url,
+            info["q"],
+            bc.profile_picture.key);
+
+    set_positive_int(info["y"], bc.legacy_blinding);
+    set_positive_int(info["j"], to_epoch_seconds(bc.created));
+}
+
+bool Contacts::erase_blinded_contact(
+        std::string_view base_url_, std::string_view blinded_id, bool legacy_blinding) {
+    std::string pk = session_id_to_bytes(blinded_id, legacy_blinding ? "15" : "25").substr(2);
+
+    auto base_url = community::canonical_url(base_url_);
+    auto info = data["d"][base_url]["R"][pk];
+    bool ret = info.exists();
+    info.erase();
+    return ret;
 }
 
 /// Load _val from the current iterator position; if it is invalid, skip to the next key until we
@@ -398,6 +494,149 @@ Contacts::iterator& Contacts::iterator::operator++() {
     return *this;
 }
 
+extern "C" {
+
+LIBSESSION_C_API const size_t CONTACT_MAX_NAME_LENGTH = contact_info::MAX_NAME_LENGTH;
+
+LIBSESSION_C_API int contacts_init(
+        config_object** conf,
+        const unsigned char* ed25519_secretkey_bytes,
+        const unsigned char* dumpstr,
+        size_t dumplen,
+        char* error) {
+    return c_wrapper_init<Contacts>(conf, ed25519_secretkey_bytes, dumpstr, dumplen, error);
+}
+
+LIBSESSION_C_API bool contacts_get(
+        config_object* conf, contacts_contact* contact, const char* session_id) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto c = unbox<Contacts>(conf)->get(session_id)) {
+                    c->into(*contact);
+                    return true;
+                }
+                return false;
+            },
+            false);
+}
+
+LIBSESSION_C_API bool contacts_get_or_construct(
+        config_object* conf, contacts_contact* contact, const char* session_id) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->get_or_construct(session_id).into(*contact);
+                return true;
+            },
+            false);
+}
+
+LIBSESSION_C_API bool contacts_set(config_object* conf, const contacts_contact* contact) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->set(contact_info{*contact});
+                return true;
+            },
+            false);
+}
+
+LIBSESSION_C_API bool contacts_erase(config_object* conf, const char* session_id) {
+    try {
+        return unbox<Contacts>(conf)->erase(session_id);
+    } catch (...) {
+        return false;
+    }
+}
+
+LIBSESSION_C_API size_t contacts_size(const config_object* conf) {
+    return unbox<Contacts>(conf)->size();
+}
+
+LIBSESSION_C_API bool contacts_get_blinded_contact(
+        config_object* conf,
+        const char* blinded_session_id,
+        bool legacy_blinding,
+        contacts_blinded_contact* blinded_contact) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                if (auto bc = unbox<Contacts>(conf)->get_blinded(
+                            blinded_session_id, legacy_blinding)) {
+                    bc->into(*blinded_contact);
+                    return true;
+                }
+                return false;
+            },
+            false);
+}
+
+LIBSESSION_C_API contacts_blinded_contact_list* contacts_blinded_contacts(
+        const config_object* conf) {
+    try {
+        auto cpp_contacts = unbox<Contacts>(conf)->blinded_contacts();
+
+        if (cpp_contacts.empty())
+            return nullptr;
+
+        // We malloc space for the contacts_blinded_contact_list struct itself, plus the required
+        // number of contacts_blinded_contact pointers to store its records, and the space to
+        // actually contain a copy of the data. When we're done, the malloced memory we grab is
+        // going to look like this:
+        //
+        // {contacts_blinded_contact_list}
+        // {pointer1}{pointer2}...
+        // {contacts_blinded_contact data 1\0}{contacts_blinded_contact data 2\0}...
+        //
+        // where contacts_blinded_contact.value points at the beginning of {pointer1}, and each
+        // pointerN points at the beginning of the {contacts_blinded_contact data N\0} struct.
+        //
+        // Since we malloc it all at once, when the user frees it, they also free the entire thing.
+        size_t sz = sizeof(contacts_blinded_contact_list) +
+                    (cpp_contacts.size() * sizeof(contacts_blinded_contact*)) +
+                    (cpp_contacts.size() * sizeof(contacts_blinded_contact));
+        auto* ret = static_cast<contacts_blinded_contact_list*>(std::malloc(sz));
+        ret->len = cpp_contacts.size();
+
+        // value points at the space immediately after the struct itself, which is the first element
+        // in the array of contacts_blinded_contact pointers.
+        ret->value = reinterpret_cast<contacts_blinded_contact**>(ret + 1);
+        contacts_blinded_contact* next_struct =
+                reinterpret_cast<contacts_blinded_contact*>(ret->value + ret->len);
+
+        for (size_t i = 0; i < cpp_contacts.size(); ++i) {
+            ret->value[i] = next_struct;
+            cpp_contacts[i].into(*next_struct);
+            next_struct++;
+        }
+
+        return ret;
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+LIBSESSION_C_API bool contacts_set_blinded_contact(
+        config_object* conf, const contacts_blinded_contact* bc) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->set_blinded_contact(blinded_contact_info{*bc});
+                return true;
+            },
+            false);
+}
+
+LIBSESSION_C_API bool contacts_erase_blinded_contact(
+        config_object* conf, const char* base_url, const char* blinded_id, bool legacy_blinding) {
+    try {
+        return unbox<Contacts>(conf)->erase_blinded_contact(base_url, blinded_id, legacy_blinding);
+    } catch (...) {
+        return false;
+    }
+}
+
 LIBSESSION_C_API contacts_iterator* contacts_iterator_new(const config_object* conf) {
     auto* it = new contacts_iterator{};
     it->_internals = new Contacts::iterator{unbox<Contacts>(conf)->begin()};
@@ -420,3 +659,5 @@ LIBSESSION_C_API bool contacts_iterator_done(contacts_iterator* it, contacts_con
 LIBSESSION_C_API void contacts_iterator_advance(contacts_iterator* it) {
     ++*static_cast<Contacts::iterator*>(it->_internals);
 }
+
+}  // extern "C"
