@@ -347,10 +347,7 @@ std::vector<conversation> ConfigManager::conversations() const {
             last_active,
             it->priority,
             it->notifications,
-            it->mute_until,
-            true,
-            true,
-            true 
+            it->mute_until
         });
     }
 
@@ -397,6 +394,30 @@ std::vector<conversation> ConfigManager::conversations() const {
             it->priority,
             it->notifications,
             it->mute_until
+        });
+    }
+    
+    // Outgoing blinded message requests
+    auto blinded_contacts = _config_contacts->blinded_contacts();
+    for (auto& bc : blinded_contacts) {
+        int64_t last_active = 0;
+
+        if (auto v = _config_convo_info_volatile->get_blinded_1to1(bc.session_id(), bc.legacy_blinding))
+            last_active = v->last_active;
+
+        conversations.emplace_back(blinded_one_to_one_conversation{
+            bc.session_id(),
+            conversation_type::blinded_one_to_one,
+            bc.name,
+            display_pic_item{bc.session_id(), bc.name, profile_pic{}},
+            bc.base_url(),
+            bc.pubkey_hex(),
+            bc.legacy_blinding,
+            bc.created,
+            last_active,
+            0,                      // priority not supported in blinded conversations
+            notify_mode::disabled,  // notify_mode not supported in blinded conversations
+            0                       // mute_until not supported in blinded conversations
         });
     }
     
@@ -646,12 +667,12 @@ LIBSESSION_C_API bool config_manager_get_conversations(const config_manager* man
                 if constexpr (std::is_same_v<std::decay_t<decltype(cpp_conversation)>, one_to_one_conversation>) {
                     conversation->specific_data.one_to_one.is_message_request = cpp_conversation.is_message_request;
                     conversation->specific_data.one_to_one.is_blocked = cpp_conversation.is_blocked;
-                } else if constexpr (std::is_same_v<std::decay_t<decltype(cpp_conversation)>, community_conversation>) {
-                    conversation->specific_data.community.read = cpp_conversation.read;
-                    conversation->specific_data.community.write = cpp_conversation.write;
-                    conversation->specific_data.community.upload = cpp_conversation.upload;
                 } else if constexpr (std::is_same_v<std::decay_t<decltype(cpp_conversation)>, group_conversation>) {
                     conversation->specific_data.group.is_message_request = cpp_conversation.is_message_request;
+                } else if constexpr (std::is_same_v<std::decay_t<decltype(cpp_conversation)>, blinded_one_to_one_conversation>) {
+                    copy_c_str(conversation->specific_data.blinded_one_to_one.base_url, cpp_conversation.community_base_url);
+                    std::memcpy(conversation->specific_data.blinded_one_to_one.pubkey, cpp_conversation.community_public_key.data(), 32);
+                    conversation->specific_data.blinded_one_to_one.legacy_blinding = cpp_conversation.legacy_blinding;
                 }
             }, cpp_conversation_variant);
 

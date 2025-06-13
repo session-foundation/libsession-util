@@ -25,6 +25,7 @@ typedef enum CONVERSATION_TYPE {
     CONVERSATION_TYPE_ONE_TO_ONE = 0,
     CONVERSATION_TYPE_COMMUNITY = 1,
     CONVERSATION_TYPE_GROUP = 2,
+    CONVERSATION_TYPE_BLINDED_ONE_TO_ONE = 3,
     CONVERSATION_TYPE_LEGACY_GROUP = 100,
 } CONVERSATION_TYPE;
 
@@ -48,14 +49,15 @@ typedef struct config_convo {
         } one_to_one;
 
         struct {
-            bool read;
-            bool write;
-            bool upload;
-        } community;
-
-        struct {
             bool is_message_request;
         } group;
+
+        struct {
+            char base_url[268];  // null-terminated (max length 267), normalized (i.e. always lower-case,
+                                 // only has port if non-default, has trailing / removed)
+            unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
+            bool legacy_blinding;
+        } blinded_one_to_one;
     } specific_data;
 } config_convo;
 

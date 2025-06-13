@@ -33,6 +33,7 @@ enum class conversation_type {
     one_to_one = 0,
     community = 1,
     group = 2,
+    blinded_one_to_one = 3,
     legacy_group = 100,
 };
 
@@ -97,10 +98,6 @@ struct one_to_one_conversation : base_conversation {
 };
 
 struct community_conversation : base_conversation {
-    bool read;
-    bool write;
-    bool upload;
-
     community_conversation(
         std::string id,
         conversation_type type,
@@ -110,10 +107,7 @@ struct community_conversation : base_conversation {
         int64_t last_active = 0,
         int priority = 0,
         notify_mode notifications = notify_mode::defaulted,
-        int64_t mute_until = 0,
-        bool read = true,
-        bool write = true,
-        bool upload = true) : read{read}, write{write}, upload{upload}, base_conversation{id, type, name, pic, first_active, last_active, priority, notifications, mute_until} {}
+        int64_t mute_until = 0) : base_conversation{id, type, name, pic, first_active, last_active, priority, notifications, mute_until} {}
 };
 
 struct group_conversation : base_conversation {
@@ -145,7 +139,29 @@ struct legacy_group_conversation : base_conversation {
         int64_t mute_until = 0) : base_conversation{id, type, name, pic, first_active, last_active, priority, notifications, mute_until} {}
 };
 
-using conversation = std::variant<one_to_one_conversation, community_conversation, group_conversation, legacy_group_conversation>;
+struct blinded_one_to_one_conversation : base_conversation {
+    std::string community_base_url;
+    std::string community_public_key;
+    bool legacy_blinding;
+
+    blinded_one_to_one_conversation(
+        std::string id,
+        conversation_type type,
+        std::string name,
+        display_pic pic,
+        std::string community_base_url,
+        std::string community_public_key,
+        bool legacy_blinding,
+        int64_t first_active = 0,
+        int64_t last_active = 0,
+        int priority = 0,
+        notify_mode notifications = notify_mode::defaulted,
+        int64_t mute_until = 0,
+        bool is_message_request = false,
+        bool is_blocked = false) : community_base_url{community_base_url}, community_public_key{community_public_key}, legacy_blinding{legacy_blinding}, base_conversation{id, type, name, pic, first_active, last_active, priority, notifications, mute_until} {}
+};
+
+using conversation = std::variant<one_to_one_conversation, community_conversation, group_conversation, legacy_group_conversation, blinded_one_to_one_conversation>;
 
 class GroupConfigs {
   public:

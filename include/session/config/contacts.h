@@ -38,10 +38,14 @@ typedef struct contacts_contact {
 
 typedef struct contacts_blinded_contact {
     char session_id[67];  // in hex; 66 hex chars + null terminator.
+    char base_url[268];  // null-terminated (max length 267), normalized (i.e. always lower-case,
+                         // only has port if non-default, has trailing / removed)
+    unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
 
     char name[101]; // This will be a 0-length strings when unset
     user_profile_pic profile_pic;
 
+    bool legacy_blinding;
     int64_t created;  // unix timestamp (seconds)
 
 } contacts_blinded_contact;
@@ -52,6 +56,11 @@ typedef struct contacts_deleted_contact {
     int64_t deleted;  // unix timestamp (seconds)
 
 } contacts_deleted_contact;
+
+typedef struct contacts_blinded_contact_list {
+    contacts_blinded_contact** value;  // array of blinded contacts
+    size_t len;    // length of `value`
+} contacts_blinded_contact_list;
 
 /// API: contacts/contacts_init
 ///
@@ -224,6 +233,45 @@ LIBSESSION_EXPORT bool contacts_erase(config_object* conf, const char* session_i
 /// Outputs:
 /// - `size_t` -- number of contacts
 LIBSESSION_EXPORT size_t contacts_size(const config_object* conf);
+
+// TODO: Need to flag that the caller needs to free this once they are done with it
+LIBSESSION_EXPORT contacts_blinded_contact_list* contacts_blinded_contacts(const config_object* conf);
+
+/// API: contacts/contacts_get_blinded_contact
+///
+/// Fills `blinded_contact` with the blinded contact info given a blinded session ID (specified as a null-terminated hex
+/// string), if the blinded contact exists, and returns true.  If the contact does not exist then `blinded_contact`
+/// is left unchanged and false is returned.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL contacts_get_blinded_contact(
+///     [in]    config_object*              conf,
+///     [out]   contacts_blinded_contact*   blinded_contact,
+///     [in]    const char*                 blinded_session_id,
+///     [in]    bool                        legacy_blinding
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `blinded_contact` -- [out] the blinded contact info data
+/// - `blinded_session_id` -- [in] null terminated hex string
+/// - `legacy_blinding` -- [in] null terminated hex string
+///
+/// Output:
+/// - `bool` -- Returns true if blinded contact exsts
+LIBSESSION_EXPORT bool contacts_get_blinded_contact(
+    config_object* conf,
+    contacts_blinded_contact* blinded_contact,
+    const char* blinded_session_id,
+    bool legacy_blinding) LIBSESSION_WARN_UNUSED;
+
+LIBSESSION_EXPORT bool contacts_set_blinded_contact(config_object* conf, const contacts_blinded_contact* bc);
+LIBSESSION_EXPORT bool contacts_erase_blinded_contact(config_object* conf, const char* base_url, const char* blinded_id, bool legacy_blinding);
+
+// TODO: Need to flag that the caller needs to free this once they are done with it
+LIBSESSION_EXPORT bool last_deleted_contacts(const config_object* conf, const contacts_deleted_contact** contacts, size_t* contacts_len);
 
 typedef struct contacts_iterator {
     void* _internals;

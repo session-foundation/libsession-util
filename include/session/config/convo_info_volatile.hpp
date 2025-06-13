@@ -16,6 +16,7 @@ struct convo_info_volatile_1to1;
 struct convo_info_volatile_community;
 struct convo_info_volatile_group;
 struct convo_info_volatile_legacy_group;
+struct convo_info_volatile_blinded_1to1;
 }
 
 namespace session::config {
@@ -59,6 +60,14 @@ class val_loader;
 ///         but will be 0 if no messages are read.
 ///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
+///
+/// b - outgoing blinded message request conversations.  The key is the blinded Session ID without the prefix.  Values
+///     are dicts with keys:
+///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,
+///         but will be 0 if no messages are read.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
+///     u - will be present and set to 1 if this conversation is specifically marked unread.
+///     y - flag indicating whether the blinded message request is using legac"y" blinding.
 
 namespace convo {
 
@@ -154,7 +163,33 @@ namespace convo {
         void into(convo_info_volatile_legacy_group& c) const;            // Into c struct
     };
 
-    using any = std::variant<one_to_one, community, group, legacy_group>;
+    struct blinded_one_to_one : base {
+        std::string blinded_session_id;  // in hex
+        bool legacy_blinding;
+
+        /// API: convo_info_volatile/blinded_one_to_one::blinded_one_to_one
+        ///
+        /// Constructs an empty blinded_one_to_one from a blinded_session_id.  Session ID can be either bytes (33)
+        /// or hex (66).
+        ///
+        /// Declaration:
+        /// ```cpp
+        /// explicit blinded_one_to_one(std::string&& blinded_session_id);
+        /// explicit blinded_one_to_one(std::string_view blinded_session_id);
+        /// ```
+        ///
+        /// Inputs:
+        /// - `blinded_session_id` -- Hex string of the blinded session id
+        /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
+        explicit blinded_one_to_one(std::string&& blinded_session_id, bool legacy_blinding);
+        explicit blinded_one_to_one(std::string_view blinded_session_id, bool legacy_blinding);
+
+        // Internal ctor/method for C API implementations:
+        blinded_one_to_one(const struct convo_info_volatile_blinded_1to1& c);  // From c struct
+        void into(convo_info_volatile_blinded_1to1& c) const;          // Into c struct
+    };
+
+    using any = std::variant<one_to_one, community, group, legacy_group, blinded_one_to_one>;
 }  // namespace convo
 
 class ConvoInfoVolatile : public ConfigBase {
@@ -264,6 +299,19 @@ class ConvoInfoVolatile : public ConfigBase {
     /// - `std::optional<convo::legacy_group>` - Returns a group
     std::optional<convo::legacy_group> get_legacy_group(std::string_view pubkey_hex) const;
 
+    /// API: convo_info_volatile/ConvoInfoVolatile::get_blinded_1to1
+    ///
+    /// Looks up and returns a blinded contact by blinded session ID (hex).  Returns nullopt if the blinded session ID was
+    /// not found, otherwise returns a filled out `convo::blinded_one_to_one`.
+    ///
+    /// Inputs:
+    /// - `blinded_session_id` -- Hex string of the blinded Session ID
+    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
+    ///
+    /// Outputs:
+    /// - `std::optional<convo::blinded_one_to_one>` - Returns a contact
+    std::optional<convo::blinded_one_to_one> get_blinded_1to1(std::string_view blinded_session_id, bool legacy_blinding) const;
+
     /// API: convo_info_volatile/ConvoInfoVolatile::get_or_construct_1to1
     ///
     /// These are the same as the above `get` methods (without "_or_construct" in the name), except
@@ -351,6 +399,20 @@ class ConvoInfoVolatile : public ConfigBase {
     /// - `convo::community` - Returns a group
     convo::community get_or_construct_community(std::string_view full_url) const;
 
+    /// API: convo_info_volatile/ConvoInfoVolatile::get_or_construct_blinded_1to1
+    ///
+    /// These are the same as the above `get` methods (without "_or_construct" in the name), except
+    /// that when the conversation doesn't exist a new one is created, prefilled with the
+    /// pubkey/url/etc.
+    ///
+    /// Inputs:
+    /// - `blinded_session_id` -- Hex string blinded Session ID
+    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
+    ///
+    /// Outputs:
+    /// - `convo::blinded_one_to_one` - Returns a blinded contact
+    convo::blinded_one_to_one get_or_construct_blinded_1to1(std::string_view blinded_session_id, bool legacy_blinding) const;
+
     /// API: convo_info_volatile/ConvoInfoVolatile::set
     ///
     /// Inserts or replaces existing conversation info.  For example, to update a 1-to-1
@@ -368,6 +430,7 @@ class ConvoInfoVolatile : public ConfigBase {
     /// void set(const convo::group& c);
     /// void set(const convo::legacy_group& c);
     /// void set(const convo::community& c);
+    /// void set(const convo::blinded_one_to_one& c);
     /// void set(const convo::any& c);  // Variant which can be any of the above
     /// ```
     ///
@@ -377,6 +440,7 @@ class ConvoInfoVolatile : public ConfigBase {
     void set(const convo::legacy_group& c);
     void set(const convo::group& c);
     void set(const convo::community& c);
+    void set(const convo::blinded_one_to_one& c);
     void set(const convo::any& c);  // Variant which can be any of the above
 
   protected:
@@ -435,6 +499,18 @@ class ConvoInfoVolatile : public ConfigBase {
     /// - `bool` - Returns true if found and removed, otherwise false
     bool erase_legacy_group(std::string_view pubkey_hex);
 
+    /// API: convo_info_volatile/ConvoInfoVolatile::erase_blinded_1to1
+    ///
+    /// Removes a blinded one-to-one conversation.  Returns true if found and removed, false if not present.
+    ///
+    /// Inputs:
+    /// - `pubkey` -- hex blinded session id
+    /// - `legacy_blinding` -- flag indicating whether this blinded contact is using legacy blinding
+    ///
+    /// Outputs:
+    /// - `bool` - Returns true if found and removed, otherwise false
+    bool erase_blinded_1to1(std::string_view pubkey, bool legacy_blinding);
+
     /// API: convo_info_volatile/ConvoInfoVolatile::erase
     ///
     /// Removes a conversation taking the convo::whatever record (rather than the pubkey/url).
@@ -444,6 +520,7 @@ class ConvoInfoVolatile : public ConfigBase {
     /// bool erase(const convo::one_to_one& c);
     /// bool erase(const convo::community& c);
     /// bool erase(const convo::legacy_group& c);
+    /// bool erase(const convo::blinded_one_to_one& c);
     /// bool erase(const convo::any& c);  // Variant of any of them
     /// ```
     ///
@@ -456,6 +533,7 @@ class ConvoInfoVolatile : public ConfigBase {
     bool erase(const convo::community& c);
     bool erase(const convo::group& c);
     bool erase(const convo::legacy_group& c);
+    bool erase(const convo::blinded_one_to_one& c);
 
     bool erase(const convo::any& c);  // Variant of any of them
 
@@ -472,6 +550,7 @@ class ConvoInfoVolatile : public ConfigBase {
     /// size_t size_communities() const;
     /// size_t size_groups() const;
     /// size_t size_legacy_groups() const;
+    /// size_t size_blinded_1to1() const;
     /// ```
     ///
     /// Inputs: None
@@ -486,6 +565,7 @@ class ConvoInfoVolatile : public ConfigBase {
     size_t size_communities() const;
     size_t size_groups() const;
     size_t size_legacy_groups() const;
+    size_t size_blinded_1to1() const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::empty
     ///
@@ -515,6 +595,8 @@ class ConvoInfoVolatile : public ConfigBase {
     ///             // use cg->id, cg->last_read
     ///         } else if (const auto* lcg = std::get_if<convo::legacy_group>(&convo)) {
     ///             // use lcg->id, lcg->last_read
+    ///         } else if (const auto* bc = std::get_if<convo::blinded_one_to_one>(&convo)) {
+    ///             // use bc->id, bc->last_read
     ///         }
     ///     }
     /// ```
@@ -536,6 +618,7 @@ class ConvoInfoVolatile : public ConfigBase {
     /// subtype_iterator<convo::community> begin_communities() const;
     /// subtype_iterator<convo::group> begin_groups() const;
     /// subtype_iterator<convo::legacy_group> begin_legacy_groups() const;
+    /// subtype_iterator<convo::blinded_one_to_one> begin_blinded_one_to_one() const;
     /// ```
     ///
     /// Inputs: None
@@ -563,10 +646,11 @@ class ConvoInfoVolatile : public ConfigBase {
     subtype_iterator<convo::community> begin_communities() const { return {data}; }
     subtype_iterator<convo::group> begin_groups() const { return {data}; }
     subtype_iterator<convo::legacy_group> begin_legacy_groups() const { return {data}; }
+    subtype_iterator<convo::blinded_one_to_one> begin_blinded_1to1() const { return {data}; }
 
     using iterator_category = std::input_iterator_tag;
     using value_type =
-            std::variant<convo::one_to_one, convo::community, convo::group, convo::legacy_group>;
+            std::variant<convo::one_to_one, convo::community, convo::group, convo::legacy_group, convo::blinded_one_to_one>;
     using reference = value_type&;
     using pointer = value_type*;
     using difference_type = std::ptrdiff_t;
@@ -575,7 +659,7 @@ class ConvoInfoVolatile : public ConfigBase {
       protected:
         std::shared_ptr<convo::any> _val;
         std::optional<dict::const_iterator> _it_11, _end_11, _it_group, _end_group, _it_lgroup,
-                _end_lgroup;
+                _end_lgroup, _it_b11, _end_b11;
         std::optional<comm_iterator_helper> _it_comm;
         void _load_val();
         iterator() = default;  // Constructs an end tombstone
@@ -584,8 +668,9 @@ class ConvoInfoVolatile : public ConfigBase {
                 bool oneto1,
                 bool communities,
                 bool groups,
-                bool legacy_groups);
-        explicit iterator(const DictFieldRoot& data) : iterator(data, true, true, true, true) {}
+                bool legacy_groups,
+                bool blinded_1to1);
+        explicit iterator(const DictFieldRoot& data) : iterator(data, true, true, true, true, true) {}
         friend class ConvoInfoVolatile;
 
       public:
@@ -611,7 +696,8 @@ class ConvoInfoVolatile : public ConfigBase {
                         std::is_same_v<convo::one_to_one, ConvoType>,
                         std::is_same_v<convo::community, ConvoType>,
                         std::is_same_v<convo::group, ConvoType>,
-                        std::is_same_v<convo::legacy_group, ConvoType>) {}
+                        std::is_same_v<convo::legacy_group, ConvoType>,
+                        std::is_same_v<convo::blinded_one_to_one, ConvoType>) {}
         friend class ConvoInfoVolatile;
 
       public:

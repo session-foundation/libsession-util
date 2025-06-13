@@ -7,12 +7,15 @@
 #include <session/config.hpp>
 
 #include "base.hpp"
+#include "community.hpp"
 #include "expiring.hpp"
 #include "namespaces.hpp"
 #include "notify.hpp"
 #include "profile_pic.hpp"
 
 extern "C" struct contacts_contact;
+extern "C" struct contacts_blinded_contact;
+extern "C" struct contacts_deleted_contact;
 
 using namespace std::literals;
 
@@ -44,8 +47,23 @@ namespace session::config {
 ///     E - Disappearing message timer, in seconds.  Omitted when `e` is omitted.
 ///     j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
 ///         equivalent "j"oined field). Omitted if 0.
+///
+/// b - dict of blinded contacts.  This is a nested dict where the outkey keys are the BASE_URL of the community the blinded contact originated from and the outer value is a dict containing:
+///     `#` - the 32-byte server pubkey
+///     `R` - dict of blinded contacts from the server; each key is the blinded session pubkey without the prefix ("R" to match user_groups equivalent "R"oom field, and to make use of existing community iterators, binary, 32 bytes), value is a dict containing keys:
+///       containing keys:
+///
+///       n - contact name (string).  This is always serialized, even if empty (but empty indicates
+///           no name) so that we always have at least one key set (required to keep the dict value
+///           alive as empty dicts get pruned).
+///       p - profile url (string)
+///       q - profile decryption key (binary)
+///       j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
+///           equivalent "j"oined field). Omitted if 0.
+///       y - flag indicating whether the blinded message request is using legac"y" blinding.
+///
+/// d - dict of deleted contacts; within this dict each key is the session pubkey (binary, 33 bytes) and value is a unix timestamp (seconds) indicating when that contact was last deleted.
 
-/// Struct containing contact info.
 struct contact_info {
     static constexpr size_t MAX_NAME_LENGTH = 100;
 
@@ -53,6 +71,7 @@ struct contact_info {
     std::string name;
     std::string nickname;
     profile_pic profile_picture;
+    
     bool approved = false;
     bool approved_me = false;
     bool blocked = false;
@@ -72,7 +91,7 @@ struct contact_info {
 
     // Internal ctor/method for C API implementations:
     contact_info(const struct contacts_contact& c);  // From c struct
-                                                     //
+
     /// API: contacts/contact_info::into
     ///
     /// converts the contact info into a c struct
@@ -100,12 +119,17 @@ struct contact_info {
 struct blinded_contact_info : community {
     using community::community;
 
-    const std::string& session_id() const { return room(); }  // in hex
+    const std::string session_id() const;  // in hex
     std::string name;
     profile_pic profile_picture;
+    bool legacy_blinding;
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
-    explicit blinded_contact_info(std::string sid);
+    explicit blinded_contact_info(
+        std::string_view base_url,
+        std::string_view blinded_id,
+        std::span<const unsigned char> pubkey,
+        bool legacy_blinding);
 
     // Internal ctor/method for C API implementations:
     blinded_contact_info(const struct contacts_blinded_contact& c);  // From c struct
@@ -373,8 +397,34 @@ class Contacts : public ConfigBase {
     /// - `bool` - Returns true if the contact list is empty
     bool empty() const { return size() == 0; }
 
+    protected:
+        // Drills into the nested dicts to access open group details
+        DictFieldProxy blinded_contact_field(
+                const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey = nullptr) const;
+    
+    public:
     std::vector<blinded_contact_info> blinded_contacts() const;
-    std::vector<std::pair<std::string, uint64_t>> last_deleted_contacts() const;
+
+
+
+    /// API: contacts/Contacts::get_blinded
+    ///
+    /// Looks up and returns a blinded contact by blinded session ID (hex).  Returns nullopt if the blinded session ID was
+    /// not found, otherwise returns a filled out `blinded_contact_info`.
+    ///
+    /// Inputs:
+    /// - `pubkey_hex` -- hex string of the session id
+    /// - `legacy_blinding` -- flag indicating whether the pubkey is using legacy blinding
+    ///
+    /// Outputs:
+    /// - `std::optional<blinded_contact_info>` - Returns nullopt if blinded session ID was not found, otherwise a
+    /// filled out blinded_contact_info
+    std::optional<blinded_contact_info> get_blinded(std::string_view pubkey_hex, bool legacy_blinding) const;
+
+    bool set_blinded_contact(const blinded_contact_info& bc);
+    bool erase_blinded_contact(std::string_view base_url_, std::string_view blinded_id, bool legacy_blinding);
+
+    std::vector<std::pair<std::string, int64_t>> last_deleted_contacts() const;
 
     bool accepts_protobuf() const override { return true; }
 
