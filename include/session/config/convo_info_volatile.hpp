@@ -33,7 +33,9 @@ class val_loader;
 ///     Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
-///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///     included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///     conversation is specifically marked unread.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
 /// o - community conversations.  This is a nested dict where the outer keys are the BASE_URL of the
@@ -43,14 +45,18 @@ class val_loader;
 ///       containing keys:
 ///       r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///           included, but will be 0 if no messages are read.
-///       l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
+///       l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///       included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///       conversation is specifically marked unread.
 ///       u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
 /// g - group conversations (aka new, non-legacy closed groups).  The key is the group identifier
 ///     (beginning with 03).  Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
-///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///     included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///     conversation is specifically marked unread.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
 /// C - legacy group conversations (aka closed groups).  The key is the group identifier (which
@@ -58,16 +64,20 @@ class val_loader;
 ///     are dicts with keys:
 ///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,
 ///         but will be 0 if no messages are read.
-///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///     included, but will be 0 for empty conversations. u - will be present and set to 1 if this
+///     conversation is specifically marked unread.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
-/// b - outgoing blinded message request conversations.  The key is the blinded Session ID without the prefix.  Values
+/// b - outgoing blinded message request conversations.  The key is the blinded Session ID without
+/// the prefix.  Values
 ///     are dicts with keys:
 ///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,
 ///         but will be 0 if no messages are read.
-///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always included, but will be 0 if the user hasn't properly interacted with the covnersation.
-///     u - will be present and set to 1 if this conversation is specifically marked unread.
-///     y - flag indicating whether the blinded message request is using legac"y" blinding.
+///     l - the unix timestamp (in integer milliseconds) the conversation was last active.  Always
+///     included, but will be 0 if the user hasn't properly interacted with the covnersation. u -
+///     will be present and set to 1 if this conversation is specifically marked unread. y - flag
+///     indicating whether the blinded message request is using legac"y" blinding.
 
 namespace convo {
 
@@ -169,8 +179,8 @@ namespace convo {
 
         /// API: convo_info_volatile/blinded_one_to_one::blinded_one_to_one
         ///
-        /// Constructs an empty blinded_one_to_one from a blinded_session_id.  Session ID can be either bytes (33)
-        /// or hex (66).
+        /// Constructs an empty blinded_one_to_one from a blinded_session_id.  Session ID can be
+        /// either bytes (33) or hex (66).
         ///
         /// Declaration:
         /// ```cpp
@@ -180,13 +190,14 @@ namespace convo {
         ///
         /// Inputs:
         /// - `blinded_session_id` -- Hex string of the blinded session id
-        /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
+        /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy
+        /// blinding
         explicit blinded_one_to_one(std::string&& blinded_session_id, bool legacy_blinding);
         explicit blinded_one_to_one(std::string_view blinded_session_id, bool legacy_blinding);
 
         // Internal ctor/method for C API implementations:
         blinded_one_to_one(const struct convo_info_volatile_blinded_1to1& c);  // From c struct
-        void into(convo_info_volatile_blinded_1to1& c) const;          // Into c struct
+        void into(convo_info_volatile_blinded_1to1& c) const;                  // Into c struct
     };
 
     using any = std::variant<one_to_one, community, group, legacy_group, blinded_one_to_one>;
@@ -301,16 +312,19 @@ class ConvoInfoVolatile : public ConfigBase {
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_blinded_1to1
     ///
-    /// Looks up and returns a blinded contact by blinded session ID (hex).  Returns nullopt if the blinded session ID was
-    /// not found, otherwise returns a filled out `convo::blinded_one_to_one`.
+    /// Looks up and returns a blinded contact by blinded session ID (hex).  Returns nullopt if the
+    /// blinded session ID was not found, otherwise returns a filled out
+    /// `convo::blinded_one_to_one`.
     ///
     /// Inputs:
     /// - `blinded_session_id` -- Hex string of the blinded Session ID
-    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
+    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy
+    /// blinding
     ///
     /// Outputs:
     /// - `std::optional<convo::blinded_one_to_one>` - Returns a contact
-    std::optional<convo::blinded_one_to_one> get_blinded_1to1(std::string_view blinded_session_id, bool legacy_blinding) const;
+    std::optional<convo::blinded_one_to_one> get_blinded_1to1(
+            std::string_view blinded_session_id, bool legacy_blinding) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_or_construct_1to1
     ///
@@ -407,11 +421,13 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `blinded_session_id` -- Hex string blinded Session ID
-    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
+    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy
+    /// blinding
     ///
     /// Outputs:
     /// - `convo::blinded_one_to_one` - Returns a blinded contact
-    convo::blinded_one_to_one get_or_construct_blinded_1to1(std::string_view blinded_session_id, bool legacy_blinding) const;
+    convo::blinded_one_to_one get_or_construct_blinded_1to1(
+            std::string_view blinded_session_id, bool legacy_blinding) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::set
     ///
@@ -501,7 +517,8 @@ class ConvoInfoVolatile : public ConfigBase {
 
     /// API: convo_info_volatile/ConvoInfoVolatile::erase_blinded_1to1
     ///
-    /// Removes a blinded one-to-one conversation.  Returns true if found and removed, false if not present.
+    /// Removes a blinded one-to-one conversation.  Returns true if found and removed, false if not
+    /// present.
     ///
     /// Inputs:
     /// - `pubkey` -- hex blinded session id
@@ -649,8 +666,12 @@ class ConvoInfoVolatile : public ConfigBase {
     subtype_iterator<convo::blinded_one_to_one> begin_blinded_1to1() const { return {data}; }
 
     using iterator_category = std::input_iterator_tag;
-    using value_type =
-            std::variant<convo::one_to_one, convo::community, convo::group, convo::legacy_group, convo::blinded_one_to_one>;
+    using value_type = std::variant<
+            convo::one_to_one,
+            convo::community,
+            convo::group,
+            convo::legacy_group,
+            convo::blinded_one_to_one>;
     using reference = value_type&;
     using pointer = value_type*;
     using difference_type = std::ptrdiff_t;
@@ -670,7 +691,8 @@ class ConvoInfoVolatile : public ConfigBase {
                 bool groups,
                 bool legacy_groups,
                 bool blinded_1to1);
-        explicit iterator(const DictFieldRoot& data) : iterator(data, true, true, true, true, true) {}
+        explicit iterator(const DictFieldRoot& data) :
+                iterator(data, true, true, true, true, true) {}
         friend class ConvoInfoVolatile;
 
       public:

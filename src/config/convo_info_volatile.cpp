@@ -86,14 +86,18 @@ namespace convo {
         c.unread = unread;
     }
 
-    blinded_one_to_one::blinded_one_to_one(std::string&& sid, bool legacy_blinding) : blinded_session_id{std::move(sid)}, legacy_blinding{legacy_blinding} {
+    blinded_one_to_one::blinded_one_to_one(std::string&& sid, bool legacy_blinding) :
+            blinded_session_id{std::move(sid)}, legacy_blinding{legacy_blinding} {
         check_session_id(blinded_session_id, legacy_blinding ? "15" : "25");
     }
-    blinded_one_to_one::blinded_one_to_one(std::string_view sid, bool legacy_blinding) : blinded_session_id{sid}, legacy_blinding{legacy_blinding} {
+    blinded_one_to_one::blinded_one_to_one(std::string_view sid, bool legacy_blinding) :
+            blinded_session_id{sid}, legacy_blinding{legacy_blinding} {
         check_session_id(blinded_session_id, legacy_blinding ? "15" : "25");
     }
     blinded_one_to_one::blinded_one_to_one(const convo_info_volatile_blinded_1to1& c) :
-            base{c.last_read, c.last_active, c.unread}, blinded_session_id{c.blinded_session_id, 66}, legacy_blinding{c.legacy_blinding} {}
+            base{c.last_read, c.last_active, c.unread},
+            blinded_session_id{c.blinded_session_id, 66},
+            legacy_blinding{c.legacy_blinding} {}
 
     void blinded_one_to_one::into(convo_info_volatile_blinded_1to1& c) const {
         std::memcpy(c.blinded_session_id, blinded_session_id.data(), 67);
@@ -235,19 +239,22 @@ convo::legacy_group ConvoInfoVolatile::get_or_construct_legacy_group(
     return convo::legacy_group{std::string{pubkey_hex}};
 }
 
-std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(std::string_view pubkey_hex, bool legacy_blinding) const {
+std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(
+        std::string_view pubkey_hex, bool legacy_blinding) const {
     std::string pubkey = session_id_to_bytes(pubkey_hex, legacy_blinding ? "15" : "25");
 
     auto* info_dict = data["b"][pubkey].dict();
     if (!info_dict)
         return std::nullopt;
 
-    auto result = std::make_optional<convo::blinded_one_to_one>(std::string{pubkey_hex}, legacy_blinding);
+    auto result =
+            std::make_optional<convo::blinded_one_to_one>(std::string{pubkey_hex}, legacy_blinding);
     result->load(*info_dict);
     return result;
 }
 
-convo::blinded_one_to_one ConvoInfoVolatile::get_or_construct_blinded_1to1(std::string_view pubkey_hex, bool legacy_blinding) const {
+convo::blinded_one_to_one ConvoInfoVolatile::get_or_construct_blinded_1to1(
+        std::string_view pubkey_hex, bool legacy_blinding) const {
     if (auto maybe = get_blinded_1to1(pubkey_hex, legacy_blinding))
         return *std::move(maybe);
 
@@ -339,7 +346,8 @@ bool ConvoInfoVolatile::erase_group(std::string_view id) {
 bool ConvoInfoVolatile::erase_legacy_group(std::string_view id) {
     return erase(convo::legacy_group{id});
 }
-bool ConvoInfoVolatile::erase_blinded_1to1(std::string_view blinded_session_id, bool legacy_blinding) {
+bool ConvoInfoVolatile::erase_blinded_1to1(
+        std::string_view blinded_session_id, bool legacy_blinding) {
     return erase(convo::blinded_one_to_one{blinded_session_id, legacy_blinding});
 }
 
@@ -384,11 +392,17 @@ size_t ConvoInfoVolatile::size_blinded_1to1() const {
 }
 
 size_t ConvoInfoVolatile::size() const {
-    return size_1to1() + size_communities() + size_legacy_groups() + size_groups() + size_blinded_1to1();
+    return size_1to1() + size_communities() + size_legacy_groups() + size_groups() +
+           size_blinded_1to1();
 }
 
 ConvoInfoVolatile::iterator::iterator(
-        const DictFieldRoot& data, bool oneto1, bool communities, bool groups, bool legacy_groups, bool blinded_1to1) {
+        const DictFieldRoot& data,
+        bool oneto1,
+        bool communities,
+        bool groups,
+        bool legacy_groups,
+        bool blinded_1to1) {
     if (oneto1)
         if (auto* d = data["1"].dict()) {
             _it_11 = d->begin();
@@ -436,7 +450,8 @@ class val_loader {
             if (k.size() == 33 && (k[0] == prefix || (legacy_prefix && k[0] == *legacy_prefix))) {
                 if (auto* info_dict = std::get_if<dict>(&v)) {
                     if constexpr (std::is_same_v<ConvoType, convo::blinded_one_to_one>)
-                        val = std::make_shared<convo::any>(ConvoType{oxenc::to_hex(k), (legacy_prefix && k[0] == *legacy_prefix)});
+                        val = std::make_shared<convo::any>(ConvoType{
+                                oxenc::to_hex(k), (legacy_prefix && k[0] == *legacy_prefix)});
                     else
                         val = std::make_shared<convo::any>(ConvoType{oxenc::to_hex(k)});
                     std::get<ConvoType>(*val).load(*info_dict);
@@ -636,11 +651,15 @@ LIBSESSION_C_API bool convo_info_volatile_get_or_construct_legacy_group(
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_blinded_1to1(
-        config_object* conf, convo_info_volatile_blinded_1to1* convo, const char* blinded_session_id, bool legacy_blinding) {
+        config_object* conf,
+        convo_info_volatile_blinded_1to1* convo,
+        const char* blinded_session_id,
+        bool legacy_blinding) {
     return wrap_exceptions(
             conf,
             [&] {
-                if (auto c = unbox<ConvoInfoVolatile>(conf)->get_blinded_1to1(blinded_session_id, legacy_blinding)) {
+                if (auto c = unbox<ConvoInfoVolatile>(conf)->get_blinded_1to1(
+                            blinded_session_id, legacy_blinding)) {
                     c->into(*convo);
                     return true;
                 }
@@ -650,11 +669,16 @@ LIBSESSION_C_API bool convo_info_volatile_get_blinded_1to1(
 }
 
 LIBSESSION_C_API bool convo_info_volatile_get_or_construct_blinded_1to1(
-        config_object* conf, convo_info_volatile_blinded_1to1* convo, const char* blinded_session_id, bool legacy_blinding) {
+        config_object* conf,
+        convo_info_volatile_blinded_1to1* convo,
+        const char* blinded_session_id,
+        bool legacy_blinding) {
     return wrap_exceptions(
             conf,
             [&] {
-                unbox<ConvoInfoVolatile>(conf)->get_or_construct_blinded_1to1(blinded_session_id, legacy_blinding).into(*convo);
+                unbox<ConvoInfoVolatile>(conf)
+                        ->get_or_construct_blinded_1to1(blinded_session_id, legacy_blinding)
+                        .into(*convo);
                 return true;
             },
             false);
@@ -711,6 +735,17 @@ LIBSESSION_C_API bool convo_info_volatile_set_blinded_1to1(
             false);
 }
 
+LIBSESSION_C_API bool convo_info_volatile_set_blinded_1to1(
+        config_object* conf, const convo_info_volatile_blinded_1to1* convo) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<ConvoInfoVolatile>(conf)->set(convo::blinded_one_to_one{*convo});
+                return true;
+            },
+            false);
+}
+
 LIBSESSION_C_API bool convo_info_volatile_erase_1to1(config_object* conf, const char* session_id) {
     return wrap_exceptions(
             conf, [&] { return unbox<ConvoInfoVolatile>(conf)->erase_1to1(session_id); }, false);
@@ -733,9 +768,15 @@ LIBSESSION_C_API bool convo_info_volatile_erase_legacy_group(
             [&] { return unbox<ConvoInfoVolatile>(conf)->erase_legacy_group(group_id); },
             false);
 }
-LIBSESSION_C_API bool convo_info_volatile_erase_blinded_1to1(config_object* conf, const char* blinded_session_id, bool legacy_blinding) {
+LIBSESSION_C_API bool convo_info_volatile_erase_blinded_1to1(
+        config_object* conf, const char* blinded_session_id, bool legacy_blinding) {
     return wrap_exceptions(
-            conf, [&] { return unbox<ConvoInfoVolatile>(conf)->erase_blinded_1to1(blinded_session_id, legacy_blinding); }, false);
+            conf,
+            [&] {
+                return unbox<ConvoInfoVolatile>(conf)->erase_blinded_1to1(
+                        blinded_session_id, legacy_blinding);
+            },
+            false);
 }
 
 LIBSESSION_C_API size_t convo_info_volatile_size(const config_object* conf) {
@@ -794,7 +835,8 @@ LIBSESSION_C_API convo_info_volatile_iterator* convo_info_volatile_iterator_new_
 LIBSESSION_C_API convo_info_volatile_iterator* convo_info_volatile_iterator_new_blinded_1to1(
         const config_object* conf) {
     auto* it = new convo_info_volatile_iterator{};
-    it->_internals = new ConvoInfoVolatile::iterator{unbox<ConvoInfoVolatile>(conf)->begin_blinded_1to1()};
+    it->_internals =
+            new ConvoInfoVolatile::iterator{unbox<ConvoInfoVolatile>(conf)->begin_blinded_1to1()};
     return it;
 }
 

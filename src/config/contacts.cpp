@@ -7,6 +7,8 @@
 #include <oxen/log/format.hpp>
 #include <sodium/crypto_generichash_blake2b.h>
 
+#include <oxen/log.hpp>
+#include <oxen/log/format.hpp>
 #include <variant>
 
 #include "internal.hpp"
@@ -162,10 +164,12 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
 }
 
 blinded_contact_info::blinded_contact_info(
-    std::string_view base_url,
-    std::string_view blinded_id,
-    std::span<const unsigned char> pubkey,
-    bool legacy_blinding) : legacy_blinding{legacy_blinding}, community(std::move(base_url), blinded_id.substr(2), std::move(pubkey)) {
+        std::string_view base_url,
+        std::string_view blinded_id,
+        std::span<const unsigned char> pubkey,
+        bool legacy_blinding) :
+        legacy_blinding{legacy_blinding},
+        community(std::move(base_url), blinded_id.substr(2), std::move(pubkey)) {
     check_session_id(blinded_id, legacy_blinding ? "15" : "25");
 }
 
@@ -213,7 +217,8 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     c.created = to_epoch_seconds(created);
 }
 
-blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) : community(c.base_url, {c.session_id + 2, 64}, c.pubkey) {
+blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) :
+        community(c.base_url, {c.session_id + 2, 64}, c.pubkey) {
     assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
     name = c.name;
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
@@ -352,8 +357,14 @@ bool Contacts::erase(std::string_view session_id) {
     return ret;
 }
 
+size_t Contacts::size() const {
+    if (auto* c = data["c"].dict())
+        return c->size();
+    return 0;
+}
+
 ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
-    const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey) const {
+        const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey) const {
     auto record = data["b"][bc.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
@@ -366,7 +377,8 @@ ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
 
 using any_blinded_contact = std::variant<blinded_contact_info>;
 
-std::optional<blinded_contact_info> Contacts::get_blinded(std::string_view pubkey_hex, bool legacy_blinding) const {
+std::optional<blinded_contact_info> Contacts::get_blinded(
+        std::string_view pubkey_hex, bool legacy_blinding) const {
     check_session_id(pubkey_hex, legacy_blinding ? "15" : "25");
 
     if (auto* b = data["b"].dict()) {
@@ -374,8 +386,9 @@ std::optional<blinded_contact_info> Contacts::get_blinded(std::string_view pubke
         std::shared_ptr<any_blinded_contact> val;
 
         while (!comm.done()) {
-            if (comm.load<blinded_contact_info>(val))   // TODO: This is untested
-                if (auto* ptr = std::get_if<blinded_contact_info>(val.get()); ptr && ptr->session_id() == pubkey_hex)
+            if (comm.load<blinded_contact_info>(val))  // TODO: This is untested
+                if (auto* ptr = std::get_if<blinded_contact_info>(val.get());
+                    ptr && ptr->session_id() == pubkey_hex)
                     return *ptr;
             comm.advance();
         }
@@ -383,6 +396,7 @@ std::optional<blinded_contact_info> Contacts::get_blinded(std::string_view pubke
 
     return std::nullopt;
 }
+
 std::vector<blinded_contact_info> Contacts::blinded_contacts() const {
     std::vector<blinded_contact_info> ret;
 
@@ -397,7 +411,7 @@ std::vector<blinded_contact_info> Contacts::blinded_contacts() const {
             comm.advance();
         }
     }
-    
+
     return ret;
 }
 
@@ -420,9 +434,10 @@ bool Contacts::set_blinded_contact(const blinded_contact_info& bc) {
     set_positive_int(info["j"], to_epoch_seconds(bc.created));
 }
 
-bool Contacts::erase_blinded_contact(std::string_view base_url_, std::string_view blinded_id, bool legacy_blinding) {
+bool Contacts::erase_blinded_contact(
+        std::string_view base_url_, std::string_view blinded_id, bool legacy_blinding) {
     std::string pk = session_id_to_bytes(blinded_id, legacy_blinding ? "15" : "25").substr(2);
-    
+
     auto base_url = community::canonical_url(base_url_);
     auto info = data["d"][base_url]["R"][pk];
     bool ret = info.exists();
@@ -443,12 +458,6 @@ std::vector<std::pair<std::string, int64_t>> Contacts::last_deleted_contacts() c
     }
 
     return ret;
-}
-
-size_t Contacts::size() const {
-    if (auto* c = data["c"].dict())
-        return c->size();
-    return 0;
 }
 
 /// Load _val from the current iterator position; if it is invalid, skip to the next key until we
@@ -552,49 +561,55 @@ LIBSESSION_C_API size_t contacts_size(const config_object* conf) {
 }
 
 LIBSESSION_C_API bool contacts_get_blinded_contact(
-    config_object* conf,
-    contacts_blinded_contact* blinded_contact,
-    const char* blinded_session_id,
-    bool legacy_blinding) {
+        config_object* conf,
+        const char* blinded_session_id,
+        bool legacy_blinding,
+        contacts_blinded_contact* blinded_contact) {
     return wrap_exceptions(
-        conf,
-        [&] {
-            if (auto bc = unbox<Contacts>(conf)->get_blinded(blinded_session_id, legacy_blinding)) {
-                bc->into(*blinded_contact);
-                return true;
-            }
-            return false;
-        },
-        false);
+            conf,
+            [&] {
+                if (auto bc = unbox<Contacts>(conf)->get_blinded(
+                            blinded_session_id, legacy_blinding)) {
+                    bc->into(*blinded_contact);
+                    return true;
+                }
+                return false;
+            },
+            false);
 }
 
-LIBSESSION_C_API contacts_blinded_contact_list* contacts_blinded_contacts(const config_object* conf) {
+LIBSESSION_C_API contacts_blinded_contact_list* contacts_blinded_contacts(
+        const config_object* conf) {
     try {
         auto cpp_contacts = unbox<Contacts>(conf)->blinded_contacts();
 
         if (cpp_contacts.empty())
             return nullptr;
 
-        // We malloc space for the contacts_blinded_contact_list struct itself, plus the required number of contacts_blinded_contact
-        // pointers to store its records, and the space to actually contain a copy of the data.
-        // When we're done, the malloced memory we grab is going to look like this:
+        // We malloc space for the contacts_blinded_contact_list struct itself, plus the required
+        // number of contacts_blinded_contact pointers to store its records, and the space to
+        // actually contain a copy of the data. When we're done, the malloced memory we grab is
+        // going to look like this:
         //
         // {contacts_blinded_contact_list}
         // {pointer1}{pointer2}...
         // {contacts_blinded_contact data 1\0}{contacts_blinded_contact data 2\0}...
         //
-        // where contacts_blinded_contact.value points at the beginning of {pointer1}, and each pointerN
-        // points at the beginning of the {contacts_blinded_contact data N\0} struct.
+        // where contacts_blinded_contact.value points at the beginning of {pointer1}, and each
+        // pointerN points at the beginning of the {contacts_blinded_contact data N\0} struct.
         //
         // Since we malloc it all at once, when the user frees it, they also free the entire thing.
-        size_t sz = sizeof(contacts_blinded_contact_list) + (cpp_contacts.size() * sizeof(contacts_blinded_contact*)) + (cpp_contacts.size() * sizeof(contacts_blinded_contact));
+        size_t sz = sizeof(contacts_blinded_contact_list) +
+                    (cpp_contacts.size() * sizeof(contacts_blinded_contact*)) +
+                    (cpp_contacts.size() * sizeof(contacts_blinded_contact));
         auto* ret = static_cast<contacts_blinded_contact_list*>(std::malloc(sz));
         ret->len = cpp_contacts.size();
 
-        // value points at the space immediately after the struct itself, which is the first element in
-        // the array of contacts_blinded_contact pointers.
+        // value points at the space immediately after the struct itself, which is the first element
+        // in the array of contacts_blinded_contact pointers.
         ret->value = reinterpret_cast<contacts_blinded_contact**>(ret + 1);
-        contacts_blinded_contact* next_struct = reinterpret_cast<contacts_blinded_contact*>(ret->value + ret->len);
+        contacts_blinded_contact* next_struct =
+                reinterpret_cast<contacts_blinded_contact*>(ret->value + ret->len);
 
         for (size_t i = 0; i < cpp_contacts.size(); ++i) {
             ret->value[i] = next_struct;
@@ -608,17 +623,19 @@ LIBSESSION_C_API contacts_blinded_contact_list* contacts_blinded_contacts(const 
     }
 }
 
-LIBSESSION_C_API bool contacts_set_blinded_contact(config_object* conf, const contacts_blinded_contact* bc) {
+LIBSESSION_C_API bool contacts_set_blinded_contact(
+        config_object* conf, const contacts_blinded_contact* bc) {
     return wrap_exceptions(
-        conf,
-        [&] {
-            unbox<Contacts>(conf)->set_blinded_contact(blinded_contact_info{*bc});
-            return true;
-        },
-        false);
+            conf,
+            [&] {
+                unbox<Contacts>(conf)->set_blinded_contact(blinded_contact_info{*bc});
+                return true;
+            },
+            false);
 }
 
-LIBSESSION_C_API bool contacts_erase_blinded_contact(config_object* conf, const char* base_url, const char* blinded_id, bool legacy_blinding) {
+LIBSESSION_C_API bool contacts_erase_blinded_contact(
+        config_object* conf, const char* base_url, const char* blinded_id, bool legacy_blinding) {
     try {
         return unbox<Contacts>(conf)->erase_blinded_contact(base_url, blinded_id, legacy_blinding);
     } catch (...) {

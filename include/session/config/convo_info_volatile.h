@@ -10,9 +10,9 @@ extern "C" {
 typedef struct convo_info_volatile_1to1 {
     char session_id[67];  // in hex; 66 hex chars + null terminator.
 
-    int64_t last_read;   // ms since unix epoch
-    int64_t last_active; // ms since unix epoch
-    bool unread;         // true if the conversation is explicitly marked unread
+    int64_t last_read;    // milliseconds since unix epoch
+    int64_t last_active;  // ms since unix epoch
+    bool unread;          // true if the conversation is explicitly marked unread
 } convo_info_volatile_1to1;
 
 typedef struct convo_info_volatile_community {
@@ -21,34 +21,33 @@ typedef struct convo_info_volatile_community {
     char room[65];       // null-terminated (max length 64), normalized (always lower-case)
     unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
 
-    int64_t last_read;   // ms since unix epoch
-    int64_t last_active; // ms since unix epoch
-    bool unread;         // true if marked unread
+    int64_t last_read;    // ms since unix epoch
+    int64_t last_active;  // ms since unix epoch
+    bool unread;          // true if marked unread
 } convo_info_volatile_community;
 
 typedef struct convo_info_volatile_group {
-    char group_id[67];   // in hex; 66 hex chars + null terminator.  Begins with "03".
-    int64_t last_read;   // ms since unix epoch
-    int64_t last_active; // ms since unix epoch
-    bool unread;         // true if marked unread
+    char group_id[67];    // in hex; 66 hex chars + null terminator.  Begins with "03".
+    int64_t last_read;    // ms since unix epoch
+    int64_t last_active;  // ms since unix epoch
+    bool unread;          // true if marked unread
 } convo_info_volatile_group;
 
 typedef struct convo_info_volatile_legacy_group {
     char group_id[67];   // in hex; 66 hex chars + null terminator.  Looks just like a Session ID,
                          // though isn't really one.
-
-    int64_t last_read;   // ms since unix epoch
-    int64_t last_active; // ms since unix epoch
-    bool unread;         // true if marked unread
+    int64_t last_read;    // ms since unix epoch
+    int64_t last_active;  // ms since unix epoch
+    bool unread;          // true if marked unread
 } convo_info_volatile_legacy_group;
 
 typedef struct convo_info_volatile_blinded_1to1 {
     char blinded_session_id[67];  // in hex; 66 hex chars + null terminator.
     bool legacy_blinding;
 
-    int64_t last_read;   // ms since unix epoch
-    int64_t last_active; // ms since unix epoch
-    bool unread;         // true if the conversation is explicitly marked unread
+    int64_t last_read;    // ms since unix epoch
+    int64_t last_active;  // ms since unix epoch
+    bool unread;          // true if the conversation is explicitly marked unread
 } convo_info_volatile_blinded_1to1;
 
 /// API: convo_info_volatile/convo_info_volatile_init
@@ -360,11 +359,12 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_legacy_group(
 
 /// API: convo_info_volatile/convo_info_volatile_get_blinded_1to1
 ///
-/// Fills `convo` with the conversation info given a blinded session ID (specified as a null-terminated hex
-/// string), if the conversation exists, and returns true.  If the conversation does not exist then
-/// `convo` is left unchanged and false is returned.  If an error occurs, false is returned and
-/// `conf->last_error` will be set to non-NULL containing the error string (if no error occurs, such
-/// as in the case where the conversation merely doesn't exist, `last_error` will be set to NULL).
+/// Fills `convo` with the conversation info given a blinded session ID (specified as a
+/// null-terminated hex string), if the conversation exists, and returns true.  If the conversation
+/// does not exist then `convo` is left unchanged and false is returned.  If an error occurs, false
+/// is returned and `conf->last_error` will be set to non-NULL containing the error string (if no
+/// error occurs, such as in the case where the conversation merely doesn't exist, `last_error` will
+/// be set to NULL).
 ///
 /// Declaration:
 /// ```cpp
@@ -392,12 +392,13 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_blinded_1to1(
 
 /// API: convo_info_volatile/convo_info_volatile_get_or_construct_blinded_1to1
 ///
-/// Same as the above convo_info_volatile_get_blinded_1to1 except that when the conversation does not exist,
-/// this sets all the convo fields to defaults and loads it with the given blinded_session_id.
+/// Same as the above convo_info_volatile_get_blinded_1to1 except that when the conversation does
+/// not exist, this sets all the convo fields to defaults and loads it with the given
+/// blinded_session_id.
 ///
-/// Returns true as long as it is given a valid blinded_session_id.  A false return is considered an error,
-/// and means the blinded_session_id was not a valid blinded_session_id.  In such a case `conf->last_error` will be
-/// set to an error string.
+/// Returns true as long as it is given a valid blinded_session_id.  A false return is considered an
+/// error, and means the blinded_session_id was not a valid blinded_session_id.  In such a case
+/// `conf->last_error` will be set to an error string.
 ///
 /// This is the method that should usually be used to create or update a conversation, followed by
 /// setting fields in the convo, and then giving it to convo_info_volatile_set().
@@ -644,7 +645,8 @@ LIBSESSION_EXPORT bool convo_info_volatile_erase_legacy_group(
 ///
 /// Outputs:
 /// - `bool` - Returns true if conversation was found and removed
-LIBSESSION_EXPORT bool convo_info_volatile_erase_blinded_1to1(config_object* conf, const char* blinded_session_id, bool legacy_blinding);
+LIBSESSION_EXPORT bool convo_info_volatile_erase_blinded_1to1(
+        config_object* conf, const char* blinded_session_id, bool legacy_blinding);
 
 /// API: convo_info_volatile/convo_info_volatile_size
 ///
@@ -897,10 +899,10 @@ LIBSESSION_EXPORT convo_info_volatile_iterator* convo_info_volatile_iterator_new
 /// API: convo_info_volatile/convo_info_volatile_iterator_new_blinded_1to1
 ///
 /// The same as `convo_info_volatile_iterator_new` except that this iterates *only* over one type of
-/// conversation. You still need to use `convo_info_volatile_it_is_blinded_1to1` (or the alternatives) to
-/// load the data in each pass of the loop.  (You can, however, safely ignore the bool return value
-/// of the `it_is_whatever` function: it will always be true for the particular type being iterated
-/// over).
+/// conversation. You still need to use `convo_info_volatile_it_is_blinded_1to1` (or the
+/// alternatives) to load the data in each pass of the loop.  (You can, however, safely ignore the
+/// bool return value of the `it_is_whatever` function: it will always be true for the particular
+/// type being iterated over).
 ///
 /// Declaration:
 /// ```cpp
@@ -1055,8 +1057,8 @@ LIBSESSION_EXPORT bool convo_info_volatile_it_is_legacy_group(
 
 /// API: convo_info_volatile/convo_info_volatile_it_is_blinded_1to1
 ///
-/// If the current iterator record is a blinded 1-to-1 conversation this sets the details into `c` and
-/// returns true.  Otherwise it returns false.
+/// If the current iterator record is a blinded 1-to-1 conversation this sets the details into `c`
+/// and returns true.  Otherwise it returns false.
 ///
 /// Declaration:
 /// ```cpp
