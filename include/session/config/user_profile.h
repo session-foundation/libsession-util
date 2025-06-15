@@ -128,6 +128,44 @@ LIBSESSION_EXPORT user_profile_pic user_profile_get_pic(const config_object* con
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_EXPORT int user_profile_set_pic(config_object* conf, user_profile_pic pic);
 
+/// API: user_profile/user_profile_get_nts_last_active
+///
+/// Gets the Note-to-self conversation last_active timestamp in integer milliseconds.
+///
+/// Declaration:
+/// ```cpp
+/// INT user_profile_get_nts_last_active(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int64_t` -- Returns the timestamp, in integer milliseconds, when the Note-to-self was last active
+LIBSESSION_EXPORT int64_t user_profile_get_nts_last_active(const config_object* conf);
+
+/// API: user_profile/user_profile_set_nts_last_active
+///
+/// Sets the Note-to-self conversation last_active value.
+///
+/// Declaration:
+/// ```cpp
+/// VOID user_profile_set_nts_last_active(
+///     [in]    config_object*      conf,
+///     [in]    int64_t             last_active
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `last_active` -- [in] Timestamp, in integer milliseconds, that the conversation was last active
+///
+/// Outputs:
+/// - `void` -- Returns Nothing
+LIBSESSION_EXPORT void user_profile_set_nts_last_active(config_object* conf, int64_t last_active);
+
 /// API: user_profile/user_profile_get_nts_priority
 ///
 /// Gets the current note-to-self priority level. Will be negative for hidden, 0 for unpinned, and >

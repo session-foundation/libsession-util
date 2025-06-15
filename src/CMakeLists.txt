@@ -60,6 +60,7 @@ add_libsession_util_library(config
     config/base.cpp
     config/community.cpp
     config/contacts.cpp
+    config/config_manager.cpp
     config/convo_info_volatile.cpp
     config/encrypt.cpp
     config/error.c
