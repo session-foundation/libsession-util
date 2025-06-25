@@ -31,9 +31,12 @@ typedef struct ugroups_legacy_group_info {
     int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
                         // pinned (with higher meaning pinned higher).
     int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
-    CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
-                                      // `notifications` setting until the timestamp)
+    CONVO_NOTIFY_MODE mobile_notifications;   // When the user wants mobile notifications
+    CONVO_NOTIFY_MODE desktop_notifications;  // When the user wants desktop notifications
+    int64_t mobile_mute_until;   // Mute mobile notifications until this timestamp (seconds,
+                                 // overrides `notifications` setting until the timestamp)
+    int64_t desktop_mute_until;  // Mute desktop notifications until this timestamp (seconds,
+                                 // overrides `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
@@ -61,9 +64,12 @@ typedef struct ugroups_group_info {
     int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
                         // pinned (with higher meaning pinned higher).
     int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
-    CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
-                                      // `notifications` setting until the timestamp)
+    CONVO_NOTIFY_MODE mobile_notifications;   // When the user wants mobile notifications
+    CONVO_NOTIFY_MODE desktop_notifications;  // When the user wants desktop notifications
+    int64_t mobile_mute_until;   // Mute mobile notifications until this timestamp (seconds,
+                                 // overrides `notifications` setting until the timestamp)
+    int64_t desktop_mute_until;  // Mute desktop notifications until this timestamp (seconds,
+                                 // overrides `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
@@ -82,9 +88,12 @@ typedef struct ugroups_community_info {
     int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
                         // pinned (with higher meaning pinned higher).
     int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
-    CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
-                                      // `notifications` setting until the timestamp)
+    CONVO_NOTIFY_MODE mobile_notifications;   // When the user wants mobile notifications
+    CONVO_NOTIFY_MODE desktop_notifications;  // When the user wants desktop notifications
+    int64_t mobile_mute_until;   // Mute mobile notifications until this timestamp (seconds,
+                                 // overrides `notifications` setting until the timestamp)
+    int64_t desktop_mute_until;  // Mute desktop notifications until this timestamp (seconds,
+                                 // overrides `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 

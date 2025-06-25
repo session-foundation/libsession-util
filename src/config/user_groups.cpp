@@ -35,8 +35,10 @@ template <typename T>
 static void base_into(const base_group_info& self, T& c) {
     c.priority = self.priority;
     c.joined_at = to_epoch_seconds(self.joined_at);
-    c.notifications = static_cast<CONVO_NOTIFY_MODE>(self.mobile_notifications);
-    c.mute_until = to_epoch_seconds(self.mobile_mute_until);
+    c.mobile_notifications = static_cast<CONVO_NOTIFY_MODE>(self.mobile_notifications);
+    c.desktop_notifications = static_cast<CONVO_NOTIFY_MODE>(self.desktop_notifications);
+    c.mobile_mute_until = to_epoch_seconds(self.mobile_mute_until);
+    c.desktop_mute_until = to_epoch_seconds(self.desktop_mute_until);
     c.invited = self.invited;
 }
 
@@ -44,8 +46,10 @@ template <typename T>
 static void base_from(base_group_info& self, const T& c) {
     self.priority = c.priority;
     self.joined_at = to_epoch_seconds(c.joined_at);
-    self.mobile_notifications = static_cast<notify_mode>(c.notifications);
-    self.mobile_mute_until = to_epoch_seconds(c.mute_until);
+    self.mobile_notifications = static_cast<notify_mode>(c.mobile_notifications);
+    self.desktop_notifications = static_cast<notify_mode>(c.desktop_notifications);
+    self.mobile_mute_until = to_epoch_seconds(c.mobile_mute_until);
+    self.desktop_mute_until = to_epoch_seconds(c.desktop_mute_until);
     self.invited = c.invited;
 }
 

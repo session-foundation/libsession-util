@@ -144,8 +144,10 @@ void contact_info::into(contacts_contact& c) const {
     c.approved_me = approved_me;
     c.blocked = blocked;
     c.priority = priority;
-    c.notifications = static_cast<CONVO_NOTIFY_MODE>(mobile_notifications);
-    c.mute_until = to_epoch_seconds(mobile_mute_until);
+    c.mobile_notifications = static_cast<CONVO_NOTIFY_MODE>(mobile_notifications);
+    c.desktop_notifications = static_cast<CONVO_NOTIFY_MODE>(desktop_notifications);
+    c.mobile_mute_until = to_epoch_seconds(mobile_mute_until);
+    c.desktop_mute_until = to_epoch_seconds(desktop_mute_until);
     c.exp_mode = static_cast<CONVO_EXPIRATION_MODE>(exp_mode);
     c.exp_seconds = exp_timer.count();
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
@@ -167,8 +169,10 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     approved_me = c.approved_me;
     blocked = c.blocked;
     priority = c.priority;
-    mobile_notifications = static_cast<notify_mode>(c.notifications);
-    mobile_mute_until = to_epoch_seconds(c.mute_until);
+    mobile_notifications = static_cast<notify_mode>(c.mobile_notifications);
+    desktop_notifications = static_cast<notify_mode>(c.desktop_notifications);
+    mobile_mute_until = to_epoch_seconds(c.mobile_mute_until);
+    desktop_mute_until = to_epoch_seconds(c.desktop_mute_until);
     exp_mode = static_cast<expiration_mode>(c.exp_mode);
     exp_timer = exp_mode == expiration_mode::none ? 0s : std::chrono::seconds{c.exp_seconds};
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)

@@ -26,8 +26,10 @@ typedef struct contacts_contact {
     bool blocked;
 
     int priority;
-    CONVO_NOTIFY_MODE notifications;
-    int64_t mute_until;
+    CONVO_NOTIFY_MODE mobile_notifications;
+    CONVO_NOTIFY_MODE desktop_notifications;
+    int64_t mobile_mute_until;
+    int64_t desktop_mute_until;
 
     CONVO_EXPIRATION_MODE exp_mode;
     int exp_seconds;
