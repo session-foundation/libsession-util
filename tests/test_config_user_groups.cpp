@@ -118,8 +118,10 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(c.name == "");
     CHECK(c.members().empty());
     CHECK(c.joined_at == 0);
-    CHECK(c.notifications == session::config::notify_mode::defaulted);
-    CHECK(c.mute_until == 0);
+    CHECK(c.mobile_notifications == session::config::notify_mode::defaulted);
+    CHECK(c.desktop_notifications == session::config::notify_mode::defaulted);
+    CHECK(c.mobile_mute_until == 0);
+    CHECK(c.desktop_mute_until == 0);
 
     CHECK_FALSE(groups.needs_push());
     CHECK_FALSE(groups.needs_dump());
@@ -137,8 +139,10 @@ TEST_CASE("User Groups", "[config][groups]") {
     c.name = "Englishmen";
     c.disappearing_timer = 60min;
     c.joined_at = created_ts * 1000;  // milliseconds
-    c.notifications = session::config::notify_mode::mentions_only;
-    c.mute_until = now + 3600;
+    c.mobile_notifications = session::config::notify_mode::mentions_only;
+    c.desktop_notifications = session::config::notify_mode::all;
+    c.mobile_mute_until = now + 3600;
+    c.desktop_mute_until = now + 3700;
     CHECK(c.insert(users[0], false));
     CHECK(c.insert(users[1], true));
     CHECK(c.insert(users[2], false));
@@ -244,8 +248,10 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(c1.members() == expected_members);
     CHECK(c1.name == "Englishmen");
     CHECK(c1.joined_at == created_ts);
-    CHECK(c1.notifications == session::config::notify_mode::mentions_only);
-    CHECK(c1.mute_until == now + 3600);
+    CHECK(c1.mobile_notifications == session::config::notify_mode::mentions_only);
+    CHECK(c1.desktop_notifications == session::config::notify_mode::all);
+    CHECK(c1.mobile_mute_until == now + 3600);
+    CHECK(c1.desktop_mute_until == now + 3700);
 
     CHECK_FALSE(g2.needs_push());
     CHECK_FALSE(g2.needs_dump());
@@ -458,8 +464,10 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(c.id == definitely_real_id);
     CHECK(c.priority == 0);
     CHECK(c.joined_at == 0);
-    CHECK(c.notifications == session::config::notify_mode::defaulted);
-    CHECK(c.mute_until == 0);
+    CHECK(c.mobile_notifications == session::config::notify_mode::defaulted);
+    CHECK(c.desktop_notifications == session::config::notify_mode::defaulted);
+    CHECK(c.mobile_mute_until == 0);
+    CHECK(c.desktop_mute_until == 0);
 
     c.secretkey = session::to_vector(ed_sk);  // This *isn't* the right secret key for the group, so
                                               // won't propagate, and so auth data will:
@@ -486,15 +494,19 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(c2->id == definitely_real_id);
     CHECK(c2->priority == 0);
     CHECK(c2->joined_at == 0);
-    CHECK(c2->notifications == session::config::notify_mode::defaulted);
-    CHECK(c2->mute_until == 0);
+    CHECK(c2->mobile_notifications == session::config::notify_mode::defaulted);
+    CHECK(c2->desktop_notifications == session::config::notify_mode::defaulted);
+    CHECK(c2->mobile_mute_until == 0);
+    CHECK(c2->desktop_mute_until == 0);
     CHECK_FALSE(c2->invited);
     CHECK(c2->name == "");
 
     c2->priority = 123;
     c2->joined_at = (int64_t)1'234'567'890 * 1'000;
-    c2->notifications = session::config::notify_mode::mentions_only;
-    c2->mute_until = (int64_t)456'789'012 * 1'000'000;
+    c2->mobile_notifications = session::config::notify_mode::mentions_only;
+    c2->desktop_notifications = session::config::notify_mode::all;
+    c2->mobile_mute_until = (int64_t)456'789'012 * 1'000'000;
+    c2->desktop_mute_until = (int64_t)456'789'013 * 1'000'000;
     c2->invited = true;
     c2->name = "Magic Special Room";
 
@@ -527,8 +539,10 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(c3->id == definitely_real_id);
     CHECK(c3->priority == 123);
     CHECK(c3->joined_at == 1234567890);
-    CHECK(c3->notifications == session::config::notify_mode::mentions_only);
-    CHECK(c3->mute_until == 456789012);
+    CHECK(c3->mobile_notifications == session::config::notify_mode::mentions_only);
+    CHECK(c3->desktop_notifications == session::config::notify_mode::all);
+    CHECK(c3->mobile_mute_until == 456789012);
+    CHECK(c3->desktop_mute_until == 456789013);
     CHECK(c3->invited);
     CHECK(c3->name == "Magic Special Room");
 
@@ -844,14 +858,19 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
         auto lg = c.get_or_construct_legacy_group(
                 "051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         int64_t joined_at = get_timestamp_us();
-        int64_t mute_until = get_timestamp_s();
+        int64_t mobile_mute_until = get_timestamp_s();
+        int64_t desktop_mute_until = get_timestamp_s() + 10;
         lg.joined_at = joined_at;
-        lg.mute_until = mute_until;
+        lg.mobile_mute_until = mobile_mute_until;
+        lg.desktop_mute_until = desktop_mute_until;
         c.set(lg);
         auto lg2 = c.get_or_construct_legacy_group(
                 "051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         CHECK(lg2.joined_at == joined_at / 1'000'000);  // joined_at was given in microseconds
-        CHECK(lg2.mute_until == mute_until);            // mute_until was given in seconds
+        CHECK(lg2.mobile_mute_until ==
+              mobile_mute_until);  // mobile_mute_until was given in seconds
+        CHECK(lg2.desktop_mute_until ==
+              desktop_mute_until);  // desktop_mute_until was given in seconds
         c.erase_legacy_group("051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
     }
 
@@ -859,14 +878,19 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
         auto gr = c.get_or_construct_group(
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
         int64_t joined_at = get_timestamp_ms();
-        int64_t mute_until = get_timestamp_us();
+        int64_t mobile_mute_until = get_timestamp_us();
+        int64_t desktop_mute_until = get_timestamp_us() + 10;
         gr.joined_at = joined_at;
-        gr.mute_until = mute_until;
+        gr.mobile_mute_until = mobile_mute_until;
+        gr.desktop_mute_until = desktop_mute_until;
         c.set(gr);
         auto gr2 = c.get_or_construct_group(
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-        CHECK(gr2.joined_at == joined_at / 1'000);        // joined_at was given in milliseconds
-        CHECK(gr2.mute_until == mute_until / 1'000'000);  // mute_until was given in microseconds
+        CHECK(gr2.joined_at == joined_at / 1'000);  // joined_at was given in milliseconds
+        CHECK(gr2.mobile_mute_until ==
+              mobile_mute_until / 1'000'000);  // mobile_mute_until was given in microseconds
+        CHECK(gr2.desktop_mute_until ==
+              desktop_mute_until / 1'000'000);  // desktop_mute_until was given in microseconds
         c.erase_group("031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
     }
 
@@ -877,19 +901,24 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
         const auto room = "sudoku_room";
         auto comm = c.get_or_construct_community(url, room, open_group_pubkey);
         int64_t joined_at = get_timestamp_ms();
-        int64_t mute_until = get_timestamp_ms();
+        int64_t mobile_mute_until = get_timestamp_ms();
+        int64_t desktop_mute_until = get_timestamp_ms() + 10;
         comm.joined_at = joined_at;
-        comm.mute_until = mute_until;
+        comm.mobile_mute_until = mobile_mute_until;
+        comm.desktop_mute_until = desktop_mute_until;
         c.set(comm);
         auto comm2 = c.get_or_construct_community(url, room, open_group_pubkey);
-        CHECK(comm2.joined_at == joined_at / 1'000);    // joined_at was given in milliseconds
-        CHECK(comm2.mute_until == mute_until / 1'000);  // mute_until was given in milliseconds
+        CHECK(comm2.joined_at == joined_at / 1'000);  // joined_at was given in milliseconds
+        CHECK(comm2.mobile_mute_until ==
+              mobile_mute_until / 1'000);  // mobile_mute_until was given in milliseconds
+        CHECK(comm2.desktop_mute_until ==
+              desktop_mute_until / 1'000);  // mobile_mute_until was given in milliseconds
         c.erase_community(url, room);
     }
     {
         // this dump has:
         // - an invalid joined_at (1'733'979'503'520) and
-        // - an invalid mute_until (1'733'979'503'520'780) values
+        // - an invalid mobile_mute_until (1'733'979'503'520'780) values
         const auto dump_with_not_seconds =
                 "64313a21693165313a243231303a64313a23693165313a2664313a676433333a031234567890abcdef"
                 "1234"
@@ -908,7 +937,7 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
 
         CHECK(gr.joined_at == 1'733'979'503'520 / 1'000);
-        CHECK(gr.mute_until == 1'733'979'503'520'780 / 1'000'000);
+        CHECK(gr.mobile_mute_until == 1'733'979'503'520'780 / 1'000'000);
     }
 }
 

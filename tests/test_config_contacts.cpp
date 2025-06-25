@@ -53,8 +53,10 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK_FALSE(c.blocked);
     CHECK_FALSE(c.profile_picture);
     CHECK(c.created == 0);
-    CHECK(c.notifications == session::config::notify_mode::defaulted);
-    CHECK(c.mute_until == 0);
+    CHECK(c.mobile_notifications == session::config::notify_mode::defaulted);
+    CHECK(c.desktop_notifications == session::config::notify_mode::defaulted);
+    CHECK(c.mobile_mute_until == 0);
+    CHECK(c.desktop_mute_until == 0);
 
     CHECK_FALSE(contacts.needs_push());
     CHECK_FALSE(contacts.needs_dump());
@@ -65,8 +67,10 @@ TEST_CASE("Contacts", "[config][contacts]") {
     c.approved = true;
     c.approved_me = true;
     c.created = created_ts * 1'000;
-    c.notifications = session::config::notify_mode::all;
-    c.mute_until = (now + 1800) * 1'000'000;
+    c.mobile_notifications = session::config::notify_mode::all;
+    c.desktop_notifications = session::config::notify_mode::disabled;
+    c.mobile_mute_until = (now + 1800) * 1'000'000;
+    c.desktop_mute_until = (now + 1900) * 1'000'000;
 
     contacts.set(c);
 
@@ -111,8 +115,10 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK_FALSE(x->profile_picture);
     CHECK_FALSE(x->blocked);
     CHECK(x->created == created_ts);
-    CHECK(x->notifications == session::config::notify_mode::all);
-    CHECK(x->mute_until == now + 1800);
+    CHECK(x->mobile_notifications == session::config::notify_mode::all);
+    CHECK(x->desktop_notifications == session::config::notify_mode::disabled);
+    CHECK(x->mobile_mute_until == now + 1800);
+    CHECK(x->desktop_mute_until == now + 1900);
 
     auto another_id = "051111111111111111111111111111111111111111111111111111111111111111"sv;
     auto c2 = contacts2.get_or_construct(another_id);

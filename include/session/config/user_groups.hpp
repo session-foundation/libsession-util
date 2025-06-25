@@ -23,11 +23,16 @@ namespace session::config {
 ///
 /// *Within* the group dicts (i.e. not at the top level), we use these common values:
 ///
-///     @ - notification setting (int).  Omitted = use default setting; 1 = all, 2 = disabled, 3 =
-///         mentions-only.
-///     ! - mute timestamp: if set then don't show notifications for this contact's messages until
-///         this unix timestamp (i.e.  overriding the current notification setting until the given
-///         time).
+///     @ - mobile notification setting (int).  Omitted = use default setting; 1 = all, 2 =
+///         disabled, 3 = mentions-only.
+///     % - desktop notification setting (int).  Omitted = use default setting; 1 = all, 2 =
+///         disabled, 3 = mentions-only.
+///     ! - mobile mute timestamp: if set then don't show notifications for this contact's messages
+///         until this unix timestamp (i.e.  overriding the current notification setting until the
+///         given time).
+///     ^ - desktop mute timestamp: if set then don't show notifications for this contact's messages
+///         until this unix timestamp (i.e.  overriding the current notification setting until the
+///         given time).
 ///     + - the conversation priority, for pinning/hiding this group in the conversation list.
 ///         Integer.  Omitted means not pinned; -1 means hidden, and a positive value is a pinned
 ///         message for which higher priority values means the conversation is meant to appear
@@ -51,7 +56,7 @@ namespace session::config {
 ///     n - the room name, from a the group invitation; this is intended to be removed once the
 ///         invitation has been accepted, as the name contained in the group info supercedes this).
 ///     r - removed_status, tracks why we were removed from the group.
-///     @, !, +, i, j -- see common values, above.
+///     @, %, !, ^, +, i, j -- see common values, above.
 ///
 /// o - dict of communities (AKA open groups); within this dict (which deliberately has the same
 ///     layout as convo_info_volatile) each key is the SOGS base URL (in canonical form), and value
@@ -63,7 +68,7 @@ namespace session::config {
 ///             appropriate).  For instance, a room name SudokuSolvers would be "sudokusolvers" in
 ///             the outer key, with the capitalization variation in use ("SudokuSolvers") in this
 ///             key.  This key is *always* present (to keep the room dict non-empty).
-///         @, !, +, i, j - see common values, above.
+///         @, %, !, ^, +, i, j -- see common values, above.
 ///
 /// C - dict of legacy groups; within this dict each key is the group pubkey (binary, 33 bytes) and
 /// value is a dict containing keys:
@@ -76,7 +81,7 @@ namespace session::config {
 ///     a - set of admin session ids (each 33 bytes).
 ///     E - disappearing messages duration, in seconds, > 0.  Omitted if disappearing messages is
 ///         disabled.  (Note that legacy groups only support expire after-read)
-///     @, !, +, i, j - see common values, above.
+///     @, %, !, ^, +, i, j -- see common values, above.
 
 /// Common base type with fields shared by all the groups
 struct base_group_info {
@@ -85,8 +90,14 @@ struct base_group_info {
     int priority = 0;       // The priority; 0 means unpinned, -1 means hidden, positive means
                             // pinned higher (i.e.  higher priority conversations come first).
     int64_t joined_at = 0;  // unix timestamp (seconds) when the group was joined (or re-joined)
-    notify_mode notifications = notify_mode::defaulted;  // When the user wants notifications
-    int64_t mute_until = 0;  // unix timestamp (seconds) until which notifications are disabled
+    notify_mode mobile_notifications =
+            notify_mode::defaulted;  // When the user wants mobile notifications
+    notify_mode desktop_notifications =
+            notify_mode::defaulted;  // When the user wants desktop notifications
+    int64_t mobile_mute_until =
+            0;  // unix timestamp (seconds) until which mobile notifications are disabled
+    int64_t desktop_mute_until =
+            0;  // unix timestamp (seconds) until which desktop notifications are disabled
 
     std::string name;  // human-readable; always set for a legacy closed group, only used before
                        // joining a new closed group (after joining the group info provide the name)

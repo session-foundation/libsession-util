@@ -35,8 +35,8 @@ template <typename T>
 static void base_into(const base_group_info& self, T& c) {
     c.priority = self.priority;
     c.joined_at = to_epoch_seconds(self.joined_at);
-    c.notifications = static_cast<CONVO_NOTIFY_MODE>(self.notifications);
-    c.mute_until = to_epoch_seconds(self.mute_until);
+    c.notifications = static_cast<CONVO_NOTIFY_MODE>(self.mobile_notifications);
+    c.mute_until = to_epoch_seconds(self.mobile_mute_until);
     c.invited = self.invited;
 }
 
@@ -44,8 +44,8 @@ template <typename T>
 static void base_from(base_group_info& self, const T& c) {
     self.priority = c.priority;
     self.joined_at = to_epoch_seconds(c.joined_at);
-    self.notifications = static_cast<notify_mode>(c.notifications);
-    self.mute_until = to_epoch_seconds(c.mute_until);
+    self.mobile_notifications = static_cast<notify_mode>(c.notifications);
+    self.mobile_mute_until = to_epoch_seconds(c.mute_until);
     self.invited = c.invited;
 }
 
@@ -129,13 +129,20 @@ void base_group_info::load(const dict& info_dict) {
     priority = maybe_int(info_dict, "+").value_or(0);
     joined_at = to_epoch_seconds(std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0)));
 
-    int notify = maybe_int(info_dict, "@").value_or(0);
-    if (notify >= 0 && notify <= 3)
-        notifications = static_cast<notify_mode>(notify);
+    int notify_mobile = maybe_int(info_dict, "@").value_or(0);
+    if (notify_mobile >= 0 && notify_mobile <= 3)
+        mobile_notifications = static_cast<notify_mode>(notify_mobile);
     else
-        notifications = notify_mode::defaulted;
+        mobile_notifications = notify_mode::defaulted;
 
-    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    int notify_dekstop = maybe_int(info_dict, "%").value_or(0);
+    if (notify_dekstop >= 0 && notify_dekstop <= 3)
+        desktop_notifications = static_cast<notify_mode>(notify_dekstop);
+    else
+        desktop_notifications = notify_mode::defaulted;
+
+    mobile_mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    desktop_mute_until = to_epoch_seconds(maybe_int(info_dict, "^").value_or(0));
 
     invited = maybe_int(info_dict, "i").value_or(0);
 }
@@ -410,8 +417,10 @@ void UserGroups::set(const community_info& c) {
 void UserGroups::set_base(const base_group_info& bg, DictFieldProxy& info) const {
     set_nonzero_int(info["+"], bg.priority);
     set_positive_int(info["j"], to_epoch_seconds(bg.joined_at));
-    set_positive_int(info["@"], static_cast<int>(bg.notifications));
-    set_positive_int(info["!"], to_epoch_seconds(bg.mute_until));
+    set_positive_int(info["@"], static_cast<int>(bg.mobile_notifications));
+    set_positive_int(info["%"], static_cast<int>(bg.desktop_notifications));
+    set_positive_int(info["!"], to_epoch_seconds(bg.mobile_mute_until));
+    set_positive_int(info["^"], to_epoch_seconds(bg.desktop_mute_until));
     set_flag(info["i"], bg.invited);
     // We don't set n here because it's subtly different in the three group types
 }

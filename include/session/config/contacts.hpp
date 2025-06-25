@@ -32,9 +32,14 @@ namespace session::config {
 ///     a - 1 if approved, omitted otherwise (int)
 ///     A - 1 if remote has approved me, omitted otherwise (int)
 ///     b - 1 if contact is blocked, omitted otherwise
-///     @ - notification setting (int).  Omitted = use default setting; 1 = all; 2 = disabled.
-///     ! - mute timestamp: if this is set then notifications are to be muted until the given unix
-///         timestamp (seconds, not milliseconds).
+///     @ - mobile notification setting (int).  Omitted = use default setting; 1 = all; 2 =
+///         disabled.
+///     % - desktop notification setting (int).  Omitted = use default setting; 1 = all; 2
+///         = disabled.
+///     ! - mobile mute timestamp: if this is set then notifications are to be muted
+///         until the given unix timestamp (seconds, not milliseconds).
+///     ^ - desktop mute timestamp: if this is set then notifications are to be muted until the
+///         given unix timestamp (seconds, not milliseconds).
 ///     + - the conversation priority; -1 means hidden; omitted means not pinned; otherwise an
 ///         integer value >0, where a higher priority means the conversation is meant to appear
 ///         earlier in the pinned conversation list.
@@ -60,10 +65,14 @@ struct contact_info {
                        // (i.e. pinned earlier in the pinned list).  If negative then this
                        // conversation is hidden.  Otherwise (0) this is a regular, unpinned
                        // conversation.
-    notify_mode notifications = notify_mode::defaulted;
-    int64_t mute_until = 0;  // If non-zero, disable notifications until the given unix timestamp
-                             // (seconds, overriding whatever the current `notifications` value is
-                             // until the timestamp expires).
+    notify_mode mobile_notifications = notify_mode::defaulted;
+    notify_mode desktop_notifications = notify_mode::defaulted;
+    int64_t mobile_mute_until = 0;   // If non-zero, disable mobile notifications until the given
+                                     // unix timestamp (seconds, overriding whatever the current
+                                     // `notifications` value is until the timestamp expires).
+    int64_t desktop_mute_until = 0;  // If non-zero, disable desktop notifications until the given
+                                     // unix timestamp (seconds, overriding whatever the current
+                                     // `notifications` value is until the timestamp expires).
     expiration_mode exp_mode = expiration_mode::none;  // The expiry time; none if not expiring.
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
@@ -271,15 +280,25 @@ class Contacts : public ConfigBase {
     /// - `priority` -- numerical value on the contacts priority (pinned, normal, hidden etc)
     void set_priority(std::string_view session_id, int priority);
 
-    /// API: contacts/contacts::set_notifications
+    /// API: contacts/contacts::set_mobile_notifications
     ///
     /// Alternative to `set()` for setting a single field.  (If setting multiple fields at once you
     /// should use `set()` instead).
     ///
     /// Inputs:
     /// - `session_id` -- hex string of the session id
-    /// - `notifications` -- detail on notifications
-    void set_notifications(std::string_view session_id, notify_mode notifications);
+    /// - `notifications` -- detail on mobile notifications
+    void set_mobile_notifications(std::string_view session_id, notify_mode notifications);
+
+    /// API: contacts/contacts::set_desktop_notifications
+    ///
+    /// Alternative to `set()` for setting a single field.  (If setting multiple fields at once you
+    /// should use `set()` instead).
+    ///
+    /// Inputs:
+    /// - `session_id` -- hex string of the session id
+    /// - `notifications` -- detail on desktop notifications
+    void set_desktop_notifications(std::string_view session_id, notify_mode notifications);
 
     /// API: contacts/contacts::set_expiry
     ///

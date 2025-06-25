@@ -89,15 +89,24 @@ void contact_info::load(const dict& info_dict) {
 
     priority = maybe_int(info_dict, "+").value_or(0);
 
-    int notify = maybe_int(info_dict, "@").value_or(0);
-    if (notify >= 0 && notify <= 3) {
-        notifications = static_cast<notify_mode>(notify);
-        if (notifications == notify_mode::mentions_only)
-            notifications = notify_mode::all;
+    int notify_mobile = maybe_int(info_dict, "@").value_or(0);
+    if (notify_mobile >= 0 && notify_mobile <= 3) {
+        mobile_notifications = static_cast<notify_mode>(notify_mobile);
+        if (mobile_notifications == notify_mode::mentions_only)
+            mobile_notifications = notify_mode::all;
     } else {
-        notifications = notify_mode::defaulted;
+        mobile_notifications = notify_mode::defaulted;
     }
-    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    int notify_desktop = maybe_int(info_dict, "%").value_or(0);
+    if (notify_desktop >= 0 && notify_desktop <= 3) {
+        desktop_notifications = static_cast<notify_mode>(notify_desktop);
+        if (desktop_notifications == notify_mode::mentions_only)
+            desktop_notifications = notify_mode::all;
+    } else {
+        desktop_notifications = notify_mode::defaulted;
+    }
+    mobile_mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    desktop_mute_until = to_epoch_seconds(maybe_int(info_dict, "^").value_or(0));
 
     int exp_mode_ = maybe_int(info_dict, "e").value_or(0);
     if (exp_mode_ >= static_cast<int>(expiration_mode::none) &&
@@ -135,8 +144,8 @@ void contact_info::into(contacts_contact& c) const {
     c.approved_me = approved_me;
     c.blocked = blocked;
     c.priority = priority;
-    c.notifications = static_cast<CONVO_NOTIFY_MODE>(notifications);
-    c.mute_until = to_epoch_seconds(mute_until);
+    c.notifications = static_cast<CONVO_NOTIFY_MODE>(mobile_notifications);
+    c.mute_until = to_epoch_seconds(mobile_mute_until);
     c.exp_mode = static_cast<CONVO_EXPIRATION_MODE>(exp_mode);
     c.exp_seconds = exp_timer.count();
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
@@ -158,8 +167,8 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     approved_me = c.approved_me;
     blocked = c.blocked;
     priority = c.priority;
-    notifications = static_cast<notify_mode>(c.notifications);
-    mute_until = to_epoch_seconds(c.mute_until);
+    mobile_notifications = static_cast<notify_mode>(c.notifications);
+    mobile_mute_until = to_epoch_seconds(c.mute_until);
     exp_mode = static_cast<expiration_mode>(c.exp_mode);
     exp_timer = exp_mode == expiration_mode::none ? 0s : std::chrono::seconds{c.exp_seconds};
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
@@ -233,11 +242,16 @@ void Contacts::set(const contact_info& contact) {
 
     set_nonzero_int(info["+"], contact.priority);
 
-    auto notify = contact.notifications;
-    if (notify == notify_mode::mentions_only)
-        notify = notify_mode::all;
-    set_positive_int(info["@"], static_cast<int>(notify));
-    set_positive_int(info["!"], to_epoch_seconds(contact.mute_until));
+    auto notify_mobile = contact.mobile_notifications;
+    if (notify_mobile == notify_mode::mentions_only)
+        notify_mobile = notify_mode::all;
+    auto notify_desktop = contact.desktop_notifications;
+    if (notify_desktop == notify_mode::mentions_only)
+        notify_desktop = notify_mode::all;
+    set_positive_int(info["@"], static_cast<int>(notify_mobile));
+    set_positive_int(info["%"], static_cast<int>(notify_desktop));
+    set_positive_int(info["!"], to_epoch_seconds(contact.mobile_mute_until));
+    set_positive_int(info["^"], to_epoch_seconds(contact.desktop_mute_until));
 
     set_pair_if(
             contact.exp_mode != expiration_mode::none && contact.exp_timer > 0s,
@@ -301,9 +315,15 @@ void Contacts::set_priority(std::string_view session_id, int priority) {
     set(c);
 }
 
-void Contacts::set_notifications(std::string_view session_id, notify_mode notifications) {
+void Contacts::set_mobile_notifications(std::string_view session_id, notify_mode notifications) {
     auto c = get_or_construct(session_id);
-    c.notifications = notifications;
+    c.mobile_notifications = notifications;
+    set(c);
+}
+
+void Contacts::set_desktop_notifications(std::string_view session_id, notify_mode notifications) {
+    auto c = get_or_construct(session_id);
+    c.desktop_notifications = notifications;
     set(c);
 }
 
