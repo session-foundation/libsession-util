@@ -43,7 +43,7 @@ typedef struct contacts_blinded_contact {
                           // only has port if non-default, has trailing / removed)
     unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
 
-    char name[101];  // This will be a 0-length strings when unset
+    char name[101];  // This will be a 0-length string when unset
     user_profile_pic profile_pic;
 
     bool legacy_blinding;

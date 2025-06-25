@@ -48,14 +48,13 @@ namespace session::config {
 ///         equivalent "j"oined field). Omitted if 0.
 ///     t - The `profile_updated` unix timestamp (seconds) for this contacts profile information.
 ///
-/// b - dict of blinded contacts.  This is a nested dict where the outkey keys are the BASE_URL of
+/// b - dict of blinded contacts.  This is a nested dict where the outer keys are the BASE_URL of
 ///     the community the blinded contact originated from and the outer value is a dict containing:
 ///
 ///     `#` - the 32-byte server pubkey
 ///     `R` - dict of blinded contacts from the server; each key is the blinded session pubkey
 ///     without the prefix ("R" to match user_groups equivalent "R"oom field, and to make use of
 ///     existing community iterators, binary, 32 bytes), value is a dict containing keys:
-///       containing keys:
 ///
 ///       n - contact name (string).  This is always serialized, even if empty (but empty indicates
 ///           no name) so that we always have at least one key set (required to keep the dict value
@@ -414,7 +413,7 @@ class Contacts : public ConfigBase {
     bool accepts_protobuf() const override { return true; }
 
   protected:
-    // Drills into the nested dicts to access open group details
+    // Drills into the nested dicts to access community details
     DictFieldProxy blinded_contact_field(
             const blinded_contact_info& bc,
             std::span<const unsigned char>* get_pubkey = nullptr) const;
