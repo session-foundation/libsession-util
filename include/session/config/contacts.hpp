@@ -118,8 +118,8 @@ struct contact_info {
     void load(const dict& info_dict);
 };
 
-struct blinded_contact_info : community {
-    using community::community;
+struct blinded_contact_info {
+    community comm;
 
     const std::string session_id() const;  // in hex
     std::string name;
@@ -127,6 +127,7 @@ struct blinded_contact_info : community {
     bool legacy_blinding;
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
+    blinded_contact_info() = default;
     explicit blinded_contact_info(
             std::string_view base_url,
             std::string_view blinded_id,
@@ -152,6 +153,13 @@ struct blinded_contact_info : community {
     /// Inputs:
     /// - `name` -- Name to assign to the contact
     void set_name(std::string name);
+
+    /// These functions are here so we can use the `comm_iterator_helper` for loading data
+    /// into this struct
+    void set_base_url(std::string_view base_url);
+    void set_room(std::string_view room);
+    void set_pubkey(std::span<const unsigned char> pubkey);
+    void set_pubkey(std::string_view pubkey);
 
   private:
     friend class Contacts;

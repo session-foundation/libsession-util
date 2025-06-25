@@ -169,13 +169,13 @@ blinded_contact_info::blinded_contact_info(
         std::string_view blinded_id,
         std::span<const unsigned char> pubkey,
         bool legacy_blinding) :
-        legacy_blinding{legacy_blinding},
-        community(std::move(base_url), blinded_id.substr(2), std::move(pubkey)) {
+        comm{community(std::move(base_url), blinded_id.substr(2), std::move(pubkey))},
+        legacy_blinding{legacy_blinding} {
     check_session_id(blinded_id, legacy_blinding ? "15" : "25");
 }
 
 const std::string blinded_contact_info::session_id() const {
-    return "{}{}"_format(legacy_blinding ? "15" : "25", room());
+    return "{}{}"_format(legacy_blinding ? "15" : "25", comm.room());
 }
 
 void blinded_contact_info::set_name(std::string n) {
@@ -183,6 +183,22 @@ void blinded_contact_info::set_name(std::string n) {
         name = utf8_truncate(std::move(n), contact_info::MAX_NAME_LENGTH);
     else
         name = std::move(n);
+}
+
+void blinded_contact_info::set_base_url(std::string_view base_url) {
+    comm.set_base_url(base_url);
+}
+
+void blinded_contact_info::set_room(std::string_view room) {
+    comm.set_room(room);
+}
+
+void blinded_contact_info::set_pubkey(std::span<const unsigned char> pubkey) {
+    comm.set_pubkey(pubkey);
+}
+
+void blinded_contact_info::set_pubkey(std::string_view pubkey) {
+    comm.set_pubkey(pubkey);
 }
 
 void blinded_contact_info::load(const dict& info_dict) {
@@ -201,12 +217,12 @@ void blinded_contact_info::load(const dict& info_dict) {
 }
 
 void blinded_contact_info::into(contacts_blinded_contact& c) const {
-    copy_c_str(c.base_url, base_url());
+    copy_c_str(c.base_url, comm.base_url());
     c.session_id[0] = (legacy_blinding ? '1' : '2');
     c.session_id[1] = '5';
     std::memcpy(c.session_id + 2, session_id().data(), 64);
     c.session_id[66] = '\0';
-    std::memcpy(c.pubkey, pubkey().data(), 32);
+    std::memcpy(c.pubkey, comm.pubkey().data(), 32);
     copy_c_str(c.name, name);
     if (profile_picture) {
         copy_c_str(c.profile_pic.url, profile_picture.url);
@@ -218,8 +234,8 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     c.created = to_epoch_seconds(created);
 }
 
-blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) :
-        community(c.base_url, {c.session_id + 2, 64}, c.pubkey) {
+blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
+    comm = community(c.base_url, {c.session_id + 2, 64}, c.pubkey);
     assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
     name = c.name;
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
@@ -374,14 +390,14 @@ size_t Contacts::size() const {
 
 ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
         const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey) const {
-    auto record = data["b"][bc.base_url()];
+    auto record = data["b"][bc.comm.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
             *get_pubkey = std::span<const unsigned char>{
                     reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
     }
-    return record["R"][bc.room()];  // The `room` value is the blinded id without the prefix
+    return record["R"][bc.comm.room()];  // The `room` value is the blinded id without the prefix
 }
 
 using any_blinded_contact = std::variant<blinded_contact_info>;
@@ -395,7 +411,7 @@ std::optional<blinded_contact_info> Contacts::get_blinded(
         std::shared_ptr<any_blinded_contact> val;
 
         while (!comm.done()) {
-            if (comm.load<blinded_contact_info>(val))  // TODO: This is untested
+            if (comm.load<blinded_contact_info>(val))
                 if (auto* ptr = std::get_if<blinded_contact_info>(val.get());
                     ptr && ptr->session_id() == pubkey_hex)
                     return *ptr;
@@ -425,7 +441,7 @@ std::vector<blinded_contact_info> Contacts::blinded_contacts() const {
 }
 
 bool Contacts::set_blinded_contact(const blinded_contact_info& bc) {
-    data["b"][bc.base_url()]["#"] = bc.pubkey();
+    data["b"][bc.comm.base_url()]["#"] = bc.comm.pubkey();
     auto info = blinded_contact_field(bc);  // data["b"][base]["R"][bc_session_id_without_prefix]
 
     // Always set the name, even if empty, to keep the dict from getting pruned if there are no
