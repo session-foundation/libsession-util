@@ -123,6 +123,18 @@ if(ENABLE_ONIONREQ)
     endif()
 endif()
 
+if(ENABLE_LOKINET)
+    add_libsession_util_library(session-lokinet
+        session_lokinet.cpp
+    )
+    set_target_properties(session-lokinet PROPERTIES OUTPUT_NAME session-lokinet)
+    target_link_libraries(session-lokinet
+        PUBLIC
+        util
+        lokinet::embedded
+    )
+endif()
+
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
     # GCC 11 has an overzealous (and false) stringop-overread warning, but only when LTO is off.
     # Um, yeah.

@@ -22,3 +22,6 @@
 [submodule "external/oxen-logging"]
 	path = external/oxen-logging
 	url = https://github.com/oxen-io/oxen-logging.git
+[submodule "external/lokinet"]
+	path = external/lokinet
+	url = https://github.com/oxen-io/lokinet.git

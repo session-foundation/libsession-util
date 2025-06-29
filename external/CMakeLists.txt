@@ -1,4 +1,5 @@
 option(SUBMODULE_CHECK "Enables checking that vendored library submodules are up to date" ON)
+
 if(SUBMODULE_CHECK)
   find_package(Git)
   if(GIT_FOUND)
@@ -26,7 +27,8 @@ if(SUBMODULE_CHECK)
     message(STATUS "Checking submodules")
     check_submodule(ios-cmake)
     check_submodule(libsodium-internal)
-    check_submodule(oxen-libquic external/oxen-logging external/oxen-encoding)
+    check_submodule(lokinet external/oxen-encoding)
+    check_submodule(oxen-libquic external/oxen-logging)
     check_submodule(nlohmann-json)
     check_submodule(zstd)
     check_submodule(protobuf)
@@ -100,23 +102,23 @@ if(CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
+if(NOT TARGET oxenc::oxenc)
+    set(OXENC_BUILD_TESTS OFF CACHE BOOL "")
+    set(OXENC_BUILD_DOCS OFF CACHE BOOL "")
+    libsession_system_or_submodule(OXENC oxenc liboxenc>=1.5.0 lokinet/external/oxen-encoding)
+endif()
+
+if(NOT TARGET oxen::logging)
+    libsession_system_or_submodule(OXENLOGGING oxenlogging liboxen-logging>=1.2.0 oxen-libquic/external/oxen-logging)
+    if(NOT TARGET oxen::logging)
+        add_library(oxen::logging ALIAS oxenlogging::oxenlogging)
+    endif()
+endif()
+
 set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
 if(ENABLE_ONIONREQ)
   libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.3.0 oxen-libquic)
 endif()
-
-if(NOT TARGET oxenc::oxenc)
-    # The oxenc target will already exist if we load libquic above via submodule
-    set(OXENC_BUILD_TESTS OFF CACHE BOOL "")
-    set(OXENC_BUILD_DOCS OFF CACHE BOOL "")
-    libsession_system_or_submodule(OXENC oxenc liboxenc>=1.3.0 oxen-libquic/external/oxen-encoding)
-endif()
-
-if(NOT TARGET oxen::logging)
-    add_subdirectory(oxen-libquic/external/oxen-logging)
-endif()
-
-oxen_logging_add_source_dir("${PROJECT_SOURCE_DIR}")
 
 # Apple xcode 15 has a completely broken std::source_location; we can't fix it, but at least we can
 # hack up the source locations to hide the path that it uses (which is the useless path to
@@ -144,12 +146,12 @@ if(APPLE)
     endforeach()
 endif()
 
-
-function(libsodium_internal_subdir)
+function(add_static_subdirectory dir)
     set(BUILD_SHARED_LIBS OFF)
-    add_subdirectory(libsodium-internal)
+    add_subdirectory(${dir} ${ARGN})
 endfunction()
-libsodium_internal_subdir()
+
+add_static_subdirectory(libsodium-internal)
 libsession_static_bundle(libsodium::sodium-internal)
 
 
@@ -193,3 +195,15 @@ libsession_static_bundle(libzstd_static)
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
 libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json>=3.7.0 nlohmann-json)
+
+if(ENABLE_LOKINET)
+    set(LOKINET_EMBEDDED ON CACHE BOOL "")
+    set(LOKINET_NATIVE_BUILD OFF CACHE BOOL "")
+    set(LOKINET_JEMALLOC OFF CACHE BOOL "")
+    set(LOKINET_BOOTSTRAP OFF CACHE BOOL "")
+
+    add_library(sodium INTERFACE)
+    target_link_libraries(sodium INTERFACE libsodium::sodium-internal)
+    add_static_subdirectory(lokinet EXCLUDE_FROM_ALL)
+    libsession_static_bundle(lokinet-embedded)
+endif()
