@@ -247,7 +247,7 @@ class TestNetwork : public Network {
         path_nodes.reserve(3);
 
         for (auto i = 0; i < 3; ++i) {
-            path_servers.emplace_back(create_test_node(static_cast<uint16_t>(1000 + i)));
+            path_servers.emplace_back(create_test_node(static_cast<uint16_t>(5360 + i)));
             path_nodes.emplace_back(path_servers[i]->node);
         }
 
@@ -1227,7 +1227,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
 
 TEST_CASE("Network", "[network][establish_connection]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
-    auto test_server = network.create_test_node(500);
+    auto test_server = network.create_test_node(2350);
     std::promise<std::pair<connection_info, std::optional<std::string>>> prom;
 
     network.establish_connection(
@@ -1253,7 +1253,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it doesn't start checking for timeouts when the request doesn't have
     // a build paths timeout
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(network->create_test_node(501));
+    test_server.emplace(network->create_test_node(2351));
     network->send_onion_request(
             (*test_server)->node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
@@ -1270,7 +1270,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it does start checking for timeouts when the request has a
     // paths build timeout
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(network->create_test_node(502));
+    test_server.emplace(network->create_test_node(2352));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             (*test_server)->node,
@@ -1288,7 +1288,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it fails the request with a timeout if it has a build path timeout
     // and the path build takes too long
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(network->create_test_node(503));
+    test_server.emplace(network->create_test_node(2353));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             (*test_server)->node,
@@ -1313,7 +1313,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
 
 TEST_CASE("Network", "[network][send_request]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
-    auto test_server = network.create_test_node(500);
+    auto test_server = network.create_test_node(2350);
     std::promise<Result> prom;
 
     network.establish_connection(
@@ -1366,7 +1366,7 @@ TEST_CASE("Network", "[network][send_request]") {
 
 TEST_CASE("Network", "[network][send_onion_request]") {
     auto network = TestNetwork(std::nullopt, true, true, false);
-    auto test_server = network.create_test_node(500);
+    auto test_server = network.create_test_node(2350);
     auto [test_path_servers, test_path] = network.create_test_path();
     network.handle_onion_requests_as_plaintext = true;
     network.set_paths(PathType::standard, {test_path});
@@ -1408,7 +1408,7 @@ TEST_CASE("Network", "[network][send_onion_request]") {
 
 TEST_CASE("Network", "[network][c][network_send_onion_request]") {
     auto test_network = std::make_unique<TestNetwork>(std::nullopt, true, true, false);
-    auto test_server_cpp = test_network->create_test_node(500);
+    auto test_server_cpp = test_network->create_test_node(2350);
     std::optional<std::pair<std::vector<std::shared_ptr<TestServer>>, onion_path>> test_path_data;
     test_path_data.emplace(test_network->create_test_path());
     test_network->handle_onion_requests_as_plaintext = true;
