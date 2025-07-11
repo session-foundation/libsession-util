@@ -44,6 +44,7 @@ namespace session::config {
 ///     E - Disappearing message timer, in seconds.  Omitted when `e` is omitted.
 ///     j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
 ///         equivalent "j"oined field). Omitted if 0.
+///     # - The `profile_seqno` (version number) for this contacts profile information.
 
 /// Struct containing contact info.
 struct contact_info {
@@ -53,6 +54,7 @@ struct contact_info {
     std::string name;
     std::string nickname;
     profile_pic profile_picture;
+    int64_t profile_seqno = 0;
     bool approved = false;
     bool approved_me = false;
     bool blocked = false;
@@ -229,6 +231,16 @@ class Contacts : public ConfigBase {
     /// - `session_id` -- hex string of the session id
     /// - `profile_pic` -- profile pic of the contact
     void set_profile_pic(std::string_view session_id, profile_pic pic);
+
+    /// API: contacts/contacts::set_profile_seqno
+    ///
+    /// Alternative to `set()` for setting a single field.  (If setting multiple fields at once you
+    /// should use `set()` instead).
+    ///
+    /// Inputs:
+    /// - `session_id` -- hex string of the session id
+    /// - `profile_seqno` -- profile seqno of the contact
+    void set_profile_seqno(std::string_view session_id, int64_t profile_seqno);
 
     /// API: contacts/contacts::set_approved
     ///

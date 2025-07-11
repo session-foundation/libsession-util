@@ -83,6 +83,7 @@ void contact_info::load(const dict& info_dict) {
         profile_picture.clear();
     }
 
+    profile_seqno = maybe_int(info_dict, "#").value_or(0);
     approved = maybe_int(info_dict, "a").value_or(0);
     approved_me = maybe_int(info_dict, "A").value_or(0);
     blocked = maybe_int(info_dict, "b").value_or(0);
@@ -131,6 +132,7 @@ void contact_info::into(contacts_contact& c) const {
     } else {
         copy_c_str(c.profile_pic.url, "");
     }
+    c.profile_seqno = profile_seqno;
     c.approved = approved;
     c.approved_me = approved_me;
     c.blocked = blocked;
@@ -154,6 +156,7 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
         profile_picture.url = c.profile_pic.url;
         profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
     }
+    profile_seqno = c.profile_seqno;
     approved = c.approved;
     approved_me = c.approved_me;
     blocked = c.blocked;
@@ -227,6 +230,7 @@ void Contacts::set(const contact_info& contact) {
             info["q"],
             contact.profile_picture.key);
 
+    set_positive_int(info["#"], contact.profile_seqno);
     set_flag(info["a"], contact.approved);
     set_flag(info["A"], contact.approved_me);
     set_flag(info["b"], contact.blocked);
@@ -277,6 +281,11 @@ void Contacts::set_nickname_truncated(std::string_view session_id, std::string n
 void Contacts::set_profile_pic(std::string_view session_id, profile_pic pic) {
     auto c = get_or_construct(session_id);
     c.profile_picture = std::move(pic);
+    set(c);
+}
+void Contacts::set_profile_seqno(std::string_view session_id, int64_t profile_seqno) {
+    auto c = get_or_construct(session_id);
+    c.profile_seqno = profile_seqno;
     set(c);
 }
 void Contacts::set_approved(std::string_view session_id, bool approved) {

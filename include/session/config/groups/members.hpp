@@ -40,6 +40,7 @@ using namespace std::literals;
 ///         resent)
 ///       - 3 if a member has been marked for promotion but the promotion hasn't been sent yet.
 ///       - omitted once the promotion is accepted (i.e. once `A` gets set).
+///   # - The `profile_seqno` (version number) for this members profile information.
 
 constexpr int STATUS_SENT = 1, STATUS_FAILED = 2, STATUS_NOT_SENT = 3;
 constexpr int REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2;
@@ -99,6 +100,13 @@ struct member {
     /// members of the group to display a member's details before having seen a message from that
     /// member.
     profile_pic profile_picture;
+
+    /// API: groups/member::profile_seqno
+    ///
+    /// Member variable
+    ///
+    /// The version number for this members profile information.
+    int64_t profile_seqno = 0;
 
     /// API: groups/member::admin
     ///

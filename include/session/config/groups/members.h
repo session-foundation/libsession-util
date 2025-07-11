@@ -38,6 +38,7 @@ typedef struct config_group_member {
     // These two will be 0-length strings when unset:
     char name[101];
     user_profile_pic profile_pic;
+    int64_t profile_seqno;
 
     bool admin;
     int invited;   // 0 == unset, STATUS_SENT = invited, STATUS_FAILED = invite failed to send,
