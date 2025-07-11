@@ -20,7 +20,7 @@ typedef struct contacts_contact {
     char name[101];
     char nickname[101];
     user_profile_pic profile_pic;
-    int64_t profile_seqno;
+    int64_t profile_updated;  // unix timestamp (seconds)
 
     bool approved;
     bool approved_me;

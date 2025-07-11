@@ -48,7 +48,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(c.name.empty());
     CHECK(c.nickname.empty());
-    CHECK(c.profile_seqno == 0);
+    CHECK(c.profile_updated == 0);
     CHECK_FALSE(c.approved);
     CHECK_FALSE(c.approved_me);
     CHECK_FALSE(c.blocked);
@@ -63,7 +63,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     c.set_name("Joe");
     c.set_nickname("Joey");
-    c.profile_seqno = 1;
+    c.profile_updated = 1;
     c.approved = true;
     c.approved_me = true;
     c.created = created_ts * 1'000;
@@ -76,7 +76,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(contacts.get(definitely_real_id)->name == "Joe");
     CHECK(contacts.get(definitely_real_id)->nickname == "Joey");
-    CHECK(contacts.get(definitely_real_id)->profile_seqno == 1);
+    CHECK(contacts.get(definitely_real_id)->profile_updated == 1);
     CHECK(contacts.get(definitely_real_id)->approved);
     CHECK(contacts.get(definitely_real_id)->approved_me);
     CHECK_FALSE(contacts.get(definitely_real_id)->profile_picture);
@@ -109,7 +109,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     REQUIRE(x);
     CHECK(x->name == "Joe");
     CHECK(x->nickname == "Joey");
-    CHECK(x->profile_seqno == 1);
+    CHECK(x->profile_updated == 1);
     CHECK(x->approved);
     CHECK(x->approved_me);
     CHECK_FALSE(x->profile_picture);
@@ -141,13 +141,13 @@ TEST_CASE("Contacts", "[config][contacts]") {
     // Iterate through and make sure we got everything we expected
     std::vector<std::string> session_ids;
     std::vector<std::string> nicknames;
-    std::vector<int64_t> profile_seqnos;
+    std::vector<int64_t> profile_updateds;
     CHECK(contacts.size() == 2);
     CHECK_FALSE(contacts.empty());
     for (const auto& cc : contacts) {
         session_ids.push_back(cc.session_id);
         nicknames.emplace_back(cc.nickname.empty() ? "(N/A)" : cc.nickname);
-        profile_seqnos.emplace_back(cc.profile_seqno);
+        profile_updateds.emplace_back(cc.profile_updated);
     }
 
     REQUIRE(session_ids.size() == 2);
@@ -156,8 +156,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(session_ids[1] == another_id);
     CHECK(nicknames[0] == "Joey");
     CHECK(nicknames[1] == "(N/A)");
-    CHECK(profile_seqnos[0] == 1);
-    CHECK(profile_seqnos[1] == 0);
+    CHECK(profile_updateds[0] == 1);
+    CHECK(profile_updateds[1] == 0);
 
     // Conflict! Oh no!
 
@@ -167,7 +167,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     // Client 2 adds a new friend:
     auto third_id = "052222222222222222222222222222222222222222222222222222222222222222"sv;
     contacts2.set_nickname(third_id, "Nickname 3");
-    contacts2.set_profile_seqno(third_id, 2);
+    contacts2.set_profile_updated(third_id, 2);
     contacts2.set_approved(third_id, true);
     contacts2.set_blocked(third_id, true);
 
@@ -225,19 +225,19 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     session_ids.clear();
     nicknames.clear();
-    profile_seqnos.clear();
+    profile_updateds.clear();
     for (const auto& cc : contacts) {
         session_ids.push_back(cc.session_id);
         nicknames.emplace_back(cc.nickname.empty() ? "(N/A)" : cc.nickname);
-        profile_seqnos.emplace_back(cc.profile_seqno);
+        profile_updateds.emplace_back(cc.profile_updated);
     }
     REQUIRE(session_ids.size() == 2);
     CHECK(session_ids[0] == another_id);
     CHECK(session_ids[1] == third_id);
     CHECK(nicknames[0] == "(N/A)");
     CHECK(nicknames[1] == "Nickname 3");
-    CHECK(profile_seqnos[0] == 0);
-    CHECK(profile_seqnos[1] == 2);
+    CHECK(profile_updateds[0] == 0);
+    CHECK(profile_updateds[1] == 2);
 
     CHECK_THROWS(
             c.set_nickname("12345678901234567890123456789012345678901234567890123456789012345678901"
@@ -292,7 +292,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK(c.session_id == std::string_view{definitely_real_id});
     CHECK(strlen(c.name) == 0);
     CHECK(strlen(c.nickname) == 0);
-    CHECK(c.profile_seqno == 0);
+    CHECK(c.profile_updated == 0);
     CHECK_FALSE(c.approved);
     CHECK_FALSE(c.approved_me);
     CHECK_FALSE(c.blocked);
@@ -301,7 +301,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
 
     strcpy(c.name, "Joe");
     strcpy(c.nickname, "Joey");
-    c.profile_seqno = 1;
+    c.profile_updated = 1;
     c.approved = true;
     c.approved_me = true;
     c.created = created_ts;
@@ -313,7 +313,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
 
     CHECK(c2.name == "Joe"sv);
     CHECK(c2.nickname == "Joey"sv);
-    CHECK(c2.profile_seqno == 1);
+    CHECK(c2.profile_updated == 1);
     CHECK(c2.approved);
     CHECK(c2.approved_me);
     CHECK_FALSE(c2.blocked);
@@ -349,7 +349,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     REQUIRE(contacts_get(conf2, &c3, definitely_real_id));
     CHECK(c3.name == "Joe"sv);
     CHECK(c3.nickname == "Joey"sv);
-    CHECK(c3.profile_seqno == 1);
+    CHECK(c3.profile_updated == 1);
     CHECK(c3.approved);
     CHECK(c3.approved_me);
     CHECK_FALSE(c3.blocked);
@@ -360,7 +360,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     REQUIRE(contacts_get_or_construct(conf, &c3, another_id));
     CHECK(strlen(c3.name) == 0);
     CHECK(strlen(c3.nickname) == 0);
-    CHECK(c3.profile_seqno == 0);
+    CHECK(c3.profile_updated == 0);
     CHECK_FALSE(c3.approved);
     CHECK_FALSE(c3.approved_me);
     CHECK_FALSE(c3.blocked);
@@ -390,7 +390,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     // Iterate through and make sure we got everything we expected
     std::vector<std::string> session_ids;
     std::vector<std::string> nicknames;
-    std::vector<int64_t> profile_seqnos;
+    std::vector<int64_t> profile_updateds;
 
     CHECK(contacts_size(conf) == 2);
     contacts_iterator* it = contacts_iterator_new(conf);
@@ -398,7 +398,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     for (; !contacts_iterator_done(it, &ci); contacts_iterator_advance(it)) {
         session_ids.push_back(ci.session_id);
         nicknames.emplace_back(strlen(ci.nickname) ? ci.nickname : "(N/A)");
-        profile_seqnos.emplace_back(ci.profile_seqno);
+        profile_updateds.emplace_back(ci.profile_updated);
     }
     contacts_iterator_free(it);
 
@@ -407,8 +407,8 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK(session_ids[1] == another_id);
     CHECK(nicknames[0] == "Joey");
     CHECK(nicknames[1] == "(N/A)");
-    CHECK(profile_seqnos[0] == 1);
-    CHECK(profile_seqnos[1] == 0);
+    CHECK(profile_updateds[0] == 1);
+    CHECK(profile_updateds[1] == 0);
 
     // Changing things while iterating:
     it = contacts_iterator_new(conf);

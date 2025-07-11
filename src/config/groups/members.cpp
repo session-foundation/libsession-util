@@ -66,7 +66,7 @@ void Members::set(const member& mem) {
             info["q"],
             mem.profile_picture.key);
 
-    set_positive_int(info["#"], mem.profile_seqno);
+    set_positive_int(info["t"], to_epoch_seconds(mem.profile_updated));
     set_flag(info["A"], mem.admin);
     set_positive_int(info["P"], mem.promotion_status);
     set_positive_int(info["I"], mem.admin ? 0 : mem.invite_status);
@@ -96,7 +96,7 @@ void member::load(const dict& info_dict) {
         profile_picture.clear();
     }
 
-    profile_seqno = maybe_int(info_dict, "#").value_or(0);
+    profile_updated = to_epoch_seconds(maybe_int(info_dict, "t").value_or(0));
     admin = maybe_int(info_dict, "A").value_or(0);
     invite_status = admin ? 0 : maybe_int(info_dict, "I").value_or(0);
     promotion_status = maybe_int(info_dict, "P").value_or(0);
@@ -189,7 +189,7 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
         profile_picture.url = m.profile_pic.url;
         profile_picture.key.assign(m.profile_pic.key, m.profile_pic.key + 32);
     }
-    profile_seqno = m.profile_seqno;
+    profile_updated = m.profile_updated;
     admin = m.admin;
     invite_status =
             (m.invited == STATUS_SENT || m.invited == STATUS_FAILED || m.invited == STATUS_NOT_SENT)
@@ -214,7 +214,7 @@ void member::into(config_group_member& m) const {
     } else {
         copy_c_str(m.profile_pic.url, "");
     }
-    m.profile_seqno = profile_seqno;
+    m.profile_updated = profile_updated;
     m.admin = admin;
     static_assert(groups::STATUS_SENT == ::STATUS_SENT);
     static_assert(groups::STATUS_FAILED == ::STATUS_FAILED);

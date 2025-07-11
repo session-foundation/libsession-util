@@ -72,7 +72,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
                 "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
-        m.profile_seqno = 1;
+        m.profile_updated = 1;
         gmem1.set(m);
     }
     // 10 members:
@@ -82,7 +82,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
                 "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
-        m.profile_seqno = 2;
+        m.profile_updated = 2;
         gmem1.set(m);
     }
     // 5 members with no attributes (not even a name):
@@ -133,7 +133,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                         session::config::groups::member::Status::invite_not_sent);
                 CHECK(m.admin);
                 CHECK(m.name == "Admin {}"_format(i));
-                CHECK(m.profile_seqno == 1);
+                CHECK(m.profile_updated == 1);
                 CHECK_FALSE(m.profile_picture.empty());
                 CHECK(gmem2.get_status(m) ==
                       session::config::groups::member::Status::promotion_accepted);
@@ -147,12 +147,12 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                 CHECK_FALSE(m.admin);
                 if (i < 20) {
                     CHECK(m.name == "Member {}"_format(i));
-                    CHECK(m.profile_seqno == 2);
+                    CHECK(m.profile_updated == 2);
                     CHECK_FALSE(m.profile_picture.empty());
                 } else {
                     CHECK(m.name.empty());
                     CHECK(m.profile_picture.empty());
-                    CHECK(m.profile_seqno == 0);
+                    CHECK(m.profile_updated == 0);
                 }
             }
             i++;
@@ -162,13 +162,13 @@ TEST_CASE("Group Members", "[config][groups][members]") {
 
     for (int i = 5; i < 15; i++) {
         auto m = gmem2.get_or_construct(sids[i]);
-        m.profile_seqno += 1;
+        m.profile_updated += 1;
         gmem2.set(m);
     }
     for (int i = 22; i < 50; i++) {
         auto m = gmem2.get_or_construct(sids[i]);
         m.name = "Member {}"_format(i);
-        m.profile_seqno = 1;
+        m.profile_updated = 1;
         gmem2.set(m);
     }
     for (int i = 50; i < 55; i++) {
@@ -223,19 +223,19 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
             if (i < 5)
-                CHECK(m.profile_seqno == 1);
+                CHECK(m.profile_updated == 1);
             if (i >= 5 && i < 10)
-                CHECK(m.profile_seqno == 2);
+                CHECK(m.profile_updated == 2);
             if (i >= 10 && i < 15)
-                CHECK(m.profile_seqno == 3);
+                CHECK(m.profile_updated == 3);
             if (i >= 15 && i < 20)
-                CHECK(m.profile_seqno == 2);
+                CHECK(m.profile_updated == 2);
             if (i >= 20 && i < 22)
-                CHECK(m.profile_seqno == 0);
+                CHECK(m.profile_updated == 0);
             if (i >= 22 && i < 50)
-                CHECK(m.profile_seqno == 1);
+                CHECK(m.profile_updated == 1);
             if (i >= 50)
-                CHECK(m.profile_seqno == 0);
+                CHECK(m.profile_updated == 0);
             if (i >= 10 && i < 25)
                 CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_sending);
@@ -307,19 +307,19 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                           : ""_hexbytes));
             CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
             if (i < 5)
-                CHECK(m.profile_seqno == 1);
+                CHECK(m.profile_updated == 1);
             if (i >= 5 && i < 10)
-                CHECK(m.profile_seqno == 2);
+                CHECK(m.profile_updated == 2);
             if (i >= 10 && i < 15)
-                CHECK(m.profile_seqno == 3);
+                CHECK(m.profile_updated == 3);
             if (i >= 15 && i < 20)
-                CHECK(m.profile_seqno == 2);
+                CHECK(m.profile_updated == 2);
             if (i >= 20 && i < 22)
-                CHECK(m.profile_seqno == 0);
+                CHECK(m.profile_updated == 0);
             if (i >= 22 && i < 50)
-                CHECK(m.profile_seqno == 1);
+                CHECK(m.profile_updated == 1);
             if (i >= 50)
-                CHECK(m.profile_seqno == 0);
+                CHECK(m.profile_updated == 0);
             if (is_prime100(i) || (i >= 25 && i < 50))
                 CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_not_sent);
