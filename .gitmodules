@@ -10,18 +10,9 @@
 [submodule "external/zstd"]
 	path = external/zstd
 	url = https://github.com/facebook/zstd.git
-[submodule "external/nlohmann-json"]
-	path = external/nlohmann-json
-	url = https://github.com/nlohmann/json.git
-[submodule "external/oxen-libquic"]
-	path = external/oxen-libquic
-	url = https://github.com/oxen-io/oxen-libquic.git
 [submodule "external/protobuf"]
 	path = external/protobuf
 	url = https://github.com/protocolbuffers/protobuf.git
-[submodule "external/oxen-logging"]
-	path = external/oxen-logging
-	url = https://github.com/oxen-io/oxen-logging.git
 [submodule "external/lokinet"]
 	path = external/lokinet
 	url = https://github.com/oxen-io/lokinet.git
