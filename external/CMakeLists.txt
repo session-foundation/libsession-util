@@ -188,10 +188,10 @@ set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
 libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json>=3.7.0 lokinet/external/nlohmann)
 
 if(ENABLE_LOKINET)
-    set(LOKINET_EMBEDDED ON CACHE BOOL "")
+    set(LOKINET_FULL OFF CACHE BOOL "")
+    set(LOKINET_DAEMON OFF CACHE BOOL "")
     set(LOKINET_NATIVE_BUILD OFF CACHE BOOL "")
     set(LOKINET_JEMALLOC OFF CACHE BOOL "")
-    set(LOKINET_BOOTSTRAP OFF CACHE BOOL "")
 
     add_library(sodium INTERFACE)
     target_link_libraries(sodium INTERFACE libsodium::sodium-internal)
