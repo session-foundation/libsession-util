@@ -100,23 +100,27 @@ if(CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
+if(ENABLE_ONIONREQ)
+  libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.3.0 lokinet/external/oxen-libquic)
+endif()
+
 if(NOT TARGET oxenc::oxenc)
-    set(OXENC_BUILD_TESTS OFF CACHE BOOL "")
-    set(OXENC_BUILD_DOCS OFF CACHE BOOL "")
     libsession_system_or_submodule(OXENC oxenc liboxenc>=1.5.0 lokinet/external/oxen-libquic/external/oxen-encoding)
 endif()
 
 if(NOT TARGET oxen::logging)
     libsession_system_or_submodule(OXENLOGGING oxenlogging liboxen-logging>=1.2.0 lokinet/external/oxen-libquic/external/oxen-logging)
-    if(NOT TARGET oxen::logging)
-        add_library(oxen::logging ALIAS oxenlogging::oxenlogging)
+    if(OXENLOGGING_FOUND)
+        # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
+        # but this script will give us them:
+        include(lokinet/external/oxen-libquic/external/oxen-logging/cmake/load_fmt_spdlog.cmake)
+
+        add_library(oxen-logging-fmt-spdlog INTERFACE)
+        target_link_libraries(oxen-logging-fmt-spdlog INTERFACE oxenlogging::oxenlogging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
+        add_library(oxen::logging ALIAS oxen-logging-fmt-spdlog)
     endif()
 endif()
 
-set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
-if(ENABLE_ONIONREQ)
-  libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.3.0 lokinet/external/oxen-libquic)
-endif()
 
 
 if(CMAKE_C_COMPILER_LAUNCHER)
@@ -196,5 +200,5 @@ if(ENABLE_LOKINET)
     add_library(sodium INTERFACE)
     target_link_libraries(sodium INTERFACE libsodium::sodium-internal)
     add_static_subdirectory(lokinet EXCLUDE_FROM_ALL)
-    libsession_static_bundle(lokinet-embedded)
+    libsession_static_bundle(lokinet::liblokinet)
 endif()
