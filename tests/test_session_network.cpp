@@ -59,14 +59,13 @@ std::optional<service_node> node_for_destination(network_destination destination
 
 std::shared_ptr<TestServer> create_test_server(uint16_t port) {
     oxen::quic::opt::inbound_alpns server_alpns{"oxenstorage"};
-    auto server_key_pair =
-            session::ed25519::ed25519_key_pair(to_span(fmt::format("{:032}", port)));
+    auto server_key_pair = session::ed25519::ed25519_key_pair(to_span(fmt::format("{:032}", port)));
     auto server_x25519_pubkey = session::curve25519::to_curve25519_pubkey(
             {server_key_pair.first.data(), server_key_pair.first.size()});
     auto server_x25519_seckey = session::curve25519::to_curve25519_seckey(
             {server_key_pair.second.data(), server_key_pair.second.size()});
-    auto creds = oxen::quic::GNUTLSCreds::make_from_ed_seckey(
-            to_string_view(server_key_pair.second));
+    auto creds =
+            oxen::quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(server_key_pair.second));
     oxen::quic::Address server_local{port};
     session::onionreq::HopEncryption decryptor{
             x25519_seckey::from_bytes(to_span(server_x25519_seckey)),
