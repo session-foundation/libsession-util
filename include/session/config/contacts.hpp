@@ -54,7 +54,8 @@ struct contact_info {
     std::string name;
     std::string nickname;
     profile_pic profile_picture;
-    int64_t profile_updated = 0; /// The unix timestamp (seconds) that this profile information was last updated.
+    int64_t profile_updated = 0;  /// The unix timestamp (seconds) that this profile information
+                                  /// was last updated.
     bool approved = false;
     bool approved_me = false;
     bool blocked = false;
