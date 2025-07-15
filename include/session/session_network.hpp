@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <limits>
+#include <lokinet.hpp>
 #include <oxen/quic.hpp>
 
 #include "onionreq/builder.hpp"
@@ -208,6 +209,7 @@ class Network {
     ConnectionStatus status;
 
     std::shared_ptr<oxen::quic::Loop> loop;
+    std::shared_ptr<lokinet::Lokinet> lokinet;
     std::shared_ptr<oxen::quic::Endpoint> endpoint;
     std::unordered_map<PathType, std::vector<onion_path>> paths;
     std::vector<std::pair<onion_path, PathType>> paths_pending_drop;

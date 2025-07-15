@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <llarp/contact/router_id.hpp>
 #include <nlohmann/json.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
 #include <session/curve25519.hpp>
@@ -83,11 +84,24 @@ class TestNetwork : public Network {
         };
     }
 
+    oxen::quic::Loop& get_loop() { return *loop; }
+    std::shared_ptr<oxen::quic::Loop> get_loop_ptr() { return loop; }
+
     void set_suspended(bool suspended_) { suspended = suspended_; }
 
     bool get_suspended() { return suspended; }
 
     ConnectionStatus get_status() { return status; }
+
+    void set_endpoint(oxen::quic::Address address) {
+        loop->call([this, address]() {
+            endpoint = oxen::quic::Endpoint::endpoint(
+                    *loop,
+                    address,
+                    oxen::quic::opt::alpns{"oxenstorage"},
+                    oxen::quic::opt::disable_mtu_discovery{});
+        });
+    }
 
     void set_snode_cache(std::vector<service_node> cache) {
         // Need to set the `last_snode_cache_update` to `10s` ago because otherwise it'll be
@@ -1644,4 +1658,75 @@ TEST_CASE("Network", "[network][get_swarm]") {
                                "f") == 0);
     CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000fffffffffffffff"
                                "e") == 0);
+}
+
+TEST_CASE("Network", "[network][lokinet]") {
+    CHECK("a" == "Start test");
+    auto network = TestNetwork(std::nullopt, true, true, false);
+    // fs::path ini_path = "/Users/morganpretty/Projects/Oxen/LibSession-Util/lokinet.ini";
+    // auto lokinet = std::make_shared<lokinet::Lokinet>(ini_path, network.get_loop_ptr());
+    auto lokinet =
+            std::make_shared<lokinet::Lokinet>(lokinet::Network::TESTNET, network.get_loop_ptr());
+    CHECK("a" == "Lokinet init called");
+    std::this_thread::sleep_for(5000ms);
+    CHECK("a" == "Sleep completed");
+    std::promise<Result> prom;
+
+    auto address = llarp::RouterID();
+    uint16_t quic_port = 35400;
+    address.from_hex("decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9");
+
+    auto snode_address = address.to_network_address(true);
+    auto info = lokinet->establish_udp_blocking(snode_address, quic_port);
+    auto target = oxen::quic::RemoteAddress{
+            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"_hexbytes,
+            "127.0.0.1",
+            info.local_port};
+    auto test_endpoint = oxen::quic::Endpoint::endpoint(
+            network.get_loop(),
+            oxen::quic::Address{"0.0.0.0", 0},
+            oxen::quic::opt::alpns{"oxenstorage"},
+            oxen::quic::opt::disable_mtu_discovery{});
+
+    auto conn_key_pair = ed25519::ed25519_key_pair();
+    auto creds = oxen::quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
+    auto conn_promise = std::promise<std::shared_ptr<oxen::quic::Connection>>();
+    auto conn_future = conn_promise.get_future().share();
+    std::span<const std::byte> payload = to_span<std::byte>("{}");
+
+    CHECK("a" == "Send request");
+    auto c = test_endpoint->connect(
+            target,
+            creds,
+            oxen::quic::opt::keep_alive{10s},
+            [&prom, target, payload, conn_future](oxen::quic::Connection&) mutable {
+                CHECK("a" == "Conn succeeded");
+                auto conn = conn_future.get();
+                auto stream = conn->open_stream<oxen::quic::BTRequestStream>();
+
+                stream->command("info", payload, [&prom](oxen::quic::message resp) {
+                    std::string body = std::string(resp.body());
+
+                    if (resp.is_error() || resp.timed_out) {
+                        prom.set_value({false, resp.timed_out, -1, {}, body});
+                        return;
+                    }
+                    prom.set_value({true, false, -1, {}, body});
+                });
+            },
+            [&prom](oxen::quic::Connection& conn, uint64_t error_code) mutable {
+                CHECK("a" == "Conn failed: " + std::to_string(error_code));
+                prom.set_value({false, false, -1, {}, std::nullopt});
+            });
+
+    conn_promise.set_value(c);
+
+    // Wait for the result to be set
+    auto result = prom.get_future().get();
+
+    CHECK(result.success);
+    CHECK_FALSE(result.timeout);
+    if (result.response.has_value()) {
+        CHECK("b" == *result.response);
+    }
 }

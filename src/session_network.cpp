@@ -9,6 +9,7 @@
 #include <sodium/randombytes.h>
 
 #include <fstream>
+#include <llarp/contact/router_id.hpp>
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -539,6 +540,20 @@ Network::Network(
         disk_write_thread = std::thread{&Network::disk_write_thread_loop, this};
     }
 
+    auto test_ini = R"(
+[router]
+netid=testnet
+[logging]
+type=none
+level=*=debug,quic=info
+)";
+
+try {
+    lokinet = std::make_shared<lokinet::Lokinet>(test_ini, loop);
+} catch (const std::exception& e) {
+        log::error(cat, "Failed to start lokinet ({}).", e.what());
+    }
+
     // Kick off a separate thread to build paths (may as well kick this off early)
     if (pre_build_paths)
         for (int i = 0; i < min_path_count(PathType::standard, single_path_mode); ++i) {
@@ -892,53 +907,131 @@ void Network::establish_connection(
         return callback(
                 {target, std::make_shared<size_t>(0), nullptr, nullptr}, "Network is suspended.");
 
-    auto conn_key_pair = ed25519::ed25519_key_pair();
-    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
     auto cb_called = std::make_shared<std::once_flag>();
     auto cb = std::make_shared<std::function<void(connection_info, std::optional<std::string>)>>(
             std::move(callback));
-    auto conn_promise = std::promise<std::shared_ptr<oxen::quic::Connection>>();
-    auto conn_future = conn_promise.get_future().share();
-    auto handshake_timeout =
-            timeout ? std::optional{quic::opt::handshake_timeout{
-                              std::chrono::duration_cast<std::chrono::nanoseconds>(*timeout)}}
-                    : std::nullopt;
+    auto address = llarp::RouterID();
+    address.from_hex(to_string(target.view_remote_key()));
+    auto snode_address = address.to_network_address(true);
+    auto info = lokinet->establish_udp_blocking(snode_address, target.port());
+// TODO: Need to ensure this exists
+    lokinet->establish_udp(
+            snode_address,
+            target.port(),
+            [this, id, target, timeout, cb, cb_called](lokinet::tunnel_info info) mutable {
+                auto conn_key_pair = ed25519::ed25519_key_pair();
+                auto creds = quic::GNUTLSCreds::make_from_ed_seckey(
+                        to_string_view(conn_key_pair.second));
+                auto conn_promise = std::promise<std::shared_ptr<oxen::quic::Connection>>();
+                auto conn_future = conn_promise.get_future().share();
+                auto handshake_timeout =
+                        timeout ? std::optional{quic::opt::handshake_timeout{
+                                          std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                                  *timeout)}}
+                                : std::nullopt;
+                auto loki_target = oxen::quic::RemoteAddress{
+                        target.view_remote_key(), "127.0.0.1", info.local_port};
 
-    auto c = get_endpoint()->connect(
-            target,
-            creds,
-            quic::opt::keep_alive{10s},
-            handshake_timeout,
-            [this, id, target, cb, cb_called, conn_future](quic::Connection&) mutable {
-                log::trace(cat, "Connection established for {}.", id);
+                auto c = get_endpoint()->connect(
+                        loki_target,
+                        creds,
+                        quic::opt::keep_alive{10s},
+                        handshake_timeout,
+                        [this, id, target, cb, cb_called, conn_future](quic::Connection&) mutable {
+                            log::trace(cat, "Connection established for {}.", id);
 
-                // Just in case, call it within a `loop->call`
-                loop->call([&] {
-                    std::call_once(*cb_called, [&]() {
-                        if (cb) {
-                            auto conn = conn_future.get();
-                            (*cb)({target,
-                                   std::make_shared<size_t>(0),
-                                   conn,
-                                   conn->open_stream<quic::BTRequestStream>()},
-                                  std::nullopt);
-                            cb.reset();
-                        }
-                    });
-                });
+                            // Just in case, call it within a `loop->call`
+                            loop->call([&] {
+                                std::call_once(*cb_called, [&]() {
+                                    if (cb) {
+                                        auto conn = conn_future.get();
+                                        (*cb)({target,
+                                               std::make_shared<size_t>(0),
+                                               conn,
+                                               conn->open_stream<quic::BTRequestStream>()},
+                                              std::nullopt);
+                                        cb.reset();
+                                    }
+                                });
+                            });
+                        },
+                        [this, target, id, cb, cb_called, conn_future](
+                                quic::Connection& conn, uint64_t error_code) mutable {
+                            if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
+                                log::info(
+                                        cat,
+                                        "Unable to establish connection to {} for {}.",
+                                        target.to_string(),
+                                        id);
+                            else
+                                log::info(
+                                        cat,
+                                        "Connection to {} closed for {}.",
+                                        target.to_string(),
+                                        id);
+
+                            // Just in case, call it within a `loop->call`
+                            loop->call([&] {
+                                // Trigger the callback first before updating the paths in case this
+                                // was triggered when try to establish a connection
+                                std::call_once(*cb_called, [&]() {
+                                    if (cb) {
+                                        (*cb)({target,
+                                               std::make_shared<size_t>(0),
+                                               nullptr,
+                                               nullptr},
+                                              std::nullopt);
+                                        cb.reset();
+                                    }
+                                });
+
+                                // Remove the connection from `unused_connection` if present
+                                std::erase_if(
+                                        unused_connections, [&conn, &target](auto& unused_conn) {
+                                            return (unused_conn.node == target &&
+                                                    unused_conn.conn &&
+                                                    unused_conn.conn->reference_id() ==
+                                                            conn.reference_id());
+                                        });
+
+                                // If this connection is being used in an existing path then we
+                                // should drop it (as the path is no longer valid)
+                                for (const auto& [path_type, paths_for_type] : paths) {
+                                    for (const auto& path : paths_for_type) {
+                                        if (!path.nodes.empty() && path.nodes.front() == target &&
+                                            path.conn_info.conn &&
+                                            conn.reference_id() ==
+                                                    path.conn_info.conn->reference_id()) {
+                                            drop_path_when_empty(id, path_type, path);
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                // Since a connection was closed we should also clear any pending
+                                // path drops in case this connection was one of those
+                                clear_empty_pending_path_drops();
+
+                                // If the connection failed with a handshake timeout then the node
+                                // is unreachable, either due to a device network issue or because
+                                // the node is down so set the failure count to the failure
+                                // threshold so it won't be used for subsequent requests
+                                if (error_code ==
+                                    static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
+                                    snode_failure_counts[target.to_string()] =
+                                            snode_failure_threshold;
+                            });
+                        });
+
+                conn_promise.set_value(c);
             },
-            [this, target, id, cb, cb_called, conn_future](
-                    quic::Connection& conn, uint64_t error_code) mutable {
-                if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
-                    log::info(
-                            cat,
-                            "Unable to establish connection to {} for {}.",
-                            target.to_string(),
-                            id);
-                else
-                    log::info(cat, "Connection to {} closed for {}.", target.to_string(), id);
+            [this, target, id, cb, cb_called](std::string errmsg) mutable {
+                log::info(
+                        cat,
+                        "Unable to establish lokinet UDP connection to {} for {}.",
+                        target.to_string(),
+                        id);
 
-                // Just in case, call it within a `loop->call`
                 loop->call([&] {
                     // Trigger the callback first before updating the paths in case this was
                     // triggered when try to establish a connection
@@ -949,40 +1042,8 @@ void Network::establish_connection(
                             cb.reset();
                         }
                     });
-
-                    // Remove the connection from `unused_connection` if present
-                    std::erase_if(unused_connections, [&conn, &target](auto& unused_conn) {
-                        return (unused_conn.node == target && unused_conn.conn &&
-                                unused_conn.conn->reference_id() == conn.reference_id());
-                    });
-
-                    // If this connection is being used in an existing path then we should drop it
-                    // (as the path is no longer valid)
-                    for (const auto& [path_type, paths_for_type] : paths) {
-                        for (const auto& path : paths_for_type) {
-                            if (!path.nodes.empty() && path.nodes.front() == target &&
-                                path.conn_info.conn &&
-                                conn.reference_id() == path.conn_info.conn->reference_id()) {
-                                drop_path_when_empty(id, path_type, path);
-                                break;
-                            }
-                        }
-                    }
-
-                    // Since a connection was closed we should also clear any pending path drops
-                    // in case this connection was one of those
-                    clear_empty_pending_path_drops();
-
-                    // If the connection failed with a handshake timeout then the node is
-                    // unreachable, either due to a device network issue or because the node
-                    // is down so set the failure count to the failure threshold so it won't
-                    // be used for subsequent requests
-                    if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
-                        snode_failure_counts[target.to_string()] = snode_failure_threshold;
                 });
             });
-
-    conn_promise.set_value(c);
 }
 
 void Network::establish_and_store_connection(std::string path_id) {

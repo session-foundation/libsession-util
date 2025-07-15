@@ -84,7 +84,7 @@ option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 # Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
 option(ENABLE_ONIONREQ "Build with onion request functionality" ON)
 
-option(ENABLE_LOKINET "Build with support for embedded lokinet" OFF)
+option(ENABLE_LOKINET "Build with support for embedded lokinet" ON)
 
 if(USE_LTO)
   include(CheckIPOSupported)
