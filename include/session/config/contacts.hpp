@@ -129,9 +129,9 @@ struct blinded_contact_info {
 
     blinded_contact_info() = default;
     explicit blinded_contact_info(
-            std::string_view base_url,
+            std::string_view community_base_url,
+            std::span<const unsigned char> community_pubkey,
             std::string_view blinded_id,
-            std::span<const unsigned char> pubkey,
             bool legacy_blinding);
 
     // Internal ctor/method for C API implementations:
@@ -427,7 +427,7 @@ class Contacts : public ConfigBase {
             std::span<const unsigned char>* get_pubkey = nullptr) const;
 
   public:
-    /// API: contacts/Contacts::blinded_contacts
+    /// API: contacts/Contacts::blinded
     ///
     /// Retrieves a list of all known blinded contacts.
     ///
@@ -435,7 +435,7 @@ class Contacts : public ConfigBase {
     ///
     /// Outputs:
     /// - `std::vector<blinded_contact_info>` - Returns a list of blinded_contact_info
-    std::vector<blinded_contact_info> blinded_contacts() const;
+    std::vector<blinded_contact_info> blinded() const;
 
     /// API: contacts/Contacts::get_blinded
     ///
@@ -443,32 +443,58 @@ class Contacts : public ConfigBase {
     /// blinded session ID was not found, otherwise returns a filled out `blinded_contact_info`.
     ///
     /// Inputs:
-    /// - `pubkey_hex` -- hex string of the session id
+    /// - `blinded_id_hex` -- hex string of the session id
     /// - `legacy_blinding` -- flag indicating whether the pubkey is using legacy blinding
     ///
     /// Outputs:
     /// - `std::optional<blinded_contact_info>` - Returns nullopt if blinded session ID was not
     /// found, otherwise a filled out blinded_contact_info
     std::optional<blinded_contact_info> get_blinded(
-            std::string_view pubkey_hex, bool legacy_blinding) const;
+            std::string_view blinded_id_hex, bool legacy_blinding) const;
 
-    /// API: contacts/contacts::set_blinded_contact
+    /// API: contacts/Contacts::get_or_construct_blinded
+    ///
+    /// Similar to get_blinded(), but if the blinded ID does not exist this returns a filled-out
+    /// blinded_contact_info containing the blinded_id, community info and legacy_blinded flag (all
+    /// other fields will be empty/defaulted).  This is intended to be combined with `set_blinded`
+    /// to set-or-create a record.
+    ///
+    /// NB: calling this does *not* add the blinded id to the blinded list when called: that
+    /// requires also calling `set_blinded` with this value.
+    ///
+    /// Inputs:
+    /// - `community_base_url` -- String of the base URL for the community this blinded id
+    /// originates from
+    /// - `community_pubkey_hex` -- Hex string of the public key for the community this blinded id
+    /// originates from
+    /// - `blinded_id_hex` -- hex string of the blinded id
+    /// - `legacy_blinding` -- flag indicating whether the pubkey is using legacy blinding
+    ///
+    /// Outputs:
+    /// - `blinded_contact_info` - Returns a filled out blinded_contact_info
+    blinded_contact_info get_or_construct_blinded(
+            std::string_view community_base_url,
+            std::string_view community_pubkey_hex,
+            std::string_view blinded_id_hex,
+            bool legacy_blinding);
+
+    /// API: contacts/contacts::set_blinded
     ///
     /// Sets or updates multiple blinded contact info values at once with the given info.  The usual
     /// use is to access the current info, change anything desired, then pass it back into
-    /// set_blinded_contact, e.g.:
+    /// set_blinded, e.g.:
     ///
     ///```cpp
     ///     auto c = contacts.get_blinded(pubkey, legacy_blinding);
     ///     c.name = "Session User 42";
-    ///     contacts.set_blinded_contact(c);
+    ///     contacts.set_blinded(c);
     ///```
     ///
     /// Inputs:
-    /// - `bc` -- set_blinded_contact value to set
-    bool set_blinded_contact(const blinded_contact_info& bc);
+    /// - `bc` -- set_blinded value to set
+    void set_blinded(const blinded_contact_info& bc);
 
-    /// API: contacts/contacts::erase_blinded_contact
+    /// API: contacts/contacts::erase_blinded
     ///
     /// Removes a blinded contact, if present.  Returns true if it was found and removed, false
     /// otherwise. Note that this removes all fields related to a blinded contact, even fields we do
@@ -481,7 +507,7 @@ class Contacts : public ConfigBase {
     ///
     /// Outputs:
     /// - `bool` - Returns true if contact was found and removed, false otherwise
-    bool erase_blinded_contact(
+    bool erase_blinded(
             std::string_view base_url, std::string_view blinded_id, bool legacy_blinding);
 
     struct iterator;

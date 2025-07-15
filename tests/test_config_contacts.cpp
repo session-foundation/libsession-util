@@ -1,6 +1,7 @@
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/config/contacts.h>
+#include <session/util.hpp>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -885,4 +886,213 @@ TEST_CASE("needs_dump bug", "[config][needs_dump]") {
     c.approved_me = false;
     contacts.set(c);
     CHECK(contacts.needs_dump());
+}
+
+TEST_CASE("Contacts", "[config][blinded_contacts]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
+            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+
+    constexpr auto definitely_real_id =
+            "150000000000000000000000000000000000000000000000000000000000000000"sv;
+    constexpr auto comm_base_url = "https://example.com/"sv;
+    constexpr auto comm_pubkey_hex =
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"sv;
+
+    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+
+    CHECK_FALSE(contacts.get_blinded(definitely_real_id, true));
+
+    CHECK(contacts.empty());
+    CHECK(contacts.size() == 0);
+
+    auto c = contacts.get_or_construct_blinded(
+            comm_base_url, comm_pubkey_hex, definitely_real_id, true);
+
+    CHECK(c.session_id() == "150000000000000000000000000000000000000000000000000000000000000000");
+    CHECK(c.name.empty());
+    CHECK_FALSE(c.profile_picture);
+    CHECK(c.legacy_blinding);
+    CHECK(c.created == 0);
+
+    CHECK_FALSE(contacts.needs_push());
+    CHECK_FALSE(contacts.needs_dump());
+    CHECK(std::get<seqno_t>(contacts.push()) == 0);
+
+    c.set_name("Joe");
+    c.created = created_ts * 1'000;
+    contacts.set_blinded(c);
+
+    REQUIRE(contacts.get_blinded(definitely_real_id, true).has_value());
+
+    CHECK(contacts.get_blinded(definitely_real_id, true)->name == "Joe");
+    CHECK_FALSE(contacts.get_blinded(definitely_real_id, true)->profile_picture);
+    CHECK(contacts.get_blinded(definitely_real_id, true)->legacy_blinding);
+    CHECK(contacts.get_blinded(definitely_real_id, true)->session_id() == definitely_real_id);
+
+    CHECK(contacts.needs_push());
+    CHECK(contacts.needs_dump());
+
+    auto [seqno, to_push, obs] = contacts.push();
+
+    CHECK(seqno == 1);
+
+    // Pretend we uploaded it
+    contacts.confirm_pushed(seqno, {"fakehash1"});
+    CHECK(contacts.needs_dump());
+    CHECK_FALSE(contacts.needs_push());
+
+    // NB: Not going to check encrypted data and decryption here because that's general (not
+    // specific to contacts) and is covered already in the user profile tests.
+    session::config::Contacts contacts2{seed, contacts.dump()};
+    CHECK_FALSE(contacts2.needs_push());
+    CHECK_FALSE(contacts2.needs_dump());
+    CHECK(std::get<seqno_t>(contacts2.push()) == 1);
+    CHECK_FALSE(contacts.needs_dump());  // Because we just called dump() above, to load up
+                                         // contacts2.
+
+    auto x = contacts2.get_blinded(definitely_real_id, true);
+    REQUIRE(x);
+    CHECK(x->name == "Joe");
+    CHECK_FALSE(x->profile_picture);
+    CHECK(x->created == created_ts);
+    CHECK(x->legacy_blinding == true);
+
+    auto another_id = "251111111111111111111111111111111111111111111111111111111111111111"sv;
+    auto c2 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, another_id, false);
+    // We're not setting any fields, but we should still keep a record of the session id
+    contacts2.set_blinded(c2);
+
+    CHECK(contacts2.needs_push());
+
+    std::tie(seqno, to_push, obs) = contacts2.push();
+    REQUIRE(to_push.size() == 1);
+
+    CHECK(seqno == 2);
+
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    merge_configs.emplace_back("fakehash2", to_push[0]);
+    contacts.merge(merge_configs);
+    contacts2.confirm_pushed(seqno, {"fakehash2"});
+
+    CHECK_FALSE(contacts.needs_push());
+    CHECK(std::get<seqno_t>(contacts.push()) == seqno);
+
+    // Iterate through and make sure we got everything we expected
+    auto blinded = contacts.blinded();
+    std::vector<std::string> session_ids;
+    std::vector<std::string> names;
+    std::vector<bool> legacy_blindings;
+    CHECK(blinded.size() == 2);
+    for (const auto& cc : blinded) {
+        session_ids.push_back(cc.session_id());
+        names.emplace_back(cc.name.empty() ? "(N/A)" : cc.name);
+        legacy_blindings.emplace_back(cc.legacy_blinding);
+    }
+
+    REQUIRE(session_ids.size() == 2);
+    REQUIRE(session_ids.size() == blinded.size());
+    CHECK(session_ids[0] == definitely_real_id);
+    CHECK(session_ids[1] == another_id);
+    CHECK(names[0] == "Joe");
+    CHECK(names[1] == "(N/A)");
+    CHECK(legacy_blindings[0]);
+    CHECK_FALSE(legacy_blindings[1]);
+
+    // Conflict! Oh no!
+
+    // On client 1 delete a contact:
+    CHECK(contacts.erase_blinded(comm_base_url, definitely_real_id, true));
+
+    // Client 2 adds a new friend:
+    auto third_id = "152222222222222222222222222222222222222222222222222222222222222222"sv;
+    auto c3 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, third_id, true);
+    c3.set_name("Name 3");
+
+    session::config::profile_pic p;
+    {
+        // These don't stay alive, so we use set_key/set_url to make a local copy:
+        std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
+        std::string url = "http://example.com/huge.bmp";
+        p.set_key(std::move(key));
+        p.url = std::move(url);
+    }
+    c3.profile_picture = std::move(p);
+    contacts2.set_blinded(c3);
+
+    CHECK(contacts.needs_push());
+    CHECK(contacts2.needs_push());
+
+    std::tie(seqno, to_push, obs) = contacts.push();
+    auto [seqno2, to_push2, obs2] = contacts2.push();
+    REQUIRE(to_push.size() == 1);
+    REQUIRE(to_push2.size() == 1);
+
+    CHECK(seqno == seqno2);
+    CHECK(to_push != to_push2);
+    CHECK(as_set(obs) == make_set("fakehash2"s));
+    CHECK(as_set(obs2) == make_set("fakehash2"s));
+
+    contacts.confirm_pushed(seqno, {"fakehash3a"});
+    contacts2.confirm_pushed(seqno2, {"fakehash3b"});
+
+    merge_configs.clear();
+    merge_configs.emplace_back("fakehash3b", to_push2[0]);
+    contacts.merge(merge_configs);
+    CHECK(contacts.needs_push());
+
+    merge_configs.clear();
+    merge_configs.emplace_back("fakehash3a", to_push[0]);
+    contacts2.merge(merge_configs);
+    CHECK(contacts2.needs_push());
+
+    std::tie(seqno, to_push, obs) = contacts.push();
+    CHECK(seqno == seqno2 + 1);
+    std::tie(seqno2, to_push2, obs2) = contacts2.push();
+    CHECK(seqno == seqno2);
+    // Disabled check for now: doesn't work with protobuf (because of the non-deterministic
+    // encryption in the middle of the protobuf wrapping).
+    // TODO: reenable once protobuf isn't always-on.
+    // CHECK(printable(to_push) == printable(to_push2));
+    CHECK(as_set(obs) == make_set("fakehash3a"s, "fakehash3b"));
+    CHECK(as_set(obs2) == make_set("fakehash3a"s, "fakehash3b"));
+
+    contacts.confirm_pushed(seqno, {"fakehash4"});
+    contacts2.confirm_pushed(seqno2, {"fakehash4"});
+
+    CHECK_FALSE(contacts.needs_push());
+    CHECK_FALSE(contacts2.needs_push());
+
+    auto blinded2 = contacts.blinded();
+    session_ids.clear();
+    names.clear();
+    legacy_blindings.clear();
+    for (const auto& cc : blinded2) {
+        session_ids.push_back(cc.session_id());
+        names.emplace_back(cc.name.empty() ? "(N/A)" : cc.name);
+        legacy_blindings.emplace_back(cc.legacy_blinding);
+    }
+    REQUIRE(session_ids.size() == 2);
+    CHECK(session_ids[0] == another_id);
+    CHECK(session_ids[1] == third_id);
+    CHECK(names[0] == "(N/A)");
+    CHECK(names[1] == "Name 3");
+    CHECK_FALSE(legacy_blindings[0]);
+    CHECK(legacy_blindings[1]);
 }

@@ -164,89 +164,6 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     created = to_epoch_seconds(c.created);
 }
 
-blinded_contact_info::blinded_contact_info(
-        std::string_view base_url,
-        std::string_view blinded_id,
-        std::span<const unsigned char> pubkey,
-        bool legacy_blinding) :
-        comm{community(std::move(base_url), blinded_id.substr(2), std::move(pubkey))},
-        legacy_blinding{legacy_blinding} {
-    check_session_id(blinded_id, legacy_blinding ? "15" : "25");
-}
-
-const std::string blinded_contact_info::session_id() const {
-    return "{}{}"_format(legacy_blinding ? "15" : "25", comm.room());
-}
-
-void blinded_contact_info::set_name(std::string n) {
-    if (n.size() > contact_info::MAX_NAME_LENGTH)
-        name = utf8_truncate(std::move(n), contact_info::MAX_NAME_LENGTH);
-    else
-        name = std::move(n);
-}
-
-void blinded_contact_info::set_base_url(std::string_view base_url) {
-    comm.set_base_url(base_url);
-}
-
-void blinded_contact_info::set_room(std::string_view room) {
-    comm.set_room(room);
-}
-
-void blinded_contact_info::set_pubkey(std::span<const unsigned char> pubkey) {
-    comm.set_pubkey(pubkey);
-}
-
-void blinded_contact_info::set_pubkey(std::string_view pubkey) {
-    comm.set_pubkey(pubkey);
-}
-
-void blinded_contact_info::load(const dict& info_dict) {
-    name = maybe_string(info_dict, "n").value_or("");
-
-    auto url = maybe_string(info_dict, "p");
-    auto key = maybe_vector(info_dict, "q");
-    if (url && key && !url->empty() && key->size() == 32) {
-        profile_picture.url = std::move(*url);
-        profile_picture.key = std::move(*key);
-    } else {
-        profile_picture.clear();
-    }
-    legacy_blinding = maybe_int(info_dict, "y").value_or(0);
-    created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
-}
-
-void blinded_contact_info::into(contacts_blinded_contact& c) const {
-    copy_c_str(c.base_url, comm.base_url());
-    c.session_id[0] = (legacy_blinding ? '1' : '2');
-    c.session_id[1] = '5';
-    std::memcpy(c.session_id + 2, session_id().data(), 64);
-    c.session_id[66] = '\0';
-    std::memcpy(c.pubkey, comm.pubkey().data(), 32);
-    copy_c_str(c.name, name);
-    if (profile_picture) {
-        copy_c_str(c.profile_pic.url, profile_picture.url);
-        std::memcpy(c.profile_pic.key, profile_picture.key.data(), 32);
-    } else {
-        copy_c_str(c.profile_pic.url, "");
-    }
-    c.legacy_blinding = legacy_blinding;
-    c.created = to_epoch_seconds(created);
-}
-
-blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
-    comm = community(c.base_url, {c.session_id + 2, 64}, c.pubkey);
-    assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
-    name = c.name;
-    assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
-    if (std::strlen(c.profile_pic.url)) {
-        profile_picture.url = c.profile_pic.url;
-        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
-    }
-    legacy_blinding = c.legacy_blinding;
-    created = to_epoch_seconds(c.created);
-}
-
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
     std::string pubkey = session_id_to_bytes(pubkey_hex);
 
@@ -388,6 +305,90 @@ size_t Contacts::size() const {
     return 0;
 }
 
+blinded_contact_info::blinded_contact_info(
+        std::string_view community_base_url,
+        std::span<const unsigned char> community_pubkey,
+        std::string_view blinded_id,
+        bool legacy_blinding) :
+        comm{community(
+                std::move(community_base_url), blinded_id.substr(2), std::move(community_pubkey))},
+        legacy_blinding{legacy_blinding} {
+    check_session_id(blinded_id, legacy_blinding ? "15" : "25");
+}
+
+void blinded_contact_info::load(const dict& info_dict) {
+    name = maybe_string(info_dict, "n").value_or("");
+
+    auto url = maybe_string(info_dict, "p");
+    auto key = maybe_vector(info_dict, "q");
+    if (url && key && !url->empty() && key->size() == 32) {
+        profile_picture.url = std::move(*url);
+        profile_picture.key = std::move(*key);
+    } else {
+        profile_picture.clear();
+    }
+    legacy_blinding = maybe_int(info_dict, "y").value_or(0);
+    created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
+}
+
+void blinded_contact_info::into(contacts_blinded_contact& c) const {
+    copy_c_str(c.base_url, comm.base_url());
+    c.session_id[0] = (legacy_blinding ? '1' : '2');
+    c.session_id[1] = '5';
+    std::memcpy(c.session_id + 2, session_id().data(), 64);
+    c.session_id[66] = '\0';
+    std::memcpy(c.pubkey, comm.pubkey().data(), 32);
+    copy_c_str(c.name, name);
+    if (profile_picture) {
+        copy_c_str(c.profile_pic.url, profile_picture.url);
+        std::memcpy(c.profile_pic.key, profile_picture.key.data(), 32);
+    } else {
+        copy_c_str(c.profile_pic.url, "");
+    }
+    c.legacy_blinding = legacy_blinding;
+    c.created = to_epoch_seconds(created);
+}
+
+blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
+    comm = community(c.base_url, {c.session_id + 2, 64}, c.pubkey);
+    assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
+    name = c.name;
+    assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
+    if (std::strlen(c.profile_pic.url)) {
+        profile_picture.url = c.profile_pic.url;
+        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
+    }
+    legacy_blinding = c.legacy_blinding;
+    created = to_epoch_seconds(c.created);
+}
+
+const std::string blinded_contact_info::session_id() const {
+    return "{}{}"_format(legacy_blinding ? "15" : "25", comm.room());
+}
+
+void blinded_contact_info::set_name(std::string n) {
+    if (n.size() > contact_info::MAX_NAME_LENGTH)
+        name = utf8_truncate(std::move(n), contact_info::MAX_NAME_LENGTH);
+    else
+        name = std::move(n);
+}
+
+void blinded_contact_info::set_base_url(std::string_view base_url) {
+    comm.set_base_url(base_url);
+}
+
+void blinded_contact_info::set_room(std::string_view room) {
+    comm.set_room(room);
+}
+
+void blinded_contact_info::set_pubkey(std::span<const unsigned char> pubkey) {
+    comm.set_pubkey(pubkey);
+}
+
+void blinded_contact_info::set_pubkey(std::string_view pubkey) {
+    comm.set_pubkey(pubkey);
+}
+
 ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
         const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey) const {
     auto record = data["b"][bc.comm.base_url()];
@@ -403,8 +404,8 @@ ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
 using any_blinded_contact = std::variant<blinded_contact_info>;
 
 std::optional<blinded_contact_info> Contacts::get_blinded(
-        std::string_view pubkey_hex, bool legacy_blinding) const {
-    check_session_id(pubkey_hex, legacy_blinding ? "15" : "25");
+        std::string_view blinded_id_hex, bool legacy_blinding) const {
+    check_session_id(blinded_id_hex, legacy_blinding ? "15" : "25");
 
     if (auto* b = data["b"].dict()) {
         auto comm = comm_iterator_helper{b->begin(), b->end()};
@@ -413,7 +414,7 @@ std::optional<blinded_contact_info> Contacts::get_blinded(
         while (!comm.done()) {
             if (comm.load<blinded_contact_info>(val))
                 if (auto* ptr = std::get_if<blinded_contact_info>(val.get());
-                    ptr && ptr->session_id() == pubkey_hex)
+                    ptr && ptr->session_id() == blinded_id_hex)
                     return *ptr;
             comm.advance();
         }
@@ -422,7 +423,22 @@ std::optional<blinded_contact_info> Contacts::get_blinded(
     return std::nullopt;
 }
 
-std::vector<blinded_contact_info> Contacts::blinded_contacts() const {
+blinded_contact_info Contacts::get_or_construct_blinded(
+        std::string_view community_base_url,
+        std::string_view community_pubkey_hex,
+        std::string_view blinded_id_hex,
+        bool legacy_blinding) {
+    if (auto maybe = get_blinded(blinded_id_hex, legacy_blinding))
+        return *std::move(maybe);
+
+    return blinded_contact_info{
+            community_base_url,
+            to_span(oxenc::from_hex(community_pubkey_hex)),
+            blinded_id_hex,
+            legacy_blinding};
+}
+
+std::vector<blinded_contact_info> Contacts::blinded() const {
     std::vector<blinded_contact_info> ret;
 
     if (auto* b = data["b"].dict()) {
@@ -440,7 +456,7 @@ std::vector<blinded_contact_info> Contacts::blinded_contacts() const {
     return ret;
 }
 
-bool Contacts::set_blinded_contact(const blinded_contact_info& bc) {
+void Contacts::set_blinded(const blinded_contact_info& bc) {
     data["b"][bc.comm.base_url()]["#"] = bc.comm.pubkey();
     auto info = blinded_contact_field(bc);  // data["b"][base]["R"][bc_session_id_without_prefix]
 
@@ -459,12 +475,13 @@ bool Contacts::set_blinded_contact(const blinded_contact_info& bc) {
     set_positive_int(info["j"], to_epoch_seconds(bc.created));
 }
 
-bool Contacts::erase_blinded_contact(
+bool Contacts::erase_blinded(
         std::string_view base_url_, std::string_view blinded_id, bool legacy_blinding) {
-    std::string pk = session_id_to_bytes(blinded_id, legacy_blinding ? "15" : "25").substr(2);
+    check_session_id(blinded_id, legacy_blinding ? "15" : "25");
 
     auto base_url = community::canonical_url(base_url_);
-    auto info = data["d"][base_url]["R"][pk];
+    auto pk = std::string(blinded_id.substr(2));
+    auto info = data["b"][base_url]["R"][pk];
     bool ret = info.exists();
     info.erase();
     return ret;
@@ -570,16 +587,15 @@ LIBSESSION_C_API size_t contacts_size(const config_object* conf) {
     return unbox<Contacts>(conf)->size();
 }
 
-LIBSESSION_C_API bool contacts_get_blinded_contact(
+LIBSESSION_C_API bool contacts_get_blinded(
         config_object* conf,
-        const char* blinded_session_id,
+        const char* blinded_id,
         bool legacy_blinding,
         contacts_blinded_contact* blinded_contact) {
     return wrap_exceptions(
             conf,
             [&] {
-                if (auto bc = unbox<Contacts>(conf)->get_blinded(
-                            blinded_session_id, legacy_blinding)) {
+                if (auto bc = unbox<Contacts>(conf)->get_blinded(blinded_id, legacy_blinding)) {
                     bc->into(*blinded_contact);
                     return true;
                 }
@@ -588,10 +604,31 @@ LIBSESSION_C_API bool contacts_get_blinded_contact(
             false);
 }
 
-LIBSESSION_C_API contacts_blinded_contact_list* contacts_blinded_contacts(
-        const config_object* conf) {
+LIBSESSION_C_API bool contacts_get_or_construct_blinded(
+        config_object* conf,
+        const char* community_base_url,
+        const char* community_pubkey_hex,
+        const char* blinded_id,
+        bool legacy_blinding,
+        contacts_blinded_contact* blinded_contact) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<Contacts>(conf)
+                        ->get_or_construct_blinded(
+                                community_base_url,
+                                community_pubkey_hex,
+                                blinded_id,
+                                legacy_blinding)
+                        .into(*blinded_contact);
+                return true;
+            },
+            false);
+}
+
+LIBSESSION_C_API contacts_blinded_contact_list* contacts_blinded(const config_object* conf) {
     try {
-        auto cpp_contacts = unbox<Contacts>(conf)->blinded_contacts();
+        auto cpp_contacts = unbox<Contacts>(conf)->blinded();
 
         if (cpp_contacts.empty())
             return nullptr;
@@ -633,21 +670,25 @@ LIBSESSION_C_API contacts_blinded_contact_list* contacts_blinded_contacts(
     }
 }
 
-LIBSESSION_C_API bool contacts_set_blinded_contact(
+LIBSESSION_C_API bool contacts_set_blinded(
         config_object* conf, const contacts_blinded_contact* bc) {
     return wrap_exceptions(
             conf,
             [&] {
-                unbox<Contacts>(conf)->set_blinded_contact(blinded_contact_info{*bc});
+                unbox<Contacts>(conf)->set_blinded(blinded_contact_info{*bc});
                 return true;
             },
             false);
 }
 
-LIBSESSION_C_API bool contacts_erase_blinded_contact(
-        config_object* conf, const char* base_url, const char* blinded_id, bool legacy_blinding) {
+LIBSESSION_C_API bool contacts_erase_blinded(
+        config_object* conf,
+        const char* community_base_url,
+        const char* blinded_id,
+        bool legacy_blinding) {
     try {
-        return unbox<Contacts>(conf)->erase_blinded_contact(base_url, blinded_id, legacy_blinding);
+        return unbox<Contacts>(conf)->erase_blinded(
+                community_base_url, blinded_id, legacy_blinding);
     } catch (...) {
         return false;
     }
