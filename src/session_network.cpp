@@ -232,10 +232,11 @@ namespace {
                 port,                       // port
         };
     }
-
     const std::vector<service_node> seed_nodes_testnet{
-            node_from_disk("144.76.164.202|35400|2.8.0|"
-                           "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
+            node_from_disk("23.88.6.250|35420|2.10.0|"
+                           "decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a|"sv)}; // lokinet one
+            // node_from_disk("144.76.164.202|35400|2.8.0|" // This is the original one
+            //                "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
     const std::vector<service_node> seed_nodes_mainnet{
             node_from_disk("144.76.164.202|20200|2.8.0|"
                            "1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef|"sv),
@@ -541,17 +542,21 @@ Network::Network(
     }
 
     auto test_ini = R"(
-[router]
-netid=testnet
-[logging]
-type=none
-level=*=debug,quic=info
-)";
+    [router]
+    netid=testnet
+    data-dir={}
+    [logging]
+    type=none
+    level=*=debug,quic=info
+    )"_format(cache_path.value_or(default_cache_path));
 
-try {
-    lokinet = std::make_shared<lokinet::Lokinet>(test_ini, loop);
-} catch (const std::exception& e) {
+    try {
+        // TODO: Don't pass the loop for now
+        lokinet = std::make_shared<lokinet::Lokinet>(test_ini/*, loop*/);
+    } catch (const std::exception& e) {
         log::error(cat, "Failed to start lokinet ({}).", e.what());
+        std::this_thread::sleep_for(500ms); // Hack so we can see the log before this crashes
+        throw e;
     }
 
     // Kick off a separate thread to build paths (may as well kick this off early)
@@ -638,6 +643,9 @@ void Network::load_cache_from_disk() {
 
         if (fs::exists(cache_path))
             fs::remove_all(cache_path);
+
+        // Create the cache directories if needed
+        fs::create_directories(cache_path);
     }
 }
 
@@ -910,15 +918,18 @@ void Network::establish_connection(
     auto cb_called = std::make_shared<std::once_flag>();
     auto cb = std::make_shared<std::function<void(connection_info, std::optional<std::string>)>>(
             std::move(callback));
-    auto address = llarp::RouterID();
-    address.from_hex(to_string(target.view_remote_key()));
+    auto key = target.view_remote_key();
+    if (key.size() != 32)
+        throw std::invalid_argument{"garbage"};
+    llarp::RouterID address{key.first<32>()};
     auto snode_address = address.to_network_address(true);
-    auto info = lokinet->establish_udp_blocking(snode_address, target.port());
+    // auto info = lokinet->establish_udp_blocking(snode_address, target.port());
 // TODO: Need to ensure this exists
     lokinet->establish_udp(
             snode_address,
             target.port(),
             [this, id, target, timeout, cb, cb_called](lokinet::tunnel_info info) mutable {
+                log::info(cat, "Lokinet UDP connection established for {}.", id);
                 auto conn_key_pair = ed25519::ed25519_key_pair();
                 auto creds = quic::GNUTLSCreds::make_from_ed_seckey(
                         to_string_view(conn_key_pair.second));
@@ -939,6 +950,7 @@ void Network::establish_connection(
                         handshake_timeout,
                         [this, id, target, cb, cb_called, conn_future](quic::Connection&) mutable {
                             log::trace(cat, "Connection established for {}.", id);
+                            log::info(cat, "Connection established for {}.", id);
 
                             // Just in case, call it within a `loop->call`
                             loop->call([&] {
