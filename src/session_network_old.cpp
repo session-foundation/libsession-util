@@ -1,4 +1,4 @@
-#include "session/session_network.hpp"
+#include "session/session_network_old.hpp"
 
 #include <fmt/ranges.h>
 #include <oxenc/base64.h>
@@ -29,7 +29,7 @@
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/key_types.hpp"
 #include "session/onionreq/response_parser.hpp"
-#include "session/session_network.h"
+#include "session/session_network_old.h"
 #include "session/util.hpp"
 
 using namespace oxen;

@@ -1,5 +1,5 @@
 #include <fmt/core.h>
-#include <session/session_network.h>
+#include <session/session_network_old.h>
 #include <sodium/randombytes.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -11,7 +11,7 @@
 #include <session/ed25519.hpp>
 #include <session/onionreq/hop_encryption.hpp>
 #include <session/onionreq/key_types.hpp>
-#include <session/session_network.hpp>
+#include <session/session_network_old.hpp>
 #include <tuple>
 
 #include "utils.hpp"
