@@ -155,13 +155,15 @@ TEST_CASE("Conversations", "[config][conversations]") {
 
     auto x4 = convos2.get_blinded_1to1(legacy_blinded_id, true);
     REQUIRE(x4);
-    CHECK(x4->blinded_session_id == "150000000000000000000000000000000000101010111010000110100001210000");
+    CHECK(x4->blinded_session_id ==
+          "150000000000000000000000000000000000101010111010000110100001210000");
     CHECK(x4->last_read == now_ms);
     CHECK(x4->unread);
 
     auto x5 = convos2.get_blinded_1to1(blinded_id, false);
     REQUIRE(x5);
-    CHECK(x5->blinded_session_id == "255000000000000000000000000000000000101010111010000110100001210000");
+    CHECK(x5->blinded_session_id ==
+          "255000000000000000000000000000000000101010111010000110100001210000");
     CHECK(x5->last_read == now_ms);
     CHECK(x5->unread);
 
@@ -260,31 +262,31 @@ TEST_CASE("Conversations", "[config][conversations]") {
     seen.clear();
     for (auto it = convos.begin_1to1(); it != convos.end(); ++it)
         seen.push_back(it->session_id);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "051111111111111111111111111111111111111111111111111111111111111111",
-                  }});
+                  });
 
     seen.clear();
     for (auto it = convos.begin_communities(); it != convos.end(); ++it)
         seen.emplace_back(it->base_url());
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "http://example.org:5678",
-                  }});
+                  });
 
     seen.clear();
     for (auto it = convos.begin_legacy_groups(); it != convos.end(); ++it)
         seen.emplace_back(it->id);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                  }});
+                  });
 
     seen.clear();
     for (auto it = convos.begin_blinded_1to1(); it != convos.end(); ++it)
         seen.emplace_back(it->blinded_session_id);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "150000000000000000000000000000000000101010111010000110100001210000",
                           "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                  }});
+                  });
 }
 
 TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
@@ -492,18 +494,18 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
         convo_info_volatile_iterator_free(it);
 
         CHECK(seen == std::vector<std::string>{
-                              {"1-to-1: "
-                               "051111111111111111111111111111111111111111111111111111111111111111",
-                               "1-to-1: "
-                               "055000000000000000000000000000000000000000000000000000000000000000",
-                               "comm: http://example.org:5678/r/sudokuroom",
-                               "lgr: "
-                               "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                               "b: "
-                               "150000000000000000000000000000000000101010111010000110100001210000",
-                               "b: "
-                               "2512345cccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                               "c"}});
+                              "1-to-1: "
+                              "051111111111111111111111111111111111111111111111111111111111111111",
+                              "1-to-1: "
+                              "055000000000000000000000000000000000000000000000000000000000000000",
+                              "comm: http://example.org:5678/r/sudokuroom",
+                              "lgr: "
+                              "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                              "b: "
+                              "150000000000000000000000000000000000101010111010000110100001210000",
+                              "b: "
+                              "2512345cccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                              "c"});
     }
 
     CHECK_FALSE(config_needs_push(conf));
@@ -543,9 +545,9 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
         seen.emplace_back(ogi.base_url);
     }
     convo_info_volatile_iterator_free(it);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "http://example.org:5678",
-                  }});
+                  });
 
     seen.clear();
     convo_info_volatile_legacy_group cgi;
@@ -556,9 +558,9 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
         seen.emplace_back(cgi.group_id);
     }
     convo_info_volatile_iterator_free(it);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                  }});
+                  });
 
     seen.clear();
     convo_info_volatile_blinded_1to1 bi;
@@ -569,9 +571,9 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
         seen.emplace_back(bi.blinded_session_id);
     }
     convo_info_volatile_iterator_free(it);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "150000000000000000000000000000000000101010111010000110100001210000",
-                  }});
+                  });
 }
 
 TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {

@@ -1,7 +1,6 @@
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/config/contacts.h>
-#include <session/util.hpp>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
