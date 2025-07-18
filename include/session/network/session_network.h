@@ -1,0 +1,120 @@
+#pragma once
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "session/export.h"
+#include "session/log_level.h"
+#include "session/network/service_node.h"
+#include "session/onionreq/builder.h"
+#include "session/platform.h"
+
+typedef struct network_object_v2 {
+    // Internal opaque object pointer; calling code should leave this alone.
+    void* internals;
+} network_object_v2;
+typedef struct session_response_handle_cpp_t session_response_handle_t;
+
+typedef enum {
+    SESSION_NETWORK_MAINNET = 0,
+    SESSION_NETWORK_TESTNET = 1,
+    SESSION_NETWORK_DEVNET = 2
+} SESSION_NETWORK_NETID;
+
+typedef enum {
+    SESSION_NETWORK_ROUTER_ONION_REQUESTS = 0,
+    SESSION_NETWORK_ROUTER_LOKINET = 1,
+    SESSION_NETWORK_ROUTER_DIRECT = 2,
+} SESSION_NETWORK_ROUTER;
+
+typedef enum {
+    SESSION_NETWORK_TRANSPORT_QUIC = 0,
+    SESSION_NETWORK_TRANSPORT_CALLBACKS = 1,
+} SESSION_NETWORK_TRANSPORT;
+
+typedef enum {
+    SESSION_NETWORK_PATH_STANDARD = 0,
+    SESSION_NETWORK_PATH_UPLOAD = 1,
+    SESSION_NETWORK_PATH_DOWNLOAD = 2
+} SESSION_NETWORK_PATH_TYPE;
+
+typedef void (*session_network_request_t)(
+        const char* url,
+        const char* body_data,
+        size_t body_size,
+        session_response_handle_t* response_handle,
+        void* ctx);
+
+typedef struct {
+    // Basic options
+    SESSION_NETWORK_NETID netid;
+    SESSION_NETWORK_ROUTER router;
+    SESSION_NETWORK_TRANSPORT transport;
+    const char* cache_dir;
+    uint32_t snode_cache_expiration_minutes;
+
+    // Devnet options (only used when netid_target == SESSION_NETWORK_DEVNET)
+    const network_service_node* devnet_seed_nodes;
+    size_t devnet_seed_nodes_size;
+
+    // Onion request options (only used when router ==
+    // SESSION_NETWORK_ROUTER_ONION_REQUESTS)
+    size_t onionreq_min_snode_cache_size;
+    uint8_t onionreq_num_cache_nodes_to_use_for_refresh;
+    uint8_t onionreq_path_size;
+    uint8_t onionreq_path_failure_threshold;
+    uint8_t onionreq_node_failure_threshold;
+    uint8_t onionreq_min_path_count_standard;
+    uint8_t onionreq_min_path_count_upload;
+    uint8_t onionreq_min_path_count_download;
+    bool onionreq_disable_pre_build_paths;
+
+    // Callback options (for transport == SESSION_NETWORK_TRANSPORT_CALLBACKS)
+    session_network_request_t transport_callback;
+
+    /// A user-defined context pointer passed back to every invocation of
+    /// `transport_callback`.
+    void* transport_callback_ctx;
+
+} session_network_config;
+
+/// API: network/session_network_default_config
+///
+/// Populates an instance with the default configuration options.
+///
+/// Inputs:
+/// - `config` -- [in] Pointer to session_network_config object
+LIBSESSION_EXPORT session_network_config session_network_config_default();
+
+LIBSESSION_EXPORT bool session_network_init(
+        network_object_v2** network,
+        const session_network_config* config,
+        char* error) LIBSESSION_WARN_UNUSED;
+
+/// API: network/network_free
+///
+/// Frees a network object.
+///
+/// Inputs:
+/// - `network` -- [in] Pointer to network_object object
+LIBSESSION_EXPORT void session_network_free(network_object_v2* network);
+
+LIBSESSION_EXPORT void session_network_callbacks_respond(
+        network_object_v2* network,
+        session_response_handle_t* response_handle,
+        bool success,
+        bool timeout,
+        int16_t status_code,
+        const char* const* headers,
+        const char* const* header_values,
+        size_t headers_size,
+        const char* body,
+        size_t body_len);
+
+#ifdef __cplusplus
+}
+#endif

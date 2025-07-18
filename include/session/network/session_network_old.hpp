@@ -5,14 +5,17 @@
 #include <lokinet.hpp>
 #include <oxen/quic.hpp>
 
-#include "onionreq/builder.hpp"
-#include "onionreq/key_types.hpp"
-#include "platform.hpp"
+#include "service_node.hpp"
+#include "session/onionreq/builder.hpp"
+#include "session/onionreq/key_types.hpp"
+#include "session/platform.hpp"
 #include "session/random.hpp"
-#include "types.hpp"
+#include "session/types.hpp"
+#include "swarm.hpp"
 
 namespace session::network {
 
+using namespace session::network::swarm;
 namespace fs = std::filesystem;
 
 using network_response_callback_t = std::function<void(
@@ -33,55 +36,6 @@ enum class PathType {
     standard,
     upload,
     download,
-};
-
-using swarm_id_t = uint64_t;
-constexpr swarm_id_t INVALID_SWARM_ID = std::numeric_limits<uint64_t>::max();
-
-struct service_node : public oxen::quic::RemoteAddress {
-  public:
-    std::vector<int> storage_server_version;
-    swarm_id_t swarm_id;
-
-    service_node() = delete;
-
-    template <typename... Opt>
-    service_node(
-            std::string_view remote_pk,
-            std::vector<int> storage_server_version,
-            swarm_id_t swarm_id,
-            Opt&&... opts) :
-            oxen::quic::RemoteAddress{remote_pk, std::forward<Opt>(opts)...},
-            storage_server_version{storage_server_version},
-            swarm_id{swarm_id} {}
-
-    template <typename... Opt>
-    service_node(
-            std::span<const unsigned char> remote_pk,
-            std::vector<int> storage_server_version,
-            swarm_id_t swarm_id,
-            Opt&&... opts) :
-            oxen::quic::RemoteAddress{remote_pk, std::forward<Opt>(opts)...},
-            storage_server_version{storage_server_version},
-            swarm_id{swarm_id} {}
-
-    service_node(const service_node& obj) :
-            oxen::quic::RemoteAddress{obj},
-            storage_server_version{obj.storage_server_version},
-            swarm_id{obj.swarm_id} {}
-    service_node& operator=(const service_node& obj) {
-        storage_server_version = obj.storage_server_version;
-        swarm_id = obj.swarm_id;
-        oxen::quic::RemoteAddress::operator=(obj);
-        _copy_internals(obj);
-        return *this;
-    }
-
-    auto operator<=>(const service_node& other) const = delete;
-    bool operator==(const service_node& other) const {
-        return RemoteAddress::operator==(other) &&
-               storage_server_version == other.storage_server_version && swarm_id == other.swarm_id;
-    }
 };
 
 struct connection_info {
@@ -134,10 +88,6 @@ struct onion_path {
 };
 
 namespace detail {
-    swarm_id_t pubkey_to_swarm_space(const session::onionreq::x25519_pubkey& pk);
-    std::vector<std::pair<swarm_id_t, std::vector<service_node>>> generate_swarms(
-            std::vector<service_node> nodes);
-
     std::optional<service_node> node_for_destination(onionreq::network_destination destination);
 
     session::onionreq::x25519_pubkey pubkey_for_destination(
@@ -154,7 +104,7 @@ struct request_info {
             std::optional<std::chrono::milliseconds> _request_and_path_build_timeout = std::nullopt,
             PathType _type = PathType::standard,
             std::optional<std::string> _req_id = std::nullopt,
-            std::optional<std::string> endpoint = "onion_req",
+            std::optional<std::string> endpoint = "onion_req",  // TODO: This needs to be passed
             std::optional<std::vector<unsigned char>> _body = std::nullopt);
 
     enum class RetryReason {

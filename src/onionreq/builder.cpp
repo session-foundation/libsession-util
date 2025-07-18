@@ -22,10 +22,11 @@
 #include <oxen/quic/address.hpp>
 
 #include "session/export.h"
+#include "session/network/service_node.hpp"
+#include "session/network/session_network_old.hpp"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/hop_encryption.hpp"
 #include "session/onionreq/key_types.hpp"
-#include "session/session_network.hpp"
 #include "session/util.hpp"
 #include "session/xed25519.hpp"
 

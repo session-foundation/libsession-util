@@ -1,5 +1,5 @@
 #include <fmt/core.h>
-#include <session/session_network_old.h>
+#include <session/network/session_network_old.h>
 #include <sodium/randombytes.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -9,9 +9,9 @@
 #include <oxen/quic/gnutls_crypto.hpp>
 #include <session/curve25519.hpp>
 #include <session/ed25519.hpp>
+#include <session/network/session_network_old.hpp>
 #include <session/onionreq/hop_encryption.hpp>
 #include <session/onionreq/key_types.hpp>
-#include <session/session_network_old.hpp>
 #include <tuple>
 
 #include "utils.hpp"
@@ -1505,159 +1505,6 @@ TEST_CASE("Network", "[network][c][network_send_onion_request]") {
     CHECK(response.contains("version"));
     test_path_data.reset();
     network_free(network);
-}
-
-TEST_CASE("Network", "[network][detail][pubkey_to_swarm_space]") {
-    x25519_pubkey pk;
-
-    pk = x25519_pubkey::from_hex(
-            "3506f4a71324b7dd114eddbf4e311f39dde243e1f2cb97c40db1961f70ebaae8");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 17589930838143112648ULL);
-    pk = x25519_pubkey::from_hex(
-            "cf27da303a50ac8c4b2d43d27259505c9bcd73fc21cf2a57902c3d050730b604");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 10370619079776428163ULL);
-    pk = x25519_pubkey::from_hex(
-            "d3511706b8b34f6e8411bf07bd22ba6b2435ca56846fbccf6eb1e166a6cd15cc");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 2144983569669512198ULL);
-    pk = x25519_pubkey::from_hex(
-            "0f06693428fca9102a451e3f28d9cc743d8ea60a89ab6aa69eb119470c11cbd3");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 9690840703409570833ULL);
-    pk = x25519_pubkey::from_hex(
-            "ffba630924aa1224bb930dde21c0d11bf004608f2812217f8ac812d6c7e3ad48");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 4532060000165252872ULL);
-    pk = x25519_pubkey::from_hex(
-            "eeeeeeeeeeeeeeee777777777777777711111111111111118888888888888888");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 0);
-    pk = x25519_pubkey::from_hex(
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 0);
-    pk = x25519_pubkey::from_hex(
-            "fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 1);
-    pk = x25519_pubkey::from_hex(
-            "ffffffffffffffffffffffffffffffffffffffffffffffff7fffffffffffffff");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 1ULL << 63);
-    pk = x25519_pubkey::from_hex(
-            "000000000000000000000000000000000000000000000000ffffffffffffffff");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == (uint64_t)-1);
-    pk = x25519_pubkey::from_hex(
-            "0000000000000000000000000000000000000000000000000123456789abcdef");
-    CHECK(session::network::detail::pubkey_to_swarm_space(pk) == 0x0123456789abcdefULL);
-}
-
-TEST_CASE("Network", "[network][get_swarm]") {
-    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
-    std::vector<std::pair<swarm_id_t, std::vector<service_node>>> swarms = {
-            {100, {}}, {200, {}}, {300, {}}, {399, {}}, {498, {}}, {596, {}}, {694, {}}};
-    auto network = TestNetwork(std::nullopt, true, true, false);
-    network.set_snode_cache({test_node(ed_pk, 0)});
-    network.set_all_swarms(swarms);
-
-    // Exact matches:
-    // 0x64 = 100, 0xc8 = 200, 0x1f2 = 498
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000006"
-                               "4") == 100);
-    CHECK(network.get_swarm_id("0500000000000000000000000000000000000000000000000000000000000000c"
-                               "8") == 200);
-    CHECK(network.get_swarm_id("0500000000000000000000000000000000000000000000000000000000000001f"
-                               "2") == 498);
-
-    // Nearest
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000000"
-                               "0") == 100);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000000"
-                               "1") == 100);
-
-    // Nearest, with wraparound
-    // 0x8000... is closest to the top value
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000800000000000000"
-                               "0") == 694);
-
-    // 0xa000... is closest (via wraparound) to the smallest
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000a00000000000000"
-                               "0") == 100);
-
-    // This is the invalid swarm id for swarms, but should still work for a client
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000fffffffffffffff"
-                               "f") == 100);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000fffffffffffffff"
-                               "e") == 100);
-
-    // Midpoint tests; we prefer the lower value when exactly in the middle between two swarms.
-    // 0x96 = 150
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000009"
-                               "5") == 100);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000009"
-                               "6") == 100);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000009"
-                               "7") == 200);
-
-    // 0xfa = 250
-    CHECK(network.get_swarm_id("0500000000000000000000000000000000000000000000000000000000000000f"
-                               "9") == 200);
-    CHECK(network.get_swarm_id("0500000000000000000000000000000000000000000000000000000000000000f"
-                               "a") == 200);
-    CHECK(network.get_swarm_id("0500000000000000000000000000000000000000000000000000000000000000f"
-                               "b") == 300);
-
-    // 0x15d = 349
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000015"
-                               "d") == 300);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000015"
-                               "e") == 399);
-
-    // 0x1c0 = 448
-    CHECK(network.get_swarm_id("0500000000000000000000000000000000000000000000000000000000000001c"
-                               "0") == 399);
-    CHECK(network.get_swarm_id("0500000000000000000000000000000000000000000000000000000000000001c"
-                               "1") == 498);
-
-    // 0x223 = 547
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000022"
-                               "2") == 498);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000022"
-                               "3") == 498);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000022"
-                               "4") == 596);
-
-    // 0x285 = 645
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000028"
-                               "5") == 596);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000028"
-                               "6") == 694);
-
-    // 0x800....d is the midpoint between 694 and 100 (the long way).  We always round "down" (which
-    // in this case, means wrapping to the largest swarm).
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000800000000000018"
-                               "c") == 694);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000800000000000018"
-                               "d") == 694);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000800000000000018"
-                               "e") == 100);
-
-    // With a swarm at -20 the midpoint is now 40 (=0x28).  When our value is the *low* value we
-    // prefer the *last* swarm in the case of a tie (while consistent with the general case of
-    // preferring the left edge, it means we're inconsistent with the other wraparound case, above.
-    // *sigh*).
-    swarms.push_back({(uint64_t)-20, {}});
-    network.set_all_swarms(swarms);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000002"
-                               "7") == swarms.back().first);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000002"
-                               "8") == swarms.back().first);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000000000000000002"
-                               "9") == swarms.front().first);
-
-    // The code used to have a broken edge case if we have a swarm at zero and a client at max-u64
-    // because of an overflow in how the distance is calculated (the first swarm will be calculated
-    // as max-u64 away, rather than 1 away), and so the id always maps to the highest swarm (even
-    // though 0xfff...fe maps to the lowest swarm; the first check here, then, would fail.
-    swarms.insert(swarms.begin(), {0, {}});
-    network.set_all_swarms(swarms);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000fffffffffffffff"
-                               "f") == 0);
-    CHECK(network.get_swarm_id("05000000000000000000000000000000000000000000000000fffffffffffffff"
-                               "e") == 0);
 }
 
 TEST_CASE("Network", "[network][lokinet]") {

@@ -34,6 +34,7 @@ set(LIB_SESSION_UTESTS_SOURCES
 
 if (ENABLE_ONIONREQ)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_session_network.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
 endif()
 

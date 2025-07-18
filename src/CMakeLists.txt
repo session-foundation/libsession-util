@@ -105,7 +105,12 @@ if(ENABLE_ONIONREQ)
         onionreq/key_types.cpp
         onionreq/parser.cpp
         onionreq/response_parser.cpp
-        session_network_old.cpp
+        network/service_node.cpp
+        network/session_network_config.cpp
+        network/session_network_old.cpp
+        network/session_network.cpp
+        network/snode_pool.cpp
+        network/swarm.cpp
     )
 
     target_link_libraries(onionreq
@@ -126,7 +131,7 @@ endif()
 
 # if(ENABLE_LOKINET)
 #     add_libsession_util_library(session-lokinet
-#         session_lokinet.cpp
+#         network/session_lokinet.cpp
 #     )
 #     set_target_properties(session-lokinet PROPERTIES OUTPUT_NAME session-lokinet)
 #     target_link_libraries(session-lokinet

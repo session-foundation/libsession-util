@@ -50,4 +50,23 @@ std::vector<unsigned char> random(size_t size);
 /// - random base32 string of the specified length.
 std::string random_base32(size_t size);
 
+/// API: random/get_uniform_distribution
+///
+/// Generates a cryptographically secure random integer within a given range (inclusive).
+///
+/// Inputs:
+/// - `min` -- the minimum value for the range.
+/// - `max` -- the maximum value for the range.
+///
+/// Outputs:
+/// - A random integer in the specified range
+template <typename T>
+T get_uniform_distribution(T min, T max) {
+    if (min > max)
+        return min; 
+
+    const uint64_t range = static_cast<uint64_t>(max) - static_cast<uint64_t>(min) + 1;
+    return static_cast<T>(static_cast<uint64_t>(min) + (csrng() % range));
+}
+
 }  // namespace session::random

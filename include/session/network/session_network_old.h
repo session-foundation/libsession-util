@@ -7,10 +7,11 @@ extern "C" {
 #include <stddef.h>
 #include <stdint.h>
 
-#include "export.h"
-#include "log_level.h"
-#include "onionreq/builder.h"
-#include "platform.h"
+#include "session/export.h"
+#include "session/log_level.h"
+#include "session/network/service_node.h"
+#include "session/onionreq/builder.h"
+#include "session/platform.h"
 
 typedef enum CONNECTION_STATUS {
     CONNECTION_STATUS_UNKNOWN = 0,
@@ -23,12 +24,6 @@ typedef struct network_object {
     // Internal opaque object pointer; calling code should leave this alone.
     void* internals;
 } network_object;
-
-typedef struct network_service_node {
-    uint8_t ip[4];
-    uint16_t quic_port;
-    char ed25519_pubkey_hex[65];  // The 64-byte ed25519 pubkey in hex + null terminator.
-} network_service_node;
 
 typedef struct network_server_destination {
     const char* method;

@@ -1,4 +1,4 @@
-#include "session/session_network_old.hpp"
+#include "session/network/session_network_old.hpp"
 
 #include <fmt/ranges.h>
 #include <oxenc/base64.h>
@@ -25,11 +25,11 @@
 #include "session/ed25519.hpp"
 #include "session/export.h"
 #include "session/file.hpp"
+#include "session/network/session_network_old.h"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/key_types.hpp"
 #include "session/onionreq/response_parser.hpp"
-#include "session/session_network_old.h"
 #include "session/util.hpp"
 
 using namespace oxen;
@@ -96,7 +96,8 @@ namespace {
 
     constexpr auto node_not_found_prefix = "502 Bad Gateway\n\nNext node not found: "sv;
     constexpr auto node_not_found_prefix_no_status = "Next node not found: "sv;
-    constexpr auto ALPN = "oxenstorage";
+    constexpr auto ALPN = "oxenstorage";  // constexpr auto ALPN = "quic-ping";//constexpr auto ALPN
+                                          // = "oxenstorage";
     constexpr auto ONION = "onion_req";
 
     enum class PathSelectionBehaviour {
@@ -232,11 +233,11 @@ namespace {
                 port,                       // port
         };
     }
-    const std::vector<service_node> seed_nodes_testnet{
-            node_from_disk("23.88.6.250|35420|2.10.0|"
-                           "decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a|"sv)}; // lokinet one
-            // node_from_disk("144.76.164.202|35400|2.8.0|" // This is the original one
-            //                "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
+    const std::vector<service_node> seed_nodes_testnet{node_from_disk(
+            "23.88.6.250|35420|2.10.0|"
+            "decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a|"sv)};  // lokinet one
+    // node_from_disk("144.76.164.202|35400|2.8.0|" // This is the original one
+    //                "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
     const std::vector<service_node> seed_nodes_mainnet{
             node_from_disk("144.76.164.202|20200|2.8.0|"
                            "1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef|"sv),
@@ -291,35 +292,6 @@ namespace {
 }  // namespace
 
 namespace detail {
-    swarm_id_t pubkey_to_swarm_space(const session::onionreq::x25519_pubkey& pk) {
-        swarm_id_t res = 0;
-        for (size_t i = 0; i < 4; i++) {
-            swarm_id_t buf;
-            std::memcpy(&buf, pk.data() + i * 8, 8);
-            res ^= buf;
-        }
-        oxenc::big_to_host_inplace(res);
-
-        return res;
-    }
-
-    std::vector<std::pair<swarm_id_t, std::vector<service_node>>> generate_swarms(
-            std::vector<service_node> nodes) {
-        std::vector<std::pair<swarm_id_t, std::vector<service_node>>> result;
-        std::unordered_map<uint64_t, std::vector<service_node>> _grouped_nodes;
-
-        for (const auto& node : nodes)
-            _grouped_nodes[node.swarm_id].push_back(node);
-
-        for (auto& [swarm_id, nodes] : _grouped_nodes)
-            result.emplace_back(swarm_id, std::move(nodes));
-
-        std::sort(result.begin(), result.end(), [](const auto& a, const auto& b) {
-            return a.first < b.first;
-        });
-        return result;
-    }
-
     std::optional<service_node> node_for_destination(network_destination destination) {
         if (auto* dest = std::get_if<service_node>(&destination))
             return *dest;
@@ -552,10 +524,12 @@ Network::Network(
 
     try {
         // TODO: Don't pass the loop for now
-        lokinet = std::make_shared<lokinet::Lokinet>(test_ini/*, loop*/);
+        lokinet = std::make_shared<lokinet::Lokinet>(test_ini /*, loop*/);
+        std::this_thread::sleep_for(
+                5000ms);  // Hack to wait for lokinet to be ready before any requests get sent
     } catch (const std::exception& e) {
         log::error(cat, "Failed to start lokinet ({}).", e.what());
-        std::this_thread::sleep_for(500ms); // Hack so we can see the log before this crashes
+        std::this_thread::sleep_for(500ms);  // Hack so we can see the log before this crashes
         throw e;
     }
 
@@ -630,7 +604,7 @@ void Network::load_cache_from_disk() {
                 log::warning(cat, "Skipped {} invalid entries in snode cache.", invalid_entries);
 
             snode_cache = loaded_cache;
-            all_swarms = detail::generate_swarms(loaded_cache);
+            all_swarms = swarm::generate_swarms(loaded_cache);
         }
 
         log::info(
@@ -918,18 +892,25 @@ void Network::establish_connection(
     auto cb_called = std::make_shared<std::once_flag>();
     auto cb = std::make_shared<std::function<void(connection_info, std::optional<std::string>)>>(
             std::move(callback));
+    // auto cb = std::make_shared<std::atomic<bool>>{false};//<std::function<void(connection_info,
+    // std::optional<std::string>)>>(
+    //         // std::move(callback));
     auto key = target.view_remote_key();
     if (key.size() != 32)
         throw std::invalid_argument{"garbage"};
     llarp::RouterID address{key.first<32>()};
+
+    // auto snode_address = "34d9udo9ethfcrcaxcgdyxsi1w8gr79jzornsytcfgdw5rpmif8y.loki";//
+    // address.to_network_address(true);
+    //  auto snode_address = "55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo.snode";
     auto snode_address = address.to_network_address(true);
-    // auto info = lokinet->establish_udp_blocking(snode_address, target.port());
-// TODO: Need to ensure this exists
+    auto test_port = target.port();  // 35519;
+    // TODO: Need to ensure this exists
     lokinet->establish_udp(
             snode_address,
-            target.port(),
+            test_port,  // target.port(),
             [this, id, target, timeout, cb, cb_called](lokinet::tunnel_info info) mutable {
-                log::info(cat, "Lokinet UDP connection established for {}.", id);
+                log::info(cat, "Lokinet session to remote established for {}.", id);
                 auto conn_key_pair = ed25519::ed25519_key_pair();
                 auto creds = quic::GNUTLSCreds::make_from_ed_seckey(
                         to_string_view(conn_key_pair.second));
@@ -940,8 +921,16 @@ void Network::establish_connection(
                                           std::chrono::duration_cast<std::chrono::nanoseconds>(
                                                   *timeout)}}
                                 : std::nullopt;
-                auto loki_target = oxen::quic::RemoteAddress{
-                        target.view_remote_key(), "127.0.0.1", info.local_port};
+
+                auto test_key = target.view_remote_key();
+                // auto test_key =
+                // oxenc::from_base64("1n+DAM9hKyJhtXSPR5L/HdemIKPiHs8dZsPn2kEQuMs="); auto test_key
+                // = oxenc::from_base32z("55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo");
+                auto loki_target =
+                        oxen::quic::RemoteAddress{test_key, "127.0.0.1", info.local_port};
+
+                // TODO: Make this a debug log
+                log::info(cat, "Opening quic connection to {}.", oxenc::to_hex(test_key));
 
                 auto c = get_endpoint()->connect(
                         loki_target,
@@ -967,19 +956,19 @@ void Network::establish_connection(
                                 });
                             });
                         },
-                        [this, target, id, cb, cb_called, conn_future](
+                        [this, target, loki_target, id, cb, cb_called, conn_future](
                                 quic::Connection& conn, uint64_t error_code) mutable {
                             if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
                                 log::info(
                                         cat,
                                         "Unable to establish connection to {} for {}.",
-                                        target.to_string(),
+                                        loki_target.to_string(),
                                         id);
                             else
                                 log::info(
                                         cat,
                                         "Connection to {} closed for {}.",
-                                        target.to_string(),
+                                        loki_target.to_string(),
                                         id);
 
                             // Just in case, call it within a `loop->call`
@@ -1047,13 +1036,15 @@ void Network::establish_connection(
                 loop->call([&] {
                     // Trigger the callback first before updating the paths in case this was
                     // triggered when try to establish a connection
-                    std::call_once(*cb_called, [&]() {
-                        if (cb) {
-                            (*cb)({target, std::make_shared<size_t>(0), nullptr, nullptr},
-                                  std::nullopt);
-                            cb.reset();
-                        }
-                    });
+                    // TODO: This is crashing (trying to access 'target' after it was freed)
+                    //                    std::call_once(*cb_called, [&]() {
+                    //                        if (cb) {
+                    //                            (*cb)({target, std::make_shared<size_t>(0),
+                    //                            nullptr, nullptr},
+                    //                                  std::nullopt);
+                    //                            cb.reset();
+                    //                        }
+                    //                    });
                 });
             });
 }
@@ -1105,7 +1096,7 @@ void Network::establish_and_store_connection(std::string path_id) {
     establish_connection(
             path_id,
             target_node,
-            3s,
+            10s,  // 3s,
             [this, target_node, path_id](connection_info info, std::optional<std::string>) {
                 // If we failed to get a connection then try again after a delay (may as well try
                 // indefinitely because there is no way to recover from this issue)
@@ -1177,7 +1168,7 @@ void Network::refresh_snode_cache_complete(std::vector<service_node> nodes) {
     // appropriate swarm for a given pubkey)
     all_swarms.clear();
     swarm_cache.clear();
-    all_swarms = detail::generate_swarms(nodes);
+    all_swarms = swarm::generate_swarms(nodes);
 
     // Run any post-refresh processes
     for (const auto& callback : after_snode_cache_refresh)
@@ -1232,7 +1223,7 @@ void Network::refresh_snode_cache_from_seed_nodes(std::string request_id, bool r
     establish_connection(
             request_id,
             target_node,
-            3s,
+            10s,  // 3s,
             [this, request_id](connection_info info, std::optional<std::string>) {
                 // If we failed to get a connection then try again after a delay (may as well try
                 // indefinitely because there is no way to recover from this issue)
@@ -1327,143 +1318,148 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     if (unused_nodes.size() < min_snode_cache_size())
         return refresh_snode_cache_from_seed_nodes(request_id, true);
 
-    // Target an unused node and increment the in progress refresh counter
-    auto target_node = unused_nodes.back();
-    unused_nodes.pop_back();
-    in_progress_snode_cache_refresh_count++;
+    log::error(
+            cat,
+            "Ignoring cache refresh {} due to in progress refresh ({}).",
+            request_id,
+            current_snode_cache_refresh_request_id.value_or("NULL"));
+    // // Target an unused node and increment the in progress refresh counter
+    // auto target_node = unused_nodes.back();
+    // unused_nodes.pop_back();
+    // in_progress_snode_cache_refresh_count++;
 
-    // If there are still more concurrent refresh_snode_cache requests we want to trigger then
-    // trigger the next one to run in the next run loop
-    if (in_progress_snode_cache_refresh_count < num_snodes_to_refresh_cache_from)
-        loop->call_soon([this, request_id]() { refresh_snode_cache(request_id); });
+    // // If there are still more concurrent refresh_snode_cache requests we want to trigger then
+    // // trigger the next one to run in the next run loop
+    // if (in_progress_snode_cache_refresh_count < num_snodes_to_refresh_cache_from)
+    //     loop->call_soon([this, request_id]() { refresh_snode_cache(request_id); });
 
-    // Prepare and send the request to retrieve service nodes
-    nlohmann::json payload{
-            {"method", "oxend_request"},
-            {"params",
-             {{"endpoint", "get_service_nodes"},
-              {"params", detail::get_service_nodes_params(std::nullopt)}}},
-    };
-    auto info = request_info::make(
-            target_node,
-            to_vector(payload.dump()),
-            std::nullopt,
-            quic::DEFAULT_TIMEOUT,
-            std::nullopt,
-            PathType::standard,
-            request_id);
-    _send_onion_request(
-            info,
-            [this, request_id](
-                    bool success,
-                    bool timeout,
-                    int16_t,
-                    std::vector<std::pair<std::string, std::string>>,
-                    std::optional<std::string> response) {
-                // If the 'snode_refresh_results' value doesn't exist it means we have already
-                // completed/cancelled this snode cache refresh and have somehow gotten into an
-                // invalid state, so just ignore this request
-                if (!snode_refresh_results) {
-                    log::warning(
-                            cat,
-                            "Ignoring snode cache response after cache update already completed "
-                            "({}).",
-                            request_id);
-                    return;
-                }
+    // // Prepare and send the request to retrieve service nodes
+    // nlohmann::json payload{
+    //         {"method", "oxend_request"},
+    //         {"params",
+    //          {{"endpoint", "get_service_nodes"},
+    //           {"params", detail::get_service_nodes_params(std::nullopt)}}},
+    // };
+    // auto info = request_info::make(
+    //         target_node,
+    //         to_vector(payload.dump()),
+    //         std::nullopt,
+    //         quic::DEFAULT_TIMEOUT,
+    //         std::nullopt,
+    //         PathType::standard,
+    //         request_id);
+    // _send_onion_request(
+    //         info,
+    //         [this, request_id](
+    //                 bool success,
+    //                 bool timeout,
+    //                 int16_t,
+    //                 std::vector<std::pair<std::string, std::string>>,
+    //                 std::optional<std::string> response) {
+    //             // If the 'snode_refresh_results' value doesn't exist it means we have already
+    //             // completed/cancelled this snode cache refresh and have somehow gotten into an
+    //             // invalid state, so just ignore this request
+    //             if (!snode_refresh_results) {
+    //                 log::warning(
+    //                         cat,
+    //                         "Ignoring snode cache response after cache update already completed "
+    //                         "({}).",
+    //                         request_id);
+    //                 return;
+    //             }
 
-                try {
-                    if (!success || timeout || !response)
-                        throw std::runtime_error{response.value_or("Unknown error.")};
+    //             try {
+    //                 if (!success || timeout || !response)
+    //                     throw std::runtime_error{response.value_or("Unknown error.")};
 
-                    nlohmann::json response_json = nlohmann::json::parse(*response);
-                    std::vector<service_node> result =
-                            detail::process_get_service_nodes_response(response_json);
-                    snode_refresh_results->emplace_back(result);
+    //                 nlohmann::json response_json = nlohmann::json::parse(*response);
+    //                 std::vector<service_node> result =
+    //                         detail::process_get_service_nodes_response(response_json);
+    //                 snode_refresh_results->emplace_back(result);
 
-                    // Update the in progress request count
-                    in_progress_snode_cache_refresh_count--;
-                } catch (const std::exception& e) {
-                    // The request failed so increment the failure counter and retry after a short
-                    // delay
-                    snode_cache_refresh_failure_count++;
+    //                 // Update the in progress request count
+    //                 in_progress_snode_cache_refresh_count--;
+    //             } catch (const std::exception& e) {
+    //                 // The request failed so increment the failure counter and retry after a
+    //                 short
+    //                 // delay
+    //                 snode_cache_refresh_failure_count++;
 
-                    auto cache_refresh_retry_delay = retry_delay(snode_cache_refresh_failure_count);
-                    log::error(
-                            cat,
-                            "Failed to retrieve nodes from one target when refreshing cache due to "
-                            "error: {}, Will try another target after {}ms ({}).",
-                            e.what(),
-                            cache_refresh_retry_delay.count(),
-                            request_id);
-                    return loop->call_later(cache_refresh_retry_delay, [this, request_id]() {
-                        refresh_snode_cache(request_id);
-                    });
-                }
+    //                 auto cache_refresh_retry_delay =
+    //                 retry_delay(snode_cache_refresh_failure_count); log::error(
+    //                         cat,
+    //                         "Failed to retrieve nodes from one target when refreshing cache due
+    //                         to " "error: {}, Will try another target after {}ms ({}).", e.what(),
+    //                         cache_refresh_retry_delay.count(),
+    //                         request_id);
+    //                 return loop->call_later(cache_refresh_retry_delay, [this, request_id]() {
+    //                     refresh_snode_cache(request_id);
+    //                 });
+    //             }
 
-                // If we haven't received all results then do nothing
-                if (snode_refresh_results->size() != num_snodes_to_refresh_cache_from) {
-                    log::info(
-                            cat,
-                            "Received snode cache refresh result {}/{} ({}).",
-                            snode_refresh_results->size(),
-                            num_snodes_to_refresh_cache_from,
-                            request_id);
-                    return;
-                }
+    //             // If we haven't received all results then do nothing
+    //             if (snode_refresh_results->size() != num_snodes_to_refresh_cache_from) {
+    //                 log::info(
+    //                         cat,
+    //                         "Received snode cache refresh result {}/{} ({}).",
+    //                         snode_refresh_results->size(),
+    //                         num_snodes_to_refresh_cache_from,
+    //                         request_id);
+    //                 return;
+    //             }
 
-                auto any_nodes_request_failed = std::any_of(
-                        snode_refresh_results->begin(),
-                        snode_refresh_results->end(),
-                        [](const auto& n) { return n.empty(); });
+    //             auto any_nodes_request_failed = std::any_of(
+    //                     snode_refresh_results->begin(),
+    //                     snode_refresh_results->end(),
+    //                     [](const auto& n) { return n.empty(); });
 
-                // If the current cache is still usable just send a warning and don't bother
-                // retrying
-                if (any_nodes_request_failed) {
-                    log::warning(cat, "Failed to refresh snode cache ({}).", request_id);
-                    current_snode_cache_refresh_request_id = std::nullopt;
-                    snode_cache_refresh_failure_count = 0;
-                    in_progress_snode_cache_refresh_count = 0;
-                    snode_refresh_results.reset();
-                    return;
-                }
+    //             // If the current cache is still usable just send a warning and don't bother
+    //             // retrying
+    //             if (any_nodes_request_failed) {
+    //                 log::warning(cat, "Failed to refresh snode cache ({}).", request_id);
+    //                 current_snode_cache_refresh_request_id = std::nullopt;
+    //                 snode_cache_refresh_failure_count = 0;
+    //                 in_progress_snode_cache_refresh_count = 0;
+    //                 snode_refresh_results.reset();
+    //                 return;
+    //             }
 
-                // Sort the vectors (so make it easier to find the intersection)
-                auto compare_service_nodes = [](const service_node& a, const service_node& b) {
-                    if (auto cmp = quic::Address(a) <=> quic::Address(b); cmp != 0)
-                        return cmp < 0;
+    //             // Sort the vectors (so make it easier to find the intersection)
+    //             auto compare_service_nodes = [](const service_node& a, const service_node& b) {
+    //                 if (auto cmp = quic::Address(a) <=> quic::Address(b); cmp != 0)
+    //                     return cmp < 0;
 
-                    return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
-                           std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
-                };
+    //                 return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
+    //                        std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+    //             };
 
-                for (auto& nodes : *snode_refresh_results)
-                    std::stable_sort(nodes.begin(), nodes.end(), compare_service_nodes);
+    //             for (auto& nodes : *snode_refresh_results)
+    //                 std::stable_sort(nodes.begin(), nodes.end(), compare_service_nodes);
 
-                auto nodes = (*snode_refresh_results)[0];
+    //             auto nodes = (*snode_refresh_results)[0];
 
-                // If we triggered multiple requests then get the intersection of all vectors
-                if (snode_refresh_results->size() > 1) {
-                    for (size_t i = 1; i < snode_refresh_results->size(); ++i) {
-                        std::vector<service_node> temp;
-                        std::set_intersection(
-                                nodes.begin(),
-                                nodes.end(),
-                                (*snode_refresh_results)[i].begin(),
-                                (*snode_refresh_results)[i].end(),
-                                std::back_inserter(temp),
-                                compare_service_nodes);
-                        nodes = std::move(temp);
-                    }
-                }
+    //             // If we triggered multiple requests then get the intersection of all vectors
+    //             if (snode_refresh_results->size() > 1) {
+    //                 for (size_t i = 1; i < snode_refresh_results->size(); ++i) {
+    //                     std::vector<service_node> temp;
+    //                     std::set_intersection(
+    //                             nodes.begin(),
+    //                             nodes.end(),
+    //                             (*snode_refresh_results)[i].begin(),
+    //                             (*snode_refresh_results)[i].end(),
+    //                             std::back_inserter(temp),
+    //                             compare_service_nodes);
+    //                     nodes = std::move(temp);
+    //                 }
+    //             }
 
-                log::info(
-                        cat,
-                        "Refreshing snode cache completed with {} nodes ({}).",
-                        nodes.size(),
-                        request_id);
-                refresh_snode_cache_complete(nodes);
-            });
+    //             log::info(
+    //                     cat,
+    //                     "Refreshing snode cache completed with {} nodes ({}).",
+    //                     nodes.size(),
+    //                     request_id);
+    //             refresh_snode_cache_complete(nodes);
+    //         });
 }
 
 void Network::build_path(std::string path_id, PathType path_type) {
@@ -1768,39 +1764,16 @@ void Network::get_swarm(
             return loop->call_soon([this]() { refresh_snode_cache(); });
         }
 
-        // If there is only a single swarm then return it
-        if (all_swarms.size() == 1)
-            return cb(all_swarms.front().first, all_swarms.front().second);
-
-        // Generate a swarm_id for the pubkey
-        const swarm_id_t swarm_id = detail::pubkey_to_swarm_space(swarm_pubkey);
-
-        // Find the right boundary, i.e. first swarm with swarm_id >= res
-        auto right_it = std::lower_bound(
-                all_swarms.begin(), all_swarms.end(), swarm_id, [](const auto& s, uint64_t v) {
-                    return s.first < v;
-                });
-
-        if (right_it == all_swarms.end())
-            // res is > the top swarm_id, meaning it is big and in the wrapping space between last
-            // and first elements.
-            right_it = all_swarms.begin();
-
-        // Our "left" is the one just before that (with wraparound, if right is the first swarm)
-        auto left_it = std::prev(right_it == all_swarms.begin() ? all_swarms.end() : right_it);
-
-        uint64_t dright = right_it->first - swarm_id;
-        uint64_t dleft = swarm_id - left_it->first;
-        auto swarm = &*(dright < dleft ? right_it : left_it);
+        auto swarm = swarm::get_swarm(swarm_pubkey, all_swarms);
 
         // Update the cache with the result
         log::info(
                 cat,
                 "Found swarm with {} nodes for {}, adding to cache.",
-                swarm->second.size(),
+                swarm.second.size(),
                 swarm_pubkey.hex());
-        swarm_cache[swarm_pubkey.hex()] = *swarm;
-        cb(swarm->first, swarm->second);
+        swarm_cache[swarm_pubkey.hex()] = swarm;
+        cb(swarm.first, swarm.second);
     });
 }
 
@@ -1971,14 +1944,27 @@ void Network::send_onion_request(
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout,
         PathType type) {
+    std::optional<std::vector<unsigned char>> final_body;
+    std::optional<std::string> final_endpoint;
+
+    if (body) {
+        auto json_payload = nlohmann::json::parse(*body);
+        final_endpoint = json_payload["method"].get<std::string>();
+        auto unwrapped_payload = json_payload["params"];
+        auto tmp = unwrapped_payload.dump();
+        final_body = to_vector(unwrapped_payload.dump());
+    }
     _send_onion_request(
             request_info::make(
                     std::move(destination),
-                    std::move(body),
+                    final_body,
                     std::move(swarm_pubkey),
                     request_timeout,
                     request_and_path_build_timeout,
-                    type),
+                    type,
+                    std::nullopt,
+                    final_endpoint,
+                    final_body),
             std::move(handle_response));
 }
 
@@ -2018,6 +2004,10 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
     }
 
     log::trace(cat, "{} got {} path for {}.", __PRETTY_FUNCTION__, path_name, info.request_id);
+
+    // TODO: HACK - Just forward the request instead of onion routing it
+    send_request(info, path->conn_info, handle_response);
+    return;
 
     // Construct the onion request
     auto builder = Builder::make(info.destination, path->nodes);
