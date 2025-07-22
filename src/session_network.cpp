@@ -233,16 +233,16 @@ namespace {
     }
 
     const std::vector<service_node> seed_nodes_testnet{
-            node_from_disk("144.76.164.202|35400|2.8.0|"
+            node_from_disk("95.216.33.113|35400|2.8.0|"
                            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
     const std::vector<service_node> seed_nodes_mainnet{
-            node_from_disk("144.76.164.202|20200|2.8.0|"
+            node_from_disk("95.216.33.113|20200|2.8.0|"
                            "1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef|"sv),
-            node_from_disk("88.99.102.229|20201|2.8.0|"
+            node_from_disk("37.27.236.229|20201|2.8.0|"
                            "1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7ce|"sv),
-            node_from_disk("195.16.73.17|20202|2.8.0|"
+            node_from_disk("172.96.140.124|20202|2.8.0|"
                            "1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e06199919f|"sv),
-            node_from_disk("104.194.11.120|20203|2.8.0|"
+            node_from_disk("208.73.207.54|20203|2.8.0|"
                            "1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d78b|"sv),
             node_from_disk("104.194.8.115|20204|2.8.0|"
                            "1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7b0|"sv)};
