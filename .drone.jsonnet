@@ -356,7 +356,7 @@ local static_build(name,
   clang(17),
   full_llvm(17),
   debian_build('Debian stable (i386)', docker_base + 'debian-stable/i386'),
-  debian_build('Debian 11', docker_base + 'debian-bullseye', extra_setup=debian_backports('bullseye', ['cmake'])),
+  debian_build('Debian 12', docker_base + 'debian-bookworm', extra_setup=debian_backports('bookworm', ['cmake'])),
   debian_build('Ubuntu latest', docker_base + 'ubuntu-rolling'),
   debian_build('Ubuntu LTS', docker_base + 'ubuntu-lts'),
 
