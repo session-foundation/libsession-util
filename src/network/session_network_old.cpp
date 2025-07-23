@@ -28,7 +28,7 @@
 #include "session/network/session_network_old.h"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/builder.hpp"
-#include "session/onionreq/key_types.hpp"
+#include "session/network/key_types.hpp"
 #include "session/onionreq/response_parser.hpp"
 #include "session/util.hpp"
 
@@ -266,13 +266,13 @@ namespace {
                 node.swarm_id);
     }
 
-    session::onionreq::x25519_pubkey compute_xpk(std::span<const unsigned char> ed25519_pk) {
+    session::network::x25519_pubkey compute_xpk(std::span<const unsigned char> ed25519_pk) {
         std::array<unsigned char, 32> xpk;
         if (0 != crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed25519_pk.data()))
             throw std::runtime_error{
                     "An error occured while attempting to convert Ed25519 pubkey to X25519; "
                     "is the pubkey valid?"};
-        return session::onionreq::x25519_pubkey::from_bytes({xpk.data(), 32});
+        return session::network::x25519_pubkey::from_bytes({xpk.data(), 32});
     }
 
     std::string consume_string(oxenc::bt_dict_consumer dict, std::string_view key) {
@@ -455,7 +455,7 @@ namespace detail {
 request_info request_info::make(
         onionreq::network_destination _dest,
         std::optional<std::vector<unsigned char>> _original_body,
-        std::optional<session::onionreq::x25519_pubkey> _swarm_pk,
+        std::optional<session::network::x25519_pubkey> _swarm_pk,
         std::chrono::milliseconds _request_timeout,
         std::optional<std::chrono::milliseconds> _request_and_path_build_timeout,
         PathType _type,
@@ -1745,7 +1745,7 @@ void Network::get_service_nodes(
 // MARK: Swarm Management
 
 void Network::get_swarm(
-        session::onionreq::x25519_pubkey swarm_pubkey,
+        session::network::x25519_pubkey swarm_pubkey,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, swarm_pubkey.hex());
 
@@ -1939,7 +1939,7 @@ void Network::send_request(
 void Network::send_onion_request(
         onionreq::network_destination destination,
         std::optional<std::vector<unsigned char>> body,
-        std::optional<session::onionreq::x25519_pubkey> swarm_pubkey,
+        std::optional<session::network::x25519_pubkey> swarm_pubkey,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout,
@@ -2211,7 +2211,7 @@ void Network::upload_file_to_server(
 
 void Network::download_file(
         std::string_view download_url,
-        session::onionreq::x25519_pubkey x25519_pubkey,
+        session::network::x25519_pubkey x25519_pubkey,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout) {
@@ -2244,7 +2244,7 @@ void Network::download_file(
 
 void Network::get_client_version(
         Platform platform,
-        onionreq::ed25519_seckey seckey,
+        network::ed25519_seckey seckey,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout) {
@@ -2784,8 +2784,8 @@ void Network::handle_errors(
         // If we found a result then try to extract the pubkey and process it
         if (ed25519PublicKey && ed25519PublicKey->size() == 64 &&
             oxenc::is_hex(*ed25519PublicKey)) {
-            session::onionreq::ed25519_pubkey edpk =
-                    session::onionreq::ed25519_pubkey::from_hex(*ed25519PublicKey);
+            session::network::ed25519_pubkey edpk =
+                    session::network::ed25519_pubkey::from_hex(*ed25519PublicKey);
             auto edpk_view = to_span(edpk.view());
 
             auto snode_it = std::find_if(
@@ -3325,7 +3325,7 @@ LIBSESSION_C_API void network_get_client_version(
 
         unbox(network).get_client_version(
                 static_cast<Platform>(platform),
-                onionreq::ed25519_seckey::from_bytes({ed25519_secret, 64}),
+                network::ed25519_seckey::from_bytes({ed25519_secret, 64}),
                 [cb = std::move(callback), ctx](
                         bool success,
                         bool timeout,

@@ -54,24 +54,31 @@ typedef struct {
     SESSION_NETWORK_NETID netid;
     SESSION_NETWORK_ROUTER router;
     SESSION_NETWORK_TRANSPORT transport;
-    const char* cache_dir;
-    uint32_t snode_cache_expiration_minutes;
+    uint8_t path_length;
 
     // Devnet options (only used when netid_target == SESSION_NETWORK_DEVNET)
     const network_service_node* devnet_seed_nodes;
     size_t devnet_seed_nodes_size;
 
-    // Onion request options (only used when router ==
+    // Snode pool options
+    const char* cache_dir;
+    uint32_t cache_expiration_minutes;
+    size_t min_cache_size;
+    uint8_t num_nodes_to_use_for_refresh;
+    uint8_t node_failure_threshold;
+
+    // Onion request router options (only used when router ==
     // SESSION_NETWORK_ROUTER_ONION_REQUESTS)
-    size_t onionreq_min_snode_cache_size;
-    uint8_t onionreq_num_cache_nodes_to_use_for_refresh;
-    uint8_t onionreq_path_size;
     uint8_t onionreq_path_failure_threshold;
-    uint8_t onionreq_node_failure_threshold;
     uint8_t onionreq_min_path_count_standard;
     uint8_t onionreq_min_path_count_upload;
     uint8_t onionreq_min_path_count_download;
     bool onionreq_disable_pre_build_paths;
+
+    // Quic transport options (for transport == SESSION_NETWORK_TRANSPORT_QUIC)
+    uint32_t quic_handshake_timeout_seconds;
+    uint32_t quic_keep_alive_seconds;
+    bool quic_disable_mtu_discovery;
 
     // Callback options (for transport == SESSION_NETWORK_TRANSPORT_CALLBACKS)
     session_network_request_t transport_callback;

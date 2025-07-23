@@ -1,4 +1,4 @@
-#include "session/onionreq/key_types.hpp"
+#include "session/network/key_types.hpp"
 
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
@@ -8,7 +8,7 @@
 #include <cstring>
 #include <type_traits>
 
-namespace session::onionreq {
+namespace session::network {
 
 namespace detail {
 

@@ -6,42 +6,111 @@
 #include <vector>
 
 #include "session/network/session_network.h"
-#include "session/network/session_network_config.hpp"
-#include "session/network/session_network_opt.hpp"
+#include "session/network/network_config.hpp"
+#include "session/network/network_opt.hpp"
+#include "session/network/transport/quic_transport.hpp"
 
 using namespace oxen;
-using namespace session::onionreq;
 using namespace session::network;
+using namespace session::network::config;
 using namespace std::literals;
 using namespace oxen::log::literals;
 
 namespace session::network {
 
-Network_v2::Network_v2(session::network::Config config) : config{config} {
+namespace {
+
+config::SnodePoolConfig build_snode_pool_config(const config::Config& main_config) {
+    SnodePoolConfig config;
+
+    if (main_config.cache_directory) {
+        config.cache_directory = *main_config.cache_directory;
+    }
+    config.netid = main_config.netid;
+    config.seed_nodes = main_config.seed_nodes;
+    config.cache_expiration = main_config.cache_expiration;
+    config.num_nodes_to_use_for_refresh = main_config.num_nodes_to_use_for_refresh;
+    config.node_failure_threshold = main_config.node_failure_threshold;
+
+    return config;
+}
+
+config::QuicTransportConfig build_quic_transport_config(const config::Config& main_config) {
+    QuicTransportConfig config;
+
+    config.handshake_timeout = main_config.quic_handshake_timeout;
+    config.keep_alive = main_config.quic_keep_alive;
+
+    return config;
+}
+
+} // namespace
+
+Network_v2::Network_v2(config::Config config) : config{config} {
     // Start by validating the configuration
     switch (config.router) {
-        case opt::router::Type::onion_requests: break;
         case opt::router::Type::lokinet:
             if (!config.cache_directory)
                 throw std::invalid_argument{"Lokinet requires a cache_directory to be configured."};
             break;
 
+        case opt::router::Type::onion_requests: break;
         case opt::router::Type::direct: break;
     }
 
     switch (config.transport) {
         case opt::transport::Type::quic: break;
         case opt::transport::Type::callbacks: break;
-            if (!config.transport_callbacks_callback)
+            if (!config.callbacks_callback)
                 throw std::invalid_argument{"Callbacks requires a callback to be provided."};
             break;
     }
 
     // Now we can properly do any setup needed
-    loop = std::make_shared<quic::Loop>();
+    _loop = std::make_shared<quic::Loop>();
+
+    // The SnodePool is needed regardless of the transport layer as it includes swarm information which is needed by the clients in order to send requests
+    auto snode_fetcher = [this](service_node target, auto on_complete) {
+        // Placeholder:
+        on_complete({}, "Fetcher not yet implemented");
+    };
+    _snode_pool = std::make_unique<SnodePool>(std::move(build_snode_pool_config(config)), snode_fetcher);
+
+    // Setup the transport layer
+    switch (config.transport) {
+        case opt::transport::Type::quic:
+            _transport = std::make_unique<QuicTransport>(std::move(build_quic_transport_config(config)), _loop);
+            break;
+
+        case opt::transport::Type::callbacks:
+            // _transport = std::make_unique<LokinetTransport>(_config, *_snode_pool, _loop);
+            break;
+    }
+
+    // Setup the router
+    switch (config.router) {
+        case opt::router::Type::onion_requests:
+            // _transport = std::make_unique<OnionRequestTransport>(_config, *_snode_pool, _loop);
+            break;
+
+        case opt::router::Type::lokinet:
+            // _transport = std::make_unique<LokinetTransport>(_config, *_snode_pool, _loop);
+            break;
+
+        case opt::router::Type::direct:
+            // _transport = std::make_unique<DirectTransport>(_config, *_snode_pool, _loop);
+            break;
+    }
 }
 
 Network_v2::~Network_v2() {
+}
+
+void Network_v2::send_request(Request request, network_response_callback_t callback) {
+    if (!_transport)
+        return callback(false, false, -1, {}, "No transport layer configured");
+    
+    _transport->send_request(std::move(request), std::move(callback));
 }
 
 }  // namespace session::network
@@ -80,9 +149,6 @@ using namespace session::network;
 LIBSESSION_C_API session_network_config session_network_config_default() {
     Config cpp_defaults{};
     session_network_config config = {};
-    
-    config.cache_dir = nullptr;
-    config.snode_cache_expiration_minutes = cpp_defaults.snode_cache_expiration.count();
 
     switch (cpp_defaults.netid) {
         case opt::netid::Target::mainnet: config.netid = SESSION_NETWORK_MAINNET;
@@ -103,16 +169,24 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
         case opt::transport::Type::callbacks: config.transport = SESSION_NETWORK_TRANSPORT_CALLBACKS;
         default: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
     }
+
+    config.path_length = cpp_defaults.path_length;
+
+    config.cache_dir = nullptr;
+    config.cache_expiration_minutes = std::chrono::duration_cast<std::chrono::minutes>(cpp_defaults.cache_expiration).count();
+    config.min_cache_size = cpp_defaults.min_cache_size;
+    config.num_nodes_to_use_for_refresh = cpp_defaults.num_nodes_to_use_for_refresh;
+    config.node_failure_threshold = cpp_defaults.node_failure_threshold;
     
-    config.onionreq_min_snode_cache_size = cpp_defaults.onionreq_min_snode_cache_size;
-    config.onionreq_num_cache_nodes_to_use_for_refresh = cpp_defaults.onionreq_num_cache_nodes_to_use_for_refresh;
-    config.onionreq_path_size = cpp_defaults.onionreq_path_size;
     config.onionreq_path_failure_threshold = cpp_defaults.onionreq_path_failure_threshold;
-    config.onionreq_node_failure_threshold = cpp_defaults.onionreq_node_failure_threshold;
     config.onionreq_min_path_count_standard = cpp_defaults.onionreq_min_path_counts[opt::onionreq_min_path_count::PathType::standard];
     config.onionreq_min_path_count_upload = cpp_defaults.onionreq_min_path_counts[opt::onionreq_min_path_count::PathType::upload];
     config.onionreq_min_path_count_download = cpp_defaults.onionreq_min_path_counts[opt::onionreq_min_path_count::PathType::download];
     config.onionreq_disable_pre_build_paths = cpp_defaults.onionreq_disable_pre_build_paths;
+
+    config.quic_handshake_timeout_seconds = std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_handshake_timeout).count();
+    config.quic_keep_alive_seconds = std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_keep_alive).count();
+    config.quic_disable_mtu_discovery = cpp_defaults.quic_disable_mtu_discovery;
 
     return config;
 }
@@ -129,13 +203,21 @@ LIBSESSION_C_API bool session_network_init(
         // Build the configuration options
         std::vector<std::any> cpp_opts;
         
-        // Cache directory
+        // Snode cache
         if (config->cache_dir)
             cpp_opts.emplace_back(opt::cache_directory{std::filesystem::path{config->cache_dir}});
         
-        // Snode cache expiration
-        if (config->snode_cache_expiration_minutes > 0)
-            cpp_opts.emplace_back(opt::snode_cache_expiration(std::chrono::minutes(config->snode_cache_expiration_minutes)));
+        if (config->cache_expiration_minutes > 0)
+            cpp_opts.emplace_back(opt::cache_expiration(std::chrono::minutes(config->cache_expiration_minutes)));
+        
+        if (config->min_cache_size > 0)
+            cpp_opts.emplace_back(opt::min_cache_size(config->min_cache_size));
+        
+        if (config->num_nodes_to_use_for_refresh > 0)
+            cpp_opts.emplace_back(opt::num_nodes_to_use_for_refresh(config->num_nodes_to_use_for_refresh));
+        
+        if (config->node_failure_threshold > 0)
+            cpp_opts.emplace_back(opt::node_failure_threshold(config->node_failure_threshold));
 
         // Network ID
         switch (config->netid) {
@@ -161,20 +243,11 @@ LIBSESSION_C_API bool session_network_init(
                 cpp_opts.emplace_back(opt::router::onion_requests());
 
                 // Process the Onion Request options since we are using them
-                if (config->onionreq_min_snode_cache_size > 0)
-                    cpp_opts.emplace_back(opt::onionreq_min_snode_cache_size(config->onionreq_min_snode_cache_size));
-                
-                if (config->onionreq_num_cache_nodes_to_use_for_refresh > 0)
-                    cpp_opts.emplace_back(opt::onionreq_num_cache_nodes_to_use_for_refresh(config->onionreq_num_cache_nodes_to_use_for_refresh));
-                
-                if (config->onionreq_path_size > 0)
-                    cpp_opts.emplace_back(opt::onionreq_path_size(config->onionreq_path_size));
+                if (config->path_length > 0)
+                    cpp_opts.emplace_back(opt::path_length(config->path_length));
                 
                 if (config->onionreq_path_failure_threshold > 0)
                     cpp_opts.emplace_back(opt::onionreq_path_failure_threshold(config->onionreq_path_failure_threshold));
-                
-                if (config->onionreq_node_failure_threshold > 0)
-                    cpp_opts.emplace_back(opt::onionreq_node_failure_threshold(config->onionreq_node_failure_threshold));
                 
                 if (config->onionreq_min_path_count_standard > 0)
                     cpp_opts.emplace_back(opt::onionreq_min_path_count{
@@ -198,13 +271,31 @@ LIBSESSION_C_API bool session_network_init(
                     cpp_opts.emplace_back(opt::onionreq_disable_pre_build_paths{});
                 break;
             
-            case SESSION_NETWORK_ROUTER_LOKINET: cpp_opts.emplace_back(opt::router::lokinet()); break;
+            case SESSION_NETWORK_ROUTER_LOKINET:
+                // Process the Lokinet options since we are using them
+                if (config->path_length > 0)
+                    cpp_opts.emplace_back(opt::path_length(config->path_length));
+
+                cpp_opts.emplace_back(opt::router::lokinet());
+                break;
+
             case SESSION_NETWORK_ROUTER_DIRECT: cpp_opts.emplace_back(opt::router::direct()); break;
         }
         
         // Transport
         switch (config->transport) {
-            case SESSION_NETWORK_TRANSPORT_QUIC: cpp_opts.emplace_back(opt::transport::quic()); break;
+            case SESSION_NETWORK_TRANSPORT_QUIC:
+                if (config->quic_handshake_timeout_seconds > 0)
+                    cpp_opts.emplace_back(opt::quic_handshake_timeout(std::chrono::seconds(config->quic_handshake_timeout_seconds)));
+
+                if (config->quic_keep_alive_seconds > 0)
+                    cpp_opts.emplace_back(opt::quic_keep_alive(std::chrono::seconds(config->quic_keep_alive_seconds)));
+
+                if (config->quic_disable_mtu_discovery)
+                    cpp_opts.emplace_back(opt::quic_disable_mtu_discovery{});
+                
+                cpp_opts.emplace_back(opt::transport::quic()); break;
+            
             case SESSION_NETWORK_TRANSPORT_CALLBACKS:
                 if (!config->transport_callback)
                     throw std::runtime_error("transport_callback must be set when using the CALLBACKS for sending requests.");

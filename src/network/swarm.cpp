@@ -7,7 +7,7 @@
 
 namespace session::network::swarm {
 
-swarm_id_t pubkey_to_swarm_space(const session::onionreq::x25519_pubkey& pk) {
+swarm_id_t pubkey_to_swarm_space(const session::network::x25519_pubkey& pk) {
     swarm_id_t res = 0;
     for (size_t i = 0; i < 4; i++) {
         swarm_id_t buf;
@@ -37,7 +37,7 @@ std::vector<std::pair<swarm_id_t, std::vector<service_node>>> generate_swarms(
 }
 
 std::pair<swarm_id_t, std::vector<service_node>> get_swarm(
-        const session::onionreq::x25519_pubkey swarm_pubkey,
+        const session::network::x25519_pubkey swarm_pubkey,
         const std::vector<std::pair<swarm_id_t, std::vector<service_node>>> all_swarms) {
     // If there is only a single swarm then return it
     if (all_swarms.size() == 1)

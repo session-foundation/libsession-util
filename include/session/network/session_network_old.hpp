@@ -7,7 +7,7 @@
 
 #include "service_node.hpp"
 #include "session/onionreq/builder.hpp"
-#include "session/onionreq/key_types.hpp"
+#include "session/network/key_types.hpp"
 #include "session/platform.hpp"
 #include "session/random.hpp"
 #include "session/types.hpp"
@@ -90,7 +90,7 @@ struct onion_path {
 namespace detail {
     std::optional<service_node> node_for_destination(onionreq::network_destination destination);
 
-    session::onionreq::x25519_pubkey pubkey_for_destination(
+    session::network::x25519_pubkey pubkey_for_destination(
             onionreq::network_destination destination);
 
 }  //  namespace detail
@@ -99,7 +99,7 @@ struct request_info {
     static request_info make(
             onionreq::network_destination _dest,
             std::optional<std::vector<unsigned char>> _original_body,
-            std::optional<session::onionreq::x25519_pubkey> _swarm_pk,
+            std::optional<session::network::x25519_pubkey> _swarm_pk,
             std::chrono::milliseconds _request_timeout,
             std::optional<std::chrono::milliseconds> _request_and_path_build_timeout = std::nullopt,
             PathType _type = PathType::standard,
@@ -119,7 +119,7 @@ struct request_info {
     std::string endpoint;
     std::optional<std::vector<unsigned char>> body;
     std::optional<std::vector<unsigned char>> original_body;
-    std::optional<session::onionreq::x25519_pubkey> swarm_pubkey;
+    std::optional<session::network::x25519_pubkey> swarm_pubkey;
     PathType path_type;
     std::chrono::milliseconds request_timeout;
     std::optional<std::chrono::milliseconds> request_and_path_build_timeout;
@@ -250,7 +250,7 @@ class Network {
     /// - 'callback' - [in] callback to be called with the retrieved swarm (in the case of an error
     /// the callback will be called with an empty list).
     void get_swarm(
-            session::onionreq::x25519_pubkey swarm_pubkey,
+            session::network::x25519_pubkey swarm_pubkey,
             std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback);
 
     /// API: network/get_random_nodes
@@ -286,7 +286,7 @@ class Network {
     void send_onion_request(
             onionreq::network_destination destination,
             std::optional<std::vector<unsigned char>> body,
-            std::optional<session::onionreq::x25519_pubkey> swarm_pubkey,
+            std::optional<session::network::x25519_pubkey> swarm_pubkey,
             network_response_callback_t handle_response,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> request_and_path_build_timeout = std::nullopt,
@@ -356,7 +356,7 @@ class Network {
     /// - `handle_response` -- [in] callback to be called with the result of the request.
     void download_file(
             std::string_view download_url,
-            onionreq::x25519_pubkey x25519_pubkey,
+            network::x25519_pubkey x25519_pubkey,
             network_response_callback_t handle_response,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> request_and_path_build_timeout = std::nullopt);
@@ -378,7 +378,7 @@ class Network {
     /// - `handle_response` -- [in] callback to be called with the result of the request.
     void get_client_version(
             Platform platform,
-            onionreq::ed25519_seckey seckey,
+            network::ed25519_seckey seckey,
             network_response_callback_t handle_response,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> request_and_path_build_timeout = std::nullopt);

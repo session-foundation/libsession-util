@@ -22,7 +22,7 @@ namespace {
     inline auto cat = log::Cat("snode_pool");
 }
 
-SnodePool::SnodePool(Config& config, network_fetcher_t network_fetcher) : _config{config}, _network_fetcher{std::move(network_fetcher)} {
+SnodePool::SnodePool(config::SnodePoolConfig config, network_fetcher_t network_fetcher) : _config{config}, _network_fetcher{std::move(network_fetcher)} {
     if (_config.cache_directory) {
         std::string cache_file_name;
 
@@ -189,7 +189,7 @@ void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
         return;
     
     const std::string request_id = *_current_snode_cache_refresh_id;
-    const uint8_t total_required = (is_bootstrap_request ? 1 : _config.onionreq_num_cache_nodes_to_use_for_refresh);
+    const uint8_t total_required = (is_bootstrap_request ? 1 : _config.num_nodes_to_use_for_refresh);
     auto results_ptr = _snode_refresh_results;
     auto target_node = _refresh_candidate_nodes.back();
     _refresh_candidate_nodes.pop_back();
@@ -222,7 +222,7 @@ void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
         results_ptr->push_back(std::move(nodes));
 
         // If we've received all the results then we need to process them and complete the refresh
-        if (results_ptr->size() >= _config.onionreq_num_cache_nodes_to_use_for_refresh)
+        if (results_ptr->size() >= _config.num_nodes_to_use_for_refresh)
             _process_and_complete_refresh();
     });
 }
@@ -283,8 +283,8 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
     _snode_refresh_results = std::make_shared<std::vector<std::vector<service_node>>>();
     _refresh_candidate_nodes.clear();
 
-    // If the cache is empty, cache refreshing is disabled, or it's smaller than `onionreq_num_cache_nodes_to_use_for_refresh` then we need to refresh from seed nodes (when fetching from seed nodes we only need to fetch from a single node so only kick off a single refresh request)
-    if (_snode_cache.empty() || _config.onionreq_num_cache_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.onionreq_num_cache_nodes_to_use_for_refresh) {
+    // If the cache is empty, cache refreshing is disabled, or it's smaller than `num_nodes_to_use_for_refresh` then we need to refresh from seed nodes (when fetching from seed nodes we only need to fetch from a single node so only kick off a single refresh request)
+    if (_snode_cache.empty() || _config.num_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.num_nodes_to_use_for_refresh) {
         log::debug(cat, "Snode cache is insufficient, bootstrapping from seed nodes for refresh {}", request_id);
         _refresh_candidate_nodes = _config.seed_nodes;
         std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
@@ -301,12 +301,12 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
     }
 
     // Otherwise we want to try to refresh using nodes from the existing cache
-    log::debug(cat, "Performing standard snode cache refresh using {} nodes for request ID {}", _config.onionreq_num_cache_nodes_to_use_for_refresh, request_id);
+    log::debug(cat, "Performing standard snode cache refresh using {} nodes for request ID {}", _config.num_nodes_to_use_for_refresh, request_id);
     _refresh_candidate_nodes = _snode_cache;
     std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
 
     // Kick off the concurrent requests
-    for (uint8_t i = 0; i < _config.onionreq_num_cache_nodes_to_use_for_refresh; ++i)
+    for (uint8_t i = 0; i < _config.num_nodes_to_use_for_refresh; ++i)
         _launch_next_refresh_request(false /* is_bootstrap_request */);
 }
 
@@ -357,7 +357,7 @@ void SnodePool::_on_refresh_complete(std::vector<service_node> new_nodes) {
 // MARK: Public Functions
 
 size_t SnodePool::size() {
-    std::shared_lock lock{_cache_mutex};
+    std::lock_guard lock{_cache_mutex};
     return _snode_cache.size();
 }
 
@@ -370,7 +370,7 @@ void SnodePool::clear_cache() {
 }
 
 void SnodePool::record_node_failure(const service_node& node) {
-    std::unique_lock lock{_cache_mutex};
+    std::lock_guard lock{_cache_mutex};
     _snode_failure_counts[node.to_string()]++;
     log::trace(cat, "Recorded failure for node {}, total failures: {}",
         node.to_string(), _snode_failure_counts[node.to_string()]);
@@ -379,14 +379,14 @@ void SnodePool::record_node_failure(const service_node& node) {
 void SnodePool::refresh_if_needed() {
     bool needs_refresh = false;
     {
-        std::shared_lock lock{_cache_mutex};
+        std::lock_guard lock{_cache_mutex};
         
         // Don't bother if we are alread doing a refresh
         if (_current_snode_cache_refresh_id)
             return;
         
         auto cache_lifetime = std::chrono::system_clock::now() - _last_snode_cache_update;
-        needs_refresh = (_snode_cache.empty() || cache_lifetime > _config.snode_cache_expiration);
+        needs_refresh = (_snode_cache.empty() || cache_lifetime > _config.cache_expiration);
     }
     
     // Kick off a refresh if needed
@@ -402,11 +402,11 @@ std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::v
     std::vector<service_node> result;
     result.reserve(count);
 
-    std::unordered_set<oxen::quic::ipv4> used_ips;
+    std::unordered_set<std::string> excluded_ips;
     for (const auto& node : exclude_nodes)
-        used_ips.insert(node.to_ipv4());
+        excluded_ips.insert(node.host());
 
-    std::shared_lock lock{_cache_mutex};
+    std::lock_guard lock{_cache_mutex};
 
     if (_snode_cache.empty()) {
         log::warning(cat, "Cannot get unused nodes: snode cache is empty.");
@@ -425,12 +425,12 @@ std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::v
 
         // Skip nodes with too many failures
         auto it = _snode_failure_counts.find(node.to_string());
-        if (it != _snode_failure_counts.end() && it->second >= _config.onionreq_node_failure_threshold)
+        if (it != _snode_failure_counts.end() && it->second >= _config.node_failure_threshold)
             continue;
 
-        // Skip nodes in the exclusion list
-        auto exclude_it = std::find(exclude_nodes.begin(), exclude_nodes.end(), node);
-        if (exclude_it != exclude_nodes.end())
+        // Skip nodes whos IP addresses are in the exclusion list
+        auto [_, inserted] = excluded_ips.insert(node.host());
+        if (!inserted)
             continue;
 
         result.push_back(node);
@@ -443,17 +443,15 @@ std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::v
 }
 
 void SnodePool::get_swarm(
-        session::onionreq::x25519_pubkey swarm_pubkey,
+        session::network::x25519_pubkey swarm_pubkey,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, swarm_pubkey.hex());
 
-    std::shared_lock lock{_cache_mutex};
+    std::unique_lock lock{_cache_mutex};
 
     // Check the in-memory swarm cache first
-    if (auto it = _swarm_cache.find(swarm_pubkey.hex()); it != _swarm_cache.end()) {
-        lock.unlock();
+    if (auto it = _swarm_cache.find(swarm_pubkey.hex()); it != _swarm_cache.end())
         return callback(it->second.first, it->second.second);
-    }
 
     // If we have no snode cache or no swarms then we need to rebuild the cache (which will also
     // rebuild the swarms) and run this request again
@@ -495,7 +493,7 @@ void SnodePool::get_swarm(
 
     // Update our in-memory cache (need to re-acquire the lock to do so)
     {
-        std::unique_lock write_lock{_cache_mutex};
+        std::lock_guard write_lock{_cache_mutex};
         _swarm_cache[swarm_pubkey.hex()] = swarm;
     }
 

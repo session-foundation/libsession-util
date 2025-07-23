@@ -18,7 +18,7 @@
 
 #include "session/export.h"
 #include "session/onionreq/builder.hpp"
-#include "session/onionreq/key_types.hpp"
+#include "session/network/key_types.hpp"
 #include "session/util.hpp"
 #include "session/xed25519.hpp"
 
@@ -28,7 +28,7 @@ namespace {
 
     // Derive shared secret from our (ephemeral) `seckey` and the other party's `pubkey`
     std::array<uint8_t, crypto_scalarmult_BYTES> calculate_shared_secret(
-            const x25519_seckey& seckey, const x25519_pubkey& pubkey) {
+            const network::x25519_seckey& seckey, const network::x25519_pubkey& pubkey) {
         std::array<uint8_t, crypto_scalarmult_BYTES> secret;
         if (crypto_scalarmult(secret.data(), seckey.data(), pubkey.data()) != 0)
             throw std::runtime_error("Shared key derivation failed (crypto_scalarmult)");
@@ -38,7 +38,7 @@ namespace {
     constexpr std::string_view salt{"LOKI"};
 
     std::array<uint8_t, crypto_scalarmult_BYTES> derive_symmetric_key(
-            const x25519_seckey& seckey, const x25519_pubkey& pubkey) {
+            const network::x25519_seckey& seckey, const network::x25519_pubkey& pubkey) {
         auto key = calculate_shared_secret(seckey, pubkey);
 
         auto usalt = to_span(salt);
@@ -56,9 +56,9 @@ namespace {
     // could be used for AES-GCM as well, but would break backwards compatibility with existing
     // Session clients).
     std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> xchacha20_shared_key(
-            const x25519_pubkey& local_pub,
-            const x25519_seckey& local_sec,
-            const x25519_pubkey& remote_pub,
+            const network::x25519_pubkey& local_pub,
+            const network::x25519_seckey& local_sec,
+            const network::x25519_pubkey& remote_pub,
             bool local_first) {
         std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> key;
         static_assert(crypto_aead_xchacha20poly1305_ietf_KEYBYTES >= crypto_scalarmult_BYTES);
@@ -90,7 +90,7 @@ bool HopEncryption::response_long_enough(EncryptType type, size_t response_size)
 }
 
 std::vector<unsigned char> HopEncryption::encrypt(
-        EncryptType type, std::vector<unsigned char> plaintext, const x25519_pubkey& pubkey) const {
+        EncryptType type, std::vector<unsigned char> plaintext, const network::x25519_pubkey& pubkey) const {
     switch (type) {
         case EncryptType::xchacha20: return encrypt_xchacha20(plaintext, pubkey);
         case EncryptType::aes_gcm: return encrypt_aesgcm(plaintext, pubkey);
@@ -101,7 +101,7 @@ std::vector<unsigned char> HopEncryption::encrypt(
 std::vector<unsigned char> HopEncryption::decrypt(
         EncryptType type,
         std::vector<unsigned char> ciphertext,
-        const x25519_pubkey& pubkey) const {
+        const network::x25519_pubkey& pubkey) const {
     switch (type) {
         case EncryptType::xchacha20: return decrypt_xchacha20(ciphertext, pubkey);
         case EncryptType::aes_gcm: return decrypt_aesgcm(ciphertext, pubkey);
@@ -110,7 +110,7 @@ std::vector<unsigned char> HopEncryption::decrypt(
 }
 
 std::vector<unsigned char> HopEncryption::encrypt_aesgcm(
-        std::vector<unsigned char> plaintext, const x25519_pubkey& pubKey) const {
+        std::vector<unsigned char> plaintext, const network::x25519_pubkey& pubKey) const {
     auto key = derive_symmetric_key(private_key_, pubKey);
 
     // Initialise cipher context with the key
@@ -141,7 +141,7 @@ std::vector<unsigned char> HopEncryption::encrypt_aesgcm(
 }
 
 std::vector<unsigned char> HopEncryption::decrypt_aesgcm(
-        std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
+        std::vector<unsigned char> ciphertext_, const network::x25519_pubkey& pubKey) const {
     std::span<const unsigned char> ciphertext = to_span(ciphertext_);
 
     if (!response_long_enough(EncryptType::aes_gcm, ciphertext_.size()))
@@ -176,7 +176,7 @@ std::vector<unsigned char> HopEncryption::decrypt_aesgcm(
 }
 
 std::vector<unsigned char> HopEncryption::encrypt_xchacha20(
-        std::vector<unsigned char> plaintext, const x25519_pubkey& pubKey) const {
+        std::vector<unsigned char> plaintext, const network::x25519_pubkey& pubKey) const {
 
     std::vector<unsigned char> ciphertext;
     ciphertext.resize(
@@ -208,7 +208,7 @@ std::vector<unsigned char> HopEncryption::encrypt_xchacha20(
 }
 
 std::vector<unsigned char> HopEncryption::decrypt_xchacha20(
-        std::vector<unsigned char> ciphertext_, const x25519_pubkey& pubKey) const {
+        std::vector<unsigned char> ciphertext_, const network::x25519_pubkey& pubKey) const {
     std::span<const unsigned char> ciphertext = to_span(ciphertext_);
 
     // Extract nonce from the beginning of the ciphertext:

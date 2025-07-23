@@ -83,8 +83,8 @@ LIBSESSION_C_API bool onion_request_decrypt(
         }
 
         session::onionreq::HopEncryption d{
-                session::onionreq::x25519_seckey::from_bytes({final_x25519_seckey, 32}),
-                session::onionreq::x25519_pubkey::from_bytes({final_x25519_pubkey, 32}),
+                session::network::x25519_seckey::from_bytes({final_x25519_seckey, 32}),
+                session::network::x25519_pubkey::from_bytes({final_x25519_pubkey, 32}),
                 false};
 
         std::vector<unsigned char> result;
@@ -99,13 +99,13 @@ LIBSESSION_C_API bool onion_request_decrypt(
             result = d.decrypt(
                     enc_type,
                     ciphertext,
-                    session::onionreq::x25519_pubkey::from_bytes({destination_x25519_pubkey, 32}));
+                    session::network::x25519_pubkey::from_bytes({destination_x25519_pubkey, 32}));
         } catch (...) {
             if (enc_type == session::onionreq::EncryptType::xchacha20)
                 result = d.decrypt(
                         session::onionreq::EncryptType::aes_gcm,
                         ciphertext,
-                        session::onionreq::x25519_pubkey::from_bytes(
+                        session::network::x25519_pubkey::from_bytes(
                                 {destination_x25519_pubkey, 32}));
             else
                 return false;

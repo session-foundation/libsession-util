@@ -14,19 +14,6 @@ namespace opt {
 
     struct base {};
 
-    /// Can be used to override the default ('.') path the network uses to cache files (eg. snode pool and lokinet bootstrap).
-    struct cache_directory: base {
-        fs::path path;
-        explicit cache_directory(fs::path p) : path{p} {}
-    };
-
-    /// Can be used to override the default (2h) duration that the snode cache can be used for before it needs to be refreshed.
-    struct snode_cache_expiration : base {
-        std::chrono::minutes duration;
-        explicit snode_cache_expiration(std::chrono::minutes duration) :
-                duration{duration} {}
-    };
-
     /// Can be used to override the default (mainnet) netid that the network will populate it's internal caches from, 'devnet' allows for specifying a custom server.
     struct netid : base {
         enum class Target {
@@ -138,7 +125,7 @@ namespace opt {
             quic,
             callbacks,
         };
-
+// TODO: Add in "HTTP" as an option
         using network_response_callback_t = std::function<void(
                 bool success,
                 bool timeout,
@@ -165,41 +152,73 @@ namespace opt {
         }
     };
 
+    /// Can be used to override the default (3) path length used when building onion request or lokinet paths.
+    struct path_length : base {
+        uint8_t length;
+
+        explicit path_length(uint8_t length) : length{length} {}
+    };
+
+    // MARK: Snode Pool Options
+
+    /// Can be used to override the default ('.') path the network uses to cache files (eg. snode pool and lokinet bootstrap).
+    struct cache_directory: base {
+        fs::path path;
+        explicit cache_directory(fs::path p) : path{p} {}
+    };
+
+    /// Can be used to override the default (2h) duration that the snode cache can be used for before it needs to be refreshed.
+    struct cache_expiration : base {
+        std::chrono::minutes duration;
+        explicit cache_expiration(std::chrono::minutes duration) : duration{duration} {}
+    };
+
     /// Can be used to override the default (12) minimum number of unused nodes before we trigger a snode cache refresh.
     ///
     /// Note: If the cache size is somehow smaller than this value (eg. Testnet is having issues) then the minimum size will be the full cache size (minus enough to build a path) or at least the size of a single path.
-    struct onionreq_min_snode_cache_size : base {
+    struct min_cache_size : base {
         size_t size;
-        explicit onionreq_min_snode_cache_size(size_t size) : size{size} {}
+        explicit min_cache_size(size_t size) : size{size} {}
     };
 
     /// Can be used to override the default (3) number of cached nodes used to refresh the cache for any subsequent refreshes after populating from a seed node.
     ///
     /// Note: Providing a value of `0` will result in the cache _always_ being refreshed using a seed node.
-    struct onionreq_num_cache_nodes_to_use_for_refresh : base {
+    struct num_nodes_to_use_for_refresh : base {
         uint8_t count;
-        explicit onionreq_num_cache_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
+        explicit num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
     };
 
-    /// Can be used to override the default (3) path size used when building onion request paths.
-    struct onionreq_path_size : base {
-        uint8_t size;
-
-        explicit onionreq_path_size(uint8_t size) : size{size} {}
+    /// Can be used to override the default (3) number of times a specific node in a path can receive an error before it is removed from the path and replaced by a new node (or the path is rebuilt if it happens to be the guard node).
+    struct node_failure_threshold : base {
+        uint16_t count;
+        explicit node_failure_threshold(uint16_t count) : count{count} {}
     };
+
+    // MARK: Quic Transport Options
+
+    /// Can be used to override the default (10s) handshake timeout duration for Quic connections.
+    struct quic_handshake_timeout : base {
+        std::chrono::milliseconds duration;
+        explicit quic_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
+    };
+
+    /// Can be used to override the default (0ms) keep alive duration for Quic connections.
+    struct quic_keep_alive : base {
+        std::chrono::seconds duration;
+        explicit quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
+    };
+
+    /// Can be used to disable Quic MTU discovery.
+    struct quic_disable_mtu_discovery : base {};
+
+    // MARK: Onion Request Router Options
 
     /// Can be used to override the default (3) number of times a path can receive an error before it is dropped and replaced by a new path.
     struct onionreq_path_failure_threshold : base {
         uint16_t count;
 
         explicit onionreq_path_failure_threshold(uint16_t count) : count{count} {}
-    };
-
-    /// Can be used to override the default (3) number of times a specific node in a path can receive an error before it is removed from the path and replaced by a new node (or the path is rebuilt if it happens to be the guard node).
-    struct onionreq_node_failure_threshold : base {
-        uint16_t count;
-
-        explicit onionreq_node_failure_threshold(uint16_t count) : count{count} {}
     };
 
     /// Can be used to override the default (2) minimum number of paths that are maintained for each type of request when using onion requests.

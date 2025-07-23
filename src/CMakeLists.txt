@@ -102,15 +102,16 @@ if(ENABLE_ONIONREQ)
     add_libsession_util_library(onionreq
         onionreq/builder.cpp
         onionreq/hop_encryption.cpp
-        onionreq/key_types.cpp
         onionreq/parser.cpp
         onionreq/response_parser.cpp
+        network/key_types.cpp
+        network/network_config.cpp
         network/service_node.cpp
-        network/session_network_config.cpp
         network/session_network_old.cpp
         network/session_network.cpp
         network/snode_pool.cpp
         network/swarm.cpp
+        network/transport/quic_transport.cpp
     )
 
     target_link_libraries(onionreq

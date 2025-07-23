@@ -10,11 +10,25 @@
 #include <vector>
 
 #include "session/network/service_node.hpp"
-#include "session/network/session_network_config.hpp"
-#include "session/onionreq/key_types.hpp"
+#include "session/network/network_config.hpp"
+#include "session/network/key_types.hpp"
 #include "swarm.hpp"
 
 namespace session::network {
+
+namespace config {
+    struct SnodePoolConfig {
+        std::optional<std::filesystem::path> cache_directory;
+        std::chrono::minutes cache_expiration;
+        
+        opt::netid::Target netid;
+        std::vector<service_node> seed_nodes;
+        
+        size_t min_cache_size;
+        uint8_t num_nodes_to_use_for_refresh;
+        uint16_t node_failure_threshold;
+    };
+}
 
 class SnodePool {
   public:
@@ -23,7 +37,7 @@ class SnodePool {
             std::function<void(
                     std::vector<service_node> nodes, std::optional<std::string> error)>)>;
 
-    SnodePool(Config& config, network_fetcher_t network_fetcher);
+    SnodePool(config::SnodePoolConfig config, network_fetcher_t network_fetcher);
     ~SnodePool();
 
     // Returns the number of nodes currently in the pool
@@ -39,14 +53,14 @@ class SnodePool {
     void refresh_if_needed();
 
     void get_swarm(
-            session::onionreq::x25519_pubkey swarm_pubkey,
+            session::network::x25519_pubkey swarm_pubkey,
             std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback);
 
     std::vector<service_node> get_unused_nodes(
             size_t count, const std::vector<service_node>& exclude = {});
 
   private:
-    Config& _config;
+    config::SnodePoolConfig _config;
     network_fetcher_t _network_fetcher;
 
     // Data (protected by '_cache_mutex')

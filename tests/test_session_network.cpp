@@ -11,7 +11,7 @@
 #include <session/ed25519.hpp>
 #include <session/network/session_network_old.hpp>
 #include <session/onionreq/hop_encryption.hpp>
-#include <session/onionreq/key_types.hpp>
+#include <session/network/key_types.hpp>
 #include <tuple>
 
 #include "utils.hpp"

@@ -14,7 +14,7 @@
 #include "../types.hpp"
 #include "../util.hpp"
 
-namespace session::onionreq {
+namespace session::network {
 
 using namespace std::literals;
 
@@ -100,12 +100,12 @@ ed25519_pubkey parse_ed25519_pubkey(std::string_view pubkey_in);
 x25519_pubkey parse_x25519_pubkey(std::string_view pubkey_in);
 x25519_pubkey compute_x25519_pubkey(std::span<const unsigned char> ed25519_pk);
 
-}  // namespace session::onionreq
+}  // namespace session::network
 
 namespace std {
 template <typename Derived, size_t N>
-struct hash<session::onionreq::pubkey_base<Derived, N>> {
-    size_t operator()(const session::onionreq::pubkey_base<Derived, N>& pk) const {
+struct hash<session::network::pubkey_base<Derived, N>> {
+    size_t operator()(const session::network::pubkey_base<Derived, N>& pk) const {
         // pubkeys are already random enough to use the first bytes directly as a good (and fast)
         // hash value
         static_assert(alignof(decltype(pk)) >= alignof(size_t));
@@ -114,13 +114,13 @@ struct hash<session::onionreq::pubkey_base<Derived, N>> {
 };
 
 template <>
-struct hash<session::onionreq::legacy_pubkey> : hash<session::onionreq::legacy_pubkey::PubKeyBase> {
+struct hash<session::network::legacy_pubkey> : hash<session::network::legacy_pubkey::PubKeyBase> {
 };
 template <>
-struct hash<session::onionreq::x25519_pubkey> : hash<session::onionreq::x25519_pubkey::PubKeyBase> {
+struct hash<session::network::x25519_pubkey> : hash<session::network::x25519_pubkey::PubKeyBase> {
 };
 template <>
-struct hash<session::onionreq::ed25519_pubkey>
-        : hash<session::onionreq::ed25519_pubkey::PubKeyBase> {};
+struct hash<session::network::ed25519_pubkey>
+        : hash<session::network::ed25519_pubkey::PubKeyBase> {};
 
 }  // namespace std

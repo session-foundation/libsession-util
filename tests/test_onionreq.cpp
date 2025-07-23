@@ -7,6 +7,7 @@
 
 using namespace session;
 using namespace session::onionreq;
+using namespace session::network;
 
 TEST_CASE("Onion request encryption", "[encryption][onionreq]") {
 

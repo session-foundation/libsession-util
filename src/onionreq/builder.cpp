@@ -26,7 +26,7 @@
 #include "session/network/session_network_old.hpp"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/hop_encryption.hpp"
-#include "session/onionreq/key_types.hpp"
+#include "session/network/key_types.hpp"
 #include "session/util.hpp"
 #include "session/xed25519.hpp"
 
@@ -36,9 +36,9 @@ using namespace oxen::log::literals;
 namespace session::onionreq {
 
 namespace detail {
-    session::onionreq::x25519_pubkey pubkey_for_destination(network_destination destination) {
+    session::network::x25519_pubkey pubkey_for_destination(network_destination destination) {
         if (auto* dest = std::get_if<network::service_node>(&destination))
-            return compute_x25519_pubkey(dest->view_remote_key());
+            return network::compute_x25519_pubkey(dest->view_remote_key());
 
         if (auto* dest = std::get_if<ServerDestination>(&destination))
             return dest->x25519_pubkey;
@@ -84,14 +84,14 @@ Builder::Builder(
 }
 
 void Builder::add_hop(std::span<const unsigned char> remote_key) {
-    hops_.push_back({ed25519_pubkey::from_bytes(remote_key), compute_x25519_pubkey(remote_key)});
+    hops_.push_back({network::ed25519_pubkey::from_bytes(remote_key), network::compute_x25519_pubkey(remote_key)});
 }
 
 void Builder::set_destination(network_destination destination) {
     ed25519_public_key_.reset();
 
     if (auto* dest = std::get_if<session::network::service_node>(&destination))
-        ed25519_public_key_.emplace(ed25519_pubkey::from_bytes(dest->view_remote_key()));
+        ed25519_public_key_.emplace(network::ed25519_pubkey::from_bytes(dest->view_remote_key()));
     else if (auto* dest = std::get_if<ServerDestination>(&destination)) {
         host_.emplace(dest->host);
         endpoint_.emplace(dest->endpoint);
@@ -113,7 +113,7 @@ void Builder::set_destination(network_destination destination) {
         throw std::invalid_argument{"Invalid destination type."};
 }
 
-void Builder::set_destination_pubkey(session::onionreq::x25519_pubkey x25519_pubkey) {
+void Builder::set_destination_pubkey(session::network::x25519_pubkey x25519_pubkey) {
     destination_x25519_public_key.reset();
     destination_x25519_public_key.emplace(x25519_pubkey);
 }
@@ -196,8 +196,8 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
     // any onion encryption at all all the way back to the client.
 
     // Ephemeral keypair:
-    x25519_pubkey A;
-    x25519_seckey a;
+    network::x25519_pubkey A;
+    network::x25519_seckey a;
     nlohmann::json final_route;
 
     {
@@ -360,7 +360,7 @@ LIBSESSION_C_API void onion_request_builder_set_server_destination(
             protocol,
             host,
             endpoint,
-            session::onionreq::x25519_pubkey::from_hex({x25519_pubkey, 64}),
+            session::network::x25519_pubkey::from_hex({x25519_pubkey, 64}),
             port,
             std::nullopt,
             method});
@@ -371,7 +371,7 @@ LIBSESSION_C_API void onion_request_builder_set_destination_pubkey(
     assert(builder && x25519_pubkey);
 
     unbox(builder).set_destination_pubkey(
-            session::onionreq::x25519_pubkey::from_hex({x25519_pubkey, 64}));
+            session::network::x25519_pubkey::from_hex({x25519_pubkey, 64}));
 }
 
 LIBSESSION_C_API void onion_request_builder_add_hop(
@@ -381,8 +381,8 @@ LIBSESSION_C_API void onion_request_builder_add_hop(
     assert(builder && ed25519_pubkey && x25519_pubkey);
 
     unbox(builder).add_hop(
-            {session::onionreq::ed25519_pubkey::from_hex({ed25519_pubkey, 64}),
-             session::onionreq::x25519_pubkey::from_hex({x25519_pubkey, 64})});
+            {session::network::ed25519_pubkey::from_hex({ed25519_pubkey, 64}),
+             session::network::x25519_pubkey::from_hex({x25519_pubkey, 64})});
 }
 
 LIBSESSION_C_API bool onion_request_builder_build(
