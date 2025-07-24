@@ -50,7 +50,7 @@ class SnodePool {
     void record_node_failure(const service_node& node);
 
     // Checks if the pool is empty or stale and triggers a refresh if needed
-    void refresh_if_needed();
+    void refresh_if_needed(std::function<void()> on_refresh_complete = nullptr);
 
     void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,

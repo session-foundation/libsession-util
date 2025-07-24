@@ -27,11 +27,13 @@
 #include "session/onionreq/builder.h"
 #include "session/onionreq/hop_encryption.hpp"
 #include "session/network/key_types.hpp"
+#include "session/network/session_network_types.hpp"
 #include "session/util.hpp"
 #include "session/xed25519.hpp"
 
 using namespace std::literals;
 using namespace oxen::log::literals;
+using namespace session::network;
 
 namespace session::onionreq {
 
@@ -120,6 +122,10 @@ void Builder::set_destination_pubkey(session::network::x25519_pubkey x25519_pubk
 
 void Builder::generate(network::request_info& info) {
     info.body = build(_generate_payload(info.original_body));
+}
+
+std::vector<unsigned char> Builder::generate_onion_blob(const std::optional<std::vector<unsigned char>>& plaintext_body) {
+    return build(_generate_payload(plaintext_body));
 }
 
 std::vector<unsigned char> Builder::_generate_payload(
@@ -356,7 +362,7 @@ LIBSESSION_C_API void onion_request_builder_set_server_destination(
         const char* x25519_pubkey) {
     assert(builder && protocol && host && endpoint && protocol && x25519_pubkey);
 
-    unbox(builder).set_destination(session::onionreq::ServerDestination{
+    unbox(builder).set_destination(session::network::ServerDestination{
             protocol,
             host,
             endpoint,

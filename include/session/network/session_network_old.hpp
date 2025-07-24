@@ -8,6 +8,7 @@
 #include "service_node.hpp"
 #include "session/onionreq/builder.hpp"
 #include "session/network/key_types.hpp"
+#include "session/network/session_network_types.hpp"
 #include "session/platform.hpp"
 #include "session/random.hpp"
 #include "session/types.hpp"
@@ -88,16 +89,16 @@ struct onion_path {
 };
 
 namespace detail {
-    std::optional<service_node> node_for_destination(onionreq::network_destination destination);
+    std::optional<service_node> node_for_destination(network_destination destination);
 
     session::network::x25519_pubkey pubkey_for_destination(
-            onionreq::network_destination destination);
+            network_destination destination);
 
 }  //  namespace detail
 
 struct request_info {
     static request_info make(
-            onionreq::network_destination _dest,
+            network_destination _dest,
             std::optional<std::vector<unsigned char>> _original_body,
             std::optional<session::network::x25519_pubkey> _swarm_pk,
             std::chrono::milliseconds _request_timeout,
@@ -115,7 +116,7 @@ struct request_info {
     };
 
     std::string request_id;
-    session::onionreq::network_destination destination;
+    network_destination destination;
     std::string endpoint;
     std::optional<std::vector<unsigned char>> body;
     std::optional<std::vector<unsigned char>> original_body;
@@ -284,7 +285,7 @@ class Network {
     /// it took to build the path.
     /// - 'type' - [in] the type of paths to send the request across.
     void send_onion_request(
-            onionreq::network_destination destination,
+            network_destination destination,
             std::optional<std::vector<unsigned char>> body,
             std::optional<session::network::x25519_pubkey> swarm_pubkey,
             network_response_callback_t handle_response,
@@ -310,7 +311,7 @@ class Network {
     /// - `handle_response` -- [in] callback to be called with the result of the request.
     void upload_file_to_server(
             std::vector<unsigned char> data,
-            onionreq::ServerDestination server,
+            ServerDestination server,
             std::optional<std::string> file_name,
             network_response_callback_t handle_response,
             std::chrono::milliseconds request_timeout,
@@ -331,7 +332,7 @@ class Network {
     /// it took to build the path.
     /// - `handle_response` -- [in] callback to be called with the result of the request.
     void download_file(
-            onionreq::ServerDestination server,
+            ServerDestination server,
             network_response_callback_t handle_response,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> request_and_path_build_timeout = std::nullopt);

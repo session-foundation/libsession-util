@@ -1,6 +1,7 @@
 #pragma once
 
 #include <filesystem>
+#include "session/network/session_network_types.hpp"
 #include "session/network/service_node.hpp"
 #include "session/types.hpp"
 
@@ -126,12 +127,6 @@ namespace opt {
             callbacks,
         };
 // TODO: Add in "HTTP" as an option
-        using network_response_callback_t = std::function<void(
-                bool success,
-                bool timeout,
-                int16_t status_code,
-                std::vector<std::pair<std::string, std::string>> headers,
-                std::optional<std::string> response)>;
         using network_callback_t = std::function<void(
                 std::string url, std::string body, network_response_callback_t handle_response)>;
 

@@ -8,6 +8,7 @@
 #include "session/network/session_network.h"
 #include "session/network/network_config.hpp"
 #include "session/network/network_opt.hpp"
+#include "session/network/session_network_types.hpp"
 #include "session/network/transport/quic_transport.hpp"
 
 using namespace oxen;
@@ -118,7 +119,7 @@ void Network_v2::send_request(Request request, network_response_callback_t callb
 // MARK: C API
 
 struct session_response_handle_cpp_t {
-    session::network::opt::transport::network_response_callback_t cpp_callback;
+    session::network::network_response_callback_t cpp_callback;
 };
 
 namespace {
@@ -306,7 +307,7 @@ LIBSESSION_C_API bool session_network_init(
                 opt::transport::network_callback_t cpp_callback = [c_callback_ptr, ctx](
                     std::string url,
                     std::string body,
-                    opt::transport::network_response_callback_t handle_response) {
+                    session::network::network_response_callback_t handle_response) {
                         auto* c_response_handle = new session_response_handle_t{
                             std::move(handle_response)
                         };

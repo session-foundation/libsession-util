@@ -106,6 +106,7 @@ if(ENABLE_ONIONREQ)
         onionreq/response_parser.cpp
         network/key_types.cpp
         network/network_config.cpp
+        network/request_queue.cpp
         network/service_node.cpp
         network/session_network_old.cpp
         network/session_network.cpp

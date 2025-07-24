@@ -14,9 +14,6 @@ namespace session::network {
 
 namespace fs = std::filesystem;
 
-using swarm_id_t = uint64_t;
-constexpr swarm_id_t INVALID_SWARM_ID = std::numeric_limits<uint64_t>::max();
-
 class Network_v2 {
   private:
     const config::Config config;

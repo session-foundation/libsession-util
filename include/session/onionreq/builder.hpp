@@ -5,46 +5,19 @@
 #include <string_view>
 #include <variant>
 
-#include "session/network/key_types.hpp"
+#include "session/network/session_network_types.hpp"
 
 namespace session::network {
 struct service_node;
 struct request_info;
+struct Request;
 }  // namespace session::network
 
 namespace session::onionreq {
 
-struct ServerDestination {
-    std::string protocol;
-    std::string host;
-    std::string endpoint;
-    session::network::x25519_pubkey x25519_pubkey;
-    std::optional<uint16_t> port;
-    std::optional<std::vector<std::pair<std::string, std::string>>> headers;
-    std::string method;
-
-    ServerDestination(
-            std::string protocol,
-            std::string host,
-            std::string endpoint,
-            session::network::x25519_pubkey x25519_pubkey,
-            std::optional<uint16_t> port = std::nullopt,
-            std::optional<std::vector<std::pair<std::string, std::string>>> headers = std::nullopt,
-            std::string method = "GET") :
-            protocol{std::move(protocol)},
-            host{std::move(host)},
-            endpoint{std::move(endpoint)},
-            x25519_pubkey{std::move(x25519_pubkey)},
-            port{std::move(port)},
-            headers{std::move(headers)},
-            method{std::move(method)} {}
-};
-
-using network_destination = std::variant<session::network::service_node, ServerDestination>;
-
 namespace detail {
 
-    session::network::x25519_pubkey pubkey_for_destination(network_destination destination);
+    session::network::x25519_pubkey pubkey_for_destination(network::network_destination destination);
 }
 
 enum class EncryptType {
@@ -66,13 +39,13 @@ inline constexpr std::string_view to_string(EncryptType type) {
 
 // Builder class for preparing onion request payloads.
 class Builder {
-    Builder(const network_destination& destination,
+    Builder(const network::network_destination& destination,
             const std::vector<network::service_node>& nodes,
             const EncryptType enc_type_);
 
   public:
     static Builder make(
-            const network_destination& destination,
+            const network::network_destination& destination,
             const std::vector<network::service_node>& nodes,
             const EncryptType enc_type_ = EncryptType::xchacha20);
 
@@ -84,13 +57,14 @@ class Builder {
 
     void set_enc_type(EncryptType enc_type_) { enc_type = enc_type_; }
 
-    void set_destination(network_destination destination);
+    void set_destination(network::network_destination destination);
     void set_destination_pubkey(network::x25519_pubkey x25519_pubkey);
     void add_hop(std::span<const unsigned char> remote_key);
     void add_hop(std::pair<network::ed25519_pubkey, network::x25519_pubkey> keys) { hops_.push_back(keys); }
 
-    void generate(network::request_info& info);
+    void generate(network::request_info& info); // TODO: Remove this once the refactoring is done
     std::vector<unsigned char> build(std::vector<unsigned char> payload);
+    std::vector<unsigned char> generate_onion_blob(const std::optional<std::vector<unsigned char>>& plaintext_body);
 
   private:
     std::vector<std::pair<network::ed25519_pubkey, network::x25519_pubkey>> hops_ = {};

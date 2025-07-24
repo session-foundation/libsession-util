@@ -43,6 +43,11 @@ public:
     explicit QuicTransport(config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop);
     ~QuicTransport() override;
 
+    void verify_connectivity(
+        service_node node,
+        std::chrono::milliseconds timeout,
+        const std::string& request_id,
+        std::function<void(bool success)> callback) override;
     void send_request(Request request, network_response_callback_t callback) override;
 
 private:

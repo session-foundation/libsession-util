@@ -36,6 +36,33 @@ QuicTransport::~QuicTransport() {
     log::debug(cat, "QuicTransport destroyed.");
 }
 
+void QuicTransport::verify_connectivity(
+        service_node node,
+        std::chrono::milliseconds timeout,
+        const std::string& context_id,
+        std::function<void(bool success)> callback) {
+    // For Quic, a successful connection IS a successful ping so we can just check for an existing connection and, if one doesn't exist, try to establish one
+    _loop->call([this, node = std::move(node), cb = std::move(callback), context_id]() mutable {
+        const auto pubkey_hex = oxenc::to_hex(node.view_remote_key());
+
+        // If we already have a connection we can stop here
+        if (_active_connection_ids.count(pubkey_hex) || _pending_requests.count(pubkey_hex))
+            return cb(true);
+        
+        // We don't current have a connection so we should establish a new one. We create a dummy `Request` here so we can make use of the existing queue logic instead of having to complicate things.
+        Request dummy_req{
+            std::string{context_id},    // request_id
+            node,                       // destination
+            "info",                     // endpoint
+            std::nullopt,               // body
+            RequestCategory::standard,  // category
+            3s                          // request_timeout
+        };
+        _pending_requests[pubkey_hex].emplace_back(std::move(dummy_req), [cb](bool success, bool timeout, ...){ cb(success && !timeout); });
+        _establish_connection(node, context_id);
+    });
+}
+
 void QuicTransport::send_request(Request request, network_response_callback_t callback) {
     log::trace(cat, "QuicTransport dispatching request {} to loop.", request.request_id);
     _loop->call([this, req = std::move(request), cb = std::move(callback)]() mutable {
@@ -91,15 +118,15 @@ void QuicTransport::_establish_connection(const service_node& target_node, const
             auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
             auto conn_id = conn.reference_id();
             auto stream_id = stream->stream_id();
-            _active_connection_ids[target_pubkey_hex] = conn_id;
-            _active_stream_ids[conn_id] = stream_id;
+            _active_connection_ids.insert_or_assign(target_pubkey_hex, conn_id);
+            _active_stream_ids.insert_or_assign(conn_id, stream_id);
 
             // Process all the pending requests for this connection
             if (auto it = _pending_requests.find(target_pubkey_hex); it != _pending_requests.end()) {
                 auto to_process = std::move(it->second);
                 _pending_requests.erase(it);
 
-                log::debug(cat, "[QuicTransport] Processing {} pending requests on new conn/stream {}/{}.", to_process.size(), conn_id, stream_id);
+                log::debug(cat, "[QuicTransport] Processing {} pending requests on new conn/stream {}/{}.", to_process.size(), conn_id.to_string(), stream_id);
                 
                 for (auto& [req, cb] : to_process)
                     _send_on_connection(conn_id, std::move(req), std::move(cb));
@@ -140,7 +167,7 @@ void QuicTransport::_send_on_connection(oxen::quic::ConnectionID conn_id, Reques
     // Try to retrieve the active connection first
     auto conn = _endpoint->get_conn(conn_id);
     if (!conn) {
-        log::warning(cat, "[QuicTransport Request {}] Attempted to send on a connection (ID {}) that no longer exists.", request.request_id, conn_id);
+        log::warning(cat, "[QuicTransport Request {}] Attempted to send on a connection (ID {}) that no longer exists.", request.request_id, conn_id.to_string());
         
         // Since the connection is dead we should remove it from our active list and fail the request (the client can retry if they want)
         for (auto it = _active_connection_ids.begin(); it != _active_connection_ids.end(); ++it) {
@@ -158,7 +185,7 @@ void QuicTransport::_send_on_connection(oxen::quic::ConnectionID conn_id, Reques
     auto stream_it = _active_stream_ids.find(conn_id);
     if (stream_it == _active_stream_ids.end()) {
         // Something has gone horribly wrong, lets close the connection and the client can retry
-        log::critical(cat, "[QuicTransport Request {}] No stream ID found for active connection {}, closing connection.", request.request_id, conn_id);
+        log::critical(cat, "[QuicTransport Request {}] No stream ID found for active connection {}, closing connection.", request.request_id, conn_id.to_string());
         conn->close_connection();
         return callback(false, false, -1, {content_type_plain_text}, "Internal error: Stream state missing for active connection");
     }
@@ -167,7 +194,7 @@ void QuicTransport::_send_on_connection(oxen::quic::ConnectionID conn_id, Reques
     auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id);
     if (!stream) {
         // Similar to the above, if the stream is gone then the connection ir probably in a bad state so we should just close it
-        log::warning(cat, "[QuicTransport Request {}] Stream {} on connection {} has died, closing connection.", request.request_id, stream_id, conn_id);
+        log::warning(cat, "[QuicTransport Request {}] Stream {} on connection {} has died, closing connection.", request.request_id, stream_id, conn_id.to_string());
         conn->close_connection();
         return callback(false, false, -1, {content_type_plain_text}, "Connection stream was closed");
     }
@@ -178,7 +205,7 @@ void QuicTransport::_send_on_connection(oxen::quic::ConnectionID conn_id, Reques
         return callback(false, true, 408, {content_type_plain_text}, "Request already timed out");
 
     // We have a valid connection and stream so we can send the request
-    log::trace(cat, "[QuicTransport Request {}] Sending on conn/stream {}/{}", request.request_id, conn_id, stream_id);
+    log::trace(cat, "[QuicTransport Request {}] Sending on conn/stream {}/{}", request.request_id, conn_id.to_string(), stream_id);
 
     std::span<const std::byte> payload{};
 

@@ -135,14 +135,14 @@ class TestNetwork : public Network {
     }
 
     void set_swarm(
-            session::onionreq::x25519_pubkey swarm_pubkey,
+            session::network::x25519_pubkey swarm_pubkey,
             swarm_id_t swarm_id,
             std::vector<service_node> swarm) {
         swarm_cache[swarm_pubkey.hex()] = {swarm_id, swarm};
     }
 
     std::pair<swarm_id_t, std::vector<service_node>> get_cached_swarm(
-            session::onionreq::x25519_pubkey swarm_pubkey) {
+            session::network::x25519_pubkey swarm_pubkey) {
         return swarm_cache[swarm_pubkey.hex()];
     }
 

@@ -376,22 +376,30 @@ void SnodePool::record_node_failure(const service_node& node) {
         node.to_string(), _snode_failure_counts[node.to_string()]);
 }
 
-void SnodePool::refresh_if_needed() {
-    bool needs_refresh = false;
+void SnodePool::refresh_if_needed(std::function<void()> on_refresh_complete) {
+    bool needs_to_start_refresh = false;
+    bool already_running = false;
     {
         std::lock_guard lock{_cache_mutex};
         
         // Don't bother if we are alread doing a refresh
         if (_current_snode_cache_refresh_id)
-            return;
+            already_running = true;
+        else {
+            auto cache_lifetime = std::chrono::system_clock::now() - _last_snode_cache_update;
+            needs_to_start_refresh = (_snode_cache.empty() || cache_lifetime > _config.cache_expiration);
+        }
         
-        auto cache_lifetime = std::chrono::system_clock::now() - _last_snode_cache_update;
-        needs_refresh = (_snode_cache.empty() || cache_lifetime > _config.cache_expiration);
+        // If a refresh is needed or already running, queue the callback
+        if ((needs_to_start_refresh || already_running) && on_refresh_complete)
+            _after_snode_cache_refresh.push_back(std::move(on_refresh_complete));
     }
     
-    // Kick off a refresh if needed
-    if (needs_refresh)
+    // Kick off a refresh if needed (if none was needed then we should trigger the on_refresh_complete callback immediately)
+    if (needs_to_start_refresh)
         _refresh_snode_cache();
+    else if (on_refresh_complete)
+        on_refresh_complete();
 }
 
 std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::vector<service_node>& exclude_nodes) {

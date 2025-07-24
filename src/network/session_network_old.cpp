@@ -63,11 +63,6 @@ namespace {
     constexpr int16_t error_building_onion_request = -10002;
     constexpr int16_t error_path_build_timeout = -10003;
 
-    const std::pair<std::string, std::string> content_type_plain_text = {
-            "Content-Type", "text/plain; charset=UTF-8"};
-    const std::pair<std::string, std::string> content_type_json = {
-            "Content-Type", "application/json"};
-
     // The amount of time the snode cache can be used before it needs to be refreshed/
     constexpr auto snode_cache_expiration_duration = 2h;
 
@@ -453,7 +448,7 @@ namespace detail {
 }  // namespace detail
 
 request_info request_info::make(
-        onionreq::network_destination _dest,
+        network_destination _dest,
         std::optional<std::vector<unsigned char>> _original_body,
         std::optional<session::network::x25519_pubkey> _swarm_pk,
         std::chrono::milliseconds _request_timeout,
@@ -1937,7 +1932,7 @@ void Network::send_request(
 }
 
 void Network::send_onion_request(
-        onionreq::network_destination destination,
+        network_destination destination,
         std::optional<std::vector<unsigned char>> body,
         std::optional<session::network::x25519_pubkey> swarm_pubkey,
         network_response_callback_t handle_response,
@@ -2169,7 +2164,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
 
 void Network::upload_file_to_server(
         std::vector<unsigned char> data,
-        onionreq::ServerDestination server,
+        ServerDestination server,
         std::optional<std::string> file_name,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
@@ -2228,7 +2223,7 @@ void Network::download_file(
 }
 
 void Network::download_file(
-        onionreq::ServerDestination server,
+        ServerDestination server,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout) {
