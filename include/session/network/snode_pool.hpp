@@ -20,6 +20,7 @@ namespace config {
     struct SnodePoolConfig {
         std::optional<std::filesystem::path> cache_directory;
         std::chrono::minutes cache_expiration;
+        bool enforce_subnet_diversity;
         
         opt::netid::Target netid;
         std::vector<service_node> seed_nodes;
@@ -66,9 +67,8 @@ class SnodePool {
     // Data (protected by '_cache_mutex')
     std::vector<service_node> _snode_cache;
     std::vector<std::pair<swarm::swarm_id_t, std::vector<service_node>>> _all_swarms;
-    std::unordered_map<std::string, std::pair<swarm::swarm_id_t, std::vector<service_node>>>
-            _swarm_cache;
-    std::unordered_map<std::string, uint16_t> _snode_failure_counts;
+    std::unordered_map<x25519_pubkey, std::pair<swarm::swarm_id_t, std::vector<service_node>>> _swarm_cache;
+    std::unordered_map<ed25519_pubkey, uint16_t> _snode_failure_counts;
 
     // Disk I/O
     std::filesystem::path _snode_cache_file_path;

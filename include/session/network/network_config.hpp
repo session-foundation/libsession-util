@@ -19,6 +19,7 @@ struct Config {
     opt::router::Type router = opt::router::Type::onion_requests;
     opt::transport::Type transport = opt::transport::Type::quic;
     uint8_t path_length = 3;
+    bool enforce_subnet_diversity = true;
 
     // Netid Options
     std::vector<service_node> seed_nodes;
@@ -69,6 +70,7 @@ struct Config {
     void handle_config_opt(opt::router router);
     void handle_config_opt(opt::transport transport);
     void handle_config_opt(opt::path_length pl);
+    void handle_config_opt(opt::disable_subnet_diversity dsd);
 
     // Snode pool options
     void handle_config_opt(opt::cache_directory dir);

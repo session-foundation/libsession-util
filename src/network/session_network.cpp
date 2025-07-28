@@ -27,9 +27,10 @@ config::SnodePoolConfig build_snode_pool_config(const config::Config& main_confi
     if (main_config.cache_directory) {
         config.cache_directory = *main_config.cache_directory;
     }
+    config.cache_expiration = main_config.cache_expiration;
+    config.enforce_subnet_diversity = main_config.enforce_subnet_diversity;
     config.netid = main_config.netid;
     config.seed_nodes = main_config.seed_nodes;
-    config.cache_expiration = main_config.cache_expiration;
     config.num_nodes_to_use_for_refresh = main_config.num_nodes_to_use_for_refresh;
     config.node_failure_threshold = main_config.node_failure_threshold;
 
@@ -172,6 +173,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     }
 
     config.path_length = cpp_defaults.path_length;
+    config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
 
     config.cache_dir = nullptr;
     config.cache_expiration_minutes = std::chrono::duration_cast<std::chrono::minutes>(cpp_defaults.cache_expiration).count();

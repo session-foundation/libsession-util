@@ -55,6 +55,7 @@ typedef struct {
     SESSION_NETWORK_ROUTER router;
     SESSION_NETWORK_TRANSPORT transport;
     uint8_t path_length;
+    bool enforce_subnet_diversity;
 
     // Devnet options (only used when netid_target == SESSION_NETWORK_DEVNET)
     const network_service_node* devnet_seed_nodes;

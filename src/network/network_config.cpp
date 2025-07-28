@@ -23,6 +23,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::router);
         HANDLE_TYPE(opt::transport);
         HANDLE_TYPE(opt::path_length);
+        HANDLE_TYPE(opt::disable_subnet_diversity);
 
         // Snode pool options
         HANDLE_TYPE(opt::cache_directory);
@@ -109,6 +110,11 @@ void Config::handle_config_opt(opt::transport transport_) {
 void Config::handle_config_opt(opt::path_length pl) {
     path_length = pl.length;
     log::debug(cat, "Network config path length set to {}", pl.length);
+}
+
+void Config::handle_config_opt(opt::disable_subnet_diversity dsd) {
+    enforce_subnet_diversity = false;
+    log::debug(cat, "Network config disabled subnet diversity");
 }
 
 // MARK: Snode Pool Options

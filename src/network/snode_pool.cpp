@@ -371,9 +371,9 @@ void SnodePool::clear_cache() {
 
 void SnodePool::record_node_failure(const service_node& node) {
     std::lock_guard lock{_cache_mutex};
-    _snode_failure_counts[node.to_string()]++;
-    log::trace(cat, "Recorded failure for node {}, total failures: {}",
-        node.to_string(), _snode_failure_counts[node.to_string()]);
+    auto key = ed25519_pubkey::from_bytes(node.view_remote_key());
+    _snode_failure_counts[key]++;
+    log::trace(cat, "Recorded failure for node {}, total failures: {}", key.hex(), _snode_failure_counts[key]);
 }
 
 void SnodePool::refresh_if_needed(std::function<void()> on_refresh_complete) {
@@ -410,9 +410,15 @@ std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::v
     std::vector<service_node> result;
     result.reserve(count);
 
-    std::unordered_set<std::string> excluded_ips;
+    std::unordered_set<ed25519_pubkey> exclusion_keys;
+    exclusion_keys.reserve(exclude_nodes.size());
     for (const auto& node : exclude_nodes)
-        excluded_ips.insert(node.host());
+        exclusion_keys.insert(ed25519_pubkey::from_bytes(node.view_remote_key()));
+
+    std::unordered_set<oxen::quic::ipv4> used_subnets;
+    if (_config.enforce_subnet_diversity)
+        for (const auto& node : exclude_nodes)
+            used_subnets.insert(node.to_ipv4().to_base(24));
 
     std::lock_guard lock{_cache_mutex};
 
@@ -425,23 +431,33 @@ std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::v
     size_t start_index = random::get_uniform_distribution<size_t>(0, _snode_cache.size() - 1);
 
     for (size_t i = 0; i < _snode_cache.size(); ++i) {
-        if (result.size() >= count) {
+        if (result.size() >= count)
             break;
-        }
+        
         const size_t current_index = (start_index + i) % _snode_cache.size();
         const auto& node = _snode_cache[current_index];
+        auto current_key = ed25519_pubkey::from_bytes(node.view_remote_key());
+
+        // Skip nodes explicitly excluded (needed in case subnet diversity is disabled)
+        if (exclusion_keys.count(current_key))
+            continue;
 
         // Skip nodes with too many failures
-        auto it = _snode_failure_counts.find(node.to_string());
+        auto it = _snode_failure_counts.find(current_key);
         if (it != _snode_failure_counts.end() && it->second >= _config.node_failure_threshold)
             continue;
 
         // Skip nodes whos IP addresses are in the exclusion list
-        auto [_, inserted] = excluded_ips.insert(node.host());
-        if (!inserted)
-            continue;
+        if (_config.enforce_subnet_diversity) {
+            auto subnet = node.to_ipv4().to_base(24);
+            if (used_subnets.count(subnet))
+                continue;
+        }
 
         result.push_back(node);
+
+        if (_config.enforce_subnet_diversity)
+            used_subnets.insert(node.to_ipv4().to_base(24));
     }
 
     if (result.size() < count)
@@ -458,7 +474,7 @@ void SnodePool::get_swarm(
     std::unique_lock lock{_cache_mutex};
 
     // Check the in-memory swarm cache first
-    if (auto it = _swarm_cache.find(swarm_pubkey.hex()); it != _swarm_cache.end())
+    if (auto it = _swarm_cache.find(swarm_pubkey); it != _swarm_cache.end())
         return callback(it->second.first, it->second.second);
 
     // If we have no snode cache or no swarms then we need to rebuild the cache (which will also
@@ -502,7 +518,7 @@ void SnodePool::get_swarm(
     // Update our in-memory cache (need to re-acquire the lock to do so)
     {
         std::lock_guard write_lock{_cache_mutex};
-        _swarm_cache[swarm_pubkey.hex()] = swarm;
+        _swarm_cache[swarm_pubkey] = swarm;
     }
 
     // Trigger the callback with the swarm we found
