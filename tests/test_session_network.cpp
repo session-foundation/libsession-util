@@ -246,7 +246,7 @@ class TestNetwork : public Network {
         path_nodes.reserve(3);
 
         for (auto i = 0; i < 3; ++i) {
-            path_servers.emplace_back(create_test_server(static_cast<uint16_t>(1000 + i)));
+            path_servers.emplace_back(create_test_server(static_cast<uint16_t>(4390 + i)));
             path_nodes.emplace_back(path_servers[i]->node);
         }
 
