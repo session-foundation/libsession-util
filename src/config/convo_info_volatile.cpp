@@ -83,8 +83,8 @@ namespace convo {
     }
 
     void base::load(const dict& info_dict) {
-        last_read = maybe_int(info_dict, "r").value_or(0);
-        unread = (bool)maybe_int(info_dict, "u").value_or(0);
+        last_read = int_or_0(info_dict, "r");
+        unread = (bool)int_or_0(info_dict, "u");
     }
 
 }  // namespace convo

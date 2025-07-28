@@ -126,18 +126,18 @@ void legacy_group_info::into(ugroups_legacy_group_info& c) && {
 }
 
 void base_group_info::load(const dict& info_dict) {
-    priority = maybe_int(info_dict, "+").value_or(0);
-    joined_at = to_epoch_seconds(std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0)));
+    priority = int_or_0(info_dict, "+");
+    joined_at = to_epoch_seconds(std::max<int64_t>(0, int_or_0(info_dict, "j")));
 
-    int notify = maybe_int(info_dict, "@").value_or(0);
+    int notify = int_or_0(info_dict, "@");
     if (notify >= 0 && notify <= 3)
         notifications = static_cast<notify_mode>(notify);
     else
         notifications = notify_mode::defaulted;
 
-    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    mute_until = to_epoch_seconds(int_or_0(info_dict, "!"));
 
-    invited = maybe_int(info_dict, "i").value_or(0);
+    invited = int_or_0(info_dict, "i");
 }
 
 void legacy_group_info::load(const dict& info_dict) {
@@ -157,10 +157,7 @@ void legacy_group_info::load(const dict& info_dict) {
         enc_pubkey.clear();
         enc_seckey.clear();
     }
-    if (auto secs = maybe_int(info_dict, "E").value_or(0); secs > 0)
-        disappearing_timer = std::chrono::seconds{secs};
-    else
-        disappearing_timer = 0s;
+    disappearing_timer = std::max(0s, std::chrono::seconds{int_or_0(info_dict, "E")});
 
     members_.clear();
     if (auto* members = maybe_set(info_dict, "m"))
@@ -244,7 +241,7 @@ void group_info::load(const dict& info_dict) {
     if (auto sig = maybe_vector(info_dict, "s"); sig && sig->size() == 100)
         auth_data = std::move(*sig);
 
-    removed_status = maybe_int(info_dict, "r").value_or(0);
+    removed_status = int_or_0(info_dict, "r");
 }
 
 void group_info::mark_kicked() {

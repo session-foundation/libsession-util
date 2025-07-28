@@ -71,8 +71,8 @@ LIBSESSION_C_API int contacts_init(
 }
 
 void contact_info::load(const dict& info_dict) {
-    name = maybe_string(info_dict, "n").value_or("");
-    nickname = maybe_string(info_dict, "N").value_or("");
+    name = string_or_empty(info_dict, "n");
+    nickname = string_or_empty(info_dict, "N");
 
     auto url = maybe_string(info_dict, "p");
     auto key = maybe_vector(info_dict, "q");
@@ -84,13 +84,13 @@ void contact_info::load(const dict& info_dict) {
     }
 
     profile_updated = ts_or_epoch(info_dict, "t");
-    approved = maybe_int(info_dict, "a").value_or(0);
-    approved_me = maybe_int(info_dict, "A").value_or(0);
-    blocked = maybe_int(info_dict, "b").value_or(0);
+    approved = int_or_0(info_dict, "a");
+    approved_me = int_or_0(info_dict, "A");
+    blocked = int_or_0(info_dict, "b");
 
-    priority = maybe_int(info_dict, "+").value_or(0);
+    priority = int_or_0(info_dict, "+");
 
-    int notify = maybe_int(info_dict, "@").value_or(0);
+    int notify = int_or_0(info_dict, "@");
     if (notify >= 0 && notify <= 3) {
         notifications = static_cast<notify_mode>(notify);
         if (notifications == notify_mode::mentions_only)
@@ -98,9 +98,9 @@ void contact_info::load(const dict& info_dict) {
     } else {
         notifications = notify_mode::defaulted;
     }
-    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    mute_until = to_epoch_seconds(int_or_0(info_dict, "!"));
 
-    int exp_mode_ = maybe_int(info_dict, "e").value_or(0);
+    int exp_mode_ = int_or_0(info_dict, "e");
     if (exp_mode_ >= static_cast<int>(expiration_mode::none) &&
         exp_mode_ <= static_cast<int>(expiration_mode::after_read))
         exp_mode = static_cast<expiration_mode>(exp_mode_);
@@ -110,7 +110,7 @@ void contact_info::load(const dict& info_dict) {
     if (exp_mode == expiration_mode::none)
         exp_timer = 0s;
     else {
-        int secs = maybe_int(info_dict, "E").value_or(0);
+        int secs = int_or_0(info_dict, "E");
         if (secs <= 0) {
             exp_mode = expiration_mode::none;
             exp_timer = 0s;
@@ -119,7 +119,7 @@ void contact_info::load(const dict& info_dict) {
         }
     }
 
-    created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
+    created = to_epoch_seconds(int_or_0(info_dict, "j"));
 }
 
 void contact_info::into(contacts_contact& c) const {
