@@ -47,7 +47,7 @@ service_node test_node(
             {2, 8, 0},
             INVALID_SWARM_ID,
             (unique_ip ? fmt::format("0.0.0.{}", index) : "1.1.1.1"),
-            index};
+            static_cast<uint16_t>(10000 + index)};
 }
 
 std::optional<service_node> node_for_destination(network_destination destination) {
@@ -246,7 +246,7 @@ class TestNetwork : public Network {
         path_nodes.reserve(3);
 
         for (auto i = 0; i < 3; ++i) {
-            path_servers.emplace_back(create_test_server(static_cast<uint16_t>(1000 + i)));
+            path_servers.emplace_back(create_test_server(static_cast<uint16_t>(4390 + i)));
             path_nodes.emplace_back(path_servers[i]->node);
         }
 
@@ -1072,7 +1072,7 @@ TEST_CASE("Network", "[network][build_path]") {
 
 TEST_CASE("Network", "[network][find_valid_path]") {
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
-    auto test_server = create_test_server(500);
+    auto test_server = create_test_server(5000);
     auto target = test_node(ed_pk, 1);
     auto info = request_info::make(target, std::nullopt, std::nullopt, 0ms);
 
@@ -1221,7 +1221,7 @@ TEST_CASE("Network", "[network][build_path_if_needed]") {
 }
 
 TEST_CASE("Network", "[network][establish_connection]") {
-    auto test_server = create_test_server(500);
+    auto test_server = create_test_server(5100);
     auto network = TestNetwork(std::nullopt, true, true, false);
     std::promise<std::pair<connection_info, std::optional<std::string>>> prom;
 
@@ -1248,7 +1248,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it doesn't start checking for timeouts when the request doesn't have
     // a build paths timeout
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(create_test_server(501));
+    test_server.emplace(create_test_server(5201));
     network->send_onion_request(
             (*test_server)->node,
             to_vector("{\"method\":\"info\",\"params\":{}}"),
@@ -1265,7 +1265,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it does start checking for timeouts when the request has a
     // paths build timeout
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(create_test_server(502));
+    test_server.emplace(create_test_server(5202));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             (*test_server)->node,
@@ -1283,7 +1283,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
     // Test that it fails the request with a timeout if it has a build path timeout
     // and the path build takes too long
     network.emplace(std::nullopt, true, true, false);
-    test_server.emplace(create_test_server(503));
+    test_server.emplace(create_test_server(5203));
     network->ignore_calls_to("build_path");
     network->send_onion_request(
             (*test_server)->node,
@@ -1307,7 +1307,7 @@ TEST_CASE("Network", "[network][check_request_queue_timeouts]") {
 }
 
 TEST_CASE("Network", "[network][send_request]") {
-    auto test_server = create_test_server(500);
+    auto test_server = create_test_server(5300);
     auto network = TestNetwork(std::nullopt, true, true, false);
     std::promise<Result> prom;
 
@@ -1360,7 +1360,7 @@ TEST_CASE("Network", "[network][send_request]") {
 }
 
 TEST_CASE("Network", "[network][send_onion_request]") {
-    auto test_server = create_test_server(500);
+    auto test_server = create_test_server(5400);
     auto network = TestNetwork(std::nullopt, true, true, false);
     auto [test_path_servers, test_path] = network.create_test_path();
     network.handle_onion_requests_as_plaintext = true;
@@ -1402,7 +1402,7 @@ TEST_CASE("Network", "[network][send_onion_request]") {
 }
 
 TEST_CASE("Network", "[network][c][network_send_onion_request]") {
-    auto test_server_cpp = create_test_server(500);
+    auto test_server_cpp = create_test_server(5500);
     auto test_network = std::make_unique<TestNetwork>(std::nullopt, true, true, false);
     std::optional<std::pair<std::vector<std::shared_ptr<TestServer>>, onion_path>> test_path_data;
     test_path_data.emplace(test_network->create_test_path());
