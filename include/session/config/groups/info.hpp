@@ -1,7 +1,6 @@
 #pragma once
 
 #include <chrono>
-#include <memory>
 #include <session/config.hpp>
 
 #include "../base.hpp"
@@ -220,7 +219,11 @@ class Info : public ConfigBase {
     /// Inputs:
     /// - `session_id` -- hex string of the session id
     /// - `timestamp` -- standard unix timestamp when the group was created
-    void set_created(int64_t timestamp);
+    void set_created(std::chrono::sys_seconds timestamp);
+    /// Deprecated version that attempts to guess whether the input is seconds, milliseconds, or
+    /// microseconds.
+    [[deprecated("pass a std::chrono::sys_seconds instead (or use session::to_sys_seconds)")]] void
+    set_created(int64_t timestamp);
 
     /// API: groups/Info::get_created
     ///
@@ -229,9 +232,9 @@ class Info : public ConfigBase {
     /// Inputs: none.
     ///
     /// Outputs:
-    /// - `std::optional<int64_t>` -- the unix timestamp when the group was created, or nullopt if
-    ///   the creation timestamp is not set.
-    std::optional<int64_t> get_created() const;
+    /// - `std::chrono::sys_seconds` -- the unix timestamp when the group was
+    ///   created, or nullopt if the creation timestamp is not set.
+    std::optional<std::chrono::sys_seconds> get_created() const;
 
     /// API: groups/Info::set_delete_before
     ///
@@ -239,13 +242,14 @@ class Info : public ConfigBase {
     /// the closed group history with a timestamp earlier than this value.  Returns nullopt if no
     /// delete-before timestamp is set.
     ///
-    /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
-    /// interpreted as such)
-    ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete messages.  Pass 0
     ///   (or negative) to disable the delete-before timestamp.
-    void set_delete_before(int64_t timestamp);
+    void set_delete_before(std::chrono::sys_seconds timestamp);
+    /// Deprecated version that attempts to guess whether you meant seconds, milliseconds, or
+    /// microseconds.
+    [[deprecated("pass a std::chrono::sys_seconds instead (or use session::to_sys_seconds)")]] void
+    set_delete_before(int64_t timestamp);
 
     /// API: groups/Info::get_delete_before
     ///
@@ -257,8 +261,9 @@ class Info : public ConfigBase {
     /// Inputs: none.
     ///
     /// Outputs:
-    /// - `int64_t` -- the unix timestamp for which all older messages shall be delete
-    std::optional<int64_t> get_delete_before() const;
+    /// - `sys_seconds` -- the unix timestamp for which all older messages shall be deleted, or
+    ///   nullopt if there is no delete-before timestamp set.
+    std::optional<std::chrono::sys_seconds> get_delete_before() const;
 
     /// API: groups/Info::set_delete_attach_before
     ///
@@ -272,9 +277,12 @@ class Info : public ConfigBase {
     ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete attachments. Pass
-    /// 0
-    ///   (or negative) to disable the delete-attachment-before timestamp.
-    void set_delete_attach_before(int64_t timestamp);
+    ///   0 (or negative) to disable the delete-attachment-before timestamp.
+    void set_delete_attach_before(std::chrono::sys_seconds timestamp);
+    /// Deprecated version that attempts to guess whether you meant seconds, milliseconds, or
+    /// microseconds.
+    [[deprecated("pass a std::chrono::sys_seconds instead (or use session::to_sys_seconds)")]] void
+    set_delete_attach_before(int64_t timestamp);
 
     /// API: groups/Info::get_delete_attach_before
     ///
@@ -286,8 +294,9 @@ class Info : public ConfigBase {
     /// Inputs: none.
     ///
     /// Outputs:
-    /// - `int64_t` -- the unix timestamp for which all older message attachments shall be deleted
-    std::optional<int64_t> get_delete_attach_before() const;
+    /// - `sys_seconds` -- the unix timestamp for which all older message attachments shall be
+    /// deleted, or nullopt if delete-attach-before is not enabled.
+    std::optional<std::chrono::sys_seconds> get_delete_attach_before() const;
 
     /// API: groups/Info::destroy_group
     ///

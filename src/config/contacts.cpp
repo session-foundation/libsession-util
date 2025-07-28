@@ -5,6 +5,7 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
+#include <chrono>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <variant>
@@ -92,7 +93,9 @@ void contact_info::load(const dict& info_dict) {
     } else {
         notifications = notify_mode::defaulted;
     }
-    mute_until = to_epoch_seconds(int_or_0(info_dict, "!"));
+    // Older client versions might have accidentally stored this as ms, so run it through
+    // to_sys_seconds:
+    mute_until = to_sys_seconds(int_or_0(info_dict, "!"));
 
     int exp_mode_ = int_or_0(info_dict, "e");
     if (exp_mode_ >= static_cast<int>(expiration_mode::none) &&
@@ -113,7 +116,9 @@ void contact_info::load(const dict& info_dict) {
         }
     }
 
-    created = to_epoch_seconds(int_or_0(info_dict, "j"));
+    // Older client versions might have accidentally stored this as ms, so run it through
+    // to_sys_seconds:
+    created = to_sys_seconds(int_or_0(info_dict, "j"));
 }
 
 void contact_info::into(contacts_contact& c) const {
@@ -132,12 +137,12 @@ void contact_info::into(contacts_contact& c) const {
     c.blocked = blocked;
     c.priority = priority;
     c.notifications = static_cast<CONVO_NOTIFY_MODE>(notifications);
-    c.mute_until = to_epoch_seconds(mute_until);
+    c.mute_until = mute_until.time_since_epoch().count();
     c.exp_mode = static_cast<CONVO_EXPIRATION_MODE>(exp_mode);
     c.exp_seconds = exp_timer.count();
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
         c.exp_mode = CONVO_EXPIRATION_NONE;
-    c.created = to_epoch_seconds(created);
+    c.created = created.time_since_epoch().count();
 }
 
 contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id, 66} {
@@ -156,12 +161,12 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     blocked = c.blocked;
     priority = c.priority;
     notifications = static_cast<notify_mode>(c.notifications);
-    mute_until = to_epoch_seconds(c.mute_until);
+    mute_until = to_sys_seconds(c.mute_until);
     exp_mode = static_cast<expiration_mode>(c.exp_mode);
     exp_timer = exp_mode == expiration_mode::none ? 0s : std::chrono::seconds{c.exp_seconds};
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
         exp_mode = expiration_mode::none;
-    created = to_epoch_seconds(c.created);
+    created = to_sys_seconds(c.created);
 }
 
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
@@ -211,7 +216,7 @@ void Contacts::set(const contact_info& contact) {
     if (notify == notify_mode::mentions_only)
         notify = notify_mode::all;
     set_positive_int(info["@"], static_cast<int>(notify));
-    set_positive_int(info["!"], to_epoch_seconds(contact.mute_until));
+    set_ts(info["!"], contact.mute_until);
 
     set_pair_if(
             contact.exp_mode != expiration_mode::none && contact.exp_timer > 0s,
@@ -220,7 +225,7 @@ void Contacts::set(const contact_info& contact) {
             info["E"],
             contact.exp_timer.count());
 
-    set_positive_int(info["j"], to_epoch_seconds(contact.created));
+    set_ts(info["j"], contact.created);
 }
 
 void Contacts::set_name(std::string_view session_id, std::string name) {
@@ -285,9 +290,9 @@ void Contacts::set_expiry(
     set(c);
 }
 
-void Contacts::set_created(std::string_view session_id, int64_t timestamp) {
+void Contacts::set_created(std::string_view session_id, std::chrono::sys_seconds timestamp) {
     auto c = get_or_construct(session_id);
-    c.created = to_epoch_seconds(timestamp);
+    c.created = timestamp;
     set(c);
 }
 

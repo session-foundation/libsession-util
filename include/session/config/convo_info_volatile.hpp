@@ -67,7 +67,7 @@ class val_loader;
 namespace convo {
 
     struct base {
-        int64_t last_read = 0;
+        sys_milliseconds last_read{};
         bool unread = false;
 
       protected:

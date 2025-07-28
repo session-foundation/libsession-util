@@ -82,12 +82,13 @@ struct contact_info {
                        // conversation is hidden.  Otherwise (0) this is a regular, unpinned
                        // conversation.
     notify_mode notifications = notify_mode::defaulted;
-    int64_t mute_until = 0;  // If non-zero, disable notifications until the given unix timestamp
-                             // (seconds, overriding whatever the current `notifications` value is
-                             // until the timestamp expires).
+    std::chrono::sys_seconds mute_until{0s};  // If timestamp is non-zero, disable notifications
+                                              // until the given unix timestamp (seconds, overriding
+                                              // whatever the current `notifications` value is until
+                                              // the timestamp expires).
     expiration_mode exp_mode = expiration_mode::none;  // The expiry time; none if not expiring.
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
-    int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
+    std::chrono::sys_seconds created{0s};  // Unix timestamp (seconds) when this contact was added
 
     explicit contact_info(std::string sid);
 
@@ -384,7 +385,14 @@ class Contacts : public ConfigBase {
     /// Inputs:
     /// - `session_id` -- hex string of the session id
     /// - `timestamp` -- standard unix timestamp of the time contact was created
-    void set_created(std::string_view session_id, int64_t timestamp);
+    void set_created(std::string_view session_id, std::chrono::sys_seconds timestamp);
+
+    /// Deprecated: takes timestamp as an integer and guess whether it is seconds, milliseconds, or
+    /// microseconds.
+    [[deprecated(
+            "pass a std::chrono::sys_seconds instead (perhaps using "
+            "session::to_sys_seconds)")]] void
+    set_created(std::string_view session_id, int64_t timestamp);
 
     /// API: contacts/contacts::erase
     ///

@@ -6,7 +6,6 @@ extern "C" {
 
 #include "base.h"
 #include "notify.h"
-#include "util.h"
 
 // Maximum length of a group name, in bytes
 LIBSESSION_EXPORT extern const size_t GROUP_NAME_MAX_LENGTH;

@@ -5,14 +5,10 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
-#include <charconv>
-#include <iterator>
-#include <stdexcept>
 #include <variant>
 
 #include "internal.hpp"
 #include "session/config/convo_info_volatile.h"
-#include "session/config/error.h"
 #include "session/export.h"
 #include "session/types.hpp"
 #include "session/util.hpp"
@@ -30,17 +26,17 @@ namespace convo {
         check_session_id(session_id);
     }
     one_to_one::one_to_one(const convo_info_volatile_1to1& c) :
-            base{c.last_read, c.unread}, session_id{c.session_id, 66} {}
+            base{as_sys_ms(c.last_read), c.unread}, session_id{c.session_id, 66} {}
 
     void one_to_one::into(convo_info_volatile_1to1& c) const {
         std::memcpy(c.session_id, session_id.data(), 67);
-        c.last_read = last_read;
+        c.last_read = last_read.time_since_epoch().count();
         c.unread = unread;
     }
 
     community::community(const convo_info_volatile_community& c) :
             config::community{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}},
-            base{c.last_read, c.unread} {}
+            base{as_sys_ms(c.last_read), c.unread} {}
 
     void community::into(convo_info_volatile_community& c) const {
         static_assert(sizeof(c.base_url) == BASE_URL_MAX_LENGTH + 1);
@@ -48,7 +44,7 @@ namespace convo {
         copy_c_str(c.base_url, base_url());
         copy_c_str(c.room, room_norm());
         std::memcpy(c.pubkey, pubkey().data(), 32);
-        c.last_read = last_read;
+        c.last_read = last_read.time_since_epoch().count();
         c.unread = unread;
     }
 
@@ -59,11 +55,11 @@ namespace convo {
         check_session_id(id, "03");
     }
     group::group(const convo_info_volatile_group& c) :
-            base{c.last_read, c.unread}, id{c.group_id, 66} {}
+            base{as_sys_ms(c.last_read), c.unread}, id{c.group_id, 66} {}
 
     void group::into(convo_info_volatile_group& c) const {
         std::memcpy(c.group_id, id.c_str(), 67);
-        c.last_read = last_read;
+        c.last_read = last_read.time_since_epoch().count();
         c.unread = unread;
     }
 
@@ -74,11 +70,11 @@ namespace convo {
         check_session_id(id);
     }
     legacy_group::legacy_group(const convo_info_volatile_legacy_group& c) :
-            base{c.last_read, c.unread}, id{c.group_id, 66} {}
+            base{as_sys_ms(c.last_read), c.unread}, id{c.group_id, 66} {}
 
     void legacy_group::into(convo_info_volatile_legacy_group& c) const {
         std::memcpy(c.group_id, id.data(), 67);
-        c.last_read = last_read;
+        c.last_read = last_read.time_since_epoch().count();
         c.unread = unread;
     }
 
@@ -91,19 +87,19 @@ namespace convo {
         check_session_id(blinded_session_id, legacy_blinding ? "15" : "25");
     }
     blinded_one_to_one::blinded_one_to_one(const convo_info_volatile_blinded_1to1& c) :
-            base{c.last_read, c.unread},
+            base{as_sys_ms(c.last_read), c.unread},
             blinded_session_id{c.blinded_session_id, 66},
             legacy_blinding{c.legacy_blinding} {}
 
     void blinded_one_to_one::into(convo_info_volatile_blinded_1to1& c) const {
         std::memcpy(c.blinded_session_id, blinded_session_id.data(), 67);
-        c.last_read = last_read;
+        c.last_read = last_read.time_since_epoch().count();
         c.unread = unread;
         c.legacy_blinding = legacy_blinding;
     }
 
     void base::load(const dict& info_dict) {
-        last_read = int_or_0(info_dict, "r");
+        last_read = as_sys_ms(int_or_0(info_dict, "r"));
         unread = (bool)int_or_0(info_dict, "u");
     }
 
@@ -263,23 +259,21 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
 void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
     auto r = info["r"];
 
-    // If we're making the last_read value *older* for some reason then ignore the prune cutoff
-    // (because we might be intentionally resetting the value after a deletion, for instance).
-    if (auto* val = r.integer(); val && c.last_read < *val)
-        r = c.last_read;
-    else {
-        std::chrono::system_clock::time_point last_read{std::chrono::milliseconds{c.last_read}};
-        if (last_read > std::chrono::system_clock::now() - PRUNE_LOW)
-            info["r"] = c.last_read;
-    }
+    if (auto* val = r.integer();
+        // If we're making the last_read value *older* for some reason then ignore the prune cutoff
+        // (because we might be intentionally resetting the value after a deletion, for instance).
+        (val && c.last_read < sys_milliseconds{std::chrono::milliseconds{*val}})  //
+        ||
+        // Otherwise set it if it's more recent than the prune cutoff
+        c.last_read > std::chrono::system_clock::now() - PRUNE_LOW)
+
+        r = c.last_read.time_since_epoch().count();
 
     set_flag(info["u"], c.unread);
 }
 
 void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
-    const int64_t cutoff = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   (std::chrono::system_clock::now() - prune).time_since_epoch())
-                                   .count();
+    const auto cutoff = std::chrono::system_clock::now() - prune;
 
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)

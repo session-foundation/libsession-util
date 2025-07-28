@@ -28,7 +28,7 @@ typedef struct contacts_contact {
 
     int priority;
     CONVO_NOTIFY_MODE notifications;
-    int64_t mute_until;
+    int64_t mute_until;  // unix timestamp (seconds)
 
     CONVO_EXPIRATION_MODE exp_mode;
     int exp_seconds;

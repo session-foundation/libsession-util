@@ -8,6 +8,7 @@
 #include <string_view>
 #include <variant>
 
+#include "session/util.hpp"
 #include "utils.hpp"
 
 TEST_CASE("Conversations", "[config][conversations]") {
@@ -48,15 +49,15 @@ TEST_CASE("Conversations", "[config][conversations]") {
     auto c = convos.get_or_construct_1to1(definitely_real_id);
 
     CHECK(c.session_id == definitely_real_id);
-    CHECK(c.last_read == 0);
+    CHECK(c.last_read.time_since_epoch() == 0s);
 
     CHECK_FALSE(convos.needs_push());
     CHECK_FALSE(convos.needs_dump());
     CHECK(std::get<seqno_t>(convos.push()) == 0);
 
-    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                          std::chrono::system_clock::now().time_since_epoch())
-                          .count();
+    auto now_ms = std::chrono::time_point_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now());
+    static_assert(std::same_as<decltype(now_ms), session::sys_milliseconds>);
 
     c.last_read = now_ms;
 
@@ -88,7 +89,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
 
     auto g = convos.get_or_construct_group(benders_nightmare_group);
     CHECK(g.id == benders_nightmare_group);
-    CHECK(g.last_read == 0);
+    CHECK(g.last_read.time_since_epoch() == 0s);
     CHECK_FALSE(g.unread);
 
     g.last_read = now_ms;
@@ -100,7 +101,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
 
     auto lb = convos.get_or_construct_blinded_1to1(legacy_blinded_id, true);
     CHECK(lb.blinded_session_id == legacy_blinded_id);
-    CHECK(lb.last_read == 0);
+    CHECK(lb.last_read.time_since_epoch() == 0s);
     CHECK_FALSE(lb.unread);
 
     lb.last_read = now_ms;
@@ -109,7 +110,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
 
     auto b = convos.get_or_construct_blinded_1to1(blinded_id, false);
     CHECK(b.blinded_session_id == blinded_id);
-    CHECK(b.last_read == 0);
+    CHECK(b.last_read.time_since_epoch() == 0s);
     CHECK_FALSE(b.unread);
 
     b.last_read = now_ms;
@@ -174,7 +175,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
 
     auto c3 = convos2.get_or_construct_legacy_group(
             "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
-    c3.last_read = now_ms - 50;
+    c3.last_read = now_ms - 50ms;
     convos2.set(c3);
 
     auto c4 = convos2.get_or_construct_blinded_1to1(
@@ -605,29 +606,26 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
         auto pk = some_pubkey(x);
         return "05" + oxenc::to_hex(pk.begin(), pk.end());
     };
-    const auto now = std::chrono::system_clock::now() - 1ms;
-    auto unix_timestamp = [&now](int days_ago) -> int64_t {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(
-                       (now - days_ago * 24h).time_since_epoch())
-                .count();
-    };
+    const auto now = std::chrono::time_point_cast<std::chrono::milliseconds>(
+                             std::chrono::system_clock::now()) -
+                     1ms;
     for (int i = 0; i <= 65; i++) {
         if (i % 3 == 0) {
             auto c = convos.get_or_construct_1to1(some_session_id(i));
-            c.last_read = unix_timestamp(i);
+            c.last_read = now - i * 24h;
             if (i % 5 == 0)
                 c.unread = true;
             convos.set(c);
         } else if (i % 3 == 1) {
             auto c = convos.get_or_construct_legacy_group(some_session_id(i));
-            c.last_read = unix_timestamp(i);
+            c.last_read = now - i * 24h;
             if (i % 5 == 0)
                 c.unread = true;
             convos.set(c);
         } else {
             auto c = convos.get_or_construct_community(
                     "https://example.org", "room{}"_format(i), some_pubkey(i));
-            c.last_read = unix_timestamp(i);
+            c.last_read = now - i * 24h;
             if (i % 5 == 0)
                 c.unread = true;
             convos.set(c);
@@ -652,13 +650,19 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     // internals like this!)
 
     // These ones wouldn't be stored by the normal `set()` interface, but won't get pruned either:
-    convos.data["1"][oxenc::from_hex(some_session_id(80))]["r"] = unix_timestamp(33);
-    convos.data["1"][oxenc::from_hex(some_session_id(81))]["r"] = unix_timestamp(40);
-    convos.data["1"][oxenc::from_hex(some_session_id(82))]["r"] = unix_timestamp(44);
+    convos.data["1"][oxenc::from_hex(some_session_id(80))]["r"] =
+            (now - 33 * 24h).time_since_epoch().count();
+    convos.data["1"][oxenc::from_hex(some_session_id(81))]["r"] =
+            (now - 40 * 24h).time_since_epoch().count();
+    convos.data["1"][oxenc::from_hex(some_session_id(82))]["r"] =
+            (now - 44 * 24h).time_since_epoch().count();
     // These ones should get pruned as soon as we push:
-    convos.data["1"][oxenc::from_hex(some_session_id(83))]["r"] = unix_timestamp(45);
-    convos.data["1"][oxenc::from_hex(some_session_id(84))]["r"] = unix_timestamp(46);
-    convos.data["1"][oxenc::from_hex(some_session_id(85))]["r"] = unix_timestamp(1000);
+    convos.data["1"][oxenc::from_hex(some_session_id(83))]["r"] =
+            (now - 45 * 24h).time_since_epoch().count();
+    convos.data["1"][oxenc::from_hex(some_session_id(84))]["r"] =
+            (now - 46 * 24h).time_since_epoch().count();
+    convos.data["1"][oxenc::from_hex(some_session_id(85))]["r"] =
+            (now - 1000 * 24h).time_since_epoch().count();
 
     CHECK(convos.size_1to1() == 19);
     int count = 0;
