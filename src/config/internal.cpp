@@ -81,6 +81,19 @@ std::optional<int64_t> maybe_int(const session::config::dict& d, const char* key
     return std::nullopt;
 }
 
+std::optional<std::chrono::sys_seconds> maybe_ts(const session::config::dict& d, const char* key) {
+    std::optional<std::chrono::sys_seconds> result;
+    if (auto* i = maybe_scalar<int64_t>(d, key))
+        result.emplace(std::chrono::seconds{*i});
+    return result;
+}
+
+std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char* key) {
+    if (auto* i = maybe_scalar<int64_t>(d, key))
+        return std::chrono::sys_seconds{std::chrono::seconds{*i}};
+    return std::chrono::sys_seconds{};
+}
+
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key) {
     if (auto* s = maybe_scalar<std::string>(d, key))
         return *s;

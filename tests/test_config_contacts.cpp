@@ -4,8 +4,10 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <random>
 #include <session/config/contacts.hpp>
+#include <session/util.hpp>
 #include <string_view>
 #include <thread>
 
@@ -48,7 +50,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(c.name.empty());
     CHECK(c.nickname.empty());
-    CHECK(c.profile_updated == 0);
+    CHECK(c.profile_updated == std::chrono::sys_seconds{});
     CHECK_FALSE(c.approved);
     CHECK_FALSE(c.approved_me);
     CHECK_FALSE(c.blocked);
@@ -63,7 +65,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     c.set_name("Joe");
     c.set_nickname("Joey");
-    c.profile_updated = 1;
+    c.profile_updated = std::chrono::sys_seconds{1s};
     c.approved = true;
     c.approved_me = true;
     c.created = created_ts * 1'000;
@@ -76,7 +78,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(contacts.get(definitely_real_id)->name == "Joe");
     CHECK(contacts.get(definitely_real_id)->nickname == "Joey");
-    CHECK(contacts.get(definitely_real_id)->profile_updated == 1);
+    CHECK(contacts.get(definitely_real_id)->profile_updated.time_since_epoch() == 1s);
     CHECK(contacts.get(definitely_real_id)->approved);
     CHECK(contacts.get(definitely_real_id)->approved_me);
     CHECK_FALSE(contacts.get(definitely_real_id)->profile_picture);
@@ -109,7 +111,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     REQUIRE(x);
     CHECK(x->name == "Joe");
     CHECK(x->nickname == "Joey");
-    CHECK(x->profile_updated == 1);
+    CHECK(x->profile_updated.time_since_epoch() == 1s);
     CHECK(x->approved);
     CHECK(x->approved_me);
     CHECK_FALSE(x->profile_picture);
@@ -141,7 +143,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     // Iterate through and make sure we got everything we expected
     std::vector<std::string> session_ids;
     std::vector<std::string> nicknames;
-    std::vector<int64_t> profile_updateds;
+    std::vector<std::chrono::sys_seconds> profile_updateds;
     CHECK(contacts.size() == 2);
     CHECK_FALSE(contacts.empty());
     for (const auto& cc : contacts) {
@@ -156,8 +158,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(session_ids[1] == another_id);
     CHECK(nicknames[0] == "Joey");
     CHECK(nicknames[1] == "(N/A)");
-    CHECK(profile_updateds[0] == 1);
-    CHECK(profile_updateds[1] == 0);
+    CHECK(profile_updateds[0].time_since_epoch() == 1s);
+    CHECK(profile_updateds[1].time_since_epoch() == 0s);
 
     // Conflict! Oh no!
 
@@ -167,7 +169,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     // Client 2 adds a new friend:
     auto third_id = "052222222222222222222222222222222222222222222222222222222222222222"sv;
     contacts2.set_nickname(third_id, "Nickname 3");
-    contacts2.set_profile_updated(third_id, 2);
+    contacts2.set_profile_updated(third_id, session::to_sys_seconds(2));
     contacts2.set_approved(third_id, true);
     contacts2.set_blocked(third_id, true);
 
@@ -236,8 +238,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(session_ids[1] == third_id);
     CHECK(nicknames[0] == "(N/A)");
     CHECK(nicknames[1] == "Nickname 3");
-    CHECK(profile_updateds[0] == 0);
-    CHECK(profile_updateds[1] == 2);
+    CHECK(profile_updateds[0].time_since_epoch() == 0s);
+    CHECK(profile_updateds[1].time_since_epoch() == 2s);
 
     CHECK_THROWS(
             c.set_nickname("12345678901234567890123456789012345678901234567890123456789012345678901"

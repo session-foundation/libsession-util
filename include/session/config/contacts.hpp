@@ -54,8 +54,8 @@ struct contact_info {
     std::string name;
     std::string nickname;
     profile_pic profile_picture;
-    int64_t profile_updated = 0;  /// The unix timestamp (seconds) that this profile information
-                                  /// was last updated.
+    std::chrono::sys_seconds profile_updated{};  /// The unix timestamp (seconds) that this
+                                                 /// profile information was last updated.
     bool approved = false;
     bool approved_me = false;
     bool blocked = false;
@@ -240,8 +240,9 @@ class Contacts : public ConfigBase {
     ///
     /// Inputs:
     /// - `session_id` -- hex string of the session id
-    /// - `profile_updated` -- profile updated unix timestamp (seconds) of the contact
-    void set_profile_updated(std::string_view session_id, int64_t profile_updated);
+    /// - `profile_updated` -- profile updated unix timestamp (seconds) of the contact.  (To convert
+    ///   a raw s/ms/µs integer value, use session::to_sys_seconds).
+    void set_profile_updated(std::string_view session_id, std::chrono::sys_seconds profile_updated);
 
     /// API: contacts/contacts::set_approved
     ///

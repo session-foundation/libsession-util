@@ -147,6 +147,15 @@ const config::set* maybe_set(const session::config::dict& d, const char* key);
 // Digs into a config `dict` to get out an int64_t; nullopt if not there (or not int)
 std::optional<int64_t> maybe_int(const session::config::dict& d, const char* key);
 
+// Digs into a config `dict` to get out an int64_t containing unix timestamp seconds, returns it
+// wrapped in a std::chrono::sys_seconds.  Returns nullopt if not there (or not int).
+std::optional<std::chrono::sys_seconds> maybe_ts(const session::config::dict& d, const char* key);
+
+// Works like maybe_ts, except that if the value isn't present it returns a default-constructed
+// sys_seconds (i.e. unix timestamp 0).  Equivalent to `maybe_ts(d,
+// key).value_or(std::chrono::sys_seconds{})`.
+std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char* key);
+
 // Digs into a config `dict` to get out a string; nullopt if not there (or not string)
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key);
 
@@ -171,6 +180,11 @@ void set_nonzero_int(ConfigBase::DictFieldProxy&& field, int64_t val);
 
 /// Sets an integer value, if positive; removes it if <= 0.
 void set_positive_int(ConfigBase::DictFieldProxy&& field, int64_t val);
+
+/// Sets a unix timestamp as an integer, if positive; removes it if <= 0.
+inline void set_ts(ConfigBase::DictFieldProxy&& field, std::chrono::sys_seconds val) {
+    set_positive_int(std::move(field), val.time_since_epoch().count());
+}
 
 /// Sets a pair of values if the given condition is satisfied, clears both values otherwise.
 template <typename Condition, typename T1, typename T2>

@@ -106,7 +106,7 @@ struct member {
     /// Member variable
     ///
     /// The unix timestamp (seconds) that this profile information was last updated.
-    int64_t profile_updated = 0;
+    std::chrono::sys_seconds profile_updated{};
 
     /// API: groups/member::admin
     ///
