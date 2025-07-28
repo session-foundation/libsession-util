@@ -257,4 +257,23 @@ inline int64_t to_epoch_seconds(int64_t timestamp) {
                                          : timestamp;
 }
 
+// Takes a timestamp as unix epoch seconds (not ms, µs) and wraps it in a sys_seconds containing it.
+inline std::chrono::sys_seconds as_sys_seconds(int64_t timestamp) {
+    return std::chrono::sys_seconds{std::chrono::seconds{timestamp}};
+}
+
+// Helper function to transform a timestamp integer that might be seconds, milliseconds or
+// microseconds to typesafe system clock seconds unix timestamp.
+inline std::chrono::sys_seconds to_sys_seconds(int64_t timestamp) {
+    if (timestamp > 9'000'000'000'000)
+        timestamp /= 1'000'000;
+    else if (timestamp > 9'000'000'000)
+        timestamp /= 1'000;
+    return as_sys_seconds(timestamp);
+}
+
+static_assert(std::is_same_v<
+              std::chrono::seconds,
+              decltype(std::declval<std::chrono::sys_seconds>().time_since_epoch())>);
+
 }  // namespace session

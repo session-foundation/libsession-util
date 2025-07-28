@@ -81,16 +81,47 @@ std::optional<int64_t> maybe_int(const session::config::dict& d, const char* key
     return std::nullopt;
 }
 
+int64_t int_or_0(const session::config::dict& d, const char* key) {
+    if (auto* i = maybe_scalar<int64_t>(d, key))
+        return *i;
+    return 0;
+}
+
+std::optional<std::chrono::sys_seconds> maybe_ts(const session::config::dict& d, const char* key) {
+    std::optional<std::chrono::sys_seconds> result;
+    if (auto* i = maybe_scalar<int64_t>(d, key))
+        result.emplace(std::chrono::seconds{*i});
+    return result;
+}
+
+std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char* key) {
+    if (auto* i = maybe_scalar<int64_t>(d, key))
+        return std::chrono::sys_seconds{std::chrono::seconds{*i}};
+    return std::chrono::sys_seconds{};
+}
+
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key) {
     if (auto* s = maybe_scalar<std::string>(d, key))
         return *s;
     return std::nullopt;
 }
 
+std::string string_or_empty(const session::config::dict& d, const char* key) {
+    if (auto* s = maybe_scalar<std::string>(d, key))
+        return *s;
+    return ""s;
+}
+
 std::optional<std::string_view> maybe_sv(const session::config::dict& d, const char* key) {
     if (auto* s = maybe_scalar<std::string>(d, key))
         return *s;
     return std::nullopt;
+}
+
+std::string_view sv_or_empty(const session::config::dict& d, const char* key) {
+    if (auto* s = maybe_scalar<std::string>(d, key))
+        return *s;
+    return ""sv;
 }
 
 std::optional<std::vector<unsigned char>> maybe_vector(

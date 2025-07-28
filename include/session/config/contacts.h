@@ -20,6 +20,7 @@ typedef struct contacts_contact {
     char name[101];
     char nickname[101];
     user_profile_pic profile_pic;
+    int64_t profile_updated;  // unix timestamp (seconds)
 
     bool approved;
     bool approved_me;
@@ -35,6 +36,31 @@ typedef struct contacts_contact {
     int64_t created;  // unix timestamp (seconds)
 
 } contacts_contact;
+
+typedef struct contacts_blinded_contact {
+    char session_id[67];  // in hex; 66 hex chars + null terminator.
+    char base_url[268];   // null-terminated (max length 267), normalized (i.e. always lower-case,
+                          // only has port if non-default, has trailing / removed)
+    unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
+
+    char name[101];  // This will be a 0-length string when unset
+    user_profile_pic profile_pic;
+
+    bool legacy_blinding;
+    int64_t created;  // unix timestamp (seconds)
+
+} contacts_blinded_contact;
+
+/// Struct containing a list of contacts_blinded_contact structs.  Typically where this is returned
+/// by this API it must be freed (via `free()`) when done with it.
+///
+/// When returned as a pointer by a libsession-util function this is allocated in such a way that
+/// just the outer contacts_blinded_contact_list can be free()d to free both the list *and* the
+/// inner `value` and pointed-at values.
+typedef struct contacts_blinded_contact_list {
+    contacts_blinded_contact** value;  // array of blinded contacts
+    size_t len;                        // length of `value`
+} contacts_blinded_contact_list;
 
 /// API: contacts/contacts_init
 ///
@@ -207,6 +233,147 @@ LIBSESSION_EXPORT bool contacts_erase(config_object* conf, const char* session_i
 /// Outputs:
 /// - `size_t` -- number of contacts
 LIBSESSION_EXPORT size_t contacts_size(const config_object* conf);
+
+/// API: contacts/contacts_blinded_contacts
+///
+/// Retrieves a list of blinded contact records.
+///
+/// Declaration:
+/// ```cpp
+/// contacts_blinded_contact_list* contacts_blinded_contacts(
+///     [in]        config_object*          conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to config_object object
+///
+/// Outputs:
+/// - `contacts_blinded_contact_list*` -- pointer to the list of blinded contact structs; the
+/// pointer belongs to the caller and must be freed when done with it.
+LIBSESSION_EXPORT contacts_blinded_contact_list* contacts_blinded(const config_object* conf);
+
+/// API: contacts/contacts_get_blinded_contact
+///
+/// Fills `blinded_contact` with the blinded contact info given a blinded session ID (specified as a
+/// null-terminated hex string), if the blinded contact exists, and returns true.  If the contact
+/// does not exist then `blinded_contact` is left unchanged and false is returned.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL contacts_get_blinded_contact(
+///     [in]    config_object*              conf,
+///     [in]    const char*                 blinded_id,
+///     [in]    bool                        legacy_blinding,
+///     [out]   contacts_blinded_contact*   blinded_contact
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `blinded_id` -- [in] null terminated hex string
+/// - `legacy_blinding` -- [in] null terminated hex string
+/// - `blinded_contact` -- [out] the blinded contact info data
+///
+/// Output:
+/// - `bool` -- Returns true if blinded contact exists
+LIBSESSION_EXPORT bool contacts_get_blinded(
+        config_object* conf,
+        const char* blinded_id,
+        bool legacy_blinding,
+        contacts_blinded_contact* blinded_contact) LIBSESSION_WARN_UNUSED;
+
+/// API: contacts/contacts_get_or_construct_blinded
+///
+/// Same as the above `contacts_get_blinded()` except that when the blinded contact does not exist,
+/// this sets all the contact fields to defaults and loads it with the given blinded_id.
+///
+/// Returns true as long as it is given a valid blinded_id.  A false return is considered an error,
+/// and means the blinded_id was not a valid blinded_id.
+///
+/// This is the method that should usually be used to create or update a blinded contact, followed
+/// by setting fields in the blinded contact, and then giving it to contacts_set_blinded().
+///
+/// Declaration:
+/// ```cpp
+/// BOOL contacts_get_or_construct_blinded(
+///     [in]    config_object*              conf,
+///     [in]    const char*                 community_base_url,
+///     [in]    const char*                 community_pubkey_hex,
+///     [in]    const char*                 blinded_id,
+///     [in]    bool                        legacy_blinding,
+///     [out]   contacts_blinded_contact*   blinded_contact
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `community_base_url` -- [in] null terminated string
+/// - `community_pubkey_hex` -- [in] null terminated hex string
+/// - `blinded_id` -- [in] null terminated hex string
+/// - `legacy_blinding` -- [in] null terminated hex string
+/// - `blinded_contact` -- [out] the blinded contact info data
+///
+/// Output:
+/// - `bool` -- Returns true if contact exsts
+LIBSESSION_EXPORT bool contacts_get_or_construct_blinded(
+        config_object* conf,
+        const char* community_base_url,
+        const char* community_pubkey_hex,
+        const char* blinded_id,
+        bool legacy_blinding,
+        contacts_blinded_contact* blinded_contact) LIBSESSION_WARN_UNUSED;
+
+/// API: contacts/contacts_set_blinded
+///
+/// Adds or updates a blinded contact from the given contact info struct.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL contacts_set_blinded_contact(
+///     [in]    config_object*              conf,
+///     [in]    contacts_blinded_contact*   bc
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `blinded_contact` -- [in] the blinded contact info data
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool contacts_set_blinded(
+        config_object* conf, const contacts_blinded_contact* bc);
+
+/// API: contacts/contacts_erase_blinded
+///
+/// Erases a blinded contact from the blinded contact list.  blinded_id is in hex.  Returns true if
+/// the blinded contact was found and removed, false if the blinded contact was not present.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL contacts_erase_blinded(
+///     [in, out]   config_object*  conf,
+///     [in]        const char*     community_base_url,
+///     [in]        const char*     blinded_id,
+///     [in]        bool            legacy_blinding
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in, out] Pointer to the config object
+/// - `base_url` -- [in] Text containing null terminated base url for the community this blinded
+/// contact originated from
+/// - `blinded_id` -- [in] Text containing null terminated hex string
+/// - `legacy_blinding` -- [in] Flag indicating whether this blinded contact used legacy blinding
+///
+/// Outputs:
+/// - `bool` -- True if erasing was successful
+LIBSESSION_EXPORT bool contacts_erase_blinded_contact(
+        config_object* conf,
+        const char* community_base_url,
+        const char* blinded_id,
+        bool legacy_blinding);
 
 typedef struct contacts_iterator {
     void* _internals;

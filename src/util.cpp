@@ -87,4 +87,8 @@ std::tuple<std::string, std::string, std::optional<uint16_t>, std::optional<std:
     return result;
 }
 
+static_assert(std::is_same_v<
+              std::chrono::seconds,
+              decltype(std::declval<std::chrono::sys_seconds>().time_since_epoch())>);
+
 }  // namespace session
