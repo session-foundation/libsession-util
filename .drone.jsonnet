@@ -255,7 +255,8 @@ local mac_builder(name,
                   local_mirror=true,
                   jobs=6,
                   tests=true,
-                  allow_fail=false)
+                  allow_fail=false,
+                  allow_test_fail=false)
       = mac_pipeline(name, arch=arch, allow_fail=allow_fail, build=[
   'mkdir build',
   'cd build',
@@ -271,7 +272,7 @@ local mac_builder(name,
                      (if tests then
                         [{
                           name: 'tests',
-                          [if allow_fail then 'failure']: 'ignore',
+                          [if (allow_fail || allow_test_fail) then 'failure']: 'ignore',
                           commands: [
                             'cd build',
                             './tests/testLogging --colour-mode ansi -d yes',
@@ -365,7 +366,7 @@ local static_build(name,
   debian_build('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', jobs=4),
 
   // Macos builds:
-  mac_builder('macOS Intel (Release)'),
+  mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
   mac_builder('macOS Arm64 (Release)', arch='arm64'),
   mac_builder('macOS Arm64 (Debug)', arch='arm64', build_type='Debug'),
 
