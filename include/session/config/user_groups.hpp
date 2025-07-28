@@ -82,11 +82,13 @@ namespace session::config {
 struct base_group_info {
     static constexpr size_t NAME_MAX_LENGTH = 100;  // in bytes; name will be truncated if exceeded
 
-    int priority = 0;       // The priority; 0 means unpinned, -1 means hidden, positive means
-                            // pinned higher (i.e.  higher priority conversations come first).
-    int64_t joined_at = 0;  // unix timestamp (seconds) when the group was joined (or re-joined)
+    int priority = 0;  // The priority; 0 means unpinned, -1 means hidden, positive means
+                       // pinned higher (i.e.  higher priority conversations come first).
+    std::chrono::sys_seconds joined_at{};                // unix timestamp (seconds) when the group
+                                                         // was joined (or re-joined)
     notify_mode notifications = notify_mode::defaulted;  // When the user wants notifications
-    int64_t mute_until = 0;  // unix timestamp (seconds) until which notifications are disabled
+    std::chrono::sys_seconds mute_until{};               // unix timestamp (seconds) until which
+                                                         // notifications are disabled
 
     std::string name;  // human-readable; always set for a legacy closed group, only used before
                        // joining a new closed group (after joining the group info provide the name)

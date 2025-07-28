@@ -4,7 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
-#include <iostream>
+#include <chrono>
 #include <session/config/groups/members.hpp>
 #include <string_view>
 
@@ -72,6 +72,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
                 "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
+        m.profile_updated = std::chrono::sys_seconds{1s};
         gmem1.set(m);
     }
     // 10 members:
@@ -81,6 +82,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
                 "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
+        m.profile_updated = session::to_sys_seconds(2);
         gmem1.set(m);
     }
     // 5 members with no attributes (not even a name):
@@ -131,6 +133,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                         session::config::groups::member::Status::invite_not_sent);
                 CHECK(m.admin);
                 CHECK(m.name == "Admin {}"_format(i));
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
                 CHECK_FALSE(m.profile_picture.empty());
                 CHECK(gmem2.get_status(m) ==
                       session::config::groups::member::Status::promotion_accepted);
@@ -144,10 +147,12 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                 CHECK_FALSE(m.admin);
                 if (i < 20) {
                     CHECK(m.name == "Member {}"_format(i));
+                    CHECK(m.profile_updated.time_since_epoch() == 2s);
                     CHECK_FALSE(m.profile_picture.empty());
                 } else {
                     CHECK(m.name.empty());
                     CHECK(m.profile_picture.empty());
+                    CHECK(m.profile_updated.time_since_epoch() == 0s);
                 }
             }
             i++;
@@ -155,9 +160,15 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         CHECK(i == 25);
     }
 
+    for (int i = 5; i < 15; i++) {
+        auto m = gmem2.get_or_construct(sids[i]);
+        m.profile_updated += 1s;
+        gmem2.set(m);
+    }
     for (int i = 22; i < 50; i++) {
         auto m = gmem2.get_or_construct(sids[i]);
         m.name = "Member {}"_format(i);
+        m.profile_updated = std::chrono::sys_seconds{1s};
         gmem2.set(m);
     }
     for (int i = 50; i < 55; i++) {
@@ -211,6 +222,20 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                   (i < 20 ? "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes
                           : ""_hexbytes));
             CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
+            if (i < 5)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 5 && i < 10)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 10 && i < 15)
+                CHECK(m.profile_updated.time_since_epoch() == 3s);
+            if (i >= 15 && i < 20)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 20 && i < 22)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
+            if (i >= 22 && i < 50)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 50)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
             if (i >= 10 && i < 25)
                 CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_sending);
@@ -281,6 +306,20 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                   (i < 20 ? "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes
                           : ""_hexbytes));
             CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
+            if (i < 5)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 5 && i < 10)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 10 && i < 15)
+                CHECK(m.profile_updated.time_since_epoch() == 3s);
+            if (i >= 15 && i < 20)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 20 && i < 22)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
+            if (i >= 22 && i < 50)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 50)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
             if (is_prime100(i) || (i >= 25 && i < 50))
                 CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_not_sent);

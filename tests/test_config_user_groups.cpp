@@ -4,12 +4,12 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
-#include <iostream>
 #include <session/config/user_groups.hpp>
 #include <string_view>
 #include <variant>
 
 #include "session/config/notify.hpp"
+#include "session/util.hpp"
 #include "utils.hpp"
 
 static constexpr int64_t created_ts = 1680064059;
@@ -117,9 +117,9 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(c.priority == 0);
     CHECK(c.name == "");
     CHECK(c.members().empty());
-    CHECK(c.joined_at == 0);
+    CHECK(c.joined_at.time_since_epoch() == 0s);
     CHECK(c.notifications == session::config::notify_mode::defaulted);
-    CHECK(c.mute_until == 0);
+    CHECK(c.mute_until.time_since_epoch() == 0s);
 
     CHECK_FALSE(groups.needs_push());
     CHECK_FALSE(groups.needs_dump());
@@ -136,9 +136,9 @@ TEST_CASE("User Groups", "[config][groups]") {
 
     c.name = "Englishmen";
     c.disappearing_timer = 60min;
-    c.joined_at = created_ts * 1000;  // milliseconds
+    c.joined_at = session::to_sys_seconds(created_ts * 1000);  // milliseconds
     c.notifications = session::config::notify_mode::mentions_only;
-    c.mute_until = now + 3600;
+    c.mute_until = session::to_sys_seconds(now + 3600);
     CHECK(c.insert(users[0], false));
     CHECK(c.insert(users[1], true));
     CHECK(c.insert(users[2], false));
@@ -243,9 +243,9 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(c1.priority == 3);
     CHECK(c1.members() == expected_members);
     CHECK(c1.name == "Englishmen");
-    CHECK(c1.joined_at == created_ts);
+    CHECK(c1.joined_at.time_since_epoch() == created_ts * 1s);
     CHECK(c1.notifications == session::config::notify_mode::mentions_only);
-    CHECK(c1.mute_until == now + 3600);
+    CHECK(c1.mute_until.time_since_epoch() == (now + 3600) * 1s);
 
     CHECK_FALSE(g2.needs_push());
     CHECK_FALSE(g2.needs_dump());
@@ -457,9 +457,9 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     CHECK(c.secretkey.empty());
     CHECK(c.id == definitely_real_id);
     CHECK(c.priority == 0);
-    CHECK(c.joined_at == 0);
+    CHECK(c.joined_at.time_since_epoch() == 0s);
     CHECK(c.notifications == session::config::notify_mode::defaulted);
-    CHECK(c.mute_until == 0);
+    CHECK(c.mute_until.time_since_epoch() == 0s);
 
     c.secretkey = session::to_vector(ed_sk);  // This *isn't* the right secret key for the group, so
                                               // won't propagate, and so auth data will:
@@ -485,16 +485,16 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
 
     CHECK(c2->id == definitely_real_id);
     CHECK(c2->priority == 0);
-    CHECK(c2->joined_at == 0);
+    CHECK(c2->joined_at.time_since_epoch() == 0s);
     CHECK(c2->notifications == session::config::notify_mode::defaulted);
-    CHECK(c2->mute_until == 0);
+    CHECK(c2->mute_until.time_since_epoch() == 0s);
     CHECK_FALSE(c2->invited);
     CHECK(c2->name == "");
 
     c2->priority = 123;
-    c2->joined_at = (int64_t)1'234'567'890 * 1'000;
+    c2->joined_at = session::to_sys_seconds((int64_t)1'234'567'890 * 1'000);  // ms
     c2->notifications = session::config::notify_mode::mentions_only;
-    c2->mute_until = (int64_t)456'789'012 * 1'000'000;
+    c2->mute_until = session::to_sys_seconds((int64_t)456'789'012 * 1'000'000);  // µs
     c2->invited = true;
     c2->name = "Magic Special Room";
 
@@ -526,9 +526,9 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
           "0000000000000000000000000000");
     CHECK(c3->id == definitely_real_id);
     CHECK(c3->priority == 123);
-    CHECK(c3->joined_at == 1234567890);
+    CHECK(c3->joined_at.time_since_epoch() == 1234567890s);
     CHECK(c3->notifications == session::config::notify_mode::mentions_only);
-    CHECK(c3->mute_until == 456789012);
+    CHECK(c3->mute_until.time_since_epoch() == 456789012s);
     CHECK(c3->invited);
     CHECK(c3->name == "Magic Special Room");
 
@@ -731,7 +731,7 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
     auto grp = c2.get_legacy_group(definitely_real_id);
     REQUIRE(grp);
     CHECK(grp->members() == expected_members);
-    CHECK(grp->joined_at == created_ts);
+    CHECK(grp->joined_at.time_since_epoch() == created_ts * 1s);
 }
 
 TEST_CASE("User groups empty member bug", "[config][groups][bug]") {
@@ -843,30 +843,35 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
     {
         auto lg = c.get_or_construct_legacy_group(
                 "051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-        int64_t joined_at = get_timestamp_us();
-        int64_t mute_until = get_timestamp_s();
-        lg.joined_at = joined_at;
-        lg.mute_until = mute_until;
+        int64_t joined_at_raw = get_timestamp_us();
+        int64_t mute_until_raw = get_timestamp_s();
+        auto joined_at = joined_at_raw * 1us;
+        auto mute_until = mute_until_raw * 1s;
+        lg.joined_at = session::to_sys_seconds(joined_at_raw);    // µs
+        lg.mute_until = session::to_sys_seconds(mute_until_raw);  // s
         c.set(lg);
         auto lg2 = c.get_or_construct_legacy_group(
                 "051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-        CHECK(lg2.joined_at == joined_at / 1'000'000);  // joined_at was given in microseconds
-        CHECK(lg2.mute_until == mute_until);            // mute_until was given in seconds
+        CHECK(lg2.joined_at.time_since_epoch() == joined_at - joined_at % 1s);
+        CHECK(lg2.mute_until.time_since_epoch() == mute_until);
         c.erase_legacy_group("051234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
     }
 
     {
         auto gr = c.get_or_construct_group(
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-        int64_t joined_at = get_timestamp_ms();
-        int64_t mute_until = get_timestamp_us();
-        gr.joined_at = joined_at;
-        gr.mute_until = mute_until;
+        int64_t joined_at_raw = get_timestamp_ms();
+        int64_t mute_until_raw = get_timestamp_us();
+        auto joined_at = joined_at_raw * 1ms;
+        auto mute_until = mute_until_raw * 1us;
+        gr.joined_at = session::to_sys_seconds(joined_at_raw);    // ms
+        gr.mute_until = session::to_sys_seconds(mute_until_raw);  // µs
         c.set(gr);
         auto gr2 = c.get_or_construct_group(
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
-        CHECK(gr2.joined_at == joined_at / 1'000);        // joined_at was given in milliseconds
-        CHECK(gr2.mute_until == mute_until / 1'000'000);  // mute_until was given in microseconds
+        // Non-whole second timestamp components should have been truncate:
+        CHECK(gr2.joined_at.time_since_epoch() == joined_at - joined_at % 1s);
+        CHECK(gr2.mute_until.time_since_epoch() == mute_until - mute_until % 1s);
         c.erase_group("031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
     }
 
@@ -876,14 +881,16 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
         const auto url = "http://example.org:5678";
         const auto room = "sudoku_room";
         auto comm = c.get_or_construct_community(url, room, open_group_pubkey);
-        int64_t joined_at = get_timestamp_ms();
-        int64_t mute_until = get_timestamp_ms();
-        comm.joined_at = joined_at;
-        comm.mute_until = mute_until;
+        int64_t joined_at_raw = get_timestamp_ms();
+        int64_t mute_until_raw = get_timestamp_ms();
+        auto joined_at = joined_at_raw * 1ms;
+        auto mute_until = mute_until_raw * 1ms;
+        comm.joined_at = session::to_sys_seconds(joined_at_raw);
+        comm.mute_until = session::to_sys_seconds(mute_until_raw);
         c.set(comm);
         auto comm2 = c.get_or_construct_community(url, room, open_group_pubkey);
-        CHECK(comm2.joined_at == joined_at / 1'000);    // joined_at was given in milliseconds
-        CHECK(comm2.mute_until == mute_until / 1'000);  // mute_until was given in milliseconds
+        CHECK(comm2.joined_at.time_since_epoch() == joined_at - joined_at % 1s);     // ms
+        CHECK(comm2.mute_until.time_since_epoch() == mute_until - mute_until % 1s);  // ms
         c.erase_community(url, room);
     }
     {
@@ -891,24 +898,19 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
         // - an invalid joined_at (1'733'979'503'520) and
         // - an invalid mute_until (1'733'979'503'520'780) values
         const auto dump_with_not_seconds =
-                "64313a21693165313a243231303a64313a23693165313a2664313a676433333a031234567890abcdef"
-                "1234"
-                "567890abcdef1234567890abcdef1234567890abcdef64313a21693137333339373935303335323037"
-                "3830"
-                "65313a4b303a313a6a693137333339373935303335323065656565313a3c6c6c69306533323aea173b"
-                "57be"
-                "ca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c96564656565313a3d64313a67643333"
-                "3a03"
-                "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef64313a21303a313a4b"
-                "303a"
-                "313a6a303a65656565313a28303a313a296c6565"_hexbytes;
+                "64313a21693165313a243231303a64313a23693165313a2664313a676433333a031234567890abcd"
+                "ef1234567890abcdef1234567890abcdef1234567890abcdef64313a216931373333393739353033"
+                "35323037383065313a4b303a313a6a693137333339373935303335323065656565313a3c6c6c6930"
+                "6533323aea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c96564656565"
+                "313a3d64313a676433333a031234567890abcdef1234567890abcdef1234567890abcdef12345678"
+                "90abcdef64313a21303a313a4b303a313a6a303a65656565313a28303a313a296c6565"_hexbytes;
         session::config::UserGroups c2{std::span<const unsigned char>{seed}, dump_with_not_seconds};
 
         auto gr = c2.get_or_construct_group(
                 "031234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef");
 
-        CHECK(gr.joined_at == 1'733'979'503'520 / 1'000);
-        CHECK(gr.mute_until == 1'733'979'503'520'780 / 1'000'000);
+        CHECK(gr.joined_at.time_since_epoch() == 1'733'979'503'520ms - 520ms);
+        CHECK(gr.mute_until.time_since_epoch() == 1'733'979'503'520'780us - 520'780us);
     }
 }
 

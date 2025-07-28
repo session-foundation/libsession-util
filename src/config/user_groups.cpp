@@ -6,16 +6,12 @@
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
-#include <charconv>
 #include <iterator>
-#include <stdexcept>
 #include <variant>
 
 #include "internal.hpp"
-#include "session/config/error.h"
 #include "session/config/user_groups.h"
 #include "session/export.h"
-#include "session/types.hpp"
 #include "session/util.hpp"
 
 using namespace std::literals;
@@ -34,18 +30,18 @@ namespace session::config {
 template <typename T>
 static void base_into(const base_group_info& self, T& c) {
     c.priority = self.priority;
-    c.joined_at = to_epoch_seconds(self.joined_at);
+    c.joined_at = self.joined_at.time_since_epoch().count();
     c.notifications = static_cast<CONVO_NOTIFY_MODE>(self.notifications);
-    c.mute_until = to_epoch_seconds(self.mute_until);
+    c.mute_until = self.mute_until.time_since_epoch().count();
     c.invited = self.invited;
 }
 
 template <typename T>
 static void base_from(base_group_info& self, const T& c) {
     self.priority = c.priority;
-    self.joined_at = to_epoch_seconds(c.joined_at);
+    self.joined_at = to_sys_seconds(c.joined_at);
     self.notifications = static_cast<notify_mode>(c.notifications);
-    self.mute_until = to_epoch_seconds(c.mute_until);
+    self.mute_until = to_sys_seconds(c.mute_until);
     self.invited = c.invited;
 }
 
@@ -126,18 +122,22 @@ void legacy_group_info::into(ugroups_legacy_group_info& c) && {
 }
 
 void base_group_info::load(const dict& info_dict) {
-    priority = maybe_int(info_dict, "+").value_or(0);
-    joined_at = to_epoch_seconds(std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0)));
+    priority = int_or_0(info_dict, "+");
+    // This value could have been accidentally stored in ms by a previous version, so pass it
+    // through to_sys_seconds:
+    joined_at = to_sys_seconds(std::max<int64_t>(0, int_or_0(info_dict, "j")));
 
-    int notify = maybe_int(info_dict, "@").value_or(0);
+    int notify = int_or_0(info_dict, "@");
     if (notify >= 0 && notify <= 3)
         notifications = static_cast<notify_mode>(notify);
     else
         notifications = notify_mode::defaulted;
 
-    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    // This value could have been accidentally stored in ms by a previous version, so pass it
+    // through to_sys_seconds:
+    mute_until = to_sys_seconds(int_or_0(info_dict, "!"));
 
-    invited = maybe_int(info_dict, "i").value_or(0);
+    invited = int_or_0(info_dict, "i");
 }
 
 void legacy_group_info::load(const dict& info_dict) {
@@ -157,10 +157,7 @@ void legacy_group_info::load(const dict& info_dict) {
         enc_pubkey.clear();
         enc_seckey.clear();
     }
-    if (auto secs = maybe_int(info_dict, "E").value_or(0); secs > 0)
-        disappearing_timer = std::chrono::seconds{secs};
-    else
-        disappearing_timer = 0s;
+    disappearing_timer = std::max(0s, std::chrono::seconds{int_or_0(info_dict, "E")});
 
     members_.clear();
     if (auto* members = maybe_set(info_dict, "m"))
@@ -244,7 +241,7 @@ void group_info::load(const dict& info_dict) {
     if (auto sig = maybe_vector(info_dict, "s"); sig && sig->size() == 100)
         auth_data = std::move(*sig);
 
-    removed_status = maybe_int(info_dict, "r").value_or(0);
+    removed_status = int_or_0(info_dict, "r");
 }
 
 void group_info::mark_kicked() {
@@ -409,9 +406,9 @@ void UserGroups::set(const community_info& c) {
 
 void UserGroups::set_base(const base_group_info& bg, DictFieldProxy& info) const {
     set_nonzero_int(info["+"], bg.priority);
-    set_positive_int(info["j"], to_epoch_seconds(bg.joined_at));
+    set_ts(info["j"], bg.joined_at);
     set_positive_int(info["@"], static_cast<int>(bg.notifications));
-    set_positive_int(info["!"], to_epoch_seconds(bg.mute_until));
+    set_ts(info["!"], bg.mute_until);
     set_flag(info["i"], bg.invited);
     // We don't set n here because it's subtly different in the three group types
 }

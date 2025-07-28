@@ -3,13 +3,12 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
-#include <variant>
+#include <chrono>
 
 #include "../internal.hpp"
 #include "session/config/error.h"
 #include "session/config/groups/info.h"
 #include "session/export.h"
-#include "session/types.hpp"
 #include "session/util.hpp"
 
 using namespace std::literals;
@@ -84,33 +83,47 @@ void Info::set_expiry_timer(std::chrono::seconds expiration_timer) {
     set_positive_int(data["E"], expiration_timer.count());
 }
 
+void Info::set_created(std::chrono::sys_seconds timestamp) {
+    set_ts(data["c"], timestamp);
+}
 void Info::set_created(int64_t timestamp) {
-    set_positive_int(data["c"], to_epoch_seconds(timestamp));
+    set_created(to_sys_seconds(timestamp));
 }
 
-std::optional<int64_t> Info::get_created() const {
+std::optional<std::chrono::sys_seconds> Info::get_created() const {
     if (auto* ts = data["c"].integer())
-        return to_epoch_seconds(*ts);
+        // Pass through to_sys_seconds because some past client bug may have stored ms here:
+        return to_sys_seconds(*ts);
     return std::nullopt;
+}
+
+void Info::set_delete_before(std::chrono::sys_seconds timestamp) {
+    set_ts(data["d"], timestamp);
 }
 
 void Info::set_delete_before(int64_t timestamp) {
-    set_positive_int(data["d"], to_epoch_seconds(timestamp));
+    set_delete_before(to_sys_seconds(timestamp));
 }
 
-std::optional<int64_t> Info::get_delete_before() const {
+std::optional<std::chrono::sys_seconds> Info::get_delete_before() const {
     if (auto* ts = data["d"].integer())
-        return to_epoch_seconds(*ts);
+        // Pass through to_sys_seconds because some past client bug may have stored ms here:
+        return to_sys_seconds(*ts);
     return std::nullopt;
 }
 
-void Info::set_delete_attach_before(int64_t timestamp) {
-    set_positive_int(data["D"], to_epoch_seconds(timestamp));
+void Info::set_delete_attach_before(std::chrono::sys_seconds timestamp) {
+    set_ts(data["D"], timestamp);
 }
 
-std::optional<int64_t> Info::get_delete_attach_before() const {
+void Info::set_delete_attach_before(int64_t timestamp) {
+    set_delete_attach_before(to_sys_seconds(timestamp));
+}
+
+std::optional<std::chrono::sys_seconds> Info::get_delete_attach_before() const {
     if (auto* ts = data["D"].integer())
-        return to_epoch_seconds(*ts);
+        // Pass through to_sys_seconds because some past client bug may have stored ms here:
+        return to_sys_seconds(*ts);
     return std::nullopt;
 }
 
@@ -306,7 +319,11 @@ LIBSESSION_C_API void groups_info_set_expiry_timer(config_object* conf, int expi
 /// Outputs:
 /// - `int64_t` -- Unix timestamp when the group was created (if set by an admin).
 LIBSESSION_C_API int64_t groups_info_get_created(const config_object* conf) {
-    return unbox<groups::Info>(conf)->get_created().value_or(0);
+    return unbox<groups::Info>(conf)
+            ->get_created()
+            .value_or(std::chrono::sys_seconds{})
+            .time_since_epoch()
+            .count();
 }
 
 /// API: groups_info/groups_info_set_created
@@ -318,7 +335,7 @@ LIBSESSION_C_API int64_t groups_info_get_created(const config_object* conf) {
 /// - `conf` -- [in] Pointer to the config object
 /// - `ts` -- [in] the unix timestamp, or 0 to clear a current value.
 LIBSESSION_C_API void groups_info_set_created(config_object* conf, int64_t ts) {
-    unbox<groups::Info>(conf)->set_created(std::max<int64_t>(0, ts));
+    unbox<groups::Info>(conf)->set_created(to_sys_seconds(std::max<int64_t>(0, ts)));
 }
 
 /// API: groups_info/groups_info_get_delete_before
@@ -332,7 +349,11 @@ LIBSESSION_C_API void groups_info_set_created(config_object* conf, int64_t ts) {
 /// Outputs:
 /// - `int64_t` -- Unix timestamp before which messages should be deleted.  Returns 0 if not set.
 LIBSESSION_C_API int64_t groups_info_get_delete_before(const config_object* conf) {
-    return unbox<groups::Info>(conf)->get_delete_before().value_or(0);
+    return unbox<groups::Info>(conf)
+            ->get_delete_before()
+            .value_or(std::chrono::sys_seconds{})
+            .time_since_epoch()
+            .count();
 }
 
 /// API: groups_info/groups_info_set_delete_before
@@ -344,7 +365,7 @@ LIBSESSION_C_API int64_t groups_info_get_delete_before(const config_object* conf
 /// - `conf` -- [in] Pointer to the config object
 /// - `ts` -- [in] the unix timestamp, or 0 to clear a current value.
 LIBSESSION_C_API void groups_info_set_delete_before(config_object* conf, int64_t ts) {
-    unbox<groups::Info>(conf)->set_delete_before(std::max<int64_t>(0, ts));
+    unbox<groups::Info>(conf)->set_delete_before(to_sys_seconds(std::max<int64_t>(0, ts)));
 }
 
 /// API: groups_info/groups_info_get_attach_delete_before
@@ -358,7 +379,11 @@ LIBSESSION_C_API void groups_info_set_delete_before(config_object* conf, int64_t
 /// Outputs:
 /// - `int64_t` -- Unix timestamp before which messages should be deleted.  Returns 0 if not set.
 LIBSESSION_C_API int64_t groups_info_get_attach_delete_before(const config_object* conf) {
-    return unbox<groups::Info>(conf)->get_delete_attach_before().value_or(0);
+    return unbox<groups::Info>(conf)
+            ->get_delete_attach_before()
+            .value_or(std::chrono::sys_seconds{})
+            .time_since_epoch()
+            .count();
 }
 
 /// API: groups_info/groups_info_set_attach_delete_before
@@ -370,7 +395,7 @@ LIBSESSION_C_API int64_t groups_info_get_attach_delete_before(const config_objec
 /// - `conf` -- [in] Pointer to the config object
 /// - `ts` -- [in] the unix timestamp, or 0 to clear a current value.
 LIBSESSION_C_API void groups_info_set_attach_delete_before(config_object* conf, int64_t ts) {
-    unbox<groups::Info>(conf)->set_delete_attach_before(std::max<int64_t>(0, ts));
+    unbox<groups::Info>(conf)->set_delete_attach_before(to_sys_seconds(std::max<int64_t>(0, ts)));
 }
 
 /// API: groups_info/groups_info_is_destroyed(const config_object* conf);

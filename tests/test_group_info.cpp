@@ -76,9 +76,11 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
             "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
     ginfo2.set_expiry_timer(1h);
     constexpr int64_t create_time{1682529839};
-    ginfo2.set_created(create_time);
-    ginfo2.set_delete_before((create_time + 50 * 86400) * 1'000'000);     // as microseconds
-    ginfo2.set_delete_attach_before((create_time + 70 * 86400) * 1'000);  // as milliseconds
+    ginfo2.set_created(session::to_sys_seconds(create_time));
+    // µs:
+    ginfo2.set_delete_before(session::to_sys_seconds((create_time + 50 * 86400) * 1'000'000));
+    // ms:
+    ginfo2.set_delete_attach_before(session::to_sys_seconds((create_time + 70 * 86400) * 1'000));
     ginfo2.destroy_group();
 
     auto [s2, p2, o2] = ginfo2.push();
@@ -106,14 +108,18 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(ginfo1.needs_push());
     auto [s3, p3, o3] = ginfo1.push();
 
+    constexpr std::chrono::sys_seconds expected_created{create_time * 1s};
+    constexpr std::chrono::sys_seconds expected_del_before{create_time * 1s + 50 * 24h};
+    constexpr std::chrono::sys_seconds expected_del_attach{create_time * 1s + 70 * 24h};
+
     CHECK(ginfo1.get_name() == "Better name!");
     CHECK(ginfo1.get_profile_pic().url == "http://example.com/12345");
     CHECK(ginfo1.get_profile_pic().key ==
           "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
     CHECK(ginfo1.get_expiry_timer() == 1h);
-    CHECK(ginfo1.get_created() == create_time);
-    CHECK(ginfo1.get_delete_before() == create_time + 50 * 86400);
-    CHECK(ginfo1.get_delete_attach_before() == create_time + 70 * 86400);
+    CHECK(ginfo1.get_created() == expected_created);
+    CHECK(ginfo1.get_delete_before() == expected_del_before);
+    CHECK(ginfo1.get_delete_attach_before() == expected_del_attach);
     CHECK(ginfo1.is_destroyed());
 
     ginfo1.confirm_pushed(s3, {"fakehash3"});
@@ -126,9 +132,9 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(ginfo2.get_profile_pic().key ==
           "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes);
     CHECK(ginfo2.get_expiry_timer() == 1h);
-    CHECK(ginfo2.get_created() == create_time);
-    CHECK(ginfo2.get_delete_before() == create_time + 50 * 86400);
-    CHECK(ginfo2.get_delete_attach_before() == create_time + 70 * 86400);
+    CHECK(ginfo2.get_created() == expected_created);
+    CHECK(ginfo2.get_delete_before() == expected_del_before);
+    CHECK(ginfo2.get_delete_attach_before() == expected_del_attach);
     CHECK(ginfo2.is_destroyed());
 
     CHECK_THROWS(
@@ -245,7 +251,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
 
     // Now let's get more complicated: we will have *two* valid signers who submit competing updates
     ginfo_rw2.set_name("Super Group 2");
-    ginfo_rw2.set_created(12345);
+    ginfo_rw2.set_created(session::to_sys_seconds(12345));
     ginfo_rw.set_name("Super Group 3");
     ginfo_rw.set_expiry_timer(365 * 24h);
 
@@ -299,7 +305,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
         CHECK(*n == "Super Group 2");
         auto c = g.get_created();
         REQUIRE(c);
-        CHECK(*c == 12345);
+        CHECK(c->time_since_epoch() == 12345s);
         auto et = g.get_expiry_timer();
         REQUIRE(et);
         CHECK(*et == 365 * 24h);

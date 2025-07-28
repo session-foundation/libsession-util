@@ -4,8 +4,10 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <chrono>
 #include <random>
 #include <session/config/contacts.hpp>
+#include <session/util.hpp>
 #include <string_view>
 #include <thread>
 
@@ -48,13 +50,14 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(c.name.empty());
     CHECK(c.nickname.empty());
+    CHECK(c.profile_updated == std::chrono::sys_seconds{});
     CHECK_FALSE(c.approved);
     CHECK_FALSE(c.approved_me);
     CHECK_FALSE(c.blocked);
     CHECK_FALSE(c.profile_picture);
-    CHECK(c.created == 0);
+    CHECK(c.created.time_since_epoch() == 0s);
     CHECK(c.notifications == session::config::notify_mode::defaulted);
-    CHECK(c.mute_until == 0);
+    CHECK(c.mute_until.time_since_epoch() == 0s);
 
     CHECK_FALSE(contacts.needs_push());
     CHECK_FALSE(contacts.needs_dump());
@@ -62,11 +65,12 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     c.set_name("Joe");
     c.set_nickname("Joey");
+    c.profile_updated = std::chrono::sys_seconds{1s};
     c.approved = true;
     c.approved_me = true;
-    c.created = created_ts * 1'000;
+    c.created = session::to_sys_seconds(created_ts * 1'000);  // test setting ms
     c.notifications = session::config::notify_mode::all;
-    c.mute_until = (now + 1800) * 1'000'000;
+    c.mute_until = session::to_sys_seconds((now + 1800) * 1'000'000);  // test setting us
 
     contacts.set(c);
 
@@ -74,6 +78,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     CHECK(contacts.get(definitely_real_id)->name == "Joe");
     CHECK(contacts.get(definitely_real_id)->nickname == "Joey");
+    CHECK(contacts.get(definitely_real_id)->profile_updated.time_since_epoch() == 1s);
     CHECK(contacts.get(definitely_real_id)->approved);
     CHECK(contacts.get(definitely_real_id)->approved_me);
     CHECK_FALSE(contacts.get(definitely_real_id)->profile_picture);
@@ -106,13 +111,14 @@ TEST_CASE("Contacts", "[config][contacts]") {
     REQUIRE(x);
     CHECK(x->name == "Joe");
     CHECK(x->nickname == "Joey");
+    CHECK(x->profile_updated.time_since_epoch() == 1s);
     CHECK(x->approved);
     CHECK(x->approved_me);
     CHECK_FALSE(x->profile_picture);
     CHECK_FALSE(x->blocked);
-    CHECK(x->created == created_ts);
+    CHECK(x->created.time_since_epoch() == created_ts * 1s);
     CHECK(x->notifications == session::config::notify_mode::all);
-    CHECK(x->mute_until == now + 1800);
+    CHECK(x->mute_until.time_since_epoch() == (now + 1800) * 1s);
 
     auto another_id = "051111111111111111111111111111111111111111111111111111111111111111"sv;
     auto c2 = contacts2.get_or_construct(another_id);
@@ -137,11 +143,13 @@ TEST_CASE("Contacts", "[config][contacts]") {
     // Iterate through and make sure we got everything we expected
     std::vector<std::string> session_ids;
     std::vector<std::string> nicknames;
+    std::vector<std::chrono::sys_seconds> profile_updateds;
     CHECK(contacts.size() == 2);
     CHECK_FALSE(contacts.empty());
     for (const auto& cc : contacts) {
         session_ids.push_back(cc.session_id);
         nicknames.emplace_back(cc.nickname.empty() ? "(N/A)" : cc.nickname);
+        profile_updateds.emplace_back(cc.profile_updated);
     }
 
     REQUIRE(session_ids.size() == 2);
@@ -150,6 +158,8 @@ TEST_CASE("Contacts", "[config][contacts]") {
     CHECK(session_ids[1] == another_id);
     CHECK(nicknames[0] == "Joey");
     CHECK(nicknames[1] == "(N/A)");
+    CHECK(profile_updateds[0].time_since_epoch() == 1s);
+    CHECK(profile_updateds[1].time_since_epoch() == 0s);
 
     // Conflict! Oh no!
 
@@ -159,6 +169,7 @@ TEST_CASE("Contacts", "[config][contacts]") {
     // Client 2 adds a new friend:
     auto third_id = "052222222222222222222222222222222222222222222222222222222222222222"sv;
     contacts2.set_nickname(third_id, "Nickname 3");
+    contacts2.set_profile_updated(third_id, session::to_sys_seconds(2));
     contacts2.set_approved(third_id, true);
     contacts2.set_blocked(third_id, true);
 
@@ -216,15 +227,19 @@ TEST_CASE("Contacts", "[config][contacts]") {
 
     session_ids.clear();
     nicknames.clear();
+    profile_updateds.clear();
     for (const auto& cc : contacts) {
         session_ids.push_back(cc.session_id);
         nicknames.emplace_back(cc.nickname.empty() ? "(N/A)" : cc.nickname);
+        profile_updateds.emplace_back(cc.profile_updated);
     }
     REQUIRE(session_ids.size() == 2);
     CHECK(session_ids[0] == another_id);
     CHECK(session_ids[1] == third_id);
     CHECK(nicknames[0] == "(N/A)");
     CHECK(nicknames[1] == "Nickname 3");
+    CHECK(profile_updateds[0].time_since_epoch() == 0s);
+    CHECK(profile_updateds[1].time_since_epoch() == 2s);
 
     CHECK_THROWS(
             c.set_nickname("12345678901234567890123456789012345678901234567890123456789012345678901"
@@ -279,6 +294,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK(c.session_id == std::string_view{definitely_real_id});
     CHECK(strlen(c.name) == 0);
     CHECK(strlen(c.nickname) == 0);
+    CHECK(c.profile_updated == 0);
     CHECK_FALSE(c.approved);
     CHECK_FALSE(c.approved_me);
     CHECK_FALSE(c.blocked);
@@ -287,6 +303,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
 
     strcpy(c.name, "Joe");
     strcpy(c.nickname, "Joey");
+    c.profile_updated = 1;
     c.approved = true;
     c.approved_me = true;
     c.created = created_ts;
@@ -298,6 +315,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
 
     CHECK(c2.name == "Joe"sv);
     CHECK(c2.nickname == "Joey"sv);
+    CHECK(c2.profile_updated == 1);
     CHECK(c2.approved);
     CHECK(c2.approved_me);
     CHECK_FALSE(c2.blocked);
@@ -333,6 +351,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     REQUIRE(contacts_get(conf2, &c3, definitely_real_id));
     CHECK(c3.name == "Joe"sv);
     CHECK(c3.nickname == "Joey"sv);
+    CHECK(c3.profile_updated == 1);
     CHECK(c3.approved);
     CHECK(c3.approved_me);
     CHECK_FALSE(c3.blocked);
@@ -343,6 +362,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     REQUIRE(contacts_get_or_construct(conf, &c3, another_id));
     CHECK(strlen(c3.name) == 0);
     CHECK(strlen(c3.nickname) == 0);
+    CHECK(c3.profile_updated == 0);
     CHECK_FALSE(c3.approved);
     CHECK_FALSE(c3.approved_me);
     CHECK_FALSE(c3.blocked);
@@ -372,6 +392,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     // Iterate through and make sure we got everything we expected
     std::vector<std::string> session_ids;
     std::vector<std::string> nicknames;
+    std::vector<int64_t> profile_updateds;
 
     CHECK(contacts_size(conf) == 2);
     contacts_iterator* it = contacts_iterator_new(conf);
@@ -379,6 +400,7 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     for (; !contacts_iterator_done(it, &ci); contacts_iterator_advance(it)) {
         session_ids.push_back(ci.session_id);
         nicknames.emplace_back(strlen(ci.nickname) ? ci.nickname : "(N/A)");
+        profile_updateds.emplace_back(ci.profile_updated);
     }
     contacts_iterator_free(it);
 
@@ -387,6 +409,8 @@ TEST_CASE("Contacts (C API)", "[config][contacts][c]") {
     CHECK(session_ids[1] == another_id);
     CHECK(nicknames[0] == "Joey");
     CHECK(nicknames[1] == "(N/A)");
+    CHECK(profile_updateds[0] == 1);
+    CHECK(profile_updateds[1] == 0);
 
     // Changing things while iterating:
     it = contacts_iterator_new(conf);
@@ -861,4 +885,213 @@ TEST_CASE("needs_dump bug", "[config][needs_dump]") {
     c.approved_me = false;
     contacts.set(c);
     CHECK(contacts.needs_dump());
+}
+
+TEST_CASE("Contacts", "[config][blinded_contacts]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
+            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+
+    constexpr auto definitely_real_id =
+            "150000000000000000000000000000000000000000000000000000000000000000"sv;
+    constexpr auto comm_base_url = "https://example.com/"sv;
+    constexpr auto comm_pubkey_hex =
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"sv;
+
+    int64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+
+    CHECK_FALSE(contacts.get_blinded(definitely_real_id, true));
+
+    CHECK(contacts.empty());
+    CHECK(contacts.size() == 0);
+
+    auto c = contacts.get_or_construct_blinded(
+            comm_base_url, comm_pubkey_hex, definitely_real_id, true);
+
+    CHECK(c.session_id() == "150000000000000000000000000000000000000000000000000000000000000000");
+    CHECK(c.name.empty());
+    CHECK_FALSE(c.profile_picture);
+    CHECK(c.legacy_blinding);
+    CHECK(c.created.time_since_epoch() == 0s);
+
+    CHECK_FALSE(contacts.needs_push());
+    CHECK_FALSE(contacts.needs_dump());
+    CHECK(std::get<seqno_t>(contacts.push()) == 0);
+
+    c.set_name("Joe");
+    c.created = session::to_sys_seconds(created_ts * 1'000);
+    contacts.set_blinded(c);
+
+    REQUIRE(contacts.get_blinded(definitely_real_id, true).has_value());
+
+    CHECK(contacts.get_blinded(definitely_real_id, true)->name == "Joe");
+    CHECK_FALSE(contacts.get_blinded(definitely_real_id, true)->profile_picture);
+    CHECK(contacts.get_blinded(definitely_real_id, true)->legacy_blinding);
+    CHECK(contacts.get_blinded(definitely_real_id, true)->session_id() == definitely_real_id);
+
+    CHECK(contacts.needs_push());
+    CHECK(contacts.needs_dump());
+
+    auto [seqno, to_push, obs] = contacts.push();
+
+    CHECK(seqno == 1);
+
+    // Pretend we uploaded it
+    contacts.confirm_pushed(seqno, {"fakehash1"});
+    CHECK(contacts.needs_dump());
+    CHECK_FALSE(contacts.needs_push());
+
+    // NB: Not going to check encrypted data and decryption here because that's general (not
+    // specific to contacts) and is covered already in the user profile tests.
+    session::config::Contacts contacts2{seed, contacts.dump()};
+    CHECK_FALSE(contacts2.needs_push());
+    CHECK_FALSE(contacts2.needs_dump());
+    CHECK(std::get<seqno_t>(contacts2.push()) == 1);
+    CHECK_FALSE(contacts.needs_dump());  // Because we just called dump() above, to load up
+                                         // contacts2.
+
+    auto x = contacts2.get_blinded(definitely_real_id, true);
+    REQUIRE(x);
+    CHECK(x->name == "Joe");
+    CHECK_FALSE(x->profile_picture);
+    CHECK(x->created.time_since_epoch() == created_ts * 1s);
+    CHECK(x->legacy_blinding == true);
+
+    auto another_id = "251111111111111111111111111111111111111111111111111111111111111111"sv;
+    auto c2 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, another_id, false);
+    // We're not setting any fields, but we should still keep a record of the session id
+    contacts2.set_blinded(c2);
+
+    CHECK(contacts2.needs_push());
+
+    std::tie(seqno, to_push, obs) = contacts2.push();
+    REQUIRE(to_push.size() == 1);
+
+    CHECK(seqno == 2);
+
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    merge_configs.emplace_back("fakehash2", to_push[0]);
+    contacts.merge(merge_configs);
+    contacts2.confirm_pushed(seqno, {"fakehash2"});
+
+    CHECK_FALSE(contacts.needs_push());
+    CHECK(std::get<seqno_t>(contacts.push()) == seqno);
+
+    // Iterate through and make sure we got everything we expected
+    auto blinded = contacts.blinded();
+    std::vector<std::string> session_ids;
+    std::vector<std::string> names;
+    std::vector<bool> legacy_blindings;
+    CHECK(blinded.size() == 2);
+    for (const auto& cc : blinded) {
+        session_ids.push_back(cc.session_id());
+        names.emplace_back(cc.name.empty() ? "(N/A)" : cc.name);
+        legacy_blindings.emplace_back(cc.legacy_blinding);
+    }
+
+    REQUIRE(session_ids.size() == 2);
+    REQUIRE(session_ids.size() == blinded.size());
+    CHECK(session_ids[0] == definitely_real_id);
+    CHECK(session_ids[1] == another_id);
+    CHECK(names[0] == "Joe");
+    CHECK(names[1] == "(N/A)");
+    CHECK(legacy_blindings[0]);
+    CHECK_FALSE(legacy_blindings[1]);
+
+    // Conflict! Oh no!
+
+    // On client 1 delete a contact:
+    CHECK(contacts.erase_blinded(comm_base_url, definitely_real_id, true));
+
+    // Client 2 adds a new friend:
+    auto third_id = "152222222222222222222222222222222222222222222222222222222222222222"sv;
+    auto c3 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, third_id, true);
+    c3.set_name("Name 3");
+
+    session::config::profile_pic p;
+    {
+        // These don't stay alive, so we use set_key/set_url to make a local copy:
+        std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
+        std::string url = "http://example.com/huge.bmp";
+        p.set_key(std::move(key));
+        p.url = std::move(url);
+    }
+    c3.profile_picture = std::move(p);
+    contacts2.set_blinded(c3);
+
+    CHECK(contacts.needs_push());
+    CHECK(contacts2.needs_push());
+
+    std::tie(seqno, to_push, obs) = contacts.push();
+    auto [seqno2, to_push2, obs2] = contacts2.push();
+    REQUIRE(to_push.size() == 1);
+    REQUIRE(to_push2.size() == 1);
+
+    CHECK(seqno == seqno2);
+    CHECK(to_push != to_push2);
+    CHECK(as_set(obs) == make_set("fakehash2"s));
+    CHECK(as_set(obs2) == make_set("fakehash2"s));
+
+    contacts.confirm_pushed(seqno, {"fakehash3a"});
+    contacts2.confirm_pushed(seqno2, {"fakehash3b"});
+
+    merge_configs.clear();
+    merge_configs.emplace_back("fakehash3b", to_push2[0]);
+    contacts.merge(merge_configs);
+    CHECK(contacts.needs_push());
+
+    merge_configs.clear();
+    merge_configs.emplace_back("fakehash3a", to_push[0]);
+    contacts2.merge(merge_configs);
+    CHECK(contacts2.needs_push());
+
+    std::tie(seqno, to_push, obs) = contacts.push();
+    CHECK(seqno == seqno2 + 1);
+    std::tie(seqno2, to_push2, obs2) = contacts2.push();
+    CHECK(seqno == seqno2);
+    // Disabled check for now: doesn't work with protobuf (because of the non-deterministic
+    // encryption in the middle of the protobuf wrapping).
+    // TODO: reenable once protobuf isn't always-on.
+    // CHECK(printable(to_push) == printable(to_push2));
+    CHECK(as_set(obs) == make_set("fakehash3a"s, "fakehash3b"));
+    CHECK(as_set(obs2) == make_set("fakehash3a"s, "fakehash3b"));
+
+    contacts.confirm_pushed(seqno, {"fakehash4"});
+    contacts2.confirm_pushed(seqno2, {"fakehash4"});
+
+    CHECK_FALSE(contacts.needs_push());
+    CHECK_FALSE(contacts2.needs_push());
+
+    auto blinded2 = contacts.blinded();
+    session_ids.clear();
+    names.clear();
+    legacy_blindings.clear();
+    for (const auto& cc : blinded2) {
+        session_ids.push_back(cc.session_id());
+        names.emplace_back(cc.name.empty() ? "(N/A)" : cc.name);
+        legacy_blindings.emplace_back(cc.legacy_blinding);
+    }
+    REQUIRE(session_ids.size() == 2);
+    CHECK(session_ids[0] == another_id);
+    CHECK(session_ids[1] == third_id);
+    CHECK(names[0] == "(N/A)");
+    CHECK(names[1] == "Name 3");
+    CHECK_FALSE(legacy_blindings[0]);
+    CHECK(legacy_blindings[1]);
 }
