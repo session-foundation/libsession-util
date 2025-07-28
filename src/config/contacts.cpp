@@ -317,7 +317,7 @@ blinded_contact_info::blinded_contact_info(
 }
 
 void blinded_contact_info::load(const dict& info_dict) {
-    name = maybe_string(info_dict, "n").value_or("");
+    name = string_or_empty(info_dict, "n");
 
     auto url = maybe_string(info_dict, "p");
     auto key = maybe_vector(info_dict, "q");
@@ -327,8 +327,8 @@ void blinded_contact_info::load(const dict& info_dict) {
     } else {
         profile_picture.clear();
     }
-    legacy_blinding = maybe_int(info_dict, "y").value_or(0);
-    created = to_epoch_seconds(maybe_int(info_dict, "j").value_or(0));
+    legacy_blinding = int_or_0(info_dict, "y");
+    created = ts_or_epoch(info_dict, "j");
 }
 
 void blinded_contact_info::into(contacts_blinded_contact& c) const {
@@ -346,7 +346,7 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
         copy_c_str(c.profile_pic.url, "");
     }
     c.legacy_blinding = legacy_blinding;
-    c.created = to_epoch_seconds(created);
+    c.created = created.time_since_epoch().count();
 }
 
 blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
@@ -359,7 +359,7 @@ blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
         profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
     }
     legacy_blinding = c.legacy_blinding;
-    created = to_epoch_seconds(c.created);
+    created = to_sys_seconds(c.created);
 }
 
 const std::string blinded_contact_info::session_id() const {
@@ -472,7 +472,7 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
             bc.profile_picture.key);
 
     set_positive_int(info["y"], bc.legacy_blinding);
-    set_positive_int(info["j"], to_epoch_seconds(bc.created));
+    set_ts(info["j"], bc.created);
 }
 
 bool Contacts::erase_blinded(

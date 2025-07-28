@@ -125,7 +125,7 @@ struct blinded_contact_info {
     std::string name;
     profile_pic profile_picture;
     bool legacy_blinding;
-    int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
+    std::chrono::sys_seconds created{};  // Unix timestamp (seconds) when this contact was added
 
     blinded_contact_info() = default;
     explicit blinded_contact_info(

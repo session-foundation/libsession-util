@@ -928,14 +928,14 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(c.name.empty());
     CHECK_FALSE(c.profile_picture);
     CHECK(c.legacy_blinding);
-    CHECK(c.created == 0);
+    CHECK(c.created.time_since_epoch() == 0s);
 
     CHECK_FALSE(contacts.needs_push());
     CHECK_FALSE(contacts.needs_dump());
     CHECK(std::get<seqno_t>(contacts.push()) == 0);
 
     c.set_name("Joe");
-    c.created = created_ts * 1'000;
+    c.created = session::to_sys_seconds(created_ts * 1'000);
     contacts.set_blinded(c);
 
     REQUIRE(contacts.get_blinded(definitely_real_id, true).has_value());
@@ -970,7 +970,7 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     REQUIRE(x);
     CHECK(x->name == "Joe");
     CHECK_FALSE(x->profile_picture);
-    CHECK(x->created == created_ts);
+    CHECK(x->created.time_since_epoch() == created_ts * 1s);
     CHECK(x->legacy_blinding == true);
 
     auto another_id = "251111111111111111111111111111111111111111111111111111111111111111"sv;
