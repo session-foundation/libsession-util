@@ -916,13 +916,12 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
                           std::chrono::system_clock::now().time_since_epoch())
                           .count();
 
-    CHECK_FALSE(contacts.get_blinded(definitely_real_id, true));
+    CHECK_FALSE(contacts.get_blinded(definitely_real_id));
 
     CHECK(contacts.empty());
     CHECK(contacts.size() == 0);
 
-    auto c = contacts.get_or_construct_blinded(
-            comm_base_url, comm_pubkey_hex, definitely_real_id, true);
+    auto c = contacts.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, definitely_real_id);
 
     CHECK(c.session_id() == "150000000000000000000000000000000000000000000000000000000000000000");
     CHECK(c.name.empty());
@@ -938,12 +937,12 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     c.created = session::to_sys_seconds(created_ts * 1'000);
     contacts.set_blinded(c);
 
-    REQUIRE(contacts.get_blinded(definitely_real_id, true).has_value());
+    REQUIRE(contacts.get_blinded(definitely_real_id).has_value());
 
-    CHECK(contacts.get_blinded(definitely_real_id, true)->name == "Joe");
-    CHECK_FALSE(contacts.get_blinded(definitely_real_id, true)->profile_picture);
-    CHECK(contacts.get_blinded(definitely_real_id, true)->legacy_blinding);
-    CHECK(contacts.get_blinded(definitely_real_id, true)->session_id() == definitely_real_id);
+    CHECK(contacts.get_blinded(definitely_real_id)->name == "Joe");
+    CHECK_FALSE(contacts.get_blinded(definitely_real_id)->profile_picture);
+    CHECK(contacts.get_blinded(definitely_real_id)->legacy_blinding);
+    CHECK(contacts.get_blinded(definitely_real_id)->session_id() == definitely_real_id);
 
     CHECK(contacts.needs_push());
     CHECK(contacts.needs_dump());
@@ -966,7 +965,7 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK_FALSE(contacts.needs_dump());  // Because we just called dump() above, to load up
                                          // contacts2.
 
-    auto x = contacts2.get_blinded(definitely_real_id, true);
+    auto x = contacts2.get_blinded(definitely_real_id);
     REQUIRE(x);
     CHECK(x->name == "Joe");
     CHECK_FALSE(x->profile_picture);
@@ -974,7 +973,7 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(x->legacy_blinding == true);
 
     auto another_id = "251111111111111111111111111111111111111111111111111111111111111111"sv;
-    auto c2 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, another_id, false);
+    auto c2 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, another_id);
     // We're not setting any fields, but we should still keep a record of the session id
     contacts2.set_blinded(c2);
 
@@ -1017,11 +1016,11 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     // Conflict! Oh no!
 
     // On client 1 delete a contact:
-    CHECK(contacts.erase_blinded(comm_base_url, definitely_real_id, true));
+    CHECK(contacts.erase_blinded(comm_base_url, definitely_real_id));
 
     // Client 2 adds a new friend:
     auto third_id = "152222222222222222222222222222222222222222222222222222222222222222"sv;
-    auto c3 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, third_id, true);
+    auto c3 = contacts2.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, third_id);
     c3.set_name("Name 3");
 
     session::config::profile_pic p;
@@ -1094,4 +1093,10 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(names[1] == "Name 3");
     CHECK_FALSE(legacy_blindings[0]);
     CHECK(legacy_blindings[1]);
+
+    // Ensure that we throw correctly when giving invalid blinded ids
+    auto invalid_id_1 = "072222222222222222222222222222222222222222222222222222222222222222"sv;
+    auto invalid_id_2 = "992222222222222222222222222222222222222222222222222222222222222222"sv;
+    CHECK_THROWS(contacts.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, invalid_id_1));
+    CHECK_THROWS(contacts.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, invalid_id_2));
 }

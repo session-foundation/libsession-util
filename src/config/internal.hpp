@@ -12,6 +12,32 @@
 #include "session/config/error.h"
 #include "session/types.hpp"
 
+namespace session {
+
+enum class SessionIDPrefix {
+    standard,
+    group,
+    community_blinded_legacy,
+    community_blinded,
+    version_blinded,
+    unblinded,
+};
+
+inline constexpr std::string_view to_string(session::SessionIDPrefix prefix) {
+    switch (prefix) {
+        case session::SessionIDPrefix::unblinded: return "00"sv;
+        case session::SessionIDPrefix::group: return "03"sv;
+        case session::SessionIDPrefix::standard: return "05"sv;
+        case session::SessionIDPrefix::community_blinded_legacy: return "15"sv;
+        case session::SessionIDPrefix::community_blinded: return "25"sv;
+        case session::SessionIDPrefix::version_blinded: return "07"sv;
+    }
+
+    return "05"sv;  // Fallback to standard, shouldn't occur
+};
+
+};  // namespace session
+
 namespace session::config {
 
 template <typename ConfigT, typename... Args>
@@ -121,6 +147,9 @@ config_string_list* make_string_list(Container vals) {
 // Throws std::invalid_argument if session_id doesn't look valid.  Can optionally be passed a prefix
 // byte for id's that aren't starting with 0x05 (e.g. 0x03 for non-legacy group ids).
 void check_session_id(std::string_view session_id, std::string_view prefix = "05");
+
+// Throws std::invalid_argument if id doesn't look valid.
+SessionIDPrefix get_session_id_prefix(std::string_view id);
 
 // Checks the session_id (throwing if invalid) then returns it as bytes
 std::string session_id_to_bytes(std::string_view session_id, std::string_view prefix = "05");
@@ -241,3 +270,14 @@ std::optional<std::vector<unsigned char>> zstd_decompress(
         std::span<const unsigned char> data, size_t max_size = 0);
 
 }  // namespace session::config
+
+namespace fmt {
+
+template <>
+struct formatter<session::SessionIDPrefix, char> : formatter<std::string_view> {
+    auto format(const session::SessionIDPrefix& val, fmt::format_context& ctx) const {
+        return formatter<std::string_view>::format(to_string(val), ctx);
+    }
+};
+
+}  // namespace fmt

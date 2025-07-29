@@ -1,5 +1,6 @@
 #include "internal.hpp"
 
+#include <fmt/ranges.h>
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/bt_value_producer.h>
@@ -8,8 +9,23 @@
 
 #include <iterator>
 #include <optional>
+#include <oxen/log/format.hpp>
+
+using namespace oxen::log::literals;
 
 namespace session::config {
+
+namespace {
+
+    constexpr std::array all_session_id_prefixes = {
+            session::SessionIDPrefix::standard,
+            session::SessionIDPrefix::group,
+            session::SessionIDPrefix::community_blinded_legacy,
+            session::SessionIDPrefix::community_blinded,
+            session::SessionIDPrefix::version_blinded,
+            session::SessionIDPrefix::unblinded};
+
+}  // namespace
 
 void check_session_id(std::string_view session_id, std::string_view prefix) {
     if (!(session_id.size() == 64 + prefix.size() && oxenc::is_hex(session_id) &&
@@ -17,6 +33,24 @@ void check_session_id(std::string_view session_id, std::string_view prefix) {
         throw std::invalid_argument{
                 "Invalid session ID: expected 66 hex digits starting with " + std::string{prefix} +
                 "; got " + std::string{session_id}};
+}
+
+SessionIDPrefix get_session_id_prefix(std::string_view id) {
+    if (oxenc::is_hex(id) && id.size() == 66) {
+        for (auto prefix : all_session_id_prefixes) {
+            auto prefix_str = to_string(prefix);
+
+            if ((id.size() == 64 + prefix_str.size() &&
+                 id.substr(0, prefix_str.size()) == prefix_str))
+                return prefix;
+        }
+    }
+
+    // If we get here then the id wasn't any of the currently defined prefixes
+    throw std::invalid_argument{fmt::format(
+            "Invalid session ID: expected 66 hex digits starting with one of [{}]; got {}",
+            fmt::join(all_session_id_prefixes, ", "),
+            id)};
 }
 
 std::string session_id_to_bytes(std::string_view session_id, std::string_view prefix) {
