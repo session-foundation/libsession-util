@@ -21,6 +21,7 @@ namespace config {
         std::optional<std::filesystem::path> cache_directory;
         std::chrono::minutes cache_expiration;
         bool enforce_subnet_diversity;
+        network::opt::retry_delay retry_delay;
         
         opt::netid::Target netid;
         std::vector<service_node> seed_nodes;
@@ -33,13 +34,16 @@ namespace config {
 
 class SnodePool {
   public:
-    using network_fetcher_t = std::function<void(
-            service_node target,
-            std::function<void(
-                    std::vector<service_node> nodes, std::optional<std::string> error)>)>;
+    using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
 
-    SnodePool(config::SnodePoolConfig config, network_fetcher_t network_fetcher);
+    SnodePool(
+        config::SnodePoolConfig config,
+        std::shared_ptr<oxen::quic::Loop> loop,
+        network_fetcher_t bootstrap_fetcher);
     ~SnodePool();
+
+    // Sets the network fetcher which should be used once the snode cache exists
+    void set_standard_fetcher(network_fetcher_t standard_fetcher);
 
     // Returns the number of nodes currently in the pool
     size_t size();
@@ -62,7 +66,9 @@ class SnodePool {
 
   private:
     config::SnodePoolConfig _config;
-    network_fetcher_t _network_fetcher;
+    std::shared_ptr<oxen::quic::Loop> _loop;
+    network_fetcher_t _bootstrap_fetcher;
+    std::optional<network_fetcher_t> _standard_fetcher;
 
     // Data (protected by '_cache_mutex')
     std::vector<service_node> _snode_cache;
@@ -92,10 +98,10 @@ class SnodePool {
     void _disk_write_loop();
 
     // Refresh functions
-    void _launch_next_refresh_request(bool is_bootstrap_request);
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
-    void _process_and_complete_refresh();
-    void _on_refresh_complete(std::vector<service_node> new_nodes);
+    void _launch_next_refresh_request(bool is_bootstrap_request);
+    void _retry_refresh_request(bool is_bootstrap_request);
+    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<service_node>> raw_results);
 };
 
 }  // namespace session::network

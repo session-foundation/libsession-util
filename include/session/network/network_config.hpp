@@ -20,6 +20,7 @@ struct Config {
     opt::transport::Type transport = opt::transport::Type::quic;
     uint8_t path_length = 3;
     bool enforce_subnet_diversity = true;
+    opt::retry_delay retry_delay = opt::retry_delay(200ms, 5s);
 
     // Netid Options
     std::vector<service_node> seed_nodes;
@@ -33,10 +34,12 @@ struct Config {
 
     // Onion Request Router Options
     uint8_t onionreq_path_failure_threshold = 3;
-    std::unordered_map<opt::onionreq_min_path_count::PathType, uint8_t> onionreq_min_path_counts = {
-            {opt::onionreq_min_path_count::PathType::standard, 2},
-            {opt::onionreq_min_path_count::PathType::download, 2},
-            {opt::onionreq_min_path_count::PathType::upload, 2}};
+    uint8_t onionreq_path_build_retry_limit = 10;
+    std::unordered_map<RequestCategory, uint8_t> onionreq_min_path_counts = {
+            {RequestCategory::standard, 2},
+            {RequestCategory::download, 2},
+            {RequestCategory::upload, 2}};
+    bool onionreq_single_path_mode = false;
     bool onionreq_disable_pre_build_paths = false;
 
     // Quic Transport Options
@@ -71,6 +74,7 @@ struct Config {
     void handle_config_opt(opt::transport transport);
     void handle_config_opt(opt::path_length pl);
     void handle_config_opt(opt::disable_subnet_diversity dsd);
+    void handle_config_opt(opt::retry_delay rd);
 
     // Snode pool options
     void handle_config_opt(opt::cache_directory dir);
@@ -86,7 +90,9 @@ struct Config {
 
     // Onion request router options
     void handle_config_opt(opt::onionreq_path_failure_threshold pft);
+    void handle_config_opt(opt::onionreq_path_build_retry_limit pbrl);
     void handle_config_opt(opt::onionreq_min_path_count mpc);
+    void handle_config_opt(opt::onionreq_single_path_mode spm);
     void handle_config_opt(opt::onionreq_disable_pre_build_paths dpbp);
 
     template <typename Opt>

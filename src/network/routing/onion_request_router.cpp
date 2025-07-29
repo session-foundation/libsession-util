@@ -5,6 +5,7 @@
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 
+#include "session/network/network_opt.hpp"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/response_parser.hpp"
 #include "session/random.hpp"
@@ -319,13 +320,38 @@ void OnionRequestRouter::_on_guard_connection_established(const std::string& pat
         // The guard node failed so record the failure and try to build a new path to replace this failed one (excluding the failed guard node from the next attempt)
         log::warning(cat, "[OnionRouter Request {} Path {}]: Failed to verify connectivity to guard node {}, retrying path build.", req_id_log, path_id, guard_node.to_string());
         _snode_pool.record_node_failure(guard_node);
-        _build_path(category, initiating_req_id, {guard_node});
+
+        int& retries = _path_build_retries[path_id];
+        retries++;
+
+        // If we tried, and failed, to build the path too many times then give up and fail all pending requests
+        if (retries > _config.path_build_retry_limit) {
+            log::critical(cat, "[OnionRouter Path {}]: Aborting build after {} failed attempts.", path_id, retries);
+            _path_build_retries.erase(path_id);
+            
+            auto& queue = _request_queues[category];
+            if (!queue.is_empty()) {
+                auto to_fail = queue.pop_all();
+                log::error(cat, "[OnionRouter]: Failing {} queued requests for '{}' paths due to persistent path build failures.", to_fail.size(), to_string(category, _config.single_path_mode));
+                
+                for (const auto& [req, cb] : to_fail)
+                    cb(false, false, -1, {content_type_plain_text}, "Failed to build a required onion path after multiple retries.");
+            }
+            return;
+        }
+
+        auto delay = _config.retry_delay.exponential(retries);
+        log::info(cat, "[OnionRouter Path {}]: Retrying path build in {}ms (attempt {}/{})", path_id, delay.count(), retries, _config.path_build_retry_limit);
+        _loop->call_later(delay, [this, category, initiating_req_id, guard_node] {
+            _build_path(category, initiating_req_id, {guard_node});
+        });
         return;
     }
 
     OnionPath new_path{path_id, std::move(path_nodes)};
     log::info(cat, "[OnionRouter Request {} Path {}]: New {} path is active with nodes: [{}].", req_id_log, path_id, to_string(category, _config.single_path_mode), new_path.to_string());
     _paths[category].push_back(std::move(new_path));
+    _path_build_retries.erase(path_id);
     
     // Now, check the queue for any requests that were waiting for this path.
     auto& queue = _request_queues[category];

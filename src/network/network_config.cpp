@@ -117,6 +117,11 @@ void Config::handle_config_opt(opt::disable_subnet_diversity dsd) {
     log::debug(cat, "Network config disabled subnet diversity");
 }
 
+void Config::handle_config_opt(opt::retry_delay rd) {
+    retry_delay = std::move(rd);
+    log::debug(cat, "Network config retry delay set to min: {}ms, max: {}ms", retry_delay.base_delay.count(), retry_delay.max_delay.count());
+}
+
 // MARK: Snode Pool Options
 
 void Config::handle_config_opt(opt::cache_directory dir) {
@@ -174,21 +179,24 @@ void Config::handle_config_opt(opt::onionreq_path_failure_threshold pft) {
     log::debug(cat, "Network config onion request path failure threshold set to {}", pft.count);
 }
 
-void Config::handle_config_opt(opt::onionreq_min_path_count mpc) {
-    onionreq_min_path_counts.emplace(mpc.type, mpc.min_count);
+void Config::handle_config_opt(opt::onionreq_path_build_retry_limit pbrl) {
+    onionreq_path_build_retry_limit = pbrl.count;
+    log::debug(cat, "Network config onion request path build retry limit set to {}", pbrl.count);
+}
 
-    std::string path_type_name;
-    switch (mpc.type) {
-        case opt::onionreq_min_path_count::PathType::standard: path_type_name = "standard";
-        case opt::onionreq_min_path_count::PathType::download: path_type_name = "download";
-        case opt::onionreq_min_path_count::PathType::upload: path_type_name = "upload";
-        default: path_type_name = "unknown";
-    }
+void Config::handle_config_opt(opt::onionreq_min_path_count mpc) {
+    onionreq_min_path_counts.emplace(mpc.category, mpc.min_count);
+
     log::debug(
             cat,
             "Network config min {} onion request path count set to {}",
-            path_type_name,
+            to_string(mpc.category),
             mpc.min_count);
+}
+
+void Config::handle_config_opt(opt::onionreq_single_path_mode spm) {
+    onionreq_single_path_mode = true;
+    log::debug(cat, "Network config onion requests set to single path mode");
 }
 
 void Config::handle_config_opt(opt::onionreq_disable_pre_build_paths dpbp) {

@@ -10,6 +10,7 @@
 #include "session/network/network_opt.hpp"
 #include "session/network/session_network_types.hpp"
 #include "session/network/transport/quic_transport.hpp"
+#include "session/network/routing/onion_request_router.hpp"
 
 using namespace oxen;
 using namespace session::network;
@@ -22,28 +23,37 @@ namespace session::network {
 namespace {
 
 config::SnodePoolConfig build_snode_pool_config(const config::Config& main_config) {
-    SnodePoolConfig config;
-
-    if (main_config.cache_directory) {
-        config.cache_directory = *main_config.cache_directory;
-    }
-    config.cache_expiration = main_config.cache_expiration;
-    config.enforce_subnet_diversity = main_config.enforce_subnet_diversity;
-    config.netid = main_config.netid;
-    config.seed_nodes = main_config.seed_nodes;
-    config.num_nodes_to_use_for_refresh = main_config.num_nodes_to_use_for_refresh;
-    config.node_failure_threshold = main_config.node_failure_threshold;
-
-    return config;
+    return {
+        main_config.cache_directory,
+        main_config.cache_expiration,
+        main_config.enforce_subnet_diversity,
+        main_config.retry_delay,
+        main_config.netid,
+        main_config.seed_nodes,
+        main_config.min_cache_size,
+        main_config.num_nodes_to_use_for_refresh,
+        main_config.node_failure_threshold
+    };
 }
 
 config::QuicTransportConfig build_quic_transport_config(const config::Config& main_config) {
-    QuicTransportConfig config;
+    return {
+        main_config.quic_handshake_timeout,
+        main_config.quic_keep_alive,
+        main_config.quic_disable_mtu_discovery
+    };
+}
 
-    config.handshake_timeout = main_config.quic_handshake_timeout;
-    config.keep_alive = main_config.quic_keep_alive;
-
-    return config;
+config::OnionRequestRouterConfig build_onion_request_router_config(const config::Config& main_config) {
+    return {
+        main_config.retry_delay,
+        main_config.path_length,
+        main_config.onionreq_path_failure_threshold,
+        main_config.onionreq_path_build_retry_limit,
+        main_config.onionreq_disable_pre_build_paths,
+        main_config.onionreq_single_path_mode,
+        main_config.onionreq_min_path_counts
+    };
 }
 
 } // namespace
@@ -71,13 +81,6 @@ Network_v2::Network_v2(config::Config config) : config{config} {
     // Now we can properly do any setup needed
     _loop = std::make_shared<quic::Loop>();
 
-    // The SnodePool is needed regardless of the transport layer as it includes swarm information which is needed by the clients in order to send requests
-    auto snode_fetcher = [this](service_node target, auto on_complete) {
-        // Placeholder:
-        on_complete({}, "Fetcher not yet implemented");
-    };
-    _snode_pool = std::make_unique<SnodePool>(std::move(build_snode_pool_config(config)), snode_fetcher);
-
     // Setup the transport layer
     switch (config.transport) {
         case opt::transport::Type::quic:
@@ -89,20 +92,31 @@ Network_v2::Network_v2(config::Config config) : config{config} {
             break;
     }
 
+    // The SnodePool is needed regardless of the transport layer as it includes swarm information which is needed by the clients in order to send requests
+    auto bootstrap_fetcher = [bt = _transport.get()](Request req, network_response_callback_t on_complete) {
+        bt->send_request(std::move(req), std::move(on_complete));
+    };
+    _snode_pool = std::make_unique<SnodePool>(std::move(build_snode_pool_config(config)), _loop, bootstrap_fetcher);
+
     // Setup the router
     switch (config.router) {
         case opt::router::Type::onion_requests:
-            // _transport = std::make_unique<OnionRequestTransport>(_config, *_snode_pool, _loop);
+            _router = std::make_unique<OnionRequestRouter>(std::move(build_onion_request_router_config(config)), _loop, *_snode_pool, _transport);
             break;
 
         case opt::router::Type::lokinet:
-            // _transport = std::make_unique<LokinetTransport>(_config, *_snode_pool, _loop);
+            // _router = std::make_unique<LokinetTransport>(_config, *_snode_pool, _loop);
             break;
 
         case opt::router::Type::direct:
-            // _transport = std::make_unique<DirectTransport>(_config, *_snode_pool, _loop);
+            // _router = std::make_unique<DirectTransport>(_config, *_snode_pool, _loop);
             break;
     }
+
+    // Now that we have our router setup we need to setup the `standard_fetcher` on the `SnodePool`
+    _snode_pool->set_standard_fetcher([router = _router.get()](Request req, network_response_callback_t on_complete) {
+        router->send_request(std::move(req), std::move(on_complete));
+    });
 }
 
 Network_v2::~Network_v2() {
@@ -174,6 +188,11 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
 
     config.path_length = cpp_defaults.path_length;
     config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
+    config.min_retry_delay_ms = cpp_defaults.retry_delay.base_delay.count();
+    config.max_retry_delay_ms = cpp_defaults.retry_delay.max_delay.count();
+
+    config.devnet_seed_nodes = nullptr;
+    config.devnet_seed_nodes_size = 0;
 
     config.cache_dir = nullptr;
     config.cache_expiration_minutes = std::chrono::duration_cast<std::chrono::minutes>(cpp_defaults.cache_expiration).count();
@@ -182,14 +201,19 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.node_failure_threshold = cpp_defaults.node_failure_threshold;
     
     config.onionreq_path_failure_threshold = cpp_defaults.onionreq_path_failure_threshold;
-    config.onionreq_min_path_count_standard = cpp_defaults.onionreq_min_path_counts[opt::onionreq_min_path_count::PathType::standard];
-    config.onionreq_min_path_count_upload = cpp_defaults.onionreq_min_path_counts[opt::onionreq_min_path_count::PathType::upload];
-    config.onionreq_min_path_count_download = cpp_defaults.onionreq_min_path_counts[opt::onionreq_min_path_count::PathType::download];
+    config.onionreq_path_build_retry_limit = cpp_defaults.onionreq_path_build_retry_limit;
+    config.onionreq_min_path_count_standard = cpp_defaults.onionreq_min_path_counts[RequestCategory::standard];
+    config.onionreq_min_path_count_upload = cpp_defaults.onionreq_min_path_counts[RequestCategory::upload];
+    config.onionreq_min_path_count_download = cpp_defaults.onionreq_min_path_counts[RequestCategory::download];
+    config.onionreq_single_path_mode = cpp_defaults.onionreq_single_path_mode;
     config.onionreq_disable_pre_build_paths = cpp_defaults.onionreq_disable_pre_build_paths;
 
     config.quic_handshake_timeout_seconds = std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_handshake_timeout).count();
     config.quic_keep_alive_seconds = std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_keep_alive).count();
     config.quic_disable_mtu_discovery = cpp_defaults.quic_disable_mtu_discovery;
+
+    config.transport_callback = nullptr;
+    config.transport_callback_ctx = nullptr;
 
     return config;
 }
@@ -205,6 +229,12 @@ LIBSESSION_C_API bool session_network_init(
     try {
         // Build the configuration options
         std::vector<std::any> cpp_opts;
+
+        if (!config->enforce_subnet_diversity)
+            cpp_opts.emplace_back(opt::disable_subnet_diversity{});
+
+        if (config->min_retry_delay_ms > 0 || config->max_retry_delay_ms > 0)
+            cpp_opts.emplace_back(opt::retry_delay(std::chrono::milliseconds(config->min_retry_delay_ms), std::chrono::milliseconds(config->max_retry_delay_ms)));
         
         // Snode cache
         if (config->cache_dir)
@@ -251,24 +281,21 @@ LIBSESSION_C_API bool session_network_init(
                 
                 if (config->onionreq_path_failure_threshold > 0)
                     cpp_opts.emplace_back(opt::onionreq_path_failure_threshold(config->onionreq_path_failure_threshold));
+
+                if (config->onionreq_path_build_retry_limit > 0)
+                    cpp_opts.emplace_back(opt::onionreq_path_build_retry_limit(config->onionreq_path_build_retry_limit));
                 
                 if (config->onionreq_min_path_count_standard > 0)
-                    cpp_opts.emplace_back(opt::onionreq_min_path_count{
-                        opt::onionreq_min_path_count::PathType::standard,
-                        config->onionreq_min_path_count_standard
-                    });
+                    cpp_opts.emplace_back(opt::onionreq_min_path_count{RequestCategory::standard, config->onionreq_min_path_count_standard});
 
                 if (config->onionreq_min_path_count_upload > 0)
-                    cpp_opts.emplace_back(opt::onionreq_min_path_count{
-                        opt::onionreq_min_path_count::PathType::upload,
-                        config->onionreq_min_path_count_upload
-                    });
+                    cpp_opts.emplace_back(opt::onionreq_min_path_count{RequestCategory::upload, config->onionreq_min_path_count_upload});
 
                 if (config->onionreq_min_path_count_download > 0)
-                    cpp_opts.emplace_back(opt::onionreq_min_path_count{
-                        opt::onionreq_min_path_count::PathType::download,
-                        config->onionreq_min_path_count_download
-                    });
+                    cpp_opts.emplace_back(opt::onionreq_min_path_count{RequestCategory::download, config->onionreq_min_path_count_download});
+
+                if (config->onionreq_single_path_mode)
+                    cpp_opts.emplace_back(opt::onionreq_single_path_mode{});
 
                 if (config->onionreq_disable_pre_build_paths)
                     cpp_opts.emplace_back(opt::onionreq_disable_pre_build_paths{});

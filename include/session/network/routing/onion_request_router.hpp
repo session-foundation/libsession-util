@@ -15,6 +15,8 @@ namespace session::network {
 
 namespace config {
     struct OnionRequestRouterConfig {
+        network::opt::retry_delay retry_delay;
+        
         uint8_t path_length;
         uint8_t path_failure_threshold;
         uint8_t path_build_retry_limit;
@@ -31,7 +33,7 @@ struct OnionPath {
     size_t pending_requests = 0;
     uint16_t failure_count = 0;
 
-    std::string OnionPath::to_string() const;
+    std::string to_string() const;
 };
 
 class OnionRequestRouter : public IRouter {
@@ -46,11 +48,13 @@ private:
     std::unordered_map<RequestCategory, detail::RequestQueue> _request_queues;
     
     std::unordered_map<RequestCategory, int> _in_progress_path_builds;
+    std::unordered_map<std::string, int> _path_build_retries;
     std::unordered_map<std::string, std::vector<service_node>> _pending_paths;
 
 public:
     OnionRequestRouter(
             config::OnionRequestRouterConfig config,
+            std::shared_ptr<oxen::quic::Loop> loop,
             SnodePool& snode_pool,
             std::shared_ptr<ITransport> transport);
 

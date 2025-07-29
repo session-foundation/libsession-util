@@ -14,6 +14,17 @@
 using namespace oxen;
 using namespace std::literals;
 
+namespace std {
+
+template <>
+struct hash<oxen::quic::ipv4> {
+    size_t operator()(const oxen::quic::ipv4& ip) const noexcept {
+        return std::hash<uint32_t>{}(ip.addr);
+    }
+};
+
+} // namespace std
+
 namespace session::network {
 
 namespace fs = std::filesystem;
@@ -22,7 +33,7 @@ namespace {
     inline auto cat = log::Cat("snode_pool");
 }
 
-SnodePool::SnodePool(config::SnodePoolConfig config, network_fetcher_t network_fetcher) : _config{config}, _network_fetcher{std::move(network_fetcher)} {
+SnodePool::SnodePool(config::SnodePoolConfig config, std::shared_ptr<oxen::quic::Loop> loop, network_fetcher_t bootstrap_fetcher) : _config{config}, _loop{loop}, _bootstrap_fetcher{std::move(bootstrap_fetcher)} {
     if (_config.cache_directory) {
         std::string cache_file_name;
 
@@ -184,93 +195,9 @@ void SnodePool::_disk_write_loop() {
 
 // MARK: Refresh Functions
 
-void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
-    if (!_current_snode_cache_refresh_id || _refresh_candidate_nodes.empty())
-        return;
-    
-    const std::string request_id = *_current_snode_cache_refresh_id;
-    const uint8_t total_required = (is_bootstrap_request ? 1 : _config.num_nodes_to_use_for_refresh);
-    auto results_ptr = _snode_refresh_results;
-    auto target_node = _refresh_candidate_nodes.back();
-    _refresh_candidate_nodes.pop_back();
-    log::trace(cat, "Launching {}refresh request to {} for master request ID {}", (is_bootstrap_request ? "bootstrap" : ""), target_node.to_string(), request_id);
-
-    _network_fetcher(target_node, [this, request_id, results_ptr, is_bootstrap_request, total_required](std::vector<service_node> nodes, std::optional<std::string> error) {
-        // This callback runs on the network loop so acquire a lock
-        std::unique_lock lock{_cache_mutex};
-
-        // If the refresh was cancelled or completed while we were in-flight, do nothing.
-        if (!_current_snode_cache_refresh_id || *_current_snode_cache_refresh_id != request_id) {
-            log::debug(cat, "Ignoring stale refresh response for request ID {}", request_id);
-            return;
-        }
-
-        // A request failed, so try to launch a replacement from our candidate pool.
-        if (error) {
-            log::warning(cat, "Failed to refresh snode cache from one node: {}. Trying another.", *error);
-            _launch_next_refresh_request(is_bootstrap_request);
-            return;
-        }
-
-        log::info(
-            cat,
-            "Received refresh result {}/{} with {} nodes cache for request ID {}.",
-            results_ptr->size(),
-            total_required,
-            nodes.size(),
-            request_id);
-        results_ptr->push_back(std::move(nodes));
-
-        // If we've received all the results then we need to process them and complete the refresh
-        if (results_ptr->size() >= _config.num_nodes_to_use_for_refresh)
-            _process_and_complete_refresh();
-    });
-}
-
-void SnodePool::_process_and_complete_refresh() {
-    if (!_current_snode_cache_refresh_id)
-        return;
-    
-    log::info(cat, "Have {} successful responses, processing and finalizing snode cache refresh for request ID {}.", _snode_refresh_results->size(), *_current_snode_cache_refresh_id);
-
-    // Sort the vectors (so make it easier to find the intersection)
-    auto compare_service_nodes = [](const service_node& a, const service_node& b) {
-        if (auto cmp = quic::Address(a) <=> quic::Address(b); cmp != 0)
-            return cmp < 0;
-
-        return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) < std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
-    };
-
-    for (auto& nodes : *_snode_refresh_results)
-        std::stable_sort(nodes.begin(), nodes.end(), compare_service_nodes);
-
-    auto nodes = (*_snode_refresh_results)[0];
-
-    // If we triggered multiple requests then get the intersection of all vectors
-    for (size_t i = 1; i < _snode_refresh_results->size(); ++i) {
-        std::vector<service_node> intersection;
-        std::set_intersection(
-                nodes.begin(),
-                nodes.end(),
-                (*_snode_refresh_results)[i].begin(),
-                (*_snode_refresh_results)[i].end(),
-                std::back_inserter(intersection),
-                compare_service_nodes);
-        nodes = std::move(intersection);
-    }
-
-    log::info(
-            cat,
-            "Refreshing snode cache completed with {} nodes for request ID {}.",
-            nodes.size(),
-            *_current_snode_cache_refresh_id);
-    _on_refresh_complete(std::move(nodes));
-}
-
 void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) {
-    std::unique_lock lock{_cache_mutex};
-
     const auto request_id = request_id_opt.value_or("RSC-" + random::random_base32(4));
+    std::unique_lock lock{_cache_mutex};
 
     // Only allow a single cache refresh at a time
     if (_current_snode_cache_refresh_id) {
@@ -284,8 +211,13 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
     _refresh_candidate_nodes.clear();
 
     // If the cache is empty, cache refreshing is disabled, or it's smaller than `num_nodes_to_use_for_refresh` then we need to refresh from seed nodes (when fetching from seed nodes we only need to fetch from a single node so only kick off a single refresh request)
-    if (_snode_cache.empty() || _config.num_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.num_nodes_to_use_for_refresh) {
-        log::debug(cat, "Snode cache is insufficient, bootstrapping from seed nodes for refresh {}", request_id);
+    auto bootstrap_mode = (_snode_cache.empty() || _config.num_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.num_nodes_to_use_for_refresh);
+    if (bootstrap_mode || !_standard_fetcher) {
+        if (!bootstrap_mode)
+            log::warning(cat, "No standard fetcher set, using bootstrap fetcher to fetch from seed nodes for cache refresh {}", request_id);
+        else
+            log::debug(cat, "Snode cache is insufficient, bootstrapping from seed nodes for refresh {}", request_id);
+        
         _refresh_candidate_nodes = _config.seed_nodes;
         std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
 
@@ -310,18 +242,106 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
         _launch_next_refresh_request(false /* is_bootstrap_request */);
 }
 
-void SnodePool::_on_refresh_complete(std::vector<service_node> new_nodes) {
-    std::vector<std::function<void()>> after_refresh;
+void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
+    if (!_current_snode_cache_refresh_id || _refresh_candidate_nodes.empty())
+        return;
     
+    const std::string request_id = *_current_snode_cache_refresh_id;
+    const uint8_t total_required = (is_bootstrap_request ? 1 : _config.num_nodes_to_use_for_refresh);
+    auto results_ptr = _snode_refresh_results;
+    auto target_node = _refresh_candidate_nodes.back();
+    _refresh_candidate_nodes.pop_back();
+    log::trace(cat, "Launching {}refresh request to {} for master request ID {}", (is_bootstrap_request ? "bootstrap" : ""), target_node.to_string(), request_id);
+
+    // Select the appropriate fetcher to use for this refresh
+    auto& fetcher_to_use = (is_bootstrap_request ? _bootstrap_fetcher : *_standard_fetcher);
+
+    fetcher_to_use(target_node, [this, request_id, results_ptr, is_bootstrap_request, total_required](std::vector<service_node> nodes, std::optional<std::string> error) {
+        // This callback runs on the network loop so acquire a lock
+        std::unique_lock lock{_cache_mutex};
+
+        // If the refresh was cancelled or completed while we were in-flight, do nothing.
+        if (!_current_snode_cache_refresh_id || *_current_snode_cache_refresh_id != request_id) {
+            log::debug(cat, "Ignoring stale refresh response for request ID {}", request_id);
+            return;
+        }
+
+        // A request failed, so try to launch a replacement from our candidate pool.
+        if (error) {
+            _snode_cache_refresh_failure_count++;
+            auto delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
+            
+            log::warning(cat, "Failed to refresh cache from one node: {}. Trying another in {}ms.", *error, delay.count());
+            _loop->call_later(delay, [this, is_bootstrap_request] {
+                _retry_refresh_request(is_bootstrap_request);
+            });
+            return;
+        }
+
+        log::info(
+            cat,
+            "Received refresh result {}/{} with {} nodes cache for request ID {}.",
+            results_ptr->size(),
+            total_required,
+            nodes.size(),
+            request_id);
+        results_ptr->push_back(std::move(nodes));
+
+        // If we've received all the results then we need to process them and complete the refresh
+        if (results_ptr->size() >= _config.num_nodes_to_use_for_refresh) {
+            auto final_results = std::move(*_snode_refresh_results);
+            auto refresh_id = *_current_snode_cache_refresh_id;
+            lock.unlock();  // Unlock so `_on_refresh_complete` can get it's own lock
+            _on_refresh_complete(refresh_id, final_results);
+        }
+    });
+}
+
+void SnodePool::_retry_refresh_request(bool is_bootstrap_request) {
+    std::unique_lock lock{_cache_mutex};
+    _launch_next_refresh_request(is_bootstrap_request);
+}
+
+void SnodePool::_on_refresh_complete(std::string refresh_id, std::vector<std::vector<service_node>> raw_results) {
+    log::info(cat, "Have {} successful responses, processing and finalizing cache refresh for request ID {}.", raw_results.size(), refresh_id);
+
+    // Sort the vectors (so make it easier to find the intersection)
+    auto compare_service_nodes = [](const service_node& a, const service_node& b) {
+        if (auto cmp = quic::Address(a) <=> quic::Address(b); cmp != 0)
+            return cmp < 0;
+
+        return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) < std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+    };
+
+    for (auto& nodes : raw_results)
+        std::stable_sort(nodes.begin(), nodes.end(), compare_service_nodes);
+
+    auto nodes = raw_results[0];
+
+    // If we triggered multiple requests then get the intersection of all vectors
+    for (size_t i = 1; i < raw_results.size(); ++i) {
+        std::vector<service_node> intersection;
+        std::set_intersection(
+                nodes.begin(),
+                nodes.end(),
+                raw_results[i].begin(),
+                raw_results[i].end(),
+                std::back_inserter(intersection),
+                compare_service_nodes);
+        nodes = std::move(intersection);
+    }
+
+    // Shuffle the nodes so we don't have a specific order
+    std::shuffle(nodes.begin(), nodes.end(), csrng);
+    log::info(cat, "Cache refresh complete with {} nodes for request ID {}.", nodes.size(), refresh_id);
+
+    std::vector<std::function<void()>> after_refresh;
+
     {
         std::unique_lock lock{_cache_mutex};
-        log::info(cat, "Snode cache refresh complete with {} nodes for request ID {}", new_nodes.size(), _current_snode_cache_refresh_id.value_or("NULL"));
-
-        // Shuffle the nodes so we don't have a specific order
-        std::shuffle(new_nodes.begin(), new_nodes.end(), csrng);
-
+    
         // Update the in-memory caches and, since the swarm cache could now be invalid, clear it and re-generate `_all_swarms`
-        _snode_cache = std::move(new_nodes);
+        _snode_cache = std::move(nodes);
         _all_swarms = swarm::generate_swarms(_snode_cache);
         _swarm_cache.clear();
         _last_snode_cache_update = std::chrono::system_clock::now();
@@ -340,6 +360,8 @@ void SnodePool::_on_refresh_complete(std::vector<service_node> new_nodes) {
         _need_write = true;
     }
 
+    _disk_write_cv.notify_one();
+
     // Trigger any callbacks
     if (!after_refresh.empty()) {
         log::debug(cat, "Executing {} post-refresh callbacks.", after_refresh.size());
@@ -356,6 +378,11 @@ void SnodePool::_on_refresh_complete(std::vector<service_node> new_nodes) {
 
 // MARK: Public Functions
 
+void SnodePool::set_standard_fetcher(network_fetcher_t standard_fetcher) {
+    std::unique_lock lock{_cache_mutex};
+    _standard_fetcher = std::move(standard_fetcher);
+}
+
 size_t SnodePool::size() {
     std::lock_guard lock{_cache_mutex};
     return _snode_cache.size();
@@ -365,8 +392,8 @@ void SnodePool::clear_cache() {
     {
         std::lock_guard lock{_cache_mutex};
         _need_clear_cache = true;
-        _disk_write_cv.notify_one();
     }
+    _disk_write_cv.notify_one();
 }
 
 void SnodePool::record_node_failure(const service_node& node) {

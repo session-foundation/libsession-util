@@ -56,6 +56,8 @@ typedef struct {
     SESSION_NETWORK_TRANSPORT transport;
     uint8_t path_length;
     bool enforce_subnet_diversity;
+    uint64_t min_retry_delay_ms;
+    uint64_t max_retry_delay_ms;
 
     // Devnet options (only used when netid_target == SESSION_NETWORK_DEVNET)
     const network_service_node* devnet_seed_nodes;
@@ -71,9 +73,11 @@ typedef struct {
     // Onion request router options (only used when router ==
     // SESSION_NETWORK_ROUTER_ONION_REQUESTS)
     uint8_t onionreq_path_failure_threshold;
+    uint8_t onionreq_path_build_retry_limit;
     uint8_t onionreq_min_path_count_standard;
     uint8_t onionreq_min_path_count_upload;
     uint8_t onionreq_min_path_count_download;
+    bool onionreq_single_path_mode;
     bool onionreq_disable_pre_build_paths;
 
     // Quic transport options (for transport == SESSION_NETWORK_TRANSPORT_QUIC)

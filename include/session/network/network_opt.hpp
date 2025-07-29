@@ -157,6 +157,29 @@ namespace opt {
     /// Can be used to prevent the code from excluding nodes within the same `/24` subnet from being included in the same path when building onion request or lokinet paths.
     struct disable_subnet_diversity : base {};
 
+    struct retry_delay : base {
+        std::chrono::milliseconds base_delay;
+        std::chrono::milliseconds max_delay;
+
+        explicit retry_delay(std::chrono::milliseconds base_delay, std::chrono::milliseconds max_delay) : base_delay{base_delay}, max_delay{max_delay} {}
+
+        /// API: retry_delay/exponential
+        ///
+        /// A function which generates an exponential delay to wait before retrying a request/action
+        /// based on the provided failure count.
+        ///
+        /// Inputs:
+        /// - 'failure_count' - [in] the number of times the request has already failed.
+        inline std::chrono::milliseconds exponential(int failure_count) {
+            if (failure_count <= 0) return base_delay;
+
+            double delay_ms = base_delay.count() * std::pow(2.0, failure_count - 1);
+            auto final_delay = std::chrono::milliseconds(static_cast<long long>(delay_ms));
+
+            return std::min(final_delay, max_delay);
+        }
+    };
+
     // MARK: Snode Pool Options
 
     /// Can be used to override the default ('.') path the network uses to cache files (eg. snode pool and lokinet bootstrap).
@@ -219,20 +242,24 @@ namespace opt {
         explicit onionreq_path_failure_threshold(uint16_t count) : count{count} {}
     };
 
-    /// Can be used to override the default (2) minimum number of paths that are maintained for each type of request when using onion requests.
-    struct onionreq_min_path_count : base {
-        enum class PathType {
-            standard,
-            upload,
-            download,
-        };
+    /// Can be used to override the default (3) number of times a path can receive an error before it is dropped and replaced by a new path.
+    struct onionreq_path_build_retry_limit : base {
+        uint16_t count;
 
-        PathType type;
+        explicit onionreq_path_build_retry_limit(uint16_t count) : count{count} {}
+    };
+
+    /// Can be used to override the default (2) minimum number of paths that are maintained for each request category when using onion requests. If `onionreq_single_path_mode` is provided this will be ignored.
+    struct onionreq_min_path_count : base {
+        RequestCategory category;
         uint8_t min_count;
 
-        explicit onionreq_min_path_count(PathType type, uint8_t min_count) :
-                type{type}, min_count{min_count} {}
+        explicit onionreq_min_path_count(RequestCategory category, uint8_t min_count) :
+                category{category}, min_count{min_count} {}
     };
+
+    /// Can be used to force the onion request router to only use a single path regardless of what category the requests sent have. When this option is provided `onionreq_min_path_count` will be ignored.
+    struct onionreq_single_path_mode : base {};
 
     /// Can be used to prevent the network instance from building onion request paths when initialised, when this option is provided paths will be built when the first request it made.
     struct onionreq_disable_pre_build_paths : base {};

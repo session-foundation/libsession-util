@@ -8,6 +8,7 @@
 #include "session/network/network_config.hpp"
 #include "session/network/snode_pool.hpp"
 #include "session/network/network_transport.hpp"
+#include "session/network/network_router.hpp"
 #include "session/types.hpp"
 
 namespace session::network {
@@ -20,6 +21,7 @@ class Network_v2 {
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::unique_ptr<SnodePool> _snode_pool;
     std::unique_ptr<ITransport> _transport;
+    std::unique_ptr<IRouter> _router;
 
   public:
     template <typename... Opt>
