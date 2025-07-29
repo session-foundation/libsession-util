@@ -313,10 +313,10 @@ blinded_contact_info::blinded_contact_info(
         comm{community(
                 std::move(community_base_url), blinded_id.substr(2), std::move(community_pubkey))} {
     auto prefix = get_session_id_prefix(blinded_id);
-    legacy_blinding = (prefix == session::SessionIdPrefix::community_blinded_legacy);
+    legacy_blinding = (prefix == session::SessionIDPrefix::community_blinded_legacy);
 
-    if (prefix != session::SessionIdPrefix::community_blinded &&
-        prefix != session::SessionIdPrefix::community_blinded_legacy)
+    if (prefix != session::SessionIDPrefix::community_blinded &&
+        prefix != session::SessionIDPrefix::community_blinded_legacy)
         throw std::invalid_argument{
                 "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{blinded_id}};
 }
