@@ -383,6 +383,10 @@ void blinded_contact_info::set_base_url(std::string_view base_url) {
 }
 
 void blinded_contact_info::set_room(std::string_view room) {
+    if (room.size() != 64 || !oxenc::is_hex(room))
+        throw std::invalid_argument{
+                fmt::format("Invalid room: expected 64 hex digits; got {}", room)};
+
     comm.set_room(room);
 }
 

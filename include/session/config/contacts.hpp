@@ -119,8 +119,6 @@ struct contact_info {
 };
 
 struct blinded_contact_info {
-    community comm;
-
     const std::string session_id() const;  // in hex
     std::string name;
     profile_pic profile_picture;
@@ -153,17 +151,51 @@ struct blinded_contact_info {
     /// - `name` -- Name to assign to the contact
     void set_name(std::string name);
 
+    /// API: contacts/blinded_contact_info::community_base_url
+    ///
+    /// Accesses the base url for the community (i.e. not including room or pubkey). Always
+    /// lower-case/normalized.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `const std::string&` -- Returns the base url
+    const std::string& community_base_url() const { return comm.base_url(); }
+
+    /// API: contacts/blinded_contact_info::community_pubkey
+    ///
+    /// Accesses the community server pubkey (32 bytes).
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `const std::vector<unsigned char>&` -- Returns the pubkey
+    const std::vector<unsigned char>& community_pubkey() const { return comm.pubkey(); }
+
+    /// API: contacts/blinded_contact_info::community_pubkey_hex
+    ///
+    /// Accesses the community server pubkey as hex (64 hex digits).
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::string` -- Returns the pubkey
+    std::string community_pubkey_hex() const { return comm.pubkey_hex(); }
+
+  private:
+    friend class Contacts;
+    friend struct session::config::comm_iterator_helper;
+
+    community comm;
+
+    void load(const dict& info_dict);
+
     /// These functions are here so we can use the `comm_iterator_helper` for loading data
     /// into this struct
     void set_base_url(std::string_view base_url);
     void set_room(std::string_view room);
     void set_pubkey(std::span<const unsigned char> pubkey);
     void set_pubkey(std::string_view pubkey);
-
-  private:
-    friend class Contacts;
-    friend struct session::config::comm_iterator_helper;
-    void load(const dict& info_dict);
 };
 
 class Contacts : public ConfigBase {
