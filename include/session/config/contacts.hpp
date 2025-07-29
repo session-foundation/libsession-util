@@ -530,12 +530,10 @@ class Contacts : public ConfigBase {
     /// Inputs:
     /// - `base_url` -- the base url for the community this blinded contact originated from
     /// - `blinded_id` -- hex string of the blinded id
-    /// - `legacy_blinding` -- flag indicating whether `blinded_id` is using legacy blinding
     ///
     /// Outputs:
     /// - `bool` - Returns true if contact was found and removed, false otherwise
-    bool erase_blinded(
-            std::string_view base_url, std::string_view blinded_id, bool legacy_blinding);
+    bool erase_blinded(std::string_view base_url, std::string_view blinded_id);
 
     struct iterator;
     /// API: contacts/contacts::begin

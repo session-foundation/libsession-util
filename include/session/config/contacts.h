@@ -350,8 +350,7 @@ LIBSESSION_EXPORT bool contacts_set_blinded(
 /// BOOL contacts_erase_blinded(
 ///     [in, out]   config_object*  conf,
 ///     [in]        const char*     community_base_url,
-///     [in]        const char*     blinded_id,
-///     [in]        bool            legacy_blinding
+///     [in]        const char*     blinded_id
 /// );
 /// ```
 ///
@@ -365,10 +364,7 @@ LIBSESSION_EXPORT bool contacts_set_blinded(
 /// Outputs:
 /// - `bool` -- True if erasing was successful
 LIBSESSION_EXPORT bool contacts_erase_blinded_contact(
-        config_object* conf,
-        const char* community_base_url,
-        const char* blinded_id,
-        bool legacy_blinding);
+        config_object* conf, const char* community_base_url, const char* blinded_id);
 
 typedef struct contacts_iterator {
     void* _internals;

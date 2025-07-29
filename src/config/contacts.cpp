@@ -479,9 +479,13 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
     set_ts(info["j"], bc.created);
 }
 
-bool Contacts::erase_blinded(
-        std::string_view base_url_, std::string_view blinded_id, bool legacy_blinding) {
-    check_session_id(blinded_id, legacy_blinding ? "15" : "25");
+bool Contacts::erase_blinded(std::string_view base_url_, std::string_view blinded_id) {
+    auto prefix = get_session_id_prefix(blinded_id);
+
+    if (prefix != session::SessionIDPrefix::community_blinded &&
+        prefix != session::SessionIDPrefix::community_blinded_legacy)
+        throw std::invalid_argument{
+                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{blinded_id}};
 
     auto base_url = community::canonical_url(base_url_);
     auto pk = std::string(blinded_id.substr(2));
@@ -679,13 +683,9 @@ LIBSESSION_C_API bool contacts_set_blinded(
 }
 
 LIBSESSION_C_API bool contacts_erase_blinded(
-        config_object* conf,
-        const char* community_base_url,
-        const char* blinded_id,
-        bool legacy_blinding) {
+        config_object* conf, const char* community_base_url, const char* blinded_id) {
     try {
-        return unbox<Contacts>(conf)->erase_blinded(
-                community_base_url, blinded_id, legacy_blinding);
+        return unbox<Contacts>(conf)->erase_blinded(community_base_url, blinded_id);
     } catch (...) {
         return false;
     }

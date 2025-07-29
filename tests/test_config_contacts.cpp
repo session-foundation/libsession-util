@@ -1016,7 +1016,7 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     // Conflict! Oh no!
 
     // On client 1 delete a contact:
-    CHECK(contacts.erase_blinded(comm_base_url, definitely_real_id, true));
+    CHECK(contacts.erase_blinded(comm_base_url, definitely_real_id));
 
     // Client 2 adds a new friend:
     auto third_id = "152222222222222222222222222222222222222222222222222222222222222222"sv;
