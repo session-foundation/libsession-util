@@ -131,8 +131,7 @@ struct blinded_contact_info {
     explicit blinded_contact_info(
             std::string_view community_base_url,
             std::span<const unsigned char> community_pubkey,
-            std::string_view blinded_id,
-            bool legacy_blinding);
+            std::string_view blinded_id);
 
     // Internal ctor/method for C API implementations:
     blinded_contact_info(const struct contacts_blinded_contact& c);  // From c struct
@@ -444,13 +443,11 @@ class Contacts : public ConfigBase {
     ///
     /// Inputs:
     /// - `blinded_id_hex` -- hex string of the session id
-    /// - `legacy_blinding` -- flag indicating whether the pubkey is using legacy blinding
     ///
     /// Outputs:
     /// - `std::optional<blinded_contact_info>` - Returns nullopt if blinded session ID was not
     /// found, otherwise a filled out blinded_contact_info
-    std::optional<blinded_contact_info> get_blinded(
-            std::string_view blinded_id_hex, bool legacy_blinding) const;
+    std::optional<blinded_contact_info> get_blinded(std::string_view blinded_id_hex) const;
 
     /// API: contacts/Contacts::get_or_construct_blinded
     ///
@@ -468,15 +465,13 @@ class Contacts : public ConfigBase {
     /// - `community_pubkey_hex` -- Hex string of the public key for the community this blinded id
     /// originates from
     /// - `blinded_id_hex` -- hex string of the blinded id
-    /// - `legacy_blinding` -- flag indicating whether the pubkey is using legacy blinding
     ///
     /// Outputs:
     /// - `blinded_contact_info` - Returns a filled out blinded_contact_info
     blinded_contact_info get_or_construct_blinded(
             std::string_view community_base_url,
             std::string_view community_pubkey_hex,
-            std::string_view blinded_id_hex,
-            bool legacy_blinding);
+            std::string_view blinded_id_hex);
 
     /// API: contacts/contacts::set_blinded
     ///

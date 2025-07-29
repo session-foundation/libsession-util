@@ -10,6 +10,7 @@
 #include <variant>
 
 #include "internal.hpp"
+#include "session/blinding.hpp"
 #include "session/config/contacts.h"
 #include "session/config/error.h"
 #include "session/export.h"
@@ -308,12 +309,16 @@ size_t Contacts::size() const {
 blinded_contact_info::blinded_contact_info(
         std::string_view community_base_url,
         std::span<const unsigned char> community_pubkey,
-        std::string_view blinded_id,
-        bool legacy_blinding) :
+        std::string_view blinded_id) :
         comm{community(
-                std::move(community_base_url), blinded_id.substr(2), std::move(community_pubkey))},
-        legacy_blinding{legacy_blinding} {
-    check_session_id(blinded_id, legacy_blinding ? "15" : "25");
+                std::move(community_base_url), blinded_id.substr(2), std::move(community_pubkey))} {
+    auto prefix = get_session_id_prefix(blinded_id);
+    legacy_blinding = (prefix == session::SessionIdPrefix::community_blinded_legacy);
+
+    if (prefix != session::SessionIdPrefix::community_blinded &&
+        prefix != session::SessionIdPrefix::community_blinded_legacy)
+        throw std::invalid_argument{
+                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{blinded_id}};
 }
 
 void blinded_contact_info::load(const dict& info_dict) {
@@ -403,9 +408,8 @@ ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
 
 using any_blinded_contact = std::variant<blinded_contact_info>;
 
-std::optional<blinded_contact_info> Contacts::get_blinded(
-        std::string_view blinded_id_hex, bool legacy_blinding) const {
-    check_session_id(blinded_id_hex, legacy_blinding ? "15" : "25");
+std::optional<blinded_contact_info> Contacts::get_blinded(std::string_view blinded_id_hex) const {
+    get_session_id_prefix(blinded_id_hex);
 
     if (auto* b = data["b"].dict()) {
         auto comm = comm_iterator_helper{b->begin(), b->end()};
@@ -426,16 +430,12 @@ std::optional<blinded_contact_info> Contacts::get_blinded(
 blinded_contact_info Contacts::get_or_construct_blinded(
         std::string_view community_base_url,
         std::string_view community_pubkey_hex,
-        std::string_view blinded_id_hex,
-        bool legacy_blinding) {
-    if (auto maybe = get_blinded(blinded_id_hex, legacy_blinding))
+        std::string_view blinded_id_hex) {
+    if (auto maybe = get_blinded(blinded_id_hex))
         return *std::move(maybe);
 
     return blinded_contact_info{
-            community_base_url,
-            to_span(oxenc::from_hex(community_pubkey_hex)),
-            blinded_id_hex,
-            legacy_blinding};
+            community_base_url, to_span(oxenc::from_hex(community_pubkey_hex)), blinded_id_hex};
 }
 
 std::vector<blinded_contact_info> Contacts::blinded() const {
@@ -588,14 +588,11 @@ LIBSESSION_C_API size_t contacts_size(const config_object* conf) {
 }
 
 LIBSESSION_C_API bool contacts_get_blinded(
-        config_object* conf,
-        const char* blinded_id,
-        bool legacy_blinding,
-        contacts_blinded_contact* blinded_contact) {
+        config_object* conf, const char* blinded_id, contacts_blinded_contact* blinded_contact) {
     return wrap_exceptions(
             conf,
             [&] {
-                if (auto bc = unbox<Contacts>(conf)->get_blinded(blinded_id, legacy_blinding)) {
+                if (auto bc = unbox<Contacts>(conf)->get_blinded(blinded_id)) {
                     bc->into(*blinded_contact);
                     return true;
                 }
@@ -609,17 +606,13 @@ LIBSESSION_C_API bool contacts_get_or_construct_blinded(
         const char* community_base_url,
         const char* community_pubkey_hex,
         const char* blinded_id,
-        bool legacy_blinding,
         contacts_blinded_contact* blinded_contact) {
     return wrap_exceptions(
             conf,
             [&] {
                 unbox<Contacts>(conf)
                         ->get_or_construct_blinded(
-                                community_base_url,
-                                community_pubkey_hex,
-                                blinded_id,
-                                legacy_blinding)
+                                community_base_url, community_pubkey_hex, blinded_id)
                         .into(*blinded_contact);
                 return true;
             },

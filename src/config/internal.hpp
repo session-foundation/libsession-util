@@ -12,6 +12,19 @@
 #include "session/config/error.h"
 #include "session/types.hpp"
 
+namespace session {
+
+enum class SessionIdPrefix {
+    standard,
+    group,
+    community_blinded_legacy,
+    community_blinded,
+    version_blinded,
+    unblinded,
+};
+
+};
+
 namespace session::config {
 
 template <typename ConfigT, typename... Args>
@@ -121,6 +134,9 @@ config_string_list* make_string_list(Container vals) {
 // Throws std::invalid_argument if session_id doesn't look valid.  Can optionally be passed a prefix
 // byte for id's that aren't starting with 0x05 (e.g. 0x03 for non-legacy group ids).
 void check_session_id(std::string_view session_id, std::string_view prefix = "05");
+
+// Throws std::invalid_argument if id doesn't look valid.
+SessionIdPrefix get_session_id_prefix(std::string_view id);
 
 // Checks the session_id (throwing if invalid) then returns it as bytes
 std::string session_id_to_bytes(std::string_view session_id, std::string_view prefix = "05");
