@@ -13,6 +13,17 @@ namespace opt {
     namespace fs = std::filesystem;
     using namespace std::chrono_literals;
 
+
+    namespace {
+        inline std::vector<unsigned char> from_hex(std::string_view s) {
+            std::vector<unsigned char> out;
+            out.reserve(s.size() / 2);
+            oxenc::from_hex(s.begin(), s.end(), std::back_inserter(out));
+
+            return out;
+        }
+    }
+
     struct base {};
 
     /// Can be used to override the default (mainnet) netid that the network will populate it's internal caches from, 'devnet' allows for specifying a custom server.
@@ -36,35 +47,40 @@ namespace opt {
         static netid mainnet() {
             auto seed_nodes = {
                     service_node{
-                            "1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef",
+                            from_hex("1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef"),
+                            oxen::quic::ipv4{"144.76.164.202"},
+                            uint16_t{0},    // TODO: Get this
+                            uint16_t{20200},
                             {2, 10, 0},
-                            swarm::INVALID_SWARM_ID,
-                            "144.76.164.202",
-                            uint16_t{20200}},
+                            swarm::INVALID_SWARM_ID},
                     service_node{
-                            "1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7ce",
+                            from_hex("1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7ce"),
+                            oxen::quic::ipv4{"88.99.102.229"},
+                            uint16_t{0},    // TODO: Get this
+                            uint16_t{20201},
                             {2, 10, 0},
-                            swarm::INVALID_SWARM_ID,
-                            "88.99.102.229",
-                            uint16_t{20201}},
+                            swarm::INVALID_SWARM_ID},
                     service_node{
-                            "1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e06199919f",
+                            from_hex("1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e06199919f"),
+                            oxen::quic::ipv4{"195.16.73.17"},
+                            uint16_t{0},    // TODO: Get this
+                            uint16_t{20202},
                             {2, 10, 0},
-                            swarm::INVALID_SWARM_ID,
-                            "195.16.73.17",
-                            uint16_t{20202}},
+                            swarm::INVALID_SWARM_ID},
                     service_node{
-                            "1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d78b",
+                            from_hex("1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d78b"),
+                            oxen::quic::ipv4{"104.194.11.120"},
+                            uint16_t{0},    // TODO: Get this
+                            uint16_t{20203},
                             {2, 10, 0},
-                            swarm::INVALID_SWARM_ID,
-                            "104.194.11.120",
-                            uint16_t{20203}},
+                            swarm::INVALID_SWARM_ID},
                     service_node{
-                            "1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7b0",
+                            from_hex("1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7b0"),
+                            oxen::quic::ipv4{"104.194.8.115"},
+                            uint16_t{0},    // TODO: Get this
+                            uint16_t{20204},
                             {2, 10, 0},
-                            swarm::INVALID_SWARM_ID,
-                            "104.194.8.115",
-                            uint16_t{20204}},
+                            swarm::INVALID_SWARM_ID},
             };
 
             return netid(Target::mainnet, seed_nodes);
@@ -73,18 +89,20 @@ namespace opt {
         static netid testnet() {
             auto seed_nodes = {
                     // service_node{
-                    //         "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9",
+                    //         from_hex("decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"),
+                    //         oxen::quic::ipv4{"144.76.164.202"},
+                    //         uint16_t{0},    // TODO: Get this
+                    //         uint16_t{35400}
                     //         {2, 10, 0},
-                    //         swarm::INVALID_SWARM_ID,
-                    //         "144.76.164.202",
-                    //         uint16_t{35400}},  // This is the original one
+                    //         swarm::INVALID_SWARM_ID},  // This is the original one
 
                     service_node{
-                            "decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a",
+                            from_hex("decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a"),
+                            oxen::quic::ipv4{"23.88.6.250"},
+                            uint16_t{0},    // TODO: Get this
+                            uint16_t{35420},
                             {2, 10, 0},
-                            swarm::INVALID_SWARM_ID,
-                            "23.88.6.250",
-                            uint16_t{35420}},  // lokinet one
+                            swarm::INVALID_SWARM_ID},  // lokinet one
             };
 
             return netid(Target::testnet, seed_nodes);
@@ -178,6 +196,12 @@ namespace opt {
 
             return std::min(final_delay, max_delay);
         }
+    };
+
+    /// Can be used to override the default (250ms) fequency that is used to check if queued requests have timed out due to transport/router setup.
+    struct request_timeout_check_frequency: base {
+        std::chrono::milliseconds frequency;
+        explicit request_timeout_check_frequency(std::chrono::milliseconds f) : frequency{f} {}
     };
 
     // MARK: Snode Pool Options

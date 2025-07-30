@@ -45,10 +45,11 @@ service_node test_node(
         const std::vector<unsigned char> ed_pk, const uint16_t index, const bool unique_ip = true) {
     return service_node{
             ed_pk,
+            oxen::quic::ipv4{(unique_ip ? fmt::format("0.0.0.{}", index) : "1.1.1.1")},
+            index,
+            index,
             {2, 8, 0},
-            INVALID_SWARM_ID,
-            (unique_ip ? fmt::format("0.0.0.{}", index) : "1.1.1.1"),
-            index};
+            INVALID_SWARM_ID};
 }
 
 std::optional<service_node> node_for_destination(network_destination destination) {
@@ -246,11 +247,12 @@ class TestNetwork : public Network {
         endpoint->listen(creds, server_constructor);
 
         auto node = service_node{
-                to_string_view(server_key_pair.first),
+                to_vector(server_key_pair.first),
+                oxen::quic::ipv4{"127.0.0.1"},
+                endpoint->local().port(),
+                endpoint->local().port(),
                 {2, 8, 0},
-                INVALID_SWARM_ID,
-                "127.0.0.1"s,
-                endpoint->local().port()};
+                INVALID_SWARM_ID};
 
         return std::make_shared<TestServer>(loop, endpoint, node);
     }
@@ -891,14 +893,6 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     auto path =
             onion_path{"Test", invalid_info, {snode_cache[0], snode_cache[1], snode_cache[2]}, 0};
 
-    auto compare_service_nodes = [](const service_node& a, const service_node& b) {
-        if (auto cmp = oxen::quic::Address(a) <=> oxen::quic::Address(b); cmp != 0)
-            return cmp < 0;
-
-        return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
-               std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
-    };
-
     // Should shuffle the result
     network.emplace(std::nullopt, true, false, false);
     network->set_snode_cache(snode_cache);
@@ -908,7 +902,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     network.emplace(std::nullopt, true, false, false);
     network->set_snode_cache(snode_cache);
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
     CHECK(unused_nodes == snode_cache);
 
     // Should exclude nodes used in paths
@@ -916,7 +910,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_paths(PathType::standard, {path});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 3, snode_cache.end()});
 
     // Should exclude nodes in unused connections
@@ -924,7 +918,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_unused_connections({invalid_info});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes in in-progress connections
@@ -932,7 +926,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_in_progress_connections({{"Test", snode_cache.front()}});
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes destinations in pending requests
@@ -948,7 +942,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
                     std::nullopt,
                     PathType::standard));
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes which have passed the failure threshold
@@ -956,12 +950,12 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     network->set_snode_cache(snode_cache);
     network->set_failure_count(snode_cache.front(), 10);
     unused_nodes = network->get_unused_nodes();
-    std::stable_sort(unused_nodes.begin(), unused_nodes.end(), compare_service_nodes);
+    std::stable_sort(unused_nodes.begin(), unused_nodes.end());
     CHECK(unused_nodes == std::vector<service_node>{snode_cache.begin() + 1, snode_cache.end()});
 
     // Should exclude nodes which have the same IP if one was excluded
     std::vector<service_node> same_ip_snode_cache;
-    auto unique_node = service_node{ed_pk, {2, 8, 0}, INVALID_SWARM_ID, "0.0.0.20", uint16_t{20}};
+    auto unique_node = service_node{ed_pk, oxen::quic::ipv4{"0.0.0.20"}, uint16_t{20}, uint16_t{20}, {2, 8, 0}, INVALID_SWARM_ID};
     for (uint16_t i = 0; i < 11; ++i)
         same_ip_snode_cache.emplace_back(test_node(ed_pk, i, false));
     same_ip_snode_cache.emplace_back(unique_node);
@@ -1090,10 +1084,11 @@ TEST_CASE("Network", "[network][find_valid_path]") {
     auto target = test_node(ed_pk, 1);
     auto test_service_node = service_node{
             "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"_hexbytes,
+            oxen::quic::ipv4{"144.76.164.202"},
+            uint16_t{35400},
+            uint16_t{35400},
             {2, 8, 0},
-            INVALID_SWARM_ID,
-            "144.76.164.202",
-            uint16_t{35400}};
+            INVALID_SWARM_ID};
     auto network = TestNetwork(std::nullopt, true, false, false);
     auto info = request_info::make(target, std::nullopt, std::nullopt, 0ms);
     auto invalid_path = onion_path{
@@ -1434,14 +1429,14 @@ TEST_CASE("Network", "[network][c][network_send_onion_request]") {
     network_object* network = n_object.release();
 
     // Convert test_server_cpp->node to network_service_node to pass to C API
-    auto ip_v4 = test_server_cpp->node.to_ipv4();
+    auto ip_v4 = test_server_cpp->node.ip;
     std::array<uint8_t, 4> target_ip = {
             static_cast<uint8_t>(ip_v4.addr >> 24),
             static_cast<uint8_t>((ip_v4.addr >> 16) & 0xFF),
             static_cast<uint8_t>((ip_v4.addr >> 8) & 0xFF),
             static_cast<uint8_t>(ip_v4.addr & 0xFF)};
     auto test_service_node = network_service_node{};
-    test_service_node.quic_port = test_server_cpp->node.port();
+    test_service_node.omq_port = test_server_cpp->node.omq_port;
     std::copy(target_ip.begin(), target_ip.end(), test_service_node.ip);
     auto test_pubkey_hex = oxenc::to_hex(test_server_cpp->node.view_remote_key());
     std::strcpy(test_service_node.ed25519_pubkey_hex, test_pubkey_hex.c_str());

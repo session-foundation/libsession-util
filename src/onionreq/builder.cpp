@@ -341,15 +341,17 @@ LIBSESSION_C_API void onion_request_builder_set_snode_destination(
         const char* ed25519_pubkey) {
     assert(builder && ip && ed25519_pubkey);
 
-    std::array<uint8_t, 4> target_ip;
-    std::memcpy(target_ip.data(), ip, target_ip.size());
+    std::vector<unsigned char> pubkey;
+    pubkey.reserve(32);
+    oxenc::from_hex(ed25519_pubkey, ed25519_pubkey + 64, std::back_inserter(pubkey));
 
-    unbox(builder).set_destination(session::network::service_node(
-            oxenc::from_hex({ed25519_pubkey, 64}),
-            {0},
-            session::network::INVALID_SWARM_ID,
-            "{}"_format(fmt::join(target_ip, ".")),
-            quic_port));
+    unbox(builder).set_destination(session::network::service_node{
+            pubkey,
+            oxen::quic::ipv4{std::span<const uint8_t, 4>(ip, 4)},
+            0,
+            quic_port,
+            {0, 0, 0},
+            session::network::INVALID_SWARM_ID});
 }
 
 LIBSESSION_C_API void onion_request_builder_set_server_destination(

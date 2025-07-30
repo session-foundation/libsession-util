@@ -113,6 +113,7 @@ if(ENABLE_ONIONREQ)
         network/snode_pool.cpp
         network/swarm.cpp
         network/transport/quic_transport.cpp
+        network/routing/onion_request_router.cpp
     )
 
     target_link_libraries(onionreq

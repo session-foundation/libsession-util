@@ -19,9 +19,9 @@ class Network_v2 {
   private:
     const config::Config config;
     std::shared_ptr<oxen::quic::Loop> _loop;
-    std::unique_ptr<SnodePool> _snode_pool;
-    std::unique_ptr<ITransport> _transport;
-    std::unique_ptr<IRouter> _router;
+    std::shared_ptr<SnodePool> _snode_pool;
+    std::shared_ptr<ITransport> _transport;
+    std::shared_ptr<IRouter> _router;
 
   public:
     template <typename... Opt>

@@ -17,6 +17,18 @@ const std::pair<std::string, std::string> content_type_plain_text = {
 const std::pair<std::string, std::string> content_type_json = {
         "Content-Type", "application/json"};
 
+class status_code_exception : public std::runtime_error {
+    public:
+    int16_t status_code;
+    std::vector<std::pair<std::string, std::string>> headers;
+
+    status_code_exception(
+            int16_t status_code,
+            std::vector<std::pair<std::string, std::string>> headers,
+            std::string message) :
+            std::runtime_error(message), status_code{status_code}, headers{headers} {}
+};
+
 enum class RequestCategory {
     standard,
     upload,

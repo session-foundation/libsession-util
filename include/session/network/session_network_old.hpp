@@ -394,7 +394,7 @@ class Network {
         for (const auto& [path_type, paths_for_type] : paths)
             for (const auto& path : paths_for_type)
                 for (const auto& node : path.nodes)
-                    result.emplace_back(node.to_ipv4());
+                    result.emplace_back(node.ip);
 
         return result;
     };

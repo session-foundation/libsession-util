@@ -201,6 +201,44 @@ std::string OnionPath::to_string() const {
     return "{}"_format(fmt::join(node_descriptions, ", "));
 }
 
+OnionRequestRouter::OnionRequestRouter(
+    config::OnionRequestRouterConfig config,
+    std::shared_ptr<oxen::quic::Loop> loop,
+    std::weak_ptr<SnodePool> snode_pool,
+    std::weak_ptr<ITransport> transport
+) : _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport}, _request_queues{
+        {RequestCategory::standard, {loop, _config.request_timeout_check_frequency}},
+        {RequestCategory::upload,   {loop, _config.request_timeout_check_frequency}},
+        {RequestCategory::download, {loop, _config.request_timeout_check_frequency}}
+    } {
+    log::debug(cat, "[OnionRequestRouter]: Initializing.");
+
+    if (!_config.disable_pre_build_paths) {
+        log::info(cat, "[OnionRequestRouter]: Pre-building initial paths.");
+        
+        auto schedule_build = [this](RequestCategory category, int count) {
+            for (int i = 0; i < count; ++i) {
+                _loop->call([this, category, i] {
+                    _build_path(category, "pre-build-{}-{}"_format(to_string(category, _config.single_path_mode), i + 1), {});
+                });
+            }
+        };
+
+        if (_config.single_path_mode) {
+            log::debug(cat, "[OnionRequestRouter]: Pre-building 1 path for single_path_mode.");
+            schedule_build(RequestCategory::standard, 1);
+        } else {
+            for (const auto& [category, min_count] : _config.min_path_counts) {
+                if (min_count > 0) {
+                    log::debug(cat, "[OnionRequestRouter]: Pre-building {} path(s) for category '{}'.", min_count, to_string(category, _config.single_path_mode));
+                    schedule_build(category, min_count);
+                }
+            }
+        }
+    } else
+        log::debug(cat, "[OnionRequestRouter]: Path pre-building is disabled.");
+}
+
 void OnionRequestRouter::send_request(Request request, network_response_callback_t callback) {
     _loop->call([this, req = std::move(request), cb = std::move(callback)]() mutable {
         _send_request_internal(std::move(req), std::move(cb));
@@ -263,7 +301,7 @@ void OnionRequestRouter::_build_path(RequestCategory category, std::optional<std
         auto to_fail = queue.pop_all();
 
         for (const auto& [req, cb] : to_fail)
-            cb(false, false, -1, {content_type_plain_text}, "Router misconfigured: path_length is 0");
+            cb(false, false, -1, {content_type_plain_text}, "Router misconfigured: path_length is 0.");
         return;
     }
     
@@ -271,16 +309,26 @@ void OnionRequestRouter::_build_path(RequestCategory category, std::optional<std
 
     auto nodes_to_exclude = get_all_used_nodes(_paths, _pending_paths);
     nodes_to_exclude.insert(nodes_to_exclude.end(), nodes_to_exclude_.begin(), nodes_to_exclude_.end());
-    auto path_nodes = _snode_pool.get_unused_nodes(_config.path_length, nodes_to_exclude);
+    
+    std::vector<service_node> path_nodes;
+
+    if (auto snode_pool = _snode_pool.lock())
+        path_nodes = snode_pool->get_unused_nodes(_config.path_length, nodes_to_exclude);
+    else {
+        log::critical(cat, "[OnionRouter]: SnodePool was destroyed, cannot build path.");
+        return;
+    }
     
     // If we don't have enough nodes to build a path then we should try to refresh the snode pool
     if (path_nodes.size() < _config.path_length) {
         log::warning(cat, "[OnionRouter Request {} Path {}]: Failed to get enough nodes from SnodePool (need {}, got {}), queueing retry after pool refresh.", req_id_log, path_id, _config.path_length, path_nodes.size());
-        _in_progress_path_builds[category]--; 
-        _snode_pool.refresh_if_needed([this, category, initiating_req_id, excluded = std::move(nodes_to_exclude)]() {
-            log::info(cat, "[OnionRouter Request {}]: SnodePool refresh complete, retrying path build.", initiating_req_id.value_or("internal"));
-            _build_path(category, initiating_req_id, excluded);
-        });
+        _in_progress_path_builds[category]--;
+
+        if (auto snode_pool = _snode_pool.lock())
+            snode_pool->refresh_if_needed([this, category, initiating_req_id, excluded = std::move(nodes_to_exclude)]() {
+                log::info(cat, "[OnionRouter Request {}]: SnodePool refresh complete, retrying path build.", initiating_req_id.value_or("internal"));
+                _build_path(category, initiating_req_id, excluded);
+            });
         return;
     }
 
@@ -289,13 +337,18 @@ void OnionRequestRouter::_build_path(RequestCategory category, std::optional<std
     auto guard_node = path_nodes.front();
     log::debug(cat, "[OnionRouter Request {} Path {}]: Testing connectivity to guard node {}.", req_id_log, path_id, guard_node.to_string());
 
-    _transport->verify_connectivity(
-        guard_node,
-        3s,
-        "{} - Path Build {}"_format(req_id_log, path_id),
-        [this, path_id, category, initiating_req_id](bool success) {
-        _on_guard_connection_established(path_id, category, initiating_req_id, success);
-    });
+    if (auto transport = _transport.lock())
+        transport->verify_connectivity(
+            guard_node,
+            3s,
+            "{} - Path Build {}"_format(req_id_log, path_id),
+            [this, path_id, category, initiating_req_id](bool success) {
+            _on_guard_connection_established(path_id, category, initiating_req_id, success);
+        });
+    else {
+        log::critical(cat, "[OnionRouter]: Transport was destroyed, cannot build path.");
+        return;
+    }
 }
 
 void OnionRequestRouter::_on_guard_connection_established(const std::string& path_id, RequestCategory category, std::optional<std::string> initiating_req_id, bool success) {
@@ -319,7 +372,8 @@ void OnionRequestRouter::_on_guard_connection_established(const std::string& pat
     if (!success) {
         // The guard node failed so record the failure and try to build a new path to replace this failed one (excluding the failed guard node from the next attempt)
         log::warning(cat, "[OnionRouter Request {} Path {}]: Failed to verify connectivity to guard node {}, retrying path build.", req_id_log, path_id, guard_node.to_string());
-        _snode_pool.record_node_failure(guard_node);
+        if (auto snode_pool = _snode_pool.lock())
+            snode_pool->record_node_failure(guard_node);
 
         int& retries = _path_build_retries[path_id];
         retries++;
@@ -342,6 +396,7 @@ void OnionRequestRouter::_on_guard_connection_established(const std::string& pat
 
         auto delay = _config.retry_delay.exponential(retries);
         log::info(cat, "[OnionRouter Path {}]: Retrying path build in {}ms (attempt {}/{})", path_id, delay.count(), retries, _config.path_build_retry_limit);
+        
         _loop->call_later(delay, [this, category, initiating_req_id, guard_node] {
             _build_path(category, initiating_req_id, {guard_node});
         });
@@ -489,28 +544,34 @@ void OnionRequestRouter::_send_on_path(OnionPath& path, Request request, network
 
     // Increment the `pending_requests` and actually send the `onion_request`
     path.pending_requests++;
-    _transport->send_request(
-        std::move(onion_request),
-        [this, path_id = path.id, original_request = std::move(request), builder = std::move(builder), cb = std::move(callback)](bool success, bool timeout, int16_t status_code, auto headers, auto response) {
-            _decrement_and_cleanup_path(path_id, original_request.category);
 
-            if (!success || timeout) {
-                _handle_request_failure(path_id, original_request, status_code, "Transport layer failure");
-                return cb(false, timeout, status_code, std::move(headers), std::move(response));
-            }
-            
-            try {
-                DecryptedResponse decrypted = decrypt_onion_response(*builder, original_request, *response);
+    if (auto transport = _transport.lock())
+        transport->send_request(
+            std::move(onion_request),
+            [this, path_id = path.id, original_request = std::move(request), builder = std::move(builder), cb = std::move(callback)](bool success, bool timeout, int16_t status_code, auto headers, auto response) {
+                _decrement_and_cleanup_path(path_id, original_request.category);
 
-                if (decrypted.status_code < 200 || decrypted.status_code > 299)
-                     _handle_request_failure(path_id, original_request, decrypted.status_code, decrypted.body.value_or(""));
+                if (!success || timeout) {
+                    _handle_request_failure(path_id, original_request, status_code, "Transport layer failure");
+                    return cb(false, timeout, status_code, std::move(headers), std::move(response));
+                }
+                
+                try {
+                    DecryptedResponse decrypted = decrypt_onion_response(*builder, original_request, *response);
 
-                cb(true, false, decrypted.status_code, std::move(decrypted.headers), std::move(decrypted.body));
-            } catch (const std::exception& e) {
-                _handle_request_failure(path_id, original_request, -1, "Decryption/Parsing failed");
-                cb(false, false, -1, {content_type_plain_text}, "Failed to process onion response");
-            }
-        });
+                    if (decrypted.status_code < 200 || decrypted.status_code > 299)
+                        _handle_request_failure(path_id, original_request, decrypted.status_code, decrypted.body.value_or(""));
+
+                    cb(true, false, decrypted.status_code, std::move(decrypted.headers), std::move(decrypted.body));
+                } catch (const std::exception& e) {
+                    _handle_request_failure(path_id, original_request, -1, "Decryption/Parsing failed");
+                    cb(false, false, -1, {content_type_plain_text}, "Failed to process onion response");
+                }
+            });
+    else {
+        log::critical(cat, "[OnionRouter]: Transport was destroyed, cannot send request.");
+        return;
+    }
 }
 
 void OnionRequestRouter::_decrement_and_cleanup_path(const std::string& path_id, RequestCategory category) {
@@ -578,10 +639,18 @@ void OnionRequestRouter::_handle_request_failure(
 
             if (bad_node_it != path.nodes.end()) {
                 log::debug(cat, "[OnionRouter Path {}]: Failure identified for specific node {}.", path_id, bad_node_pk.view());
-                _snode_pool.record_node_failure(*bad_node_it);
+                std::vector<service_node> replacements;
 
-                auto used_nodes = get_all_used_nodes(_paths, _pending_paths);
-                auto replacements = _snode_pool.get_unused_nodes(1, used_nodes);
+                if (auto snode_pool = _snode_pool.lock()) {
+                    snode_pool->record_node_failure(*bad_node_it);
+
+                    auto used_nodes = get_all_used_nodes(_paths, _pending_paths);
+                    replacements = snode_pool->get_unused_nodes(1, used_nodes);
+                }
+                else {
+                    log::critical(cat, "[OnionRouter]: SnodePool was destroyed, cannot repair path.");
+                    return;
+                }
 
                 // If we found a replacement node then swap out the bad one and reset the path failure count (assume the bad node was the cause of any failures), we can then stop here (the path is repaired so no need to continue)
                 if (!replacements.empty()) {
@@ -606,8 +675,9 @@ void OnionRequestRouter::_handle_request_failure(
         log::warning(cat, "[OnionRouter Path {}]: Path has exceeded its failure threshold.", path.id);
         
         // Tell the SnodePool that all nodes on this path are now suspect
-        for (const auto& node : path.nodes)
-            _snode_pool.record_node_failure(node);
+        if (auto snode_pool = _snode_pool.lock())
+            for (const auto& node : path.nodes)
+                snode_pool->record_node_failure(node);
 
         // Store for subsequent path building
         auto nodes_to_exclude = path.nodes;

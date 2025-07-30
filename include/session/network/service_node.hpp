@@ -10,57 +10,62 @@ namespace session::network {
 
 using namespace session::network::swarm;
 
-struct service_node : public oxen::quic::RemoteAddress {
-  public:
-    std::vector<int> storage_server_version;
+namespace service_node_disk_format {
+    constexpr size_t PUBKEY_HEX = 64;               // 32 bytes * 2 hex chars
+    constexpr size_t IP_MAX = 15;                   // 255.255.255.255
+    constexpr size_t PORT_MAX = 5;                  // 65535
+    constexpr size_t VERSION_MAX = 17;              // 65535.65535.65535
+    constexpr size_t SWARM_ID_MAX = 20;             // uint64_t max value
+    constexpr size_t FIELD_COUNT = 6;
+    constexpr size_t SEPARATORS = FIELD_COUNT - 1;  // 5 pipes
+    constexpr size_t LINE_ENDING = 2;               // \n\r (just in case)
+
+    constexpr size_t MAX_LINE_SIZE = PUBKEY_HEX + 
+                            IP_MAX + 
+                            (PORT_MAX * 2) +
+                            VERSION_MAX + 
+                            SWARM_ID_MAX + 
+                            SEPARATORS + 
+                            LINE_ENDING;
+}
+
+struct service_node {
+    std::vector<unsigned char> _remote_pubkey;
+    oxen::quic::ipv4 ip;
+    uint16_t https_port;
+    uint16_t omq_port;
+    std::array<uint16_t, 3> storage_server_version;
     swarm_id_t swarm_id;
 
-    service_node() = delete;
-
-    template <typename... Opt>
-    service_node(
-            std::string_view remote_pk,
-            std::vector<int> storage_server_version,
-            swarm_id_t swarm_id,
-            Opt&&... opts) :
-            oxen::quic::RemoteAddress{remote_pk, std::forward<Opt>(opts)...},
-            storage_server_version{storage_server_version},
-            swarm_id{swarm_id} {}
-
-    template <typename... Opt>
-    service_node(
-            std::span<const unsigned char> remote_pk,
-            std::vector<int> storage_server_version,
-            swarm_id_t swarm_id,
-            Opt&&... opts) :
-            oxen::quic::RemoteAddress{remote_pk, std::forward<Opt>(opts)...},
-            storage_server_version{storage_server_version},
-            swarm_id{swarm_id} {}
-
-    service_node(const service_node& obj) :
-            oxen::quic::RemoteAddress{obj},
-            storage_server_version{obj.storage_server_version},
-            swarm_id{obj.swarm_id} {}
-
-    service_node& operator=(const service_node& obj) {
-        storage_server_version = obj.storage_server_version;
-        swarm_id = obj.swarm_id;
-        oxen::quic::RemoteAddress::operator=(obj);
-        _copy_internals(obj);
-        return *this;
+    oxen::quic::RemoteAddress to_https_address() const {
+        return oxen::quic::RemoteAddress{_remote_pubkey, ip, https_port};
+    }
+    
+    oxen::quic::RemoteAddress to_omq_address() const {
+        return oxen::quic::RemoteAddress{_remote_pubkey, ip, omq_port};
     }
 
-    auto operator<=>(const service_node& other) const = delete;
-    bool operator==(const service_node& other) const {
-        return RemoteAddress::operator==(other) &&
-               storage_server_version == other.storage_server_version && swarm_id == other.swarm_id;
-    }
+    std::span<const unsigned char> view_remote_key() const { return _remote_pubkey; }
+    std::string host() const { return ip.to_string(); }
+
+    std::string to_string() const;
+    std::string to_https_string() const;
+    std::string to_omq_string() const;
 
     static service_node from(const network_service_node& node);
-    static service_node from_json(nlohmann::json json);
-    static service_node from_disk(std::string_view str, bool can_ignore_version = false);
+    void into(network_service_node& n) const;
+    
+    template<typename OutputIt>
+    void to_disk(OutputIt out) const;
+    static service_node from_disk(std::string_view str);
+    static std::pair<std::vector<service_node>, int> process_snode_cache_bin(std::vector<std::byte> cache_bin);
 
-    std::string to_disk() const;
+    static service_node legacy_from_json(nlohmann::json json);
+    static service_node legacy_from_disk(std::string_view str);
+    std::string legacy_to_disk() const;
+
+    bool operator==(const service_node& other) const = default;
+    auto operator<=>(const service_node& other) const = default;
 };
 
 }  // namespace session::network

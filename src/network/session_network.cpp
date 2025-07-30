@@ -22,6 +22,8 @@ namespace session::network {
 
 namespace {
 
+    inline auto cat = log::Cat("network");
+
 config::SnodePoolConfig build_snode_pool_config(const config::Config& main_config) {
     return {
         main_config.cache_directory,
@@ -47,6 +49,7 @@ config::QuicTransportConfig build_quic_transport_config(const config::Config& ma
 config::OnionRequestRouterConfig build_onion_request_router_config(const config::Config& main_config) {
     return {
         main_config.retry_delay,
+        main_config.request_timeout_check_frequency,
         main_config.path_length,
         main_config.onionreq_path_failure_threshold,
         main_config.onionreq_path_build_retry_limit,
@@ -84,24 +87,27 @@ Network_v2::Network_v2(config::Config config) : config{config} {
     // Setup the transport layer
     switch (config.transport) {
         case opt::transport::Type::quic:
-            _transport = std::make_unique<QuicTransport>(std::move(build_quic_transport_config(config)), _loop);
+            _transport = std::make_shared<QuicTransport>(std::move(build_quic_transport_config(config)), _loop);
             break;
 
         case opt::transport::Type::callbacks:
-            // _transport = std::make_unique<LokinetTransport>(_config, *_snode_pool, _loop);
+            // _transport = std::make_shared<LokinetTransport>(_config, *_snode_pool, _loop);
             break;
     }
 
     // The SnodePool is needed regardless of the transport layer as it includes swarm information which is needed by the clients in order to send requests
-    auto bootstrap_fetcher = [bt = _transport.get()](Request req, network_response_callback_t on_complete) {
-        bt->send_request(std::move(req), std::move(on_complete));
+    auto bootstrap_fetcher = [bt = std::weak_ptr{_transport}](Request req, network_response_callback_t on_complete) {
+        if (auto transport = bt.lock())
+            transport->send_request(std::move(req), std::move(on_complete));
+        else
+            log::error(cat, "Transport provided to the SnodePool bootstrap fetcher has been destroyed.");
     };
-    _snode_pool = std::make_unique<SnodePool>(std::move(build_snode_pool_config(config)), _loop, bootstrap_fetcher);
+    _snode_pool = std::make_shared<SnodePool>(std::move(build_snode_pool_config(config)), _loop, bootstrap_fetcher);
 
     // Setup the router
     switch (config.router) {
         case opt::router::Type::onion_requests:
-            _router = std::make_unique<OnionRequestRouter>(std::move(build_onion_request_router_config(config)), _loop, *_snode_pool, _transport);
+            _router = std::make_unique<OnionRequestRouter>(std::move(build_onion_request_router_config(config)), _loop, _snode_pool, _transport);
             break;
 
         case opt::router::Type::lokinet:
@@ -114,8 +120,11 @@ Network_v2::Network_v2(config::Config config) : config{config} {
     }
 
     // Now that we have our router setup we need to setup the `standard_fetcher` on the `SnodePool`
-    _snode_pool->set_standard_fetcher([router = _router.get()](Request req, network_response_callback_t on_complete) {
-        router->send_request(std::move(req), std::move(on_complete));
+    _snode_pool->set_standard_fetcher([r = std::weak_ptr{_router}](Request req, network_response_callback_t on_complete) {
+        if (auto router = r.lock())
+            router->send_request(std::move(req), std::move(on_complete));
+        else
+            log::error(cat, "Router provided to the SnodePool standard fetcher has been destroyed.");
     });
 }
 
@@ -190,6 +199,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
     config.min_retry_delay_ms = cpp_defaults.retry_delay.base_delay.count();
     config.max_retry_delay_ms = cpp_defaults.retry_delay.max_delay.count();
+    config.request_timeout_check_frequency_ms = cpp_defaults.request_timeout_check_frequency.count();
 
     config.devnet_seed_nodes = nullptr;
     config.devnet_seed_nodes_size = 0;
@@ -235,6 +245,9 @@ LIBSESSION_C_API bool session_network_init(
 
         if (config->min_retry_delay_ms > 0 || config->max_retry_delay_ms > 0)
             cpp_opts.emplace_back(opt::retry_delay(std::chrono::milliseconds(config->min_retry_delay_ms), std::chrono::milliseconds(config->max_retry_delay_ms)));
+        
+        if (config->request_timeout_check_frequency_ms > 0)
+            cpp_opts.emplace_back(opt::request_timeout_check_frequency(std::chrono::milliseconds(config->request_timeout_check_frequency_ms)));
         
         // Snode cache
         if (config->cache_dir)

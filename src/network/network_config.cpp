@@ -24,6 +24,8 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::transport);
         HANDLE_TYPE(opt::path_length);
         HANDLE_TYPE(opt::disable_subnet_diversity);
+        HANDLE_TYPE(opt::retry_delay);
+        HANDLE_TYPE(opt::request_timeout_check_frequency);
 
         // Snode pool options
         HANDLE_TYPE(opt::cache_directory);
@@ -35,6 +37,7 @@ Config::Config(const std::vector<std::any>& opts) {
         // Quic transport options
         HANDLE_TYPE(opt::quic_handshake_timeout);
         HANDLE_TYPE(opt::quic_keep_alive);
+        HANDLE_TYPE(opt::quic_disable_mtu_discovery);
 
         // Onion request router options
         HANDLE_TYPE(opt::onionreq_path_failure_threshold);
@@ -120,6 +123,11 @@ void Config::handle_config_opt(opt::disable_subnet_diversity dsd) {
 void Config::handle_config_opt(opt::retry_delay rd) {
     retry_delay = std::move(rd);
     log::debug(cat, "Network config retry delay set to min: {}ms, max: {}ms", retry_delay.base_delay.count(), retry_delay.max_delay.count());
+}
+
+void Config::handle_config_opt(opt::request_timeout_check_frequency rtcf) {
+    request_timeout_check_frequency = rtcf.frequency;
+    log::debug(cat, "Network config request timeout check frequency set to: {}ms", rtcf.frequency.count());
 }
 
 // MARK: Snode Pool Options

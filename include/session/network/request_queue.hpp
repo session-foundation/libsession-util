@@ -20,8 +20,9 @@ private:
     
 public:
     RequestQueue(std::shared_ptr<oxen::quic::Loop> loop, std::chrono::milliseconds check_frequency) : _loop{loop}, _check_frequency{check_frequency} {};
+    ~RequestQueue();
     
-    bool is_empty() const { _queue.empty(); };
+    bool is_empty() const { return _queue.empty(); };
 
     void add(Request request, network_response_callback_t callback);
     void add_front(std::pair<Request, network_response_callback_t> req_pair);

@@ -90,7 +90,7 @@ class SnodePool {
     std::optional<std::string> _current_snode_cache_refresh_id;
     int _snode_cache_refresh_failure_count = 0;
     std::vector<service_node> _refresh_candidate_nodes;
-    std::shared_ptr<std::vector<std::vector<service_node>>> _snode_refresh_results;
+    std::vector<std::vector<std::byte>> _snode_refresh_results;
     std::vector<std::function<void()>> _after_snode_cache_refresh;
 
     // Disk I/O functions
@@ -101,7 +101,7 @@ class SnodePool {
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
     void _launch_next_refresh_request(bool is_bootstrap_request);
     void _retry_refresh_request(bool is_bootstrap_request);
-    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<service_node>> raw_results);
+    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results);
 };
 
 }  // namespace session::network

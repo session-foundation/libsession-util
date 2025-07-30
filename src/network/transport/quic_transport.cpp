@@ -24,7 +24,7 @@ constexpr auto ALPN = "oxenstorage";
 
 QuicTransport::QuicTransport(config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop) : _config{std::move(config)}, _loop{loop} {
     _endpoint = quic::Endpoint::endpoint(
-        *loop,
+        *_loop,
         quic::Address{"0.0.0.0", 0},
         quic::opt::alpns{ALPN},
         (config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{} : std::nullopt));
@@ -105,7 +105,7 @@ void QuicTransport::_establish_connection(const service_node& target_node, const
     const auto target_pubkey_hex = oxenc::to_hex(target_node.view_remote_key());
     auto conn_key_pair = ed25519::ed25519_key_pair();
     auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
-    auto remote = oxen::quic::RemoteAddress{target_node.view_remote_key(), target_node.host(), target_node.port()};
+    auto remote = oxen::quic::RemoteAddress{target_node.view_remote_key(), target_node.host(), target_node.omq_port};
 
     log::debug(cat, "[QuicTransport Request {}] Establishing new connection to {}", initiating_req_id, target_node.to_string());
     _endpoint->connect(

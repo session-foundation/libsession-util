@@ -47,17 +47,6 @@ namespace {
       public:
         load_cache_exception(std::string message) : std::runtime_error(message) {}
     };
-    class status_code_exception : public std::runtime_error {
-      public:
-        int16_t status_code;
-        std::vector<std::pair<std::string, std::string>> headers;
-
-        status_code_exception(
-                int16_t status_code,
-                std::vector<std::pair<std::string, std::string>> headers,
-                std::string message) :
-                std::runtime_error(message), status_code{status_code}, headers{headers} {}
-    };
 
     constexpr int16_t error_network_suspended = -10001;
     constexpr int16_t error_building_onion_request = -10002;
@@ -151,115 +140,25 @@ namespace {
         return result;
     }
 
-    service_node node_from_json(nlohmann::json json) {
-        auto pk_ed = json["pubkey_ed25519"].get<std::string_view>();
-        if (pk_ed.size() != 64 || !oxenc::is_hex(pk_ed))
-            throw std::invalid_argument{
-                    "Invalid service node json: pubkey_ed25519 is not a valid, hex pubkey"};
-
-        // When parsing a node from JSON it'll generally be from the 'get_swarm` endpoint or a 421
-        // error neither of which contain the `storage_server_version` - luckily we don't need the
-        // version for these two cases so can just default it to `0`
-        std::vector<int> storage_server_version = {0};
-        if (json.contains("storage_server_version")) {
-            if (json["storage_server_version"].is_array()) {
-                if (json["storage_server_version"].size() > 0) {
-                    // Convert the version to a string and parse it back into a version code to
-                    // ensure the version formats remain consistent throughout
-                    storage_server_version = json["storage_server_version"].get<std::vector<int>>();
-                    storage_server_version =
-                            parse_version("{}"_format(fmt::join(storage_server_version, ".")));
-                }
-            } else
-                storage_server_version =
-                        parse_version(json["storage_server_version"].get<std::string>());
-        }
-
-        std::string ip;
-        if (json.contains("public_ip"))
-            ip = json["public_ip"].get<std::string>();
-        else
-            ip = json["ip"].get<std::string>();
-
-        if (ip == "0.0.0.0")
-            throw std::runtime_error{"Invalid IP address"};
-
-        uint16_t port;
-        if (json.contains("storage_lmq_port"))
-            port = json["storage_lmq_port"].get<uint16_t>();
-        else
-            port = json["port_omq"].get<uint16_t>();
-
-        if (port == 0)
-            throw std::runtime_error{"Invalid lmq port"};
-
-        swarm_id_t swarm_id = INVALID_SWARM_ID;
-        if (json.contains("swarm_id"))
-            swarm_id = json["swarm_id"].get<swarm_id_t>();
-
-        return {oxenc::from_hex(pk_ed), storage_server_version, swarm_id, ip, port};
-    }
-
-    service_node node_from_disk(std::string_view str, bool can_ignore_version = false) {
-        // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
-        auto parts = split(str, "|");
-        if (parts.size() != 5)
-            throw std::invalid_argument("Invalid service node serialisation: {}"_format(str));
-        if (parts[3].size() != 64 || !oxenc::is_hex(parts[3]))
-            throw std::invalid_argument{
-                    "Invalid service node serialisation: pubkey is not hex or has wrong size"};
-
-        uint16_t port;
-        if (!quic::parse_int(parts[1], port))
-            throw std::invalid_argument{"Invalid service node serialization: invalid port"};
-
-        std::vector<int> storage_server_version = parse_version(parts[2]);
-        if (!can_ignore_version && storage_server_version == std::vector<int>{0})
-            throw std::invalid_argument{"Invalid service node serialization: invalid version"};
-
-        swarm_id_t swarm_id = INVALID_SWARM_ID;
-        quic::parse_int(parts[4], swarm_id);
-
-        return {
-                oxenc::from_hex(parts[3]),  // ed25519_pubkey
-                storage_server_version,     // storage_server_version
-                swarm_id,                   // swarm_id
-                std::string(parts[0]),      // ip
-                port,                       // port
-        };
-    }
-    const std::vector<service_node> seed_nodes_testnet{node_from_disk(
+    const std::vector<service_node> seed_nodes_testnet{service_node::legacy_from_disk(
             "23.88.6.250|35420|2.10.0|"
             "decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a|"sv)};  // lokinet one
-    // node_from_disk("144.76.164.202|35400|2.8.0|" // This is the original one
+    // service_node::legacy_from_disk("144.76.164.202|35400|2.8.0|" // This is the original one
     //                "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
     const std::vector<service_node> seed_nodes_mainnet{
-            node_from_disk("144.76.164.202|20200|2.8.0|"
+            service_node::legacy_from_disk("144.76.164.202|20200|2.8.0|"
                            "1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef|"sv),
-            node_from_disk("88.99.102.229|20201|2.8.0|"
+            service_node::legacy_from_disk("88.99.102.229|20201|2.8.0|"
                            "1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7ce|"sv),
-            node_from_disk("195.16.73.17|20202|2.8.0|"
+            service_node::legacy_from_disk("195.16.73.17|20202|2.8.0|"
                            "1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e06199919f|"sv),
-            node_from_disk("104.194.11.120|20203|2.8.0|"
+            service_node::legacy_from_disk("104.194.11.120|20203|2.8.0|"
                            "1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d78b|"sv),
-            node_from_disk("104.194.8.115|20204|2.8.0|"
+            service_node::legacy_from_disk("104.194.8.115|20204|2.8.0|"
                            "1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7b0|"sv)};
     constexpr auto file_server = "filev2.getsession.org"sv;
     constexpr auto file_server_pubkey =
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
-
-    std::string node_to_disk(service_node node) {
-        // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
-        auto ed25519_pubkey_hex = oxenc::to_hex(node.view_remote_key());
-
-        return fmt::format(
-                "{}|{}|{}|{}|{}",
-                node.host(),
-                node.port(),
-                "{}"_format(fmt::join(node.storage_server_version, ".")),
-                ed25519_pubkey_hex,
-                node.swarm_id);
-    }
 
     session::network::x25519_pubkey compute_xpk(std::span<const unsigned char> ed25519_pk) {
         std::array<unsigned char, 32> xpk;
@@ -326,8 +225,10 @@ namespace detail {
         while (!node.is_finished()) {
             try {
                 auto node_consumer = node.consume_dict_consumer();
-                auto pubkey_ed25519 =
-                        oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
+                auto pubkey_ed25519 = consume_string(node_consumer, "pubkey_ed25519");
+                std::vector<unsigned char> pubkey;
+                pubkey.reserve(32);
+                oxenc::from_hex(pubkey_ed25519.begin(), pubkey_ed25519.end(), std::back_inserter(pubkey));
                 auto public_ip = consume_string(node_consumer, "public_ip");
                 auto storage_lmq_port =
                         consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
@@ -338,21 +239,24 @@ namespace detail {
                 if (storage_lmq_port == 0)
                     throw std::runtime_error{"Invalid lmq port"};
 
-                std::vector<int> storage_server_version;
+                std::array<uint16_t, 3> storage_server_version{0, 0, 0};
                 node_consumer.skip_until("storage_server_version");
                 auto version_consumer = node_consumer.consume_list_consumer();
                 auto swarm_id = consume_integer<uint64_t>(node_consumer, "swarm_id");
 
-                while (!version_consumer.is_finished()) {
-                    storage_server_version.emplace_back(version_consumer.consume_integer<int>());
+                size_t version_index = 0;
+                while (!version_consumer.is_finished() && version_index < 3) {
+                    storage_server_version[version_index] = version_consumer.consume_integer<uint16_t>();
+                    ++version_index;
                 }
 
                 result.emplace_back(
-                        pubkey_ed25519,
+                        std::move(pubkey),
+                        quic::ipv4{public_ip},
+                        0,
+                        storage_lmq_port,
                         storage_server_version,
-                        swarm_id,
-                        public_ip,
-                        storage_lmq_port);
+                        swarm_id);
             } catch (const std::exception& e) {
                 log::warning(cat, "Ignoring invalid snode: {}.", e.what());
             }
@@ -373,7 +277,7 @@ namespace detail {
         std::vector<service_node> result;
         for (auto& snode : result_json["service_node_states"])
             try {
-                result.emplace_back(node_from_json(snode));
+                result.emplace_back(service_node::legacy_from_json(snode));
             } catch (const std::exception& e) {
                 log::warning(cat, "Ignoring invalid snode: {}.", e.what());
             }
@@ -411,16 +315,8 @@ namespace detail {
             std::vector<session::network::service_node> nodes) {
         std::vector<network_service_node> converted_nodes;
         for (auto& node : nodes) {
-            auto ed25519_pubkey_hex = oxenc::to_hex(node.view_remote_key());
-            auto ipv4 = node.to_ipv4();
             network_service_node converted_node;
-            converted_node.ip[0] = (ipv4.addr >> 24) & 0xFF;
-            converted_node.ip[1] = (ipv4.addr >> 16) & 0xFF;
-            converted_node.ip[2] = (ipv4.addr >> 8) & 0xFF;
-            converted_node.ip[3] = ipv4.addr & 0xFF;
-            strncpy(converted_node.ed25519_pubkey_hex, ed25519_pubkey_hex.c_str(), 64);
-            converted_node.ed25519_pubkey_hex[64] = '\0';  // Ensure null termination
-            converted_node.quic_port = node.port();
+            node.into(converted_node);
             converted_nodes.push_back(converted_node);
         }
 
@@ -475,7 +371,7 @@ std::string onion_path::to_string() const {
             nodes.begin(),
             nodes.end(),
             std::back_inserter(node_descriptions),
-            [](const service_node& node) { return node.to_string(); });
+            [](const service_node& node) { return node.to_omq_string(); });
 
     return "{}"_format(fmt::join(node_descriptions, ", "));
 }
@@ -589,7 +485,7 @@ void Network::load_cache_from_disk() {
 
             while (std::getline(file, line)) {
                 try {
-                    loaded_cache.push_back(node_from_disk(line));
+                    loaded_cache.push_back(service_node::legacy_from_disk(line));
                 } catch (...) {
                     ++invalid_entries;
                 }
@@ -667,7 +563,7 @@ void Network::disk_write_thread_loop() {
                     {
                         std::stringstream ss;
                         for (auto& snode : snode_cache_write)
-                            ss << node_to_disk(snode) << '\n';
+                            ss << snode.legacy_to_disk() << '\n';
 
                         std::ofstream file(pool_tmp, std::ios::binary);
                         file << ss.rdbuf();
@@ -825,17 +721,17 @@ std::vector<service_node> Network::get_unused_nodes() {
 
     // Exclude unused connections
     for (const auto& conn_info : unused_connections)
-        node_ips_to_exlude.emplace_back(conn_info.node.to_ipv4());
+        node_ips_to_exlude.emplace_back(conn_info.node.ip);
 
     // Exclude in progress connections
     for (const auto& [request_id, node] : in_progress_connections)
-        node_ips_to_exlude.emplace_back(node.to_ipv4());
+        node_ips_to_exlude.emplace_back(node.ip);
 
     // Exclude pending requests
     for (const auto& [path_type, path_type_requests] : request_queue)
         for (const auto& [info, callback] : path_type_requests)
             if (auto* dest = std::get_if<service_node>(&info.destination))
-                node_ips_to_exlude.emplace_back(dest->to_ipv4());
+                node_ips_to_exlude.emplace_back(dest->ip);
 
     // Exclude any nodes which have surpassed the failure threshold
     for (const auto& [node_string, failure_count] : snode_failure_counts)
@@ -862,7 +758,7 @@ std::vector<service_node> Network::get_unused_nodes() {
                     return std::find(
                                    node_ips_to_exlude.begin(),
                                    node_ips_to_exlude.end(),
-                                   node.to_ipv4()) == node_ips_to_exlude.end();
+                                   node.ip) == node_ips_to_exlude.end();
                 });
 
     // Shuffle the `result` so anything that uses it would get random nodes
@@ -899,8 +795,8 @@ void Network::establish_connection(
     // address.to_network_address(true);
     //  auto snode_address = "55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo.snode";
     auto snode_address = address.to_network_address(true);
-    auto test_port = target.port();  // 35519;
     // TODO: Need to ensure this exists
+    auto test_port = target.omq_port;  // 35519;
     lokinet->establish_udp(
             snode_address,
             test_port,  // target.port(),
@@ -1014,7 +910,7 @@ void Network::establish_connection(
                                 // threshold so it won't be used for subsequent requests
                                 if (error_code ==
                                     static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
-                                    snode_failure_counts[target.to_string()] =
+                                    snode_failure_counts[target.to_omq_string()] =
                                             snode_failure_threshold;
                             });
                         });
@@ -1025,7 +921,7 @@ void Network::establish_connection(
                 log::info(
                         cat,
                         "Unable to establish lokinet UDP connection to {} for {}.",
-                        target.to_string(),
+                        target.to_omq_string(),
                         id);
 
                 loop->call([&] {
@@ -1085,7 +981,7 @@ void Network::establish_and_store_connection(std::string path_id) {
 
     // Try to establish a new connection to the target (this has a 3s handshake timeout as we
     // wouldn't want to use any nodes which take longer than that anyway)
-    log::info(cat, "Establishing connection to {} for {}.", target_node.to_string(), path_id);
+    log::info(cat, "Establishing connection to {} for {}.", target_node.to_omq_string(), path_id);
     in_progress_connections.emplace(path_id, target_node);
 
     establish_connection(
@@ -1101,7 +997,7 @@ void Network::establish_and_store_connection(std::string path_id) {
                     log::error(
                             cat,
                             "Failed to connect to {}, will try another after {}ms.",
-                            target_node.to_string(),
+                            target_node.to_omq_string(),
                             connection_retry_delay.count());
                     return loop->call_later(connection_retry_delay, [this, path_id]() {
                         establish_and_store_connection(path_id);
@@ -1109,7 +1005,7 @@ void Network::establish_and_store_connection(std::string path_id) {
                 }
 
                 // We were able to connect to the node so add it to the unused_connections queue
-                log::info(cat, "Connection to {} valid for {}.", target_node.to_string(), path_id);
+                log::info(cat, "Connection to {} valid for {}.", target_node.to_omq_string(), path_id);
                 unused_connections.emplace_back(info);
 
                 // Kick off the next pending path build since we now have a valid connection
@@ -1525,7 +1421,7 @@ void Network::build_path(std::string path_id, PathType path_type) {
         // Ensure we don't put two nodes with the same IP into the same path
         auto snode_with_ip_it = std::find_if(
                 path_nodes.begin(), path_nodes.end(), [&node](const auto& existing_node) {
-                    return existing_node.to_ipv4() == node.to_ipv4();
+                    return existing_node.ip == node.ip;
                 });
 
         if (snode_with_ip_it == path_nodes.end())
@@ -1565,10 +1461,10 @@ void Network::build_path(std::string path_id, PathType path_type) {
     // the final path
     std::vector<oxen::quic::ipv4> path_ips;
     for (const auto& node : path_nodes)
-        path_ips.emplace_back(node.to_ipv4());
+        path_ips.emplace_back(node.ip);
 
     std::erase_if(unused_nodes, [&path_ips](const auto& node) {
-        return std::find(path_ips.begin(), path_ips.end(), node.to_ipv4()) != path_ips.end();
+        return std::find(path_ips.begin(), path_ips.end(), node.ip) != path_ips.end();
     });
 
     // If there are pending requests which this path is valid for then resume them
@@ -2753,7 +2649,7 @@ void Network::handle_errors(
                     "Request {} failed but {} path with guard {} already dropped.",
                     info.request_id,
                     path_name,
-                    conn_info.node.to_string());
+                    conn_info.node.to_omq_string());
 
             if (handle_response)
                 (*handle_response)(false, timeout, status_code, headers, response);
@@ -2795,7 +2691,7 @@ void Network::handle_errors(
 
                 // If we get an explicit node failure then we should just immediately drop it and
                 // try to repair the existing path by replacing the bad node with another one
-                snode_failure_counts[snode_it->to_string()] = snode_failure_threshold;
+                snode_failure_counts[snode_it->to_omq_string()] = snode_failure_threshold;
 
                 try {
                     // If the node that's gone bad is the guard node then we just have to
@@ -2844,15 +2740,15 @@ void Network::handle_errors(
         // invalid) and increment the failure count of each node in the path)
         if (updated_path.failure_count >= path_failure_threshold) {
             for (auto& it : updated_path.nodes)
-                ++snode_failure_counts[it.to_string()];
+                ++snode_failure_counts[it.to_omq_string()];
 
             // Set the failure count of the guard node to match the threshold so we don't use it
             // again until we refresh the cache
-            snode_failure_counts[updated_path.nodes[0].to_string()] = snode_failure_threshold;
+            snode_failure_counts[updated_path.nodes[0].to_omq_string()] = snode_failure_threshold;
         } else if (updated_path.nodes.size() < path_size)
             // triggered when trying to establish a new path and, as such, we should increase
             // the failure count of the guard node since it is probably invalid
-            ++snode_failure_counts[updated_path.nodes[0].to_string()];
+            ++snode_failure_counts[updated_path.nodes[0].to_omq_string()];
     }
 
     // Drop the path if invalid (and currently an active path)
@@ -3043,16 +2939,8 @@ LIBSESSION_C_API void network_send_onion_request_to_snode_destination(
             request_and_path_build_timeout =
                     std::chrono::milliseconds{request_and_path_build_timeout_ms};
 
-        std::array<uint8_t, 4> ip;
-        std::memcpy(ip.data(), node.ip, ip.size());
-
         unbox(network).send_onion_request(
-                service_node{
-                        oxenc::from_hex({node.ed25519_pubkey_hex, 64}),
-                        {0},
-                        INVALID_SWARM_ID,
-                        "{}"_format(fmt::join(ip, ".")),
-                        node.quic_port},
+                service_node::from(node),
                 body,
                 swarm_pubkey,
                 [cb = std::move(callback), ctx](

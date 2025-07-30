@@ -19,14 +19,19 @@ std::ifstream open_for_reading(const fs::path& filename) {
     return in;
 }
 
-std::string read_whole_file(const fs::path& filename) {
+std::vector<std::byte> read_whole_file(const fs::path& filename) {
     auto in = open_for_reading(filename);
-    std::string contents;
     in.seekg(0, std::ios::end);
     auto size = in.tellg();
     in.seekg(0, std::ios::beg);
-    contents.resize(size);
-    in.read(contents.data(), size);
+
+    if (size <= 0)
+        return {};
+
+    std::vector<std::byte> contents(static_cast<size_t>(size));
+    if (!in.read(reinterpret_cast<char*>(contents.data()), size))
+        return {};
+
     return contents;
 }
 

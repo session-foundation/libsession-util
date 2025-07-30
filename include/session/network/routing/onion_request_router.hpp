@@ -16,6 +16,7 @@ namespace session::network {
 namespace config {
     struct OnionRequestRouterConfig {
         network::opt::retry_delay retry_delay;
+        std::chrono::milliseconds request_timeout_check_frequency;
         
         uint8_t path_length;
         uint8_t path_failure_threshold;
@@ -40,8 +41,8 @@ class OnionRequestRouter : public IRouter {
 private:
     config::OnionRequestRouterConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
-    SnodePool& _snode_pool;
-    std::shared_ptr<ITransport> _transport;
+    std::weak_ptr<SnodePool> _snode_pool;
+    std::weak_ptr<ITransport> _transport;
 
     std::unordered_map<RequestCategory, std::vector<OnionPath>> _paths;
     std::unordered_map<RequestCategory, std::vector<OnionPath>> _paths_pending_drop;
@@ -55,10 +56,8 @@ public:
     OnionRequestRouter(
             config::OnionRequestRouterConfig config,
             std::shared_ptr<oxen::quic::Loop> loop,
-            SnodePool& snode_pool,
-            std::shared_ptr<ITransport> transport);
-
-    ~OnionRequestRouter() override;
+            std::weak_ptr<SnodePool> snode_pool,
+            std::weak_ptr<ITransport> transport);
 
     void send_request(Request request, network_response_callback_t callback) override;
 
