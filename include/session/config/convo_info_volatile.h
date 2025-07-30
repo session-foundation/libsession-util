@@ -368,7 +368,6 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_legacy_group(
 ///     [in]    config_object*                      conf,
 ///     [out]   convo_info_volatile_blinded_1to1*   convo,
 ///     [in]    const char*                         blinded_session_id
-///     [in]    bool                                legacy_blinding
 /// );
 /// ```
 ///
@@ -376,15 +375,13 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_legacy_group(
 /// - `conf` -- [in] Pointer to the config object
 /// - `convo` -- [out] Pointer to conversation info
 /// - `blinded_session_id` -- [in] Null terminated hex string of the session_id
-/// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
 ///
 /// Outputs:
 /// - `bool` - Returns true if the conversation exists
 LIBSESSION_EXPORT bool convo_info_volatile_get_blinded_1to1(
         config_object* conf,
         convo_info_volatile_blinded_1to1* convo,
-        const char* blinded_session_id,
-        bool legacy_blinding) LIBSESSION_WARN_UNUSED;
+        const char* blinded_session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_get_or_construct_blinded_1to1
 ///
@@ -405,7 +402,6 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_blinded_1to1(
 ///     [in]    config_object*                      conf,
 ///     [out]   convo_info_volatile_blinded_1to1*   convo,
 ///     [in]    const char*                         blinded_session_id
-///     [in]    bool                                legacy_blinding
 /// );
 /// ```
 ///
@@ -413,15 +409,13 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_blinded_1to1(
 /// - `conf` -- [in] Pointer to the config object
 /// - `convo` -- [out] Pointer to conversation info
 /// - `blinded_session_id` -- [in] Null terminated hex string of the blinded session id
-/// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy blinding
 ///
 /// Outputs:
 /// - `bool` - Returns true if the conversation exists
 LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_blinded_1to1(
         config_object* conf,
         convo_info_volatile_blinded_1to1* convo,
-        const char* blinded_session_id,
-        bool legacy_blinding) LIBSESSION_WARN_UNUSED;
+        const char* blinded_session_id) LIBSESSION_WARN_UNUSED;
 
 /// API: convo_info_volatile/convo_info_volatile_set_1to1
 ///
@@ -630,19 +624,17 @@ LIBSESSION_EXPORT bool convo_info_volatile_erase_legacy_group(
 /// BOOL convo_info_volatile_erase_blinded_1to1(
 ///     [in]    config_object*  conf,
 ///     [in]    const char*     blinded_session_id
-///     [in]    bool            legacy_blinding
 /// );
 /// ```
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 /// - `blinded_session_id` -- [in] Null terminated hex string
-/// - `legacy_blinding` -- flag indicating whether the blinded contact used legacy blinding
 ///
 /// Outputs:
 /// - `bool` - Returns true if conversation was found and removed
 LIBSESSION_EXPORT bool convo_info_volatile_erase_blinded_1to1(
-        config_object* conf, const char* blinded_session_id, bool legacy_blinding);
+        config_object* conf, const char* blinded_session_id);
 
 /// API: convo_info_volatile/convo_info_volatile_size
 ///
