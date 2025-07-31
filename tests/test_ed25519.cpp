@@ -67,6 +67,61 @@ TEST_CASE("Ed25519 seed for private key", "[ed25519][seed]") {
           "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876");
 }
 
+TEST_CASE("Ed25519 pro key pair generation seed", "[ed25519][keypair]") {
+    using namespace session;
+
+    // Test vectors generated from Python
+    //
+    // clang-format off
+    //
+    //   import nacl.bindings
+    //   import hashlib
+    //   import os
+    //
+    //   seed0                = os.urandom(32)
+    //   seed1                = hashlib.blake2b(seed0, key=b'SessionProRandom', digest_size=32).digest()
+    //   (pkey, skey)         = nacl.bindings.crypto_sign_seed_keypair(seed=seed0)
+    //   (pro_pkey, pro_skey) = nacl.bindings.crypto_sign_seed_keypair(seed=seed1)
+    //
+    //   print(f'Seed1:   {seed1.hex()}')
+    //   print(f'Pro:     {bytes(pro_skey)[:32].hex()} / {bytes(pro_pkey).hex()}')
+    //
+    // Output
+    //
+    //   Seed0:   e5481635020d6f7b327e94e6d63e33a431fccabc4d2775845c43a8486a9f2884
+    //   Pro:     a4ec87e2346b25ee6394211cb682640a09dd8d297016fe241fe5b06fefef416c / b6d20c075eddd2edb69d4d7da9b7e580f187ce0537585da2b5e454b77980d0c8
+    //
+    //   Seed0:   743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84
+    //   Pro:     7da256ba427cf5419cefea81f8ebb3395c261e4dfc2c91ee4d3ce9def67aa21c / 539d0a3be9658ebb6ba3ce97b25d4f6b716f7ef6d6ae6343bd0733519f5a51e8
+    //
+    // clang-format on
+
+    auto ed_seed1 = "e5481635020d6f7b327e94e6d63e33a431fccabc4d2775845c43a8486a9f2884"_hexbytes;
+    auto ed_seed2 = "743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84"_hexbytes;
+    auto ed_seed_invalid = "010203040506070809"_hexbytes;
+
+    auto kp1 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(to_span(ed_seed1));
+    auto kp2 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(to_span(ed_seed2));
+    CHECK_THROWS(session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(to_span(ed_seed_invalid)));
+
+    CHECK(kp1.first.size() == 32);
+    CHECK(kp1.second.size() == 64);
+    CHECK(kp1.first != kp2.first);
+    CHECK(kp1.second != kp2.second);
+    CHECK(oxenc::to_hex(kp1.first) == "b6d20c075eddd2edb69d4d7da9b7e580f187ce0537585da2b5e454b77980d0c8");
+    CHECK(oxenc::to_hex(kp2.first) == "539d0a3be9658ebb6ba3ce97b25d4f6b716f7ef6d6ae6343bd0733519f5a51e8");
+
+    auto kp_sk1 =
+        "a4ec87e2346b25ee6394211cb682640a09dd8d297016fe241fe5b06fefef416c"
+        "b6d20c075eddd2edb69d4d7da9b7e580f187ce0537585da2b5e454b77980d0c8";
+    auto kp_sk2 =
+        "7da256ba427cf5419cefea81f8ebb3395c261e4dfc2c91ee4d3ce9def67aa21c"
+        "539d0a3be9658ebb6ba3ce97b25d4f6b716f7ef6d6ae6343bd0733519f5a51e8";
+
+    CHECK(oxenc::to_hex(kp1.second) == kp_sk1);
+    CHECK(oxenc::to_hex(kp2.second) == kp_sk2);
+}
+
 TEST_CASE("Ed25519", "[ed25519][signature]") {
     using namespace session;
 
