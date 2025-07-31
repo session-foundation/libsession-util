@@ -39,6 +39,7 @@ struct OnionPath {
 
 class OnionRequestRouter : public IRouter {
 private:
+    bool _ready = false;
     config::OnionRequestRouterConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::weak_ptr<SnodePool> _snode_pool;
@@ -63,11 +64,11 @@ public:
 
 private:
     // All of the below functions should only be called from within `_loop`
-    
+    void _finish_setup();
     void _send_request_internal(Request request, network_response_callback_t callback);
 
     void _build_path(RequestCategory category, std::optional<std::string> initiating_req_id, const std::vector<service_node>& nodes_to_exclude);
-    void _on_guard_connection_established(const std::string& path_id, RequestCategory category, std::optional<std::string> initiating_req_id, bool success);
+    void _on_guard_connectivity_response(const std::string& path_id, RequestCategory category, std::optional<std::string> initiating_req_id, bool success);
 
     OnionPath* _find_valid_path(const Request& request);
 

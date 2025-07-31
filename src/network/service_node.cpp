@@ -179,20 +179,6 @@ std::string service_node::legacy_to_disk() const {
             swarm_id);
 }
 
-template<typename OutputIt>
-void service_node::to_disk(OutputIt out) const {
-    fmt::format_to(out,
-                  "{}|{}|{}|{}|{}.{}.{}|{}\n",
-                  oxenc::to_hex(view_remote_key()),
-                  host(),
-                  https_port,
-                  omq_port,
-                  storage_server_version[0],
-                  storage_server_version[1],
-                  storage_server_version[2],
-                  swarm_id);
-}
-
 service_node service_node::from_disk(std::string_view str) {
     // Format is "{ed_pubkey}|{ip}|{https_port}|{omq_port}|{version}|{swarm_id}"
     auto parts = split(str, "|");

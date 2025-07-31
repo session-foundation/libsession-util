@@ -95,10 +95,11 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
     }
 
     // No connection exists so we need to start a new one and queue the request
-    const std::string& initiating_req_id = request.request_id;
-    log::info(cat, "[QuicTransport Request {}] No connection to {}, initiating new connection.", initiating_req_id, target_node->to_string());
+    log::info(cat, "[QuicTransport Request {}] No connection to {}, initiating new connection.", request.request_id, target_node->to_string());
+    std::string initiating_req_id = request.request_id;
+    service_node target_node_copy = *target_node;
     _pending_requests[target_pubkey_hex].emplace_back(std::move(request), std::move(callback));
-    _establish_connection(*target_node, initiating_req_id);
+    _establish_connection(target_node_copy, initiating_req_id);
 }
 
 void QuicTransport::_establish_connection(const service_node& target_node, const std::string& initiating_req_id) {

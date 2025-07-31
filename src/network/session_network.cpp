@@ -237,8 +237,67 @@ LIBSESSION_C_API bool session_network_init(
         return set_error(error, std::invalid_argument{"network or config were null."});
     
     try {
-        // Build the configuration options
+        // Build the configuration options (ordered this way for the debug logs to make the most sense)
         std::vector<std::any> cpp_opts;
+
+        // Network ID
+        switch (config->netid) {
+            case SESSION_NETWORK_MAINNET: cpp_opts.emplace_back(opt::netid::mainnet()); break;
+            case SESSION_NETWORK_TESTNET: cpp_opts.emplace_back(opt::netid::testnet()); break;
+            case SESSION_NETWORK_DEVNET:
+                if (!config->devnet_seed_nodes || config->devnet_seed_nodes_size == 0)
+                    throw std::runtime_error("SESSION_NETWORK_DEVNET requires at least one seed node.");
+
+                std::vector<service_node> seed_nodes;
+                seed_nodes.reserve(config->devnet_seed_nodes_size);
+
+                for (size_t i = 0; i < config->devnet_seed_nodes_size; ++i)
+                    seed_nodes.push_back(service_node::from(config->devnet_seed_nodes[i]));
+                
+                cpp_opts.emplace_back(opt::netid::devnet(std::move(seed_nodes)));
+                break;
+        }
+
+        // Router
+        switch (config->router) {
+            case SESSION_NETWORK_ROUTER_ONION_REQUESTS: cpp_opts.emplace_back(opt::router::onion_requests()); break;
+            case SESSION_NETWORK_ROUTER_LOKINET: cpp_opts.emplace_back(opt::router::lokinet()); break;
+            case SESSION_NETWORK_ROUTER_DIRECT: cpp_opts.emplace_back(opt::router::direct()); break;
+        }
+
+        // Transport
+        switch (config->transport) {
+            case SESSION_NETWORK_TRANSPORT_QUIC:
+                cpp_opts.emplace_back(opt::transport::quic());
+                break;
+            
+            case SESSION_NETWORK_TRANSPORT_CALLBACKS:
+                if (!config->transport_callback)
+                    throw std::runtime_error("transport_callback must be set when using the CALLBACKS for sending requests.");
+
+                auto c_callback_ptr = config->transport_callback;
+                auto ctx = config->transport_callback_ctx;
+
+                opt::transport::network_callback_t cpp_callback = [c_callback_ptr, ctx](
+                    std::string url,
+                    std::string body,
+                    session::network::network_response_callback_t handle_response) {
+                        auto* c_response_handle = new session_response_handle_t{
+                            std::move(handle_response)
+                        };
+
+                        c_callback_ptr(
+                            url.c_str(),
+                            body.data(),
+                            body.size(),
+                            c_response_handle,
+                            ctx
+                        );
+                };
+
+                cpp_opts.emplace_back(opt::transport::callbacks(std::move(cpp_callback)));
+                break;
+        }
 
         if (!config->enforce_subnet_diversity)
             cpp_opts.emplace_back(opt::disable_subnet_diversity{});
@@ -265,29 +324,9 @@ LIBSESSION_C_API bool session_network_init(
         if (config->node_failure_threshold > 0)
             cpp_opts.emplace_back(opt::node_failure_threshold(config->node_failure_threshold));
 
-        // Network ID
-        switch (config->netid) {
-            case SESSION_NETWORK_MAINNET: cpp_opts.emplace_back(opt::netid::mainnet()); break;
-            case SESSION_NETWORK_TESTNET: cpp_opts.emplace_back(opt::netid::testnet()); break;
-            case SESSION_NETWORK_DEVNET:
-                if (!config->devnet_seed_nodes || config->devnet_seed_nodes_size == 0)
-                    throw std::runtime_error("SESSION_NETWORK_DEVNET requires at least one seed node.");
-
-                std::vector<service_node> seed_nodes;
-                seed_nodes.reserve(config->devnet_seed_nodes_size);
-
-                for (size_t i = 0; i < config->devnet_seed_nodes_size; ++i)
-                    seed_nodes.push_back(service_node::from(config->devnet_seed_nodes[i]));
-                
-                cpp_opts.emplace_back(opt::netid::devnet(std::move(seed_nodes)));
-                break;
-        }
-
-        // Router
+        // Router-specific settings
         switch (config->router) {
             case SESSION_NETWORK_ROUTER_ONION_REQUESTS:
-                cpp_opts.emplace_back(opt::router::onion_requests());
-
                 // Process the Onion Request options since we are using them
                 if (config->path_length > 0)
                     cpp_opts.emplace_back(opt::path_length(config->path_length));
@@ -318,14 +357,12 @@ LIBSESSION_C_API bool session_network_init(
                 // Process the Lokinet options since we are using them
                 if (config->path_length > 0)
                     cpp_opts.emplace_back(opt::path_length(config->path_length));
-
-                cpp_opts.emplace_back(opt::router::lokinet());
                 break;
 
-            case SESSION_NETWORK_ROUTER_DIRECT: cpp_opts.emplace_back(opt::router::direct()); break;
+            case SESSION_NETWORK_ROUTER_DIRECT: break;
         }
         
-        // Transport
+        // Transport-specific settings
         switch (config->transport) {
             case SESSION_NETWORK_TRANSPORT_QUIC:
                 if (config->quic_handshake_timeout_seconds > 0)
@@ -337,34 +374,9 @@ LIBSESSION_C_API bool session_network_init(
                 if (config->quic_disable_mtu_discovery)
                     cpp_opts.emplace_back(opt::quic_disable_mtu_discovery{});
                 
-                cpp_opts.emplace_back(opt::transport::quic()); break;
-            
-            case SESSION_NETWORK_TRANSPORT_CALLBACKS:
-                if (!config->transport_callback)
-                    throw std::runtime_error("transport_callback must be set when using the CALLBACKS for sending requests.");
-
-                auto c_callback_ptr = config->transport_callback;
-                auto ctx = config->transport_callback_ctx;
-
-                opt::transport::network_callback_t cpp_callback = [c_callback_ptr, ctx](
-                    std::string url,
-                    std::string body,
-                    session::network::network_response_callback_t handle_response) {
-                        auto* c_response_handle = new session_response_handle_t{
-                            std::move(handle_response)
-                        };
-
-                        c_callback_ptr(
-                            url.c_str(),
-                            body.data(),
-                            body.size(),
-                            c_response_handle,
-                            ctx
-                        );
-                };
-
-                cpp_opts.emplace_back(opt::transport::callbacks(std::move(cpp_callback)));
                 break;
+            
+            case SESSION_NETWORK_TRANSPORT_CALLBACKS: break;
         }
         
         // Construct the Network instance

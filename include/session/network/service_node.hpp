@@ -1,6 +1,8 @@
 #pragma once
 
+#include <fmt/ranges.h>
 #include <nlohmann/json.hpp>
+#include <oxenc/hex.h>
 #include <oxen/quic.hpp>
 
 #include "session/network/service_node.h"
@@ -56,7 +58,19 @@ struct service_node {
     void into(network_service_node& n) const;
     
     template<typename OutputIt>
-    void to_disk(OutputIt out) const;
+    void to_disk(OutputIt out) const {
+        fmt::format_to(out,
+                  "{}|{}|{}|{}|{}.{}.{}|{}\n",
+                  oxenc::to_hex(view_remote_key()),
+                  host(),
+                  https_port,
+                  omq_port,
+                  storage_server_version[0],
+                  storage_server_version[1],
+                  storage_server_version[2],
+                  swarm_id);
+    }
+
     static service_node from_disk(std::string_view str);
     static std::pair<std::vector<service_node>, int> process_snode_cache_bin(std::vector<std::byte> cache_bin);
 
