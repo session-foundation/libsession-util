@@ -19,8 +19,10 @@ TEST_CASE("Ed25519 key pair generation", "[ed25519][keypair]") {
 TEST_CASE("Ed25519 key pair generation seed", "[ed25519][keypair]") {
     using namespace session;
 
-    constexpr auto ed_seed1 = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_u;
-    constexpr auto ed_seed2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_u;
+    constexpr auto ed_seed1 =
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_u;
+    constexpr auto ed_seed2 =
+            "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hex_u;
     constexpr auto ed_seed_invalid = "010203040506070809"_hex_u;
 
     auto [pk1, sk1] = session::ed25519::ed25519_key_pair(ed_seed1);
