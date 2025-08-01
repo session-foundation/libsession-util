@@ -7,7 +7,6 @@
 #include <stdexcept>
 
 #include "session/export.h"
-
 #include "session/sodium_array.hpp"
 
 template <size_t N>
@@ -15,8 +14,7 @@ using uc32 = std::array<unsigned char, 32>;
 using uc64 = std::array<unsigned char, 64>;
 
 namespace {
-uc64 derived_ed25519_keypair(
-        std::span<const unsigned char> ed25519_seed, std::string_view key) {
+uc64 derived_ed25519_keypair(std::span<const unsigned char> ed25519_seed, std::string_view key) {
     if (ed25519_seed.size() != 32 && ed25519_seed.size() != 64)
         throw std::invalid_argument{
                 "Invalid ed25519_seed: expected 32 bytes or libsodium style 64 bytes seed"};
@@ -30,14 +28,14 @@ uc64 derived_ed25519_keypair(
             s2.size(),
             ed25519_seed.data(),
             ed25519_seed.size(),
-            reinterpret_cast<const unsigned char *>(key.data()),
+            reinterpret_cast<const unsigned char*>(key.data()),
             key.size());
     assert(hash_result == 0);  // This function can't return 0 unless misused
 
     auto [pubkey, privkey] = session::ed25519::ed25519_key_pair(s2);
     return privkey;
 }
-}
+}  // namespace
 
 namespace session::ed25519 {
 
