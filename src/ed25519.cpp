@@ -11,12 +11,8 @@
 #include "session/sodium_array.hpp"
 
 template <size_t N>
-using cleared_array = session::sodium_cleared<std::array<unsigned char, N>>;
-
 using uc32 = std::array<unsigned char, 32>;
 using uc64 = std::array<unsigned char, 64>;
-using cleared_uc32 = cleared_array<32>;
-using cleared_uc64 = cleared_array<64>;
 
 namespace {
 uc64 derived_ed25519_keypair(
@@ -28,7 +24,7 @@ uc64 derived_ed25519_keypair(
     // Construct seed for derived key
     //   new_seed = Blake2b32(ed25519_seed, key=<key>)
     //   b/B      = Ed25519FromSeed(new_seed)
-    cleared_uc32 s2 = {};
+    session::cleared_uc32 s2 = {};
     int hash_result = crypto_generichash_blake2b(
             s2.data(),
             s2.size(),
