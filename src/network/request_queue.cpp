@@ -33,7 +33,7 @@ void RequestQueue::add(Request request, network_response_callback_t callback) {
 }
 
 void RequestQueue::add_front(std::pair<Request, network_response_callback_t> req_pair) {
-    _loop->call([this, pair = std::move(req_pair)]() mutable {
+    _loop->call([this, pair = std::move(req_pair)] {
         _queue.emplace_front(std::move(pair));
         
         if (!_checker_active && pair.first.overall_timeout) {

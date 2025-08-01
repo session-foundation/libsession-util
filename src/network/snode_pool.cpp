@@ -130,8 +130,8 @@ void SnodePool::_load_from_disk() {
             log::warning(cat, "Skipped {} invalid entries in snode cache.", invalid_entries);
 
         std::shuffle(loaded_cache.begin(), loaded_cache.end(), csrng);
-        _snode_cache = loaded_cache;
-        _all_swarms = swarm::generate_swarms(loaded_cache);
+        _snode_cache = std::move(loaded_cache);
+        _all_swarms = swarm::generate_swarms(_snode_cache);
 
         log::info(cat, "Loaded cache of {} snodes, {} swarms.", _snode_cache.size(), _all_swarms.size());
     } catch (const std::exception& e) {
@@ -183,7 +183,7 @@ void SnodePool::_disk_write_loop() {
             // Make a local copy so that we can release the lock and not
             // worry about other threads wanting to change things
             auto path_to_write = _snode_cache_file_path;
-            auto snode_cache_write = std::move(_snode_cache);
+            auto snode_cache_write = _snode_cache;
 
             lock.unlock();
             {
@@ -289,7 +289,9 @@ void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
         std::string{"active_nodes_bin"},
         std::nullopt,
         RequestCategory::standard,
-        10s
+        10s,
+        std::nullopt,   // overall_timeout
+        true            // ephemeral_connection
     };
     
     fetcher_to_use(request, [this, request_id, is_bootstrap_request, total_required](bool success, bool timeout, int16_t status_code, std::vector<std::pair<std::string, std::string>> headers, std::optional<std::string> response) {
@@ -326,16 +328,16 @@ void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
             return;
         }
 
+        _snode_refresh_results.push_back(std::move(result));
         log::info(
             cat,
             "Received refresh result {}/{} for request ID {}.",
             _snode_refresh_results.size(),
             total_required,
             request_id);
-        _snode_refresh_results.push_back(std::move(result));
 
         // If we've received all the results then we need to process them and complete the refresh
-        if (_snode_refresh_results.size() >= _config.num_nodes_to_use_for_refresh) {
+        if (is_bootstrap_request || _snode_refresh_results.size() >= _config.num_nodes_to_use_for_refresh) {
             auto final_results = std::move(_snode_refresh_results);
             auto refresh_id = *_current_snode_cache_refresh_id;
             lock.unlock();  // Unlock so `_on_refresh_complete` can get it's own lock

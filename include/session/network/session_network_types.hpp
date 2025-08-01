@@ -91,6 +91,9 @@ struct Request {
     // Router-specific values
     std::optional<session::network::x25519_pubkey> swarm_pubkey;
 
+    // If true, the transport should not cache/pool the connection used for this request, this is for one-shot requests like bootstrapping.
+    bool ephemeral_connection;
+
     Request(
             std::string request_id,
             network_destination destination,
@@ -98,14 +101,16 @@ struct Request {
             std::optional<std::vector<unsigned char>> body,
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
-            std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt) :
+            std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
+            bool ephemeral_connection = false) :
             request_id{std::move(request_id)},
             destination{std::move(destination)},
             endpoint{std::move(endpoint)},
             body{std::move(body)},
             category{std::move(category)},
             request_timeout{std::move(request_timeout)},
-            overall_timeout{std::move(overall_timeout)} {}
+            overall_timeout{std::move(overall_timeout)},
+            ephemeral_connection{ephemeral_connection} {}
 
     std::chrono::milliseconds time_remaining() const {
         if (!overall_timeout)
