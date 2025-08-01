@@ -66,8 +66,8 @@ bool verify(
 ///   deterministic key from.
 ///
 /// Outputs:
-/// - The Master Session Pro ed25519 key
-std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>>
-ed25519_pro_key_pair_for_ed25519_seed(std::span<const unsigned char> ed25519_seed);
+/// - The libsodium-style Master Session Pro Ed25519 secret key, 64 bytes.
+std::array<unsigned char, 64> ed25519_pro_key_pair_for_ed25519_seed(
+        std::span<const unsigned char> ed25519_seed);
 
 }  // namespace session::ed25519

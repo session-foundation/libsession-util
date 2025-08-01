@@ -83,7 +83,7 @@ TEST_CASE("Ed25519 pro key pair generation seed", "[ed25519][keypair]") {
     //   (pkey, skey)         = nacl.bindings.crypto_sign_seed_keypair(seed=seed0)
     //   (pro_pkey, pro_skey) = nacl.bindings.crypto_sign_seed_keypair(seed=seed1)
     //
-    //   print(f'Seed1:   {seed1.hex()}')
+    //   print(f'Seed0:   {seed0.hex()}')
     //   print(f'Pro:     {bytes(pro_skey)[:32].hex()} / {bytes(pro_pkey).hex()}')
     //
     // Output
@@ -96,20 +96,16 @@ TEST_CASE("Ed25519 pro key pair generation seed", "[ed25519][keypair]") {
     //
     // clang-format on
 
-    auto ed_seed1 = "e5481635020d6f7b327e94e6d63e33a431fccabc4d2775845c43a8486a9f2884"_hexbytes;
-    auto ed_seed2 = "743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84"_hexbytes;
-    auto ed_seed_invalid = "010203040506070809"_hexbytes;
+    constexpr auto seed1 = "e5481635020d6f7b327e94e6d63e33a431fccabc4d2775845c43a8486a9f2884"_hex_u;
+    constexpr auto seed2 = "743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84"_hex_u;
+    constexpr auto seed_invalid = "010203040506070809"_hex_u;
 
-    auto kp1 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(to_span(ed_seed1));
-    auto kp2 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(to_span(ed_seed2));
-    CHECK_THROWS(session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(to_span(ed_seed_invalid)));
+    auto sk1 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(seed1);
+    auto sk2 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(seed2);
+    CHECK_THROWS(session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(seed_invalid));
 
-    CHECK(kp1.first.size() == 32);
-    CHECK(kp1.second.size() == 64);
-    CHECK(kp1.first != kp2.first);
-    CHECK(kp1.second != kp2.second);
-    CHECK(oxenc::to_hex(kp1.first) == "b6d20c075eddd2edb69d4d7da9b7e580f187ce0537585da2b5e454b77980d0c8");
-    CHECK(oxenc::to_hex(kp2.first) == "539d0a3be9658ebb6ba3ce97b25d4f6b716f7ef6d6ae6343bd0733519f5a51e8");
+    CHECK(sk1.size() == 64);
+    CHECK(sk1 != sk2);
 
     auto kp_sk1 =
         "a4ec87e2346b25ee6394211cb682640a09dd8d297016fe241fe5b06fefef416c"
@@ -118,8 +114,8 @@ TEST_CASE("Ed25519 pro key pair generation seed", "[ed25519][keypair]") {
         "7da256ba427cf5419cefea81f8ebb3395c261e4dfc2c91ee4d3ce9def67aa21c"
         "539d0a3be9658ebb6ba3ce97b25d4f6b716f7ef6d6ae6343bd0733519f5a51e8";
 
-    CHECK(oxenc::to_hex(kp1.second) == kp_sk1);
-    CHECK(oxenc::to_hex(kp2.second) == kp_sk2);
+    CHECK(oxenc::to_hex(sk1) == kp_sk1);
+    CHECK(oxenc::to_hex(sk2) == kp_sk2);
 }
 
 TEST_CASE("Ed25519", "[ed25519][signature]") {
