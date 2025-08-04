@@ -234,12 +234,22 @@ message ConfigurationMessage {
     optional bool   didApproveMe      = 7; // added for msg requests
   }
 
+  message ProProof {
+    required uint32 version           = 1;
+    required bytes  genIndexHash      = 2;
+    required bytes  rotatingPublicKey = 3;
+    required uint64 expiryUnixTs      = 4;
+    required bytes  sig               = 5;
+  }
+
   repeated ClosedGroup closedGroups   = 1;
   repeated string      openGroups     = 2;
   optional string      displayName    = 3;
   optional string      profilePicture = 4;
   optional bytes       profileKey     = 5;
   repeated Contact     contacts       = 6;
+  optional bytes       proRotatingKey = 7;
+  optional ProProof    proProof       = 8;
 }
 
 message ReceiptMessage {

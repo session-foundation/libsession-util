@@ -119,6 +119,29 @@ std::chrono::sys_seconds UserProfile::get_profile_updated() const {
     return std::chrono::sys_seconds{};
 }
 
+std::optional<Pro> UserProfile::get_pro_data() const {
+    std::optional<Pro> result = {};
+    if (const config::dict* s = data["s"].dict(); s) {
+        Pro pro = {};
+        if (pro.load(*s))
+            result = std::move(pro);
+    }
+    return result;
+}
+
+void UserProfile::set_pro_data(Pro const &pro) {
+    auto root = data["s"];
+    root["r"] = pro.rotating_privkey;
+
+    const Proof& pro_proof = pro.proof;
+    auto proof_dict = root["p"];
+    proof_dict["v"] = pro_proof.version;
+    proof_dict["g"] = pro_proof.gen_index_hash;
+    proof_dict["r"] = pro_proof.rotating_pubkey;
+    proof_dict["e"] = pro_proof.expiry_unix_ts.time_since_epoch().count();
+    proof_dict["s"] = pro_proof.sig;
+}
+
 extern "C" {
 
 using namespace session;

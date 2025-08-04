@@ -8,6 +8,7 @@
 #include "base.hpp"
 #include "namespaces.hpp"
 #include "profile_pic.hpp"
+#include "pro.hpp"
 
 namespace session::config {
 
@@ -24,6 +25,7 @@ using namespace std::literals;
 /// M - set to 1 if blinded message request retrieval is enabled, 0 if retrieval is *disabled*, and
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
+/// s - session pro data
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
@@ -31,7 +33,6 @@ using namespace std::literals;
 ///     when `T > t`).
 /// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
 ///    (automatically updates when calling `set_reupload_profile_pic`).
-
 class UserProfile : public ConfigBase {
 
   public:
@@ -166,7 +167,7 @@ class UserProfile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `int` - Returns a numeric representing prioritity
+    /// - `int` -- Returns a numeric representing prioritity
     int get_nts_priority() const;
 
     /// API: user_profile/UserProfile::set_nts_priority
@@ -186,7 +187,7 @@ class UserProfile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::optional<std::chrono::seconds>` - Returns the timestamp representing the message
+    /// - `std::optional<std::chrono::seconds>` -- Returns the timestamp representing the message
     /// expiry timer if the timer is set
     std::optional<std::chrono::seconds> get_nts_expiry() const;
 
@@ -242,6 +243,25 @@ class UserProfile : public ConfigBase {
     std::chrono::sys_seconds get_profile_updated() const;
 
     bool accepts_protobuf() const override { return true; }
+
+    /// API: user_profile/UserProfile::get_pro_data
+    ///
+    /// Get the Session Pro data if any, for the current user profile. This may be missing if the
+    /// user does not have any entitlement to Session Pro data.
+    ///
+    /// Inputs: None
+    std::optional<Pro> get_pro_data() const;
+
+    /// API: user_profile/UserProfile::set_pro_data
+    ///
+    /// Attach the Session Pro components to the user profile including the proof entitling the user
+    /// to use Session Pro features as well as the Ed25519 key pair known as the Rotating Session
+    /// Pro key authorised to use the proof.
+    ///
+    /// Inputs:
+    /// - `pro` -- The Session Pro components to assign to the current user profile. This will
+    ///   overwrite any existing Session Pro data if it exists. No verification of `pro` is done.
+    void set_pro_data(const Pro& pro);
 };
 
 }  // namespace session::config
