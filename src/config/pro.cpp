@@ -3,6 +3,7 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <session/config/pro.hpp>
+#include <session/sodium_array.hpp>
 
 #include "internal.hpp"
 

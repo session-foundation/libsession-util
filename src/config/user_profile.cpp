@@ -315,5 +315,4 @@ LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro
     std::memcpy(val.proof.sig.data(), pro->proof.sig, val.proof.sig.size());
     unbox<UserProfile>(conf)->set_pro_config(val);
 }
-
 }  // extern "C"

@@ -31,7 +31,7 @@ typedef struct pro_config {
 /// Outputs:
 /// - `bytes32` -- The 32 byte hash calculated from the proof
 LIBSESSION_EXPORT bool pro_config_verify_signature(
-        pro_config const* pro, uint8_t const* verify_pubkey, size_t verify_pubkey_len);
+        pro_pro_config const* pro, uint8_t const* verify_pubkey, size_t verify_pubkey_len);
 
 #ifdef __cplusplus
 }  // extern "C"
