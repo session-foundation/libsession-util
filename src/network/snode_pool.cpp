@@ -225,30 +225,36 @@ void SnodePool::_disk_write_loop() {
 
 void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) {
     const auto request_id = request_id_opt.value_or("RSC-" + random::random_base32(4));
-    std::unique_lock lock{_cache_mutex};
+    bool is_bootstrap = false;
+    uint8_t num_nodes_for_refresh = 0;
 
-    // Only allow a single cache refresh at a time
-    if (_current_snode_cache_refresh_id) {
-        log::debug(cat, "Ignoring request {} to refresh snode cache; a refresh is already in progress ({}).", request_id, *_current_snode_cache_refresh_id);
-        return;
-    }
+    {
+        std::unique_lock lock{_cache_mutex};
 
-    log::info(cat, "Starting snode cache refresh with request ID {}", request_id);
-    _current_snode_cache_refresh_id = request_id;
-    _snode_refresh_results.clear();
-    _refresh_candidate_nodes.clear();
+        // Only allow a single cache refresh at a time
+        if (_current_snode_cache_refresh_id) {
+            log::debug(cat, "Ignoring request {} to refresh snode cache; a refresh is already in progress ({}).", request_id, *_current_snode_cache_refresh_id);
+            return;
+        }
 
-    // If the cache is empty, cache refreshing is disabled, or it's smaller than `num_nodes_to_use_for_refresh` then we need to refresh from seed nodes (when fetching from seed nodes we only need to fetch from a single node so only kick off a single refresh request)
-    auto bootstrap_mode = (_snode_cache.empty() || _config.num_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.num_nodes_to_use_for_refresh);
+        log::info(cat, "Starting snode cache refresh with request ID {}", request_id);
+        _current_snode_cache_refresh_id = request_id;
+        _snode_refresh_results.clear();
+        _refresh_candidate_nodes.clear();
 
-    if (bootstrap_mode || !_standard_fetcher) {
-        if (!bootstrap_mode)
-            log::warning(cat, "No standard fetcher set, using bootstrap fetcher to fetch from seed nodes for cache refresh {}", request_id);
-        else
-            log::debug(cat, "Snode cache is insufficient, bootstrapping from seed nodes for refresh {}", request_id);
-        
-        _refresh_candidate_nodes = _config.seed_nodes;
+        // If we have no `_standard_fetcher`, cache refreshing is disabled, or the cache is smaller than `num_nodes_to_use_for_refresh` then we need to refresh from seed nodes (when fetching from seed nodes we only need to fetch from a single node so only kick off a single refresh request)
+        auto bootstrap_mode = (_config.num_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.num_nodes_to_use_for_refresh);
+        is_bootstrap = (!_standard_fetcher || bootstrap_mode);
+        num_nodes_for_refresh = (is_bootstrap ? 1 : _config.num_nodes_to_use_for_refresh);
+        _refresh_candidate_nodes = (is_bootstrap ? _config.seed_nodes : _snode_cache);
         std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
+
+        if (is_bootstrap && !bootstrap_mode)
+            log::warning(cat, "No standard fetcher set, using bootstrap fetcher to fetch from seed nodes for cache refresh {}", request_id);
+        else if (is_bootstrap)
+            log::debug(cat, "Snode cache is insufficient, bootstrapping from seed nodes for refresh {}", request_id);
+        else
+            log::debug(cat, "Performing cache refresh via standard fetcher using {} nodes for request ID {}", _config.num_nodes_to_use_for_refresh, request_id);
 
         // If we (somehow) have no candidate nodes then error and reset the state so we can try again later
         if (_refresh_candidate_nodes.empty()) {
@@ -256,33 +262,39 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
             _current_snode_cache_refresh_id.reset();
             return;
         }
+    }
 
-        _launch_next_refresh_request(true /* is_bootstrap_request */);
+    // Kick off the concurrent requests (if there are any)
+    for (uint8_t i = 0; i < num_nodes_for_refresh; ++i)
+        _launch_next_refresh_request(request_id, is_bootstrap);
+}
+
+void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool is_bootstrap_request) {
+    service_node target_node;
+    session::network::SnodePool::network_fetcher_t fetcher_to_use;
+
+    {
+        std::unique_lock lock{_cache_mutex};
+        if (!_current_snode_cache_refresh_id || _refresh_candidate_nodes.empty())
+            return;
+
+        target_node = _refresh_candidate_nodes.back();
+        _refresh_candidate_nodes.pop_back();
+        fetcher_to_use = (is_bootstrap_request ? _bootstrap_fetcher : *_standard_fetcher);
+    }
+
+    // If we somehow got into '_launch_next_refresh_request' for a standard request then we need to make sure '_standard_fetcher' was set
+    if (!fetcher_to_use) {
+        log::critical(cat, "[SnodePool]: No fetcher available, aborting refresh.");
+        std::unique_lock lock{_cache_mutex};
+        _current_snode_cache_refresh_id.reset();
+        _refresh_candidate_nodes.clear();
         return;
     }
 
-    // Otherwise we want to try to refresh using nodes from the existing cache
-    log::debug(cat, "Performing cache refresh via standard fetcher using {} nodes for request ID {}", _config.num_nodes_to_use_for_refresh, request_id);
-    _refresh_candidate_nodes = _snode_cache;
-    std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
+    // Construct and send the request
+    log::debug(cat, "Launching {}refresh request to {} for master request ID {}", (is_bootstrap_request ? "bootstrap " : ""), target_node.to_string(), request_id);
 
-    // Kick off the concurrent requests
-    for (uint8_t i = 0; i < _config.num_nodes_to_use_for_refresh; ++i)
-        _launch_next_refresh_request(false /* is_bootstrap_request */);
-}
-
-void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
-    if (!_current_snode_cache_refresh_id || _refresh_candidate_nodes.empty())
-        return;
-    
-    const std::string request_id = *_current_snode_cache_refresh_id;
-    const uint8_t total_required = (is_bootstrap_request ? 1 : _config.num_nodes_to_use_for_refresh);
-    auto target_node = _refresh_candidate_nodes.back();
-    _refresh_candidate_nodes.pop_back();
-    log::trace(cat, "Launching {}refresh request to {} for master request ID {}", (is_bootstrap_request ? "bootstrap " : ""), target_node.to_string(), request_id);
-
-    // Select the appropriate fetcher to use for this refresh
-    auto& fetcher_to_use = (is_bootstrap_request ? _bootstrap_fetcher : *_standard_fetcher);
     Request request{
         request_id,
         network_destination{target_node},
@@ -294,7 +306,7 @@ void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
         true            // ephemeral_connection
     };
     
-    fetcher_to_use(request, [this, request_id, is_bootstrap_request, total_required](bool success, bool timeout, int16_t status_code, std::vector<std::pair<std::string, std::string>> headers, std::optional<std::string> response) {
+    fetcher_to_use(request, [this, request_id, is_bootstrap_request](bool success, bool timeout, int16_t status_code, std::vector<std::pair<std::string, std::string>> headers, std::optional<std::string> response) {
         // This callback runs on the network loop so acquire a lock
         std::unique_lock lock{_cache_mutex};
 
@@ -322,12 +334,13 @@ void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
             auto delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
 
             log::warning(cat, "Failed to refresh cache from one node: {}. Trying another in {}ms.", e.what(), delay.count());
-            _loop->call_later(delay, [this, is_bootstrap_request] {
-                _retry_refresh_request(is_bootstrap_request);
+            _loop->call_later(delay, [this, request_id, is_bootstrap_request] {
+                _retry_refresh_request(request_id, is_bootstrap_request);
             });
             return;
         }
 
+        const uint8_t total_required = (is_bootstrap_request ? 1 : _config.num_nodes_to_use_for_refresh);
         _snode_refresh_results.push_back(std::move(result));
         log::info(
             cat,
@@ -346,9 +359,9 @@ void SnodePool::_launch_next_refresh_request(bool is_bootstrap_request) {
     });
 }
 
-void SnodePool::_retry_refresh_request(bool is_bootstrap_request) {
+void SnodePool::_retry_refresh_request(const std::string& request_id, bool is_bootstrap_request) {
     std::unique_lock lock{_cache_mutex};
-    _launch_next_refresh_request(is_bootstrap_request);
+    _launch_next_refresh_request(request_id, is_bootstrap_request);
 }
 
 void SnodePool::_on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results) {
@@ -478,8 +491,10 @@ void SnodePool::refresh_if_needed(std::function<void()> on_refresh_complete) {
 }
 
 std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::vector<service_node>& exclude_nodes) {
-    // Kick of a cache refresh in the background if needed
-    refresh_if_needed();
+    // Kick of a cache refresh in the background if needed (call_soon to ensure it is scheduled after whatever called `get_unused_nodes` which may be something trying to make it's own request that we would want to run first)
+    _loop->call_soon([this] {
+        refresh_if_needed();
+    });
 
     // Then try to get the desired number of nodes from the current cache
     std::vector<service_node> result;

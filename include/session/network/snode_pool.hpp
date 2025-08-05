@@ -99,8 +99,8 @@ class SnodePool {
 
     // Refresh functions
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
-    void _launch_next_refresh_request(bool is_bootstrap_request);
-    void _retry_refresh_request(bool is_bootstrap_request);
+    void _launch_next_refresh_request(const std::string& request_id, bool is_bootstrap_request);
+    void _retry_refresh_request(const std::string& request_id, bool is_bootstrap_request);
     void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results);
 };
 
