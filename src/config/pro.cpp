@@ -3,17 +3,16 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <session/config/pro.hpp>
-#include <session/sodium_array.hpp>
 
 #include "internal.hpp"
 
 namespace {
-std::array<uint8_t, 32> proof_hash_internal(
-        uint8_t version,
-        std::span<const uint8_t> gen_index_hash,
-        std::span<const uint8_t> rotating_pubkey,
-        uint64_t expiry_unix_ts) {
-    std::array<uint8_t, 32> result = {};
+session::array_uc32 proof_hash_internal(
+        std::uint8_t version,
+        std::span<const std::uint8_t> gen_index_hash,
+        std::span<const std::uint8_t> rotating_pubkey,
+        std::uint64_t expiry_unix_ts) {
+    session::array_uc32 result = {};
     crypto_generichash_blake2b_state state;
     crypto_generichash_blake2b_init(&state, /*key*/ nullptr, 0, result.max_size());
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
@@ -26,9 +25,9 @@ std::array<uint8_t, 32> proof_hash_internal(
 }
 
 bool proof_verify_internal(
-        std::span<const uint8_t> hash,
-        std::span<const uint8_t> sig,
-        std::span<const uint8_t> verify_pubkey) {
+        std::span<const std::uint8_t> hash,
+        std::span<const std::uint8_t> sig,
+        std::span<const std::uint8_t> verify_pubkey) {
     // The C/C++ interface verifies that the payloads are the correct size using the type system so
     // only need asserts here.
     assert(hash.size() == 32);
@@ -41,20 +40,20 @@ bool proof_verify_internal(
 }
 
 bool pro_verify_internal(
-        std::span<const uint8_t> rotating_privkey,
-        std::span<const uint8_t> verify_pubkey,
-        uint8_t version,
-        std::span<const uint8_t> gen_index_hash,
-        std::span<const uint8_t> rotating_pubkey,
-        uint64_t expiry_unix_ts,
-        std::span<const uint8_t> sig) {
+        std::span<const std::uint8_t> rotating_privkey,
+        std::span<const std::uint8_t> verify_pubkey,
+        std::uint8_t version,
+        std::span<const std::uint8_t> gen_index_hash,
+        std::span<const std::uint8_t> rotating_pubkey,
+        std::uint64_t expiry_unix_ts,
+        std::span<const std::uint8_t> sig) {
 
-    std::array<uint8_t, 32> hash =
+    session::array_uc32 hash =
             proof_hash_internal(version, gen_index_hash, rotating_pubkey, expiry_unix_ts);
     if (!proof_verify_internal(hash, sig, verify_pubkey))
         return false;
 
-    std::array<uint8_t, 32> rederived_pk;
+    session::array_uc32 rederived_pk;
     [[maybe_unused]] session::cleared_uc32 rederived_sk;
     crypto_sign_ed25519_seed_keypair(
             rederived_pk.data(), rederived_sk.data(), rotating_privkey.data());
@@ -75,14 +74,14 @@ static_assert(sizeof(((Proof*)0)->gen_index_hash) == 32);
 static_assert(sizeof(((Proof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
 static_assert(sizeof(((Proof*)0)->sig) == crypto_sign_ed25519_BYTES);
 
-bool Proof::verify(const std::array<uint8_t, 32>& verify_pubkey) const {
-    std::array<uint8_t, 32> hash_to_sign = hash();
+bool Proof::verify(const array_uc32& verify_pubkey) const {
+    array_uc32 hash_to_sign = hash();
     bool result = proof_verify_internal(hash_to_sign, sig, verify_pubkey);
     return result;
 }
 
-std::array<uint8_t, 32> Proof::hash() const {
-    std::array<uint8_t, 32> result = proof_hash_internal(
+array_uc32 Proof::hash() const {
+    array_uc32 result = proof_hash_internal(
             version, gen_index_hash, rotating_pubkey, expiry_unix_ts.time_since_epoch().count());
     return result;
 }
@@ -112,7 +111,7 @@ bool Proof::load(const dict& root) {
     return true;
 }
 
-bool Pro::verify(const std::array<uint8_t, 32>& verify_pubkey) const {
+bool Pro::verify(const array_uc32& verify_pubkey) const {
     uint64_t expiry_unix_ts = proof.expiry_unix_ts.time_since_epoch().count();
     bool result = pro_verify_internal(
             rotating_privkey,
@@ -157,14 +156,14 @@ static_assert((sizeof((pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
 
 LIBSESSION_C_API bool proof_verify(pro_proof const* proof, uint8_t const* verify_pubkey) {
     auto verify_pubkey_span =
-            std::span<const uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
+            std::span<const std::uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
     auto gen_index_hash =
-            std::span<const uint8_t>(proof->gen_index_hash, sizeof proof->gen_index_hash);
+            std::span<const std::uint8_t>(proof->gen_index_hash, sizeof proof->gen_index_hash);
     auto rotating_pubkey =
-            std::span<const uint8_t>(proof->rotating_pubkey, sizeof proof->rotating_pubkey);
-    auto sig = std::span<const uint8_t>(proof->sig, sizeof proof->sig);
+            std::span<const std::uint8_t>(proof->rotating_pubkey, sizeof proof->rotating_pubkey);
+    auto sig = std::span<const std::uint8_t>(proof->sig, sizeof proof->sig);
 
-    std::array<uint8_t, 32> hash = proof_hash_internal(
+    session::array_uc32 hash = proof_hash_internal(
             proof->version, gen_index_hash, rotating_pubkey, proof->expiry_unix_ts);
     bool result = proof_verify_internal(hash, sig, verify_pubkey_span);
     return result;
@@ -172,14 +171,14 @@ LIBSESSION_C_API bool proof_verify(pro_proof const* proof, uint8_t const* verify
 
 LIBSESSION_C_API bool pro_verify(pro_pro const* pro, uint8_t const* verify_pubkey) {
     auto verify_pubkey_span =
-            std::span<const uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
+            std::span<const std::uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
     auto rotating_privkey =
-            std::span<const uint8_t>(pro->rotating_privkey, sizeof pro->rotating_privkey);
-    auto gen_index_hash =
-            std::span<const uint8_t>(pro->proof.gen_index_hash, sizeof pro->proof.gen_index_hash);
-    auto rotating_pubkey =
-            std::span<const uint8_t>(pro->proof.rotating_pubkey, sizeof pro->proof.rotating_pubkey);
-    auto sig = std::span<const uint8_t>(pro->proof.sig, sizeof pro->proof.sig);
+            std::span<const std::uint8_t>(pro->rotating_privkey, sizeof pro->rotating_privkey);
+    auto gen_index_hash = std::span<const std::uint8_t>(
+            pro->proof.gen_index_hash, sizeof pro->proof.gen_index_hash);
+    auto rotating_pubkey = std::span<const std::uint8_t>(
+            pro->proof.rotating_pubkey, sizeof pro->proof.rotating_pubkey);
+    auto sig = std::span<const std::uint8_t>(pro->proof.sig, sizeof pro->proof.sig);
 
     bool result = pro_verify_internal(
             rotating_privkey,

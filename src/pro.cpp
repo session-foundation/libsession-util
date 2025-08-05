@@ -2,66 +2,65 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
-#include <stdint.h>
 
 #include <chrono>
 #include <session/config/pro.hpp>
+#include <session/types.hpp>
 
 namespace session::pro {
 
-constexpr std::array<uint8_t, 32> BACKEND_PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+constexpr array_uc32 BACKEND_PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+
 static_assert(BACKEND_PUBKEY.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
 
 struct add_payment_request {
-    uint8_t version;
-    std::array<uint8_t, 32> master_pkey;
-    std::array<uint8_t, 32> rotating_pkey;
-    std::array<uint8_t, 32> payment_token;
-    std::array<uint8_t, 32> master_sig;
-    std::array<uint8_t, 32> rotating_sig;
+    std::uint8_t version;
+    array_uc32 master_pkey;
+    array_uc32 rotating_pkey;
+    array_uc32 payment_token;
+    array_uc32 master_sig;
+    array_uc32 rotating_sig;
     std::string to_json() const;
 };
 
 struct get_proof_request {
-    uint8_t version;
-    std::array<uint8_t, 32> master_pkey;
-    std::array<uint8_t, 32> rotating_pkey;
+    std::uint8_t version;
+    array_uc32 master_pkey;
+    array_uc32 rotating_pkey;
     std::chrono::seconds unix_ts_s;
-    std::array<uint8_t, 32> master_sig;
-    std::array<uint8_t, 32> rotating_sig;
+    array_uc32 master_sig;
+    array_uc32 rotating_sig;
     std::string to_json() const;
 };
 
 struct master_rotating_sigs {
-    std::array<uint8_t, 64> master_sig;
-    std::array<uint8_t, 64> rotating_sig;
+    array_uc64 master_sig;
+    array_uc64 rotating_sig;
 };
 
 struct revocation_item {
-    std::array<uint8_t, 32> gen_index_hash;
+    array_uc32 gen_index_hash;
     std::chrono::seconds expiry_unix_ts;
 };
 
-master_rotating_sigs build_get_proof_sigs(std::array<uint8_t, 64> master_privkey, std::array<uint8_t, 64> rotating_privkey, std::chrono::seconds unix_ts);
-master_rotating_sigs build_add_payment_sigs(std::array<uint8_t, 64> master_privkey, std::array<uint8_t, 64> rotating_privkey, std::array<uint8_t, 32> payment_token_hash, std::chrono::seconds unix_ts);
+master_rotating_sigs build_get_proof_sigs(const array_uc64& master_privkey, const array_uc64& rotating_privkey, std::chrono::seconds unix_ts);
+master_rotating_sigs build_add_payment_sigs(const array_uc64& master_privkey, const array_uc64& rotating_privkey, const array_uc32& payment_token_hash, std::chrono::seconds unix_ts);
 
 master_rotating_sigs build_get_proof_sigs(
-        std::array<uint8_t, 64> master_privkey,
-        std::array<uint8_t, 64> rotating_privkey,
-        std::chrono::seconds unix_ts) {
+        const array_uc64& master_privkey, const array_uc64& rotating_privkey, std::chrono::seconds unix_ts) {
     // Derive the public keys
-    std::array<uint8_t, 32> master_pubkey;
-    std::array<uint8_t, 32> rotating_pubkey;
+    array_uc32 master_pubkey;
+    array_uc32 rotating_pubkey;
     crypto_sign_ed25519_sk_to_pk(master_pubkey.data(), master_privkey.data());
     crypto_sign_ed25519_sk_to_pk(rotating_pubkey.data(), rotating_privkey.data());
 
     // Hash components to 32 bytes
     uint8_t version = 0;
     uint64_t unix_ts_s = unix_ts.count();
-    std::array<uint8_t, 32> hash_to_sign = {};
+    array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state;
     crypto_generichash_blake2b_init(&state, /*key*/ nullptr, 0, hash_to_sign.max_size());
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
@@ -78,19 +77,19 @@ master_rotating_sigs build_get_proof_sigs(
 }
 
 master_rotating_sigs build_add_payment_sigs(
-        std::array<uint8_t, 64> master_privkey,
-        std::array<uint8_t, 64> rotating_privkey,
-        std::array<uint8_t, 32> payment_token_hash,
+        const array_uc64& master_privkey,
+        const array_uc64& rotating_privkey,
+        const array_uc32& payment_token_hash,
         std::chrono::seconds unix_ts) {
     // Derive the public keys
-    std::array<uint8_t, 32> master_pubkey;
-    std::array<uint8_t, 32> rotating_pubkey;
+    array_uc32 master_pubkey;
+    array_uc32 rotating_pubkey;
     crypto_sign_ed25519_sk_to_pk(master_pubkey.data(), master_privkey.data());
     crypto_sign_ed25519_sk_to_pk(rotating_pubkey.data(), rotating_privkey.data());
 
     // Hash components to 32 bytes
     uint8_t version = 0;
-    std::array<uint8_t, 32> hash_to_sign = {};
+    array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state;
     crypto_generichash_blake2b_init(&state, /*key*/ nullptr, 0, hash_to_sign.max_size());
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));

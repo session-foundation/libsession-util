@@ -9,7 +9,7 @@ using namespace oxenc::literals;
 TEST_CASE("Pro", "[config][pro]") {
     // Setup keys
     std::array<unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
-    std::array<unsigned char, crypto_sign_ed25519_SECRETKEYBYTES> rotating_sk, signing_sk;
+    session::cleared_uc64 rotating_sk, signing_sk;
     {
         crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
         crypto_sign_ed25519_keypair(signing_pk.data(), signing_sk.data());
