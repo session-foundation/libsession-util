@@ -242,14 +242,18 @@ message ConfigurationMessage {
     required bytes  sig               = 5;
   }
 
+  message Pro {
+    required bytes rotatingPrivKey = 1;
+    required bytes proof           = 2;
+  }
+
   repeated ClosedGroup closedGroups   = 1;
   repeated string      openGroups     = 2;
   optional string      displayName    = 3;
   optional string      profilePicture = 4;
   optional bytes       profileKey     = 5;
   repeated Contact     contacts       = 6;
-  optional bytes       proRotatingKey = 7;
-  optional ProProof    proProof       = 8;
+  optional Pro         pro            = 7;
 }
 
 message ReceiptMessage {
