@@ -2,9 +2,8 @@
 
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
-
-#include "types.hpp"
 
 // Helper functions for the "Session Protocol" encryption mechanism.  This is the encryption used
 // for DMs sent from one Session user to another.
