@@ -6,6 +6,8 @@
 
 namespace session::config {
 
+enum ProProofVersion { ProProofVersion_v0 };
+
 /// keys used currently or in the past (so that we don't reuse):
 ///
 /// p + pro data

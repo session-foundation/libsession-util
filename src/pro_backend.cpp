@@ -6,6 +6,8 @@
 #include <chrono>
 #include <session/pro_backend.hpp>
 #include <session/types.hpp>
+#include <session/session_encrypt.hpp>
+#include "SessionProtos.pb.h"
 
 namespace session::pro_backend {
 master_rotating_sigs build_get_proof_sigs(
