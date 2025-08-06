@@ -50,6 +50,23 @@ message MessageRequestResponse {
   optional LokiProfile               profile                   = 3;
 }
 
+message ProProof {
+  required uint32 version           = 1;
+  required bytes  genIndexHash      = 2;
+  required bytes  rotatingPublicKey = 3;
+  required uint64 expiryUnixTs      = 4;
+  required bytes  sig               = 5;
+}
+
+message ProConfig {
+  required bytes    rotatingPrivKey = 1;
+  required ProProof proof           = 2;
+}
+message ProMessageConfig {
+  required ProProof proof           = 1;
+  required uint32   flags           = 2;
+}
+
 message Content {
   optional DataMessage                dataMessage                = 1;
   optional CallMessage                callMessage                = 3;
@@ -60,6 +77,7 @@ message Content {
   optional UnsendRequest              unsendRequest              = 9;
   optional MessageRequestResponse     messageRequestResponse     = 10;
   optional SharedConfigMessage        sharedConfigMessage        = 11;
+  optional ProMessageConfig           proMessageConfig           = 12;
 }
 
 message CallMessage {
@@ -234,26 +252,13 @@ message ConfigurationMessage {
     optional bool   didApproveMe      = 7; // added for msg requests
   }
 
-  message ProProof {
-    required uint32 version           = 1;
-    required bytes  genIndexHash      = 2;
-    required bytes  rotatingPublicKey = 3;
-    required uint64 expiryUnixTs      = 4;
-    required bytes  sig               = 5;
-  }
-
-  message Pro {
-    required bytes rotatingPrivKey = 1;
-    required bytes proof           = 2;
-  }
-
   repeated ClosedGroup closedGroups   = 1;
   repeated string      openGroups     = 2;
   optional string      displayName    = 3;
   optional string      profilePicture = 4;
   optional bytes       profileKey     = 5;
   repeated Contact     contacts       = 6;
-  optional Pro         pro            = 7;
+  optional ProConfig   proConfig      = 7;
 }
 
 message ReceiptMessage {

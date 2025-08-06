@@ -4,51 +4,14 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <chrono>
-#include <session/config/pro.hpp>
+#include <session/pro.hpp>
 #include <session/types.hpp>
+#include <session/session_encrypt.hpp>
+#include "SessionProtos.pb.h"
 
 namespace session::pro {
 
-constexpr array_uc32 BACKEND_PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-
 static_assert(BACKEND_PUBKEY.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
-
-struct add_payment_request {
-    std::uint8_t version;
-    array_uc32 master_pkey;
-    array_uc32 rotating_pkey;
-    array_uc32 payment_token;
-    array_uc32 master_sig;
-    array_uc32 rotating_sig;
-    std::string to_json() const;
-};
-
-struct get_proof_request {
-    std::uint8_t version;
-    array_uc32 master_pkey;
-    array_uc32 rotating_pkey;
-    std::chrono::seconds unix_ts_s;
-    array_uc32 master_sig;
-    array_uc32 rotating_sig;
-    std::string to_json() const;
-};
-
-struct master_rotating_sigs {
-    array_uc64 master_sig;
-    array_uc64 rotating_sig;
-};
-
-struct revocation_item {
-    array_uc32 gen_index_hash;
-    std::chrono::seconds expiry_unix_ts;
-};
-
-master_rotating_sigs build_get_proof_sigs(const array_uc64& master_privkey, const array_uc64& rotating_privkey, std::chrono::seconds unix_ts);
-master_rotating_sigs build_add_payment_sigs(const array_uc64& master_privkey, const array_uc64& rotating_privkey, const array_uc32& payment_token_hash, std::chrono::seconds unix_ts);
-
 master_rotating_sigs build_get_proof_sigs(
         const array_uc64& master_privkey, const array_uc64& rotating_privkey, std::chrono::seconds unix_ts) {
     // Derive the public keys
@@ -144,4 +107,69 @@ std::string add_payment_request::to_json() const {
             oxenc::to_hex(rotating_sig));
     return result;
 }
+
+DecryptIncomingWithPro decrypt_incoming_with_pro_metadata(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> ciphertext,
+        std::chrono::sys_seconds unix_ts) {
+    DecryptIncomingWithPro result = {};
+    std::tie(result.plaintext, result.ed25519_pubkey) = session::decrypt_incoming(ed25519_privkey, ciphertext);
+
+    SessionProtos::Content content = {};
+    if (!content.ParseFromArray(result.plaintext.data(), result.plaintext.size()))
+        throw std::runtime_error{"Parse decrypted message for pro metadata failed"};
+
+    if (content.has_promessageconfig()) {
+        const SessionProtos::ProMessageConfig& config = content.promessageconfig();
+        if (!config.has_proof())
+            throw std::runtime_error("Parse decrypted message failed, pro config missing proof");
+        if (!config.has_flags())
+            throw std::runtime_error("Parse decrypted message failed, pro config missing flags");
+
+        const SessionProtos::ProProof& proto_proof = config.proof();
+        std::uint32_t proto_flags = config.flags();
+
+        if ((proto_flags & ~session::pro::FeatureFlag_All) > 0)
+            throw std::runtime_error("Parse decrypted message failed, pro config specified invalid flags");
+
+        // Parse the proof from protobufs
+        session::config::ProProof& proof = result.pro_proof;
+        // clang-format off
+        size_t proof_errors = 0;
+        proof_errors += !proto_proof.has_version()           || proto_proof.version() != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
+        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size() != proof.gen_index_hash.max_size();
+        proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
+        proof_errors += !proto_proof.has_expiryunixts();
+        proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
+        // clang-format on
+
+        if (proof_errors == 0)
+            throw std::runtime_error("Parse decrypted message failed, pro metadata was malformed");
+
+        // Fill out result, we have parsed successfully
+        result.pro_flags = proto_flags;
+
+        std::memcpy(
+                proof.gen_index_hash.data(),
+                proto_proof.genindexhash().data(),
+                proto_proof.genindexhash().size());
+        std::memcpy(
+                proof.rotating_pubkey.data(),
+                proto_proof.rotatingpublickey().data(),
+                proto_proof.rotatingpublickey().size());
+        proof.expiry_unix_ts =
+                std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
+        std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+
+        if (proof.verify(session::pro::BACKEND_PUBKEY))
+            result.pro_status = Status::Valid;
+
+        if (result.pro_status == Status::Valid) {
+            if (unix_ts >= result.pro_proof.expiry_unix_ts)
+                result.pro_status = Status::Expired;
+        }
+    }
+    return result;
+}
+
 } // namespace session::pro

@@ -69,24 +69,24 @@ bool pro_verify_internal(
 
 namespace session::config {
 
-static_assert(sizeof(((Pro*)0)->rotating_privkey) == crypto_sign_ed25519_SECRETKEYBYTES);
-static_assert(sizeof(((Proof*)0)->gen_index_hash) == 32);
-static_assert(sizeof(((Proof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
-static_assert(sizeof(((Proof*)0)->sig) == crypto_sign_ed25519_BYTES);
+static_assert(sizeof(((ProConfig*)0)->rotating_privkey) == crypto_sign_ed25519_SECRETKEYBYTES);
+static_assert(sizeof(((ProProof*)0)->gen_index_hash) == 32);
+static_assert(sizeof(((ProProof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
+static_assert(sizeof(((ProProof*)0)->sig) == crypto_sign_ed25519_BYTES);
 
-bool Proof::verify(const array_uc32& verify_pubkey) const {
+bool ProProof::verify(const array_uc32& verify_pubkey) const {
     array_uc32 hash_to_sign = hash();
     bool result = proof_verify_internal(hash_to_sign, sig, verify_pubkey);
     return result;
 }
 
-array_uc32 Proof::hash() const {
+array_uc32 ProProof::hash() const {
     array_uc32 result = proof_hash_internal(
             version, gen_index_hash, rotating_pubkey, expiry_unix_ts.time_since_epoch().count());
     return result;
 }
 
-bool Proof::load(const dict& root) {
+bool ProProof::load(const dict& root) {
     std::optional<uint8_t> version = maybe_int(root, "v");
     std::optional<std::vector<unsigned char>> maybe_gen_index_hash = maybe_vector(root, "g");
     std::optional<std::vector<unsigned char>> maybe_rotating_pubkey = maybe_vector(root, "r");
@@ -111,7 +111,7 @@ bool Proof::load(const dict& root) {
     return true;
 }
 
-bool Pro::verify(const array_uc32& verify_pubkey) const {
+bool ProConfig::verify(const array_uc32& verify_pubkey) const {
     uint64_t expiry_unix_ts = proof.expiry_unix_ts.time_since_epoch().count();
     bool result = pro_verify_internal(
             rotating_privkey,
@@ -124,7 +124,7 @@ bool Pro::verify(const array_uc32& verify_pubkey) const {
     return result;
 }
 
-bool Pro::load(const dict& root) {
+bool ProConfig::load(const dict& root) {
     // Get proof fields sitting in 'p' dictionary
     auto p_it = root.find("p");
     if (p_it == root.end())

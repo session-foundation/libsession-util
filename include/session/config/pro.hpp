@@ -1,3 +1,5 @@
+#pragma once
+
 #include <chrono>
 #include <cstdint>
 #include <session/config.hpp>
@@ -7,6 +9,8 @@
 
 namespace session::config {
 
+enum ProProofVersion { ProProofVersion_v0 };
+
 /// keys used currently or in the past (so that we don't reuse):
 ///
 /// v - version
@@ -14,7 +18,7 @@ namespace session::config {
 /// r - rotating ed25519 pubkey
 /// e - expiry unix timestamp (in seconds)
 /// s - proof signature, signed by the Session Pro Backend's ed25519 key
-class Proof {
+class ProProof {
   public:
     /// Version of the proof set by the Session Pro Backend
     std::uint8_t version;
@@ -63,7 +67,7 @@ class Proof {
 ///
 /// r - rotating ed25519 privkey
 /// p - proof
-class Pro {
+class ProConfig {
   public:
     /// Private key for the public key key specified in the proof. This is synced between clients
     /// to allow multiple clients to synchronise the Session Pro Proof and also the keys necessary
@@ -71,7 +75,7 @@ class Pro {
     cleared_uc64 rotating_privkey;
 
     /// A cryptographic proof for entitling an Ed25519 key to Session Pro
-    Proof proof;
+    ProProof proof;
 
     /// API: pro/Pro::verify
     ///
