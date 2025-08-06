@@ -89,6 +89,7 @@ target_link_libraries(crypto
     util
     PRIVATE
     libsodium::sodium-internal
+    libsession::protos
 )
 
 target_link_libraries(config

@@ -119,21 +119,21 @@ std::chrono::sys_seconds UserProfile::get_profile_updated() const {
     return std::chrono::sys_seconds{};
 }
 
-std::optional<Pro> UserProfile::get_pro_data() const {
-    std::optional<Pro> result = {};
+std::optional<ProConfig> UserProfile::get_pro_data() const {
+    std::optional<ProConfig> result = {};
     if (const config::dict* s = data["s"].dict(); s) {
-        Pro pro = {};
+        ProConfig pro = {};
         if (pro.load(*s))
             result = std::move(pro);
     }
     return result;
 }
 
-void UserProfile::set_pro_data(Pro const &pro) {
+void UserProfile::set_pro_data(ProConfig const &pro) {
     auto root = data["s"];
     root["r"] = pro.rotating_privkey;
 
-    const Proof& pro_proof = pro.proof;
+    const ProProof& pro_proof = pro.proof;
     auto proof_dict = root["p"];
     proof_dict["v"] = pro_proof.version;
     proof_dict["g"] = pro_proof.gen_index_hash;

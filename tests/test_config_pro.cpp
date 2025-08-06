@@ -16,7 +16,7 @@ TEST_CASE("Pro", "[config][pro]") {
     }
 
     // Setup the Pro data structure
-    session::config::Pro pro = {};
+    session::config::ProConfig pro = {};
     {
         pro.rotating_privkey = rotating_sk;
         pro.proof.version = 0;
@@ -52,7 +52,7 @@ TEST_CASE("Pro", "[config][pro]") {
     session::config::dict good_dict;
     {
         // clang-format off
-        const session::config::Proof& proof = pro.proof;
+        const session::config::ProProof& proof = pro.proof;
         good_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
             {"p", session::config::dict{
@@ -65,7 +65,7 @@ TEST_CASE("Pro", "[config][pro]") {
         };
         // clang-format on
 
-        session::config::Pro loaded_pro = {};
+        session::config::ProConfig loaded_pro = {};
         CHECK(loaded_pro.load(good_dict));
         CHECK(loaded_pro.rotating_privkey == pro.rotating_privkey);
         CHECK(loaded_pro.proof.version == pro.proof.version);
@@ -83,7 +83,7 @@ TEST_CASE("Pro", "[config][pro]") {
         broken_sig[0] = ~broken_sig[0]; // Break the sig
 
         // clang-format off
-        const session::config::Proof& proof = pro.proof;
+        const session::config::ProProof& proof = pro.proof;
         bad_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
             {"p", session::config::dict{
@@ -96,7 +96,7 @@ TEST_CASE("Pro", "[config][pro]") {
         };
         // clang-format on
 
-        session::config::Pro loaded_pro = {};
+        session::config::ProConfig loaded_pro = {};
         CHECK(loaded_pro.load(bad_dict));
         CHECK_FALSE(loaded_pro.verify(signing_pk));
     }
