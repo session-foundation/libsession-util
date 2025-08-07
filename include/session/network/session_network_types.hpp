@@ -102,6 +102,7 @@ struct Request {
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
+            std::optional<session::network::x25519_pubkey> swarm_pubkey = std::nullopt,
             bool ephemeral_connection = false) :
             request_id{std::move(request_id)},
             destination{std::move(destination)},
@@ -110,6 +111,7 @@ struct Request {
             category{std::move(category)},
             request_timeout{std::move(request_timeout)},
             overall_timeout{std::move(overall_timeout)},
+            swarm_pubkey{std::move(swarm_pubkey)},
             ephemeral_connection{ephemeral_connection} {}
 
     std::chrono::milliseconds time_remaining() const {

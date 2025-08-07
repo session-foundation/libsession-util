@@ -1903,7 +1903,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
     // Construct the onion request
     auto builder = Builder::make(info.destination, path->nodes);
     try {
-        builder.generate(info);
+        info.body = builder.build(builder.generate_onion_blob(info.original_body));
     } catch (const std::exception& e) {
         log::warning(cat, "Builder exception: {}", e.what());
         return handle_response(

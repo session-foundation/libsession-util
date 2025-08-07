@@ -91,15 +91,15 @@ namespace opt {
                     // service_node{
                     //         from_hex("decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9"),
                     //         oxen::quic::ipv4{"144.76.164.202"},
-                    //         uint16_t{0},    // TODO: Get this
-                    //         uint16_t{35400}
+                    //         uint16_t{35500},
+                    //         uint16_t{35400},
                     //         {2, 10, 0},
                     //         swarm::INVALID_SWARM_ID},  // This is the original one
 
                     service_node{
                             from_hex("decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a"),
                             oxen::quic::ipv4{"23.88.6.250"},
-                            uint16_t{0},    // TODO: Get this
+                            uint16_t{35520},
                             uint16_t{35420},
                             {2, 10, 0},
                             swarm::INVALID_SWARM_ID},  // lokinet one
@@ -216,6 +216,14 @@ namespace opt {
     struct cache_expiration : base {
         std::chrono::minutes duration;
         explicit cache_expiration(std::chrono::minutes duration) : duration{duration} {}
+    };
+
+    /// Can be used to override the default (3) number of retries that will be made when trying to refresh the snode cache.
+    ///
+    /// Note: This limit does not apply to the bootstrap request which will retry indefinitely since the code will be unusable otherwise.
+    struct cache_refresh_retry_limit : base {
+        uint8_t limit;
+        explicit cache_refresh_retry_limit(uint8_t limit) : limit{limit} {}
     };
 
     /// Can be used to override the default (12) minimum number of unused nodes before we trigger a snode cache refresh.

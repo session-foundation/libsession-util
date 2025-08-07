@@ -61,6 +61,22 @@ config::OnionRequestRouterConfig build_onion_request_router_config(const config:
 
 } // namespace
 
+namespace detail {
+
+    std::vector<network_service_node> convert_service_nodes(
+            std::vector<session::network::service_node> nodes) {
+        std::vector<network_service_node> converted_nodes;
+        for (auto& node : nodes) {
+            network_service_node converted_node;
+            node.into(converted_node);
+            converted_nodes.push_back(converted_node);
+        }
+
+        return converted_nodes;
+    }
+
+}  // namespace detail
+
 Network_v2::Network_v2(config::Config config) : config{config} {
     // Start by validating the configuration
     switch (config.router) {
@@ -133,11 +149,19 @@ Network_v2::Network_v2(config::Config config) : config{config} {
 Network_v2::~Network_v2() {
 }
 
+void Network_v2::get_swarm(
+        session::network::x25519_pubkey swarm_pubkey,
+        std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
+    _snode_pool->get_swarm(std::move(swarm_pubkey), std::move(callback));
+}
+
 void Network_v2::send_request(Request request, network_response_callback_t callback) {
     if (!_transport)
-        return callback(false, false, -1, {}, "No transport layer configured");
-    
-    _transport->send_request(std::move(request), std::move(callback));
+        return callback(false, false, -1, {content_type_plain_text}, "No transport layer configured");
+    if (!_router)
+        return callback(false, false, -1, {content_type_plain_text}, "No router configured");
+
+    _router->send_request(std::move(request), std::move(callback));
 }
 
 }  // namespace session::network
@@ -208,6 +232,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
 
     config.cache_dir = nullptr;
     config.cache_expiration_minutes = std::chrono::duration_cast<std::chrono::minutes>(cpp_defaults.cache_expiration).count();
+    config.cache_refresh_retry_limit = cpp_defaults.cache_refresh_retry_limit;
     config.min_cache_size = cpp_defaults.min_cache_size;
     config.num_nodes_to_use_for_refresh = cpp_defaults.num_nodes_to_use_for_refresh;
     config.node_failure_threshold = cpp_defaults.node_failure_threshold;
@@ -317,11 +342,14 @@ LIBSESSION_C_API bool session_network_init(
         if (config->cache_expiration_minutes > 0)
             cpp_opts.emplace_back(opt::cache_expiration(std::chrono::minutes(config->cache_expiration_minutes)));
         
+        if (config->cache_refresh_retry_limit > 0)
+            cpp_opts.emplace_back(opt::cache_refresh_retry_limit(config->cache_refresh_retry_limit));
+        
         if (config->min_cache_size > 0)
             cpp_opts.emplace_back(opt::min_cache_size(config->min_cache_size));
         
-        if (config->num_nodes_to_use_for_refresh > 0)
-            cpp_opts.emplace_back(opt::num_nodes_to_use_for_refresh(config->num_nodes_to_use_for_refresh));
+        // A `0` value is valid for this case
+        cpp_opts.emplace_back(opt::num_nodes_to_use_for_refresh(config->num_nodes_to_use_for_refresh));
         
         if (config->node_failure_threshold > 0)
             cpp_opts.emplace_back(opt::node_failure_threshold(config->node_failure_threshold));

@@ -30,6 +30,7 @@ Config::Config(const std::vector<std::any>& opts) {
         // Snode pool options
         HANDLE_TYPE(opt::cache_directory);
         HANDLE_TYPE(opt::cache_expiration);
+        HANDLE_TYPE(opt::cache_refresh_retry_limit);
         HANDLE_TYPE(opt::min_cache_size);
         HANDLE_TYPE(opt::num_nodes_to_use_for_refresh);
         HANDLE_TYPE(opt::node_failure_threshold);
@@ -142,6 +143,11 @@ void Config::handle_config_opt(opt::cache_directory dir) {
 void Config::handle_config_opt(opt::cache_expiration ce) {
     cache_expiration = ce.duration;
     log::debug(cat, "Network config snode pool cache expiration set to {} minutes", ce.duration.count());
+}
+
+void Config::handle_config_opt(opt::cache_refresh_retry_limit crrl) {
+    cache_refresh_retry_limit = crrl.limit;
+    log::debug(cat, "Network config snode pool cache refresh retry limit set to {}", crrl.limit);
 }
 
 void Config::handle_config_opt(opt::min_cache_size mcs) {

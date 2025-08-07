@@ -67,6 +67,7 @@ typedef struct {
     // Snode pool options
     const char* cache_dir;
     uint32_t cache_expiration_minutes;
+    uint8_t cache_refresh_retry_limit;
     size_t min_cache_size;
     uint8_t num_nodes_to_use_for_refresh;
     uint8_t node_failure_threshold;
@@ -94,6 +95,54 @@ typedef struct {
     void* transport_callback_ctx;
 
 } session_network_config;
+
+typedef enum {
+    SESSION_NETWORK_REQUEST_CATEGORY_STANDARD,
+    SESSION_NETWORK_REQUEST_CATEGORY_UPLOAD,
+    SESSION_NETWORK_REQUEST_CATEGORY_DOWNLOAD
+} SESSION_NETWORK_REQUEST_CATEGORY;
+
+typedef struct network_v2_server_destination {
+    const char* method;
+    const char* protocol;
+    const char* host;
+    const char* endpoint;   // TODO: Remove this (duplicates the `Request.endpoint`)
+    uint16_t port;
+    const char* x25519_pubkey_hex;
+    const char* const* headers_kv_pairs;    // Interleaved key-value array, null terminated
+} network_v2_server_destination;
+
+typedef struct {
+    // Only ONE of these pointers should be set, the other should be left null
+    const network_service_node* snode_dest;
+    const network_v2_server_destination* server_dest;
+    
+    // --- Payload ---
+    const char* endpoint;         // e.g., "get_service_nodes"
+    const unsigned char* body;    // Pointer to raw body data
+    size_t body_size;
+    
+    // --- Configuration ---
+    SESSION_NETWORK_REQUEST_CATEGORY category;
+    uint64_t request_timeout_ms;
+    uint64_t overall_timeout_ms; // Use 0 for no overall timeout
+    
+    // An optional, client-provided ID for tracing. If NULL, one will be generated.
+    const char* request_id;
+    
+    // Optional pubkey for swarm-related requests (e.g., sending a message).
+    const char* swarm_pubkey_hex;
+
+} session_request_params;
+
+typedef void (*session_network_response_t)(
+    bool success,
+    bool timeout,
+    int16_t status_code,
+    const char* const* headers_kv_pairs,  // Headers are passed as a NULL-terminated key-value array
+    const unsigned char* response,
+    size_t response_size,
+    void* ctx);
 
 /// API: network/session_network_default_config
 ///
@@ -127,6 +176,18 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
         size_t headers_size,
         const char* body,
         size_t body_len);
+
+LIBSESSION_EXPORT void session_network_get_swarm(
+    network_object_v2* network,
+    const char* swarm_pubkey_hex,
+    void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
+    void* ctx);
+
+LIBSESSION_EXPORT void session_network_send_request(
+    network_object_v2* network,
+    const session_request_params* params,
+    session_network_response_t callback,
+    void* ctx);
 
 #ifdef __cplusplus
 }

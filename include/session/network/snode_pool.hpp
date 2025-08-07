@@ -20,6 +20,7 @@ namespace config {
     struct SnodePoolConfig {
         std::optional<std::filesystem::path> cache_directory;
         std::chrono::minutes cache_expiration;
+        uint8_t cache_refresh_retry_limit;
         bool enforce_subnet_diversity;
         network::opt::retry_delay retry_delay;
         
@@ -101,7 +102,7 @@ class SnodePool {
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
     void _launch_next_refresh_request(const std::string& request_id, bool is_bootstrap_request);
     void _retry_refresh_request(const std::string& request_id, bool is_bootstrap_request);
-    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results);
+    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results, bool is_bootstrap_request);
 };
 
 }  // namespace session::network

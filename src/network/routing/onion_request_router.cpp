@@ -77,7 +77,7 @@ namespace {
             params_json = nlohmann::json::object();
 
         nlohmann::json wrapped_payload = {
-            {"endpoint", endpoint},
+            {"method", endpoint},
             {"params", params_json}
         };
         
