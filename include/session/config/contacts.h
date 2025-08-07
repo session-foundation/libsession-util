@@ -45,6 +45,9 @@ typedef struct contacts_blinded_contact {
 
     char name[101];  // This will be a 0-length string when unset
     user_profile_pic profile_pic;
+    int64_t profile_updated;  // unix timestamp (seconds)
+    
+    int priority;
 
     bool legacy_blinding;
     int64_t created;  // unix timestamp (seconds)
