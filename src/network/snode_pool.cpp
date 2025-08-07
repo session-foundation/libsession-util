@@ -312,7 +312,6 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
         RequestCategory::standard,
         10s,
         std::nullopt,   // overall_timeout
-        std::nullopt,   // swarm_pubkey
         true            // ephemeral_connection
     };
     

@@ -90,8 +90,7 @@ typedef struct {
     // Callback options (for transport == SESSION_NETWORK_TRANSPORT_CALLBACKS)
     session_network_request_t transport_callback;
 
-    /// A user-defined context pointer passed back to every invocation of
-    /// `transport_callback`.
+    // A user-defined context pointer passed back to every invocation of `transport_callback`
     void* transport_callback_ctx;
 
 } session_network_config;
@@ -109,7 +108,8 @@ typedef struct network_v2_server_destination {
     const char* endpoint;   // TODO: Remove this (duplicates the `Request.endpoint`)
     uint16_t port;
     const char* x25519_pubkey_hex;
-    const char* const* headers_kv_pairs;    // Interleaved key-value array, null terminated
+    const char* const* headers_kv_pairs;
+    size_t headers_kv_pairs_len;
 } network_v2_server_destination;
 
 typedef struct {
@@ -117,21 +117,15 @@ typedef struct {
     const network_service_node* snode_dest;
     const network_v2_server_destination* server_dest;
     
-    // --- Payload ---
-    const char* endpoint;         // e.g., "get_service_nodes"
-    const unsigned char* body;    // Pointer to raw body data
+    const char* endpoint;
+    const unsigned char* body;
     size_t body_size;
     
-    // --- Configuration ---
     SESSION_NETWORK_REQUEST_CATEGORY category;
     uint64_t request_timeout_ms;
     uint64_t overall_timeout_ms; // Use 0 for no overall timeout
     
-    // An optional, client-provided ID for tracing. If NULL, one will be generated.
-    const char* request_id;
-    
-    // Optional pubkey for swarm-related requests (e.g., sending a message).
-    const char* swarm_pubkey_hex;
+    const char* request_id; // Optional id for the request to trace through logs, null terminated
 
 } session_request_params;
 
@@ -139,7 +133,8 @@ typedef void (*session_network_response_t)(
     bool success,
     bool timeout,
     int16_t status_code,
-    const char* const* headers_kv_pairs,  // Headers are passed as a NULL-terminated key-value array
+    const char* const* headers_kv_pairs,
+    size_t headers_kv_pairs_len,
     const unsigned char* response,
     size_t response_size,
     void* ctx);

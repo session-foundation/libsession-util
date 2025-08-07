@@ -11,6 +11,7 @@
 #include "session/network/session_network_types.hpp"
 #include "session/network/transport/quic_transport.hpp"
 #include "session/network/routing/onion_request_router.hpp"
+#include "session/random.hpp"
 
 using namespace oxen;
 using namespace session::network;
@@ -28,6 +29,7 @@ config::SnodePoolConfig build_snode_pool_config(const config::Config& main_confi
     return {
         main_config.cache_directory,
         main_config.cache_expiration,
+        main_config.cache_refresh_retry_limit,
         main_config.enforce_subnet_diversity,
         main_config.retry_delay,
         main_config.netid,
@@ -454,6 +456,117 @@ LIBSESSION_C_API void session_network_callbacks_respond(
         body.emplace(body_, body_len);
 
     handle_guard->cpp_callback(success, timeout, status_code, std::move(headers), std::move(body));
+}
+
+LIBSESSION_C_API void session_network_get_swarm(
+    network_object_v2* network,
+    const char* swarm_pubkey_hex,
+    void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
+    void* ctx
+) {
+    assert(swarm_pubkey_hex && callback);
+    unbox(network).get_swarm(
+            x25519_pubkey::from_hex({swarm_pubkey_hex, 64}),
+            [cb = std::move(callback), ctx](swarm_id_t, std::vector<service_node> nodes) {
+                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                cb(c_nodes.data(), c_nodes.size(), ctx);
+            });
+}
+
+LIBSESSION_C_API void session_network_send_request(
+    network_object_v2* network,
+    const session_request_params* params,
+    session_network_response_t callback,
+    void* ctx
+) {
+    assert(callback);
+
+    try {
+        if (!network)
+            throw std::invalid_argument("Invalid request: 'network' cannot be null.");
+        if (!params)
+            throw std::invalid_argument("Invalid request: 'params' cannot be null.");
+        
+        network_destination dest;
+        
+        if (params->snode_dest && params->server_dest)
+            throw std::invalid_argument("Invalid request: Cannot have both 'snode_dest' and 'server_dest' set.");
+        
+        if (params->snode_dest) {
+            dest = service_node::from(*params->snode_dest);
+        } else if (params->server_dest) {
+            const auto& c_server = *params->server_dest;
+
+            std::optional<std::vector<std::pair<std::string, std::string>>> headers;
+            if (c_server.headers_kv_pairs && c_server.headers_kv_pairs_len > 0) {
+                if (c_server.headers_kv_pairs_len % 2 != 0)
+                   throw std::invalid_argument("Invalid request: Header must have an even number of key-value strings.");
+                
+                headers.emplace();
+                headers->reserve(c_server.headers_kv_pairs_len / 2);
+                for (int i = 0; i < c_server.headers_kv_pairs_len; i += 2) {
+                    const char* key = c_server.headers_kv_pairs[i];
+                    const char* val = c_server.headers_kv_pairs[i + 1];
+                    
+                    if (!key || !val)
+                        throw std::invalid_argument("Invalid request: Header list contains a null key or value.");
+
+                    headers->emplace_back(key, val);
+                }
+            }
+
+            dest = ServerDestination{
+                c_server.protocol,
+                c_server.host,
+                c_server.endpoint,  // TODO: Remove this (redundant duplication)
+                x25519_pubkey::from_hex(c_server.x25519_pubkey_hex),
+                (c_server.port > 0 ? std::optional{c_server.port} : std::nullopt),
+                headers,
+                c_server.method
+            };
+        } else
+            throw std::invalid_argument("Invalid request: Must have either 'snode_dest' or 'server_dest' set.");
+
+        std::optional<std::vector<unsigned char>> body;
+        if (params->body && params->body_size > 0)
+            body.emplace(params->body, params->body + params->body_size);
+
+        std::optional<std::string> request_id;
+        if (params->request_id)
+            request_id = params->request_id;
+
+        auto request = Request{
+            dest,
+            std::string{params->endpoint},
+            body,
+            static_cast<RequestCategory>(params->category),     // TODO: Need to assert that these values match between C and C++
+            std::chrono::milliseconds{params->request_timeout_ms},
+            (params->overall_timeout_ms > 0 ? std::optional{std::chrono::milliseconds{params->overall_timeout_ms}} : std::nullopt),
+            request_id
+        };
+        auto cpp_callback = [c_cb = callback, c_ctx = ctx](bool success, bool timeout, int16_t status_code, std::vector<std::pair<std::string, std::string>> headers, std::optional<std::string> body) {            
+            std::vector<const char*> c_headers;
+            c_headers.reserve(headers.size() * 2 + 1);
+            for (const auto& [key, val] : headers) {
+                c_headers.push_back(key.c_str());
+                c_headers.push_back(val.c_str());
+            }
+            c_headers.push_back(nullptr); // NULL terminator
+
+            c_cb(
+                success, timeout, status_code,
+                c_headers.data(),
+                (headers.size() * 2),
+                body ? reinterpret_cast<const unsigned char*>(body->data()) : nullptr,
+                body ? body->size() : 0,
+                c_ctx
+            );
+        };
+        
+        unbox(network).send_request(std::move(request), std::move(cpp_callback));
+    } catch (const std::exception& e) {
+        callback(false, false, -1, nullptr, 0, reinterpret_cast<const unsigned char*>(e.what()), strlen(e.what()), ctx);
+    }
 }
 
 }  // extern "C"

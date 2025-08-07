@@ -88,9 +88,6 @@ struct Request {
     /// The time the request was created, this is used primarily for determining whether the `overall_timeout` has been exceeded.
     std::chrono::system_clock::time_point creation_time = std::chrono::system_clock::now();
 
-    // Router-specific values
-    std::optional<session::network::x25519_pubkey> swarm_pubkey;
-
     // If true, the transport should not cache/pool the connection used for this request, this is for one-shot requests like bootstrapping.
     bool ephemeral_connection;
 
@@ -102,17 +99,17 @@ struct Request {
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
-            std::optional<session::network::x25519_pubkey> swarm_pubkey = std::nullopt,
-            bool ephemeral_connection = false) :
-            request_id{std::move(request_id)},
-            destination{std::move(destination)},
-            endpoint{std::move(endpoint)},
-            body{std::move(body)},
-            category{std::move(category)},
-            request_timeout{std::move(request_timeout)},
-            overall_timeout{std::move(overall_timeout)},
-            swarm_pubkey{std::move(swarm_pubkey)},
-            ephemeral_connection{ephemeral_connection} {}
+            bool ephemeral_connection = false);
+    
+    Request(
+            network_destination destination,
+            std::string endpoint,
+            std::optional<std::vector<unsigned char>> body,
+            RequestCategory category,
+            std::chrono::milliseconds request_timeout,
+            std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
+            std::optional<std::string> request_id = std::nullopt,
+            bool ephemeral_connection = false);
 
     std::chrono::milliseconds time_remaining() const {
         if (!overall_timeout)
