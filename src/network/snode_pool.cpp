@@ -559,9 +559,10 @@ void SnodePool::record_node_failure(const service_node& node) {
     log::trace(cat, "Recorded failure for node {}, total failures: {}", key.hex(), _snode_failure_counts[key]);
 }
 
-void SnodePool::refresh_if_needed(std::function<void()> on_refresh_complete) {
+void SnodePool::refresh_if_needed(const std::vector<service_node>& in_use_nodes, std::function<void()> on_refresh_complete) {
     bool needs_to_start_refresh = false;
     bool already_running = false;
+
     {
         std::lock_guard lock{_cache_mutex};
         
@@ -571,6 +572,34 @@ void SnodePool::refresh_if_needed(std::function<void()> on_refresh_complete) {
         else {
             auto cache_lifetime = std::chrono::system_clock::now() - _last_snode_cache_update;
             needs_to_start_refresh = (_snode_cache.empty() || cache_lifetime > _config.cache_expiration);
+
+            // Also need to refresh if there are not enough non-failed nodes in the cache
+            if (!needs_to_start_refresh) {
+                size_t usable_nodes_count = 0;
+
+                std::unordered_set<ed25519_pubkey> in_use_keys;
+                for (const auto& node : in_use_nodes)
+                    in_use_keys.insert(ed25519_pubkey::from_bytes(node.view_remote_key()));
+                
+                for (const auto& node : _snode_cache) {
+                    auto pubkey = ed25519_pubkey::from_bytes(node.view_remote_key());
+                    auto it = _snode_failure_counts.find(pubkey);
+                    if (it != _snode_failure_counts.end() && it->second >= _config.cache_node_failure_threshold)
+                        continue;
+                    
+                    // If the caller considers the node as already in use then it wouldn't be considered usable so ignore it for the purpose of determining whether we have enough nodes to avoid a refresh
+                    if (in_use_keys.count(pubkey))
+                        continue;
+
+                    usable_nodes_count++;
+
+                    if (usable_nodes_count >= _config.cache_min_size)
+                        break;
+                }
+                
+                if (usable_nodes_count < _config.cache_min_size)
+                    needs_to_start_refresh = true;
+            }
         }
         
         // If a refresh is needed or already running, queue the callback
@@ -581,14 +610,14 @@ void SnodePool::refresh_if_needed(std::function<void()> on_refresh_complete) {
     // Kick off a refresh if needed (if none was needed then we should trigger the on_refresh_complete callback immediately)
     if (needs_to_start_refresh)
         _refresh_snode_cache();
-    else if (on_refresh_complete)
+    else if (!already_running && on_refresh_complete)
         on_refresh_complete();
 }
 
 std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::vector<service_node>& exclude_nodes) {
     // Kick of a cache refresh in the background if needed (call_soon to ensure it is scheduled after whatever called `get_unused_nodes` which may be something trying to make it's own request that we would want to run first)
-    _loop->call_soon([this] {
-        refresh_if_needed();
+    _loop->call_soon([this, exclude_nodes] {
+        refresh_if_needed(exclude_nodes);
     });
 
     // Then try to get the desired number of nodes from the current cache
@@ -691,7 +720,7 @@ void SnodePool::get_swarm(
 
     // Trigger a non-blocking background refresh if the data is stale
     _loop->call_soon([this] {
-        refresh_if_needed();
+        refresh_if_needed({});
     });
 
     // Perform the swarm calculation using our local copy of the data

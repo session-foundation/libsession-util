@@ -178,13 +178,11 @@ namespace {
 
         session::onionreq::ResponseParser parser(builder);
 
-        if (std::holds_alternative<service_node>(original_request.destination)) {
+        if (std::holds_alternative<service_node>(original_request.destination))
             return decrypt_v3_response(parser, encrypted_response);
-        }
         
-        if (std::holds_alternative<ServerDestination>(original_request.destination)) {
+        if (std::holds_alternative<ServerDestination>(original_request.destination))
             return decrypt_v4_response(parser, encrypted_response);
-        }
 
         throw std::logic_error("Request destination was neither a service_node nor a ServerDestination");
     }
@@ -215,7 +213,7 @@ OnionRequestRouter::OnionRequestRouter(
 
     if (auto snode_pool = _snode_pool.lock()) {
         if (snode_pool->size() == 0)
-            snode_pool->refresh_if_needed([this] {
+            snode_pool->refresh_if_needed({}, [this] {
                 _loop->call([this] { _finish_setup(); });
             });
         else
@@ -375,9 +373,9 @@ void OnionRequestRouter::_build_path(RequestCategory category, std::optional<std
         _in_progress_path_builds[category]--;
 
         if (auto snode_pool = _snode_pool.lock())
-            snode_pool->refresh_if_needed([this, category, initiating_req_id, excluded = std::move(nodes_to_exclude)]() {
+            snode_pool->refresh_if_needed(nodes_to_exclude, [this, category, initiating_req_id, nodes_to_exclude]() {
                 log::info(cat, "[OnionRouter Request {}]: SnodePool refresh complete, retrying path build.", initiating_req_id.value_or("internal"));
-                _build_path(category, initiating_req_id, excluded);
+                _build_path(category, initiating_req_id, nodes_to_exclude);
             });
         return;
     }
