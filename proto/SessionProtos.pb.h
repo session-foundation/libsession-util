@@ -116,6 +116,15 @@ extern LokiProfileDefaultTypeInternal _LokiProfile_default_instance_;
 class MessageRequestResponse;
 struct MessageRequestResponseDefaultTypeInternal;
 extern MessageRequestResponseDefaultTypeInternal _MessageRequestResponse_default_instance_;
+class ProConfig;
+struct ProConfigDefaultTypeInternal;
+extern ProConfigDefaultTypeInternal _ProConfig_default_instance_;
+class ProMessage;
+struct ProMessageDefaultTypeInternal;
+extern ProMessageDefaultTypeInternal _ProMessage_default_instance_;
+class ProProof;
+struct ProProofDefaultTypeInternal;
+extern ProProofDefaultTypeInternal _ProProof_default_instance_;
 class ReceiptMessage;
 struct ReceiptMessageDefaultTypeInternal;
 extern ReceiptMessageDefaultTypeInternal _ReceiptMessage_default_instance_;
@@ -153,6 +162,9 @@ template<> ::SessionProtos::GroupUpdatePromoteMessage* Arena::CreateMaybeMessage
 template<> ::SessionProtos::KeyPair* Arena::CreateMaybeMessage<::SessionProtos::KeyPair>(Arena*);
 template<> ::SessionProtos::LokiProfile* Arena::CreateMaybeMessage<::SessionProtos::LokiProfile>(Arena*);
 template<> ::SessionProtos::MessageRequestResponse* Arena::CreateMaybeMessage<::SessionProtos::MessageRequestResponse>(Arena*);
+template<> ::SessionProtos::ProConfig* Arena::CreateMaybeMessage<::SessionProtos::ProConfig>(Arena*);
+template<> ::SessionProtos::ProMessage* Arena::CreateMaybeMessage<::SessionProtos::ProMessage>(Arena*);
+template<> ::SessionProtos::ProProof* Arena::CreateMaybeMessage<::SessionProtos::ProProof>(Arena*);
 template<> ::SessionProtos::ReceiptMessage* Arena::CreateMaybeMessage<::SessionProtos::ReceiptMessage>(Arena*);
 template<> ::SessionProtos::SharedConfigMessage* Arena::CreateMaybeMessage<::SessionProtos::SharedConfigMessage>(Arena*);
 template<> ::SessionProtos::TypingMessage* Arena::CreateMaybeMessage<::SessionProtos::TypingMessage>(Arena*);
@@ -627,6 +639,7 @@ class Envelope final :
   enum : int {
     kSourceFieldNumber = 2,
     kContentFieldNumber = 8,
+    kProSigFieldNumber = 11,
     kTimestampFieldNumber = 5,
     kServerTimestampFieldNumber = 10,
     kSourceDeviceFieldNumber = 7,
@@ -666,6 +679,24 @@ class Envelope final :
   const std::string& _internal_content() const;
   inline PROTOBUF_ALWAYS_INLINE void _internal_set_content(const std::string& value);
   std::string* _internal_mutable_content();
+  public:
+
+  // optional bytes proSig = 11;
+  bool has_prosig() const;
+  private:
+  bool _internal_has_prosig() const;
+  public:
+  void clear_prosig();
+  const std::string& prosig() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_prosig(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_prosig();
+  PROTOBUF_NODISCARD std::string* release_prosig();
+  void set_allocated_prosig(std::string* prosig);
+  private:
+  const std::string& _internal_prosig() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_prosig(const std::string& value);
+  std::string* _internal_mutable_prosig();
   public:
 
   // required uint64 timestamp = 5;
@@ -735,6 +766,7 @@ class Envelope final :
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr source_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr content_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr prosig_;
     uint64_t timestamp_;
     uint64_t servertimestamp_;
     uint32_t sourcedevice_;
@@ -1504,6 +1536,7 @@ class Content final :
     kUnsendRequestFieldNumber = 9,
     kMessageRequestResponseFieldNumber = 10,
     kSharedConfigMessageFieldNumber = 11,
+    kProMessageFieldNumber = 16,
     kExpirationTypeFieldNumber = 12,
     kExpirationTimerFieldNumber = 13,
     kSigTimestampFieldNumber = 15,
@@ -1652,6 +1685,24 @@ class Content final :
       ::SessionProtos::SharedConfigMessage* sharedconfigmessage);
   ::SessionProtos::SharedConfigMessage* unsafe_arena_release_sharedconfigmessage();
 
+  // optional .SessionProtos.ProMessage proMessage = 16;
+  bool has_promessage() const;
+  private:
+  bool _internal_has_promessage() const;
+  public:
+  void clear_promessage();
+  const ::SessionProtos::ProMessage& promessage() const;
+  PROTOBUF_NODISCARD ::SessionProtos::ProMessage* release_promessage();
+  ::SessionProtos::ProMessage* mutable_promessage();
+  void set_allocated_promessage(::SessionProtos::ProMessage* promessage);
+  private:
+  const ::SessionProtos::ProMessage& _internal_promessage() const;
+  ::SessionProtos::ProMessage* _internal_mutable_promessage();
+  public:
+  void unsafe_arena_set_allocated_promessage(
+      ::SessionProtos::ProMessage* promessage);
+  ::SessionProtos::ProMessage* unsafe_arena_release_promessage();
+
   // optional .SessionProtos.Content.ExpirationType expirationType = 12;
   bool has_expirationtype() const;
   private:
@@ -1709,6 +1760,7 @@ class Content final :
     ::SessionProtos::UnsendRequest* unsendrequest_;
     ::SessionProtos::MessageRequestResponse* messagerequestresponse_;
     ::SessionProtos::SharedConfigMessage* sharedconfigmessage_;
+    ::SessionProtos::ProMessage* promessage_;
     int expirationtype_;
     uint32_t expirationtimer_;
     uint64_t sigtimestamp_;
@@ -6816,6 +6868,615 @@ class GroupUpdateDeleteMemberContentMessage final :
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
 };
+// -------------------------------------------------------------------
+
+class ProProof final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.ProProof) */ {
+ public:
+  inline ProProof() : ProProof(nullptr) {}
+  ~ProProof() override;
+  explicit PROTOBUF_CONSTEXPR ProProof(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ProProof(const ProProof& from);
+  ProProof(ProProof&& from) noexcept
+    : ProProof() {
+    *this = ::std::move(from);
+  }
+
+  inline ProProof& operator=(const ProProof& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ProProof& operator=(ProProof&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  }
+  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const ProProof& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ProProof* internal_default_instance() {
+    return reinterpret_cast<const ProProof*>(
+               &_ProProof_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    27;
+
+  friend void swap(ProProof& a, ProProof& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ProProof* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ProProof* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ProProof* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ProProof>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const ProProof& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const ProProof& from) {
+    ProProof::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ProProof* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "SessionProtos.ProProof";
+  }
+  protected:
+  explicit ProProof(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kGenIndexHashFieldNumber = 2,
+    kRotatingPublicKeyFieldNumber = 3,
+    kSigFieldNumber = 5,
+    kExpiryUnixTsFieldNumber = 4,
+    kVersionFieldNumber = 1,
+  };
+  // required bytes genIndexHash = 2;
+  bool has_genindexhash() const;
+  private:
+  bool _internal_has_genindexhash() const;
+  public:
+  void clear_genindexhash();
+  const std::string& genindexhash() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_genindexhash(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_genindexhash();
+  PROTOBUF_NODISCARD std::string* release_genindexhash();
+  void set_allocated_genindexhash(std::string* genindexhash);
+  private:
+  const std::string& _internal_genindexhash() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_genindexhash(const std::string& value);
+  std::string* _internal_mutable_genindexhash();
+  public:
+
+  // required bytes rotatingPublicKey = 3;
+  bool has_rotatingpublickey() const;
+  private:
+  bool _internal_has_rotatingpublickey() const;
+  public:
+  void clear_rotatingpublickey();
+  const std::string& rotatingpublickey() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_rotatingpublickey(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_rotatingpublickey();
+  PROTOBUF_NODISCARD std::string* release_rotatingpublickey();
+  void set_allocated_rotatingpublickey(std::string* rotatingpublickey);
+  private:
+  const std::string& _internal_rotatingpublickey() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_rotatingpublickey(const std::string& value);
+  std::string* _internal_mutable_rotatingpublickey();
+  public:
+
+  // required bytes sig = 5;
+  bool has_sig() const;
+  private:
+  bool _internal_has_sig() const;
+  public:
+  void clear_sig();
+  const std::string& sig() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_sig(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_sig();
+  PROTOBUF_NODISCARD std::string* release_sig();
+  void set_allocated_sig(std::string* sig);
+  private:
+  const std::string& _internal_sig() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_sig(const std::string& value);
+  std::string* _internal_mutable_sig();
+  public:
+
+  // required uint64 expiryUnixTs = 4;
+  bool has_expiryunixts() const;
+  private:
+  bool _internal_has_expiryunixts() const;
+  public:
+  void clear_expiryunixts();
+  uint64_t expiryunixts() const;
+  void set_expiryunixts(uint64_t value);
+  private:
+  uint64_t _internal_expiryunixts() const;
+  void _internal_set_expiryunixts(uint64_t value);
+  public:
+
+  // required uint32 version = 1;
+  bool has_version() const;
+  private:
+  bool _internal_has_version() const;
+  public:
+  void clear_version();
+  uint32_t version() const;
+  void set_version(uint32_t value);
+  private:
+  uint32_t _internal_version() const;
+  void _internal_set_version(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:SessionProtos.ProProof)
+ private:
+  class _Internal;
+
+  // helper for ByteSizeLong()
+  size_t RequiredFieldsByteSizeFallback() const;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr genindexhash_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr rotatingpublickey_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr sig_;
+    uint64_t expiryunixts_;
+    uint32_t version_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_SessionProtos_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ProConfig final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.ProConfig) */ {
+ public:
+  inline ProConfig() : ProConfig(nullptr) {}
+  ~ProConfig() override;
+  explicit PROTOBUF_CONSTEXPR ProConfig(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ProConfig(const ProConfig& from);
+  ProConfig(ProConfig&& from) noexcept
+    : ProConfig() {
+    *this = ::std::move(from);
+  }
+
+  inline ProConfig& operator=(const ProConfig& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ProConfig& operator=(ProConfig&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  }
+  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const ProConfig& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ProConfig* internal_default_instance() {
+    return reinterpret_cast<const ProConfig*>(
+               &_ProConfig_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    28;
+
+  friend void swap(ProConfig& a, ProConfig& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ProConfig* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ProConfig* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ProConfig* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ProConfig>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const ProConfig& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const ProConfig& from) {
+    ProConfig::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ProConfig* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "SessionProtos.ProConfig";
+  }
+  protected:
+  explicit ProConfig(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kRotatingPrivKeyFieldNumber = 1,
+    kProofFieldNumber = 2,
+  };
+  // required bytes rotatingPrivKey = 1;
+  bool has_rotatingprivkey() const;
+  private:
+  bool _internal_has_rotatingprivkey() const;
+  public:
+  void clear_rotatingprivkey();
+  const std::string& rotatingprivkey() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_rotatingprivkey(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_rotatingprivkey();
+  PROTOBUF_NODISCARD std::string* release_rotatingprivkey();
+  void set_allocated_rotatingprivkey(std::string* rotatingprivkey);
+  private:
+  const std::string& _internal_rotatingprivkey() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_rotatingprivkey(const std::string& value);
+  std::string* _internal_mutable_rotatingprivkey();
+  public:
+
+  // required .SessionProtos.ProProof proof = 2;
+  bool has_proof() const;
+  private:
+  bool _internal_has_proof() const;
+  public:
+  void clear_proof();
+  const ::SessionProtos::ProProof& proof() const;
+  PROTOBUF_NODISCARD ::SessionProtos::ProProof* release_proof();
+  ::SessionProtos::ProProof* mutable_proof();
+  void set_allocated_proof(::SessionProtos::ProProof* proof);
+  private:
+  const ::SessionProtos::ProProof& _internal_proof() const;
+  ::SessionProtos::ProProof* _internal_mutable_proof();
+  public:
+  void unsafe_arena_set_allocated_proof(
+      ::SessionProtos::ProProof* proof);
+  ::SessionProtos::ProProof* unsafe_arena_release_proof();
+
+  // @@protoc_insertion_point(class_scope:SessionProtos.ProConfig)
+ private:
+  class _Internal;
+
+  // helper for ByteSizeLong()
+  size_t RequiredFieldsByteSizeFallback() const;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr rotatingprivkey_;
+    ::SessionProtos::ProProof* proof_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_SessionProtos_2eproto;
+};
+// -------------------------------------------------------------------
+
+class ProMessage final :
+    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.ProMessage) */ {
+ public:
+  inline ProMessage() : ProMessage(nullptr) {}
+  ~ProMessage() override;
+  explicit PROTOBUF_CONSTEXPR ProMessage(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
+
+  ProMessage(const ProMessage& from);
+  ProMessage(ProMessage&& from) noexcept
+    : ProMessage() {
+    *this = ::std::move(from);
+  }
+
+  inline ProMessage& operator=(const ProMessage& from) {
+    CopyFrom(from);
+    return *this;
+  }
+  inline ProMessage& operator=(ProMessage&& from) noexcept {
+    if (this == &from) return *this;
+    if (GetOwningArena() == from.GetOwningArena()
+  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
+        && GetOwningArena() != nullptr
+  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
+    ) {
+      InternalSwap(&from);
+    } else {
+      CopyFrom(from);
+    }
+    return *this;
+  }
+
+  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  }
+  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  }
+
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
+    return GetDescriptor();
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
+    return default_instance().GetMetadata().descriptor;
+  }
+  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
+    return default_instance().GetMetadata().reflection;
+  }
+  static const ProMessage& default_instance() {
+    return *internal_default_instance();
+  }
+  static inline const ProMessage* internal_default_instance() {
+    return reinterpret_cast<const ProMessage*>(
+               &_ProMessage_default_instance_);
+  }
+  static constexpr int kIndexInFileMessages =
+    29;
+
+  friend void swap(ProMessage& a, ProMessage& b) {
+    a.Swap(&b);
+  }
+  inline void Swap(ProMessage* other) {
+    if (other == this) return;
+  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() != nullptr &&
+        GetOwningArena() == other->GetOwningArena()) {
+   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
+    if (GetOwningArena() == other->GetOwningArena()) {
+  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
+      InternalSwap(other);
+    } else {
+      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
+    }
+  }
+  void UnsafeArenaSwap(ProMessage* other) {
+    if (other == this) return;
+    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
+    InternalSwap(other);
+  }
+
+  // implements Message ----------------------------------------------
+
+  ProMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
+    return CreateMaybeMessage<ProMessage>(arena);
+  }
+  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CopyFrom(const ProMessage& from);
+  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
+  void MergeFrom( const ProMessage& from) {
+    ProMessage::MergeImpl(*this, from);
+  }
+  private:
+  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
+  public:
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const final;
+  void InternalSwap(ProMessage* other);
+
+  private:
+  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
+  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
+    return "SessionProtos.ProMessage";
+  }
+  protected:
+  explicit ProMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                       bool is_message_owned = false);
+  public:
+
+  static const ClassData _class_data_;
+  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
+
+  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+
+  // nested types ----------------------------------------------------
+
+  // accessors -------------------------------------------------------
+
+  enum : int {
+    kProofFieldNumber = 1,
+    kFlagsFieldNumber = 2,
+  };
+  // required .SessionProtos.ProProof proof = 1;
+  bool has_proof() const;
+  private:
+  bool _internal_has_proof() const;
+  public:
+  void clear_proof();
+  const ::SessionProtos::ProProof& proof() const;
+  PROTOBUF_NODISCARD ::SessionProtos::ProProof* release_proof();
+  ::SessionProtos::ProProof* mutable_proof();
+  void set_allocated_proof(::SessionProtos::ProProof* proof);
+  private:
+  const ::SessionProtos::ProProof& _internal_proof() const;
+  ::SessionProtos::ProProof* _internal_mutable_proof();
+  public:
+  void unsafe_arena_set_allocated_proof(
+      ::SessionProtos::ProProof* proof);
+  ::SessionProtos::ProProof* unsafe_arena_release_proof();
+
+  // required uint32 flags = 2;
+  bool has_flags() const;
+  private:
+  bool _internal_has_flags() const;
+  public:
+  void clear_flags();
+  uint32_t flags() const;
+  void set_flags(uint32_t value);
+  private:
+  uint32_t _internal_flags() const;
+  void _internal_set_flags(uint32_t value);
+  public:
+
+  // @@protoc_insertion_point(class_scope:SessionProtos.ProMessage)
+ private:
+  class _Internal;
+
+  // helper for ByteSizeLong()
+  size_t RequiredFieldsByteSizeFallback() const;
+
+  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
+  typedef void InternalArenaConstructable_;
+  typedef void DestructorSkippable_;
+  struct Impl_ {
+    ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+    ::SessionProtos::ProProof* proof_;
+    uint32_t flags_;
+  };
+  union { Impl_ _impl_; };
+  friend struct ::TableStruct_SessionProtos_2eproto;
+};
 // ===================================================================
 
 
@@ -6829,7 +7490,7 @@ class GroupUpdateDeleteMemberContentMessage final :
 
 // required .SessionProtos.Envelope.Type type = 1;
 inline bool Envelope::_internal_has_type() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000020u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000040u) != 0;
   return value;
 }
 inline bool Envelope::has_type() const {
@@ -6837,7 +7498,7 @@ inline bool Envelope::has_type() const {
 }
 inline void Envelope::clear_type() {
   _impl_.type_ = 6;
-  _impl_._has_bits_[0] &= ~0x00000020u;
+  _impl_._has_bits_[0] &= ~0x00000040u;
 }
 inline ::SessionProtos::Envelope_Type Envelope::_internal_type() const {
   return static_cast< ::SessionProtos::Envelope_Type >(_impl_.type_);
@@ -6848,7 +7509,7 @@ inline ::SessionProtos::Envelope_Type Envelope::type() const {
 }
 inline void Envelope::_internal_set_type(::SessionProtos::Envelope_Type value) {
   assert(::SessionProtos::Envelope_Type_IsValid(value));
-  _impl_._has_bits_[0] |= 0x00000020u;
+  _impl_._has_bits_[0] |= 0x00000040u;
   _impl_.type_ = value;
 }
 inline void Envelope::set_type(::SessionProtos::Envelope_Type value) {
@@ -6926,7 +7587,7 @@ inline void Envelope::set_allocated_source(std::string* source) {
 
 // optional uint32 sourceDevice = 7;
 inline bool Envelope::_internal_has_sourcedevice() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000020u) != 0;
   return value;
 }
 inline bool Envelope::has_sourcedevice() const {
@@ -6934,7 +7595,7 @@ inline bool Envelope::has_sourcedevice() const {
 }
 inline void Envelope::clear_sourcedevice() {
   _impl_.sourcedevice_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000010u;
+  _impl_._has_bits_[0] &= ~0x00000020u;
 }
 inline uint32_t Envelope::_internal_sourcedevice() const {
   return _impl_.sourcedevice_;
@@ -6944,7 +7605,7 @@ inline uint32_t Envelope::sourcedevice() const {
   return _internal_sourcedevice();
 }
 inline void Envelope::_internal_set_sourcedevice(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000010u;
+  _impl_._has_bits_[0] |= 0x00000020u;
   _impl_.sourcedevice_ = value;
 }
 inline void Envelope::set_sourcedevice(uint32_t value) {
@@ -6954,7 +7615,7 @@ inline void Envelope::set_sourcedevice(uint32_t value) {
 
 // required uint64 timestamp = 5;
 inline bool Envelope::_internal_has_timestamp() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
   return value;
 }
 inline bool Envelope::has_timestamp() const {
@@ -6962,7 +7623,7 @@ inline bool Envelope::has_timestamp() const {
 }
 inline void Envelope::clear_timestamp() {
   _impl_.timestamp_ = uint64_t{0u};
-  _impl_._has_bits_[0] &= ~0x00000004u;
+  _impl_._has_bits_[0] &= ~0x00000008u;
 }
 inline uint64_t Envelope::_internal_timestamp() const {
   return _impl_.timestamp_;
@@ -6972,7 +7633,7 @@ inline uint64_t Envelope::timestamp() const {
   return _internal_timestamp();
 }
 inline void Envelope::_internal_set_timestamp(uint64_t value) {
-  _impl_._has_bits_[0] |= 0x00000004u;
+  _impl_._has_bits_[0] |= 0x00000008u;
   _impl_.timestamp_ = value;
 }
 inline void Envelope::set_timestamp(uint64_t value) {
@@ -7050,7 +7711,7 @@ inline void Envelope::set_allocated_content(std::string* content) {
 
 // optional uint64 serverTimestamp = 10;
 inline bool Envelope::_internal_has_servertimestamp() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
   return value;
 }
 inline bool Envelope::has_servertimestamp() const {
@@ -7058,7 +7719,7 @@ inline bool Envelope::has_servertimestamp() const {
 }
 inline void Envelope::clear_servertimestamp() {
   _impl_.servertimestamp_ = uint64_t{0u};
-  _impl_._has_bits_[0] &= ~0x00000008u;
+  _impl_._has_bits_[0] &= ~0x00000010u;
 }
 inline uint64_t Envelope::_internal_servertimestamp() const {
   return _impl_.servertimestamp_;
@@ -7068,12 +7729,80 @@ inline uint64_t Envelope::servertimestamp() const {
   return _internal_servertimestamp();
 }
 inline void Envelope::_internal_set_servertimestamp(uint64_t value) {
-  _impl_._has_bits_[0] |= 0x00000008u;
+  _impl_._has_bits_[0] |= 0x00000010u;
   _impl_.servertimestamp_ = value;
 }
 inline void Envelope::set_servertimestamp(uint64_t value) {
   _internal_set_servertimestamp(value);
   // @@protoc_insertion_point(field_set:SessionProtos.Envelope.serverTimestamp)
+}
+
+// optional bytes proSig = 11;
+inline bool Envelope::_internal_has_prosig() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
+  return value;
+}
+inline bool Envelope::has_prosig() const {
+  return _internal_has_prosig();
+}
+inline void Envelope::clear_prosig() {
+  _impl_.prosig_.ClearToEmpty();
+  _impl_._has_bits_[0] &= ~0x00000004u;
+}
+inline const std::string& Envelope::prosig() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.Envelope.proSig)
+  return _internal_prosig();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void Envelope::set_prosig(ArgT0&& arg0, ArgT... args) {
+ _impl_._has_bits_[0] |= 0x00000004u;
+ _impl_.prosig_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:SessionProtos.Envelope.proSig)
+}
+inline std::string* Envelope::mutable_prosig() {
+  std::string* _s = _internal_mutable_prosig();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.Envelope.proSig)
+  return _s;
+}
+inline const std::string& Envelope::_internal_prosig() const {
+  return _impl_.prosig_.Get();
+}
+inline void Envelope::_internal_set_prosig(const std::string& value) {
+  _impl_._has_bits_[0] |= 0x00000004u;
+  _impl_.prosig_.Set(value, GetArenaForAllocation());
+}
+inline std::string* Envelope::_internal_mutable_prosig() {
+  _impl_._has_bits_[0] |= 0x00000004u;
+  return _impl_.prosig_.Mutable(GetArenaForAllocation());
+}
+inline std::string* Envelope::release_prosig() {
+  // @@protoc_insertion_point(field_release:SessionProtos.Envelope.proSig)
+  if (!_internal_has_prosig()) {
+    return nullptr;
+  }
+  _impl_._has_bits_[0] &= ~0x00000004u;
+  auto* p = _impl_.prosig_.Release();
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.prosig_.IsDefault()) {
+    _impl_.prosig_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  return p;
+}
+inline void Envelope::set_allocated_prosig(std::string* prosig) {
+  if (prosig != nullptr) {
+    _impl_._has_bits_[0] |= 0x00000004u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000004u;
+  }
+  _impl_.prosig_.SetAllocated(prosig, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.prosig_.IsDefault()) {
+    _impl_.prosig_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.Envelope.proSig)
 }
 
 // -------------------------------------------------------------------
@@ -8153,7 +8882,7 @@ inline void Content::set_allocated_sharedconfigmessage(::SessionProtos::SharedCo
 
 // optional .SessionProtos.Content.ExpirationType expirationType = 12;
 inline bool Content::_internal_has_expirationtype() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000100u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000200u) != 0;
   return value;
 }
 inline bool Content::has_expirationtype() const {
@@ -8161,7 +8890,7 @@ inline bool Content::has_expirationtype() const {
 }
 inline void Content::clear_expirationtype() {
   _impl_.expirationtype_ = 0;
-  _impl_._has_bits_[0] &= ~0x00000100u;
+  _impl_._has_bits_[0] &= ~0x00000200u;
 }
 inline ::SessionProtos::Content_ExpirationType Content::_internal_expirationtype() const {
   return static_cast< ::SessionProtos::Content_ExpirationType >(_impl_.expirationtype_);
@@ -8172,7 +8901,7 @@ inline ::SessionProtos::Content_ExpirationType Content::expirationtype() const {
 }
 inline void Content::_internal_set_expirationtype(::SessionProtos::Content_ExpirationType value) {
   assert(::SessionProtos::Content_ExpirationType_IsValid(value));
-  _impl_._has_bits_[0] |= 0x00000100u;
+  _impl_._has_bits_[0] |= 0x00000200u;
   _impl_.expirationtype_ = value;
 }
 inline void Content::set_expirationtype(::SessionProtos::Content_ExpirationType value) {
@@ -8182,7 +8911,7 @@ inline void Content::set_expirationtype(::SessionProtos::Content_ExpirationType 
 
 // optional uint32 expirationTimer = 13;
 inline bool Content::_internal_has_expirationtimer() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000200u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000400u) != 0;
   return value;
 }
 inline bool Content::has_expirationtimer() const {
@@ -8190,7 +8919,7 @@ inline bool Content::has_expirationtimer() const {
 }
 inline void Content::clear_expirationtimer() {
   _impl_.expirationtimer_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000200u;
+  _impl_._has_bits_[0] &= ~0x00000400u;
 }
 inline uint32_t Content::_internal_expirationtimer() const {
   return _impl_.expirationtimer_;
@@ -8200,7 +8929,7 @@ inline uint32_t Content::expirationtimer() const {
   return _internal_expirationtimer();
 }
 inline void Content::_internal_set_expirationtimer(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000200u;
+  _impl_._has_bits_[0] |= 0x00000400u;
   _impl_.expirationtimer_ = value;
 }
 inline void Content::set_expirationtimer(uint32_t value) {
@@ -8210,7 +8939,7 @@ inline void Content::set_expirationtimer(uint32_t value) {
 
 // optional uint64 sigTimestamp = 15;
 inline bool Content::_internal_has_sigtimestamp() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000400u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000800u) != 0;
   return value;
 }
 inline bool Content::has_sigtimestamp() const {
@@ -8218,7 +8947,7 @@ inline bool Content::has_sigtimestamp() const {
 }
 inline void Content::clear_sigtimestamp() {
   _impl_.sigtimestamp_ = uint64_t{0u};
-  _impl_._has_bits_[0] &= ~0x00000400u;
+  _impl_._has_bits_[0] &= ~0x00000800u;
 }
 inline uint64_t Content::_internal_sigtimestamp() const {
   return _impl_.sigtimestamp_;
@@ -8228,12 +8957,102 @@ inline uint64_t Content::sigtimestamp() const {
   return _internal_sigtimestamp();
 }
 inline void Content::_internal_set_sigtimestamp(uint64_t value) {
-  _impl_._has_bits_[0] |= 0x00000400u;
+  _impl_._has_bits_[0] |= 0x00000800u;
   _impl_.sigtimestamp_ = value;
 }
 inline void Content::set_sigtimestamp(uint64_t value) {
   _internal_set_sigtimestamp(value);
   // @@protoc_insertion_point(field_set:SessionProtos.Content.sigTimestamp)
+}
+
+// optional .SessionProtos.ProMessage proMessage = 16;
+inline bool Content::_internal_has_promessage() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000100u) != 0;
+  PROTOBUF_ASSUME(!value || _impl_.promessage_ != nullptr);
+  return value;
+}
+inline bool Content::has_promessage() const {
+  return _internal_has_promessage();
+}
+inline void Content::clear_promessage() {
+  if (_impl_.promessage_ != nullptr) _impl_.promessage_->Clear();
+  _impl_._has_bits_[0] &= ~0x00000100u;
+}
+inline const ::SessionProtos::ProMessage& Content::_internal_promessage() const {
+  const ::SessionProtos::ProMessage* p = _impl_.promessage_;
+  return p != nullptr ? *p : reinterpret_cast<const ::SessionProtos::ProMessage&>(
+      ::SessionProtos::_ProMessage_default_instance_);
+}
+inline const ::SessionProtos::ProMessage& Content::promessage() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.Content.proMessage)
+  return _internal_promessage();
+}
+inline void Content::unsafe_arena_set_allocated_promessage(
+    ::SessionProtos::ProMessage* promessage) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.promessage_);
+  }
+  _impl_.promessage_ = promessage;
+  if (promessage) {
+    _impl_._has_bits_[0] |= 0x00000100u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000100u;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.proMessage)
+}
+inline ::SessionProtos::ProMessage* Content::release_promessage() {
+  _impl_._has_bits_[0] &= ~0x00000100u;
+  ::SessionProtos::ProMessage* temp = _impl_.promessage_;
+  _impl_.promessage_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::SessionProtos::ProMessage* Content::unsafe_arena_release_promessage() {
+  // @@protoc_insertion_point(field_release:SessionProtos.Content.proMessage)
+  _impl_._has_bits_[0] &= ~0x00000100u;
+  ::SessionProtos::ProMessage* temp = _impl_.promessage_;
+  _impl_.promessage_ = nullptr;
+  return temp;
+}
+inline ::SessionProtos::ProMessage* Content::_internal_mutable_promessage() {
+  _impl_._has_bits_[0] |= 0x00000100u;
+  if (_impl_.promessage_ == nullptr) {
+    auto* p = CreateMaybeMessage<::SessionProtos::ProMessage>(GetArenaForAllocation());
+    _impl_.promessage_ = p;
+  }
+  return _impl_.promessage_;
+}
+inline ::SessionProtos::ProMessage* Content::mutable_promessage() {
+  ::SessionProtos::ProMessage* _msg = _internal_mutable_promessage();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.Content.proMessage)
+  return _msg;
+}
+inline void Content::set_allocated_promessage(::SessionProtos::ProMessage* promessage) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.promessage_;
+  }
+  if (promessage) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(promessage);
+    if (message_arena != submessage_arena) {
+      promessage = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, promessage, submessage_arena);
+    }
+    _impl_._has_bits_[0] |= 0x00000100u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000100u;
+  }
+  _impl_.promessage_ = promessage;
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.proMessage)
 }
 
 // -------------------------------------------------------------------
@@ -13362,9 +14181,563 @@ inline void GroupUpdateDeleteMemberContentMessage::set_allocated_adminsignature(
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.GroupUpdateDeleteMemberContentMessage.adminSignature)
 }
 
+// -------------------------------------------------------------------
+
+// ProProof
+
+// required uint32 version = 1;
+inline bool ProProof::_internal_has_version() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
+  return value;
+}
+inline bool ProProof::has_version() const {
+  return _internal_has_version();
+}
+inline void ProProof::clear_version() {
+  _impl_.version_ = 0u;
+  _impl_._has_bits_[0] &= ~0x00000010u;
+}
+inline uint32_t ProProof::_internal_version() const {
+  return _impl_.version_;
+}
+inline uint32_t ProProof::version() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProProof.version)
+  return _internal_version();
+}
+inline void ProProof::_internal_set_version(uint32_t value) {
+  _impl_._has_bits_[0] |= 0x00000010u;
+  _impl_.version_ = value;
+}
+inline void ProProof::set_version(uint32_t value) {
+  _internal_set_version(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.ProProof.version)
+}
+
+// required bytes genIndexHash = 2;
+inline bool ProProof::_internal_has_genindexhash() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
+  return value;
+}
+inline bool ProProof::has_genindexhash() const {
+  return _internal_has_genindexhash();
+}
+inline void ProProof::clear_genindexhash() {
+  _impl_.genindexhash_.ClearToEmpty();
+  _impl_._has_bits_[0] &= ~0x00000001u;
+}
+inline const std::string& ProProof::genindexhash() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProProof.genIndexHash)
+  return _internal_genindexhash();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ProProof::set_genindexhash(ArgT0&& arg0, ArgT... args) {
+ _impl_._has_bits_[0] |= 0x00000001u;
+ _impl_.genindexhash_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:SessionProtos.ProProof.genIndexHash)
+}
+inline std::string* ProProof::mutable_genindexhash() {
+  std::string* _s = _internal_mutable_genindexhash();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.ProProof.genIndexHash)
+  return _s;
+}
+inline const std::string& ProProof::_internal_genindexhash() const {
+  return _impl_.genindexhash_.Get();
+}
+inline void ProProof::_internal_set_genindexhash(const std::string& value) {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  _impl_.genindexhash_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ProProof::_internal_mutable_genindexhash() {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  return _impl_.genindexhash_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ProProof::release_genindexhash() {
+  // @@protoc_insertion_point(field_release:SessionProtos.ProProof.genIndexHash)
+  if (!_internal_has_genindexhash()) {
+    return nullptr;
+  }
+  _impl_._has_bits_[0] &= ~0x00000001u;
+  auto* p = _impl_.genindexhash_.Release();
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.genindexhash_.IsDefault()) {
+    _impl_.genindexhash_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  return p;
+}
+inline void ProProof::set_allocated_genindexhash(std::string* genindexhash) {
+  if (genindexhash != nullptr) {
+    _impl_._has_bits_[0] |= 0x00000001u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000001u;
+  }
+  _impl_.genindexhash_.SetAllocated(genindexhash, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.genindexhash_.IsDefault()) {
+    _impl_.genindexhash_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProProof.genIndexHash)
+}
+
+// required bytes rotatingPublicKey = 3;
+inline bool ProProof::_internal_has_rotatingpublickey() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
+  return value;
+}
+inline bool ProProof::has_rotatingpublickey() const {
+  return _internal_has_rotatingpublickey();
+}
+inline void ProProof::clear_rotatingpublickey() {
+  _impl_.rotatingpublickey_.ClearToEmpty();
+  _impl_._has_bits_[0] &= ~0x00000002u;
+}
+inline const std::string& ProProof::rotatingpublickey() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProProof.rotatingPublicKey)
+  return _internal_rotatingpublickey();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ProProof::set_rotatingpublickey(ArgT0&& arg0, ArgT... args) {
+ _impl_._has_bits_[0] |= 0x00000002u;
+ _impl_.rotatingpublickey_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:SessionProtos.ProProof.rotatingPublicKey)
+}
+inline std::string* ProProof::mutable_rotatingpublickey() {
+  std::string* _s = _internal_mutable_rotatingpublickey();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.ProProof.rotatingPublicKey)
+  return _s;
+}
+inline const std::string& ProProof::_internal_rotatingpublickey() const {
+  return _impl_.rotatingpublickey_.Get();
+}
+inline void ProProof::_internal_set_rotatingpublickey(const std::string& value) {
+  _impl_._has_bits_[0] |= 0x00000002u;
+  _impl_.rotatingpublickey_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ProProof::_internal_mutable_rotatingpublickey() {
+  _impl_._has_bits_[0] |= 0x00000002u;
+  return _impl_.rotatingpublickey_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ProProof::release_rotatingpublickey() {
+  // @@protoc_insertion_point(field_release:SessionProtos.ProProof.rotatingPublicKey)
+  if (!_internal_has_rotatingpublickey()) {
+    return nullptr;
+  }
+  _impl_._has_bits_[0] &= ~0x00000002u;
+  auto* p = _impl_.rotatingpublickey_.Release();
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.rotatingpublickey_.IsDefault()) {
+    _impl_.rotatingpublickey_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  return p;
+}
+inline void ProProof::set_allocated_rotatingpublickey(std::string* rotatingpublickey) {
+  if (rotatingpublickey != nullptr) {
+    _impl_._has_bits_[0] |= 0x00000002u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000002u;
+  }
+  _impl_.rotatingpublickey_.SetAllocated(rotatingpublickey, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.rotatingpublickey_.IsDefault()) {
+    _impl_.rotatingpublickey_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProProof.rotatingPublicKey)
+}
+
+// required uint64 expiryUnixTs = 4;
+inline bool ProProof::_internal_has_expiryunixts() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
+  return value;
+}
+inline bool ProProof::has_expiryunixts() const {
+  return _internal_has_expiryunixts();
+}
+inline void ProProof::clear_expiryunixts() {
+  _impl_.expiryunixts_ = uint64_t{0u};
+  _impl_._has_bits_[0] &= ~0x00000008u;
+}
+inline uint64_t ProProof::_internal_expiryunixts() const {
+  return _impl_.expiryunixts_;
+}
+inline uint64_t ProProof::expiryunixts() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProProof.expiryUnixTs)
+  return _internal_expiryunixts();
+}
+inline void ProProof::_internal_set_expiryunixts(uint64_t value) {
+  _impl_._has_bits_[0] |= 0x00000008u;
+  _impl_.expiryunixts_ = value;
+}
+inline void ProProof::set_expiryunixts(uint64_t value) {
+  _internal_set_expiryunixts(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.ProProof.expiryUnixTs)
+}
+
+// required bytes sig = 5;
+inline bool ProProof::_internal_has_sig() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
+  return value;
+}
+inline bool ProProof::has_sig() const {
+  return _internal_has_sig();
+}
+inline void ProProof::clear_sig() {
+  _impl_.sig_.ClearToEmpty();
+  _impl_._has_bits_[0] &= ~0x00000004u;
+}
+inline const std::string& ProProof::sig() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProProof.sig)
+  return _internal_sig();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ProProof::set_sig(ArgT0&& arg0, ArgT... args) {
+ _impl_._has_bits_[0] |= 0x00000004u;
+ _impl_.sig_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:SessionProtos.ProProof.sig)
+}
+inline std::string* ProProof::mutable_sig() {
+  std::string* _s = _internal_mutable_sig();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.ProProof.sig)
+  return _s;
+}
+inline const std::string& ProProof::_internal_sig() const {
+  return _impl_.sig_.Get();
+}
+inline void ProProof::_internal_set_sig(const std::string& value) {
+  _impl_._has_bits_[0] |= 0x00000004u;
+  _impl_.sig_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ProProof::_internal_mutable_sig() {
+  _impl_._has_bits_[0] |= 0x00000004u;
+  return _impl_.sig_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ProProof::release_sig() {
+  // @@protoc_insertion_point(field_release:SessionProtos.ProProof.sig)
+  if (!_internal_has_sig()) {
+    return nullptr;
+  }
+  _impl_._has_bits_[0] &= ~0x00000004u;
+  auto* p = _impl_.sig_.Release();
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.sig_.IsDefault()) {
+    _impl_.sig_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  return p;
+}
+inline void ProProof::set_allocated_sig(std::string* sig) {
+  if (sig != nullptr) {
+    _impl_._has_bits_[0] |= 0x00000004u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000004u;
+  }
+  _impl_.sig_.SetAllocated(sig, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.sig_.IsDefault()) {
+    _impl_.sig_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProProof.sig)
+}
+
+// -------------------------------------------------------------------
+
+// ProConfig
+
+// required bytes rotatingPrivKey = 1;
+inline bool ProConfig::_internal_has_rotatingprivkey() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
+  return value;
+}
+inline bool ProConfig::has_rotatingprivkey() const {
+  return _internal_has_rotatingprivkey();
+}
+inline void ProConfig::clear_rotatingprivkey() {
+  _impl_.rotatingprivkey_.ClearToEmpty();
+  _impl_._has_bits_[0] &= ~0x00000001u;
+}
+inline const std::string& ProConfig::rotatingprivkey() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProConfig.rotatingPrivKey)
+  return _internal_rotatingprivkey();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void ProConfig::set_rotatingprivkey(ArgT0&& arg0, ArgT... args) {
+ _impl_._has_bits_[0] |= 0x00000001u;
+ _impl_.rotatingprivkey_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:SessionProtos.ProConfig.rotatingPrivKey)
+}
+inline std::string* ProConfig::mutable_rotatingprivkey() {
+  std::string* _s = _internal_mutable_rotatingprivkey();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.ProConfig.rotatingPrivKey)
+  return _s;
+}
+inline const std::string& ProConfig::_internal_rotatingprivkey() const {
+  return _impl_.rotatingprivkey_.Get();
+}
+inline void ProConfig::_internal_set_rotatingprivkey(const std::string& value) {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  _impl_.rotatingprivkey_.Set(value, GetArenaForAllocation());
+}
+inline std::string* ProConfig::_internal_mutable_rotatingprivkey() {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  return _impl_.rotatingprivkey_.Mutable(GetArenaForAllocation());
+}
+inline std::string* ProConfig::release_rotatingprivkey() {
+  // @@protoc_insertion_point(field_release:SessionProtos.ProConfig.rotatingPrivKey)
+  if (!_internal_has_rotatingprivkey()) {
+    return nullptr;
+  }
+  _impl_._has_bits_[0] &= ~0x00000001u;
+  auto* p = _impl_.rotatingprivkey_.Release();
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.rotatingprivkey_.IsDefault()) {
+    _impl_.rotatingprivkey_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  return p;
+}
+inline void ProConfig::set_allocated_rotatingprivkey(std::string* rotatingprivkey) {
+  if (rotatingprivkey != nullptr) {
+    _impl_._has_bits_[0] |= 0x00000001u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000001u;
+  }
+  _impl_.rotatingprivkey_.SetAllocated(rotatingprivkey, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.rotatingprivkey_.IsDefault()) {
+    _impl_.rotatingprivkey_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProConfig.rotatingPrivKey)
+}
+
+// required .SessionProtos.ProProof proof = 2;
+inline bool ProConfig::_internal_has_proof() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
+  PROTOBUF_ASSUME(!value || _impl_.proof_ != nullptr);
+  return value;
+}
+inline bool ProConfig::has_proof() const {
+  return _internal_has_proof();
+}
+inline void ProConfig::clear_proof() {
+  if (_impl_.proof_ != nullptr) _impl_.proof_->Clear();
+  _impl_._has_bits_[0] &= ~0x00000002u;
+}
+inline const ::SessionProtos::ProProof& ProConfig::_internal_proof() const {
+  const ::SessionProtos::ProProof* p = _impl_.proof_;
+  return p != nullptr ? *p : reinterpret_cast<const ::SessionProtos::ProProof&>(
+      ::SessionProtos::_ProProof_default_instance_);
+}
+inline const ::SessionProtos::ProProof& ProConfig::proof() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProConfig.proof)
+  return _internal_proof();
+}
+inline void ProConfig::unsafe_arena_set_allocated_proof(
+    ::SessionProtos::ProProof* proof) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.proof_);
+  }
+  _impl_.proof_ = proof;
+  if (proof) {
+    _impl_._has_bits_[0] |= 0x00000002u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000002u;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.ProConfig.proof)
+}
+inline ::SessionProtos::ProProof* ProConfig::release_proof() {
+  _impl_._has_bits_[0] &= ~0x00000002u;
+  ::SessionProtos::ProProof* temp = _impl_.proof_;
+  _impl_.proof_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::SessionProtos::ProProof* ProConfig::unsafe_arena_release_proof() {
+  // @@protoc_insertion_point(field_release:SessionProtos.ProConfig.proof)
+  _impl_._has_bits_[0] &= ~0x00000002u;
+  ::SessionProtos::ProProof* temp = _impl_.proof_;
+  _impl_.proof_ = nullptr;
+  return temp;
+}
+inline ::SessionProtos::ProProof* ProConfig::_internal_mutable_proof() {
+  _impl_._has_bits_[0] |= 0x00000002u;
+  if (_impl_.proof_ == nullptr) {
+    auto* p = CreateMaybeMessage<::SessionProtos::ProProof>(GetArenaForAllocation());
+    _impl_.proof_ = p;
+  }
+  return _impl_.proof_;
+}
+inline ::SessionProtos::ProProof* ProConfig::mutable_proof() {
+  ::SessionProtos::ProProof* _msg = _internal_mutable_proof();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.ProConfig.proof)
+  return _msg;
+}
+inline void ProConfig::set_allocated_proof(::SessionProtos::ProProof* proof) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.proof_;
+  }
+  if (proof) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(proof);
+    if (message_arena != submessage_arena) {
+      proof = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, proof, submessage_arena);
+    }
+    _impl_._has_bits_[0] |= 0x00000002u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000002u;
+  }
+  _impl_.proof_ = proof;
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProConfig.proof)
+}
+
+// -------------------------------------------------------------------
+
+// ProMessage
+
+// required .SessionProtos.ProProof proof = 1;
+inline bool ProMessage::_internal_has_proof() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
+  PROTOBUF_ASSUME(!value || _impl_.proof_ != nullptr);
+  return value;
+}
+inline bool ProMessage::has_proof() const {
+  return _internal_has_proof();
+}
+inline void ProMessage::clear_proof() {
+  if (_impl_.proof_ != nullptr) _impl_.proof_->Clear();
+  _impl_._has_bits_[0] &= ~0x00000001u;
+}
+inline const ::SessionProtos::ProProof& ProMessage::_internal_proof() const {
+  const ::SessionProtos::ProProof* p = _impl_.proof_;
+  return p != nullptr ? *p : reinterpret_cast<const ::SessionProtos::ProProof&>(
+      ::SessionProtos::_ProProof_default_instance_);
+}
+inline const ::SessionProtos::ProProof& ProMessage::proof() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.proof)
+  return _internal_proof();
+}
+inline void ProMessage::unsafe_arena_set_allocated_proof(
+    ::SessionProtos::ProProof* proof) {
+  if (GetArenaForAllocation() == nullptr) {
+    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.proof_);
+  }
+  _impl_.proof_ = proof;
+  if (proof) {
+    _impl_._has_bits_[0] |= 0x00000001u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000001u;
+  }
+  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.ProMessage.proof)
+}
+inline ::SessionProtos::ProProof* ProMessage::release_proof() {
+  _impl_._has_bits_[0] &= ~0x00000001u;
+  ::SessionProtos::ProProof* temp = _impl_.proof_;
+  _impl_.proof_ = nullptr;
+#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
+  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
+  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  if (GetArenaForAllocation() == nullptr) { delete old; }
+#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
+  if (GetArenaForAllocation() != nullptr) {
+    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
+  }
+#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
+  return temp;
+}
+inline ::SessionProtos::ProProof* ProMessage::unsafe_arena_release_proof() {
+  // @@protoc_insertion_point(field_release:SessionProtos.ProMessage.proof)
+  _impl_._has_bits_[0] &= ~0x00000001u;
+  ::SessionProtos::ProProof* temp = _impl_.proof_;
+  _impl_.proof_ = nullptr;
+  return temp;
+}
+inline ::SessionProtos::ProProof* ProMessage::_internal_mutable_proof() {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  if (_impl_.proof_ == nullptr) {
+    auto* p = CreateMaybeMessage<::SessionProtos::ProProof>(GetArenaForAllocation());
+    _impl_.proof_ = p;
+  }
+  return _impl_.proof_;
+}
+inline ::SessionProtos::ProProof* ProMessage::mutable_proof() {
+  ::SessionProtos::ProProof* _msg = _internal_mutable_proof();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.ProMessage.proof)
+  return _msg;
+}
+inline void ProMessage::set_allocated_proof(::SessionProtos::ProProof* proof) {
+  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
+  if (message_arena == nullptr) {
+    delete _impl_.proof_;
+  }
+  if (proof) {
+    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
+        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(proof);
+    if (message_arena != submessage_arena) {
+      proof = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
+          message_arena, proof, submessage_arena);
+    }
+    _impl_._has_bits_[0] |= 0x00000001u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000001u;
+  }
+  _impl_.proof_ = proof;
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProMessage.proof)
+}
+
+// required uint32 flags = 2;
+inline bool ProMessage::_internal_has_flags() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
+  return value;
+}
+inline bool ProMessage::has_flags() const {
+  return _internal_has_flags();
+}
+inline void ProMessage::clear_flags() {
+  _impl_.flags_ = 0u;
+  _impl_._has_bits_[0] &= ~0x00000002u;
+}
+inline uint32_t ProMessage::_internal_flags() const {
+  return _impl_.flags_;
+}
+inline uint32_t ProMessage::flags() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.flags)
+  return _internal_flags();
+}
+inline void ProMessage::_internal_set_flags(uint32_t value) {
+  _impl_._has_bits_[0] |= 0x00000002u;
+  _impl_.flags_ = value;
+}
+inline void ProMessage::set_flags(uint32_t value) {
+  _internal_set_flags(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.ProMessage.flags)
+}
+
 #ifdef __GNUC__
   #pragma GCC diagnostic pop
 #endif  // __GNUC__
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
+// -------------------------------------------------------------------
+
 // -------------------------------------------------------------------
 
 // -------------------------------------------------------------------

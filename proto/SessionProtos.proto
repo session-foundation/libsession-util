@@ -19,6 +19,7 @@ message Envelope {
   required uint64 timestamp       = 5;
   optional bytes  content         = 8;
   optional uint64 serverTimestamp = 10;
+  optional bytes  proSig          = 11;
 }
 
 message TypingMessage {
@@ -70,6 +71,7 @@ message Content {
   optional ExpirationType             expirationType                         = 12;
   optional uint32                     expirationTimer                        = 13;
   optional uint64                     sigTimestamp                           = 15;
+  optional ProMessage                 proMessage                             = 16;
 }
 
 message CallMessage {
@@ -323,4 +325,17 @@ message GroupUpdateDeleteMemberContentMessage {
   repeated string memberSessionIds   = 1;
   repeated string messageHashes      = 2;
   optional bytes  adminSignature     = 3;
+}
+
+message ProProof {
+  required uint32 version           = 1;
+  required bytes  genIndexHash      = 2;
+  required bytes  rotatingPublicKey = 3;
+  required uint64 expiryUnixTs      = 4;
+  required bytes  sig               = 5;
+}
+
+message ProMessage {
+  required ProProof proof = 1;
+  required uint32   flags = 2;
 }
