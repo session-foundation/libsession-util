@@ -50,9 +50,10 @@ add_libsession_util_library(crypto
     multi_encrypt.cpp
     random.cpp
     session_encrypt.cpp
+    session_protocol.cpp
     sodium_array.cpp
     xed25519.cpp
-    pro.cpp
+    pro_backend.cpp
 )
 
 add_libsession_util_library(config

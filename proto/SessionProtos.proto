@@ -4,6 +4,8 @@ syntax = "proto2";
 // iOS - package name determines class prefix
 package SessionProtos;
 
+option optimize_for = LITE_RUNTIME;
+
 message Envelope {
 
   enum Type {

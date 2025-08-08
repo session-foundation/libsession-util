@@ -149,12 +149,12 @@ bool ProConfig::load(const dict& root) {
 };  // namespace session::config
 
 // Ensure these are byte buffers and we can just use sizeof to build std::spans to interop with C++
-static_assert((sizeof((pro_pro*)0)->rotating_privkey) == crypto_sign_ed25519_SECRETKEYBYTES);
+static_assert((sizeof((pro_pro_config*)0)->rotating_privkey) == crypto_sign_ed25519_SECRETKEYBYTES);
 static_assert((sizeof((pro_proof*)0)->gen_index_hash) == 32);
 static_assert((sizeof((pro_proof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
 static_assert((sizeof((pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
 
-LIBSESSION_C_API bool proof_verify(pro_proof const* proof, uint8_t const* verify_pubkey) {
+LIBSESSION_C_API bool pro_proof_verify(pro_proof const* proof, uint8_t const* verify_pubkey) {
     auto verify_pubkey_span =
             std::span<const std::uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
     auto gen_index_hash =
@@ -169,7 +169,7 @@ LIBSESSION_C_API bool proof_verify(pro_proof const* proof, uint8_t const* verify
     return result;
 }
 
-LIBSESSION_C_API bool pro_verify(pro_pro const* pro, uint8_t const* verify_pubkey) {
+LIBSESSION_C_API bool pro_pro_verify(pro_pro_config const* pro, uint8_t const* verify_pubkey) {
     auto verify_pubkey_span =
             std::span<const std::uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
     auto rotating_privkey =

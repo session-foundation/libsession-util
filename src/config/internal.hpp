@@ -15,15 +15,6 @@
 
 namespace session {
 
-enum class SessionIDPrefix {
-    standard,
-    group,
-    community_blinded_legacy,
-    community_blinded,
-    version_blinded,
-    unblinded,
-};
-
 inline constexpr std::string_view to_string(session::SessionIDPrefix prefix) {
     switch (prefix) {
         case session::SessionIDPrefix::unblinded: return "00"sv;
