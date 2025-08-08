@@ -926,6 +926,8 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(c.session_id() == "150000000000000000000000000000000000000000000000000000000000000000");
     CHECK(c.name.empty());
     CHECK_FALSE(c.profile_picture);
+    CHECK(c.profile_updated == std::chrono::sys_seconds{});
+    CHECK(c.priority == 0);
     CHECK(c.legacy_blinding);
     CHECK(c.created.time_since_epoch() == 0s);
 
@@ -934,13 +936,17 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(std::get<seqno_t>(contacts.push()) == 0);
 
     c.set_name("Joe");
+    c.profile_updated = std::chrono::sys_seconds{1s};
     c.created = session::to_sys_seconds(created_ts * 1'000);
+    c.priority = 1;
     contacts.set_blinded(c);
 
     REQUIRE(contacts.get_blinded(definitely_real_id).has_value());
 
     CHECK(contacts.get_blinded(definitely_real_id)->name == "Joe");
     CHECK_FALSE(contacts.get_blinded(definitely_real_id)->profile_picture);
+    CHECK(contacts.get_blinded(definitely_real_id)->profile_updated.time_since_epoch() == 1s);
+    CHECK(contacts.get_blinded(definitely_real_id)->priority == 1);
     CHECK(contacts.get_blinded(definitely_real_id)->legacy_blinding);
     CHECK(contacts.get_blinded(definitely_real_id)->session_id() == definitely_real_id);
 
@@ -969,6 +975,8 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     REQUIRE(x);
     CHECK(x->name == "Joe");
     CHECK_FALSE(x->profile_picture);
+    CHECK(x->profile_updated.time_since_epoch() == 1s);
+    CHECK(x->priority == 1);
     CHECK(x->created.time_since_epoch() == created_ts * 1s);
     CHECK(x->legacy_blinding == true);
 
@@ -996,11 +1004,13 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     auto blinded = contacts.blinded();
     std::vector<std::string> session_ids;
     std::vector<std::string> names;
+    std::vector<std::chrono::sys_seconds> profile_updateds;
     std::vector<bool> legacy_blindings;
     CHECK(blinded.size() == 2);
     for (const auto& cc : blinded) {
         session_ids.push_back(cc.session_id());
         names.emplace_back(cc.name.empty() ? "(N/A)" : cc.name);
+        profile_updateds.emplace_back(cc.profile_updated);
         legacy_blindings.emplace_back(cc.legacy_blinding);
     }
 
@@ -1010,6 +1020,8 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(session_ids[1] == another_id);
     CHECK(names[0] == "Joe");
     CHECK(names[1] == "(N/A)");
+    CHECK(profile_updateds[0].time_since_epoch() == 1s);
+    CHECK(profile_updateds[1].time_since_epoch() == 0s);
     CHECK(legacy_blindings[0]);
     CHECK_FALSE(legacy_blindings[1]);
 
@@ -1080,10 +1092,12 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     auto blinded2 = contacts.blinded();
     session_ids.clear();
     names.clear();
+    profile_updateds.clear();
     legacy_blindings.clear();
     for (const auto& cc : blinded2) {
         session_ids.push_back(cc.session_id());
         names.emplace_back(cc.name.empty() ? "(N/A)" : cc.name);
+        profile_updateds.emplace_back(cc.profile_updated);
         legacy_blindings.emplace_back(cc.legacy_blinding);
     }
     REQUIRE(session_ids.size() == 2);
@@ -1091,6 +1105,8 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK(session_ids[1] == third_id);
     CHECK(names[0] == "(N/A)");
     CHECK(names[1] == "Name 3");
+    CHECK(profile_updateds[0].time_since_epoch() == 0s);
+    CHECK(profile_updateds[1].time_since_epoch() == 0s);
     CHECK_FALSE(legacy_blindings[0]);
     CHECK(legacy_blindings[1]);
 

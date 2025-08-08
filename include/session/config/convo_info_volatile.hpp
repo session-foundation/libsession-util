@@ -174,10 +174,8 @@ namespace convo {
         ///
         /// Inputs:
         /// - `blinded_session_id` -- Hex string of the blinded session id
-        /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy
-        /// blinding
-        explicit blinded_one_to_one(std::string&& blinded_session_id, bool legacy_blinding);
-        explicit blinded_one_to_one(std::string_view blinded_session_id, bool legacy_blinding);
+        explicit blinded_one_to_one(std::string&& blinded_session_id);
+        explicit blinded_one_to_one(std::string_view blinded_session_id);
 
         // Internal ctor/method for C API implementations:
         blinded_one_to_one(const struct convo_info_volatile_blinded_1to1& c);  // From c struct
@@ -341,13 +339,11 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `blinded_session_id` -- Hex string of the blinded Session ID
-    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy
-    /// blinding
     ///
     /// Outputs:
     /// - `std::optional<convo::blinded_one_to_one>` - Returns a contact
     std::optional<convo::blinded_one_to_one> get_blinded_1to1(
-            std::string_view blinded_session_id, bool legacy_blinding) const;
+            std::string_view blinded_session_id) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_or_construct_1to1
     ///
@@ -444,13 +440,11 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `blinded_session_id` -- Hex string blinded Session ID
-    /// - `legacy_blinding` -- flag indicating whether this blinded contact should use legacy
-    /// blinding
     ///
     /// Outputs:
     /// - `convo::blinded_one_to_one` - Returns a blinded contact
     convo::blinded_one_to_one get_or_construct_blinded_1to1(
-            std::string_view blinded_session_id, bool legacy_blinding) const;
+            std::string_view blinded_session_id) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::set
     ///
@@ -545,11 +539,10 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `pubkey` -- hex blinded session id
-    /// - `legacy_blinding` -- flag indicating whether this blinded contact is using legacy blinding
     ///
     /// Outputs:
     /// - `bool` - Returns true if found and removed, otherwise false
-    bool erase_blinded_1to1(std::string_view pubkey, bool legacy_blinding);
+    bool erase_blinded_1to1(std::string_view pubkey);
 
     /// API: convo_info_volatile/ConvoInfoVolatile::erase
     ///

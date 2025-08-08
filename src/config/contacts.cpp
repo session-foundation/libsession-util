@@ -332,6 +332,8 @@ void blinded_contact_info::load(const dict& info_dict) {
     } else {
         profile_picture.clear();
     }
+    profile_updated = ts_or_epoch(info_dict, "t");
+    priority = int_or_0(info_dict, "+");
     legacy_blinding = int_or_0(info_dict, "y");
     created = ts_or_epoch(info_dict, "j");
 }
@@ -350,6 +352,8 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     } else {
         copy_c_str(c.profile_pic.url, "");
     }
+    c.profile_updated = profile_updated.time_since_epoch().count();
+    c.priority = priority;
     c.legacy_blinding = legacy_blinding;
     c.created = created.time_since_epoch().count();
 }
@@ -363,6 +367,8 @@ blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
         profile_picture.url = c.profile_pic.url;
         profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
     }
+    profile_updated = to_sys_seconds(c.profile_updated);
+    priority = c.priority;
     legacy_blinding = c.legacy_blinding;
     created = to_sys_seconds(c.created);
 }
@@ -474,7 +480,8 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
             bc.profile_picture.url,
             info["q"],
             bc.profile_picture.key);
-
+    set_ts(info["t"], bc.profile_updated);
+    set_nonzero_int(info["+"], bc.priority);
     set_positive_int(info["y"], bc.legacy_blinding);
     set_ts(info["j"], bc.created);
 }

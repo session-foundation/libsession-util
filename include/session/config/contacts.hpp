@@ -61,6 +61,10 @@ namespace session::config {
 ///           alive as empty dicts get pruned).
 ///       p - profile url (string)
 ///       q - profile decryption key (binary)
+///       t - The `profile_updated` unix timestamp (seconds) for this contacts profile information.
+///       + - the conversation priority; -1 means hidden; omitted means not pinned; otherwise an
+///           integer value >0, where a higher priority means the conversation is meant to appear
+///           earlier in the pinned conversation list.
 ///       j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
 ///           equivalent "j"oined field). Omitted if 0.
 ///       y - flag indicating whether the blinded message request is using legac"y" blinding.
@@ -122,6 +126,13 @@ struct blinded_contact_info {
     const std::string session_id() const;  // in hex
     std::string name;
     profile_pic profile_picture;
+    std::chrono::sys_seconds profile_updated{};  /// The unix timestamp (seconds) that this
+                                                 /// profile information was last updated.
+    int priority = 0;  // If >0 then this message is pinned; higher values mean higher priority
+                       // (i.e. pinned earlier in the pinned list).  If negative then this
+                       // conversation is hidden.  Otherwise (0) this is a regular, unpinned
+                       // conversation.
+
     bool legacy_blinding;
     std::chrono::sys_seconds created{};  // Unix timestamp (seconds) when this contact was added
 
@@ -142,7 +153,7 @@ struct blinded_contact_info {
     /// - `c` -- Return Parameter that will be filled with data in blinded_contact_info
     void into(contacts_blinded_contact& c) const;
 
-    /// API: contacts/contact_info::set_name
+    /// API: contacts/blinded_contact_info::set_name
     ///
     /// Sets a name; this is exactly the same as assigning to .name directly,
     /// except that we throw an exception if the given name is longer than MAX_NAME_LENGTH.

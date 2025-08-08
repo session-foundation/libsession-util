@@ -95,10 +95,10 @@ TEST_CASE("Conversations", "[config][conversations]") {
     g.unread = true;
     convos.set(g);
 
-    CHECK_FALSE(convos.get_blinded_1to1(legacy_blinded_id, true));
-    CHECK_FALSE(convos.get_blinded_1to1(blinded_id, false));
+    CHECK_FALSE(convos.get_blinded_1to1(legacy_blinded_id));
+    CHECK_FALSE(convos.get_blinded_1to1(blinded_id));
 
-    auto lb = convos.get_or_construct_blinded_1to1(legacy_blinded_id, true);
+    auto lb = convos.get_or_construct_blinded_1to1(legacy_blinded_id);
     CHECK(lb.blinded_session_id == legacy_blinded_id);
     CHECK(lb.last_read == 0);
     CHECK_FALSE(lb.unread);
@@ -107,7 +107,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     lb.unread = true;
     convos.set(lb);
 
-    auto b = convos.get_or_construct_blinded_1to1(blinded_id, false);
+    auto b = convos.get_or_construct_blinded_1to1(blinded_id);
     CHECK(b.blinded_session_id == blinded_id);
     CHECK(b.last_read == 0);
     CHECK_FALSE(b.unread);
@@ -153,14 +153,14 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(x3->last_read == now_ms);
     CHECK(x3->unread);
 
-    auto x4 = convos2.get_blinded_1to1(legacy_blinded_id, true);
+    auto x4 = convos2.get_blinded_1to1(legacy_blinded_id);
     REQUIRE(x4);
     CHECK(x4->blinded_session_id ==
           "150000000000000000000000000000000000101010111010000110100001210000");
     CHECK(x4->last_read == now_ms);
     CHECK(x4->unread);
 
-    auto x5 = convos2.get_blinded_1to1(blinded_id, false);
+    auto x5 = convos2.get_blinded_1to1(blinded_id);
     REQUIRE(x5);
     CHECK(x5->blinded_session_id ==
           "255000000000000000000000000000000000101010111010000110100001210000");
@@ -178,7 +178,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     convos2.set(c3);
 
     auto c4 = convos2.get_or_construct_blinded_1to1(
-            "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", false);
+            "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     c4.unread = true;
     convos2.set(c4);
 
@@ -250,8 +250,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     convos.erase_1to1("052000000000000000000000000000000000000000000000000000000000000000");
     CHECK_FALSE(convos.needs_push());
     convos.erase_1to1("055000000000000000000000000000000000000000000000000000000000000000");
-    convos.erase_blinded_1to1(
-            "255000000000000000000000000000000000101010111010000110100001210000", false);
+    convos.erase_blinded_1to1("255000000000000000000000000000000000101010111010000110100001210000");
     CHECK(convos.needs_push());
     CHECK(convos.size() == 6);
     CHECK(convos.size_1to1() == 1);
@@ -287,6 +286,12 @@ TEST_CASE("Conversations", "[config][conversations]") {
                           "150000000000000000000000000000000000101010111010000110100001210000",
                           "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
                   });
+
+    // Ensure that we throw correctly when giving invalid blinded ids
+    auto invalid_id_1 = "072222222222222222222222222222222222222222222222222222222222222222"sv;
+    auto invalid_id_2 = "992222222222222222222222222222222222222222222222222222222222222222"sv;
+    CHECK_THROWS(convos.get_or_construct_blinded_1to1(invalid_id_1));
+    CHECK_THROWS(convos.get_or_construct_blinded_1to1(invalid_id_2));
 }
 
 TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
@@ -382,8 +387,8 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     const char* const blinded_id =
             "150000000000000000000000000000000000101010111010000110100001210000";
     convo_info_volatile_blinded_1to1 b1;
-    REQUIRE_FALSE(convo_info_volatile_get_blinded_1to1(conf, &b1, blinded_id, true));
-    REQUIRE(convo_info_volatile_get_or_construct_blinded_1to1(conf, &b1, blinded_id, true));
+    REQUIRE_FALSE(convo_info_volatile_get_blinded_1to1(conf, &b1, blinded_id));
+    REQUIRE(convo_info_volatile_get_or_construct_blinded_1to1(conf, &b1, blinded_id));
     b1.last_read = now_ms;
     convo_info_volatile_set_blinded_1to1(conf, &b1);
 
@@ -438,10 +443,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
 
     convo_info_volatile_blinded_1to1 b2;
     REQUIRE(convo_info_volatile_get_or_construct_blinded_1to1(
-            conf2,
-            &b2,
-            "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-            false));
+            conf2, &b2, "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"));
     b2.unread = true;
     convo_info_volatile_set_blinded_1to1(conf2, &b2);
     CHECK(config_needs_push(conf2));
@@ -515,7 +517,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     convo_info_volatile_erase_1to1(
             conf, "055000000000000000000000000000000000000000000000000000000000000000");
     convo_info_volatile_erase_blinded_1to1(
-            conf, "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", false);
+            conf, "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     CHECK(config_needs_push(conf));
     CHECK(convo_info_volatile_size(conf) == 4);
     CHECK(convo_info_volatile_size_1to1(conf) == 1);
