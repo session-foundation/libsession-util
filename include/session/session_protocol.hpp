@@ -60,19 +60,44 @@ struct Destination {
 using ProFeatures = session_pro_features;
 using ProExtraFeatures = session_pro_extra_features;
 
-struct DecryptIncomingWithPro
+enum class EnvelopeType
 {
-    std::vector<uint8_t> plaintext;
-    std::vector<uint8_t> ed25519_pubkey;
-    config::ProProof pro_proof;
-    ProStatus pro_status;
-    session_pro_features pro_flags;
+  SessionMessage,
+  ClosedGroupMessage,
+};
+
+typedef uint32_t EnvelopeFlags;
+enum EnvelopeFlags_
+{
+    EnvelopeFlags_Source = 1 << 0,
+    EnvelopeFlags_SourceDevice = 1 << 1,
+    EnvelopeFlags_ServerTimestamp = 1 << 2,
+    EnvelopeFlags_ProSig = 1 << 3,
+};
+
+struct Envelope
+{
+    EnvelopeFlags flags;
+    EnvelopeType type;
+    uint64_t timestamp;
+
+    // Optional fields
+    array_uc33 source;
+    uint32_t source_device;
+    uint64_t server_timestamp;
     array_uc64 pro_sig;
 };
 
-struct PrepareMsgForPro {
-    ProFeatures flags;
-    array_uc64 sig;
+struct DecryptedEnvelope
+{
+    Envelope envelope;
+    std::vector<uint8_t> content_plaintext;
+    std::vector<uint8_t> sender_ed25519_pubkey;
+
+    config::ProProof pro_proof;
+    ProStatus pro_status;
+    ProFeatures pro_flags;
+    array_uc64 pro_sig;
 };
 
 ProFeatures get_pro_features_for_msg(std::span<const unsigned char> msg, ProExtraFeatures flags);
@@ -86,8 +111,8 @@ std::vector<uint8_t> encrypt_for_namespaced_destination(
         const Destination& dest,
         config::Namespace space);
 
-DecryptIncomingWithPro decrypt_incoming_with_pro_metadata(
+DecryptedEnvelope decrypt_envelope(
         std::span<const uint8_t> ed25519_privkey,
-        std::span<const uint8_t> ciphertext,
+        std::span<const uint8_t> envelope_plaintext,
         std::chrono::sys_seconds unix_ts);
 } // namespace session

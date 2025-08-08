@@ -1,4 +1,5 @@
 #include <sodium/crypto_sign_ed25519.h>
+#include <fmt/core.h>
 
 #include <session/config/groups/keys.hpp>
 #include <session/config/namespaces.hpp>
@@ -210,27 +211,67 @@ std::vector<uint8_t> encrypt_for_namespaced_destination(
     return result;
 }
 
-DecryptIncomingWithPro decrypt_incoming_with_pro_metadata(
+DecryptedEnvelope decrypt_envelope(
         std::span<const unsigned char> ed25519_privkey,
-        std::span<const unsigned char> ciphertext,
+        std::span<const unsigned char> envelope_plaintext,
         std::chrono::sys_seconds unix_ts) {
-    DecryptIncomingWithPro result = {};
-
+    DecryptedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
-    if (!envelope.ParseFromArray(ciphertext.data(), ciphertext.size()))
+    if (!envelope.ParseFromArray(envelope_plaintext.data(), envelope_plaintext.size()))
         throw std::runtime_error{"Parse envelope from ciphertext failed"};
 
+    // Parse type (unconditionallty)
+    if (!envelope.has_type())
+        throw std::runtime_error("Parse envelope failed, missing type");
+
+    switch (envelope.type()) {
+        case SessionProtos::Envelope_Type_SESSION_MESSAGE:
+            result.envelope.type = EnvelopeType::SessionMessage;
+            break;
+
+        case SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE:
+            result.envelope.type = EnvelopeType::ClosedGroupMessage;
+            break;
+    }
+
+    // Parse source (optional)
+    if (envelope.has_source()) {
+        // Libsession is now responsible for creating the envelope. The only data that we send in
+        // the source is a Session public key (see: encrypt_for_namespaced_destination)
+        const std::string& source = envelope.source();
+        if (source.size() != result.envelope.source.max_size())
+            throw std::runtime_error(
+                    fmt::format(
+                            "Parse envelope failed, source had unexpected size ({} bytes)",
+                            source.size()));
+        std::memcpy(result.envelope.source.data(), source.data(), source.size());
+        result.envelope.flags |= EnvelopeFlags_Source;
+    }
+
+    // Parse source device (optional)
+    if (envelope.has_sourcedevice()) {
+        result.envelope.source_device = envelope.sourcedevice();
+        result.envelope.flags |= EnvelopeFlags_SourceDevice;
+    }
+
+    // Parse server timestamp (optional)
+    if (envelope.has_servertimestamp()) {
+        result.envelope.server_timestamp = envelope.servertimestamp();
+        result.envelope.flags |= EnvelopeFlags_ServerTimestamp;
+    }
+
+    // Parse content (unconditionallty)
     if (!envelope.has_content())
         throw std::runtime_error{"Parse decrypted message failed, missing content"};
 
     const std::string& content_str = envelope.content();
     auto content_span = std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(content_str.data()), content_str.size());
-    std::tie(result.plaintext, result.ed25519_pubkey) =
+    std::tie(result.content_plaintext, result.sender_ed25519_pubkey) =
             session::decrypt_incoming(ed25519_privkey, content_span);
 
     SessionProtos::Content content = {};
-    if (!envelope.ParseFromArray(result.plaintext.data(), result.plaintext.size()))
+    if (!envelope.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
         throw std::runtime_error{"Parse content from envelope failed"};
 
     if (content.has_promessage()) {
@@ -241,6 +282,10 @@ DecryptIncomingWithPro decrypt_incoming_with_pro_metadata(
         const std::string& pro_sig = envelope.prosig();
         if (pro_sig.size() != crypto_sign_ed25519_BYTES)
             throw std::runtime_error("Parse envelope failed, pro signature has wrong size");
+
+        static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
+        std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
+        result.envelope.flags |= EnvelopeFlags_ProSig;
 
         SessionProtos::ProMessage pro_msg = content.promessage();
         if (!pro_msg.has_proof())
