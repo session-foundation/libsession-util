@@ -23,15 +23,12 @@
 #include <google/protobuf/io/coded_stream.h>
 #include <google/protobuf/arena.h>
 #include <google/protobuf/arenastring.h>
-#include <google/protobuf/generated_message_bases.h>
 #include <google/protobuf/generated_message_util.h>
 #include <google/protobuf/metadata_lite.h>
-#include <google/protobuf/generated_message_reflection.h>
-#include <google/protobuf/message.h>
+#include <google/protobuf/message_lite.h>
 #include <google/protobuf/repeated_field.h>  // IWYU pragma: export
 #include <google/protobuf/extension_set.h>  // IWYU pragma: export
-#include <google/protobuf/generated_enum_reflection.h>
-#include <google/protobuf/unknown_field_set.h>
+#include <google/protobuf/generated_enum_util.h>
 // @@protoc_insertion_point(includes)
 #include <google/protobuf/port_def.inc>
 #define PROTOBUF_INTERNAL_EXPORT_SessionProtos_2eproto
@@ -45,7 +42,6 @@ PROTOBUF_NAMESPACE_CLOSE
 struct TableStruct_SessionProtos_2eproto {
   static const uint32_t offsets[];
 };
-extern const ::PROTOBUF_NAMESPACE_ID::internal::DescriptorTable descriptor_table_SessionProtos_2eproto;
 namespace SessionProtos {
 class AttachmentPointer;
 struct AttachmentPointerDefaultTypeInternal;
@@ -116,9 +112,6 @@ extern LokiProfileDefaultTypeInternal _LokiProfile_default_instance_;
 class MessageRequestResponse;
 struct MessageRequestResponseDefaultTypeInternal;
 extern MessageRequestResponseDefaultTypeInternal _MessageRequestResponse_default_instance_;
-class ProConfig;
-struct ProConfigDefaultTypeInternal;
-extern ProConfigDefaultTypeInternal _ProConfig_default_instance_;
 class ProMessage;
 struct ProMessageDefaultTypeInternal;
 extern ProMessageDefaultTypeInternal _ProMessage_default_instance_;
@@ -162,7 +155,6 @@ template<> ::SessionProtos::GroupUpdatePromoteMessage* Arena::CreateMaybeMessage
 template<> ::SessionProtos::KeyPair* Arena::CreateMaybeMessage<::SessionProtos::KeyPair>(Arena*);
 template<> ::SessionProtos::LokiProfile* Arena::CreateMaybeMessage<::SessionProtos::LokiProfile>(Arena*);
 template<> ::SessionProtos::MessageRequestResponse* Arena::CreateMaybeMessage<::SessionProtos::MessageRequestResponse>(Arena*);
-template<> ::SessionProtos::ProConfig* Arena::CreateMaybeMessage<::SessionProtos::ProConfig>(Arena*);
 template<> ::SessionProtos::ProMessage* Arena::CreateMaybeMessage<::SessionProtos::ProMessage>(Arena*);
 template<> ::SessionProtos::ProProof* Arena::CreateMaybeMessage<::SessionProtos::ProProof>(Arena*);
 template<> ::SessionProtos::ReceiptMessage* Arena::CreateMaybeMessage<::SessionProtos::ReceiptMessage>(Arena*);
@@ -181,20 +173,16 @@ constexpr Envelope_Type Envelope_Type_Type_MIN = Envelope_Type_SESSION_MESSAGE;
 constexpr Envelope_Type Envelope_Type_Type_MAX = Envelope_Type_CLOSED_GROUP_MESSAGE;
 constexpr int Envelope_Type_Type_ARRAYSIZE = Envelope_Type_Type_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* Envelope_Type_descriptor();
+const std::string& Envelope_Type_Name(Envelope_Type value);
 template<typename T>
 inline const std::string& Envelope_Type_Name(T enum_t_value) {
   static_assert(::std::is_same<T, Envelope_Type>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function Envelope_Type_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    Envelope_Type_descriptor(), enum_t_value);
+  return Envelope_Type_Name(static_cast<Envelope_Type>(enum_t_value));
 }
-inline bool Envelope_Type_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, Envelope_Type* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<Envelope_Type>(
-    Envelope_Type_descriptor(), name, value);
-}
+bool Envelope_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, Envelope_Type* value);
 enum TypingMessage_Action : int {
   TypingMessage_Action_STARTED = 0,
   TypingMessage_Action_STOPPED = 1
@@ -204,20 +192,16 @@ constexpr TypingMessage_Action TypingMessage_Action_Action_MIN = TypingMessage_A
 constexpr TypingMessage_Action TypingMessage_Action_Action_MAX = TypingMessage_Action_STOPPED;
 constexpr int TypingMessage_Action_Action_ARRAYSIZE = TypingMessage_Action_Action_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* TypingMessage_Action_descriptor();
+const std::string& TypingMessage_Action_Name(TypingMessage_Action value);
 template<typename T>
 inline const std::string& TypingMessage_Action_Name(T enum_t_value) {
   static_assert(::std::is_same<T, TypingMessage_Action>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function TypingMessage_Action_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    TypingMessage_Action_descriptor(), enum_t_value);
+  return TypingMessage_Action_Name(static_cast<TypingMessage_Action>(enum_t_value));
 }
-inline bool TypingMessage_Action_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, TypingMessage_Action* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<TypingMessage_Action>(
-    TypingMessage_Action_descriptor(), name, value);
-}
+bool TypingMessage_Action_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, TypingMessage_Action* value);
 enum Content_ExpirationType : int {
   Content_ExpirationType_UNKNOWN = 0,
   Content_ExpirationType_DELETE_AFTER_READ = 1,
@@ -228,20 +212,16 @@ constexpr Content_ExpirationType Content_ExpirationType_ExpirationType_MIN = Con
 constexpr Content_ExpirationType Content_ExpirationType_ExpirationType_MAX = Content_ExpirationType_DELETE_AFTER_SEND;
 constexpr int Content_ExpirationType_ExpirationType_ARRAYSIZE = Content_ExpirationType_ExpirationType_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* Content_ExpirationType_descriptor();
+const std::string& Content_ExpirationType_Name(Content_ExpirationType value);
 template<typename T>
 inline const std::string& Content_ExpirationType_Name(T enum_t_value) {
   static_assert(::std::is_same<T, Content_ExpirationType>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function Content_ExpirationType_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    Content_ExpirationType_descriptor(), enum_t_value);
+  return Content_ExpirationType_Name(static_cast<Content_ExpirationType>(enum_t_value));
 }
-inline bool Content_ExpirationType_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, Content_ExpirationType* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<Content_ExpirationType>(
-    Content_ExpirationType_descriptor(), name, value);
-}
+bool Content_ExpirationType_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, Content_ExpirationType* value);
 enum CallMessage_Type : int {
   CallMessage_Type_PRE_OFFER = 6,
   CallMessage_Type_OFFER = 1,
@@ -255,20 +235,16 @@ constexpr CallMessage_Type CallMessage_Type_Type_MIN = CallMessage_Type_OFFER;
 constexpr CallMessage_Type CallMessage_Type_Type_MAX = CallMessage_Type_PRE_OFFER;
 constexpr int CallMessage_Type_Type_ARRAYSIZE = CallMessage_Type_Type_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* CallMessage_Type_descriptor();
+const std::string& CallMessage_Type_Name(CallMessage_Type value);
 template<typename T>
 inline const std::string& CallMessage_Type_Name(T enum_t_value) {
   static_assert(::std::is_same<T, CallMessage_Type>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function CallMessage_Type_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    CallMessage_Type_descriptor(), enum_t_value);
+  return CallMessage_Type_Name(static_cast<CallMessage_Type>(enum_t_value));
 }
-inline bool CallMessage_Type_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, CallMessage_Type* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<CallMessage_Type>(
-    CallMessage_Type_descriptor(), name, value);
-}
+bool CallMessage_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, CallMessage_Type* value);
 enum DataExtractionNotification_Type : int {
   DataExtractionNotification_Type_SCREENSHOT = 1,
   DataExtractionNotification_Type_MEDIA_SAVED = 2
@@ -278,20 +254,16 @@ constexpr DataExtractionNotification_Type DataExtractionNotification_Type_Type_M
 constexpr DataExtractionNotification_Type DataExtractionNotification_Type_Type_MAX = DataExtractionNotification_Type_MEDIA_SAVED;
 constexpr int DataExtractionNotification_Type_Type_ARRAYSIZE = DataExtractionNotification_Type_Type_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataExtractionNotification_Type_descriptor();
+const std::string& DataExtractionNotification_Type_Name(DataExtractionNotification_Type value);
 template<typename T>
 inline const std::string& DataExtractionNotification_Type_Name(T enum_t_value) {
   static_assert(::std::is_same<T, DataExtractionNotification_Type>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function DataExtractionNotification_Type_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    DataExtractionNotification_Type_descriptor(), enum_t_value);
+  return DataExtractionNotification_Type_Name(static_cast<DataExtractionNotification_Type>(enum_t_value));
 }
-inline bool DataExtractionNotification_Type_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataExtractionNotification_Type* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<DataExtractionNotification_Type>(
-    DataExtractionNotification_Type_descriptor(), name, value);
-}
+bool DataExtractionNotification_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataExtractionNotification_Type* value);
 enum DataMessage_Quote_QuotedAttachment_Flags : int {
   DataMessage_Quote_QuotedAttachment_Flags_VOICE_MESSAGE = 1
 };
@@ -300,20 +272,16 @@ constexpr DataMessage_Quote_QuotedAttachment_Flags DataMessage_Quote_QuotedAttac
 constexpr DataMessage_Quote_QuotedAttachment_Flags DataMessage_Quote_QuotedAttachment_Flags_Flags_MAX = DataMessage_Quote_QuotedAttachment_Flags_VOICE_MESSAGE;
 constexpr int DataMessage_Quote_QuotedAttachment_Flags_Flags_ARRAYSIZE = DataMessage_Quote_QuotedAttachment_Flags_Flags_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataMessage_Quote_QuotedAttachment_Flags_descriptor();
+const std::string& DataMessage_Quote_QuotedAttachment_Flags_Name(DataMessage_Quote_QuotedAttachment_Flags value);
 template<typename T>
 inline const std::string& DataMessage_Quote_QuotedAttachment_Flags_Name(T enum_t_value) {
   static_assert(::std::is_same<T, DataMessage_Quote_QuotedAttachment_Flags>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function DataMessage_Quote_QuotedAttachment_Flags_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    DataMessage_Quote_QuotedAttachment_Flags_descriptor(), enum_t_value);
+  return DataMessage_Quote_QuotedAttachment_Flags_Name(static_cast<DataMessage_Quote_QuotedAttachment_Flags>(enum_t_value));
 }
-inline bool DataMessage_Quote_QuotedAttachment_Flags_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataMessage_Quote_QuotedAttachment_Flags* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<DataMessage_Quote_QuotedAttachment_Flags>(
-    DataMessage_Quote_QuotedAttachment_Flags_descriptor(), name, value);
-}
+bool DataMessage_Quote_QuotedAttachment_Flags_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataMessage_Quote_QuotedAttachment_Flags* value);
 enum DataMessage_Reaction_Action : int {
   DataMessage_Reaction_Action_REACT = 0,
   DataMessage_Reaction_Action_REMOVE = 1
@@ -323,20 +291,16 @@ constexpr DataMessage_Reaction_Action DataMessage_Reaction_Action_Action_MIN = D
 constexpr DataMessage_Reaction_Action DataMessage_Reaction_Action_Action_MAX = DataMessage_Reaction_Action_REMOVE;
 constexpr int DataMessage_Reaction_Action_Action_ARRAYSIZE = DataMessage_Reaction_Action_Action_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataMessage_Reaction_Action_descriptor();
+const std::string& DataMessage_Reaction_Action_Name(DataMessage_Reaction_Action value);
 template<typename T>
 inline const std::string& DataMessage_Reaction_Action_Name(T enum_t_value) {
   static_assert(::std::is_same<T, DataMessage_Reaction_Action>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function DataMessage_Reaction_Action_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    DataMessage_Reaction_Action_descriptor(), enum_t_value);
+  return DataMessage_Reaction_Action_Name(static_cast<DataMessage_Reaction_Action>(enum_t_value));
 }
-inline bool DataMessage_Reaction_Action_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataMessage_Reaction_Action* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<DataMessage_Reaction_Action>(
-    DataMessage_Reaction_Action_descriptor(), name, value);
-}
+bool DataMessage_Reaction_Action_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataMessage_Reaction_Action* value);
 enum DataMessage_Flags : int {
   DataMessage_Flags_EXPIRATION_TIMER_UPDATE = 2
 };
@@ -345,20 +309,16 @@ constexpr DataMessage_Flags DataMessage_Flags_Flags_MIN = DataMessage_Flags_EXPI
 constexpr DataMessage_Flags DataMessage_Flags_Flags_MAX = DataMessage_Flags_EXPIRATION_TIMER_UPDATE;
 constexpr int DataMessage_Flags_Flags_ARRAYSIZE = DataMessage_Flags_Flags_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* DataMessage_Flags_descriptor();
+const std::string& DataMessage_Flags_Name(DataMessage_Flags value);
 template<typename T>
 inline const std::string& DataMessage_Flags_Name(T enum_t_value) {
   static_assert(::std::is_same<T, DataMessage_Flags>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function DataMessage_Flags_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    DataMessage_Flags_descriptor(), enum_t_value);
+  return DataMessage_Flags_Name(static_cast<DataMessage_Flags>(enum_t_value));
 }
-inline bool DataMessage_Flags_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataMessage_Flags* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<DataMessage_Flags>(
-    DataMessage_Flags_descriptor(), name, value);
-}
+bool DataMessage_Flags_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataMessage_Flags* value);
 enum ReceiptMessage_Type : int {
   ReceiptMessage_Type_DELIVERY = 0,
   ReceiptMessage_Type_READ = 1
@@ -368,20 +328,16 @@ constexpr ReceiptMessage_Type ReceiptMessage_Type_Type_MIN = ReceiptMessage_Type
 constexpr ReceiptMessage_Type ReceiptMessage_Type_Type_MAX = ReceiptMessage_Type_READ;
 constexpr int ReceiptMessage_Type_Type_ARRAYSIZE = ReceiptMessage_Type_Type_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* ReceiptMessage_Type_descriptor();
+const std::string& ReceiptMessage_Type_Name(ReceiptMessage_Type value);
 template<typename T>
 inline const std::string& ReceiptMessage_Type_Name(T enum_t_value) {
   static_assert(::std::is_same<T, ReceiptMessage_Type>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function ReceiptMessage_Type_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    ReceiptMessage_Type_descriptor(), enum_t_value);
+  return ReceiptMessage_Type_Name(static_cast<ReceiptMessage_Type>(enum_t_value));
 }
-inline bool ReceiptMessage_Type_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, ReceiptMessage_Type* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<ReceiptMessage_Type>(
-    ReceiptMessage_Type_descriptor(), name, value);
-}
+bool ReceiptMessage_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, ReceiptMessage_Type* value);
 enum AttachmentPointer_Flags : int {
   AttachmentPointer_Flags_VOICE_MESSAGE = 1
 };
@@ -390,20 +346,16 @@ constexpr AttachmentPointer_Flags AttachmentPointer_Flags_Flags_MIN = Attachment
 constexpr AttachmentPointer_Flags AttachmentPointer_Flags_Flags_MAX = AttachmentPointer_Flags_VOICE_MESSAGE;
 constexpr int AttachmentPointer_Flags_Flags_ARRAYSIZE = AttachmentPointer_Flags_Flags_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* AttachmentPointer_Flags_descriptor();
+const std::string& AttachmentPointer_Flags_Name(AttachmentPointer_Flags value);
 template<typename T>
 inline const std::string& AttachmentPointer_Flags_Name(T enum_t_value) {
   static_assert(::std::is_same<T, AttachmentPointer_Flags>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function AttachmentPointer_Flags_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    AttachmentPointer_Flags_descriptor(), enum_t_value);
+  return AttachmentPointer_Flags_Name(static_cast<AttachmentPointer_Flags>(enum_t_value));
 }
-inline bool AttachmentPointer_Flags_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, AttachmentPointer_Flags* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<AttachmentPointer_Flags>(
-    AttachmentPointer_Flags_descriptor(), name, value);
-}
+bool AttachmentPointer_Flags_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, AttachmentPointer_Flags* value);
 enum SharedConfigMessage_Kind : int {
   SharedConfigMessage_Kind_USER_PROFILE = 1,
   SharedConfigMessage_Kind_CONTACTS = 2,
@@ -415,20 +367,16 @@ constexpr SharedConfigMessage_Kind SharedConfigMessage_Kind_Kind_MIN = SharedCon
 constexpr SharedConfigMessage_Kind SharedConfigMessage_Kind_Kind_MAX = SharedConfigMessage_Kind_USER_GROUPS;
 constexpr int SharedConfigMessage_Kind_Kind_ARRAYSIZE = SharedConfigMessage_Kind_Kind_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* SharedConfigMessage_Kind_descriptor();
+const std::string& SharedConfigMessage_Kind_Name(SharedConfigMessage_Kind value);
 template<typename T>
 inline const std::string& SharedConfigMessage_Kind_Name(T enum_t_value) {
   static_assert(::std::is_same<T, SharedConfigMessage_Kind>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function SharedConfigMessage_Kind_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    SharedConfigMessage_Kind_descriptor(), enum_t_value);
+  return SharedConfigMessage_Kind_Name(static_cast<SharedConfigMessage_Kind>(enum_t_value));
 }
-inline bool SharedConfigMessage_Kind_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, SharedConfigMessage_Kind* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<SharedConfigMessage_Kind>(
-    SharedConfigMessage_Kind_descriptor(), name, value);
-}
+bool SharedConfigMessage_Kind_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, SharedConfigMessage_Kind* value);
 enum GroupUpdateInfoChangeMessage_Type : int {
   GroupUpdateInfoChangeMessage_Type_NAME = 1,
   GroupUpdateInfoChangeMessage_Type_AVATAR = 2,
@@ -439,20 +387,16 @@ constexpr GroupUpdateInfoChangeMessage_Type GroupUpdateInfoChangeMessage_Type_Ty
 constexpr GroupUpdateInfoChangeMessage_Type GroupUpdateInfoChangeMessage_Type_Type_MAX = GroupUpdateInfoChangeMessage_Type_DISAPPEARING_MESSAGES;
 constexpr int GroupUpdateInfoChangeMessage_Type_Type_ARRAYSIZE = GroupUpdateInfoChangeMessage_Type_Type_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* GroupUpdateInfoChangeMessage_Type_descriptor();
+const std::string& GroupUpdateInfoChangeMessage_Type_Name(GroupUpdateInfoChangeMessage_Type value);
 template<typename T>
 inline const std::string& GroupUpdateInfoChangeMessage_Type_Name(T enum_t_value) {
   static_assert(::std::is_same<T, GroupUpdateInfoChangeMessage_Type>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function GroupUpdateInfoChangeMessage_Type_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    GroupUpdateInfoChangeMessage_Type_descriptor(), enum_t_value);
+  return GroupUpdateInfoChangeMessage_Type_Name(static_cast<GroupUpdateInfoChangeMessage_Type>(enum_t_value));
 }
-inline bool GroupUpdateInfoChangeMessage_Type_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, GroupUpdateInfoChangeMessage_Type* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<GroupUpdateInfoChangeMessage_Type>(
-    GroupUpdateInfoChangeMessage_Type_descriptor(), name, value);
-}
+bool GroupUpdateInfoChangeMessage_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, GroupUpdateInfoChangeMessage_Type* value);
 enum GroupUpdateMemberChangeMessage_Type : int {
   GroupUpdateMemberChangeMessage_Type_ADDED = 1,
   GroupUpdateMemberChangeMessage_Type_REMOVED = 2,
@@ -463,24 +407,20 @@ constexpr GroupUpdateMemberChangeMessage_Type GroupUpdateMemberChangeMessage_Typ
 constexpr GroupUpdateMemberChangeMessage_Type GroupUpdateMemberChangeMessage_Type_Type_MAX = GroupUpdateMemberChangeMessage_Type_PROMOTED;
 constexpr int GroupUpdateMemberChangeMessage_Type_Type_ARRAYSIZE = GroupUpdateMemberChangeMessage_Type_Type_MAX + 1;
 
-const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor* GroupUpdateMemberChangeMessage_Type_descriptor();
+const std::string& GroupUpdateMemberChangeMessage_Type_Name(GroupUpdateMemberChangeMessage_Type value);
 template<typename T>
 inline const std::string& GroupUpdateMemberChangeMessage_Type_Name(T enum_t_value) {
   static_assert(::std::is_same<T, GroupUpdateMemberChangeMessage_Type>::value ||
     ::std::is_integral<T>::value,
     "Incorrect type passed to function GroupUpdateMemberChangeMessage_Type_Name.");
-  return ::PROTOBUF_NAMESPACE_ID::internal::NameOfEnum(
-    GroupUpdateMemberChangeMessage_Type_descriptor(), enum_t_value);
+  return GroupUpdateMemberChangeMessage_Type_Name(static_cast<GroupUpdateMemberChangeMessage_Type>(enum_t_value));
 }
-inline bool GroupUpdateMemberChangeMessage_Type_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, GroupUpdateMemberChangeMessage_Type* value) {
-  return ::PROTOBUF_NAMESPACE_ID::internal::ParseNamedEnum<GroupUpdateMemberChangeMessage_Type>(
-    GroupUpdateMemberChangeMessage_Type_descriptor(), name, value);
-}
+bool GroupUpdateMemberChangeMessage_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, GroupUpdateMemberChangeMessage_Type* value);
 // ===================================================================
 
 class Envelope final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.Envelope) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.Envelope) */ {
  public:
   inline Envelope() : Envelope(nullptr) {}
   ~Envelope() override;
@@ -510,22 +450,13 @@ class Envelope final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const Envelope& default_instance() {
     return *internal_default_instance();
   }
@@ -563,15 +494,9 @@ class Envelope final :
   Envelope* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<Envelope>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const Envelope& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const Envelope& from) {
-    Envelope::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const Envelope& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -584,7 +509,7 @@ class Envelope final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(Envelope* other);
 
   private:
@@ -597,10 +522,7 @@ class Envelope final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -618,10 +540,6 @@ class Envelope final :
     Envelope_Type_Type_MAX;
   static constexpr int Type_ARRAYSIZE =
     Envelope_Type_Type_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Type_descriptor() {
-    return Envelope_Type_descriptor();
-  }
   template<typename T>
   static inline const std::string& Type_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Type>::value ||
@@ -778,7 +696,7 @@ class Envelope final :
 // -------------------------------------------------------------------
 
 class TypingMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.TypingMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.TypingMessage) */ {
  public:
   inline TypingMessage() : TypingMessage(nullptr) {}
   ~TypingMessage() override;
@@ -808,22 +726,13 @@ class TypingMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const TypingMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -861,15 +770,9 @@ class TypingMessage final :
   TypingMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<TypingMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const TypingMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const TypingMessage& from) {
-    TypingMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const TypingMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -882,7 +785,7 @@ class TypingMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(TypingMessage* other);
 
   private:
@@ -895,10 +798,7 @@ class TypingMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -916,10 +816,6 @@ class TypingMessage final :
     TypingMessage_Action_Action_MAX;
   static constexpr int Action_ARRAYSIZE =
     TypingMessage_Action_Action_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Action_descriptor() {
-    return TypingMessage_Action_descriptor();
-  }
   template<typename T>
   static inline const std::string& Action_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Action>::value ||
@@ -986,7 +882,7 @@ class TypingMessage final :
 // -------------------------------------------------------------------
 
 class UnsendRequest final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.UnsendRequest) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.UnsendRequest) */ {
  public:
   inline UnsendRequest() : UnsendRequest(nullptr) {}
   ~UnsendRequest() override;
@@ -1016,22 +912,13 @@ class UnsendRequest final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const UnsendRequest& default_instance() {
     return *internal_default_instance();
   }
@@ -1069,15 +956,9 @@ class UnsendRequest final :
   UnsendRequest* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<UnsendRequest>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const UnsendRequest& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const UnsendRequest& from) {
-    UnsendRequest::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const UnsendRequest& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -1090,7 +971,7 @@ class UnsendRequest final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(UnsendRequest* other);
 
   private:
@@ -1103,10 +984,7 @@ class UnsendRequest final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -1169,7 +1047,7 @@ class UnsendRequest final :
 // -------------------------------------------------------------------
 
 class MessageRequestResponse final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.MessageRequestResponse) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.MessageRequestResponse) */ {
  public:
   inline MessageRequestResponse() : MessageRequestResponse(nullptr) {}
   ~MessageRequestResponse() override;
@@ -1199,22 +1077,13 @@ class MessageRequestResponse final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const MessageRequestResponse& default_instance() {
     return *internal_default_instance();
   }
@@ -1252,15 +1121,9 @@ class MessageRequestResponse final :
   MessageRequestResponse* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<MessageRequestResponse>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const MessageRequestResponse& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const MessageRequestResponse& from) {
-    MessageRequestResponse::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const MessageRequestResponse& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -1273,7 +1136,7 @@ class MessageRequestResponse final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(MessageRequestResponse* other);
 
   private:
@@ -1286,10 +1149,7 @@ class MessageRequestResponse final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -1369,7 +1229,7 @@ class MessageRequestResponse final :
 // -------------------------------------------------------------------
 
 class Content final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.Content) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.Content) */ {
  public:
   inline Content() : Content(nullptr) {}
   ~Content() override;
@@ -1399,22 +1259,13 @@ class Content final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const Content& default_instance() {
     return *internal_default_instance();
   }
@@ -1452,15 +1303,9 @@ class Content final :
   Content* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<Content>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const Content& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const Content& from) {
-    Content::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const Content& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -1473,7 +1318,7 @@ class Content final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(Content* other);
 
   private:
@@ -1486,10 +1331,7 @@ class Content final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -1509,10 +1351,6 @@ class Content final :
     Content_ExpirationType_ExpirationType_MAX;
   static constexpr int ExpirationType_ARRAYSIZE =
     Content_ExpirationType_ExpirationType_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  ExpirationType_descriptor() {
-    return Content_ExpirationType_descriptor();
-  }
   template<typename T>
   static inline const std::string& ExpirationType_Name(T enum_t_value) {
     static_assert(::std::is_same<T, ExpirationType>::value ||
@@ -1771,7 +1609,7 @@ class Content final :
 // -------------------------------------------------------------------
 
 class CallMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.CallMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.CallMessage) */ {
  public:
   inline CallMessage() : CallMessage(nullptr) {}
   ~CallMessage() override;
@@ -1801,22 +1639,13 @@ class CallMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const CallMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -1854,15 +1683,9 @@ class CallMessage final :
   CallMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<CallMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const CallMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const CallMessage& from) {
-    CallMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const CallMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -1875,7 +1698,7 @@ class CallMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(CallMessage* other);
 
   private:
@@ -1888,10 +1711,7 @@ class CallMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -1917,10 +1737,6 @@ class CallMessage final :
     CallMessage_Type_Type_MAX;
   static constexpr int Type_ARRAYSIZE =
     CallMessage_Type_Type_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Type_descriptor() {
-    return CallMessage_Type_descriptor();
-  }
   template<typename T>
   static inline const std::string& Type_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Type>::value ||
@@ -2068,7 +1884,7 @@ class CallMessage final :
 // -------------------------------------------------------------------
 
 class KeyPair final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.KeyPair) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.KeyPair) */ {
  public:
   inline KeyPair() : KeyPair(nullptr) {}
   ~KeyPair() override;
@@ -2098,22 +1914,13 @@ class KeyPair final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const KeyPair& default_instance() {
     return *internal_default_instance();
   }
@@ -2151,15 +1958,9 @@ class KeyPair final :
   KeyPair* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<KeyPair>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const KeyPair& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const KeyPair& from) {
-    KeyPair::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const KeyPair& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -2172,7 +1973,7 @@ class KeyPair final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(KeyPair* other);
 
   private:
@@ -2185,10 +1986,7 @@ class KeyPair final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -2256,7 +2054,7 @@ class KeyPair final :
 // -------------------------------------------------------------------
 
 class DataExtractionNotification final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.DataExtractionNotification) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataExtractionNotification) */ {
  public:
   inline DataExtractionNotification() : DataExtractionNotification(nullptr) {}
   ~DataExtractionNotification() override;
@@ -2286,22 +2084,13 @@ class DataExtractionNotification final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const DataExtractionNotification& default_instance() {
     return *internal_default_instance();
   }
@@ -2339,15 +2128,9 @@ class DataExtractionNotification final :
   DataExtractionNotification* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<DataExtractionNotification>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const DataExtractionNotification& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const DataExtractionNotification& from) {
-    DataExtractionNotification::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const DataExtractionNotification& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -2360,7 +2143,7 @@ class DataExtractionNotification final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(DataExtractionNotification* other);
 
   private:
@@ -2373,10 +2156,7 @@ class DataExtractionNotification final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -2394,10 +2174,6 @@ class DataExtractionNotification final :
     DataExtractionNotification_Type_Type_MAX;
   static constexpr int Type_ARRAYSIZE =
     DataExtractionNotification_Type_Type_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Type_descriptor() {
-    return DataExtractionNotification_Type_descriptor();
-  }
   template<typename T>
   static inline const std::string& Type_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Type>::value ||
@@ -2461,7 +2237,7 @@ class DataExtractionNotification final :
 // -------------------------------------------------------------------
 
 class LokiProfile final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.LokiProfile) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.LokiProfile) */ {
  public:
   inline LokiProfile() : LokiProfile(nullptr) {}
   ~LokiProfile() override;
@@ -2491,22 +2267,13 @@ class LokiProfile final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const LokiProfile& default_instance() {
     return *internal_default_instance();
   }
@@ -2544,15 +2311,9 @@ class LokiProfile final :
   LokiProfile* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<LokiProfile>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const LokiProfile& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const LokiProfile& from) {
-    LokiProfile::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const LokiProfile& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -2565,7 +2326,7 @@ class LokiProfile final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(LokiProfile* other);
 
   private:
@@ -2578,10 +2339,7 @@ class LokiProfile final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -2646,7 +2404,7 @@ class LokiProfile final :
 // -------------------------------------------------------------------
 
 class DataMessage_Quote_QuotedAttachment final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Quote.QuotedAttachment) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Quote.QuotedAttachment) */ {
  public:
   inline DataMessage_Quote_QuotedAttachment() : DataMessage_Quote_QuotedAttachment(nullptr) {}
   ~DataMessage_Quote_QuotedAttachment() override;
@@ -2676,22 +2434,13 @@ class DataMessage_Quote_QuotedAttachment final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const DataMessage_Quote_QuotedAttachment& default_instance() {
     return *internal_default_instance();
   }
@@ -2729,15 +2478,9 @@ class DataMessage_Quote_QuotedAttachment final :
   DataMessage_Quote_QuotedAttachment* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<DataMessage_Quote_QuotedAttachment>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const DataMessage_Quote_QuotedAttachment& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const DataMessage_Quote_QuotedAttachment& from) {
-    DataMessage_Quote_QuotedAttachment::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const DataMessage_Quote_QuotedAttachment& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -2750,7 +2493,7 @@ class DataMessage_Quote_QuotedAttachment final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(DataMessage_Quote_QuotedAttachment* other);
 
   private:
@@ -2763,10 +2506,7 @@ class DataMessage_Quote_QuotedAttachment final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -2782,10 +2522,6 @@ class DataMessage_Quote_QuotedAttachment final :
     DataMessage_Quote_QuotedAttachment_Flags_Flags_MAX;
   static constexpr int Flags_ARRAYSIZE =
     DataMessage_Quote_QuotedAttachment_Flags_Flags_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Flags_descriptor() {
-    return DataMessage_Quote_QuotedAttachment_Flags_descriptor();
-  }
   template<typename T>
   static inline const std::string& Flags_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Flags>::value ||
@@ -2894,7 +2630,7 @@ class DataMessage_Quote_QuotedAttachment final :
 // -------------------------------------------------------------------
 
 class DataMessage_Quote final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Quote) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Quote) */ {
  public:
   inline DataMessage_Quote() : DataMessage_Quote(nullptr) {}
   ~DataMessage_Quote() override;
@@ -2924,22 +2660,13 @@ class DataMessage_Quote final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const DataMessage_Quote& default_instance() {
     return *internal_default_instance();
   }
@@ -2977,15 +2704,9 @@ class DataMessage_Quote final :
   DataMessage_Quote* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<DataMessage_Quote>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const DataMessage_Quote& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const DataMessage_Quote& from) {
-    DataMessage_Quote::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const DataMessage_Quote& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -2998,7 +2719,7 @@ class DataMessage_Quote final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(DataMessage_Quote* other);
 
   private:
@@ -3011,10 +2732,7 @@ class DataMessage_Quote final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -3119,7 +2837,7 @@ class DataMessage_Quote final :
 // -------------------------------------------------------------------
 
 class DataMessage_Preview final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Preview) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Preview) */ {
  public:
   inline DataMessage_Preview() : DataMessage_Preview(nullptr) {}
   ~DataMessage_Preview() override;
@@ -3149,22 +2867,13 @@ class DataMessage_Preview final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const DataMessage_Preview& default_instance() {
     return *internal_default_instance();
   }
@@ -3202,15 +2911,9 @@ class DataMessage_Preview final :
   DataMessage_Preview* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<DataMessage_Preview>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const DataMessage_Preview& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const DataMessage_Preview& from) {
-    DataMessage_Preview::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const DataMessage_Preview& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -3223,7 +2926,7 @@ class DataMessage_Preview final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(DataMessage_Preview* other);
 
   private:
@@ -3236,10 +2939,7 @@ class DataMessage_Preview final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -3324,7 +3024,7 @@ class DataMessage_Preview final :
 // -------------------------------------------------------------------
 
 class DataMessage_Reaction final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Reaction) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.Reaction) */ {
  public:
   inline DataMessage_Reaction() : DataMessage_Reaction(nullptr) {}
   ~DataMessage_Reaction() override;
@@ -3354,22 +3054,13 @@ class DataMessage_Reaction final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const DataMessage_Reaction& default_instance() {
     return *internal_default_instance();
   }
@@ -3407,15 +3098,9 @@ class DataMessage_Reaction final :
   DataMessage_Reaction* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<DataMessage_Reaction>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const DataMessage_Reaction& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const DataMessage_Reaction& from) {
-    DataMessage_Reaction::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const DataMessage_Reaction& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -3428,7 +3113,7 @@ class DataMessage_Reaction final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(DataMessage_Reaction* other);
 
   private:
@@ -3441,10 +3126,7 @@ class DataMessage_Reaction final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -3462,10 +3144,6 @@ class DataMessage_Reaction final :
     DataMessage_Reaction_Action_Action_MAX;
   static constexpr int Action_ARRAYSIZE =
     DataMessage_Reaction_Action_Action_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Action_descriptor() {
-    return DataMessage_Reaction_Action_descriptor();
-  }
   template<typename T>
   static inline const std::string& Action_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Action>::value ||
@@ -3572,7 +3250,7 @@ class DataMessage_Reaction final :
 // -------------------------------------------------------------------
 
 class DataMessage_OpenGroupInvitation final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.OpenGroupInvitation) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage.OpenGroupInvitation) */ {
  public:
   inline DataMessage_OpenGroupInvitation() : DataMessage_OpenGroupInvitation(nullptr) {}
   ~DataMessage_OpenGroupInvitation() override;
@@ -3602,22 +3280,13 @@ class DataMessage_OpenGroupInvitation final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const DataMessage_OpenGroupInvitation& default_instance() {
     return *internal_default_instance();
   }
@@ -3655,15 +3324,9 @@ class DataMessage_OpenGroupInvitation final :
   DataMessage_OpenGroupInvitation* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<DataMessage_OpenGroupInvitation>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const DataMessage_OpenGroupInvitation& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const DataMessage_OpenGroupInvitation& from) {
-    DataMessage_OpenGroupInvitation::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const DataMessage_OpenGroupInvitation& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -3676,7 +3339,7 @@ class DataMessage_OpenGroupInvitation final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(DataMessage_OpenGroupInvitation* other);
 
   private:
@@ -3689,10 +3352,7 @@ class DataMessage_OpenGroupInvitation final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -3760,7 +3420,7 @@ class DataMessage_OpenGroupInvitation final :
 // -------------------------------------------------------------------
 
 class DataMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.DataMessage) */ {
  public:
   inline DataMessage() : DataMessage(nullptr) {}
   ~DataMessage() override;
@@ -3790,22 +3450,13 @@ class DataMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const DataMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -3843,15 +3494,9 @@ class DataMessage final :
   DataMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<DataMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const DataMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const DataMessage& from) {
-    DataMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const DataMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -3864,7 +3509,7 @@ class DataMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(DataMessage* other);
 
   private:
@@ -3877,10 +3522,7 @@ class DataMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -3901,10 +3543,6 @@ class DataMessage final :
     DataMessage_Flags_Flags_MAX;
   static constexpr int Flags_ARRAYSIZE =
     DataMessage_Flags_Flags_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Flags_descriptor() {
-    return DataMessage_Flags_descriptor();
-  }
   template<typename T>
   static inline const std::string& Flags_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Flags>::value ||
@@ -4183,7 +3821,7 @@ class DataMessage final :
 // -------------------------------------------------------------------
 
 class ReceiptMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.ReceiptMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.ReceiptMessage) */ {
  public:
   inline ReceiptMessage() : ReceiptMessage(nullptr) {}
   ~ReceiptMessage() override;
@@ -4213,22 +3851,13 @@ class ReceiptMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const ReceiptMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -4266,15 +3895,9 @@ class ReceiptMessage final :
   ReceiptMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<ReceiptMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const ReceiptMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const ReceiptMessage& from) {
-    ReceiptMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const ReceiptMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -4287,7 +3910,7 @@ class ReceiptMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(ReceiptMessage* other);
 
   private:
@@ -4300,10 +3923,7 @@ class ReceiptMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -4321,10 +3941,6 @@ class ReceiptMessage final :
     ReceiptMessage_Type_Type_MAX;
   static constexpr int Type_ARRAYSIZE =
     ReceiptMessage_Type_Type_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Type_descriptor() {
-    return ReceiptMessage_Type_descriptor();
-  }
   template<typename T>
   static inline const std::string& Type_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Type>::value ||
@@ -4397,7 +4013,7 @@ class ReceiptMessage final :
 // -------------------------------------------------------------------
 
 class AttachmentPointer final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.AttachmentPointer) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.AttachmentPointer) */ {
  public:
   inline AttachmentPointer() : AttachmentPointer(nullptr) {}
   ~AttachmentPointer() override;
@@ -4427,22 +4043,13 @@ class AttachmentPointer final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const AttachmentPointer& default_instance() {
     return *internal_default_instance();
   }
@@ -4480,15 +4087,9 @@ class AttachmentPointer final :
   AttachmentPointer* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<AttachmentPointer>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const AttachmentPointer& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const AttachmentPointer& from) {
-    AttachmentPointer::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const AttachmentPointer& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -4501,7 +4102,7 @@ class AttachmentPointer final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(AttachmentPointer* other);
 
   private:
@@ -4514,10 +4115,7 @@ class AttachmentPointer final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -4533,10 +4131,6 @@ class AttachmentPointer final :
     AttachmentPointer_Flags_Flags_MAX;
   static constexpr int Flags_ARRAYSIZE =
     AttachmentPointer_Flags_Flags_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Flags_descriptor() {
-    return AttachmentPointer_Flags_descriptor();
-  }
   template<typename T>
   static inline const std::string& Flags_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Flags>::value ||
@@ -4785,7 +4379,7 @@ class AttachmentPointer final :
 // -------------------------------------------------------------------
 
 class SharedConfigMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.SharedConfigMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.SharedConfigMessage) */ {
  public:
   inline SharedConfigMessage() : SharedConfigMessage(nullptr) {}
   ~SharedConfigMessage() override;
@@ -4815,22 +4409,13 @@ class SharedConfigMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const SharedConfigMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -4868,15 +4453,9 @@ class SharedConfigMessage final :
   SharedConfigMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<SharedConfigMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const SharedConfigMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const SharedConfigMessage& from) {
-    SharedConfigMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const SharedConfigMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -4889,7 +4468,7 @@ class SharedConfigMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(SharedConfigMessage* other);
 
   private:
@@ -4902,10 +4481,7 @@ class SharedConfigMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -4927,10 +4503,6 @@ class SharedConfigMessage final :
     SharedConfigMessage_Kind_Kind_MAX;
   static constexpr int Kind_ARRAYSIZE =
     SharedConfigMessage_Kind_Kind_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Kind_descriptor() {
-    return SharedConfigMessage_Kind_descriptor();
-  }
   template<typename T>
   static inline const std::string& Kind_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Kind>::value ||
@@ -5017,7 +4589,7 @@ class SharedConfigMessage final :
 // -------------------------------------------------------------------
 
 class GroupUpdateMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMessage) */ {
  public:
   inline GroupUpdateMessage() : GroupUpdateMessage(nullptr) {}
   ~GroupUpdateMessage() override;
@@ -5047,22 +4619,13 @@ class GroupUpdateMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -5100,15 +4663,9 @@ class GroupUpdateMessage final :
   GroupUpdateMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const GroupUpdateMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const GroupUpdateMessage& from) {
-    GroupUpdateMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const GroupUpdateMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -5121,7 +4678,7 @@ class GroupUpdateMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(GroupUpdateMessage* other);
 
   private:
@@ -5134,10 +4691,7 @@ class GroupUpdateMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -5322,7 +4876,7 @@ class GroupUpdateMessage final :
 // -------------------------------------------------------------------
 
 class GroupUpdateInviteMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateInviteMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateInviteMessage) */ {
  public:
   inline GroupUpdateInviteMessage() : GroupUpdateInviteMessage(nullptr) {}
   ~GroupUpdateInviteMessage() override;
@@ -5352,22 +4906,13 @@ class GroupUpdateInviteMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateInviteMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -5405,15 +4950,9 @@ class GroupUpdateInviteMessage final :
   GroupUpdateInviteMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateInviteMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const GroupUpdateInviteMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const GroupUpdateInviteMessage& from) {
-    GroupUpdateInviteMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const GroupUpdateInviteMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -5426,7 +4965,7 @@ class GroupUpdateInviteMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(GroupUpdateInviteMessage* other);
 
   private:
@@ -5439,10 +4978,7 @@ class GroupUpdateInviteMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -5550,7 +5086,7 @@ class GroupUpdateInviteMessage final :
 // -------------------------------------------------------------------
 
 class GroupUpdatePromoteMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdatePromoteMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdatePromoteMessage) */ {
  public:
   inline GroupUpdatePromoteMessage() : GroupUpdatePromoteMessage(nullptr) {}
   ~GroupUpdatePromoteMessage() override;
@@ -5580,22 +5116,13 @@ class GroupUpdatePromoteMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdatePromoteMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -5633,15 +5160,9 @@ class GroupUpdatePromoteMessage final :
   GroupUpdatePromoteMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdatePromoteMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const GroupUpdatePromoteMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const GroupUpdatePromoteMessage& from) {
-    GroupUpdatePromoteMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const GroupUpdatePromoteMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -5654,7 +5175,7 @@ class GroupUpdatePromoteMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(GroupUpdatePromoteMessage* other);
 
   private:
@@ -5667,10 +5188,7 @@ class GroupUpdatePromoteMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -5738,7 +5256,7 @@ class GroupUpdatePromoteMessage final :
 // -------------------------------------------------------------------
 
 class GroupUpdateInfoChangeMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateInfoChangeMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateInfoChangeMessage) */ {
  public:
   inline GroupUpdateInfoChangeMessage() : GroupUpdateInfoChangeMessage(nullptr) {}
   ~GroupUpdateInfoChangeMessage() override;
@@ -5768,22 +5286,13 @@ class GroupUpdateInfoChangeMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateInfoChangeMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -5821,15 +5330,9 @@ class GroupUpdateInfoChangeMessage final :
   GroupUpdateInfoChangeMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateInfoChangeMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const GroupUpdateInfoChangeMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const GroupUpdateInfoChangeMessage& from) {
-    GroupUpdateInfoChangeMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const GroupUpdateInfoChangeMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -5842,7 +5345,7 @@ class GroupUpdateInfoChangeMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(GroupUpdateInfoChangeMessage* other);
 
   private:
@@ -5855,10 +5358,7 @@ class GroupUpdateInfoChangeMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -5878,10 +5378,6 @@ class GroupUpdateInfoChangeMessage final :
     GroupUpdateInfoChangeMessage_Type_Type_MAX;
   static constexpr int Type_ARRAYSIZE =
     GroupUpdateInfoChangeMessage_Type_Type_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Type_descriptor() {
-    return GroupUpdateInfoChangeMessage_Type_descriptor();
-  }
   template<typename T>
   static inline const std::string& Type_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Type>::value ||
@@ -5988,7 +5484,7 @@ class GroupUpdateInfoChangeMessage final :
 // -------------------------------------------------------------------
 
 class GroupUpdateMemberChangeMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMemberChangeMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMemberChangeMessage) */ {
  public:
   inline GroupUpdateMemberChangeMessage() : GroupUpdateMemberChangeMessage(nullptr) {}
   ~GroupUpdateMemberChangeMessage() override;
@@ -6018,22 +5514,13 @@ class GroupUpdateMemberChangeMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateMemberChangeMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -6071,15 +5558,9 @@ class GroupUpdateMemberChangeMessage final :
   GroupUpdateMemberChangeMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateMemberChangeMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const GroupUpdateMemberChangeMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const GroupUpdateMemberChangeMessage& from) {
-    GroupUpdateMemberChangeMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const GroupUpdateMemberChangeMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -6092,7 +5573,7 @@ class GroupUpdateMemberChangeMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(GroupUpdateMemberChangeMessage* other);
 
   private:
@@ -6105,10 +5586,7 @@ class GroupUpdateMemberChangeMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -6128,10 +5606,6 @@ class GroupUpdateMemberChangeMessage final :
     GroupUpdateMemberChangeMessage_Type_Type_MAX;
   static constexpr int Type_ARRAYSIZE =
     GroupUpdateMemberChangeMessage_Type_Type_ARRAYSIZE;
-  static inline const ::PROTOBUF_NAMESPACE_ID::EnumDescriptor*
-  Type_descriptor() {
-    return GroupUpdateMemberChangeMessage_Type_descriptor();
-  }
   template<typename T>
   static inline const std::string& Type_Name(T enum_t_value) {
     static_assert(::std::is_same<T, Type>::value ||
@@ -6244,9 +5718,10 @@ class GroupUpdateMemberChangeMessage final :
 // -------------------------------------------------------------------
 
 class GroupUpdateMemberLeftMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMemberLeftMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMemberLeftMessage) */ {
  public:
   inline GroupUpdateMemberLeftMessage() : GroupUpdateMemberLeftMessage(nullptr) {}
+  ~GroupUpdateMemberLeftMessage() override;
   explicit PROTOBUF_CONSTEXPR GroupUpdateMemberLeftMessage(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
   GroupUpdateMemberLeftMessage(const GroupUpdateMemberLeftMessage& from);
@@ -6273,22 +5748,13 @@ class GroupUpdateMemberLeftMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateMemberLeftMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -6326,15 +5792,23 @@ class GroupUpdateMemberLeftMessage final :
   GroupUpdateMemberLeftMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateMemberLeftMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::CopyFrom;
-  inline void CopyFrom(const GroupUpdateMemberLeftMessage& from) {
-    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::CopyImpl(*this, from);
-  }
-  using ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::MergeFrom;
-  void MergeFrom(const GroupUpdateMemberLeftMessage& from) {
-    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::MergeImpl(*this, from);
-  }
-  public:
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const GroupUpdateMemberLeftMessage& from);
+  void MergeFrom(const GroupUpdateMemberLeftMessage& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(GroupUpdateMemberLeftMessage* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
@@ -6346,10 +5820,7 @@ class GroupUpdateMemberLeftMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -6363,15 +5834,18 @@ class GroupUpdateMemberLeftMessage final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
+  union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
 };
 // -------------------------------------------------------------------
 
 class GroupUpdateMemberLeftNotificationMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMemberLeftNotificationMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateMemberLeftNotificationMessage) */ {
  public:
   inline GroupUpdateMemberLeftNotificationMessage() : GroupUpdateMemberLeftNotificationMessage(nullptr) {}
+  ~GroupUpdateMemberLeftNotificationMessage() override;
   explicit PROTOBUF_CONSTEXPR GroupUpdateMemberLeftNotificationMessage(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
 
   GroupUpdateMemberLeftNotificationMessage(const GroupUpdateMemberLeftNotificationMessage& from);
@@ -6398,22 +5872,13 @@ class GroupUpdateMemberLeftNotificationMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateMemberLeftNotificationMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -6451,15 +5916,23 @@ class GroupUpdateMemberLeftNotificationMessage final :
   GroupUpdateMemberLeftNotificationMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateMemberLeftNotificationMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::CopyFrom;
-  inline void CopyFrom(const GroupUpdateMemberLeftNotificationMessage& from) {
-    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::CopyImpl(*this, from);
-  }
-  using ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::MergeFrom;
-  void MergeFrom(const GroupUpdateMemberLeftNotificationMessage& from) {
-    ::PROTOBUF_NAMESPACE_ID::internal::ZeroFieldsBase::MergeImpl(*this, from);
-  }
-  public:
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
+  void CopyFrom(const GroupUpdateMemberLeftNotificationMessage& from);
+  void MergeFrom(const GroupUpdateMemberLeftNotificationMessage& from);
+  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
+  bool IsInitialized() const final;
+
+  size_t ByteSizeLong() const final;
+  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
+  uint8_t* _InternalSerialize(
+      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
+  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
+
+  private:
+  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
+  void SharedDtor();
+  void SetCachedSize(int size) const;
+  void InternalSwap(GroupUpdateMemberLeftNotificationMessage* other);
 
   private:
   friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
@@ -6471,10 +5944,7 @@ class GroupUpdateMemberLeftNotificationMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -6488,13 +5958,15 @@ class GroupUpdateMemberLeftNotificationMessage final :
   typedef void InternalArenaConstructable_;
   typedef void DestructorSkippable_;
   struct Impl_ {
+    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
   };
+  union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
 };
 // -------------------------------------------------------------------
 
 class GroupUpdateInviteResponseMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateInviteResponseMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateInviteResponseMessage) */ {
  public:
   inline GroupUpdateInviteResponseMessage() : GroupUpdateInviteResponseMessage(nullptr) {}
   ~GroupUpdateInviteResponseMessage() override;
@@ -6524,22 +5996,13 @@ class GroupUpdateInviteResponseMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateInviteResponseMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -6577,15 +6040,9 @@ class GroupUpdateInviteResponseMessage final :
   GroupUpdateInviteResponseMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateInviteResponseMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const GroupUpdateInviteResponseMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const GroupUpdateInviteResponseMessage& from) {
-    GroupUpdateInviteResponseMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const GroupUpdateInviteResponseMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -6598,7 +6055,7 @@ class GroupUpdateInviteResponseMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(GroupUpdateInviteResponseMessage* other);
 
   private:
@@ -6611,10 +6068,7 @@ class GroupUpdateInviteResponseMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -6654,7 +6108,7 @@ class GroupUpdateInviteResponseMessage final :
 // -------------------------------------------------------------------
 
 class GroupUpdateDeleteMemberContentMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateDeleteMemberContentMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.GroupUpdateDeleteMemberContentMessage) */ {
  public:
   inline GroupUpdateDeleteMemberContentMessage() : GroupUpdateDeleteMemberContentMessage(nullptr) {}
   ~GroupUpdateDeleteMemberContentMessage() override;
@@ -6684,22 +6138,13 @@ class GroupUpdateDeleteMemberContentMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const GroupUpdateDeleteMemberContentMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -6737,15 +6182,9 @@ class GroupUpdateDeleteMemberContentMessage final :
   GroupUpdateDeleteMemberContentMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<GroupUpdateDeleteMemberContentMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const GroupUpdateDeleteMemberContentMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const GroupUpdateDeleteMemberContentMessage& from) {
-    GroupUpdateDeleteMemberContentMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const GroupUpdateDeleteMemberContentMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -6758,7 +6197,7 @@ class GroupUpdateDeleteMemberContentMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(GroupUpdateDeleteMemberContentMessage* other);
 
   private:
@@ -6771,10 +6210,7 @@ class GroupUpdateDeleteMemberContentMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -6871,7 +6307,7 @@ class GroupUpdateDeleteMemberContentMessage final :
 // -------------------------------------------------------------------
 
 class ProProof final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.ProProof) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.ProProof) */ {
  public:
   inline ProProof() : ProProof(nullptr) {}
   ~ProProof() override;
@@ -6901,22 +6337,13 @@ class ProProof final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const ProProof& default_instance() {
     return *internal_default_instance();
   }
@@ -6954,15 +6381,9 @@ class ProProof final :
   ProProof* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<ProProof>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const ProProof& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const ProProof& from) {
-    ProProof::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const ProProof& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -6975,7 +6396,7 @@ class ProProof final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(ProProof* other);
 
   private:
@@ -6988,10 +6409,7 @@ class ProProof final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -7108,196 +6526,8 @@ class ProProof final :
 };
 // -------------------------------------------------------------------
 
-class ProConfig final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.ProConfig) */ {
- public:
-  inline ProConfig() : ProConfig(nullptr) {}
-  ~ProConfig() override;
-  explicit PROTOBUF_CONSTEXPR ProConfig(::PROTOBUF_NAMESPACE_ID::internal::ConstantInitialized);
-
-  ProConfig(const ProConfig& from);
-  ProConfig(ProConfig&& from) noexcept
-    : ProConfig() {
-    *this = ::std::move(from);
-  }
-
-  inline ProConfig& operator=(const ProConfig& from) {
-    CopyFrom(from);
-    return *this;
-  }
-  inline ProConfig& operator=(ProConfig&& from) noexcept {
-    if (this == &from) return *this;
-    if (GetOwningArena() == from.GetOwningArena()
-  #ifdef PROTOBUF_FORCE_COPY_IN_MOVE
-        && GetOwningArena() != nullptr
-  #endif  // !PROTOBUF_FORCE_COPY_IN_MOVE
-    ) {
-      InternalSwap(&from);
-    } else {
-      CopyFrom(from);
-    }
-    return *this;
-  }
-
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
-  }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
-  }
-
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
-  static const ProConfig& default_instance() {
-    return *internal_default_instance();
-  }
-  static inline const ProConfig* internal_default_instance() {
-    return reinterpret_cast<const ProConfig*>(
-               &_ProConfig_default_instance_);
-  }
-  static constexpr int kIndexInFileMessages =
-    28;
-
-  friend void swap(ProConfig& a, ProConfig& b) {
-    a.Swap(&b);
-  }
-  inline void Swap(ProConfig* other) {
-    if (other == this) return;
-  #ifdef PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() != nullptr &&
-        GetOwningArena() == other->GetOwningArena()) {
-   #else  // PROTOBUF_FORCE_COPY_IN_SWAP
-    if (GetOwningArena() == other->GetOwningArena()) {
-  #endif  // !PROTOBUF_FORCE_COPY_IN_SWAP
-      InternalSwap(other);
-    } else {
-      ::PROTOBUF_NAMESPACE_ID::internal::GenericSwap(this, other);
-    }
-  }
-  void UnsafeArenaSwap(ProConfig* other) {
-    if (other == this) return;
-    GOOGLE_DCHECK(GetOwningArena() == other->GetOwningArena());
-    InternalSwap(other);
-  }
-
-  // implements Message ----------------------------------------------
-
-  ProConfig* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
-    return CreateMaybeMessage<ProConfig>(arena);
-  }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
-  void CopyFrom(const ProConfig& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const ProConfig& from) {
-    ProConfig::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
-  PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
-  bool IsInitialized() const final;
-
-  size_t ByteSizeLong() const final;
-  const char* _InternalParse(const char* ptr, ::PROTOBUF_NAMESPACE_ID::internal::ParseContext* ctx) final;
-  uint8_t* _InternalSerialize(
-      uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const final;
-  int GetCachedSize() const final { return _impl_._cached_size_.Get(); }
-
-  private:
-  void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
-  void SharedDtor();
-  void SetCachedSize(int size) const final;
-  void InternalSwap(ProConfig* other);
-
-  private:
-  friend class ::PROTOBUF_NAMESPACE_ID::internal::AnyMetadata;
-  static ::PROTOBUF_NAMESPACE_ID::StringPiece FullMessageName() {
-    return "SessionProtos.ProConfig";
-  }
-  protected:
-  explicit ProConfig(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                       bool is_message_owned = false);
-  public:
-
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
-
-  // nested types ----------------------------------------------------
-
-  // accessors -------------------------------------------------------
-
-  enum : int {
-    kRotatingPrivKeyFieldNumber = 1,
-    kProofFieldNumber = 2,
-  };
-  // required bytes rotatingPrivKey = 1;
-  bool has_rotatingprivkey() const;
-  private:
-  bool _internal_has_rotatingprivkey() const;
-  public:
-  void clear_rotatingprivkey();
-  const std::string& rotatingprivkey() const;
-  template <typename ArgT0 = const std::string&, typename... ArgT>
-  void set_rotatingprivkey(ArgT0&& arg0, ArgT... args);
-  std::string* mutable_rotatingprivkey();
-  PROTOBUF_NODISCARD std::string* release_rotatingprivkey();
-  void set_allocated_rotatingprivkey(std::string* rotatingprivkey);
-  private:
-  const std::string& _internal_rotatingprivkey() const;
-  inline PROTOBUF_ALWAYS_INLINE void _internal_set_rotatingprivkey(const std::string& value);
-  std::string* _internal_mutable_rotatingprivkey();
-  public:
-
-  // required .SessionProtos.ProProof proof = 2;
-  bool has_proof() const;
-  private:
-  bool _internal_has_proof() const;
-  public:
-  void clear_proof();
-  const ::SessionProtos::ProProof& proof() const;
-  PROTOBUF_NODISCARD ::SessionProtos::ProProof* release_proof();
-  ::SessionProtos::ProProof* mutable_proof();
-  void set_allocated_proof(::SessionProtos::ProProof* proof);
-  private:
-  const ::SessionProtos::ProProof& _internal_proof() const;
-  ::SessionProtos::ProProof* _internal_mutable_proof();
-  public:
-  void unsafe_arena_set_allocated_proof(
-      ::SessionProtos::ProProof* proof);
-  ::SessionProtos::ProProof* unsafe_arena_release_proof();
-
-  // @@protoc_insertion_point(class_scope:SessionProtos.ProConfig)
- private:
-  class _Internal;
-
-  // helper for ByteSizeLong()
-  size_t RequiredFieldsByteSizeFallback() const;
-
-  template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
-  typedef void InternalArenaConstructable_;
-  typedef void DestructorSkippable_;
-  struct Impl_ {
-    ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
-    mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
-    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr rotatingprivkey_;
-    ::SessionProtos::ProProof* proof_;
-  };
-  union { Impl_ _impl_; };
-  friend struct ::TableStruct_SessionProtos_2eproto;
-};
-// -------------------------------------------------------------------
-
 class ProMessage final :
-    public ::PROTOBUF_NAMESPACE_ID::Message /* @@protoc_insertion_point(class_definition:SessionProtos.ProMessage) */ {
+    public ::PROTOBUF_NAMESPACE_ID::MessageLite /* @@protoc_insertion_point(class_definition:SessionProtos.ProMessage) */ {
  public:
   inline ProMessage() : ProMessage(nullptr) {}
   ~ProMessage() override;
@@ -7327,22 +6557,13 @@ class ProMessage final :
     return *this;
   }
 
-  inline const ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet& unknown_fields() const {
-    return _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance);
+  inline const std::string& unknown_fields() const {
+    return _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString);
   }
-  inline ::PROTOBUF_NAMESPACE_ID::UnknownFieldSet* mutable_unknown_fields() {
-    return _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+  inline std::string* mutable_unknown_fields() {
+    return _internal_metadata_.mutable_unknown_fields<std::string>();
   }
 
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* descriptor() {
-    return GetDescriptor();
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Descriptor* GetDescriptor() {
-    return default_instance().GetMetadata().descriptor;
-  }
-  static const ::PROTOBUF_NAMESPACE_ID::Reflection* GetReflection() {
-    return default_instance().GetMetadata().reflection;
-  }
   static const ProMessage& default_instance() {
     return *internal_default_instance();
   }
@@ -7351,7 +6572,7 @@ class ProMessage final :
                &_ProMessage_default_instance_);
   }
   static constexpr int kIndexInFileMessages =
-    29;
+    28;
 
   friend void swap(ProMessage& a, ProMessage& b) {
     a.Swap(&b);
@@ -7380,15 +6601,9 @@ class ProMessage final :
   ProMessage* New(::PROTOBUF_NAMESPACE_ID::Arena* arena = nullptr) const final {
     return CreateMaybeMessage<ProMessage>(arena);
   }
-  using ::PROTOBUF_NAMESPACE_ID::Message::CopyFrom;
+  void CheckTypeAndMergeFrom(const ::PROTOBUF_NAMESPACE_ID::MessageLite& from)  final;
   void CopyFrom(const ProMessage& from);
-  using ::PROTOBUF_NAMESPACE_ID::Message::MergeFrom;
-  void MergeFrom( const ProMessage& from) {
-    ProMessage::MergeImpl(*this, from);
-  }
-  private:
-  static void MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg);
-  public:
+  void MergeFrom(const ProMessage& from);
   PROTOBUF_ATTRIBUTE_REINITIALIZES void Clear() final;
   bool IsInitialized() const final;
 
@@ -7401,7 +6616,7 @@ class ProMessage final :
   private:
   void SharedCtor(::PROTOBUF_NAMESPACE_ID::Arena* arena, bool is_message_owned);
   void SharedDtor();
-  void SetCachedSize(int size) const final;
+  void SetCachedSize(int size) const;
   void InternalSwap(ProMessage* other);
 
   private:
@@ -7414,10 +6629,7 @@ class ProMessage final :
                        bool is_message_owned = false);
   public:
 
-  static const ClassData _class_data_;
-  const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*GetClassData() const final;
-
-  ::PROTOBUF_NAMESPACE_ID::Metadata GetMetadata() const final;
+  std::string GetTypeName() const final;
 
   // nested types ----------------------------------------------------
 
@@ -14447,168 +13659,6 @@ inline void ProProof::set_allocated_sig(std::string* sig) {
 
 // -------------------------------------------------------------------
 
-// ProConfig
-
-// required bytes rotatingPrivKey = 1;
-inline bool ProConfig::_internal_has_rotatingprivkey() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
-  return value;
-}
-inline bool ProConfig::has_rotatingprivkey() const {
-  return _internal_has_rotatingprivkey();
-}
-inline void ProConfig::clear_rotatingprivkey() {
-  _impl_.rotatingprivkey_.ClearToEmpty();
-  _impl_._has_bits_[0] &= ~0x00000001u;
-}
-inline const std::string& ProConfig::rotatingprivkey() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.ProConfig.rotatingPrivKey)
-  return _internal_rotatingprivkey();
-}
-template <typename ArgT0, typename... ArgT>
-inline PROTOBUF_ALWAYS_INLINE
-void ProConfig::set_rotatingprivkey(ArgT0&& arg0, ArgT... args) {
- _impl_._has_bits_[0] |= 0x00000001u;
- _impl_.rotatingprivkey_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
-  // @@protoc_insertion_point(field_set:SessionProtos.ProConfig.rotatingPrivKey)
-}
-inline std::string* ProConfig::mutable_rotatingprivkey() {
-  std::string* _s = _internal_mutable_rotatingprivkey();
-  // @@protoc_insertion_point(field_mutable:SessionProtos.ProConfig.rotatingPrivKey)
-  return _s;
-}
-inline const std::string& ProConfig::_internal_rotatingprivkey() const {
-  return _impl_.rotatingprivkey_.Get();
-}
-inline void ProConfig::_internal_set_rotatingprivkey(const std::string& value) {
-  _impl_._has_bits_[0] |= 0x00000001u;
-  _impl_.rotatingprivkey_.Set(value, GetArenaForAllocation());
-}
-inline std::string* ProConfig::_internal_mutable_rotatingprivkey() {
-  _impl_._has_bits_[0] |= 0x00000001u;
-  return _impl_.rotatingprivkey_.Mutable(GetArenaForAllocation());
-}
-inline std::string* ProConfig::release_rotatingprivkey() {
-  // @@protoc_insertion_point(field_release:SessionProtos.ProConfig.rotatingPrivKey)
-  if (!_internal_has_rotatingprivkey()) {
-    return nullptr;
-  }
-  _impl_._has_bits_[0] &= ~0x00000001u;
-  auto* p = _impl_.rotatingprivkey_.Release();
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.rotatingprivkey_.IsDefault()) {
-    _impl_.rotatingprivkey_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  return p;
-}
-inline void ProConfig::set_allocated_rotatingprivkey(std::string* rotatingprivkey) {
-  if (rotatingprivkey != nullptr) {
-    _impl_._has_bits_[0] |= 0x00000001u;
-  } else {
-    _impl_._has_bits_[0] &= ~0x00000001u;
-  }
-  _impl_.rotatingprivkey_.SetAllocated(rotatingprivkey, GetArenaForAllocation());
-#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (_impl_.rotatingprivkey_.IsDefault()) {
-    _impl_.rotatingprivkey_.Set("", GetArenaForAllocation());
-  }
-#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProConfig.rotatingPrivKey)
-}
-
-// required .SessionProtos.ProProof proof = 2;
-inline bool ProConfig::_internal_has_proof() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
-  PROTOBUF_ASSUME(!value || _impl_.proof_ != nullptr);
-  return value;
-}
-inline bool ProConfig::has_proof() const {
-  return _internal_has_proof();
-}
-inline void ProConfig::clear_proof() {
-  if (_impl_.proof_ != nullptr) _impl_.proof_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000002u;
-}
-inline const ::SessionProtos::ProProof& ProConfig::_internal_proof() const {
-  const ::SessionProtos::ProProof* p = _impl_.proof_;
-  return p != nullptr ? *p : reinterpret_cast<const ::SessionProtos::ProProof&>(
-      ::SessionProtos::_ProProof_default_instance_);
-}
-inline const ::SessionProtos::ProProof& ProConfig::proof() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.ProConfig.proof)
-  return _internal_proof();
-}
-inline void ProConfig::unsafe_arena_set_allocated_proof(
-    ::SessionProtos::ProProof* proof) {
-  if (GetArenaForAllocation() == nullptr) {
-    delete reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(_impl_.proof_);
-  }
-  _impl_.proof_ = proof;
-  if (proof) {
-    _impl_._has_bits_[0] |= 0x00000002u;
-  } else {
-    _impl_._has_bits_[0] &= ~0x00000002u;
-  }
-  // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.ProConfig.proof)
-}
-inline ::SessionProtos::ProProof* ProConfig::release_proof() {
-  _impl_._has_bits_[0] &= ~0x00000002u;
-  ::SessionProtos::ProProof* temp = _impl_.proof_;
-  _impl_.proof_ = nullptr;
-#ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
-  auto* old =  reinterpret_cast<::PROTOBUF_NAMESPACE_ID::MessageLite*>(temp);
-  temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-  if (GetArenaForAllocation() == nullptr) { delete old; }
-#else  // PROTOBUF_FORCE_COPY_IN_RELEASE
-  if (GetArenaForAllocation() != nullptr) {
-    temp = ::PROTOBUF_NAMESPACE_ID::internal::DuplicateIfNonNull(temp);
-  }
-#endif  // !PROTOBUF_FORCE_COPY_IN_RELEASE
-  return temp;
-}
-inline ::SessionProtos::ProProof* ProConfig::unsafe_arena_release_proof() {
-  // @@protoc_insertion_point(field_release:SessionProtos.ProConfig.proof)
-  _impl_._has_bits_[0] &= ~0x00000002u;
-  ::SessionProtos::ProProof* temp = _impl_.proof_;
-  _impl_.proof_ = nullptr;
-  return temp;
-}
-inline ::SessionProtos::ProProof* ProConfig::_internal_mutable_proof() {
-  _impl_._has_bits_[0] |= 0x00000002u;
-  if (_impl_.proof_ == nullptr) {
-    auto* p = CreateMaybeMessage<::SessionProtos::ProProof>(GetArenaForAllocation());
-    _impl_.proof_ = p;
-  }
-  return _impl_.proof_;
-}
-inline ::SessionProtos::ProProof* ProConfig::mutable_proof() {
-  ::SessionProtos::ProProof* _msg = _internal_mutable_proof();
-  // @@protoc_insertion_point(field_mutable:SessionProtos.ProConfig.proof)
-  return _msg;
-}
-inline void ProConfig::set_allocated_proof(::SessionProtos::ProProof* proof) {
-  ::PROTOBUF_NAMESPACE_ID::Arena* message_arena = GetArenaForAllocation();
-  if (message_arena == nullptr) {
-    delete _impl_.proof_;
-  }
-  if (proof) {
-    ::PROTOBUF_NAMESPACE_ID::Arena* submessage_arena =
-        ::PROTOBUF_NAMESPACE_ID::Arena::InternalGetOwningArena(proof);
-    if (message_arena != submessage_arena) {
-      proof = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
-          message_arena, proof, submessage_arena);
-    }
-    _impl_._has_bits_[0] |= 0x00000002u;
-  } else {
-    _impl_._has_bits_[0] &= ~0x00000002u;
-  }
-  _impl_.proof_ = proof;
-  // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProConfig.proof)
-}
-
-// -------------------------------------------------------------------
-
 // ProMessage
 
 // required .SessionProtos.ProProof proof = 1;
@@ -14788,8 +13838,6 @@ inline void ProMessage::set_flags(uint32_t value) {
 
 // -------------------------------------------------------------------
 
-// -------------------------------------------------------------------
-
 
 // @@protoc_insertion_point(namespace_scope)
 
@@ -14798,70 +13846,18 @@ inline void ProMessage::set_flags(uint32_t value) {
 PROTOBUF_NAMESPACE_OPEN
 
 template <> struct is_proto_enum< ::SessionProtos::Envelope_Type> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::Envelope_Type>() {
-  return ::SessionProtos::Envelope_Type_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::TypingMessage_Action> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::TypingMessage_Action>() {
-  return ::SessionProtos::TypingMessage_Action_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::Content_ExpirationType> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::Content_ExpirationType>() {
-  return ::SessionProtos::Content_ExpirationType_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::CallMessage_Type> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::CallMessage_Type>() {
-  return ::SessionProtos::CallMessage_Type_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::DataExtractionNotification_Type> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::DataExtractionNotification_Type>() {
-  return ::SessionProtos::DataExtractionNotification_Type_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::DataMessage_Quote_QuotedAttachment_Flags> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::DataMessage_Quote_QuotedAttachment_Flags>() {
-  return ::SessionProtos::DataMessage_Quote_QuotedAttachment_Flags_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::DataMessage_Reaction_Action> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::DataMessage_Reaction_Action>() {
-  return ::SessionProtos::DataMessage_Reaction_Action_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::DataMessage_Flags> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::DataMessage_Flags>() {
-  return ::SessionProtos::DataMessage_Flags_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::ReceiptMessage_Type> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::ReceiptMessage_Type>() {
-  return ::SessionProtos::ReceiptMessage_Type_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::AttachmentPointer_Flags> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::AttachmentPointer_Flags>() {
-  return ::SessionProtos::AttachmentPointer_Flags_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::SharedConfigMessage_Kind> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::SharedConfigMessage_Kind>() {
-  return ::SessionProtos::SharedConfigMessage_Kind_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::GroupUpdateInfoChangeMessage_Type> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::GroupUpdateInfoChangeMessage_Type>() {
-  return ::SessionProtos::GroupUpdateInfoChangeMessage_Type_descriptor();
-}
 template <> struct is_proto_enum< ::SessionProtos::GroupUpdateMemberChangeMessage_Type> : ::std::true_type {};
-template <>
-inline const EnumDescriptor* GetEnumDescriptor< ::SessionProtos::GroupUpdateMemberChangeMessage_Type>() {
-  return ::SessionProtos::GroupUpdateMemberChangeMessage_Type_descriptor();
-}
 
 PROTOBUF_NAMESPACE_CLOSE
 

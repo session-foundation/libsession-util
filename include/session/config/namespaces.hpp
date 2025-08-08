@@ -5,6 +5,12 @@
 namespace session::config {
 
 enum class Namespace : std::int16_t {
+    // Messages sent to an updated closed group which should be able to be retrieved by revoked
+    // members are stored in this namespace
+    RevokedRetrievableGroupMessages = -11,
+
+    // Messages sent to one-to-one conversations are stored in this namespace
+    Default = 0,
     UserProfile = 2,
     Contacts = 3,
     ConvoInfoVolatile = 4,
