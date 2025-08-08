@@ -27,6 +27,7 @@ PROTOBUF_CONSTEXPR Envelope::Envelope(
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.source_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.content_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.prosig_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.timestamp_)*/uint64_t{0u}
   , /*decltype(_impl_.servertimestamp_)*/uint64_t{0u}
   , /*decltype(_impl_.sourcedevice_)*/0u
@@ -98,6 +99,7 @@ PROTOBUF_CONSTEXPR Content::Content(
   , /*decltype(_impl_.unsendrequest_)*/nullptr
   , /*decltype(_impl_.messagerequestresponse_)*/nullptr
   , /*decltype(_impl_.sharedconfigmessage_)*/nullptr
+  , /*decltype(_impl_.promessage_)*/nullptr
   , /*decltype(_impl_.expirationtype_)*/0
   , /*decltype(_impl_.expirationtimer_)*/0u
   , /*decltype(_impl_.sigtimestamp_)*/uint64_t{0u}} {}
@@ -476,8 +478,56 @@ struct GroupUpdateDeleteMemberContentMessageDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateDeleteMemberContentMessageDefaultTypeInternal _GroupUpdateDeleteMemberContentMessage_default_instance_;
+PROTOBUF_CONSTEXPR ProProof::ProProof(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.genindexhash_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.rotatingpublickey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.sig_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.expiryunixts_)*/uint64_t{0u}
+  , /*decltype(_impl_.version_)*/0u} {}
+struct ProProofDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ProProofDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ProProofDefaultTypeInternal() {}
+  union {
+    ProProof _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ProProofDefaultTypeInternal _ProProof_default_instance_;
+PROTOBUF_CONSTEXPR ProConfig::ProConfig(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.rotatingprivkey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.proof_)*/nullptr} {}
+struct ProConfigDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ProConfigDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ProConfigDefaultTypeInternal() {}
+  union {
+    ProConfig _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ProConfigDefaultTypeInternal _ProConfig_default_instance_;
+PROTOBUF_CONSTEXPR ProMessage::ProMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.proof_)*/nullptr
+  , /*decltype(_impl_.flags_)*/0u} {}
+struct ProMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ProMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ProMessageDefaultTypeInternal() {}
+  union {
+    ProMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ProMessageDefaultTypeInternal _ProMessage_default_instance_;
 }  // namespace SessionProtos
-static ::_pb::Metadata file_level_metadata_SessionProtos_2eproto[27];
+static ::_pb::Metadata file_level_metadata_SessionProtos_2eproto[30];
 static const ::_pb::EnumDescriptor* file_level_enum_descriptors_SessionProtos_2eproto[13];
 static constexpr ::_pb::ServiceDescriptor const** file_level_service_descriptors_SessionProtos_2eproto = nullptr;
 
@@ -494,12 +544,14 @@ const uint32_t TableStruct_SessionProtos_2eproto::offsets[] PROTOBUF_SECTION_VAR
   PROTOBUF_FIELD_OFFSET(::SessionProtos::Envelope, _impl_.timestamp_),
   PROTOBUF_FIELD_OFFSET(::SessionProtos::Envelope, _impl_.content_),
   PROTOBUF_FIELD_OFFSET(::SessionProtos::Envelope, _impl_.servertimestamp_),
-  5,
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::Envelope, _impl_.prosig_),
+  6,
   0,
+  5,
+  3,
+  1,
   4,
   2,
-  1,
-  3,
   PROTOBUF_FIELD_OFFSET(::SessionProtos::TypingMessage, _impl_._has_bits_),
   PROTOBUF_FIELD_OFFSET(::SessionProtos::TypingMessage, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -549,6 +601,7 @@ const uint32_t TableStruct_SessionProtos_2eproto::offsets[] PROTOBUF_SECTION_VAR
   PROTOBUF_FIELD_OFFSET(::SessionProtos::Content, _impl_.expirationtype_),
   PROTOBUF_FIELD_OFFSET(::SessionProtos::Content, _impl_.expirationtimer_),
   PROTOBUF_FIELD_OFFSET(::SessionProtos::Content, _impl_.sigtimestamp_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::Content, _impl_.promessage_),
   0,
   1,
   2,
@@ -557,9 +610,10 @@ const uint32_t TableStruct_SessionProtos_2eproto::offsets[] PROTOBUF_SECTION_VAR
   5,
   6,
   7,
-  8,
   9,
   10,
+  11,
+  8,
   PROTOBUF_FIELD_OFFSET(::SessionProtos::CallMessage, _impl_._has_bits_),
   PROTOBUF_FIELD_OFFSET(::SessionProtos::CallMessage, _internal_metadata_),
   ~0u,  // no _extensions_
@@ -860,35 +914,74 @@ const uint32_t TableStruct_SessionProtos_2eproto::offsets[] PROTOBUF_SECTION_VAR
   ~0u,
   ~0u,
   0,
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProProof, _impl_._has_bits_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProProof, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProProof, _impl_.version_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProProof, _impl_.genindexhash_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProProof, _impl_.rotatingpublickey_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProProof, _impl_.expiryunixts_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProProof, _impl_.sig_),
+  4,
+  0,
+  1,
+  3,
+  2,
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProConfig, _impl_._has_bits_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProConfig, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProConfig, _impl_.rotatingprivkey_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProConfig, _impl_.proof_),
+  0,
+  1,
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProMessage, _impl_._has_bits_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProMessage, _internal_metadata_),
+  ~0u,  // no _extensions_
+  ~0u,  // no _oneof_case_
+  ~0u,  // no _weak_field_map_
+  ~0u,  // no _inlined_string_donated_
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProMessage, _impl_.proof_),
+  PROTOBUF_FIELD_OFFSET(::SessionProtos::ProMessage, _impl_.flags_),
+  0,
+  1,
 };
 static const ::_pbi::MigrationSchema schemas[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) = {
-  { 0, 12, -1, sizeof(::SessionProtos::Envelope)},
-  { 18, 26, -1, sizeof(::SessionProtos::TypingMessage)},
-  { 28, 36, -1, sizeof(::SessionProtos::UnsendRequest)},
-  { 38, 47, -1, sizeof(::SessionProtos::MessageRequestResponse)},
-  { 50, 67, -1, sizeof(::SessionProtos::Content)},
-  { 78, 89, -1, sizeof(::SessionProtos::CallMessage)},
-  { 94, 102, -1, sizeof(::SessionProtos::KeyPair)},
-  { 104, 112, -1, sizeof(::SessionProtos::DataExtractionNotification)},
-  { 114, 122, -1, sizeof(::SessionProtos::LokiProfile)},
-  { 124, 134, -1, sizeof(::SessionProtos::DataMessage_Quote_QuotedAttachment)},
-  { 138, 148, -1, sizeof(::SessionProtos::DataMessage_Quote)},
-  { 152, 161, -1, sizeof(::SessionProtos::DataMessage_Preview)},
-  { 164, 174, -1, sizeof(::SessionProtos::DataMessage_Reaction)},
-  { 178, 186, -1, sizeof(::SessionProtos::DataMessage_OpenGroupInvitation)},
-  { 188, 207, -1, sizeof(::SessionProtos::DataMessage)},
-  { 220, 228, -1, sizeof(::SessionProtos::ReceiptMessage)},
-  { 230, 248, -1, sizeof(::SessionProtos::AttachmentPointer)},
-  { 260, 269, -1, sizeof(::SessionProtos::SharedConfigMessage)},
-  { 272, 286, -1, sizeof(::SessionProtos::GroupUpdateMessage)},
-  { 294, 304, -1, sizeof(::SessionProtos::GroupUpdateInviteMessage)},
-  { 308, 316, -1, sizeof(::SessionProtos::GroupUpdatePromoteMessage)},
-  { 318, 328, -1, sizeof(::SessionProtos::GroupUpdateInfoChangeMessage)},
-  { 332, 342, -1, sizeof(::SessionProtos::GroupUpdateMemberChangeMessage)},
-  { 346, -1, -1, sizeof(::SessionProtos::GroupUpdateMemberLeftMessage)},
-  { 352, -1, -1, sizeof(::SessionProtos::GroupUpdateMemberLeftNotificationMessage)},
-  { 358, 365, -1, sizeof(::SessionProtos::GroupUpdateInviteResponseMessage)},
-  { 366, 375, -1, sizeof(::SessionProtos::GroupUpdateDeleteMemberContentMessage)},
+  { 0, 13, -1, sizeof(::SessionProtos::Envelope)},
+  { 20, 28, -1, sizeof(::SessionProtos::TypingMessage)},
+  { 30, 38, -1, sizeof(::SessionProtos::UnsendRequest)},
+  { 40, 49, -1, sizeof(::SessionProtos::MessageRequestResponse)},
+  { 52, 70, -1, sizeof(::SessionProtos::Content)},
+  { 82, 93, -1, sizeof(::SessionProtos::CallMessage)},
+  { 98, 106, -1, sizeof(::SessionProtos::KeyPair)},
+  { 108, 116, -1, sizeof(::SessionProtos::DataExtractionNotification)},
+  { 118, 126, -1, sizeof(::SessionProtos::LokiProfile)},
+  { 128, 138, -1, sizeof(::SessionProtos::DataMessage_Quote_QuotedAttachment)},
+  { 142, 152, -1, sizeof(::SessionProtos::DataMessage_Quote)},
+  { 156, 165, -1, sizeof(::SessionProtos::DataMessage_Preview)},
+  { 168, 178, -1, sizeof(::SessionProtos::DataMessage_Reaction)},
+  { 182, 190, -1, sizeof(::SessionProtos::DataMessage_OpenGroupInvitation)},
+  { 192, 211, -1, sizeof(::SessionProtos::DataMessage)},
+  { 224, 232, -1, sizeof(::SessionProtos::ReceiptMessage)},
+  { 234, 252, -1, sizeof(::SessionProtos::AttachmentPointer)},
+  { 264, 273, -1, sizeof(::SessionProtos::SharedConfigMessage)},
+  { 276, 290, -1, sizeof(::SessionProtos::GroupUpdateMessage)},
+  { 298, 308, -1, sizeof(::SessionProtos::GroupUpdateInviteMessage)},
+  { 312, 320, -1, sizeof(::SessionProtos::GroupUpdatePromoteMessage)},
+  { 322, 332, -1, sizeof(::SessionProtos::GroupUpdateInfoChangeMessage)},
+  { 336, 346, -1, sizeof(::SessionProtos::GroupUpdateMemberChangeMessage)},
+  { 350, -1, -1, sizeof(::SessionProtos::GroupUpdateMemberLeftMessage)},
+  { 356, -1, -1, sizeof(::SessionProtos::GroupUpdateMemberLeftNotificationMessage)},
+  { 362, 369, -1, sizeof(::SessionProtos::GroupUpdateInviteResponseMessage)},
+  { 370, 379, -1, sizeof(::SessionProtos::GroupUpdateDeleteMemberContentMessage)},
+  { 382, 393, -1, sizeof(::SessionProtos::ProProof)},
+  { 398, 406, -1, sizeof(::SessionProtos::ProConfig)},
+  { 408, 416, -1, sizeof(::SessionProtos::ProMessage)},
 };
 
 static const ::_pb::Message* const file_default_instances[] = {
@@ -919,138 +1012,149 @@ static const ::_pb::Message* const file_default_instances[] = {
   &::SessionProtos::_GroupUpdateMemberLeftNotificationMessage_default_instance_._instance,
   &::SessionProtos::_GroupUpdateInviteResponseMessage_default_instance_._instance,
   &::SessionProtos::_GroupUpdateDeleteMemberContentMessage_default_instance_._instance,
+  &::SessionProtos::_ProProof_default_instance_._instance,
+  &::SessionProtos::_ProConfig_default_instance_._instance,
+  &::SessionProtos::_ProMessage_default_instance_._instance,
 };
 
 const char descriptor_table_protodef_SessionProtos_2eproto[] PROTOBUF_SECTION_VARIABLE(protodesc_cold) =
-  "\n\023SessionProtos.proto\022\rSessionProtos\"\320\001\n"
+  "\n\023SessionProtos.proto\022\rSessionProtos\"\340\001\n"
   "\010Envelope\022*\n\004type\030\001 \002(\0162\034.SessionProtos."
   "Envelope.Type\022\016\n\006source\030\002 \001(\t\022\024\n\014sourceD"
   "evice\030\007 \001(\r\022\021\n\ttimestamp\030\005 \002(\004\022\017\n\007conten"
-  "t\030\010 \001(\014\022\027\n\017serverTimestamp\030\n \001(\004\"5\n\004Type"
-  "\022\023\n\017SESSION_MESSAGE\020\006\022\030\n\024CLOSED_GROUP_ME"
-  "SSAGE\020\007\"{\n\rTypingMessage\022\021\n\ttimestamp\030\001 "
-  "\002(\004\0223\n\006action\030\002 \002(\0162#.SessionProtos.Typi"
-  "ngMessage.Action\"\"\n\006Action\022\013\n\007STARTED\020\000\022"
-  "\013\n\007STOPPED\020\001\"2\n\rUnsendRequest\022\021\n\ttimesta"
-  "mp\030\001 \002(\004\022\016\n\006author\030\002 \002(\t\"m\n\026MessageReque"
-  "stResponse\022\022\n\nisApproved\030\001 \002(\010\022\022\n\nprofil"
-  "eKey\030\002 \001(\014\022+\n\007profile\030\003 \001(\0132\032.SessionPro"
-  "tos.LokiProfile\"\236\005\n\007Content\022/\n\013dataMessa"
-  "ge\030\001 \001(\0132\032.SessionProtos.DataMessage\022/\n\013"
-  "callMessage\030\003 \001(\0132\032.SessionProtos.CallMe"
-  "ssage\0225\n\016receiptMessage\030\005 \001(\0132\035.SessionP"
-  "rotos.ReceiptMessage\0223\n\rtypingMessage\030\006 "
-  "\001(\0132\034.SessionProtos.TypingMessage\022M\n\032dat"
-  "aExtractionNotification\030\010 \001(\0132).SessionP"
-  "rotos.DataExtractionNotification\0223\n\runse"
-  "ndRequest\030\t \001(\0132\034.SessionProtos.UnsendRe"
-  "quest\022E\n\026messageRequestResponse\030\n \001(\0132%."
-  "SessionProtos.MessageRequestResponse\022\?\n\023"
-  "sharedConfigMessage\030\013 \001(\0132\".SessionProto"
-  "s.SharedConfigMessage\022=\n\016expirationType\030"
-  "\014 \001(\0162%.SessionProtos.Content.Expiration"
-  "Type\022\027\n\017expirationTimer\030\r \001(\r\022\024\n\014sigTime"
-  "stamp\030\017 \001(\004\"K\n\016ExpirationType\022\013\n\007UNKNOWN"
-  "\020\000\022\025\n\021DELETE_AFTER_READ\020\001\022\025\n\021DELETE_AFTE"
-  "R_SEND\020\002\"\352\001\n\013CallMessage\022-\n\004type\030\001 \002(\0162\037"
-  ".SessionProtos.CallMessage.Type\022\014\n\004sdps\030"
-  "\002 \003(\t\022\027\n\017sdpMLineIndexes\030\003 \003(\r\022\017\n\007sdpMid"
-  "s\030\004 \003(\t\022\014\n\004uuid\030\005 \002(\t\"f\n\004Type\022\r\n\tPRE_OFF"
-  "ER\020\006\022\t\n\005OFFER\020\001\022\n\n\006ANSWER\020\002\022\026\n\022PROVISION"
-  "AL_ANSWER\020\003\022\022\n\016ICE_CANDIDATES\020\004\022\014\n\010END_C"
-  "ALL\020\005\"0\n\007KeyPair\022\021\n\tpublicKey\030\001 \002(\014\022\022\n\np"
-  "rivateKey\030\002 \002(\014\"\226\001\n\032DataExtractionNotifi"
-  "cation\022<\n\004type\030\001 \002(\0162..SessionProtos.Dat"
-  "aExtractionNotification.Type\022\021\n\ttimestam"
-  "p\030\002 \001(\004\"\'\n\004Type\022\016\n\nSCREENSHOT\020\001\022\017\n\013MEDIA"
-  "_SAVED\020\002\":\n\013LokiProfile\022\023\n\013displayName\030\001"
-  " \001(\t\022\026\n\016profilePicture\030\002 \001(\t\"\367\010\n\013DataMes"
-  "sage\022\014\n\004body\030\001 \001(\t\0225\n\013attachments\030\002 \003(\0132"
-  " .SessionProtos.AttachmentPointer\022\r\n\005fla"
-  "gs\030\004 \001(\r\022\022\n\nprofileKey\030\006 \001(\014\022\021\n\ttimestam"
-  "p\030\007 \001(\004\022/\n\005quote\030\010 \001(\0132 .SessionProtos.D"
-  "ataMessage.Quote\0223\n\007preview\030\n \003(\0132\".Sess"
-  "ionProtos.DataMessage.Preview\0225\n\010reactio"
-  "n\030\013 \001(\0132#.SessionProtos.DataMessage.Reac"
-  "tion\022+\n\007profile\030e \001(\0132\032.SessionProtos.Lo"
-  "kiProfile\022K\n\023openGroupInvitation\030f \001(\0132."
-  ".SessionProtos.DataMessage.OpenGroupInvi"
-  "tation\022\022\n\nsyncTarget\030i \001(\t\022&\n\036blocksComm"
-  "unityMessageRequests\030j \001(\010\022=\n\022groupUpdat"
-  "eMessage\030x \001(\0132!.SessionProtos.GroupUpda"
-  "teMessage\032\225\002\n\005Quote\022\n\n\002id\030\001 \002(\004\022\016\n\006autho"
-  "r\030\002 \002(\t\022\014\n\004text\030\003 \001(\t\022F\n\013attachments\030\004 \003"
-  "(\01321.SessionProtos.DataMessage.Quote.Quo"
-  "tedAttachment\032\231\001\n\020QuotedAttachment\022\023\n\013co"
-  "ntentType\030\001 \001(\t\022\020\n\010fileName\030\002 \001(\t\0223\n\tthu"
-  "mbnail\030\003 \001(\0132 .SessionProtos.AttachmentP"
-  "ointer\022\r\n\005flags\030\004 \001(\r\"\032\n\005Flags\022\021\n\rVOICE_"
-  "MESSAGE\020\001\032V\n\007Preview\022\013\n\003url\030\001 \002(\t\022\r\n\005tit"
-  "le\030\002 \001(\t\022/\n\005image\030\003 \001(\0132 .SessionProtos."
-  "AttachmentPointer\032\222\001\n\010Reaction\022\n\n\002id\030\001 \002"
-  "(\004\022\016\n\006author\030\002 \002(\t\022\r\n\005emoji\030\003 \001(\t\022:\n\006act"
-  "ion\030\004 \002(\0162*.SessionProtos.DataMessage.Re"
-  "action.Action\"\037\n\006Action\022\t\n\005REACT\020\000\022\n\n\006RE"
-  "MOVE\020\001\0320\n\023OpenGroupInvitation\022\013\n\003url\030\001 \002"
-  "(\t\022\014\n\004name\030\003 \002(\t\"$\n\005Flags\022\033\n\027EXPIRATION_"
-  "TIMER_UPDATE\020\002\"u\n\016ReceiptMessage\0220\n\004type"
-  "\030\001 \002(\0162\".SessionProtos.ReceiptMessage.Ty"
-  "pe\022\021\n\ttimestamp\030\002 \003(\004\"\036\n\004Type\022\014\n\010DELIVER"
-  "Y\020\000\022\010\n\004READ\020\001\"\354\001\n\021AttachmentPointer\022\n\n\002i"
-  "d\030\001 \002(\006\022\023\n\013contentType\030\002 \001(\t\022\013\n\003key\030\003 \001("
-  "\014\022\014\n\004size\030\004 \001(\r\022\021\n\tthumbnail\030\005 \001(\014\022\016\n\006di"
-  "gest\030\006 \001(\014\022\020\n\010fileName\030\007 \001(\t\022\r\n\005flags\030\010 "
-  "\001(\r\022\r\n\005width\030\t \001(\r\022\016\n\006height\030\n \001(\r\022\017\n\007ca"
-  "ption\030\013 \001(\t\022\013\n\003url\030e \001(\t\"\032\n\005Flags\022\021\n\rVOI"
-  "CE_MESSAGE\020\001\"\273\001\n\023SharedConfigMessage\0225\n\004"
-  "kind\030\001 \002(\0162\'.SessionProtos.SharedConfigM"
-  "essage.Kind\022\r\n\005seqno\030\002 \002(\003\022\014\n\004data\030\003 \002(\014"
-  "\"P\n\004Kind\022\020\n\014USER_PROFILE\020\001\022\014\n\010CONTACTS\020\002"
-  "\022\027\n\023CONVO_INFO_VOLATILE\020\003\022\017\n\013USER_GROUPS"
-  "\020\004\"\356\004\n\022GroupUpdateMessage\022>\n\rinviteMessa"
-  "ge\030\001 \001(\0132\'.SessionProtos.GroupUpdateInvi"
-  "teMessage\022F\n\021infoChangeMessage\030\002 \001(\0132+.S"
-  "essionProtos.GroupUpdateInfoChangeMessag"
-  "e\022J\n\023memberChangeMessage\030\003 \001(\0132-.Session"
-  "Protos.GroupUpdateMemberChangeMessage\022@\n"
-  "\016promoteMessage\030\004 \001(\0132(.SessionProtos.Gr"
-  "oupUpdatePromoteMessage\022F\n\021memberLeftMes"
-  "sage\030\005 \001(\0132+.SessionProtos.GroupUpdateMe"
-  "mberLeftMessage\022G\n\016inviteResponse\030\006 \001(\0132"
-  "/.SessionProtos.GroupUpdateInviteRespons"
-  "eMessage\022Q\n\023deleteMemberContent\030\007 \001(\01324."
-  "SessionProtos.GroupUpdateDeleteMemberCon"
-  "tentMessage\022^\n\035memberLeftNotificationMes"
-  "sage\030\010 \001(\01327.SessionProtos.GroupUpdateMe"
-  "mberLeftNotificationMessage\"p\n\030GroupUpda"
-  "teInviteMessage\022\026\n\016groupSessionId\030\001 \002(\t\022"
-  "\014\n\004name\030\002 \002(\t\022\026\n\016memberAuthData\030\003 \002(\014\022\026\n"
-  "\016adminSignature\030\004 \002(\014\"D\n\031GroupUpdateProm"
-  "oteMessage\022\031\n\021groupIdentitySeed\030\001 \002(\014\022\014\n"
-  "\004name\030\002 \002(\t\"\337\001\n\034GroupUpdateInfoChangeMes"
-  "sage\022>\n\004type\030\001 \002(\01620.SessionProtos.Group"
-  "UpdateInfoChangeMessage.Type\022\023\n\013updatedN"
-  "ame\030\002 \001(\t\022\031\n\021updatedExpiration\030\003 \001(\r\022\026\n\016"
-  "adminSignature\030\004 \002(\014\"7\n\004Type\022\010\n\004NAME\020\001\022\n"
-  "\n\006AVATAR\020\002\022\031\n\025DISAPPEARING_MESSAGES\020\003\"\331\001"
-  "\n\036GroupUpdateMemberChangeMessage\022@\n\004type"
-  "\030\001 \002(\01622.SessionProtos.GroupUpdateMember"
-  "ChangeMessage.Type\022\030\n\020memberSessionIds\030\002"
-  " \003(\t\022\025\n\rhistoryShared\030\003 \001(\010\022\026\n\016adminSign"
-  "ature\030\004 \002(\014\",\n\004Type\022\t\n\005ADDED\020\001\022\013\n\007REMOVE"
-  "D\020\002\022\014\n\010PROMOTED\020\003\"\036\n\034GroupUpdateMemberLe"
-  "ftMessage\"*\n(GroupUpdateMemberLeftNotifi"
-  "cationMessage\"6\n GroupUpdateInviteRespon"
-  "seMessage\022\022\n\nisApproved\030\001 \002(\010\"p\n%GroupUp"
-  "dateDeleteMemberContentMessage\022\030\n\020member"
-  "SessionIds\030\001 \003(\t\022\025\n\rmessageHashes\030\002 \003(\t\022"
-  "\026\n\016adminSignature\030\003 \001(\014"
+  "t\030\010 \001(\014\022\027\n\017serverTimestamp\030\n \001(\004\022\016\n\006proS"
+  "ig\030\013 \001(\014\"5\n\004Type\022\023\n\017SESSION_MESSAGE\020\006\022\030\n"
+  "\024CLOSED_GROUP_MESSAGE\020\007\"{\n\rTypingMessage"
+  "\022\021\n\ttimestamp\030\001 \002(\004\0223\n\006action\030\002 \002(\0162#.Se"
+  "ssionProtos.TypingMessage.Action\"\"\n\006Acti"
+  "on\022\013\n\007STARTED\020\000\022\013\n\007STOPPED\020\001\"2\n\rUnsendRe"
+  "quest\022\021\n\ttimestamp\030\001 \002(\004\022\016\n\006author\030\002 \002(\t"
+  "\"m\n\026MessageRequestResponse\022\022\n\nisApproved"
+  "\030\001 \002(\010\022\022\n\nprofileKey\030\002 \001(\014\022+\n\007profile\030\003 "
+  "\001(\0132\032.SessionProtos.LokiProfile\"\315\005\n\007Cont"
+  "ent\022/\n\013dataMessage\030\001 \001(\0132\032.SessionProtos"
+  ".DataMessage\022/\n\013callMessage\030\003 \001(\0132\032.Sess"
+  "ionProtos.CallMessage\0225\n\016receiptMessage\030"
+  "\005 \001(\0132\035.SessionProtos.ReceiptMessage\0223\n\r"
+  "typingMessage\030\006 \001(\0132\034.SessionProtos.Typi"
+  "ngMessage\022M\n\032dataExtractionNotification\030"
+  "\010 \001(\0132).SessionProtos.DataExtractionNoti"
+  "fication\0223\n\runsendRequest\030\t \001(\0132\034.Sessio"
+  "nProtos.UnsendRequest\022E\n\026messageRequestR"
+  "esponse\030\n \001(\0132%.SessionProtos.MessageReq"
+  "uestResponse\022\?\n\023sharedConfigMessage\030\013 \001("
+  "\0132\".SessionProtos.SharedConfigMessage\022=\n"
+  "\016expirationType\030\014 \001(\0162%.SessionProtos.Co"
+  "ntent.ExpirationType\022\027\n\017expirationTimer\030"
+  "\r \001(\r\022\024\n\014sigTimestamp\030\017 \001(\004\022-\n\nproMessag"
+  "e\030\020 \001(\0132\031.SessionProtos.ProMessage\"K\n\016Ex"
+  "pirationType\022\013\n\007UNKNOWN\020\000\022\025\n\021DELETE_AFTE"
+  "R_READ\020\001\022\025\n\021DELETE_AFTER_SEND\020\002\"\352\001\n\013Call"
+  "Message\022-\n\004type\030\001 \002(\0162\037.SessionProtos.Ca"
+  "llMessage.Type\022\014\n\004sdps\030\002 \003(\t\022\027\n\017sdpMLine"
+  "Indexes\030\003 \003(\r\022\017\n\007sdpMids\030\004 \003(\t\022\014\n\004uuid\030\005"
+  " \002(\t\"f\n\004Type\022\r\n\tPRE_OFFER\020\006\022\t\n\005OFFER\020\001\022\n"
+  "\n\006ANSWER\020\002\022\026\n\022PROVISIONAL_ANSWER\020\003\022\022\n\016IC"
+  "E_CANDIDATES\020\004\022\014\n\010END_CALL\020\005\"0\n\007KeyPair\022"
+  "\021\n\tpublicKey\030\001 \002(\014\022\022\n\nprivateKey\030\002 \002(\014\"\226"
+  "\001\n\032DataExtractionNotification\022<\n\004type\030\001 "
+  "\002(\0162..SessionProtos.DataExtractionNotifi"
+  "cation.Type\022\021\n\ttimestamp\030\002 \001(\004\"\'\n\004Type\022\016"
+  "\n\nSCREENSHOT\020\001\022\017\n\013MEDIA_SAVED\020\002\":\n\013LokiP"
+  "rofile\022\023\n\013displayName\030\001 \001(\t\022\026\n\016profilePi"
+  "cture\030\002 \001(\t\"\367\010\n\013DataMessage\022\014\n\004body\030\001 \001("
+  "\t\0225\n\013attachments\030\002 \003(\0132 .SessionProtos.A"
+  "ttachmentPointer\022\r\n\005flags\030\004 \001(\r\022\022\n\nprofi"
+  "leKey\030\006 \001(\014\022\021\n\ttimestamp\030\007 \001(\004\022/\n\005quote\030"
+  "\010 \001(\0132 .SessionProtos.DataMessage.Quote\022"
+  "3\n\007preview\030\n \003(\0132\".SessionProtos.DataMes"
+  "sage.Preview\0225\n\010reaction\030\013 \001(\0132#.Session"
+  "Protos.DataMessage.Reaction\022+\n\007profile\030e"
+  " \001(\0132\032.SessionProtos.LokiProfile\022K\n\023open"
+  "GroupInvitation\030f \001(\0132..SessionProtos.Da"
+  "taMessage.OpenGroupInvitation\022\022\n\nsyncTar"
+  "get\030i \001(\t\022&\n\036blocksCommunityMessageReque"
+  "sts\030j \001(\010\022=\n\022groupUpdateMessage\030x \001(\0132!."
+  "SessionProtos.GroupUpdateMessage\032\225\002\n\005Quo"
+  "te\022\n\n\002id\030\001 \002(\004\022\016\n\006author\030\002 \002(\t\022\014\n\004text\030\003"
+  " \001(\t\022F\n\013attachments\030\004 \003(\01321.SessionProto"
+  "s.DataMessage.Quote.QuotedAttachment\032\231\001\n"
+  "\020QuotedAttachment\022\023\n\013contentType\030\001 \001(\t\022\020"
+  "\n\010fileName\030\002 \001(\t\0223\n\tthumbnail\030\003 \001(\0132 .Se"
+  "ssionProtos.AttachmentPointer\022\r\n\005flags\030\004"
+  " \001(\r\"\032\n\005Flags\022\021\n\rVOICE_MESSAGE\020\001\032V\n\007Prev"
+  "iew\022\013\n\003url\030\001 \002(\t\022\r\n\005title\030\002 \001(\t\022/\n\005image"
+  "\030\003 \001(\0132 .SessionProtos.AttachmentPointer"
+  "\032\222\001\n\010Reaction\022\n\n\002id\030\001 \002(\004\022\016\n\006author\030\002 \002("
+  "\t\022\r\n\005emoji\030\003 \001(\t\022:\n\006action\030\004 \002(\0162*.Sessi"
+  "onProtos.DataMessage.Reaction.Action\"\037\n\006"
+  "Action\022\t\n\005REACT\020\000\022\n\n\006REMOVE\020\001\0320\n\023OpenGro"
+  "upInvitation\022\013\n\003url\030\001 \002(\t\022\014\n\004name\030\003 \002(\t\""
+  "$\n\005Flags\022\033\n\027EXPIRATION_TIMER_UPDATE\020\002\"u\n"
+  "\016ReceiptMessage\0220\n\004type\030\001 \002(\0162\".SessionP"
+  "rotos.ReceiptMessage.Type\022\021\n\ttimestamp\030\002"
+  " \003(\004\"\036\n\004Type\022\014\n\010DELIVERY\020\000\022\010\n\004READ\020\001\"\354\001\n"
+  "\021AttachmentPointer\022\n\n\002id\030\001 \002(\006\022\023\n\013conten"
+  "tType\030\002 \001(\t\022\013\n\003key\030\003 \001(\014\022\014\n\004size\030\004 \001(\r\022\021"
+  "\n\tthumbnail\030\005 \001(\014\022\016\n\006digest\030\006 \001(\014\022\020\n\010fil"
+  "eName\030\007 \001(\t\022\r\n\005flags\030\010 \001(\r\022\r\n\005width\030\t \001("
+  "\r\022\016\n\006height\030\n \001(\r\022\017\n\007caption\030\013 \001(\t\022\013\n\003ur"
+  "l\030e \001(\t\"\032\n\005Flags\022\021\n\rVOICE_MESSAGE\020\001\"\273\001\n\023"
+  "SharedConfigMessage\0225\n\004kind\030\001 \002(\0162\'.Sess"
+  "ionProtos.SharedConfigMessage.Kind\022\r\n\005se"
+  "qno\030\002 \002(\003\022\014\n\004data\030\003 \002(\014\"P\n\004Kind\022\020\n\014USER_"
+  "PROFILE\020\001\022\014\n\010CONTACTS\020\002\022\027\n\023CONVO_INFO_VO"
+  "LATILE\020\003\022\017\n\013USER_GROUPS\020\004\"\356\004\n\022GroupUpdat"
+  "eMessage\022>\n\rinviteMessage\030\001 \001(\0132\'.Sessio"
+  "nProtos.GroupUpdateInviteMessage\022F\n\021info"
+  "ChangeMessage\030\002 \001(\0132+.SessionProtos.Grou"
+  "pUpdateInfoChangeMessage\022J\n\023memberChange"
+  "Message\030\003 \001(\0132-.SessionProtos.GroupUpdat"
+  "eMemberChangeMessage\022@\n\016promoteMessage\030\004"
+  " \001(\0132(.SessionProtos.GroupUpdatePromoteM"
+  "essage\022F\n\021memberLeftMessage\030\005 \001(\0132+.Sess"
+  "ionProtos.GroupUpdateMemberLeftMessage\022G"
+  "\n\016inviteResponse\030\006 \001(\0132/.SessionProtos.G"
+  "roupUpdateInviteResponseMessage\022Q\n\023delet"
+  "eMemberContent\030\007 \001(\01324.SessionProtos.Gro"
+  "upUpdateDeleteMemberContentMessage\022^\n\035me"
+  "mberLeftNotificationMessage\030\010 \001(\01327.Sess"
+  "ionProtos.GroupUpdateMemberLeftNotificat"
+  "ionMessage\"p\n\030GroupUpdateInviteMessage\022\026"
+  "\n\016groupSessionId\030\001 \002(\t\022\014\n\004name\030\002 \002(\t\022\026\n\016"
+  "memberAuthData\030\003 \002(\014\022\026\n\016adminSignature\030\004"
+  " \002(\014\"D\n\031GroupUpdatePromoteMessage\022\031\n\021gro"
+  "upIdentitySeed\030\001 \002(\014\022\014\n\004name\030\002 \002(\t\"\337\001\n\034G"
+  "roupUpdateInfoChangeMessage\022>\n\004type\030\001 \002("
+  "\01620.SessionProtos.GroupUpdateInfoChangeM"
+  "essage.Type\022\023\n\013updatedName\030\002 \001(\t\022\031\n\021upda"
+  "tedExpiration\030\003 \001(\r\022\026\n\016adminSignature\030\004 "
+  "\002(\014\"7\n\004Type\022\010\n\004NAME\020\001\022\n\n\006AVATAR\020\002\022\031\n\025DIS"
+  "APPEARING_MESSAGES\020\003\"\331\001\n\036GroupUpdateMemb"
+  "erChangeMessage\022@\n\004type\030\001 \002(\01622.SessionP"
+  "rotos.GroupUpdateMemberChangeMessage.Typ"
+  "e\022\030\n\020memberSessionIds\030\002 \003(\t\022\025\n\rhistorySh"
+  "ared\030\003 \001(\010\022\026\n\016adminSignature\030\004 \002(\014\",\n\004Ty"
+  "pe\022\t\n\005ADDED\020\001\022\013\n\007REMOVED\020\002\022\014\n\010PROMOTED\020\003"
+  "\"\036\n\034GroupUpdateMemberLeftMessage\"*\n(Grou"
+  "pUpdateMemberLeftNotificationMessage\"6\n "
+  "GroupUpdateInviteResponseMessage\022\022\n\nisAp"
+  "proved\030\001 \002(\010\"p\n%GroupUpdateDeleteMemberC"
+  "ontentMessage\022\030\n\020memberSessionIds\030\001 \003(\t\022"
+  "\025\n\rmessageHashes\030\002 \003(\t\022\026\n\016adminSignature"
+  "\030\003 \001(\014\"o\n\010ProProof\022\017\n\007version\030\001 \002(\r\022\024\n\014g"
+  "enIndexHash\030\002 \002(\014\022\031\n\021rotatingPublicKey\030\003"
+  " \002(\014\022\024\n\014expiryUnixTs\030\004 \002(\004\022\013\n\003sig\030\005 \002(\014\""
+  "L\n\tProConfig\022\027\n\017rotatingPrivKey\030\001 \002(\014\022&\n"
+  "\005proof\030\002 \002(\0132\027.SessionProtos.ProProof\"C\n"
+  "\nProMessage\022&\n\005proof\030\001 \002(\0132\027.SessionProt"
+  "os.ProProof\022\r\n\005flags\030\002 \002(\r"
   ;
 static ::_pbi::once_flag descriptor_table_SessionProtos_2eproto_once;
 const ::_pbi::DescriptorTable descriptor_table_SessionProtos_2eproto = {
-    false, false, 4903, descriptor_table_protodef_SessionProtos_2eproto,
+    false, false, 5226, descriptor_table_protodef_SessionProtos_2eproto,
     "SessionProtos.proto",
-    &descriptor_table_SessionProtos_2eproto_once, nullptr, 0, 27,
+    &descriptor_table_SessionProtos_2eproto_once, nullptr, 0, 30,
     schemas, file_default_instances, TableStruct_SessionProtos_2eproto::offsets,
     file_level_metadata_SessionProtos_2eproto, file_level_enum_descriptors_SessionProtos_2eproto,
     file_level_service_descriptors_SessionProtos_2eproto,
@@ -1354,25 +1458,28 @@ class Envelope::_Internal {
  public:
   using HasBits = decltype(std::declval<Envelope>()._impl_._has_bits_);
   static void set_has_type(HasBits* has_bits) {
-    (*has_bits)[0] |= 32u;
+    (*has_bits)[0] |= 64u;
   }
   static void set_has_source(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
   static void set_has_sourcedevice(HasBits* has_bits) {
-    (*has_bits)[0] |= 16u;
+    (*has_bits)[0] |= 32u;
   }
   static void set_has_timestamp(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
+    (*has_bits)[0] |= 8u;
   }
   static void set_has_content(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
   static void set_has_servertimestamp(HasBits* has_bits) {
-    (*has_bits)[0] |= 8u;
+    (*has_bits)[0] |= 16u;
+  }
+  static void set_has_prosig(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
   }
   static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000024) ^ 0x00000024) != 0;
+    return ((has_bits[0] & 0x00000048) ^ 0x00000048) != 0;
   }
 };
 
@@ -1390,6 +1497,7 @@ Envelope::Envelope(const Envelope& from)
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.source_){}
     , decltype(_impl_.content_){}
+    , decltype(_impl_.prosig_){}
     , decltype(_impl_.timestamp_){}
     , decltype(_impl_.servertimestamp_){}
     , decltype(_impl_.sourcedevice_){}
@@ -1412,6 +1520,14 @@ Envelope::Envelope(const Envelope& from)
     _this->_impl_.content_.Set(from._internal_content(), 
       _this->GetArenaForAllocation());
   }
+  _impl_.prosig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosig_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_prosig()) {
+    _this->_impl_.prosig_.Set(from._internal_prosig(), 
+      _this->GetArenaForAllocation());
+  }
   ::memcpy(&_impl_.timestamp_, &from._impl_.timestamp_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.type_) -
     reinterpret_cast<char*>(&_impl_.timestamp_)) + sizeof(_impl_.type_));
@@ -1427,6 +1543,7 @@ inline void Envelope::SharedCtor(
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.source_){}
     , decltype(_impl_.content_){}
+    , decltype(_impl_.prosig_){}
     , decltype(_impl_.timestamp_){uint64_t{0u}}
     , decltype(_impl_.servertimestamp_){uint64_t{0u}}
     , decltype(_impl_.sourcedevice_){0u}
@@ -1439,6 +1556,10 @@ inline void Envelope::SharedCtor(
   _impl_.content_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.content_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.prosig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosig_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
@@ -1455,6 +1576,7 @@ inline void Envelope::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
   _impl_.source_.Destroy();
   _impl_.content_.Destroy();
+  _impl_.prosig_.Destroy();
 }
 
 void Envelope::SetCachedSize(int size) const {
@@ -1468,15 +1590,18 @@ void Envelope::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     if (cached_has_bits & 0x00000001u) {
       _impl_.source_.ClearNonDefaultToEmpty();
     }
     if (cached_has_bits & 0x00000002u) {
       _impl_.content_.ClearNonDefaultToEmpty();
     }
+    if (cached_has_bits & 0x00000004u) {
+      _impl_.prosig_.ClearNonDefaultToEmpty();
+    }
   }
-  if (cached_has_bits & 0x0000003cu) {
+  if (cached_has_bits & 0x00000078u) {
     ::memset(&_impl_.timestamp_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&_impl_.sourcedevice_) -
         reinterpret_cast<char*>(&_impl_.timestamp_)) + sizeof(_impl_.sourcedevice_));
@@ -1554,6 +1679,15 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // optional bytes proSig = 11;
+      case 11:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
+          auto str = _internal_mutable_prosig();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -1586,7 +1720,7 @@ uint8_t* Envelope::_InternalSerialize(
 
   cached_has_bits = _impl_._has_bits_[0];
   // required .SessionProtos.Envelope.Type type = 1;
-  if (cached_has_bits & 0x00000020u) {
+  if (cached_has_bits & 0x00000040u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
       1, this->_internal_type(), target);
@@ -1603,13 +1737,13 @@ uint8_t* Envelope::_InternalSerialize(
   }
 
   // required uint64 timestamp = 5;
-  if (cached_has_bits & 0x00000004u) {
+  if (cached_has_bits & 0x00000008u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(5, this->_internal_timestamp(), target);
   }
 
   // optional uint32 sourceDevice = 7;
-  if (cached_has_bits & 0x00000010u) {
+  if (cached_has_bits & 0x00000020u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(7, this->_internal_sourcedevice(), target);
   }
@@ -1621,9 +1755,15 @@ uint8_t* Envelope::_InternalSerialize(
   }
 
   // optional uint64 serverTimestamp = 10;
-  if (cached_has_bits & 0x00000008u) {
+  if (cached_has_bits & 0x00000010u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(10, this->_internal_servertimestamp(), target);
+  }
+
+  // optional bytes proSig = 11;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->WriteBytesMaybeAliased(
+        11, this->_internal_prosig(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -1655,7 +1795,7 @@ size_t Envelope::ByteSizeLong() const {
 // @@protoc_insertion_point(message_byte_size_start:SessionProtos.Envelope)
   size_t total_size = 0;
 
-  if (((_impl_._has_bits_[0] & 0x00000024) ^ 0x00000024) == 0) {  // All required fields are present.
+  if (((_impl_._has_bits_[0] & 0x00000048) ^ 0x00000048) == 0) {  // All required fields are present.
     // required uint64 timestamp = 5;
     total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_timestamp());
 
@@ -1671,7 +1811,7 @@ size_t Envelope::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     // optional string source = 2;
     if (cached_has_bits & 0x00000001u) {
       total_size += 1 +
@@ -1686,15 +1826,22 @@ size_t Envelope::ByteSizeLong() const {
           this->_internal_content());
     }
 
+    // optional bytes proSig = 11;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_prosig());
+    }
+
   }
-  if (cached_has_bits & 0x00000018u) {
+  if (cached_has_bits & 0x00000030u) {
     // optional uint64 serverTimestamp = 10;
-    if (cached_has_bits & 0x00000008u) {
+    if (cached_has_bits & 0x00000010u) {
       total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_servertimestamp());
     }
 
     // optional uint32 sourceDevice = 7;
-    if (cached_has_bits & 0x00000010u) {
+    if (cached_has_bits & 0x00000020u) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_sourcedevice());
     }
 
@@ -1718,7 +1865,7 @@ void Envelope::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTO
   (void) cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000003fu) {
+  if (cached_has_bits & 0x0000007fu) {
     if (cached_has_bits & 0x00000001u) {
       _this->_internal_set_source(from._internal_source());
     }
@@ -1726,15 +1873,18 @@ void Envelope::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTO
       _this->_internal_set_content(from._internal_content());
     }
     if (cached_has_bits & 0x00000004u) {
-      _this->_impl_.timestamp_ = from._impl_.timestamp_;
+      _this->_internal_set_prosig(from._internal_prosig());
     }
     if (cached_has_bits & 0x00000008u) {
-      _this->_impl_.servertimestamp_ = from._impl_.servertimestamp_;
+      _this->_impl_.timestamp_ = from._impl_.timestamp_;
     }
     if (cached_has_bits & 0x00000010u) {
-      _this->_impl_.sourcedevice_ = from._impl_.sourcedevice_;
+      _this->_impl_.servertimestamp_ = from._impl_.servertimestamp_;
     }
     if (cached_has_bits & 0x00000020u) {
+      _this->_impl_.sourcedevice_ = from._impl_.sourcedevice_;
+    }
+    if (cached_has_bits & 0x00000040u) {
       _this->_impl_.type_ = from._impl_.type_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -1767,6 +1917,10 @@ void Envelope::InternalSwap(Envelope* other) {
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.content_, lhs_arena,
       &other->_impl_.content_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.prosig_, lhs_arena,
+      &other->_impl_.prosig_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(Envelope, _impl_.sourcedevice_)
@@ -2662,13 +2816,17 @@ class Content::_Internal {
     (*has_bits)[0] |= 128u;
   }
   static void set_has_expirationtype(HasBits* has_bits) {
-    (*has_bits)[0] |= 256u;
-  }
-  static void set_has_expirationtimer(HasBits* has_bits) {
     (*has_bits)[0] |= 512u;
   }
-  static void set_has_sigtimestamp(HasBits* has_bits) {
+  static void set_has_expirationtimer(HasBits* has_bits) {
     (*has_bits)[0] |= 1024u;
+  }
+  static void set_has_sigtimestamp(HasBits* has_bits) {
+    (*has_bits)[0] |= 2048u;
+  }
+  static const ::SessionProtos::ProMessage& promessage(const Content* msg);
+  static void set_has_promessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 256u;
   }
 };
 
@@ -2704,6 +2862,10 @@ const ::SessionProtos::SharedConfigMessage&
 Content::_Internal::sharedconfigmessage(const Content* msg) {
   return *msg->_impl_.sharedconfigmessage_;
 }
+const ::SessionProtos::ProMessage&
+Content::_Internal::promessage(const Content* msg) {
+  return *msg->_impl_.promessage_;
+}
 Content::Content(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
@@ -2724,6 +2886,7 @@ Content::Content(const Content& from)
     , decltype(_impl_.unsendrequest_){nullptr}
     , decltype(_impl_.messagerequestresponse_){nullptr}
     , decltype(_impl_.sharedconfigmessage_){nullptr}
+    , decltype(_impl_.promessage_){nullptr}
     , decltype(_impl_.expirationtype_){}
     , decltype(_impl_.expirationtimer_){}
     , decltype(_impl_.sigtimestamp_){}};
@@ -2753,6 +2916,9 @@ Content::Content(const Content& from)
   if (from._internal_has_sharedconfigmessage()) {
     _this->_impl_.sharedconfigmessage_ = new ::SessionProtos::SharedConfigMessage(*from._impl_.sharedconfigmessage_);
   }
+  if (from._internal_has_promessage()) {
+    _this->_impl_.promessage_ = new ::SessionProtos::ProMessage(*from._impl_.promessage_);
+  }
   ::memcpy(&_impl_.expirationtype_, &from._impl_.expirationtype_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.sigtimestamp_) -
     reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.sigtimestamp_));
@@ -2774,6 +2940,7 @@ inline void Content::SharedCtor(
     , decltype(_impl_.unsendrequest_){nullptr}
     , decltype(_impl_.messagerequestresponse_){nullptr}
     , decltype(_impl_.sharedconfigmessage_){nullptr}
+    , decltype(_impl_.promessage_){nullptr}
     , decltype(_impl_.expirationtype_){0}
     , decltype(_impl_.expirationtimer_){0u}
     , decltype(_impl_.sigtimestamp_){uint64_t{0u}}
@@ -2799,6 +2966,7 @@ inline void Content::SharedDtor() {
   if (this != internal_default_instance()) delete _impl_.unsendrequest_;
   if (this != internal_default_instance()) delete _impl_.messagerequestresponse_;
   if (this != internal_default_instance()) delete _impl_.sharedconfigmessage_;
+  if (this != internal_default_instance()) delete _impl_.promessage_;
 }
 
 void Content::SetCachedSize(int size) const {
@@ -2846,7 +3014,11 @@ void Content::Clear() {
       _impl_.sharedconfigmessage_->Clear();
     }
   }
-  if (cached_has_bits & 0x00000700u) {
+  if (cached_has_bits & 0x00000100u) {
+    GOOGLE_DCHECK(_impl_.promessage_ != nullptr);
+    _impl_.promessage_->Clear();
+  }
+  if (cached_has_bits & 0x00000e00u) {
     ::memset(&_impl_.expirationtype_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&_impl_.sigtimestamp_) -
         reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.sigtimestamp_));
@@ -2957,6 +3129,14 @@ const char* Content::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) 
         } else
           goto handle_unusual;
         continue;
+      // optional .SessionProtos.ProMessage proMessage = 16;
+      case 16:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 130)) {
+          ptr = ctx->ParseMessage(_internal_mutable_promessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -3045,22 +3225,29 @@ uint8_t* Content::_InternalSerialize(
   }
 
   // optional .SessionProtos.Content.ExpirationType expirationType = 12;
-  if (cached_has_bits & 0x00000100u) {
+  if (cached_has_bits & 0x00000200u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
       12, this->_internal_expirationtype(), target);
   }
 
   // optional uint32 expirationTimer = 13;
-  if (cached_has_bits & 0x00000200u) {
+  if (cached_has_bits & 0x00000400u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(13, this->_internal_expirationtimer(), target);
   }
 
   // optional uint64 sigTimestamp = 15;
-  if (cached_has_bits & 0x00000400u) {
+  if (cached_has_bits & 0x00000800u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(15, this->_internal_sigtimestamp(), target);
+  }
+
+  // optional .SessionProtos.ProMessage proMessage = 16;
+  if (cached_has_bits & 0x00000100u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(16, _Internal::promessage(this),
+        _Internal::promessage(this).GetCachedSize(), target, stream);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -3138,20 +3325,27 @@ size_t Content::ByteSizeLong() const {
     }
 
   }
-  if (cached_has_bits & 0x00000700u) {
-    // optional .SessionProtos.Content.ExpirationType expirationType = 12;
+  if (cached_has_bits & 0x00000f00u) {
+    // optional .SessionProtos.ProMessage proMessage = 16;
     if (cached_has_bits & 0x00000100u) {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.promessage_);
+    }
+
+    // optional .SessionProtos.Content.ExpirationType expirationType = 12;
+    if (cached_has_bits & 0x00000200u) {
       total_size += 1 +
         ::_pbi::WireFormatLite::EnumSize(this->_internal_expirationtype());
     }
 
     // optional uint32 expirationTimer = 13;
-    if (cached_has_bits & 0x00000200u) {
+    if (cached_has_bits & 0x00000400u) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_expirationtimer());
     }
 
     // optional uint64 sigTimestamp = 15;
-    if (cached_has_bits & 0x00000400u) {
+    if (cached_has_bits & 0x00000800u) {
       total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_sigtimestamp());
     }
 
@@ -3209,14 +3403,18 @@ void Content::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOB
           from._internal_sharedconfigmessage());
     }
   }
-  if (cached_has_bits & 0x00000700u) {
+  if (cached_has_bits & 0x00000f00u) {
     if (cached_has_bits & 0x00000100u) {
-      _this->_impl_.expirationtype_ = from._impl_.expirationtype_;
+      _this->_internal_mutable_promessage()->::SessionProtos::ProMessage::MergeFrom(
+          from._internal_promessage());
     }
     if (cached_has_bits & 0x00000200u) {
-      _this->_impl_.expirationtimer_ = from._impl_.expirationtimer_;
+      _this->_impl_.expirationtype_ = from._impl_.expirationtype_;
     }
     if (cached_has_bits & 0x00000400u) {
+      _this->_impl_.expirationtimer_ = from._impl_.expirationtimer_;
+    }
+    if (cached_has_bits & 0x00000800u) {
       _this->_impl_.sigtimestamp_ = from._impl_.sigtimestamp_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -3255,6 +3453,9 @@ bool Content::IsInitialized() const {
   }
   if (_internal_has_sharedconfigmessage()) {
     if (!_impl_.sharedconfigmessage_->IsInitialized()) return false;
+  }
+  if (_internal_has_promessage()) {
+    if (!_impl_.promessage_->IsInitialized()) return false;
   }
   return true;
 }
@@ -10806,6 +11007,987 @@ void GroupUpdateDeleteMemberContentMessage::InternalSwap(GroupUpdateDeleteMember
       file_level_metadata_SessionProtos_2eproto[26]);
 }
 
+// ===================================================================
+
+class ProProof::_Internal {
+ public:
+  using HasBits = decltype(std::declval<ProProof>()._impl_._has_bits_);
+  static void set_has_version(HasBits* has_bits) {
+    (*has_bits)[0] |= 16u;
+  }
+  static void set_has_genindexhash(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static void set_has_rotatingpublickey(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static void set_has_expiryunixts(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
+  }
+  static void set_has_sig(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x0000001f) ^ 0x0000001f) != 0;
+  }
+};
+
+ProProof::ProProof(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.ProProof)
+}
+ProProof::ProProof(const ProProof& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message() {
+  ProProof* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.genindexhash_){}
+    , decltype(_impl_.rotatingpublickey_){}
+    , decltype(_impl_.sig_){}
+    , decltype(_impl_.expiryunixts_){}
+    , decltype(_impl_.version_){}};
+
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  _impl_.genindexhash_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.genindexhash_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_genindexhash()) {
+    _this->_impl_.genindexhash_.Set(from._internal_genindexhash(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.rotatingpublickey_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.rotatingpublickey_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_rotatingpublickey()) {
+    _this->_impl_.rotatingpublickey_.Set(from._internal_rotatingpublickey(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.sig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.sig_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_sig()) {
+    _this->_impl_.sig_.Set(from._internal_sig(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.expiryunixts_, &from._impl_.expiryunixts_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.version_) -
+    reinterpret_cast<char*>(&_impl_.expiryunixts_)) + sizeof(_impl_.version_));
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.ProProof)
+}
+
+inline void ProProof::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.genindexhash_){}
+    , decltype(_impl_.rotatingpublickey_){}
+    , decltype(_impl_.sig_){}
+    , decltype(_impl_.expiryunixts_){uint64_t{0u}}
+    , decltype(_impl_.version_){0u}
+  };
+  _impl_.genindexhash_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.genindexhash_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.rotatingpublickey_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.rotatingpublickey_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.sig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.sig_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ProProof::~ProProof() {
+  // @@protoc_insertion_point(destructor:SessionProtos.ProProof)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ProProof::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.genindexhash_.Destroy();
+  _impl_.rotatingpublickey_.Destroy();
+  _impl_.sig_.Destroy();
+}
+
+void ProProof::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ProProof::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.ProProof)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000007u) {
+    if (cached_has_bits & 0x00000001u) {
+      _impl_.genindexhash_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _impl_.rotatingpublickey_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _impl_.sig_.ClearNonDefaultToEmpty();
+    }
+  }
+  if (cached_has_bits & 0x00000018u) {
+    ::memset(&_impl_.expiryunixts_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.version_) -
+        reinterpret_cast<char*>(&_impl_.expiryunixts_)) + sizeof(_impl_.version_));
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+}
+
+const char* ProProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required uint32 version = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _Internal::set_has_version(&has_bits);
+          _impl_.version_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required bytes genIndexHash = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_genindexhash();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required bytes rotatingPublicKey = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_rotatingpublickey();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required uint64 expiryUnixTs = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _Internal::set_has_expiryunixts(&has_bits);
+          _impl_.expiryunixts_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required bytes sig = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          auto str = _internal_mutable_sig();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ProProof::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ProProof)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required uint32 version = 1;
+  if (cached_has_bits & 0x00000010u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_version(), target);
+  }
+
+  // required bytes genIndexHash = 2;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_genindexhash(), target);
+  }
+
+  // required bytes rotatingPublicKey = 3;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_rotatingpublickey(), target);
+  }
+
+  // required uint64 expiryUnixTs = 4;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(4, this->_internal_expiryunixts(), target);
+  }
+
+  // required bytes sig = 5;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->WriteBytesMaybeAliased(
+        5, this->_internal_sig(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ProProof)
+  return target;
+}
+
+size_t ProProof::RequiredFieldsByteSizeFallback() const {
+// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.ProProof)
+  size_t total_size = 0;
+
+  if (_internal_has_genindexhash()) {
+    // required bytes genIndexHash = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_genindexhash());
+  }
+
+  if (_internal_has_rotatingpublickey()) {
+    // required bytes rotatingPublicKey = 3;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_rotatingpublickey());
+  }
+
+  if (_internal_has_sig()) {
+    // required bytes sig = 5;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_sig());
+  }
+
+  if (_internal_has_expiryunixts()) {
+    // required uint64 expiryUnixTs = 4;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_expiryunixts());
+  }
+
+  if (_internal_has_version()) {
+    // required uint32 version = 1;
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_version());
+  }
+
+  return total_size;
+}
+size_t ProProof::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ProProof)
+  size_t total_size = 0;
+
+  if (((_impl_._has_bits_[0] & 0x0000001f) ^ 0x0000001f) == 0) {  // All required fields are present.
+    // required bytes genIndexHash = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_genindexhash());
+
+    // required bytes rotatingPublicKey = 3;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_rotatingpublickey());
+
+    // required bytes sig = 5;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_sig());
+
+    // required uint64 expiryUnixTs = 4;
+    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_expiryunixts());
+
+    // required uint32 version = 1;
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_version());
+
+  } else {
+    total_size += RequiredFieldsByteSizeFallback();
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
+}
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData ProProof::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::Message::CopyWithSourceCheck,
+    ProProof::MergeImpl
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*ProProof::GetClassData() const { return &_class_data_; }
+
+
+void ProProof::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg) {
+  auto* const _this = static_cast<ProProof*>(&to_msg);
+  auto& from = static_cast<const ProProof&>(from_msg);
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ProProof)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x0000001fu) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_genindexhash(from._internal_genindexhash());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_internal_set_rotatingpublickey(from._internal_rotatingpublickey());
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_internal_set_sig(from._internal_sig());
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _this->_impl_.expiryunixts_ = from._impl_.expiryunixts_;
+    }
+    if (cached_has_bits & 0x00000010u) {
+      _this->_impl_.version_ = from._impl_.version_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
+  }
+  _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+}
+
+void ProProof::CopyFrom(const ProProof& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ProProof)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ProProof::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  return true;
+}
+
+void ProProof::InternalSwap(ProProof* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.genindexhash_, lhs_arena,
+      &other->_impl_.genindexhash_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.rotatingpublickey_, lhs_arena,
+      &other->_impl_.rotatingpublickey_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.sig_, lhs_arena,
+      &other->_impl_.sig_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ProProof, _impl_.version_)
+      + sizeof(ProProof::_impl_.version_)
+      - PROTOBUF_FIELD_OFFSET(ProProof, _impl_.expiryunixts_)>(
+          reinterpret_cast<char*>(&_impl_.expiryunixts_),
+          reinterpret_cast<char*>(&other->_impl_.expiryunixts_));
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata ProProof::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_SessionProtos_2eproto_getter, &descriptor_table_SessionProtos_2eproto_once,
+      file_level_metadata_SessionProtos_2eproto[27]);
+}
+
+// ===================================================================
+
+class ProConfig::_Internal {
+ public:
+  using HasBits = decltype(std::declval<ProConfig>()._impl_._has_bits_);
+  static void set_has_rotatingprivkey(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static const ::SessionProtos::ProProof& proof(const ProConfig* msg);
+  static void set_has_proof(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x00000003) ^ 0x00000003) != 0;
+  }
+};
+
+const ::SessionProtos::ProProof&
+ProConfig::_Internal::proof(const ProConfig* msg) {
+  return *msg->_impl_.proof_;
+}
+ProConfig::ProConfig(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.ProConfig)
+}
+ProConfig::ProConfig(const ProConfig& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message() {
+  ProConfig* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.rotatingprivkey_){}
+    , decltype(_impl_.proof_){nullptr}};
+
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  _impl_.rotatingprivkey_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.rotatingprivkey_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_rotatingprivkey()) {
+    _this->_impl_.rotatingprivkey_.Set(from._internal_rotatingprivkey(), 
+      _this->GetArenaForAllocation());
+  }
+  if (from._internal_has_proof()) {
+    _this->_impl_.proof_ = new ::SessionProtos::ProProof(*from._impl_.proof_);
+  }
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.ProConfig)
+}
+
+inline void ProConfig::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.rotatingprivkey_){}
+    , decltype(_impl_.proof_){nullptr}
+  };
+  _impl_.rotatingprivkey_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.rotatingprivkey_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ProConfig::~ProConfig() {
+  // @@protoc_insertion_point(destructor:SessionProtos.ProConfig)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ProConfig::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.rotatingprivkey_.Destroy();
+  if (this != internal_default_instance()) delete _impl_.proof_;
+}
+
+void ProConfig::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ProConfig::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.ProConfig)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000003u) {
+    if (cached_has_bits & 0x00000001u) {
+      _impl_.rotatingprivkey_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      GOOGLE_DCHECK(_impl_.proof_ != nullptr);
+      _impl_.proof_->Clear();
+    }
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+}
+
+const char* ProConfig::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required bytes rotatingPrivKey = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_rotatingprivkey();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required .SessionProtos.ProProof proof = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr = ctx->ParseMessage(_internal_mutable_proof(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ProConfig::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ProConfig)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required bytes rotatingPrivKey = 1;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        1, this->_internal_rotatingprivkey(), target);
+  }
+
+  // required .SessionProtos.ProProof proof = 2;
+  if (cached_has_bits & 0x00000002u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(2, _Internal::proof(this),
+        _Internal::proof(this).GetCachedSize(), target, stream);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ProConfig)
+  return target;
+}
+
+size_t ProConfig::RequiredFieldsByteSizeFallback() const {
+// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.ProConfig)
+  size_t total_size = 0;
+
+  if (_internal_has_rotatingprivkey()) {
+    // required bytes rotatingPrivKey = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_rotatingprivkey());
+  }
+
+  if (_internal_has_proof()) {
+    // required .SessionProtos.ProProof proof = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.proof_);
+  }
+
+  return total_size;
+}
+size_t ProConfig::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ProConfig)
+  size_t total_size = 0;
+
+  if (((_impl_._has_bits_[0] & 0x00000003) ^ 0x00000003) == 0) {  // All required fields are present.
+    // required bytes rotatingPrivKey = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_rotatingprivkey());
+
+    // required .SessionProtos.ProProof proof = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.proof_);
+
+  } else {
+    total_size += RequiredFieldsByteSizeFallback();
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
+}
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData ProConfig::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::Message::CopyWithSourceCheck,
+    ProConfig::MergeImpl
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*ProConfig::GetClassData() const { return &_class_data_; }
+
+
+void ProConfig::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg) {
+  auto* const _this = static_cast<ProConfig*>(&to_msg);
+  auto& from = static_cast<const ProConfig&>(from_msg);
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ProConfig)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000003u) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_rotatingprivkey(from._internal_rotatingprivkey());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_internal_mutable_proof()->::SessionProtos::ProProof::MergeFrom(
+          from._internal_proof());
+    }
+  }
+  _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+}
+
+void ProConfig::CopyFrom(const ProConfig& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ProConfig)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ProConfig::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  if (_internal_has_proof()) {
+    if (!_impl_.proof_->IsInitialized()) return false;
+  }
+  return true;
+}
+
+void ProConfig::InternalSwap(ProConfig* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.rotatingprivkey_, lhs_arena,
+      &other->_impl_.rotatingprivkey_, rhs_arena
+  );
+  swap(_impl_.proof_, other->_impl_.proof_);
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata ProConfig::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_SessionProtos_2eproto_getter, &descriptor_table_SessionProtos_2eproto_once,
+      file_level_metadata_SessionProtos_2eproto[28]);
+}
+
+// ===================================================================
+
+class ProMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<ProMessage>()._impl_._has_bits_);
+  static const ::SessionProtos::ProProof& proof(const ProMessage* msg);
+  static void set_has_proof(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static void set_has_flags(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x00000003) ^ 0x00000003) != 0;
+  }
+};
+
+const ::SessionProtos::ProProof&
+ProMessage::_Internal::proof(const ProMessage* msg) {
+  return *msg->_impl_.proof_;
+}
+ProMessage::ProMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::Message(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.ProMessage)
+}
+ProMessage::ProMessage(const ProMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::Message() {
+  ProMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.proof_){nullptr}
+    , decltype(_impl_.flags_){}};
+
+  _internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+  if (from._internal_has_proof()) {
+    _this->_impl_.proof_ = new ::SessionProtos::ProProof(*from._impl_.proof_);
+  }
+  _this->_impl_.flags_ = from._impl_.flags_;
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.ProMessage)
+}
+
+inline void ProMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.proof_){nullptr}
+    , decltype(_impl_.flags_){0u}
+  };
+}
+
+ProMessage::~ProMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.ProMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ProMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  if (this != internal_default_instance()) delete _impl_.proof_;
+}
+
+void ProMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ProMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.ProMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    GOOGLE_DCHECK(_impl_.proof_ != nullptr);
+    _impl_.proof_->Clear();
+  }
+  _impl_.flags_ = 0u;
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>();
+}
+
+const char* ProMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required .SessionProtos.ProProof proof = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          ptr = ctx->ParseMessage(_internal_mutable_proof(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required uint32 flags = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _Internal::set_has_flags(&has_bits);
+          _impl_.flags_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ProMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ProMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required .SessionProtos.ProProof proof = 1;
+  if (cached_has_bits & 0x00000001u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(1, _Internal::proof(this),
+        _Internal::proof(this).GetCachedSize(), target, stream);
+  }
+
+  // required uint32 flags = 2;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_flags(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = ::_pbi::WireFormat::InternalSerializeUnknownFieldsToArray(
+        _internal_metadata_.unknown_fields<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(::PROTOBUF_NAMESPACE_ID::UnknownFieldSet::default_instance), target, stream);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ProMessage)
+  return target;
+}
+
+size_t ProMessage::RequiredFieldsByteSizeFallback() const {
+// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.ProMessage)
+  size_t total_size = 0;
+
+  if (_internal_has_proof()) {
+    // required .SessionProtos.ProProof proof = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.proof_);
+  }
+
+  if (_internal_has_flags()) {
+    // required uint32 flags = 2;
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
+  }
+
+  return total_size;
+}
+size_t ProMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ProMessage)
+  size_t total_size = 0;
+
+  if (((_impl_._has_bits_[0] & 0x00000003) ^ 0x00000003) == 0) {  // All required fields are present.
+    // required .SessionProtos.ProProof proof = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+        *_impl_.proof_);
+
+    // required uint32 flags = 2;
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
+
+  } else {
+    total_size += RequiredFieldsByteSizeFallback();
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  return MaybeComputeUnknownFieldsSize(total_size, &_impl_._cached_size_);
+}
+
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData ProMessage::_class_data_ = {
+    ::PROTOBUF_NAMESPACE_ID::Message::CopyWithSourceCheck,
+    ProMessage::MergeImpl
+};
+const ::PROTOBUF_NAMESPACE_ID::Message::ClassData*ProMessage::GetClassData() const { return &_class_data_; }
+
+
+void ProMessage::MergeImpl(::PROTOBUF_NAMESPACE_ID::Message& to_msg, const ::PROTOBUF_NAMESPACE_ID::Message& from_msg) {
+  auto* const _this = static_cast<ProMessage*>(&to_msg);
+  auto& from = static_cast<const ProMessage&>(from_msg);
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ProMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000003u) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_mutable_proof()->::SessionProtos::ProProof::MergeFrom(
+          from._internal_proof());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_impl_.flags_ = from._impl_.flags_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
+  }
+  _this->_internal_metadata_.MergeFrom<::PROTOBUF_NAMESPACE_ID::UnknownFieldSet>(from._internal_metadata_);
+}
+
+void ProMessage::CopyFrom(const ProMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ProMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ProMessage::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  if (_internal_has_proof()) {
+    if (!_impl_.proof_->IsInitialized()) return false;
+  }
+  return true;
+}
+
+void ProMessage::InternalSwap(ProMessage* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.flags_)
+      + sizeof(ProMessage::_impl_.flags_)
+      - PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.proof_)>(
+          reinterpret_cast<char*>(&_impl_.proof_),
+          reinterpret_cast<char*>(&other->_impl_.proof_));
+}
+
+::PROTOBUF_NAMESPACE_ID::Metadata ProMessage::GetMetadata() const {
+  return ::_pbi::AssignDescriptors(
+      &descriptor_table_SessionProtos_2eproto_getter, &descriptor_table_SessionProtos_2eproto_once,
+      file_level_metadata_SessionProtos_2eproto[29]);
+}
+
 // @@protoc_insertion_point(namespace_scope)
 }  // namespace SessionProtos
 PROTOBUF_NAMESPACE_OPEN
@@ -10916,6 +12098,18 @@ Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateInviteResponseMessage >(A
 template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateDeleteMemberContentMessage*
 Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateDeleteMemberContentMessage >(Arena* arena) {
   return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateDeleteMemberContentMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::ProProof*
+Arena::CreateMaybeMessage< ::SessionProtos::ProProof >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::ProProof >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::ProConfig*
+Arena::CreateMaybeMessage< ::SessionProtos::ProConfig >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::ProConfig >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::ProMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::ProMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::ProMessage >(arena);
 }
 PROTOBUF_NAMESPACE_CLOSE
 
