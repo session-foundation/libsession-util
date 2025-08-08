@@ -31,9 +31,10 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::cache_directory);
         HANDLE_TYPE(opt::cache_expiration);
         HANDLE_TYPE(opt::cache_refresh_retry_limit);
-        HANDLE_TYPE(opt::min_cache_size);
-        HANDLE_TYPE(opt::num_nodes_to_use_for_refresh);
-        HANDLE_TYPE(opt::node_failure_threshold);
+        HANDLE_TYPE(opt::cache_min_size);
+        HANDLE_TYPE(opt::cache_num_nodes_to_use_for_refresh);
+        HANDLE_TYPE(opt::cache_node_failure_threshold);
+        HANDLE_TYPE(opt::cache_refresh_using_legacy_endpoint);
 
         // Quic transport options
         HANDLE_TYPE(opt::quic_handshake_timeout);
@@ -150,13 +151,13 @@ void Config::handle_config_opt(opt::cache_refresh_retry_limit crrl) {
     log::debug(cat, "Network config snode pool cache refresh retry limit set to {}", crrl.limit);
 }
 
-void Config::handle_config_opt(opt::min_cache_size mcs) {
-    min_cache_size = mcs.size;
+void Config::handle_config_opt(opt::cache_min_size mcs) {
+    cache_min_size = mcs.size;
     log::debug(cat, "Network config min snode pool cache size set to {}", mcs.size);
 }
 
-void Config::handle_config_opt(opt::num_nodes_to_use_for_refresh nnr) {
-    num_nodes_to_use_for_refresh = nnr.count;
+void Config::handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr) {
+    cache_num_nodes_to_use_for_refresh = nnr.count;
     log::debug(
             cat,
             "Network config number of cached nodes to be used for refreshing the snode pool cache set to {}{}",
@@ -164,9 +165,14 @@ void Config::handle_config_opt(opt::num_nodes_to_use_for_refresh nnr) {
             (nnr.count > 0 ? "" : ", refreshes will always use a random seed node"));
 }
 
-void Config::handle_config_opt(opt::node_failure_threshold nft) {
-    node_failure_threshold = nft.count;
+void Config::handle_config_opt(opt::cache_node_failure_threshold nft) {
+    cache_node_failure_threshold = nft.count;
     log::debug(cat, "Network config snode pool node failure threshold set to {}", nft.count);
+}
+
+void Config::handle_config_opt(opt::cache_refresh_using_legacy_endpoint rule) {
+    cache_refresh_using_legacy_endpoint = true;
+    log::debug(cat, "Network config will refresh snode cache using legacy endpoint");
 }
 
 // MARK: Quic Transport Options

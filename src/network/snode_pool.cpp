@@ -243,10 +243,10 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
         _snode_refresh_results.clear();
         _refresh_candidate_nodes.clear();
 
-        // If we have no `_standard_fetcher`, cache refreshing is disabled, or the cache is smaller than `num_nodes_to_use_for_refresh` then we need to refresh from seed nodes (when fetching from seed nodes we only need to fetch from a single node so only kick off a single refresh request)
-        auto bootstrap_mode = (_config.num_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.num_nodes_to_use_for_refresh);
+        // If we have no `_standard_fetcher`, cache refreshing is disabled, or the cache is smaller than `cache_num_nodes_to_use_for_refresh` then we need to refresh from seed nodes (when fetching from seed nodes we only need to fetch from a single node so only kick off a single refresh request)
+        auto bootstrap_mode = (_config.cache_num_nodes_to_use_for_refresh == 0 || _snode_cache.size() < _config.cache_num_nodes_to_use_for_refresh);
         is_bootstrap = (!_standard_fetcher || bootstrap_mode);
-        num_nodes_for_refresh = (is_bootstrap ? 1 : _config.num_nodes_to_use_for_refresh);
+        num_nodes_for_refresh = (is_bootstrap ? 1 : _config.cache_num_nodes_to_use_for_refresh);
         _refresh_candidate_nodes = (is_bootstrap ? _config.seed_nodes : _snode_cache);
         std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
 
@@ -255,7 +255,7 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
         else if (is_bootstrap)
             log::debug(cat, "Cache is insufficient, bootstrapping from seed nodes for refresh {}", request_id);
         else
-            log::debug(cat, "Performing cache refresh via standard fetcher using {} nodes for request ID {}", _config.num_nodes_to_use_for_refresh, request_id);
+            log::debug(cat, "Performing cache refresh via standard fetcher using {} nodes for request ID {}", _config.cache_num_nodes_to_use_for_refresh, request_id);
 
         // If we (somehow) have no candidate nodes then error and reset the state so we can try again later
         if (_refresh_candidate_nodes.empty()) {
@@ -272,6 +272,7 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
 
 void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool is_bootstrap_request) {
     service_node target_node;
+    bool cache_refresh_using_legacy_endpoint = false;
     session::network::SnodePool::network_fetcher_t fetcher_to_use;
 
     {
@@ -290,6 +291,7 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
 
         target_node = _refresh_candidate_nodes.back();
         _refresh_candidate_nodes.pop_back();
+        cache_refresh_using_legacy_endpoint = _config.cache_refresh_using_legacy_endpoint;
         fetcher_to_use = (is_bootstrap_request ? _bootstrap_fetcher : *_standard_fetcher);
     }
 
@@ -303,19 +305,49 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
     }
 
     log::debug(cat, "Launching {}refresh request to {} for master request ID {}", (is_bootstrap_request ? "bootstrap " : ""), target_node.to_string(), request_id);
+    const Request request = [this, &request_id, &target_node, is_bootstrap_request, cache_refresh_using_legacy_endpoint]() {
+        // A mandatory service node upgrade needs to go out to support calling `active_nodes_bin` via onion requests so if it's not a bootstrap request and the `cache_refresh_using_legacy_endpoint` setting is set then we should use the legacy endpoint to refresh the cache
+        if (!is_bootstrap_request && cache_refresh_using_legacy_endpoint) {
+            nlohmann::json body{
+                {"endpoint", "get_service_nodes"},
+                {"params", {
+                    {"active_only", true},
+                    {"fields", {
+                        {"pubkey_ed25519", true},
+                        {"public_ip", true},
+                        {"storage_port", true},
+                        {"storage_lmq_port", true},
+                        {"storage_server_version", true},
+                        {"swarm_id", true}
+                    }}
+                }},
+            };
+            
+            return Request{
+                request_id,
+                network_destination{target_node},
+                std::string{"oxend_request"},
+                to_vector(body.dump()),
+                RequestCategory::standard,
+                10s,
+                std::nullopt,   // overall_timeout
+                true            // ephemeral_connection
+            };
+        }
+        
+        return Request{
+            request_id,
+            network_destination{target_node},
+            std::string{"active_nodes_bin"},
+            std::nullopt,
+            RequestCategory::standard,
+            10s,
+            std::nullopt,   // overall_timeout
+            true            // ephemeral_connection
+        };
+    }();
 
-    Request request{
-        request_id,
-        network_destination{target_node},
-        std::string{"active_nodes_bin"},
-        std::nullopt,
-        RequestCategory::standard,
-        10s,
-        std::nullopt,   // overall_timeout
-        true            // ephemeral_connection
-    };
-    
-    fetcher_to_use(request, [this, request_id, is_bootstrap_request](bool success, bool timeout, int16_t status_code, std::vector<std::pair<std::string, std::string>> headers, std::optional<std::string> response) {
+    fetcher_to_use(request, [this, request_id, is_bootstrap_request, cache_refresh_using_legacy_endpoint](bool success, bool timeout, int16_t status_code, std::vector<std::pair<std::string, std::string>> headers, std::optional<std::string> response) {
         // This callback runs on the network loop so acquire a lock
         std::unique_lock lock{_cache_mutex};
 
@@ -348,7 +380,7 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
             return;
         }
 
-        const uint8_t total_required = (is_bootstrap_request ? 1 : _config.num_nodes_to_use_for_refresh);
+        const uint8_t total_required = (is_bootstrap_request ? 1 : _config.cache_num_nodes_to_use_for_refresh);
         _snode_refresh_results.push_back(std::move(result));
         log::info(
             cat,
@@ -358,11 +390,11 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
             request_id);
 
         // If we've received all the results then we need to process them and complete the refresh
-        if (is_bootstrap_request || _snode_refresh_results.size() >= _config.num_nodes_to_use_for_refresh) {
+        if (is_bootstrap_request || _snode_refresh_results.size() >= _config.cache_num_nodes_to_use_for_refresh) {
             auto final_results = std::move(_snode_refresh_results);
             auto refresh_id = *_current_snode_cache_refresh_id;
             lock.unlock();  // Unlock so `_on_refresh_complete` can get it's own lock
-            _on_refresh_complete(refresh_id, final_results, is_bootstrap_request);
+            _on_refresh_complete(refresh_id, final_results, is_bootstrap_request, cache_refresh_using_legacy_endpoint);
         }
     });
 }
@@ -372,7 +404,7 @@ void SnodePool::_retry_refresh_request(const std::string& request_id, bool is_bo
     _launch_next_refresh_request(request_id, is_bootstrap_request);
 }
 
-void SnodePool::_on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results, bool is_bootstrap_request) {
+void SnodePool::_on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results, bool is_bootstrap_request, bool cache_refresh_using_legacy_endpoint) {
     log::info(cat, "Have {} successful responses, processing and finalizing cache refresh for request ID {}.", raw_results.size(), refresh_id);
 
     // Sort the vectors (so make it easier to find the intersection)
@@ -385,7 +417,23 @@ void SnodePool::_on_refresh_complete(std::string refresh_id, std::vector<std::ve
             auto& [nodes, invalid_count] = result;
 
             // Due to how onion requests work they need to return JSON data which means the data could be base64-encoded, so handle that case if needed
-            if (!is_bootstrap_request && oxenc::is_base64(nodes_bin)) {
+            if (!is_bootstrap_request && cache_refresh_using_legacy_endpoint) {
+                nlohmann::json response_json = nlohmann::json::parse(to_string_view(nodes_bin));
+
+                if (!response_json.contains("result") || !response_json["result"].is_object())
+                    throw std::runtime_error{"JSON missing result field."};
+
+                nlohmann::json result_json = response_json["result"];
+                if (!result_json.contains("service_node_states") || !result_json["service_node_states"].is_array())
+                    throw std::runtime_error{"JSON missing service_node_states field."};
+
+                for (auto& snode : result_json["service_node_states"])
+                    try {
+                        nodes.emplace_back(service_node::legacy_from_json(snode));
+                    } catch (...) {
+                        invalid_count++;
+                    }
+            } else if (!is_bootstrap_request && oxenc::is_base64(nodes_bin)) {
                 std::vector<std::byte> converted_nodes;
                 oxenc::from_base64(nodes_bin.begin(), nodes_bin.end(), std::back_inserter(converted_nodes));
                 result = service_node::process_snode_cache_bin(converted_nodes);
@@ -414,7 +462,7 @@ void SnodePool::_on_refresh_complete(std::string refresh_id, std::vector<std::ve
                 }
 
                 delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
-                num_nodes_for_refresh = (is_bootstrap_request ? 1 : _config.num_nodes_to_use_for_refresh);
+                num_nodes_for_refresh = (is_bootstrap_request ? 1 : _config.cache_num_nodes_to_use_for_refresh);
             }
 
             _loop->call_later(delay, [this, num_nodes_for_refresh, refresh_id, is_bootstrap_request] {
@@ -581,7 +629,7 @@ std::vector<service_node> SnodePool::get_unused_nodes(size_t count, const std::v
 
         // Skip nodes with too many failures
         auto it = _snode_failure_counts.find(current_key);
-        if (it != _snode_failure_counts.end() && it->second >= _config.node_failure_threshold)
+        if (it != _snode_failure_counts.end() && it->second >= _config.cache_node_failure_threshold)
             continue;
 
         // Skip nodes whos IP addresses are in the exclusion list

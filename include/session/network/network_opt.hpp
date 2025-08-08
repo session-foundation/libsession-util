@@ -229,23 +229,28 @@ namespace opt {
     /// Can be used to override the default (12) minimum number of unused nodes before we trigger a snode cache refresh.
     ///
     /// Note: If the cache size is somehow smaller than this value (eg. Testnet is having issues) then the minimum size will be the full cache size (minus enough to build a path) or at least the size of a single path.
-    struct min_cache_size : base {
+    struct cache_min_size : base {
         size_t size;
-        explicit min_cache_size(size_t size) : size{size} {}
+        explicit cache_min_size(size_t size) : size{size} {}
     };
 
     /// Can be used to override the default (3) number of cached nodes used to refresh the cache for any subsequent refreshes after populating from a seed node.
     ///
     /// Note: Providing a value of `0` will result in the cache _always_ being refreshed using a seed node.
-    struct num_nodes_to_use_for_refresh : base {
+    struct cache_num_nodes_to_use_for_refresh : base {
         uint8_t count;
-        explicit num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
+        explicit cache_num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
     };
 
     /// Can be used to override the default (3) number of times a specific node in a path can receive an error before it is removed from the path and replaced by a new node (or the path is rebuilt if it happens to be the guard node).
-    struct node_failure_threshold : base {
+    struct cache_node_failure_threshold : base {
         uint16_t count;
-        explicit node_failure_threshold(uint16_t count) : count{count} {}
+        explicit cache_node_failure_threshold(uint16_t count) : count{count} {}
+    };
+
+    /// Can be used to make the snode cache use the legacy endpoint when refreshing.
+    struct cache_refresh_using_legacy_endpoint : base {
+        explicit cache_refresh_using_legacy_endpoint() {}
     };
 
     // MARK: Quic Transport Options

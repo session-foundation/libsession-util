@@ -27,9 +27,10 @@ namespace config {
         opt::netid::Target netid;
         std::vector<service_node> seed_nodes;
         
-        size_t min_cache_size;
-        uint8_t num_nodes_to_use_for_refresh;
-        uint16_t node_failure_threshold;
+        size_t cache_min_size;
+        uint8_t cache_num_nodes_to_use_for_refresh;
+        uint16_t cache_node_failure_threshold;
+        bool cache_refresh_using_legacy_endpoint;
     };
 }
 
@@ -102,7 +103,7 @@ class SnodePool {
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
     void _launch_next_refresh_request(const std::string& request_id, bool is_bootstrap_request);
     void _retry_refresh_request(const std::string& request_id, bool is_bootstrap_request);
-    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results, bool is_bootstrap_request);
+    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results, bool is_bootstrap_request, bool cache_refresh_using_legacy_endpoint);
 };
 
 }  // namespace session::network

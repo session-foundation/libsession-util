@@ -34,9 +34,10 @@ config::SnodePoolConfig build_snode_pool_config(const config::Config& main_confi
         main_config.retry_delay,
         main_config.netid,
         main_config.seed_nodes,
-        main_config.min_cache_size,
-        main_config.num_nodes_to_use_for_refresh,
-        main_config.node_failure_threshold
+        main_config.cache_min_size,
+        main_config.cache_num_nodes_to_use_for_refresh,
+        main_config.cache_node_failure_threshold,
+        main_config.cache_refresh_using_legacy_endpoint
     };
 }
 
@@ -235,9 +236,10 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.cache_dir = nullptr;
     config.cache_expiration_minutes = std::chrono::duration_cast<std::chrono::minutes>(cpp_defaults.cache_expiration).count();
     config.cache_refresh_retry_limit = cpp_defaults.cache_refresh_retry_limit;
-    config.min_cache_size = cpp_defaults.min_cache_size;
-    config.num_nodes_to_use_for_refresh = cpp_defaults.num_nodes_to_use_for_refresh;
-    config.node_failure_threshold = cpp_defaults.node_failure_threshold;
+    config.cache_min_size = cpp_defaults.cache_min_size;
+    config.cache_num_nodes_to_use_for_refresh = cpp_defaults.cache_num_nodes_to_use_for_refresh;
+    config.cache_node_failure_threshold = cpp_defaults.cache_node_failure_threshold;
+    config.cache_refresh_using_legacy_endpoint = cpp_defaults.cache_refresh_using_legacy_endpoint;
     
     config.onionreq_path_failure_threshold = cpp_defaults.onionreq_path_failure_threshold;
     config.onionreq_path_build_retry_limit = cpp_defaults.onionreq_path_build_retry_limit;
@@ -332,42 +334,45 @@ LIBSESSION_C_API bool session_network_init(
             cpp_opts.emplace_back(opt::disable_subnet_diversity{});
 
         if (config->min_retry_delay_ms > 0 || config->max_retry_delay_ms > 0)
-            cpp_opts.emplace_back(opt::retry_delay(std::chrono::milliseconds(config->min_retry_delay_ms), std::chrono::milliseconds(config->max_retry_delay_ms)));
+            cpp_opts.emplace_back(opt::retry_delay{std::chrono::milliseconds{config->min_retry_delay_ms}, std::chrono::milliseconds{config->max_retry_delay_ms}});
         
         if (config->request_timeout_check_frequency_ms > 0)
-            cpp_opts.emplace_back(opt::request_timeout_check_frequency(std::chrono::milliseconds(config->request_timeout_check_frequency_ms)));
+            cpp_opts.emplace_back(opt::request_timeout_check_frequency{std::chrono::milliseconds{config->request_timeout_check_frequency_ms}});
         
         // Snode cache
         if (config->cache_dir)
             cpp_opts.emplace_back(opt::cache_directory{std::filesystem::path{config->cache_dir}});
         
         if (config->cache_expiration_minutes > 0)
-            cpp_opts.emplace_back(opt::cache_expiration(std::chrono::minutes(config->cache_expiration_minutes)));
+            cpp_opts.emplace_back(opt::cache_expiration{std::chrono::minutes{config->cache_expiration_minutes}});
         
         if (config->cache_refresh_retry_limit > 0)
-            cpp_opts.emplace_back(opt::cache_refresh_retry_limit(config->cache_refresh_retry_limit));
+            cpp_opts.emplace_back(opt::cache_refresh_retry_limit{config->cache_refresh_retry_limit});
         
-        if (config->min_cache_size > 0)
-            cpp_opts.emplace_back(opt::min_cache_size(config->min_cache_size));
+        if (config->cache_min_size > 0)
+            cpp_opts.emplace_back(opt::cache_min_size{config->cache_min_size});
         
         // A `0` value is valid for this case
-        cpp_opts.emplace_back(opt::num_nodes_to_use_for_refresh(config->num_nodes_to_use_for_refresh));
+        cpp_opts.emplace_back(opt::cache_num_nodes_to_use_for_refresh{config->cache_num_nodes_to_use_for_refresh});
         
-        if (config->node_failure_threshold > 0)
-            cpp_opts.emplace_back(opt::node_failure_threshold(config->node_failure_threshold));
+        if (config->cache_node_failure_threshold > 0)
+            cpp_opts.emplace_back(opt::cache_node_failure_threshold{config->cache_node_failure_threshold});
+
+        if (config->cache_refresh_using_legacy_endpoint)
+            cpp_opts.emplace_back(opt::cache_refresh_using_legacy_endpoint{});
 
         // Router-specific settings
         switch (config->router) {
             case SESSION_NETWORK_ROUTER_ONION_REQUESTS:
                 // Process the Onion Request options since we are using them
                 if (config->path_length > 0)
-                    cpp_opts.emplace_back(opt::path_length(config->path_length));
+                    cpp_opts.emplace_back(opt::path_length{config->path_length});
                 
                 if (config->onionreq_path_failure_threshold > 0)
-                    cpp_opts.emplace_back(opt::onionreq_path_failure_threshold(config->onionreq_path_failure_threshold));
+                    cpp_opts.emplace_back(opt::onionreq_path_failure_threshold{config->onionreq_path_failure_threshold});
 
                 if (config->onionreq_path_build_retry_limit > 0)
-                    cpp_opts.emplace_back(opt::onionreq_path_build_retry_limit(config->onionreq_path_build_retry_limit));
+                    cpp_opts.emplace_back(opt::onionreq_path_build_retry_limit{config->onionreq_path_build_retry_limit});
                 
                 if (config->onionreq_min_path_count_standard > 0)
                     cpp_opts.emplace_back(opt::onionreq_min_path_count{RequestCategory::standard, config->onionreq_min_path_count_standard});
@@ -388,7 +393,7 @@ LIBSESSION_C_API bool session_network_init(
             case SESSION_NETWORK_ROUTER_LOKINET:
                 // Process the Lokinet options since we are using them
                 if (config->path_length > 0)
-                    cpp_opts.emplace_back(opt::path_length(config->path_length));
+                    cpp_opts.emplace_back(opt::path_length{config->path_length});
                 break;
 
             case SESSION_NETWORK_ROUTER_DIRECT: break;
@@ -398,10 +403,10 @@ LIBSESSION_C_API bool session_network_init(
         switch (config->transport) {
             case SESSION_NETWORK_TRANSPORT_QUIC:
                 if (config->quic_handshake_timeout_seconds > 0)
-                    cpp_opts.emplace_back(opt::quic_handshake_timeout(std::chrono::seconds(config->quic_handshake_timeout_seconds)));
+                    cpp_opts.emplace_back(opt::quic_handshake_timeout{std::chrono::seconds{config->quic_handshake_timeout_seconds}});
 
                 if (config->quic_keep_alive_seconds > 0)
-                    cpp_opts.emplace_back(opt::quic_keep_alive(std::chrono::seconds(config->quic_keep_alive_seconds)));
+                    cpp_opts.emplace_back(opt::quic_keep_alive{std::chrono::seconds{config->quic_keep_alive_seconds}});
 
                 if (config->quic_disable_mtu_discovery)
                     cpp_opts.emplace_back(opt::quic_disable_mtu_discovery{});

@@ -103,6 +103,8 @@ service_node service_node::legacy_from_json(nlohmann::json json) {
     uint16_t https_port;
     if (json.contains("storage_https_port"))
         https_port = json["storage_https_port"].get<uint16_t>();
+    else if (json.contains("storage_port"))
+        https_port = json["storage_port"].get<uint16_t>();
     else
         https_port = json["port_https"].get<uint16_t>();
 

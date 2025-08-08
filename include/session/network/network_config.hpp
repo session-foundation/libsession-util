@@ -30,9 +30,10 @@ struct Config {
     std::optional<fs::path> cache_directory;
     std::chrono::minutes cache_expiration = 2h;
     uint8_t cache_refresh_retry_limit = 3;
-    size_t min_cache_size = 12;
-    uint8_t num_nodes_to_use_for_refresh = 3;
-    uint8_t node_failure_threshold = 3;
+    size_t cache_min_size = 12;
+    uint8_t cache_num_nodes_to_use_for_refresh = 3;
+    uint8_t cache_node_failure_threshold = 3;
+    bool cache_refresh_using_legacy_endpoint = false;
 
     // Onion Request Router Options
     uint8_t onionreq_path_failure_threshold = 3;
@@ -83,9 +84,10 @@ struct Config {
     void handle_config_opt(opt::cache_directory dir);
     void handle_config_opt(opt::cache_expiration ce);
     void handle_config_opt(opt::cache_refresh_retry_limit crrl);
-    void handle_config_opt(opt::min_cache_size mcs);
-    void handle_config_opt(opt::num_nodes_to_use_for_refresh nnr);
-    void handle_config_opt(opt::node_failure_threshold nft);
+    void handle_config_opt(opt::cache_min_size mcs);
+    void handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr);
+    void handle_config_opt(opt::cache_node_failure_threshold nft);
+    void handle_config_opt(opt::cache_refresh_using_legacy_endpoint rule);
 
     // Quic transport options
     void handle_config_opt(opt::quic_handshake_timeout qht);
