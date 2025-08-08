@@ -24,20 +24,13 @@ ProFeatures get_pro_features_for_msg(std::span<const unsigned char> msg, ProExtr
     return result;
 }
 
-array_uc64 sign_msg_for_pro(std::span<const unsigned char> msg, const array_uc64& rotating_priv_key) {
-    // Sign the msg with the rotating public pro key and the pro proof if given
-    array_uc64 result = {};
-    static_assert(result.max_size() == crypto_sign_ed25519_BYTES);
-    crypto_sign_ed25519_detached(result.data(), nullptr, msg.data(), msg.size(), rotating_priv_key.data());
-    return result;
-}
-
-std::vector<uint8_t> encrypt_for_namespaced_destination(
+EncryptedForNamespaceDest encrypt_for_namespaced_destination(
         std::span<const unsigned char> plaintext,
         std::span<const unsigned char> ed25519_privkey,
         const Destination& dest,
         config::Namespace space) {
 
+    EncryptedForNamespaceDest result = {};
     enum class Mode {
         Envelope,
         Plaintext,
@@ -132,7 +125,6 @@ std::vector<uint8_t> encrypt_for_namespaced_destination(
     }
 
     // Do the encryption work
-    std::vector<uint8_t> result;
     switch (enc.mode) {
         case Mode::Envelope: {
             assert(enc.envelope_type.has_value());
@@ -156,6 +148,7 @@ std::vector<uint8_t> encrypt_for_namespaced_destination(
             if (dest.pro_sig)
                 envelope.set_prosig(reinterpret_cast<const char*>(dest.pro_sig->data()), dest.pro_sig->size());
 
+            result.encrypted = true;
             switch (enc.after_envelope) {
                 case AfterEnvelope::Nil:
                     assert(false && "Dev error, after envelope action was not set");
@@ -173,8 +166,8 @@ std::vector<uint8_t> encrypt_for_namespaced_destination(
                     msg.set_allocated_request(&req_msg);
 
                     // Write message as ciphertext
-                    result.resize(msg.ByteSizeLong());
-                    msg.SerializeToArray(result.data(), result.size());
+                    result.ciphertext.resize(msg.ByteSizeLong());
+                    msg.SerializeToArray(result.ciphertext.data(), result.ciphertext.size());
                 } break;
 
                 case AfterEnvelope::KeysEncryptMessage: {
@@ -183,24 +176,26 @@ std::vector<uint8_t> encrypt_for_namespaced_destination(
                            "when this happens");
 
                     std::string bytes = envelope.SerializeAsString();
-                    result = dest.closed_group_keys->encrypt_message(
+                    result.ciphertext = dest.closed_group_keys->encrypt_message(
                             std::span<uint8_t>(
                                     reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()));
                 } break;
 
                 case AfterEnvelope::EnvelopeIsCipherText: {
-                    result.resize(envelope.ByteSizeLong());
-                    envelope.SerializeToArray(result.data(), result.size());
+                    result.ciphertext.resize(envelope.ByteSizeLong());
+                    envelope.SerializeToArray(result.ciphertext.data(), result.ciphertext.size());
                 } break;
             }
+
         } break;
 
         case Mode::Plaintext: {
-            result = std::vector<uint8_t>(plaintext.begin(), plaintext.end());
+            // No-op. We do not populate the ciphertext because there was no encryption.
         } break;
 
         case Mode::EncryptForBlindedRecipient: {
-            result = encrypt_for_blinded_recipient(
+            result.encrypted = true;
+            result.ciphertext = encrypt_for_blinded_recipient(
                     ed25519_privkey,
                     dest.open_group_inbox_server_pubkey,
                     dest.recipient_pubkey,  // recipient blinded pubkey
@@ -315,12 +310,11 @@ DecryptedEnvelope decrypt_envelope(
                 reinterpret_cast<const unsigned char*>(content_str.data()),
                 content_str.size(),
                 reinterpret_cast<const unsigned char*>(proto_proof.rotatingpublickey().data()));
-        if (verify_result != 0)
-            throw std::runtime_error("Parse decrypted message failed, pro signature is invalid");
+        result.pro_status = verify_result == 0 ? ProStatus::Valid : ProStatus::Invalid;
 
         // Fill out the resulting proof structure, we have parsed successfully
-        result.pro_flags = proto_flags;
-        std::memcpy(result.pro_sig.data(), pro_sig.data(), pro_sig.size());
+        result.pro_features = proto_flags;
+        std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
         std::memcpy(
                 proof.gen_index_hash.data(),
@@ -334,15 +328,17 @@ DecryptedEnvelope decrypt_envelope(
                 std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
         std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
-        // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It has been
-        // authorised by the backend as having a valid backing payment).
-        if (proof.verify(session::pro_backend::PUBKEY))
-            result.pro_status = ProStatus::Valid;
-
-        // Check if the proof has expired
         if (result.pro_status == ProStatus::Valid) {
-            if (unix_ts >= result.pro_proof.expiry_unix_ts)
-                result.pro_status = ProStatus::Expired;
+            // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It has been
+            // authorised by the backend as having a valid backing payment).
+            if (proof.verify(session::pro_backend::PUBKEY))
+                result.pro_status = ProStatus::Valid;
+
+            // Check if the proof has expired
+            if (result.pro_status == ProStatus::Valid) {
+                if (unix_ts >= result.pro_proof.expiry_unix_ts)
+                    result.pro_status = ProStatus::Expired;
+            }
         }
     }
     return result;
