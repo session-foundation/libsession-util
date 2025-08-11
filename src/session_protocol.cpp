@@ -1,6 +1,7 @@
-#include <sodium/crypto_sign_ed25519.h>
 #include <fmt/core.h>
+#include <sodium/crypto_sign_ed25519.h>
 
+#include <session/config/groups/keys.h>
 #include <session/config/groups/keys.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/config/pro.hpp>
@@ -10,27 +11,51 @@
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
+#include "session/export.h"
 
 namespace session {
 
-ProFeatures get_pro_features_for_msg(std::span<const unsigned char> msg, ProExtraFeatures extra) {
-    ProFeatures result = session_pro_features_nil;
-    if (msg.size() >= SESSION_PRO_10k_CHARACTER_LIMIT)
-        result |= session_pro_features_10k_character_limit;
-    if (extra & session_pro_extra_features_animated_avatar)
-        result |= session_pro_features_animated_avatar;
-    if (extra & session_pro_extra_features_pro_badge)
-        result |= session_pro_features_pro_badge;
+PRO_FEATURES get_pro_features_for_msg(std::span<const uint8_t> msg, PRO_EXTRA_FEATURES extra) {
+    PRO_FEATURES result = PRO_FEATURES_NIL;
+
+    if (msg.size() >= PRO_10K_CHARACTER_LIMIT)
+        result |= PRO_FEATURES_10K_CHARACTER_LIMIT;
+
+    if (extra & PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
+        result |= PRO_FEATURES_ANIMATED_AVATAR;
+
+    if (extra & PRO_EXTRA_FEATURES_PRO_BADGE)
+        result |= PRO_FEATURES_PRO_BADGE;
+
+    assert((result & ~PRO_FEATURES_ALL) == 0);
     return result;
 }
 
-EncryptedForNamespaceDest encrypt_for_namespaced_destination(
-        std::span<const unsigned char> plaintext,
-        std::span<const unsigned char> ed25519_privkey,
-        const Destination& dest,
-        config::Namespace space) {
+struct EncryptedForDestinationInternal
+{
+    bool encrypted;
+    std::vector<uint8_t> ciphertext_cpp;
+    span_u8 ciphertext_c;
+};
 
-    EncryptedForNamespaceDest result = {};
+enum class UseMalloc { No, Yes };
+static EncryptedForDestinationInternal encrypt_for_destination_internal(
+        const std::span<const uint8_t> plaintext,
+        const std::span<const uint8_t> ed25519_privkey,
+        DestinationType dest_type,
+        const uint8_t* dest_pro_sig,
+        const uint8_t* dest_recipient_pubkey,
+        std::chrono::milliseconds dest_sent_timestamp_ms,
+        const uint8_t* dest_open_group_inbox_server_pubkey,
+        const uint8_t* dest_closed_group_pubkey,
+        const config::groups::Keys* dest_closed_group_keys,
+        const uint8_t* dest_closed_group_swarm_public_key,
+        config::Namespace space,
+        UseMalloc use_malloc) {
+
+    // All incoming arguments are passed in from typed, fixed-sized arrays so we do not check
+    // the pointer lengths of those arguments.
+    EncryptedForDestinationInternal result = {};
     enum class Mode {
         Envelope,
         Plaintext,
@@ -57,13 +82,13 @@ EncryptedForNamespaceDest encrypt_for_namespaced_destination(
 
     // Figure out how to encrypt the message based on the destination and setup the encoding context
     EncodeContext enc = {};
-    switch (dest.type) {
+    switch (dest_type) {
         case DestinationType::ClosedGroup: {
             bool has_03_prefix =
-                    dest.closed_group_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
+                    dest_closed_group_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
             if (has_03_prefix) {
                 if (space == config::Namespace::GroupMessages) {
-                    if (!dest.closed_group_keys)
+                    if (!dest_closed_group_keys)
                         throw std::runtime_error(
                                 "API misuse: Sending to a closed group into the group messages "
                                 "namespace requires the closed group keys to be set");
@@ -86,11 +111,11 @@ EncryptedForNamespaceDest encrypt_for_namespaced_destination(
                         SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
                 enc.after_envelope = AfterEnvelope::WrapInWSMessage;
 
-                if (!dest.closed_group_swarm_public_key)
+                if (!dest_closed_group_swarm_public_key)
                     throw std::runtime_error(
                             "API misuse: Closed group swarm public key must be set on non 0x03 "
                             "prefixed group keys");
-                enc.envelope_src = *dest.closed_group_swarm_public_key;
+                enc.envelope_src = {dest_closed_group_swarm_public_key, sizeof(array_uc33)};
             }
         } break;
 
@@ -131,7 +156,7 @@ EncryptedForNamespaceDest encrypt_for_namespaced_destination(
             std::span<const uint8_t> src_text = plaintext;
             if (enc.before_envelope_encrypt_for_recipient_deterministic) {
                 enc.before_envelope_ciphertext = session::encrypt_for_recipient_deterministic(
-                        ed25519_privkey, dest.recipient_pubkey, plaintext);
+                        ed25519_privkey, {dest_recipient_pubkey, sizeof(array_uc32)}, src_text);
                 src_text = enc.before_envelope_ciphertext;
             }
 
@@ -141,12 +166,12 @@ EncryptedForNamespaceDest encrypt_for_namespaced_destination(
             SessionProtos::Envelope envelope = {};
             envelope.set_type(*enc.envelope_type);
             envelope.set_sourcedevice(1);
-            envelope.set_timestamp(dest.sent_timestamp_ms.count());
+            envelope.set_timestamp(dest_sent_timestamp_ms.count());
             envelope.set_content(src_text.data(), src_text.size());
             if (enc.envelope_src)
                 envelope.set_source(reinterpret_cast<const char*>(enc.envelope_src->data()), enc.envelope_src->size());
-            if (dest.pro_sig)
-                envelope.set_prosig(reinterpret_cast<const char*>(dest.pro_sig->data()), dest.pro_sig->size());
+            if (dest_pro_sig)
+                envelope.set_prosig(reinterpret_cast<const char*>(dest_pro_sig), sizeof(array_uc64));
 
             result.encrypted = true;
             switch (enc.after_envelope) {
@@ -166,24 +191,43 @@ EncryptedForNamespaceDest encrypt_for_namespaced_destination(
                     msg.set_allocated_request(&req_msg);
 
                     // Write message as ciphertext
-                    result.ciphertext.resize(msg.ByteSizeLong());
-                    msg.SerializeToArray(result.ciphertext.data(), result.ciphertext.size());
+                    void *dest = nullptr;
+                    if (use_malloc == UseMalloc::Yes) {
+                        result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
+                        msg.SerializeToArray(result.ciphertext_c.data, result.ciphertext_c.size);
+                    } else {
+                        result.ciphertext_cpp.resize(msg.ByteSizeLong());
+                        msg.SerializeToArray(
+                                result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
+                    }
                 } break;
 
                 case AfterEnvelope::KeysEncryptMessage: {
-                    assert(dest.closed_group_keys &&
+                    assert(dest_closed_group_keys &&
                            "Dev error, API miuse was not detected. We should throw an exception "
-                           "when this happens");
+                           "when this happens earlier");
 
                     std::string bytes = envelope.SerializeAsString();
-                    result.ciphertext = dest.closed_group_keys->encrypt_message(
-                            std::span<uint8_t>(
-                                    reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()));
+                    std::vector<uint8_t> ciphertext = dest_closed_group_keys->encrypt_message(
+                            {reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()});
+                    if (use_malloc == UseMalloc::Yes) {
+                        result.ciphertext_c =
+                                span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
+                    } else {
+                        result.ciphertext_cpp = std::move(ciphertext);
+                    }
                 } break;
 
                 case AfterEnvelope::EnvelopeIsCipherText: {
-                    result.ciphertext.resize(envelope.ByteSizeLong());
-                    envelope.SerializeToArray(result.ciphertext.data(), result.ciphertext.size());
+                    if (use_malloc == UseMalloc::Yes) {
+                        result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
+                        envelope.SerializeToArray(
+                                result.ciphertext_c.data, result.ciphertext_c.size);
+                    } else {
+                        result.ciphertext_cpp.resize(envelope.ByteSizeLong());
+                        envelope.SerializeToArray(
+                                result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
+                    }
                 } break;
             }
 
@@ -195,16 +239,60 @@ EncryptedForNamespaceDest encrypt_for_namespaced_destination(
 
         case Mode::EncryptForBlindedRecipient: {
             result.encrypted = true;
-            result.ciphertext = encrypt_for_blinded_recipient(
+            std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
                     ed25519_privkey,
-                    dest.open_group_inbox_server_pubkey,
-                    dest.recipient_pubkey,  // recipient blinded pubkey
+                    {dest_open_group_inbox_server_pubkey, sizeof(array_uc32)},
+                    {dest_recipient_pubkey, sizeof(array_uc32)},  // recipient blinded pubkey
                     plaintext);
+
+            if (use_malloc == UseMalloc::Yes) {
+                result.ciphertext_c = span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
+            } else {
+                result.ciphertext_cpp = std::move(ciphertext);
+            }
         } break;
     }
 
     return result;
 }
+
+EncryptedForDestination encrypt_for_destination(
+        std::span<const unsigned char> plaintext,
+        std::span<const unsigned char> ed25519_privkey,
+        const Destination& dest,
+        config::Namespace space) {
+
+    EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
+            /*plaintext=*/plaintext,
+            /*ed25519_privkey=*/ed25519_privkey,
+            /*dest_type=*/dest.type,
+            /*dest_pro_sig=*/dest.pro_sig ? dest.pro_sig->data() : nullptr,
+            /*dest_recipient_pubkey=*/dest.recipient_pubkey.data(),
+            /*dest_sent_timestamp_ms=*/dest.sent_timestamp_ms,
+            /*dest_open_group_inbox_server_pubkey=*/dest.open_group_inbox_server_pubkey.data(),
+            /*dest_closed_group_pubkey=*/dest.closed_group_pubkey.data(),
+            /*dest_closed_group_keys=*/dest.closed_group_keys,
+            /*dest_closed_group_swarm_public_key=*/dest.closed_group_swarm_public_key
+                    ? dest.closed_group_swarm_public_key->data()
+                    : nullptr,
+            /*space=*/space,
+            /*use_malloc=*/UseMalloc::No);
+
+    EncryptedForDestination result = {
+            .encrypted = result_internal.encrypted,
+            .ciphertext = std::move(result_internal.ciphertext_cpp),
+    };
+    return result;
+}
+
+struct DecryptedEnvelopeInternal {
+    Envelope envelope;
+    std::vector<uint8_t> content_plaintext;
+    std::vector<uint8_t> sender_ed25519_pubkey;
+    ProStatus pro_status;
+    config::ProProof pro_proof;
+    PRO_FEATURES pro_features;
+};
 
 DecryptedEnvelope decrypt_envelope(
         std::span<const unsigned char> ed25519_privkey,
@@ -240,31 +328,44 @@ DecryptedEnvelope decrypt_envelope(
                             "Parse envelope failed, source had unexpected size ({} bytes)",
                             source.size()));
         std::memcpy(result.envelope.source.data(), source.data(), source.size());
-        result.envelope.flags |= EnvelopeFlags_Source;
+        result.envelope.flags |= ENVELOPE_FLAGS_SOURCE;
     }
 
     // Parse source device (optional)
     if (envelope.has_sourcedevice()) {
         result.envelope.source_device = envelope.sourcedevice();
-        result.envelope.flags |= EnvelopeFlags_SourceDevice;
+        result.envelope.flags |= ENVELOPE_FLAGS_SOURCE_DEVICE;
     }
 
     // Parse server timestamp (optional)
     if (envelope.has_servertimestamp()) {
         result.envelope.server_timestamp = envelope.servertimestamp();
-        result.envelope.flags |= EnvelopeFlags_ServerTimestamp;
+        result.envelope.flags |= ENVELOPE_FLAGS_SERVER_TIMESTAMP;
     }
 
-    // Parse content (unconditionallty)
+    // Parse content
     if (!envelope.has_content())
         throw std::runtime_error{"Parse decrypted message failed, missing content"};
 
+    // Decrypt content
     const std::string& content_str = envelope.content();
     auto content_span = std::span<const uint8_t>(
             reinterpret_cast<const uint8_t*>(content_str.data()), content_str.size());
-    std::tie(result.content_plaintext, result.sender_ed25519_pubkey) =
+    auto [content_plaintext, sender_ed25519_pubkey] =
             session::decrypt_incoming(ed25519_privkey, content_span);
+    assert(result.sender_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
 
+    result.content_plaintext = std::move(content_plaintext);
+    std::memcpy(
+            result.sender_ed25519_pubkey.data(),
+            sender_ed25519_pubkey.data(),
+            result.sender_ed25519_pubkey.size());
+
+    // TODO: We parse the content in libsession to extract pro metadata but we return the unparsed
+    // blob back to the caller. This is temporary, eventually we will return a proxy structure for
+    // the protobuf Content type to the user. We avoid returning the direct protobuf type to keep
+    // the interface simple and avoid leaking protobuf implementation detail into the libsession
+    // interface.
     SessionProtos::Content content = {};
     if (!envelope.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
         throw std::runtime_error{"Parse content from envelope failed"};
@@ -280,7 +381,7 @@ DecryptedEnvelope decrypt_envelope(
 
         static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
         std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
-        result.envelope.flags |= EnvelopeFlags_ProSig;
+        result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
 
         SessionProtos::ProMessage pro_msg = content.promessage();
         if (!pro_msg.has_proof())
@@ -344,3 +445,124 @@ DecryptedEnvelope decrypt_envelope(
     return result;
 }
 }  // namespace session
+
+using namespace session;
+
+LIBSESSION_EXPORT
+PRO_FEATURES session_protocol_get_pro_features_for_msg(const span_u8 msg, PRO_FEATURES flags)
+{
+    PRO_FEATURES result = get_pro_features_for_msg({msg.data, msg.size}, flags);
+    return result;
+}
+
+LIBSESSION_EXPORT session_protocol_encrypted_for_destination
+session_protocol_encrypt_for_destination(
+        const span_u8 plaintext,
+        const span_u8 ed25519_privkey,
+        const session_protocol_destination* dest,
+        NAMESPACE space)
+{
+    session_protocol_encrypted_for_destination result = {};
+    try {
+        EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
+                /*plaintext=*/{plaintext.data, plaintext.size},
+                /*ed25519_privkey=*/{ed25519_privkey.data, ed25519_privkey.size},
+                /*dest_type=*/static_cast<DestinationType>(dest->type),
+                /*dest_pro_sig=*/dest->has_pro_sig ? dest->pro_sig : nullptr,
+                /*dest_recipient_pubkey=*/dest->recipient_pubkey,
+                /*dest_sent_timestamp_ms=*/std::chrono::milliseconds(dest->sent_timestamp_ms),
+                /*dest_open_group_inbox_server_pubkey=*/dest->open_group_inbox_server_pubkey,
+                /*dest_closed_group_pubkey=*/dest->closed_group_pubkey,
+                /*dest_closed_group_keys=*/
+                static_cast<const config::groups::Keys*>(dest->closed_group_keys->internals),
+                /*dest_closed_group_swarm_public_key=*/dest->has_closed_group_swarm_public_key
+                        ? dest->closed_group_swarm_public_key
+                        : nullptr,
+                /*space=*/static_cast<config::Namespace>(space),
+                /*use_malloc=*/UseMalloc::Yes);
+
+        result = {
+                .success = true,
+                .encrypted = result_internal.encrypted,
+                .ciphertext = result_internal.ciphertext_c,
+        };
+    } catch (...) {
+    }
+
+    return result;
+}
+
+LIBSESSION_EXPORT
+session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
+        const span_u8 ed25519_privkey, const span_u8 envelope_plaintext, uint64_t unix_ts)
+{
+    session_protocol_decrypted_envelope result = {};
+    try {
+        DecryptedEnvelope result_cpp = decrypt_envelope(
+                {ed25519_privkey.data, ed25519_privkey.size},
+                {envelope_plaintext.data, envelope_plaintext.size},
+                std::chrono::sys_seconds(std::chrono::seconds(unix_ts)));
+
+        // Marshall into c type
+        result = {
+                .success = false,
+                .envelope =
+                        {
+                                .flags = result_cpp.envelope.flags,
+                                .type = static_cast<ENVELOPE_TYPE>(result_cpp.envelope.type),
+                                .timestamp = result_cpp.envelope.timestamp,
+                                .source = {},
+                                .source_device = result_cpp.envelope.source_device,
+                                .server_timestamp = result_cpp.envelope.server_timestamp,
+                                .pro_sig = {},
+                        },
+                .content_plaintext = {},
+                .sender_ed25519_pubkey = {},
+                .pro_status = static_cast<PRO_STATUS>(result_cpp.pro_status),
+                .pro_proof =
+                        {
+                                .version = result_cpp.pro_proof.version,
+                                .gen_index_hash = {},
+                                .rotating_pubkey = {},
+                                .expiry_unix_ts = static_cast<uint64_t>(
+                                        result_cpp.pro_proof.expiry_unix_ts.time_since_epoch()
+                                                .count()),
+                                .sig = {},
+                        },
+                .pro_features = result_cpp.pro_features};
+
+        std::memcpy(
+                result.envelope.source,
+                result_cpp.envelope.source.data(),
+                sizeof(result.envelope.source));
+        std::memcpy(
+                result.envelope.pro_sig,
+                result_cpp.envelope.pro_sig.data(),
+                sizeof(result.envelope.pro_sig));
+
+        result.content_plaintext = span_u8_copy_or_throw(
+                result_cpp.content_plaintext.data(), result_cpp.content_plaintext.size());
+        std::memcpy(
+                result.sender_ed25519_pubkey,
+                result_cpp.sender_ed25519_pubkey.data(),
+                sizeof(result.sender_ed25519_pubkey));
+
+        std::memcpy(
+                result.pro_proof.gen_index_hash,
+                result_cpp.pro_proof.gen_index_hash.data(),
+                sizeof(result.pro_proof.gen_index_hash));
+        std::memcpy(
+                result.pro_proof.rotating_pubkey,
+                result_cpp.pro_proof.rotating_pubkey.data(),
+                sizeof(result.pro_proof.rotating_pubkey));
+        std::memcpy(
+                result.pro_proof.sig,
+                result_cpp.pro_proof.sig.data(),
+                sizeof(result.pro_proof.sig));
+
+        result.success = true;
+    } catch (...) {
+    }
+
+    return result;
+}
