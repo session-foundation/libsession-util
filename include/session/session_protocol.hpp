@@ -61,20 +61,12 @@ struct Destination {
 };
 
 enum class EnvelopeType {
-    SessionMessage,
-    ClosedGroupMessage,
-};
-
-typedef uint32_t EnvelopeFlags;
-enum EnvelopeFlags_ {
-    EnvelopeFlags_Source = 1 << 0,
-    EnvelopeFlags_SourceDevice = 1 << 1,
-    EnvelopeFlags_ServerTimestamp = 1 << 2,
-    EnvelopeFlags_ProSig = 1 << 3,
+    SessionMessage = ENVELOPE_TYPE_SESSION_MESSAGE,
+    ClosedGroupMessage = ENVELOPE_TYPE_CLOSED_GROUP_MESSGE,
 };
 
 struct Envelope {
-    EnvelopeFlags flags;
+    ENVELOPE_FLAGS flags;
     EnvelopeType type;
     uint64_t timestamp;
 
@@ -87,9 +79,6 @@ struct Envelope {
     array_uc64 pro_sig;
 };
 
-using ProFeatures = session_pro_features;
-using ProExtraFeatures = session_pro_extra_features;
-
 struct DecryptedEnvelope {
     // The envelope parsed from the plaintext
     Envelope envelope;
@@ -98,7 +87,7 @@ struct DecryptedEnvelope {
     std::vector<uint8_t> content_plaintext;
 
     // Sender public key extracted from the encrypted content payload
-    std::vector<uint8_t> sender_ed25519_pubkey;
+    array_uc32 sender_ed25519_pubkey;
 
     // Status flag for validity of the Session Pro proof embedded in the envelope if it has one.
     // The status is set to `Nil` if there is no Session Pro proof in the message. Otherwise it's
@@ -109,12 +98,12 @@ struct DecryptedEnvelope {
     // The embedded Session Pro proof, only set if the status was not `Nil`.
     config::ProProof pro_proof;
 
-    // Session Pro features that were used in the embedded message, only set if the status was not
-    // `Nil`.
-    ProFeatures pro_features;
+    // Session Pro bit flag features that were used in the embedded message, only set if the status
+    // was not `Nil`.
+    PRO_FEATURES pro_features;
 };
 
-struct EncryptedForNamespaceDest
+struct EncryptedForDestination
 {
     // Indicates if the ciphertext was encrypted or not. This can be false if the message sent to
     // the destination and namespace does not require encryption. In this case `ciphertext` is not
@@ -139,9 +128,9 @@ struct EncryptedForNamespaceDest
 /// Outputs:
 /// - Session Pro feature flags suitable for writing directly into the protobuf `ProMessage` in
 ///   `Content`
-ProFeatures get_pro_features_for_msg(std::span<const unsigned char> msg, ProExtraFeatures flags);
+PRO_FEATURES get_pro_features_for_msg(std::span<const uint8_t> msg, PRO_FEATURES flags);
 
-/// API: session_protocol/encrypt_for_namespaced_destination
+/// API: session_protocol/encrypt_for_destination
 ///
 /// Given an unencrypted plaintext representation of the content (i.e.: protobuf encoded stream of
 /// `Content`), encrypt and/or wrap the plaintext in the necessary structures for transmission on
@@ -174,7 +163,7 @@ ProFeatures get_pro_features_for_msg(std::span<const unsigned char> msg, ProExtr
 /// - The encryption result for the plaintext. If the destination and namespace combination did not
 ///   require encryption, no payload is returned in the ciphertext and the user should proceed with
 ///   the plaintext. This should be validated by checking the `encrypted` flag on the result.
-EncryptedForNamespaceDest encrypt_for_namespaced_destination(
+EncryptedForDestination encrypt_for_destination(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         const Destination& dest,
