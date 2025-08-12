@@ -1,7 +1,8 @@
 #include <fmt/core.h>
-#include <sodium/crypto_sign_ed25519.h>
-
 #include <session/config/groups/keys.h>
+#include <sodium/crypto_sign_ed25519.h>
+#include <sodium/randombytes.h>
+
 #include <session/config/groups/keys.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/config/pro.hpp>
@@ -18,7 +19,7 @@ namespace session {
 PRO_FEATURES get_pro_features_for_msg(std::span<const uint8_t> msg, PRO_EXTRA_FEATURES extra) {
     PRO_FEATURES result = PRO_FEATURES_NIL;
 
-    if (msg.size() >= PRO_10K_CHARACTER_LIMIT)
+    if (msg.size() >= PRO_STANDARD_CHARACTER_LIMIT)
         result |= PRO_FEATURES_10K_CHARACTER_LIMIT;
 
     if (extra & PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
@@ -31,8 +32,10 @@ PRO_FEATURES get_pro_features_for_msg(std::span<const uint8_t> msg, PRO_EXTRA_FE
     return result;
 }
 
-struct EncryptedForDestinationInternal
-{
+// Interop between the C and CPP API. The C api will request malloc which writes to `ciphertext_c`.
+// This pointer is taken verbatim and avoids requiring a copy from the CPP vector. The CPP api will
+// steal the contents from `ciphertext_cpp`.
+struct EncryptedForDestinationInternal {
     bool encrypted;
     std::vector<uint8_t> ciphertext_cpp;
     span_u8 ciphertext_c;
@@ -62,20 +65,27 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         EncryptForBlindedRecipient,
     };
 
+    // The step to partake after enveloping the content payload
     enum class AfterEnvelope {
         Nil,
-        EnvelopeIsCipherText,
-        WrapInWSMessage,
-        KeysEncryptMessage,
+        EnvelopeIsCipherText,  // No extra bit-mangling required after enveloping
+        WrapInWSMessage,       // Wrap in the protobuf websocket message after enveloping
+        KeysEncryptMessage,    // Encrypt with the closed group keys after ennveloping
     };
 
     struct EncodeContext {
         Mode mode;
-
         // Parameters for BuildMode => Envelope
         bool before_envelope_encrypt_for_recipient_deterministic;
+
+        // Ciphertext storing the result of encrypt for recipient deterministic, if it was necessary
+        // to encrypt before enveloping.
         std::vector<uint8_t> before_envelope_ciphertext;
+
+        // Payload to set the envelope source if necessary.
         std::optional<std::span<const uint8_t>> envelope_src;
+
+        // Type of message to mark the enevelope as
         std::optional<SessionProtos::Envelope_Type> envelope_type;
         AfterEnvelope after_envelope;
     };
@@ -169,9 +179,20 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             envelope.set_timestamp(dest_sent_timestamp_ms.count());
             envelope.set_content(src_text.data(), src_text.size());
             if (enc.envelope_src)
-                envelope.set_source(reinterpret_cast<const char*>(enc.envelope_src->data()), enc.envelope_src->size());
-            if (dest_pro_sig)
-                envelope.set_prosig(reinterpret_cast<const char*>(dest_pro_sig), sizeof(array_uc64));
+                envelope.set_source(
+                        reinterpret_cast<const char*>(enc.envelope_src->data()),
+                        enc.envelope_src->size());
+
+            if (dest_pro_sig) {
+                envelope.set_prosig(
+                        reinterpret_cast<const char*>(dest_pro_sig), sizeof(array_uc64));
+            } else {
+                // If there's no pro signature specified, we still fill out the pro signature with a
+                // dummy 64 byte stream. This is to make pro and non-pro messages indistinguishable.
+                std::string *pro_sig = envelope.mutable_prosig();
+                pro_sig->resize(sizeof(array_uc64));
+                randombytes_buf(pro_sig->data(), pro_sig->size());
+            }
 
             result.encrypted = true;
             switch (enc.after_envelope) {
@@ -191,7 +212,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     msg.set_allocated_request(&req_msg);
 
                     // Write message as ciphertext
-                    void *dest = nullptr;
+                    void* dest = nullptr;
                     if (use_malloc == UseMalloc::Yes) {
                         result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
                         msg.SerializeToArray(result.ciphertext_c.data, result.ciphertext_c.size);
@@ -320,7 +341,7 @@ DecryptedEnvelope decrypt_envelope(
     // Parse source (optional)
     if (envelope.has_source()) {
         // Libsession is now responsible for creating the envelope. The only data that we send in
-        // the source is a Session public key (see: encrypt_for_namespaced_destination)
+        // the source is a Session public key (see: encrypt_for_destination)
         const std::string& source = envelope.source();
         if (source.size() != result.envelope.source.max_size())
             throw std::runtime_error(
@@ -370,19 +391,25 @@ DecryptedEnvelope decrypt_envelope(
     if (!envelope.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
         throw std::runtime_error{"Parse content from envelope failed"};
 
+    // A signature must always be present on the envelope. This is to make a pro and non-pro
+    // envelope indistinguishable. If the message does not have pro then this signature must still
+    // be set but will be ignored. So in all instances a signature must be attached (real or
+    // dummy).
+    if (!envelope.has_prosig())
+        throw std::runtime_error("Parse envelope failed, pro message is missing signature");
+
+    const std::string& pro_sig = envelope.prosig();
+    if (pro_sig.size() != crypto_sign_ed25519_BYTES)
+        throw std::runtime_error("Parse envelope failed, pro signature has wrong size");
+    static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
+
+    std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
+
     if (content.has_promessage()) {
-        // Parse the signature from the envelope if the content had a pro component to it
-        if (!envelope.has_prosig())
-            throw std::runtime_error("Parse envelope failed, pro message is missing signature");
-
-        const std::string& pro_sig = envelope.prosig();
-        if (pro_sig.size() != crypto_sign_ed25519_BYTES)
-            throw std::runtime_error("Parse envelope failed, pro signature has wrong size");
-
-        static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
-        std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
+        // Mark the envelope as having a pro signature that the caller can use.
         result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
 
+        // Extract the pro message
         SessionProtos::ProMessage pro_msg = content.promessage();
         if (!pro_msg.has_proof())
             throw std::runtime_error("Parse decrypted message failed, pro config missing proof");
@@ -449,8 +476,7 @@ DecryptedEnvelope decrypt_envelope(
 using namespace session;
 
 LIBSESSION_EXPORT
-PRO_FEATURES session_protocol_get_pro_features_for_msg(const span_u8 msg, PRO_FEATURES flags)
-{
+PRO_FEATURES session_protocol_get_pro_features_for_msg(const span_u8 msg, PRO_FEATURES flags) {
     PRO_FEATURES result = get_pro_features_for_msg({msg.data, msg.size}, flags);
     return result;
 }
@@ -460,8 +486,7 @@ session_protocol_encrypt_for_destination(
         const span_u8 plaintext,
         const span_u8 ed25519_privkey,
         const session_protocol_destination* dest,
-        NAMESPACE space)
-{
+        NAMESPACE space) {
     session_protocol_encrypted_for_destination result = {};
     try {
         EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
@@ -494,8 +519,7 @@ session_protocol_encrypt_for_destination(
 
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
-        const span_u8 ed25519_privkey, const span_u8 envelope_plaintext, uint64_t unix_ts)
-{
+        const span_u8 ed25519_privkey, const span_u8 envelope_plaintext, uint64_t unix_ts) {
     session_protocol_decrypted_envelope result = {};
     try {
         DecryptedEnvelope result_cpp = decrypt_envelope(
@@ -510,7 +534,8 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
                         {
                                 .flags = result_cpp.envelope.flags,
                                 .type = static_cast<ENVELOPE_TYPE>(result_cpp.envelope.type),
-                                .timestamp = result_cpp.envelope.timestamp,
+                                .timestamp_ms = static_cast<uint64_t>(
+                                        result_cpp.envelope.timestamp.count()),
                                 .source = {},
                                 .source_device = result_cpp.envelope.source_device,
                                 .server_timestamp = result_cpp.envelope.server_timestamp,
