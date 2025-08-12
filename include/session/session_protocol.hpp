@@ -9,6 +9,28 @@
 /// A complimentary file to session encrypt which has the low level encryption function for Session
 /// protocol types. This file contains high-level helper functions for decoding payloads on the
 /// Session protocol. Prefer functions here before resorting to the lower-level cryptography.
+
+// NOTE: CPP doesn't support named bitfields without casting or operator overloads but C-style
+// enums support it very well. The only issue is that using a native C-style enum enforces some type
+// restrictions that compilers dislike when attempting to manipulate bit fields. For example:
+//
+//   enum Feature {x = 1 << 0, y = 1 << 1}
+//   Feature f = x | y
+//
+// Causes the compiler to complain about trying to do bit ops/assign an unsigned integer to an enum
+// `Feature`. We use a common C pattern/trick by suffixing an underscore to the the original enum,
+// then type define the non-suffixed enum to an unsigned integer:
+//
+//   enum Feature_ {x = 1 << 0, y = 1 << 1}
+//   typedef U64 Feature
+//   Feature f = x | y
+//
+// Does not trigger errors as the underlying type of `f` is actually an unsigned integer. The type
+// define is merely a hint to the user to what flags are to be used when manipulating the variable.
+//
+// Hence in the CPP file we use C-style enums for bitfields and CPP-style enums for non-bitfield
+// enums where we can to benefit from the type-safety of strong enums.
+
 namespace session {
 
 namespace config::groups {
@@ -68,7 +90,7 @@ enum class EnvelopeType {
 struct Envelope {
     ENVELOPE_FLAGS flags;
     EnvelopeType type;
-    uint64_t timestamp;
+    std::chrono::milliseconds timestamp;
 
     /// Optional fields. These fields are set if the appropriate flag has been set in `flags`
     /// otherwise the corresponding values are to be ignored and those fields will be
@@ -76,6 +98,8 @@ struct Envelope {
     array_uc33 source;
     uint32_t source_device;
     uint64_t server_timestamp;
+
+    /// Signature by the sending client's rotating key
     array_uc64 pro_sig;
 };
 

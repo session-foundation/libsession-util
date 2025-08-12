@@ -15,7 +15,10 @@ extern "C" {
 #endif
 
 enum {
-    PRO_10K_CHARACTER_LIMIT = 10'000,
+    /// Number of characters that a standard message can use. If the message exceeds this then the
+    /// message must activate the higher character limit feature provided by Session Pro which
+    /// allows messages up to 10k characters.
+    PRO_STANDARD_CHARACTER_LIMIT = 2'000,
 };
 
 typedef uint64_t PRO_EXTRA_FEATURES;
@@ -85,7 +88,7 @@ enum ENVELOPE_FLAGS_ {
 struct session_protocol_envelope {
     ENVELOPE_FLAGS flags;
     ENVELOPE_TYPE type;
-    uint64_t timestamp;
+    uint64_t timestamp_ms;
     uint8_t source[33];
     uint32_t source_device;
     uint64_t server_timestamp;
