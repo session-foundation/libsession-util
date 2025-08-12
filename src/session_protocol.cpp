@@ -52,7 +52,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         const uint8_t* dest_open_group_inbox_server_pubkey,
         const uint8_t* dest_closed_group_pubkey,
         const config::groups::Keys* dest_closed_group_keys,
-        const uint8_t* dest_closed_group_swarm_public_key,
+        const uint8_t* dest_closed_group_public_key,
         config::Namespace space,
         UseMalloc use_malloc) {
 
@@ -115,17 +115,18 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     enc.mode = Mode::Plaintext;
                 }
             } else {
+                // Legacy closed groups which have a 05 prefixed key
                 enc.mode = Mode::Envelope;
                 enc.before_envelope_encrypt_for_recipient_deterministic = true;
                 enc.envelope_type =
                         SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
                 enc.after_envelope = AfterEnvelope::WrapInWSMessage;
 
-                if (!dest_closed_group_swarm_public_key)
+                if (!dest_closed_group_public_key)
                     throw std::runtime_error(
-                            "API misuse: Closed group swarm public key must be set on non 0x03 "
-                            "prefixed group keys");
-                enc.envelope_src = {dest_closed_group_swarm_public_key, sizeof(array_uc33)};
+                            "API misuse: Closed group public key must be set on non 0x03 prefixed "
+                            "group keys");
+                enc.envelope_src = {dest_closed_group_public_key, sizeof(array_uc33)};
             }
         } break;
 
@@ -293,8 +294,8 @@ EncryptedForDestination encrypt_for_destination(
             /*dest_open_group_inbox_server_pubkey=*/dest.open_group_inbox_server_pubkey.data(),
             /*dest_closed_group_pubkey=*/dest.closed_group_pubkey.data(),
             /*dest_closed_group_keys=*/dest.closed_group_keys,
-            /*dest_closed_group_swarm_public_key=*/dest.closed_group_swarm_public_key
-                    ? dest.closed_group_swarm_public_key->data()
+            /*dest_closed_group_swarm_public_key=*/dest.closed_group_public_key
+                    ? dest.closed_group_public_key->data()
                     : nullptr,
             /*space=*/space,
             /*use_malloc=*/UseMalloc::No);
@@ -500,8 +501,8 @@ session_protocol_encrypt_for_destination(
                 /*dest_closed_group_pubkey=*/dest->closed_group_pubkey,
                 /*dest_closed_group_keys=*/
                 static_cast<const config::groups::Keys*>(dest->closed_group_keys->internals),
-                /*dest_closed_group_swarm_public_key=*/dest->has_closed_group_swarm_public_key
-                        ? dest->closed_group_swarm_public_key
+                /*dest_closed_group_swarm_public_key=*/dest->has_closed_group_public_key
+                        ? dest->closed_group_public_key
                         : nullptr,
                 /*space=*/static_cast<config::Namespace>(space),
                 /*use_malloc=*/UseMalloc::Yes);

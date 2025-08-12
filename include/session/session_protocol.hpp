@@ -47,7 +47,12 @@ enum class ProStatus {
 enum class DestinationType {
     Contact,
     SyncMessage,
+
+    /// Both legacy and non-legacy closed groups are to be identified as `ClosedGroup`. A non-legacy
+    /// group is detected by the (0x03) prefix byte on the given `dest_closed_group_pubkey`
+    /// specified in Destination.
     ClosedGroup,
+
     OpenGroup,
     OpenGroupInbox,
 };
@@ -74,12 +79,16 @@ struct Destination {
 
     // When type => ClosedGroup: set the following 'closed_group' prefixed fields
     array_uc33 closed_group_pubkey;
+
+    // Must be set to the group keys for a 0x03 prefix (e.g. groups v2) `closed_group_pubkey` to
+    // encrypt the message.
     const session::config::groups::Keys* closed_group_keys;
 
-    // Set to the closed group's swarm public key (needed for Android) for a non 0x03 prefixed
-    // `closed_group_pubkey`. Ignored otherwise. This will be set as the envelope source. See:
+    // Must be set to the closed group's public key (needed for Android) for a non 0x03 prefixed
+    // `closed_group_pubkey` (e.g. legacy closed groups). Ignored otherwise. This will be set as the
+    // envelope source. See:
     // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L469
-    std::optional<array_uc33> closed_group_swarm_public_key;
+    std::optional<array_uc33> closed_group_public_key;
 };
 
 enum class EnvelopeType {
