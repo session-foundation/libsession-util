@@ -68,8 +68,8 @@ struct session_protocol_destination {
 
     // The closed group swarm public key is optional but should be set for a non 0x03 prefix
     // `closed_group_pubkey`. Otherwise the public key is ignored when encrypting for a destination.
-    bool has_closed_group_swarm_public_key;
-    uint8_t closed_group_swarm_public_key[33];
+    bool has_closed_group_public_key;
+    uint8_t closed_group_public_key[33];
 };
 
 enum ENVELOPE_TYPE {
