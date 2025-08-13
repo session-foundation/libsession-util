@@ -6422,7 +6422,7 @@ class ProProof final :
     kExpiryUnixTsFieldNumber = 4,
     kVersionFieldNumber = 1,
   };
-  // required bytes genIndexHash = 2;
+  // optional bytes genIndexHash = 2;
   bool has_genindexhash() const;
   private:
   bool _internal_has_genindexhash() const;
@@ -6440,7 +6440,7 @@ class ProProof final :
   std::string* _internal_mutable_genindexhash();
   public:
 
-  // required bytes rotatingPublicKey = 3;
+  // optional bytes rotatingPublicKey = 3;
   bool has_rotatingpublickey() const;
   private:
   bool _internal_has_rotatingpublickey() const;
@@ -6458,7 +6458,7 @@ class ProProof final :
   std::string* _internal_mutable_rotatingpublickey();
   public:
 
-  // required bytes sig = 5;
+  // optional bytes sig = 5;
   bool has_sig() const;
   private:
   bool _internal_has_sig() const;
@@ -6476,7 +6476,7 @@ class ProProof final :
   std::string* _internal_mutable_sig();
   public:
 
-  // required uint64 expiryUnixTs = 4;
+  // optional uint64 expiryUnixTs = 4;
   bool has_expiryunixts() const;
   private:
   bool _internal_has_expiryunixts() const;
@@ -6489,7 +6489,7 @@ class ProProof final :
   void _internal_set_expiryunixts(uint64_t value);
   public:
 
-  // required uint32 version = 1;
+  // optional uint32 version = 1;
   bool has_version() const;
   private:
   bool _internal_has_version() const;
@@ -6505,9 +6505,6 @@ class ProProof final :
   // @@protoc_insertion_point(class_scope:SessionProtos.ProProof)
  private:
   class _Internal;
-
-  // helper for ByteSizeLong()
-  size_t RequiredFieldsByteSizeFallback() const;
 
   template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
   typedef void InternalArenaConstructable_;
@@ -6639,7 +6636,7 @@ class ProMessage final :
     kProofFieldNumber = 1,
     kFlagsFieldNumber = 2,
   };
-  // required .SessionProtos.ProProof proof = 1;
+  // optional .SessionProtos.ProProof proof = 1;
   bool has_proof() const;
   private:
   bool _internal_has_proof() const;
@@ -6657,7 +6654,7 @@ class ProMessage final :
       ::SessionProtos::ProProof* proof);
   ::SessionProtos::ProProof* unsafe_arena_release_proof();
 
-  // required uint32 flags = 2;
+  // optional uint32 flags = 2;
   bool has_flags() const;
   private:
   bool _internal_has_flags() const;
@@ -6673,9 +6670,6 @@ class ProMessage final :
   // @@protoc_insertion_point(class_scope:SessionProtos.ProMessage)
  private:
   class _Internal;
-
-  // helper for ByteSizeLong()
-  size_t RequiredFieldsByteSizeFallback() const;
 
   template <typename T> friend class ::PROTOBUF_NAMESPACE_ID::Arena::InternalHelper;
   typedef void InternalArenaConstructable_;
@@ -13397,7 +13391,7 @@ inline void GroupUpdateDeleteMemberContentMessage::set_allocated_adminsignature(
 
 // ProProof
 
-// required uint32 version = 1;
+// optional uint32 version = 1;
 inline bool ProProof::_internal_has_version() const {
   bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
   return value;
@@ -13425,7 +13419,7 @@ inline void ProProof::set_version(uint32_t value) {
   // @@protoc_insertion_point(field_set:SessionProtos.ProProof.version)
 }
 
-// required bytes genIndexHash = 2;
+// optional bytes genIndexHash = 2;
 inline bool ProProof::_internal_has_genindexhash() const {
   bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
   return value;
@@ -13493,7 +13487,7 @@ inline void ProProof::set_allocated_genindexhash(std::string* genindexhash) {
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProProof.genIndexHash)
 }
 
-// required bytes rotatingPublicKey = 3;
+// optional bytes rotatingPublicKey = 3;
 inline bool ProProof::_internal_has_rotatingpublickey() const {
   bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
   return value;
@@ -13561,7 +13555,7 @@ inline void ProProof::set_allocated_rotatingpublickey(std::string* rotatingpubli
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProProof.rotatingPublicKey)
 }
 
-// required uint64 expiryUnixTs = 4;
+// optional uint64 expiryUnixTs = 4;
 inline bool ProProof::_internal_has_expiryunixts() const {
   bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
   return value;
@@ -13589,7 +13583,7 @@ inline void ProProof::set_expiryunixts(uint64_t value) {
   // @@protoc_insertion_point(field_set:SessionProtos.ProProof.expiryUnixTs)
 }
 
-// required bytes sig = 5;
+// optional bytes sig = 5;
 inline bool ProProof::_internal_has_sig() const {
   bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
   return value;
@@ -13661,7 +13655,7 @@ inline void ProProof::set_allocated_sig(std::string* sig) {
 
 // ProMessage
 
-// required .SessionProtos.ProProof proof = 1;
+// optional .SessionProtos.ProProof proof = 1;
 inline bool ProMessage::_internal_has_proof() const {
   bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.proof_ != nullptr);
@@ -13751,7 +13745,7 @@ inline void ProMessage::set_allocated_proof(::SessionProtos::ProProof* proof) {
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProMessage.proof)
 }
 
-// required uint32 flags = 2;
+// optional uint32 flags = 2;
 inline bool ProMessage::_internal_has_flags() const {
   bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
   return value;
