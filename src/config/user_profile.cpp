@@ -52,6 +52,14 @@ void UserProfile::set_profile_pic(profile_pic pic) {
     set_profile_pic(pic.url, pic.key);
 }
 
+uint32_t UserProfile::get_profile_pic_content_version() const {
+    return data["V"].integer_or(0);
+}
+
+void UserProfile::set_profile_pic_content_version(uint32_t version) {
+    set_nonzero_int(data["V"], version);
+}
+
 void UserProfile::set_nts_priority(int priority) {
     set_nonzero_int(data["+"], priority);
 }
@@ -83,30 +91,56 @@ std::optional<bool> UserProfile::get_blinded_msgreqs() const {
     return std::nullopt;
 }
 
-std::chrono::sys_seconds UserProfile::get_public_profile_updated() const {
+std::chrono::sys_seconds UserProfile::get_profile_updated() const {
     if (auto* t = data["t"].integer(); t)
         return std::chrono::sys_seconds{std::chrono::seconds{*t}};
     return std::chrono::sys_seconds{};
 }
 
-void UserProfile::set_public_profile_updated(std::chrono::sys_seconds updated) {
+void UserProfile::set_profile_updated(std::chrono::sys_seconds updated) {
     if (updated.time_since_epoch().count() == 0)
         data["t"].erase();
     else
         data["t"] = static_cast<int>(updated.time_since_epoch().count());
 }
 
-bool UserProfile::resolve_conflicts(dict& data, const oxenc::bt_dict& diff, const dict& source) {
-    auto diff_it = diff.find("t");
-    auto source_it = source.find("t");
+void UserProfile::resolve_conflicts(dict& data, oxenc::bt_dict& diff, const dict& source) {
+    // The UserProfile config stores a timestamp indicating when the user explicitly updated their
+    // profile information but there are other situations where the profile information can be
+    // "automatically" updated by the clients (eg. re-uploading a display picture).  This hook
+    // pre-processes a conflict between these public profile values and removes any keys from the
+    // diff that should be ignored.
+    static const std::set<std::string> relevant_keys = {"n", "p", "q", "t", "V"};
 
-    if (diff_it == diff.end() || source_it == source.end())
-        return false;
+    // No need to do anything if none of the relevant keys were modified
+    bool has_public_keys = false;
+    for (const auto& [key, _] : diff) {
+        if (relevant_keys.count(key)) {
+            has_public_keys = true;
+            break;
+        }
+    }
 
-    // TODO: Check which has the higher timestamp value and use those settings
-    // What if non-public values have also changed in the diff?
+    if (!has_public_keys)
+        return;
 
-    return false;
+    // A higher content version should win, in the case that they both match then we should only
+    // keep the local state if it has a higher timestamp
+    const auto local_content_version = int_or_0(data, "V");
+    const auto local_timestamp = ts_or_epoch(data, "t");
+    const auto incoming_full_content_version = int_or_0(source, "V");
+    const auto incoming_full_timestamp = ts_or_epoch(source, "t");
+    auto local_state_wins =
+            ((local_content_version > incoming_full_content_version) ||
+             (local_content_version == incoming_full_content_version &&
+              local_timestamp > incoming_full_timestamp));
+
+    // If the local state wins then we should remove the `relevant_keys` from the diff (ie. keep the
+    // local state), otherwise the standard `apply_diff` logic should result in the incoming values
+    // overriding the local ones
+    if (local_state_wins)
+        for (const auto& key : relevant_keys)
+            diff.erase(key);
 };
 
 extern "C" {
@@ -167,6 +201,21 @@ LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic 
             static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
+LIBSESSION_C_API uint32_t user_profile_get_profile_pic_content_version(const config_object* conf) {
+    return unbox<UserProfile>(conf)->get_profile_pic_content_version();
+}
+
+LIBSESSION_C_API int user_profile_set_profile_pic_content_version(
+        config_object* conf, uint32_t version) {
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserProfile>(conf)->set_profile_pic_content_version(version);
+                return 0;
+            },
+            static_cast<int>(SESSION_ERR_BAD_VALUE));
+}
+
 LIBSESSION_C_API int user_profile_get_nts_priority(const config_object* conf) {
     return unbox<UserProfile>(conf)->get_nts_priority();
 }
@@ -194,6 +243,14 @@ LIBSESSION_C_API void user_profile_set_blinded_msgreqs(config_object* conf, int 
     if (enabled >= 0)
         val = static_cast<bool>(enabled);
     unbox<UserProfile>(conf)->set_blinded_msgreqs(std::move(val));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
+    return unbox<UserProfile>(conf)->get_profile_updated().time_since_epoch().count();
+}
+
+LIBSESSION_C_API void user_profile_set_profile_updated(config_object* conf, int64_t updated) {
+    unbox<UserProfile>(conf)->set_profile_updated(to_sys_seconds(updated));
 }
 
 }  // extern "C"

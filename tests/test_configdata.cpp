@@ -422,6 +422,7 @@ TEST_CASE("config message signature", "[config][signing]") {
                     verifier,
                     nullptr,
                     ConfigMessage::DEFAULT_DIFF_LAGS,
+                    [](config::dict&, oxenc::bt_dict&, const config::dict&) {},
                     [](size_t, const auto& exc) { throw exc; }),
             config::config_error,
             Message("Config signature failed verification"));

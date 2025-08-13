@@ -178,8 +178,8 @@ class ConfigMessage {
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
-            std::function<bool(dict&, const oxenc::bt_dict&, const dict&)>
-                    custom_conflict_resolver = nullptr,
+            std::function<void(dict&, oxenc::bt_dict&, const dict&)> custom_conflict_resolver =
+                    nullptr,
             std::function<void(size_t, const config_error&)> error_handler = nullptr);
 
     /// Returns a read-only reference to the contained data.  (To get a mutable config object use
@@ -303,8 +303,8 @@ class MutableConfigMessage : public ConfigMessage {
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
-            std::function<bool(dict&, const oxenc::bt_dict&, const dict&)>
-                    custom_conflict_resolver = nullptr,
+            std::function<void(dict&, oxenc::bt_dict&, const dict&)> custom_conflict_resolver =
+                    nullptr,
             std::function<void(size_t, const config_error&)> error_handler = nullptr);
 
     /// Wrapper around the above that takes a single string view to load a single message, doesn't

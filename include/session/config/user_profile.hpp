@@ -18,14 +18,16 @@ using namespace std::literals;
 /// n - user profile name
 /// p - user profile url
 /// q - user profile decryption key (binary)
+/// V - The version of the content of the profile picture, should be updated when the user uploads a
+///     new profile picture (but not when re-uploading the current one).
 /// + - the priority value for the "Note to Self" pseudo-conversation (higher = higher in the
 ///     conversation list).  Omitted when 0.  -1 means hidden.
 /// e - the expiry timer (in seconds) for the "Note to Self" pseudo-conversation.  Omitted when 0.
 /// M - set to 1 if blinded message request retrieval is enabled, 0 if retrieval is *disabled*, and
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
-/// t - The unix timestamp (seconds) that the user last explicitly updated their public profile
-///     information.
+/// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
+/// (should be updated when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
 
 class UserProfile : public ConfigBase {
 
@@ -86,9 +88,8 @@ class UserProfile : public ConfigBase {
     /// - `diff` -- The diffs from the conflicting config update.
     /// - `source` -- The config data that the diffs conflicted with.
     ///
-    /// Outputs:
-    /// - `Bool` -- Returns true if the conflicts were resolved
-    bool resolve_conflicts(dict& data, const oxenc::bt_dict& diff, const dict& source) override;
+    /// Outputs: None
+    void resolve_conflicts(dict& data, oxenc::bt_dict& diff, const dict& source) override;
 
     /// API: user_profile/UserProfile::get_name
     ///
@@ -147,6 +148,26 @@ class UserProfile : public ConfigBase {
     ///    - `pic` -- Profile pic object
     void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     void set_profile_pic(profile_pic pic);
+
+    /// API: user_profile/UserProfile::profile_pic_content_version
+    ///
+    /// Returns the version of the profile picture content; or `0` if it's never been set.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `uint32_t` - version of the profile picture content.  Will be `0` if it's never been set.
+    uint32_t get_profile_pic_content_version() const;
+
+    /// API: user_profile/UserProfile::profile_pic_content_version
+    ///
+    /// Sets the version for the profile picture content.  This should be updated when a user sets a
+    /// new profile picture (or removes the current one), but now when re-uploading the current
+    /// profile picture.
+    ///
+    /// Inputs:
+    /// - `version` -- version for the profile picture content.
+    void set_profile_pic_content_version(uint32_t version);
 
     /// API: user_profile/UserProfile::get_nts_priority
     ///
@@ -218,7 +239,7 @@ class UserProfile : public ConfigBase {
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
 
-    /// API: user_profile/UserProfile::get_public_profile_updated
+    /// API: user_profile/UserProfile::get_profile_updated
     ///
     /// returns the timestamp that the user last updated their public profile information; or `0` if
     /// it's never been updated.
@@ -228,9 +249,9 @@ class UserProfile : public ConfigBase {
     /// Outputs:
     /// - `std::chrono::sys_seconds` - timestamp that the user last updated their public profile
     /// information.  Will be `0` if it's never been updated.
-    std::chrono::sys_seconds get_public_profile_updated() const;
+    std::chrono::sys_seconds get_profile_updated() const;
 
-    /// API: user_profile/UserProfile::set_public_profile_updated
+    /// API: user_profile/UserProfile::set_profile_updated
     ///
     /// Sets the timestamp that the user last updated their public profile information (should be
     /// updated by the clients when modifying public profile information via a user action, eg:
@@ -239,7 +260,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Inputs:
     /// - `updated` -- timestamp that the user last updated their public profile information.
-    void set_public_profile_updated(std::chrono::sys_seconds updated);
+    void set_profile_updated(std::chrono::sys_seconds updated);
 
     bool accepts_protobuf() const override { return true; }
 };
