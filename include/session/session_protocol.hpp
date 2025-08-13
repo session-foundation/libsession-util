@@ -38,10 +38,11 @@ namespace config::groups {
 }
 
 enum class ProStatus {
-    Nil,      // Pro proof was not set
-    Invalid,  // Pro proof was set; signature validation failed
-    Valid,    // Pro proof was set, is verified; has not expired
-    Expired,  // Pro proof was set, is verified; has expired
+    Nil,                   // Pro proof was not set
+    InvalidProBackendSig,  // Pro proof was set; proof sig was not produced by the Pro backend key
+    InvalidUserSig,        // Pro proof was set; envelope sig was not produced by the Rotating key
+    Valid,                 // Pro proof was set, is verified; has not expired
+    Expired,               // Pro proof was set, is verified; has expired
 };
 
 enum class DestinationType {
@@ -60,18 +61,17 @@ enum class DestinationType {
 struct Destination {
     DestinationType type;
 
-    // Signature over the plaintext with the user's Session Pro rotating public key if they have
-    // Session Pro and opt into sending a message with pro features. If this is specified, the pro
-    // message component in `Content` must have been set with the corresponding proof for this
-    // signature.
+    // Signature over the unencrypted plaintext with the user's Session Pro rotating public key if
+    // they have Session Pro and opt into sending a message with pro features. If this is specified,
+    // the pro message component in `Content` must have been set with the corresponding proof for
+    // this signature.
     std::optional<array_uc64> pro_sig;
 
     // Set to the recipient of the message if it requires one. Ignored otherwise (for example
     // ignored in OpenGroup)
-    array_uc32 recipient_pubkey;
+    array_uc33 recipient_pubkey;
 
-    // The timestamp to assign to the message envelope if the message requires one. Ignored
-    // otherwise
+    // The timestamp to assign to the message envelope
     std::chrono::milliseconds sent_timestamp_ms;
 
     // When type => OpenGroupInbox: set this pubkey to the server's key
@@ -83,12 +83,6 @@ struct Destination {
     // Must be set to the group keys for a 0x03 prefix (e.g. groups v2) `closed_group_pubkey` to
     // encrypt the message.
     const session::config::groups::Keys* closed_group_keys;
-
-    // Must be set to the closed group's public key (needed for Android) for a non 0x03 prefixed
-    // `closed_group_pubkey` (e.g. legacy closed groups). Ignored otherwise. This will be set as the
-    // envelope source. See:
-    // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L469
-    std::optional<array_uc33> closed_group_public_key;
 };
 
 enum class EnvelopeType {
@@ -161,7 +155,7 @@ struct EncryptedForDestination
 /// Outputs:
 /// - Session Pro feature flags suitable for writing directly into the protobuf `ProMessage` in
 ///   `Content`
-PRO_FEATURES get_pro_features_for_msg(std::span<const uint8_t> msg, PRO_FEATURES flags);
+PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags);
 
 /// API: session_protocol/encrypt_for_destination
 ///
@@ -196,6 +190,9 @@ PRO_FEATURES get_pro_features_for_msg(std::span<const uint8_t> msg, PRO_FEATURES
 /// - The encryption result for the plaintext. If the destination and namespace combination did not
 ///   require encryption, no payload is returned in the ciphertext and the user should proceed with
 ///   the plaintext. This should be validated by checking the `encrypted` flag on the result.
+///
+///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
+///   encoded/wrapped if necessary).
 EncryptedForDestination encrypt_for_destination(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
@@ -219,13 +216,16 @@ EncryptedForDestination encrypt_for_destination(
 /// field to verify if the Session Pro was present and/or valid or invalid.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the libsodium-style secret key of the sender, 64 bytes. Can also be
+/// - `ed25519_privkey` -- the libsodium-style secret key of the receiver, 64 bytes. Can also be
 ///   passed as a 32-byte seed. Used to decrypt the encrypted content.
 /// - `envelope_plaintext` -- the protobuf serialised payload containing the message envelope. The
 ///   envelope must already be decrypted if it was originally encrypted (i.e.: closed group
 ///   envelopes).
-/// - `unix_ts` -- pass in the current system time which is used to determine, if present in the
-///   envelope, whether or not the Session Pro proof has expired or not.
+/// - `unix_ts` -- pass in the current system time which is used to determine, whether or not the
+///   Session Pro proof has expired or not if it is in the payload. Ignored otherwise
+/// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
+///   the proof, validating whether or not the attached proof was indeed issued by an authorised
+///   issuer
 ///
 /// Outputs:
 /// - The decrypted envelope. It contains the fields of the envelope and the Session Pro metadata
@@ -233,5 +233,6 @@ EncryptedForDestination encrypt_for_destination(
 DecryptedEnvelope decrypt_envelope(
         std::span<const uint8_t> ed25519_privkey,
         std::span<const uint8_t> envelope_plaintext,
-        std::chrono::sys_seconds unix_ts);
+        std::chrono::sys_seconds unix_ts,
+        const array_uc32& pro_backend_pubkey);
 }  // namespace session

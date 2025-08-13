@@ -9,6 +9,7 @@
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
+#include <session/util.hpp>
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
@@ -16,10 +17,10 @@
 
 namespace session {
 
-PRO_FEATURES get_pro_features_for_msg(std::span<const uint8_t> msg, PRO_EXTRA_FEATURES extra) {
+PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES extra) {
     PRO_FEATURES result = PRO_FEATURES_NIL;
 
-    if (msg.size() >= PRO_STANDARD_CHARACTER_LIMIT)
+    if (msg_size > PRO_STANDARD_CHARACTER_LIMIT)
         result |= PRO_FEATURES_10K_CHARACTER_LIMIT;
 
     if (extra & PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
@@ -43,21 +44,26 @@ struct EncryptedForDestinationInternal {
 
 enum class UseMalloc { No, Yes };
 static EncryptedForDestinationInternal encrypt_for_destination_internal(
-        const std::span<const uint8_t> plaintext,
-        const std::span<const uint8_t> ed25519_privkey,
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> ed25519_privkey,
         DestinationType dest_type,
-        const uint8_t* dest_pro_sig,
-        const uint8_t* dest_recipient_pubkey,
+        std::span<const uint8_t> dest_pro_sig,
+        std::span<const uint8_t> dest_recipient_pubkey,
         std::chrono::milliseconds dest_sent_timestamp_ms,
-        const uint8_t* dest_open_group_inbox_server_pubkey,
-        const uint8_t* dest_closed_group_pubkey,
+        std::span<const uint8_t> dest_open_group_inbox_server_pubkey,
+        std::span<const uint8_t> dest_closed_group_pubkey,
         const config::groups::Keys* dest_closed_group_keys,
-        const uint8_t* dest_closed_group_public_key,
         config::Namespace space,
         UseMalloc use_malloc) {
 
-    // All incoming arguments are passed in from typed, fixed-sized arrays so we do not check
-    // the pointer lengths of those arguments.
+    assert(dest_pro_sig.empty() || dest_pro_sig.size() == crypto_sign_ed25519_BYTES);
+    assert(dest_recipient_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
+    assert(dest_open_group_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
+    assert(dest_closed_group_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
+
+    // All incoming arguments are passed in from typed, fixed-sized arrays so we do not need to
+    // throw if these sizes are wrong. It being wrong would be a development error.
+
     EncryptedForDestinationInternal result = {};
     enum class Mode {
         Envelope,
@@ -103,6 +109,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                                 "API misuse: Sending to a closed group into the group messages "
                                 "namespace requires the closed group keys to be set");
                     enc.mode = Mode::Envelope;
+                    enc.before_envelope_encrypt_for_recipient_deterministic = false;
                     enc.after_envelope = AfterEnvelope::KeysEncryptMessage;
                     enc.envelope_type =
                             SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
@@ -121,12 +128,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                 enc.envelope_type =
                         SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
                 enc.after_envelope = AfterEnvelope::WrapInWSMessage;
-
-                if (!dest_closed_group_public_key)
-                    throw std::runtime_error(
-                            "API misuse: Closed group public key must be set on non 0x03 prefixed "
-                            "group keys");
-                enc.envelope_src = {dest_closed_group_public_key, sizeof(array_uc33)};
+                enc.envelope_src = dest_closed_group_pubkey;
             }
         } break;
 
@@ -164,11 +166,11 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
     switch (enc.mode) {
         case Mode::Envelope: {
             assert(enc.envelope_type.has_value());
-            std::span<const uint8_t> src_text = plaintext;
+            std::span<const uint8_t> content = plaintext;
             if (enc.before_envelope_encrypt_for_recipient_deterministic) {
                 enc.before_envelope_ciphertext = session::encrypt_for_recipient_deterministic(
-                        ed25519_privkey, {dest_recipient_pubkey, sizeof(array_uc32)}, src_text);
-                src_text = enc.before_envelope_ciphertext;
+                        ed25519_privkey, dest_recipient_pubkey, content);
+                content = enc.before_envelope_ciphertext;
             }
 
             // Create envelope
@@ -178,21 +180,20 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             envelope.set_type(*enc.envelope_type);
             envelope.set_sourcedevice(1);
             envelope.set_timestamp(dest_sent_timestamp_ms.count());
-            envelope.set_content(src_text.data(), src_text.size());
+            envelope.set_content(content.data(), content.size());
             if (enc.envelope_src)
                 envelope.set_source(
                         reinterpret_cast<const char*>(enc.envelope_src->data()),
                         enc.envelope_src->size());
 
-            if (dest_pro_sig) {
-                envelope.set_prosig(
-                        reinterpret_cast<const char*>(dest_pro_sig), sizeof(array_uc64));
-            } else {
+            if (dest_pro_sig.empty()) {
                 // If there's no pro signature specified, we still fill out the pro signature with a
                 // dummy 64 byte stream. This is to make pro and non-pro messages indistinguishable.
                 std::string *pro_sig = envelope.mutable_prosig();
                 pro_sig->resize(sizeof(array_uc64));
                 randombytes_buf(pro_sig->data(), pro_sig->size());
+            } else {
+                envelope.set_prosig(dest_pro_sig.data(), dest_pro_sig.size());
             }
 
             result.encrypted = true;
@@ -202,18 +203,16 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     break;
 
                 case AfterEnvelope::WrapInWSMessage: {
-                    // Make request
-                    WebSocketProtos::WebSocketRequestMessage req_msg = {};
-                    req_msg.set_body(envelope.SerializeAsString());
-
-                    // Put into message
+                    // Setup message
                     WebSocketProtos::WebSocketMessage msg = {};
                     msg.set_type(
                             WebSocketProtos::WebSocketMessage_Type::WebSocketMessage_Type_REQUEST);
-                    msg.set_allocated_request(&req_msg);
+
+                    // Make request
+                    WebSocketProtos::WebSocketRequestMessage *req_msg = msg.mutable_request();
+                    req_msg->set_body(envelope.SerializeAsString());
 
                     // Write message as ciphertext
-                    void* dest = nullptr;
                     if (use_malloc == UseMalloc::Yes) {
                         result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
                         msg.SerializeToArray(result.ciphertext_c.data, result.ciphertext_c.size);
@@ -230,8 +229,8 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                            "when this happens earlier");
 
                     std::string bytes = envelope.SerializeAsString();
-                    std::vector<uint8_t> ciphertext = dest_closed_group_keys->encrypt_message(
-                            {reinterpret_cast<uint8_t*>(bytes.data()), bytes.size()});
+                    std::vector<uint8_t> ciphertext =
+                            dest_closed_group_keys->encrypt_message(to_span(bytes));
                     if (use_malloc == UseMalloc::Yes) {
                         result.ciphertext_c =
                                 span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
@@ -263,8 +262,8 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             result.encrypted = true;
             std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
                     ed25519_privkey,
-                    {dest_open_group_inbox_server_pubkey, sizeof(array_uc32)},
-                    {dest_recipient_pubkey, sizeof(array_uc32)},  // recipient blinded pubkey
+                    dest_open_group_inbox_server_pubkey,
+                    dest_recipient_pubkey,  // recipient blinded pubkey
                     plaintext);
 
             if (use_malloc == UseMalloc::Yes) {
@@ -288,15 +287,12 @@ EncryptedForDestination encrypt_for_destination(
             /*plaintext=*/plaintext,
             /*ed25519_privkey=*/ed25519_privkey,
             /*dest_type=*/dest.type,
-            /*dest_pro_sig=*/dest.pro_sig ? dest.pro_sig->data() : nullptr,
-            /*dest_recipient_pubkey=*/dest.recipient_pubkey.data(),
+            /*dest_pro_sig=*/dest.pro_sig ? *dest.pro_sig : std::span<const uint8_t>(),
+            /*dest_recipient_pubkey=*/dest.recipient_pubkey,
             /*dest_sent_timestamp_ms=*/dest.sent_timestamp_ms,
-            /*dest_open_group_inbox_server_pubkey=*/dest.open_group_inbox_server_pubkey.data(),
-            /*dest_closed_group_pubkey=*/dest.closed_group_pubkey.data(),
+            /*dest_open_group_inbox_server_pubkey=*/dest.open_group_inbox_server_pubkey,
+            /*dest_closed_group_pubkey=*/dest.closed_group_pubkey,
             /*dest_closed_group_keys=*/dest.closed_group_keys,
-            /*dest_closed_group_swarm_public_key=*/dest.closed_group_public_key
-                    ? dest.closed_group_public_key->data()
-                    : nullptr,
             /*space=*/space,
             /*use_malloc=*/UseMalloc::No);
 
@@ -317,13 +313,14 @@ struct DecryptedEnvelopeInternal {
 };
 
 DecryptedEnvelope decrypt_envelope(
-        std::span<const unsigned char> ed25519_privkey,
-        std::span<const unsigned char> envelope_plaintext,
-        std::chrono::sys_seconds unix_ts) {
+        std::span<const uint8_t> ed25519_privkey,
+        std::span<const uint8_t> envelope_plaintext,
+        std::chrono::sys_seconds unix_ts,
+        const array_uc32& pro_backend_pubkey) {
     DecryptedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
     if (!envelope.ParseFromArray(envelope_plaintext.data(), envelope_plaintext.size()))
-        throw std::runtime_error{"Parse envelope from ciphertext failed"};
+        throw std::runtime_error{"Parse envelope from plaintext failed"};
 
     // Parse type (unconditionallty)
     if (!envelope.has_type())
@@ -370,18 +367,64 @@ DecryptedEnvelope decrypt_envelope(
         throw std::runtime_error{"Parse decrypted message failed, missing content"};
 
     // Decrypt content
-    const std::string& content_str = envelope.content();
-    auto content_span = std::span<const uint8_t>(
-            reinterpret_cast<const uint8_t*>(content_str.data()), content_str.size());
-    auto [content_plaintext, sender_ed25519_pubkey] =
-            session::decrypt_incoming(ed25519_privkey, content_span);
-    assert(result.sender_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
+    // The envelope is encrypted in GroupsV2, contents unencrypted. In 1o1 and legacy groups, the
+    // envelope is encrypted, contents is encrypted.
+    //
+    // On Android and Desktop, the envelope source is always set for legacy and v2 groups. This
+    // means we can use the envelope source to determine if the contents needs decryption.
+    //
+    // On iOS legacy groups have the source set. V2 groups on iOS do _not_ have the sender set.
+    // Reminder:
+    //
+    //   v2     => envelope encrypted,   contents unencrypted
+    //   legacy => envelope unencrypted, contents encrypted
+    //
+    // Since all platforms always set the envelope source for a legacy groups message we can use the
+    // presence of the envelope source and check the prefix to determine if the contents is
+    // encrypted, i.e. do the following checks:
+    //
+    //  1. Is a closed group message
+    //  2. The source (pubkey) is set (all platforms set this field on legacy groups messages)
+    //  3. The pubkey has a legacy prefix (0x05)
+    //
+    // Refs:
+    // clang-format off
+    //   Android:
+    //     Legacy https://github.com/session-foundation/session-android/blob/e4c16ae8aa8cae2f75aba565b890082563b07bd2/app/src/main/java/org/session/libsession/messaging/sending_receiving/MessageSender.kt#L189
+    //     v2     https://github.com/session-foundation/session-android/blob/e4c16ae8aa8cae2f75aba565b890082563b07bd2/app/src/main/java/org/session/libsession/messaging/sending_receiving/MessageSender.kt#L176
+    //   Desktop:
+    //     Legacy https://github.com/session-foundation/session-desktop/blob/4c5cd88fa707a01845f86c0de8920faf160653ea/ts/session/sending/MessageWrapper.ts#L140
+    //     v2     https://github.com/session-foundation/session-desktop/blob/4c5cd88fa707a01845f86c0de8920faf160653ea/ts/session/sending/MessageWrapper.ts#L49
+    //   iOS:
+    //     Legacy https://github.com/session-foundation/session-ios/blob/932145ab255b2327ca20fc992ac73758b94b07cd/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L469
+    //     v2     https://github.com/session-foundation/session-ios/blob/932145ab255b2327ca20fc992ac73758b94b07cd/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L426
+    // clang-format on
+    bool has_encrypted_content = envelope.type() == SessionProtos::Envelope_Type_SESSION_MESSAGE;
+    if (envelope.type() == SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE && envelope.has_source()) {
+        const std::string& source_pubkey = envelope.source();
+        if (source_pubkey.size() != sizeof(array_uc33))
+            throw std::runtime_error{
+                    "Parse closed group message failed, source was not 33 byte public key"};
 
-    result.content_plaintext = std::move(content_plaintext);
-    std::memcpy(
-            result.sender_ed25519_pubkey.data(),
-            sender_ed25519_pubkey.data(),
-            result.sender_ed25519_pubkey.size());
+        if (source_pubkey[0] != static_cast<uint8_t>(SessionIDPrefix::group))
+            has_encrypted_content = true;
+    }
+
+    if (has_encrypted_content) {
+        std::span<const uint8_t> content_str = session::to_span(envelope.content());
+        auto [content_plaintext, sender_ed25519_pubkey] =
+                session::decrypt_incoming(ed25519_privkey, content_str);
+        assert(result.sender_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
+
+        result.content_plaintext = std::move(content_plaintext);
+        std::memcpy(
+                result.sender_ed25519_pubkey.data(),
+                sender_ed25519_pubkey.data(),
+                result.sender_ed25519_pubkey.size());
+    } else {
+        result.content_plaintext.resize(envelope.content().size());
+        std::memcpy(result.content_plaintext.data(), envelope.content().data(), envelope.content().size());
+    }
 
     // TODO: We parse the content in libsession to extract pro metadata but we return the unparsed
     // blob back to the caller. This is temporary, eventually we will return a proxy structure for
@@ -389,8 +432,8 @@ DecryptedEnvelope decrypt_envelope(
     // the interface simple and avoid leaking protobuf implementation detail into the libsession
     // interface.
     SessionProtos::Content content = {};
-    if (!envelope.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
-        throw std::runtime_error{"Parse content from envelope failed"};
+    if (!content.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
+        throw std::runtime_error{fmt::format("Parse content from envelope failed: {}", result.content_plaintext.size())};
 
     // A signature must always be present on the envelope. This is to make a pro and non-pro
     // envelope indistinguishable. If the message does not have pro then this signature must still
@@ -436,10 +479,10 @@ DecryptedEnvelope decrypt_envelope(
         // Verify the sig since we have extracted the rotating public key from the embedded proof
         int verify_result = crypto_sign_ed25519_verify_detached(
                 reinterpret_cast<const unsigned char*>(pro_sig.data()),
-                reinterpret_cast<const unsigned char*>(content_str.data()),
-                content_str.size(),
+                result.content_plaintext.data(),
+                result.content_plaintext.size(),
                 reinterpret_cast<const unsigned char*>(proto_proof.rotatingpublickey().data()));
-        result.pro_status = verify_result == 0 ? ProStatus::Valid : ProStatus::Invalid;
+        result.pro_status = verify_result == 0 ? ProStatus::Valid : ProStatus::InvalidUserSig;
 
         // Fill out the resulting proof structure, we have parsed successfully
         result.pro_features = proto_flags;
@@ -460,12 +503,14 @@ DecryptedEnvelope decrypt_envelope(
         if (result.pro_status == ProStatus::Valid) {
             // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It has been
             // authorised by the backend as having a valid backing payment).
-            if (proof.verify(session::pro_backend::PUBKEY))
+            if (proof.verify(pro_backend_pubkey))
                 result.pro_status = ProStatus::Valid;
+            else
+                result.pro_status = ProStatus::InvalidProBackendSig;
 
             // Check if the proof has expired
             if (result.pro_status == ProStatus::Valid) {
-                if (unix_ts >= result.pro_proof.expiry_unix_ts)
+                if (unix_ts > result.pro_proof.expiry_unix_ts)
                     result.pro_status = ProStatus::Expired;
             }
         }
@@ -477,8 +522,8 @@ DecryptedEnvelope decrypt_envelope(
 using namespace session;
 
 LIBSESSION_EXPORT
-PRO_FEATURES session_protocol_get_pro_features_for_msg(const span_u8 msg, PRO_FEATURES flags) {
-    PRO_FEATURES result = get_pro_features_for_msg({msg.data, msg.size}, flags);
+PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags) {
+    PRO_FEATURES result = get_pro_features_for_msg(msg_size, flags);
     return result;
 }
 
@@ -494,16 +539,13 @@ session_protocol_encrypt_for_destination(
                 /*plaintext=*/{plaintext.data, plaintext.size},
                 /*ed25519_privkey=*/{ed25519_privkey.data, ed25519_privkey.size},
                 /*dest_type=*/static_cast<DestinationType>(dest->type),
-                /*dest_pro_sig=*/dest->has_pro_sig ? dest->pro_sig : nullptr,
+                /*dest_pro_sig=*/dest->has_pro_sig ? dest->pro_sig : std::span<const uint8_t>(),
                 /*dest_recipient_pubkey=*/dest->recipient_pubkey,
                 /*dest_sent_timestamp_ms=*/std::chrono::milliseconds(dest->sent_timestamp_ms),
                 /*dest_open_group_inbox_server_pubkey=*/dest->open_group_inbox_server_pubkey,
                 /*dest_closed_group_pubkey=*/dest->closed_group_pubkey,
                 /*dest_closed_group_keys=*/
                 static_cast<const config::groups::Keys*>(dest->closed_group_keys->internals),
-                /*dest_closed_group_swarm_public_key=*/dest->has_closed_group_public_key
-                        ? dest->closed_group_public_key
-                        : nullptr,
                 /*space=*/static_cast<config::Namespace>(space),
                 /*use_malloc=*/UseMalloc::Yes);
 
@@ -520,13 +562,17 @@ session_protocol_encrypt_for_destination(
 
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
-        const span_u8 ed25519_privkey, const span_u8 envelope_plaintext, uint64_t unix_ts) {
+        const span_u8 ed25519_privkey,
+        const span_u8 envelope_plaintext,
+        uint64_t unix_ts,
+        const span_u8 pro_backend_pubkey) {
     session_protocol_decrypted_envelope result = {};
     try {
         DecryptedEnvelope result_cpp = decrypt_envelope(
-                {ed25519_privkey.data, ed25519_privkey.size},
-                {envelope_plaintext.data, envelope_plaintext.size},
-                std::chrono::sys_seconds(std::chrono::seconds(unix_ts)));
+                ed25519_privkey.cpp_span(),
+                envelope_plaintext.cpp_span(),
+                std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
+                {});
 
         // Marshall into c type
         result = {

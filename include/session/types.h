@@ -3,14 +3,30 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#if defined(__cplusplus)
+#include <span>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/// C friendly buffer structure that is a pointer and lenght to a span of bytes.
+/// C friendly buffer structure that is a pointer and length to a span of bytes.
 struct span_u8 {
     uint8_t* data;
     size_t size;
+
+#if defined(__cplusplus)
+    std::span<uint8_t> cpp_span() const { return {data, size}; }
+#endif
+};
+
+struct bytes32 {
+    uint8_t data[32];
+};
+
+struct bytes64 {
+    uint8_t data[64];
 };
 
 /// Create a span of bytes that owns the `size` bytes of memory requested. If allocation fails, this
