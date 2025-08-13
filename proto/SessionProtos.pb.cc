@@ -3296,9 +3296,6 @@ bool Content::IsInitialized() const {
   if (_internal_has_sharedconfigmessage()) {
     if (!_impl_.sharedconfigmessage_->IsInitialized()) return false;
   }
-  if (_internal_has_promessage()) {
-    if (!_impl_.promessage_->IsInitialized()) return false;
-  }
   return true;
 }
 
@@ -10928,9 +10925,6 @@ class ProProof::_Internal {
   static void set_has_sig(HasBits* has_bits) {
     (*has_bits)[0] |= 4u;
   }
-  static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x0000001f) ^ 0x0000001f) != 0;
-  }
 };
 
 ProProof::ProProof(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -11063,7 +11057,7 @@ const char* ProProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // required uint32 version = 1;
+      // optional uint32 version = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
           _Internal::set_has_version(&has_bits);
@@ -11072,7 +11066,7 @@ const char* ProProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
-      // required bytes genIndexHash = 2;
+      // optional bytes genIndexHash = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
           auto str = _internal_mutable_genindexhash();
@@ -11081,7 +11075,7 @@ const char* ProProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
-      // required bytes rotatingPublicKey = 3;
+      // optional bytes rotatingPublicKey = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
           auto str = _internal_mutable_rotatingpublickey();
@@ -11090,7 +11084,7 @@ const char* ProProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
-      // required uint64 expiryUnixTs = 4;
+      // optional uint64 expiryUnixTs = 4;
       case 4:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
           _Internal::set_has_expiryunixts(&has_bits);
@@ -11099,7 +11093,7 @@ const char* ProProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
-      // required bytes sig = 5;
+      // optional bytes sig = 5;
       case 5:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
           auto str = _internal_mutable_sig();
@@ -11139,31 +11133,31 @@ uint8_t* ProProof::_InternalSerialize(
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  // required uint32 version = 1;
+  // optional uint32 version = 1;
   if (cached_has_bits & 0x00000010u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_version(), target);
   }
 
-  // required bytes genIndexHash = 2;
+  // optional bytes genIndexHash = 2;
   if (cached_has_bits & 0x00000001u) {
     target = stream->WriteBytesMaybeAliased(
         2, this->_internal_genindexhash(), target);
   }
 
-  // required bytes rotatingPublicKey = 3;
+  // optional bytes rotatingPublicKey = 3;
   if (cached_has_bits & 0x00000002u) {
     target = stream->WriteBytesMaybeAliased(
         3, this->_internal_rotatingpublickey(), target);
   }
 
-  // required uint64 expiryUnixTs = 4;
+  // optional uint64 expiryUnixTs = 4;
   if (cached_has_bits & 0x00000008u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(4, this->_internal_expiryunixts(), target);
   }
 
-  // required bytes sig = 5;
+  // optional bytes sig = 5;
   if (cached_has_bits & 0x00000004u) {
     target = stream->WriteBytesMaybeAliased(
         5, this->_internal_sig(), target);
@@ -11177,76 +11171,48 @@ uint8_t* ProProof::_InternalSerialize(
   return target;
 }
 
-size_t ProProof::RequiredFieldsByteSizeFallback() const {
-// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.ProProof)
-  size_t total_size = 0;
-
-  if (_internal_has_genindexhash()) {
-    // required bytes genIndexHash = 2;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_genindexhash());
-  }
-
-  if (_internal_has_rotatingpublickey()) {
-    // required bytes rotatingPublicKey = 3;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_rotatingpublickey());
-  }
-
-  if (_internal_has_sig()) {
-    // required bytes sig = 5;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_sig());
-  }
-
-  if (_internal_has_expiryunixts()) {
-    // required uint64 expiryUnixTs = 4;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_expiryunixts());
-  }
-
-  if (_internal_has_version()) {
-    // required uint32 version = 1;
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_version());
-  }
-
-  return total_size;
-}
 size_t ProProof::ByteSizeLong() const {
 // @@protoc_insertion_point(message_byte_size_start:SessionProtos.ProProof)
   size_t total_size = 0;
 
-  if (((_impl_._has_bits_[0] & 0x0000001f) ^ 0x0000001f) == 0) {  // All required fields are present.
-    // required bytes genIndexHash = 2;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_genindexhash());
-
-    // required bytes rotatingPublicKey = 3;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_rotatingpublickey());
-
-    // required bytes sig = 5;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_sig());
-
-    // required uint64 expiryUnixTs = 4;
-    total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_expiryunixts());
-
-    // required uint32 version = 1;
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_version());
-
-  } else {
-    total_size += RequiredFieldsByteSizeFallback();
-  }
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x0000001fu) {
+    // optional bytes genIndexHash = 2;
+    if (cached_has_bits & 0x00000001u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_genindexhash());
+    }
+
+    // optional bytes rotatingPublicKey = 3;
+    if (cached_has_bits & 0x00000002u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_rotatingpublickey());
+    }
+
+    // optional bytes sig = 5;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_sig());
+    }
+
+    // optional uint64 expiryUnixTs = 4;
+    if (cached_has_bits & 0x00000008u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_expiryunixts());
+    }
+
+    // optional uint32 version = 1;
+    if (cached_has_bits & 0x00000010u) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_version());
+    }
+
+  }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -11298,7 +11264,6 @@ void ProProof::CopyFrom(const ProProof& from) {
 }
 
 bool ProProof::IsInitialized() const {
-  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
   return true;
 }
 
@@ -11344,9 +11309,6 @@ class ProMessage::_Internal {
   }
   static void set_has_flags(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
-  }
-  static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000003) ^ 0x00000003) != 0;
   }
 };
 
@@ -11430,7 +11392,7 @@ const char* ProMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ct
     uint32_t tag;
     ptr = ::_pbi::ReadTag(ptr, &tag);
     switch (tag >> 3) {
-      // required .SessionProtos.ProProof proof = 1;
+      // optional .SessionProtos.ProProof proof = 1;
       case 1:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
           ptr = ctx->ParseMessage(_internal_mutable_proof(), ptr);
@@ -11438,7 +11400,7 @@ const char* ProMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ct
         } else
           goto handle_unusual;
         continue;
-      // required uint32 flags = 2;
+      // optional uint32 flags = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
           _Internal::set_has_flags(&has_bits);
@@ -11478,14 +11440,14 @@ uint8_t* ProMessage::_InternalSerialize(
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  // required .SessionProtos.ProProof proof = 1;
+  // optional .SessionProtos.ProProof proof = 1;
   if (cached_has_bits & 0x00000001u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(1, _Internal::proof(this),
         _Internal::proof(this).GetCachedSize(), target, stream);
   }
 
-  // required uint32 flags = 2;
+  // optional uint32 flags = 2;
   if (cached_has_bits & 0x00000002u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_flags(), target);
@@ -11499,44 +11461,29 @@ uint8_t* ProMessage::_InternalSerialize(
   return target;
 }
 
-size_t ProMessage::RequiredFieldsByteSizeFallback() const {
-// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.ProMessage)
-  size_t total_size = 0;
-
-  if (_internal_has_proof()) {
-    // required .SessionProtos.ProProof proof = 1;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-        *_impl_.proof_);
-  }
-
-  if (_internal_has_flags()) {
-    // required uint32 flags = 2;
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
-  }
-
-  return total_size;
-}
 size_t ProMessage::ByteSizeLong() const {
 // @@protoc_insertion_point(message_byte_size_start:SessionProtos.ProMessage)
   size_t total_size = 0;
 
-  if (((_impl_._has_bits_[0] & 0x00000003) ^ 0x00000003) == 0) {  // All required fields are present.
-    // required .SessionProtos.ProProof proof = 1;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-        *_impl_.proof_);
-
-    // required uint32 flags = 2;
-    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
-
-  } else {
-    total_size += RequiredFieldsByteSizeFallback();
-  }
   uint32_t cached_has_bits = 0;
   // Prevent compiler warnings about cached_has_bits being unused
   (void) cached_has_bits;
 
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000003u) {
+    // optional .SessionProtos.ProProof proof = 1;
+    if (cached_has_bits & 0x00000001u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.proof_);
+    }
+
+    // optional uint32 flags = 2;
+    if (cached_has_bits & 0x00000002u) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
+    }
+
+  }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -11580,10 +11527,6 @@ void ProMessage::CopyFrom(const ProMessage& from) {
 }
 
 bool ProMessage::IsInitialized() const {
-  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
-  if (_internal_has_proof()) {
-    if (!_impl_.proof_->IsInitialized()) return false;
-  }
   return true;
 }
 
