@@ -565,6 +565,7 @@ ConfigMessage::ConfigMessage(
         verify_callable verifier_,
         sign_callable signer_,
         int lag,
+        std::function<bool(dict&, const oxenc::bt_dict&, const dict&)> custom_conflict_resolver,
         std::function<void(size_t, const config_error&)> error_handler) :
         verifier{std::move(verifier_)}, signer{std::move(signer_)}, lag{lag} {
 
@@ -678,7 +679,10 @@ ConfigMessage::ConfigMessage(
     // ones
     for (const auto& [seqno_hash, ptrs] : replay) {
         const auto& [data, diff] = ptrs;
-        apply_diff(data_, *diff, *data);
+
+        if (!custom_conflict_resolver(data_, *diff, *data))
+            apply_diff(data_, *diff, *data);
+        
         lagged_diffs_.emplace_hint(lagged_diffs_.end(), seqno_hash, *diff);
     }
 
@@ -694,12 +698,14 @@ MutableConfigMessage::MutableConfigMessage(
         verify_callable verifier,
         sign_callable signer,
         int lag,
+        std::function<bool(dict&, const oxenc::bt_dict&, const dict&)> custom_conflict_resolver,
         std::function<void(size_t, const config_error&)> error_handler) :
         ConfigMessage{
                 serialized_confs,
                 std::move(verifier),
                 std::move(signer),
                 lag,
+                std::move(custom_conflict_resolver),
                 std::move(error_handler)} {
     if (!merged())
         increment_impl();
@@ -715,6 +721,7 @@ MutableConfigMessage::MutableConfigMessage(
                 std::move(verifier),
                 std::move(signer),
                 lag,
+                [](dict&, const oxenc::bt_dict&, const dict&) { return false; },
                 [](size_t, const config_error& e) { throw e; }} {}
 
 const oxenc::bt_dict& ConfigMessage::diff() {

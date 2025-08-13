@@ -24,6 +24,8 @@ using namespace std::literals;
 /// M - set to 1 if blinded message request retrieval is enabled, 0 if retrieval is *disabled*, and
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
+/// t - The unix timestamp (seconds) that the user last explicitly updated their public profile
+///     information.
 
 class UserProfile : public ConfigBase {
 
@@ -70,6 +72,23 @@ class UserProfile : public ConfigBase {
     /// Outputs:
     /// - `const char*` - Will return "UserProfile"
     const char* encryption_domain() const override { return "UserProfile"; }
+
+    /// API: user_profile/UserProfile::resolve_conflicts
+    ///
+    /// The UserProfile config stores a timestamp indicating when the user explicitly updated their
+    /// profile information but there are other situations where the profile information can be
+    /// "automatically" updated by the clients (eg. re-uploading a display picture).  If these
+    /// actions happen on two devices at the same time it can result in a conflict, in which case we
+    /// want the "explicit" update to to win the conflict resolution.
+    ///
+    /// Inputs:
+    /// - `data` -- The config data to be updated to the resolved state.
+    /// - `diff` -- The diffs from the conflicting config update.
+    /// - `source` -- The config data that the diffs conflicted with.
+    ///
+    /// Outputs:
+    /// - `Bool` -- Returns true if the conflicts were resolved
+    bool resolve_conflicts(dict& data, const oxenc::bt_dict& diff, const dict& source) override;
 
     /// API: user_profile/UserProfile::get_name
     ///
@@ -198,6 +217,29 @@ class UserProfile : public ConfigBase {
     ///   not, and `std::nullopt` to drop the setting from the config (and thus use the client's
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
+
+    /// API: user_profile/UserProfile::get_public_profile_updated
+    ///
+    /// returns the timestamp that the user last updated their public profile information; or `0` if
+    /// it's never been updated.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::sys_seconds` - timestamp that the user last updated their public profile
+    /// information.  Will be `0` if it's never been updated.
+    std::chrono::sys_seconds get_public_profile_updated() const;
+
+    /// API: user_profile/UserProfile::set_public_profile_updated
+    ///
+    /// Sets the timestamp that the user last updated their public profile information (should be
+    /// updated by the clients when modifying public profile information via a user action, eg:
+    /// `name`, `profile_pic`, `set_blinded_msgreqs`) but not when an "automated" change occurs (eg.
+    /// re-uploading the display picture due to expiration).
+    ///
+    /// Inputs:
+    /// - `updated` -- timestamp that the user last updated their public profile information.
+    void set_public_profile_updated(std::chrono::sys_seconds updated);
 
     bool accepts_protobuf() const override { return true; }
 };

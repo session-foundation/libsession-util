@@ -83,6 +83,32 @@ std::optional<bool> UserProfile::get_blinded_msgreqs() const {
     return std::nullopt;
 }
 
+std::chrono::sys_seconds UserProfile::get_public_profile_updated() const {
+    if (auto* t = data["t"].integer(); t)
+        return std::chrono::sys_seconds{std::chrono::seconds{*t}};
+    return std::chrono::sys_seconds{};
+}
+
+void UserProfile::set_public_profile_updated(std::chrono::sys_seconds updated) {
+    if (updated.time_since_epoch().count() == 0)
+        data["t"].erase();
+    else
+        data["t"] = static_cast<int>(updated.time_since_epoch().count());
+}
+
+bool UserProfile::resolve_conflicts(dict& data, const oxenc::bt_dict& diff, const dict& source) {
+    auto diff_it = diff.find("t");
+    auto source_it = source.find("t");
+
+    if (diff_it == diff.end() || source_it == source.end())
+        return false;
+
+    // TODO: Check which has the higher timestamp value and use those settings
+    // What if non-public values have also changed in the diff?
+
+    return false;
+};
+
 extern "C" {
 
 using namespace session;
