@@ -110,7 +110,7 @@ void UserProfile::resolve_conflicts(dict& data, oxenc::bt_dict& diff, const dict
     // "automatically" updated by the clients (eg. re-uploading a display picture).  This hook
     // pre-processes a conflict between these public profile values and removes any keys from the
     // diff that should be ignored.
-    static const std::set<std::string> relevant_keys = {"n", "p", "q", "t", "V"};
+    static const std::set<std::string> relevant_keys = {"n", "p", "q", "M", "t", "V"};
 
     // No need to do anything if none of the relevant keys were modified
     bool has_public_keys = false;
