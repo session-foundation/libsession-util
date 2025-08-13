@@ -24,7 +24,7 @@ enum {
 typedef uint64_t PRO_EXTRA_FEATURES;
 enum PRO_EXTRA_FEATURES_ {
     PRO_EXTRA_FEATURES_NIL = 0,
-    PRO_EXTRA_FEATURES_PRO_BADGE = 0 << 1,
+    PRO_EXTRA_FEATURES_PRO_BADGE = 1 << 0,
     PRO_EXTRA_FEATURES_ANIMATED_AVATAR = 1 << 1,
 };
 
@@ -40,7 +40,8 @@ enum PRO_FEATURES_ {
 
 enum PRO_STATUS {
     PRO_STATUS_NIL,
-    PRO_STATUS_INVALID,
+    PRO_STATUS_INVALID_PRO_BACKEND_SIG,
+    PRO_STATUS_INVALID_USER_SIG,
     PRO_STATUS_VALID,
     PRO_STATUS_EXPIRED,
 };
@@ -60,16 +61,11 @@ struct session_protocol_destination {
     // into account the signature or otherwise the signature is ignored.
     bool has_pro_sig;
     uint8_t pro_sig[64];
-    uint8_t recipient_pubkey[32];
+    uint8_t recipient_pubkey[33];
     uint64_t sent_timestamp_ms;
     uint8_t open_group_inbox_server_pubkey[32];
     uint8_t closed_group_pubkey[33];
     const config_group_keys* closed_group_keys;
-
-    // The closed group swarm public key is optional but should be set for a non 0x03 prefix
-    // `closed_group_pubkey`. Otherwise the public key is ignored when encrypting for a destination.
-    bool has_closed_group_public_key;
-    uint8_t closed_group_public_key[33];
 };
 
 enum ENVELOPE_TYPE {
@@ -129,7 +125,7 @@ struct session_protocol_encrypted_for_destination {
 /// - Session Pro feature flags suitable for writing directly into the protobuf `ProMessage` in
 ///   `Content`
 LIBSESSION_EXPORT
-PRO_FEATURES session_protocol_get_pro_features_for_msg(const span_u8 msg, PRO_FEATURES flags);
+PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination
 ///
@@ -152,6 +148,9 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(const span_u8 msg, PRO_FE
 /// - The encryption result for the plaintext. If the destination and namespace combination did not
 ///   require encryption, no payload is returned in the ciphertext and the user should proceed with
 ///   the plaintext. This should be validated by checking the `encrypted` flag on the result.
+///
+///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
+///   encoded/wrapped if necessary).
 ///
 ///   The success flag is set if encryption was successful, if the underlying implementation threw
 ///   an exception then this is set to false.
@@ -176,8 +175,11 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 /// - `envelope_plaintext` -- the protobuf serialised payload containing the message envelope. The
 ///   envelope must already be decrypted if it was originally encrypted (i.e.: closed group
 ///   envelopes).
-/// - `unix_ts` -- pass in the current system time which is used to determine, if present in the
-///   envelope, whether or not the Session Pro proof has expired or not.
+/// - `unix_ts` -- pass in the current system time which is used to determine, whether or not the
+///   Session Pro proof has expired or not if it is in the payload. Ignored otherwise
+/// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
+///   the proof, validating whether or not the attached proof was indeed issued by an authorised
+///   issuer
 ///
 /// Outputs:
 /// - The decrypted envelope. It contains the fields of the envelope and the Session Pro metadata
@@ -187,7 +189,10 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 ///   an exception then this is set to false.
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
-        const span_u8 ed25519_privkey, const span_u8 envelope_plaintext, uint64_t unix_ts);
+        const span_u8 ed25519_privkey,
+        const span_u8 envelope_plaintext,
+        uint64_t unix_ts,
+        const span_u8 pro_backend_pubkey);
 
 #ifdef __cplusplus
 }
