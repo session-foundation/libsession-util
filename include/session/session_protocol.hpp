@@ -6,8 +6,8 @@
 #include <session/types.hpp>
 #include <span>
 
-/// A complimentary file to session encrypt which has the low level encryption function for Session
-/// protocol types. This file contains high-level helper functions for decoding payloads on the
+/// A complimentary file to session encrypt (which has the low level encryption function for Session
+/// protocol types). This file contains high-level helper functions for decoding payloads on the
 /// Session protocol. Prefer functions here before resorting to the lower-level cryptography.
 
 // NOTE: In the CPP file we use C-style enums for bitfields and CPP-style enums for non-bitfield
@@ -116,6 +116,8 @@ struct DecryptedEnvelope {
     // was available.
     array_uc32 sender_ed25519_pubkey;
 
+    // The x25519 pubkey, always populated on successful parse. Either it's present from decrypting
+    // a Groups v2 envelope or it's re-derived from the Ed25519 pubkey.
     array_uc32 sender_x25519_pubkey;
 
     // Status flag for validity of the Session Pro proof embedded in the envelope if it has one.
@@ -167,15 +169,15 @@ struct EncryptedForDestination
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `msg` -- the conversation message to determine if the message is requires access to the 10k
-///   character limit available in Session Pro
+/// - `msg_size` -- the size of the message in bytes to determine if the message requires access to
+///   the higher character limit available in Session Pro
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
 ///
 /// Outputs:
 /// - Session Pro feature flags suitable for writing directly into the protobuf `ProMessage` in
 ///   `Content`
-PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags);
+PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/encrypt_for_destination
 ///
@@ -195,7 +197,7 @@ PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags);
 /// This function throws if the API is misused (i.e.: A field was not set, but was required to be
 /// set for the given destination and namespace. For example the closed group keys not being set
 /// when sending to a group prefixed [0x3] key in a closed group into the group message namespace)
-/// but otherwise always returns a struct with values.
+/// but otherwise returns a struct with values.
 ///
 /// Inputs:
 /// - `plaintext` -- the protobuf serialised payload containing the protobuf encoded stream,
@@ -209,7 +211,8 @@ PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags);
 /// Outputs:
 /// - The encryption result for the plaintext. If the destination and namespace combination did not
 ///   require encryption, no payload is returned in the ciphertext and the user should proceed with
-///   the plaintext. This should be validated by checking the `encrypted` flag on the result.
+///   the plaintext. This should be validated by checking the `encrypted` flag on the result to
+///   determine if the ciphertext or plaintext is to be used.
 ///
 ///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
 ///   encoded/wrapped if necessary).

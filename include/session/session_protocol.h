@@ -112,6 +112,7 @@ struct session_protocol_decrypted_envelope {
     session_protocol_envelope envelope;
     span_u8 content_plaintext;
     uint8_t sender_ed25519_pubkey[32];
+    uint8_t sender_x25519_pubkey[32];
     PRO_STATUS pro_status;
     pro_proof pro_proof;
     PRO_FEATURES pro_features;
@@ -130,8 +131,8 @@ struct session_protocol_encrypted_for_destination {
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `msg` -- the conversation message to determine if the message is requires access to the 10k
-///   character limit available in Session Pro
+/// - `msg_size` -- the size of the message in bytes to determine if the message requires access to
+///   the higher character limit available in Session Pro
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
 ///
@@ -139,7 +140,7 @@ struct session_protocol_encrypted_for_destination {
 /// - Session Pro feature flags suitable for writing directly into the protobuf `ProMessage` in
 ///   `Content`
 LIBSESSION_EXPORT
-PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags);
+PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination
 ///
@@ -161,7 +162,8 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEAT
 /// Outputs:
 /// - The encryption result for the plaintext. If the destination and namespace combination did not
 ///   require encryption, no payload is returned in the ciphertext and the user should proceed with
-///   the plaintext. This should be validated by checking the `encrypted` flag on the result.
+///   the plaintext. This should be validated by checking the `encrypted` flag on the result to
+///   determine if the ciphertext or plaintext is to be used.
 ///
 ///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
 ///   encoded/wrapped if necessary).
@@ -205,7 +207,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 ///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
 ///   the proof, validating whether or not the attached proof was indeed issued by an authorised
-///   issuer
+///   issuer. Ignored if there's no proof in the message.
 ///
 /// Outputs:
 /// - The decrypted envelope. It contains the fields of the envelope and the Session Pro metadata

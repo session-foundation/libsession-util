@@ -303,15 +303,6 @@ EncryptedForDestination encrypt_for_destination(
     return result;
 }
 
-struct DecryptedEnvelopeInternal {
-    Envelope envelope;
-    std::vector<uint8_t> content_plaintext;
-    std::vector<uint8_t> sender_ed25519_pubkey;
-    ProStatus pro_status;
-    config::ProProof pro_proof;
-    PRO_FEATURES pro_features;
-};
-
 DecryptedEnvelope decrypt_envelope(
         const DecryptEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
@@ -437,7 +428,7 @@ DecryptedEnvelope decrypt_envelope(
     // be set but will be ignored. So in all instances a signature must be attached (real or
     // dummy).
     if (!envelope.has_prosig())
-        throw std::runtime_error("Parse envelope failed, pro message is missing signature");
+        throw std::runtime_error("Parse envelope failed, message is missing pro signature");
 
     // Copy (maybe dummy) pro signature into our result struct
     const std::string& pro_sig = envelope.prosig();
@@ -496,11 +487,9 @@ DecryptedEnvelope decrypt_envelope(
         std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
         if (result.pro_status == ProStatus::Valid) {
-            // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It has been
-            // authorised by the backend as having a valid backing payment).
-            if (proof.verify(pro_backend_pubkey))
-                result.pro_status = ProStatus::Valid;
-            else
+            // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
+            // issued by an authoritative backend)
+            if (!proof.verify(pro_backend_pubkey))
                 result.pro_status = ProStatus::InvalidProBackendSig;
 
             // Check if the proof has expired
@@ -517,7 +506,7 @@ DecryptedEnvelope decrypt_envelope(
 using namespace session;
 
 LIBSESSION_EXPORT
-PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEATURES flags) {
+PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags) {
     PRO_FEATURES result = get_pro_features_for_msg(msg_size, flags);
     return result;
 }
@@ -604,8 +593,10 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
                                 .server_timestamp = result_cpp.envelope.server_timestamp,
                                 .pro_sig = {},
                         },
-                .content_plaintext = {},
+                .content_plaintext = span_u8_copy_or_throw(
+                        result_cpp.content_plaintext.data(), result_cpp.content_plaintext.size()),
                 .sender_ed25519_pubkey = {},
+                .sender_x25519_pubkey = {},
                 .pro_status = static_cast<PRO_STATUS>(result_cpp.pro_status),
                 .pro_proof =
                         {
@@ -628,12 +619,14 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
                 result_cpp.envelope.pro_sig.data(),
                 sizeof(result.envelope.pro_sig));
 
-        result.content_plaintext = span_u8_copy_or_throw(
-                result_cpp.content_plaintext.data(), result_cpp.content_plaintext.size());
         std::memcpy(
                 result.sender_ed25519_pubkey,
                 result_cpp.sender_ed25519_pubkey.data(),
                 sizeof(result.sender_ed25519_pubkey));
+        std::memcpy(
+                result.sender_x25519_pubkey,
+                result_cpp.sender_x25519_pubkey.data(),
+                sizeof(result.sender_x25519_pubkey));
 
         std::memcpy(
                 result.pro_proof.gen_index_hash,
