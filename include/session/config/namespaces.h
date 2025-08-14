@@ -29,7 +29,6 @@ typedef enum NAMESPACE {
     NAMESPACE_LOCAL = 9999,
 } NAMESPACE;
 
-
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -5,8 +5,8 @@ extern "C" {
 #endif
 
 #include "base.h"
-#include "profile_pic.h"
 #include "pro.h"
+#include "profile_pic.h"
 
 /// API: user_profile/user_profile_init
 ///
@@ -300,7 +300,7 @@ LIBSESSION_EXPORT int64_t user_profile_get_profile_updated(config_object* conf);
 /// Outputs:
 /// - `bool` -- True if the user profile had Pro data associated with it. Otherwise false and the
 ///   pro structure will remain untouched.
-LIBSESSION_EXPORT bool user_profile_get_pro_config(const config_object* conf, pro_pro_config *pro);
+LIBSESSION_EXPORT bool user_profile_get_pro_config(const config_object* conf, pro_pro_config* pro);
 
 /// API: user_profile/user_profile_set_pro_config
 ///
@@ -320,7 +320,7 @@ LIBSESSION_EXPORT bool user_profile_get_pro_config(const config_object* conf, pr
 ///
 /// Outputs:
 /// - `void` -- Returns nothing
-LIBSESSION_EXPORT void user_profile_set_pro_config(config_object* conf, const pro_pro_config *pro);
+LIBSESSION_EXPORT void user_profile_set_pro_config(config_object* conf, const pro_pro_config* pro);
 
 #ifdef __cplusplus
 }  // extern "C"

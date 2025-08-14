@@ -134,8 +134,7 @@ struct DecryptedEnvelope {
     PRO_FEATURES pro_features;
 };
 
-struct DecryptEnvelopeKey
-{
+struct DecryptEnvelopeKey {
     // Indicate to the envelope decrypting function that it should use the group keys to decrypt the
     // envelope (e.g.: for groups v2 envelopes where the envelope is encrypted and the body
     // unencrypted). The `group_keys` must be set if this flag is true. The recipient ed25519
@@ -152,8 +151,7 @@ struct DecryptEnvelopeKey
     std::span<const uint8_t> recipient_ed25519_privkey;
 };
 
-struct EncryptedForDestination
-{
+struct EncryptedForDestination {
     // Indicates if the ciphertext was encrypted or not. This can be false if the message sent to
     // the destination and namespace does not require encryption. In this case `ciphertext` is not
     // set and the user should proceed with the original plaintext.

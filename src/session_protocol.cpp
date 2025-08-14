@@ -189,7 +189,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             if (dest_pro_sig.empty()) {
                 // If there's no pro signature specified, we still fill out the pro signature with a
                 // dummy 64 byte stream. This is to make pro and non-pro messages indistinguishable.
-                std::string *pro_sig = envelope.mutable_prosig();
+                std::string* pro_sig = envelope.mutable_prosig();
                 pro_sig->resize(sizeof(array_uc64));
                 randombytes_buf(pro_sig->data(), pro_sig->size());
             } else {
@@ -209,7 +209,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                             WebSocketProtos::WebSocketMessage_Type::WebSocketMessage_Type_REQUEST);
 
                     // Make request
-                    WebSocketProtos::WebSocketRequestMessage *req_msg = msg.mutable_request();
+                    WebSocketProtos::WebSocketRequestMessage* req_msg = msg.mutable_request();
                     req_msg->set_body(envelope.SerializeAsString());
 
                     // Write message as ciphertext
@@ -332,7 +332,7 @@ DecryptedEnvelope decrypt_envelope(
                     sender_x25519_pubkey.size())};
 
         // Update the plaintext to use the decrypted envelope
-        envelope_plaintext = envelope_plaintext_from_group_keys; // Update the plaintext
+        envelope_plaintext = envelope_plaintext_from_group_keys;  // Update the plaintext
 
         // Copy keys out
         std::memcpy(
@@ -364,10 +364,8 @@ DecryptedEnvelope decrypt_envelope(
         // the source is a Session public key (see: encrypt_for_destination)
         const std::string& source = envelope.source();
         if (source.size() != result.envelope.source.max_size())
-            throw std::runtime_error(
-                    fmt::format(
-                            "Parse envelope failed, source had unexpected size ({} bytes)",
-                            source.size()));
+            throw std::runtime_error(fmt::format(
+                    "Parse envelope failed, source had unexpected size ({} bytes)", source.size()));
         std::memcpy(result.envelope.source.data(), source.data(), source.size());
         result.envelope.flags |= ENVELOPE_FLAGS_SOURCE;
     }
@@ -411,7 +409,10 @@ DecryptedEnvelope decrypt_envelope(
                     "key.");
     } else {
         result.content_plaintext.resize(envelope.content().size());
-        std::memcpy(result.content_plaintext.data(), envelope.content().data(), envelope.content().size());
+        std::memcpy(
+                result.content_plaintext.data(),
+                envelope.content().data(),
+                envelope.content().size());
     }
 
     // TODO: We parse the content in libsession to extract pro metadata but we return the unparsed
@@ -421,7 +422,8 @@ DecryptedEnvelope decrypt_envelope(
     // interface.
     SessionProtos::Content content = {};
     if (!content.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
-        throw std::runtime_error{fmt::format("Parse content from envelope failed: {}", result.content_plaintext.size())};
+        throw std::runtime_error{fmt::format(
+                "Parse content from envelope failed: {}", result.content_plaintext.size())};
 
     // A signature must always be present on the envelope. This is to make a pro and non-pro
     // envelope indistinguishable. If the message does not have pro then this signature must still
@@ -513,9 +515,9 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTR
 
 LIBSESSION_EXPORT session_protocol_encrypted_for_destination
 session_protocol_encrypt_for_destination(
-        const void *plaintext,
+        const void* plaintext,
         size_t plaintext_len,
-        const void *ed25519_privkey,
+        const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
         NAMESPACE space) {

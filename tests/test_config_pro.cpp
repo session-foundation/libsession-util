@@ -80,7 +80,7 @@ TEST_CASE("Pro", "[config][pro]") {
     {
         session::config::dict bad_dict = good_dict;
         std::array<uint8_t, 64> broken_sig = pro.proof.sig;
-        broken_sig[0] = ~broken_sig[0]; // Break the sig
+        broken_sig[0] = ~broken_sig[0];  // Break the sig
 
         // clang-format off
         const session::config::ProProof& proof = pro.proof;
