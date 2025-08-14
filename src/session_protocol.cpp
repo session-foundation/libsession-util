@@ -524,15 +524,18 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEAT
 
 LIBSESSION_EXPORT session_protocol_encrypted_for_destination
 session_protocol_encrypt_for_destination(
-        const span_u8 plaintext,
-        const span_u8 ed25519_privkey,
+        const void *plaintext,
+        size_t plaintext_len,
+        const void *ed25519_privkey,
+        size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
         NAMESPACE space) {
     session_protocol_encrypted_for_destination result = {};
     try {
         EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
-                /*plaintext=*/{plaintext.data, plaintext.size},
-                /*ed25519_privkey=*/{ed25519_privkey.data, ed25519_privkey.size},
+                /*plaintext=*/{static_cast<const uint8_t*>(plaintext), plaintext_len},
+                /*ed25519_privkey=*/
+                {static_cast<const uint8_t*>(ed25519_privkey), ed25519_privkey_len},
                 /*dest_type=*/static_cast<DestinationType>(dest->type),
                 /*dest_pro_sig=*/dest->has_pro_sig ? dest->pro_sig : std::span<const uint8_t>(),
                 /*dest_recipient_pubkey=*/dest->recipient_pubkey,
@@ -558,12 +561,21 @@ session_protocol_encrypt_for_destination(
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const session_protocol_decrypt_envelope_keys* keys,
-        const span_u8 envelope_plaintext,
+        const void* envelope_plaintext,
+        size_t envelope_plaintext_len,
         uint64_t unix_ts,
-        const span_u8 pro_backend_pubkey) {
+        const void* pro_backend_pubkey,
+        size_t pro_backend_pubkey_len) {
     session_protocol_decrypted_envelope result = {};
-    try {
 
+    // Setup the pro backend pubkey
+    array_uc32 pro_backend_pubkey_cpp = {};
+    if (pro_backend_pubkey_len != sizeof(pro_backend_pubkey_cpp))
+        return result;
+    std::memcpy(pro_backend_pubkey_cpp.data(), pro_backend_pubkey, pro_backend_pubkey_len);
+
+    try {
+        // Setup decryption keys and decrypt
         DecryptEnvelopeKey keys_cpp = {
                 .use_group_keys = keys->use_group_keys,
                 .group_keys =
@@ -572,9 +584,9 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
 
         DecryptedEnvelope result_cpp = decrypt_envelope(
                 keys_cpp,
-                envelope_plaintext.cpp_span(),
+                {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
                 std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
-                {});
+                pro_backend_pubkey_cpp);
 
         // Marshall into c type
         result = {

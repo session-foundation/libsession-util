@@ -173,8 +173,10 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEAT
 ///   an exception then this is caught internally and success is set to false.
 LIBSESSION_EXPORT
 session_protocol_encrypted_for_destination session_protocol_encrypt_for_destination(
-        const span_u8 plaintext,
+        const void *plaintext,
+        size_t plaintext_len,
         const span_u8 ed25519_privkey,
+        size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
         NAMESPACE space);
 
@@ -217,9 +219,11 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const session_protocol_decrypt_envelope_keys* keys,
-        const span_u8 envelope_payload,
+        const void* envelope_plaintext,
+        size_t envelope_plaintext_len,
         uint64_t unix_ts,
-        const span_u8 pro_backend_pubkey);
+        const void* pro_backend_pubkey,
+        size_t pro_backend_pubkey_len);
 
 #ifdef __cplusplus
 }
