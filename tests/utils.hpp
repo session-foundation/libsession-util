@@ -2,6 +2,7 @@
 
 #include <fmt/format.h>
 #include <oxenc/hex.h>
+#include <sodium/crypto_sign_ed25519.h>
 
 #include <chrono>
 #include <cstddef>
@@ -12,9 +13,8 @@
 #include <string_view>
 #include <vector>
 
-#include "session/util.hpp"
 #include "session/types.hpp"
-#include <sodium/crypto_sign_ed25519.h>
+#include "session/util.hpp"
 
 using namespace std::literals;
 using namespace oxenc::literals;

@@ -11,7 +11,9 @@ namespace session::pro_backend {
 
 static_assert(PUBKEY.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
 master_rotating_sigs build_get_proof_sigs(
-        const array_uc64& master_privkey, const array_uc64& rotating_privkey, std::chrono::seconds unix_ts) {
+        const array_uc64& master_privkey,
+        const array_uc64& rotating_privkey,
+        std::chrono::seconds unix_ts) {
     // Derive the public keys
     array_uc32 master_pubkey;
     array_uc32 rotating_pubkey;
@@ -27,13 +29,24 @@ master_rotating_sigs build_get_proof_sigs(
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
     crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
-    crypto_generichash_blake2b_update(&state, reinterpret_cast<uint8_t *>(&unix_ts_s), sizeof(unix_ts_s));
+    crypto_generichash_blake2b_update(
+            &state, reinterpret_cast<uint8_t*>(&unix_ts_s), sizeof(unix_ts_s));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash with both keys
     master_rotating_sigs result = {};
-    crypto_sign_ed25519_detached(result.master_sig.data(), nullptr, hash_to_sign.data(), hash_to_sign.size(), master_privkey.data());
-    crypto_sign_ed25519_detached(result.rotating_sig.data(), nullptr, hash_to_sign.data(), hash_to_sign.size(), rotating_privkey.data());
+    crypto_sign_ed25519_detached(
+            result.master_sig.data(),
+            nullptr,
+            hash_to_sign.data(),
+            hash_to_sign.size(),
+            master_privkey.data());
+    crypto_sign_ed25519_detached(
+            result.rotating_sig.data(),
+            nullptr,
+            hash_to_sign.data(),
+            hash_to_sign.size(),
+            rotating_privkey.data());
     return result;
 }
 
@@ -61,8 +74,18 @@ master_rotating_sigs build_add_payment_sigs(
 
     // Sign the hash with both keys
     master_rotating_sigs result = {};
-    crypto_sign_ed25519_detached(result.master_sig.data(), nullptr, hash_to_sign.data(), hash_to_sign.size(), master_privkey.data());
-    crypto_sign_ed25519_detached(result.rotating_sig.data(), nullptr, hash_to_sign.data(), hash_to_sign.size(), rotating_privkey.data());
+    crypto_sign_ed25519_detached(
+            result.master_sig.data(),
+            nullptr,
+            hash_to_sign.data(),
+            hash_to_sign.size(),
+            master_privkey.data());
+    crypto_sign_ed25519_detached(
+            result.rotating_sig.data(),
+            nullptr,
+            hash_to_sign.data(),
+            hash_to_sign.size(),
+            rotating_privkey.data());
     return result;
 }
 
@@ -105,4 +128,4 @@ std::string add_payment_request::to_json() const {
             oxenc::to_hex(rotating_sig));
     return result;
 }
-} // namespace session::pro
+}  // namespace session::pro_backend

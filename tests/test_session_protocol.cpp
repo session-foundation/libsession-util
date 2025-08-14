@@ -2,17 +2,17 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <session/blinding.hpp>
+#include <session/config/groups/info.hpp>
+#include <session/config/groups/keys.hpp>
+#include <session/config/groups/members.hpp>
 #include <session/config/pro.hpp>
 #include <session/pro_backend.hpp>
 #include <session/random.hpp>
 #include <session/session_encrypt.hpp>
-#include <session/config/groups/keys.hpp>
-#include <session/config/groups/info.hpp>
-#include <session/config/groups/members.hpp>
 #include <session/session_protocol.hpp>
 
-#include "WebSocketResources.pb.h"
 #include "SessionProtos.pb.h"
+#include "WebSocketResources.pb.h"
 #include "utils.hpp"
 
 using namespace session;
@@ -349,7 +349,8 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         REQUIRE(data.body() == large_message);
     }
 
-    SECTION("Encrypt/decrypt for legacy groups (w/ encrypted envelope, plaintext content) with Pro") {
+    SECTION("Encrypt/decrypt for legacy groups (w/ encrypted envelope, plaintext content) with "
+            "Pro") {
         // Encrypt
         EncryptedForDestination encrypt_result = {};
         {
@@ -367,7 +368,8 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
 
         // Legacy groups wrap in websocket message
         WebSocketProtos::WebSocketMessage ws_msg;
-        REQUIRE(ws_msg.ParseFromArray(encrypt_result.ciphertext.data(), encrypt_result.ciphertext.size()));
+        REQUIRE(ws_msg.ParseFromArray(
+                encrypt_result.ciphertext.data(), encrypt_result.ciphertext.size()));
         REQUIRE(ws_msg.has_request());
         REQUIRE(ws_msg.request().has_body());
 
@@ -487,12 +489,11 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         DecryptEnvelopeKey bad_decrypt_keys = {};
         bad_decrypt_keys.use_group_keys = false;
         bad_decrypt_keys.recipient_ed25519_privkey = keys.ed_sk0;
-        CHECK_THROWS(
-                session::decrypt_envelope(
-                        bad_decrypt_keys,
-                        encrypt_result.ciphertext,
-                        protobuf_content_with_pro.proof.expiry_unix_ts,
-                        pro_backend_ed_pk));
+        CHECK_THROWS(session::decrypt_envelope(
+                bad_decrypt_keys,
+                encrypt_result.ciphertext,
+                protobuf_content_with_pro.proof.expiry_unix_ts,
+                pro_backend_ed_pk));
 
         // Try decrypt with a bad backend key
         array_uc32 bad_pro_backend_ed_pk = pro_backend_ed_pk;

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <cstdint>
 #include <array>
+#include <cstdint>
 
 namespace session {
 using array_uc32 = std::array<std::uint8_t, 32>;

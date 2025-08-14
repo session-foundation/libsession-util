@@ -49,4 +49,4 @@ master_rotating_sigs build_add_payment_sigs(
         const array_uc32& payment_token_hash,
         std::chrono::seconds unix_ts);
 
-}  // namespace session::pro
+}  // namespace session::pro_backend
