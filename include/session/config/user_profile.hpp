@@ -8,7 +8,6 @@
 #include "namespaces.hpp"
 #include "pro.hpp"
 #include "profile_pic.hpp"
-#include "pro.hpp"
 
 namespace session::config {
 

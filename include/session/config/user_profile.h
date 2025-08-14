@@ -7,7 +7,6 @@ extern "C" {
 #include "base.h"
 #include "pro.h"
 #include "profile_pic.h"
-#include "pro.h"
 
 /// API: user_profile/user_profile_init
 ///
