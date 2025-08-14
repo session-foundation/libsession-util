@@ -56,7 +56,7 @@ TEST_CASE("Pro", "[config][pro]") {
         good_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
             {"p", session::config::dict{
-                /*version*/         {"v", 0},
+                /*version*/         {"@", 0},
                 /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
                 /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
@@ -87,7 +87,7 @@ TEST_CASE("Pro", "[config][pro]") {
         bad_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
             {"p", session::config::dict{
-                /*version*/         {"v", 0},
+                /*version*/         {"@", 0},
                 /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
                 /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
