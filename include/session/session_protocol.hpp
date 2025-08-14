@@ -48,12 +48,10 @@ enum class ProStatus {
 enum class DestinationType {
     Contact,
     SyncMessage,
-
     /// Both legacy and non-legacy closed groups are to be identified as `ClosedGroup`. A non-legacy
     /// group is detected by the (0x03) prefix byte on the given `dest_closed_group_pubkey`
     /// specified in Destination.
     ClosedGroup,
-
     OpenGroup,
     OpenGroupInbox,
 };
@@ -95,14 +93,14 @@ struct Envelope {
     EnvelopeType type;
     std::chrono::milliseconds timestamp;
 
-    /// Optional fields. These fields are set if the appropriate flag has been set in `flags`
-    /// otherwise the corresponding values are to be ignored and those fields will be
-    /// zero-initialised.
+    // Optional fields. These fields are set if the appropriate flag has been set in `flags`
+    // otherwise the corresponding values are to be ignored and those fields will be
+    // zero-initialised.
     array_uc33 source;
     uint32_t source_device;
     uint64_t server_timestamp;
 
-    /// Signature by the sending client's rotating key
+    // Signature by the sending client's rotating key
     array_uc64 pro_sig;
 };
 
