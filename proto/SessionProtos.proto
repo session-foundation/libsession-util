@@ -338,6 +338,6 @@ message ProProof {
 }
 
 message ProMessage {
-  optional ProProof proof = 1;
-  optional uint32   flags = 2;
+  optional ProProof proof    = 1;
+  optional uint64   features = 2;
 }

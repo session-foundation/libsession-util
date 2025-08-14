@@ -91,6 +91,23 @@ struct session_protocol_envelope {
     uint8_t pro_sig[64];
 };
 
+struct session_protocol_decrypt_envelope_keys {
+    // Indicate to the envelope decrypting function that it should use the group keys to decrypt the
+    // envelope (e.g.: for groups v2 envelopes where the envelope is encrypted and the body
+    // unencrypted). The `group_keys` must be set if this flag is true. The recipient ed25519
+    // private key field is ignored if this flag is set.
+    bool use_group_keys;
+
+    // Keys to use to decrypt the envelope.
+    const config_group_keys* group_keys;
+
+    // The libsodium-style secret key of the sender, 64 bytes. Can also be passed as a 32-byte seed.
+    // Used to decrypt the encrypted content. This field is used if `use_group_keys` is false in
+    // which case the group keys are ignored. This is for envelopes where the envelope itself is
+    // unencrypted and the contents is encrypted for this secret key.
+    std::span<const uint8_t> recipient_ed25519_privkey;
+};
+
 struct session_protocol_decrypted_envelope {
     // Indicates if the decryption was successful. If the decryption step failed and threw an
     // exception, this is false.
@@ -153,7 +170,7 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEAT
 ///   encoded/wrapped if necessary).
 ///
 ///   The success flag is set if encryption was successful, if the underlying implementation threw
-///   an exception then this is set to false.
+///   an exception then this is caught internally and success is set to false.
 LIBSESSION_EXPORT
 session_protocol_encrypted_for_destination session_protocol_encrypt_for_destination(
         const span_u8 plaintext,
@@ -163,20 +180,30 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 
 /// API: session_protocol/session_protocol_decrypt_envelope
 ///
-/// Given an unencrypted plaintext representation of an envelope (i.e.: protobuf encoded stream of
-/// `Envelope`) parse the envelope and return the envelope content decrypted to plaintext with the
-/// passed in key.
+/// Given an envelope payload (i.e.: protobuf encoded stream of `Envelope` or encrypted `Envelope`
+/// using a Groups v2 key) parse (or decrypt) the envelope and return the envelope content decrypted
+/// if necessary.
+///
+/// A groups v2 envelope will get decrypted with the group keys. A non-groups v2 envelope will get
+/// decrypted with the specified Ed25519 private key in the `keys` object. Only one of these keys
+/// need to be set depending on the type of envelope payload passed into the function.
 ///
 /// See: session_protocol/decrypt_envelope for more information
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the libsodium-style secret key of the sender, 64 bytes. Can also be
-///   passed as a 32-byte seed. Used to decrypt the encrypted content.
-/// - `envelope_plaintext` -- the protobuf serialised payload containing the message envelope. The
-///   envelope must already be decrypted if it was originally encrypted (i.e.: closed group
-///   envelopes).
-/// - `unix_ts` -- pass in the current system time which is used to determine, whether or not the
-///   Session Pro proof has expired or not if it is in the payload. Ignored otherwise
+/// - `keys` -- the keys to decrypt either the envelope or the envelope contents. Groups v2
+///   envelopes where the envelope is encrypted must set the group key. Envelopes with an encrypted
+///   content must set the the libsodium-style secret key of the receiver, 64 bytes. Can also be
+///   passed as a 32-byte seed.
+///
+///   If a group decryption key is specified, the recipient key is ignored and vice versa. Only one
+///   of the keys should be set depending on the type of envelope.
+///
+/// - `envelope_payload` -- the envelope payload either encrypted (groups v2 style) or unencrypted
+///   (1o1 or legacy groups).
+/// - `unix_ts` -- pass in the current system time in seconds which is used to determine, whether or
+///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
+///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
 ///   the proof, validating whether or not the attached proof was indeed issued by an authorised
 ///   issuer
@@ -186,11 +213,11 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 ///   within the envelope if there were any.
 ///
 ///   The success flag is set if encryption was successful, if the underlying implementation threw
-///   an exception then this is set to false.
+///   an exception then this is caught internally and success is set to false.
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
-        const span_u8 ed25519_privkey,
-        const span_u8 envelope_plaintext,
+        const session_protocol_decrypt_envelope_keys* keys,
+        const span_u8 envelope_payload,
         uint64_t unix_ts,
         const span_u8 pro_backend_pubkey);
 

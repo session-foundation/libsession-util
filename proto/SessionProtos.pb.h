@@ -6634,7 +6634,7 @@ class ProMessage final :
 
   enum : int {
     kProofFieldNumber = 1,
-    kFlagsFieldNumber = 2,
+    kFeaturesFieldNumber = 2,
   };
   // optional .SessionProtos.ProProof proof = 1;
   bool has_proof() const;
@@ -6654,17 +6654,17 @@ class ProMessage final :
       ::SessionProtos::ProProof* proof);
   ::SessionProtos::ProProof* unsafe_arena_release_proof();
 
-  // optional uint32 flags = 2;
-  bool has_flags() const;
+  // optional uint64 features = 2;
+  bool has_features() const;
   private:
-  bool _internal_has_flags() const;
+  bool _internal_has_features() const;
   public:
-  void clear_flags();
-  uint32_t flags() const;
-  void set_flags(uint32_t value);
+  void clear_features();
+  uint64_t features() const;
+  void set_features(uint64_t value);
   private:
-  uint32_t _internal_flags() const;
-  void _internal_set_flags(uint32_t value);
+  uint64_t _internal_features() const;
+  void _internal_set_features(uint64_t value);
   public:
 
   // @@protoc_insertion_point(class_scope:SessionProtos.ProMessage)
@@ -6678,7 +6678,7 @@ class ProMessage final :
     ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::SessionProtos::ProProof* proof_;
-    uint32_t flags_;
+    uint64_t features_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
@@ -13745,32 +13745,32 @@ inline void ProMessage::set_allocated_proof(::SessionProtos::ProProof* proof) {
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProMessage.proof)
 }
 
-// optional uint32 flags = 2;
-inline bool ProMessage::_internal_has_flags() const {
+// optional uint64 features = 2;
+inline bool ProMessage::_internal_has_features() const {
   bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
   return value;
 }
-inline bool ProMessage::has_flags() const {
-  return _internal_has_flags();
+inline bool ProMessage::has_features() const {
+  return _internal_has_features();
 }
-inline void ProMessage::clear_flags() {
-  _impl_.flags_ = 0u;
+inline void ProMessage::clear_features() {
+  _impl_.features_ = uint64_t{0u};
   _impl_._has_bits_[0] &= ~0x00000002u;
 }
-inline uint32_t ProMessage::_internal_flags() const {
-  return _impl_.flags_;
+inline uint64_t ProMessage::_internal_features() const {
+  return _impl_.features_;
 }
-inline uint32_t ProMessage::flags() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.flags)
-  return _internal_flags();
+inline uint64_t ProMessage::features() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.features)
+  return _internal_features();
 }
-inline void ProMessage::_internal_set_flags(uint32_t value) {
+inline void ProMessage::_internal_set_features(uint64_t value) {
   _impl_._has_bits_[0] |= 0x00000002u;
-  _impl_.flags_ = value;
+  _impl_.features_ = value;
 }
-inline void ProMessage::set_flags(uint32_t value) {
-  _internal_set_flags(value);
-  // @@protoc_insertion_point(field_set:SessionProtos.ProMessage.flags)
+inline void ProMessage::set_features(uint64_t value) {
+  _internal_set_features(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.ProMessage.features)
 }
 
 #ifdef __GNUC__

@@ -10,7 +10,10 @@
 /// protocol types. This file contains high-level helper functions for decoding payloads on the
 /// Session protocol. Prefer functions here before resorting to the lower-level cryptography.
 
-// NOTE: CPP doesn't support named bitfields without casting or operator overloads but C-style
+// NOTE: In the CPP file we use C-style enums for bitfields and CPP-style enums for non-bitfield
+// enums where we can to benefit from the type-safety of strong enums.
+//
+// CPP doesn't support named bitfields without casting or operator overloads but C-style
 // enums support it very well. The only issue is that using a native C-style enum enforces some type
 // restrictions that compilers dislike when attempting to manipulate bit fields. For example:
 //
@@ -27,9 +30,6 @@
 //
 // Does not trigger errors as the underlying type of `f` is actually an unsigned integer. The type
 // define is merely a hint to the user to what flags are to be used when manipulating the variable.
-//
-// Hence in the CPP file we use C-style enums for bitfields and CPP-style enums for non-bitfield
-// enums where we can to benefit from the type-safety of strong enums.
 
 namespace session {
 
@@ -38,11 +38,11 @@ namespace config::groups {
 }
 
 enum class ProStatus {
-    Nil,                   // Pro proof was not set
-    InvalidProBackendSig,  // Pro proof was set; proof sig was not produced by the Pro backend key
-    InvalidUserSig,        // Pro proof was set; envelope sig was not produced by the Rotating key
-    Valid,                 // Pro proof was set, is verified; has not expired
-    Expired,               // Pro proof was set, is verified; has expired
+    Nil,                   // Proof not set
+    InvalidProBackendSig,  // Proof set; pro proof sig was not produced by the Pro backend key
+    InvalidUserSig,        // Proof set; envelope pro sig was not produced by the Rotating key
+    Valid,                 // Proof set, is verified; has not expired
+    Expired,               // Proof set, is verified; has expired
 };
 
 enum class DestinationType {
@@ -113,8 +113,12 @@ struct DecryptedEnvelope {
     // Decrypted envelope content into plaintext
     std::vector<uint8_t> content_plaintext;
 
-    // Sender public key extracted from the encrypted content payload
+    // Sender public key extracted from the encrypted content payload. This is not set if the
+    // envelope was a groups v2 envelope where the envelope was encrypted and only the x25519 pubkey
+    // was available.
     array_uc32 sender_ed25519_pubkey;
+
+    array_uc32 sender_x25519_pubkey;
 
     // Status flag for validity of the Session Pro proof embedded in the envelope if it has one.
     // The status is set to `Nil` if there is no Session Pro proof in the message. Otherwise it's
@@ -128,6 +132,24 @@ struct DecryptedEnvelope {
     // Session Pro bit flag features that were used in the embedded message, only set if the status
     // was not `Nil`.
     PRO_FEATURES pro_features;
+};
+
+struct DecryptEnvelopeKey
+{
+    // Indicate to the envelope decrypting function that it should use the group keys to decrypt the
+    // envelope (e.g.: for groups v2 envelopes where the envelope is encrypted and the body
+    // unencrypted). The `group_keys` must be set if this flag is true. The recipient ed25519
+    // private key field is ignored if this flag is set.
+    bool use_group_keys;
+
+    // Keys to use to decrypt the envelope.
+    const config::groups::Keys* group_keys;
+
+    // The libsodium-style secret key of the sender, 64 bytes. Can also be passed as a 32-byte seed.
+    // Used to decrypt the encrypted content. This field is used if `use_group_keys` is false in
+    // which case the group keys are ignored. This is for envelopes where the envelope itself is
+    // unencrypted and the contents is encrypted for this secret key.
+    std::span<const uint8_t> recipient_ed25519_privkey;
 };
 
 struct EncryptedForDestination
@@ -201,9 +223,13 @@ EncryptedForDestination encrypt_for_destination(
 
 /// API: session_protocol/decrypt_envelope
 ///
-/// Given an unencrypted plaintext representation of an envelope (i.e.: protobuf encoded stream of
-/// `Envelope`) parse the envelope and return the envelope content decrypted to plaintext with the
-/// passed in key.
+/// Given an envelope payload (i.e.: protobuf encoded stream of `Envelope` or encrypted `Envelope`
+/// using a Groups v2 key) parse (or decrypt) the envelope and return the envelope content decrypted
+/// if necessary.
+///
+/// A groups v2 envelope will get decrypted with the group keys. A non-groups v2 envelope will get
+/// decrypted with the specified Ed25519 private key in the `keys` object. Only one of these keys
+/// need to be set depending on the type of envelope payload passed into the function.
 ///
 /// If the message does not use Session Pro features, the pro status will be set to nil and all
 /// other pro fields are to be ignored. If the pro status is non-nil then the pro fields will be
@@ -216,13 +242,19 @@ EncryptedForDestination encrypt_for_destination(
 /// field to verify if the Session Pro was present and/or valid or invalid.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the libsodium-style secret key of the receiver, 64 bytes. Can also be
-///   passed as a 32-byte seed. Used to decrypt the encrypted content.
-/// - `envelope_plaintext` -- the protobuf serialised payload containing the message envelope. The
-///   envelope must already be decrypted if it was originally encrypted (i.e.: closed group
-///   envelopes).
-/// - `unix_ts` -- pass in the current system time which is used to determine, whether or not the
-///   Session Pro proof has expired or not if it is in the payload. Ignored otherwise
+/// - `keys` -- the keys to decrypt either the envelope or the envelope contents. Groups v2
+///   envelopes where the envelope is encrypted must set the group key. Envelopes with an encrypted
+///   content must set the the libsodium-style secret key of the receiver, 64 bytes. Can also be
+///   passed as a 32-byte seed.
+///
+///   If a group decryption key is specified, the recipient key is ignored and vice versa. Only one
+///   of the keys should be set depending on the type of envelope.
+///
+/// - `envelope_payload` -- the envelope payload either encrypted (groups v2 style) or unencrypted
+///   (1o1 or legacy groups).
+/// - `unix_ts` -- pass in the current system time in seconds which is used to determine, whether or
+///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
+///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
 ///   the proof, validating whether or not the attached proof was indeed issued by an authorised
 ///   issuer
@@ -231,8 +263,8 @@ EncryptedForDestination encrypt_for_destination(
 /// - The decrypted envelope. It contains the fields of the envelope and the Session Pro metadata
 ///   within the envelope if there were any.
 DecryptedEnvelope decrypt_envelope(
-        std::span<const uint8_t> ed25519_privkey,
-        std::span<const uint8_t> envelope_plaintext,
+        const DecryptEnvelopeKey& keys,
+        std::span<const uint8_t> envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey);
 }  // namespace session

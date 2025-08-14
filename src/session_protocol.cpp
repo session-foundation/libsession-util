@@ -313,12 +313,43 @@ struct DecryptedEnvelopeInternal {
 };
 
 DecryptedEnvelope decrypt_envelope(
-        std::span<const uint8_t> ed25519_privkey,
-        std::span<const uint8_t> envelope_plaintext,
+        const DecryptEnvelopeKey& keys,
+        std::span<const uint8_t> envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey) {
     DecryptedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
+    std::span<const uint8_t> envelope_plaintext = envelope_payload;
+
+    // The caller is indicating that the envelope_payload is encrypted, if the group keys are
+    // provided. We will decrypt the payload to get the plaintext. In all other cases, the envelope
+    // is assumed to be unencrypted and can be used verbatim.
+    std::vector<uint8_t> envelope_plaintext_from_group_keys;
+    if (keys.use_group_keys) {
+        if (!keys.group_keys)
+            throw std::runtime_error(
+                    "API misuse: Envelope decryption with group keys was requested but no key was "
+                    "set");
+
+        // Decrypt
+        std::string sender_x25519_pubkey;
+        std::tie(sender_x25519_pubkey, envelope_plaintext_from_group_keys) =
+                keys.group_keys->decrypt_message(envelope_plaintext);
+        if (sender_x25519_pubkey.size() != crypto_sign_ed25519_PUBLICKEYBYTES)
+            throw std::runtime_error{fmt::format(
+                    "Parse encrypted envelope failed, extracted x25519 pubkey was wrong size: {}",
+                    sender_x25519_pubkey.size())};
+
+        // Update the plaintext to use the decrypted envelope
+        envelope_plaintext = envelope_plaintext_from_group_keys; // Update the plaintext
+
+        // Copy keys out
+        std::memcpy(
+                result.sender_x25519_pubkey.data(),
+                sender_x25519_pubkey.data(),
+                sender_x25519_pubkey.size());
+    }
+
     if (!envelope.ParseFromArray(envelope_plaintext.data(), envelope_plaintext.size()))
         throw std::runtime_error{"Parse envelope from plaintext failed"};
 
@@ -369,51 +400,11 @@ DecryptedEnvelope decrypt_envelope(
     // Decrypt content
     // The envelope is encrypted in GroupsV2, contents unencrypted. In 1o1 and legacy groups, the
     // envelope is encrypted, contents is encrypted.
-    //
-    // On Android and Desktop, the envelope source is always set for legacy and v2 groups. This
-    // means we can use the envelope source to determine if the contents needs decryption.
-    //
-    // On iOS legacy groups have the source set. V2 groups on iOS do _not_ have the sender set.
-    // Reminder:
-    //
-    //   v2     => envelope encrypted,   contents unencrypted
-    //   legacy => envelope unencrypted, contents encrypted
-    //
-    // Since all platforms always set the envelope source for a legacy groups message we can use the
-    // presence of the envelope source and check the prefix to determine if the contents is
-    // encrypted, i.e. do the following checks:
-    //
-    //  1. Is a closed group message
-    //  2. The source (pubkey) is set (all platforms set this field on legacy groups messages)
-    //  3. The pubkey has a legacy prefix (0x05)
-    //
-    // Refs:
-    // clang-format off
-    //   Android:
-    //     Legacy https://github.com/session-foundation/session-android/blob/e4c16ae8aa8cae2f75aba565b890082563b07bd2/app/src/main/java/org/session/libsession/messaging/sending_receiving/MessageSender.kt#L189
-    //     v2     https://github.com/session-foundation/session-android/blob/e4c16ae8aa8cae2f75aba565b890082563b07bd2/app/src/main/java/org/session/libsession/messaging/sending_receiving/MessageSender.kt#L176
-    //   Desktop:
-    //     Legacy https://github.com/session-foundation/session-desktop/blob/4c5cd88fa707a01845f86c0de8920faf160653ea/ts/session/sending/MessageWrapper.ts#L140
-    //     v2     https://github.com/session-foundation/session-desktop/blob/4c5cd88fa707a01845f86c0de8920faf160653ea/ts/session/sending/MessageWrapper.ts#L49
-    //   iOS:
-    //     Legacy https://github.com/session-foundation/session-ios/blob/932145ab255b2327ca20fc992ac73758b94b07cd/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L469
-    //     v2     https://github.com/session-foundation/session-ios/blob/932145ab255b2327ca20fc992ac73758b94b07cd/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L426
-    // clang-format on
-    bool has_encrypted_content = envelope.type() == SessionProtos::Envelope_Type_SESSION_MESSAGE;
-    if (envelope.type() == SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE && envelope.has_source()) {
-        const std::string& source_pubkey = envelope.source();
-        if (source_pubkey.size() != sizeof(array_uc33))
-            throw std::runtime_error{
-                    "Parse closed group message failed, source was not 33 byte public key"};
-
-        if (source_pubkey[0] != static_cast<uint8_t>(SessionIDPrefix::group))
-            has_encrypted_content = true;
-    }
-
+    bool has_encrypted_content = !keys.use_group_keys;
     if (has_encrypted_content) {
         std::span<const uint8_t> content_str = session::to_span(envelope.content());
         auto [content_plaintext, sender_ed25519_pubkey] =
-                session::decrypt_incoming(ed25519_privkey, content_str);
+                session::decrypt_incoming(keys.recipient_ed25519_privkey, content_str);
         assert(result.sender_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
 
         result.content_plaintext = std::move(content_plaintext);
@@ -421,6 +412,12 @@ DecryptedEnvelope decrypt_envelope(
                 result.sender_ed25519_pubkey.data(),
                 sender_ed25519_pubkey.data(),
                 result.sender_ed25519_pubkey.size());
+
+        if (crypto_sign_ed25519_pk_to_curve25519(
+                    result.sender_x25519_pubkey.data(), result.sender_ed25519_pubkey.data()) != 0)
+            throw std::runtime_error(
+                    "Parse content failed, ed25519 public key could not be converted to x25519 "
+                    "key.");
     } else {
         result.content_plaintext.resize(envelope.content().size());
         std::memcpy(result.content_plaintext.data(), envelope.content().data(), envelope.content().size());
@@ -442,11 +439,11 @@ DecryptedEnvelope decrypt_envelope(
     if (!envelope.has_prosig())
         throw std::runtime_error("Parse envelope failed, pro message is missing signature");
 
+    // Copy (maybe dummy) pro signature into our result struct
     const std::string& pro_sig = envelope.prosig();
     if (pro_sig.size() != crypto_sign_ed25519_BYTES)
         throw std::runtime_error("Parse envelope failed, pro signature has wrong size");
     static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
-
     std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
     if (content.has_promessage()) {
@@ -454,21 +451,19 @@ DecryptedEnvelope decrypt_envelope(
         result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
 
         // Extract the pro message
-        SessionProtos::ProMessage pro_msg = content.promessage();
+        const SessionProtos::ProMessage& pro_msg = content.promessage();
         if (!pro_msg.has_proof())
             throw std::runtime_error("Parse decrypted message failed, pro config missing proof");
-        if (!pro_msg.has_flags())
-            throw std::runtime_error("Parse decrypted message failed, pro config missing flags");
-
-        const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-        std::uint32_t proto_flags = pro_msg.flags();
+        if (!pro_msg.has_features())
+            throw std::runtime_error("Parse decrypted message failed, pro config missing features");
 
         // Parse the proof from protobufs
+        const SessionProtos::ProProof& proto_proof = pro_msg.proof();
         session::config::ProProof& proof = result.pro_proof;
         // clang-format off
         size_t proof_errors = 0;
-        proof_errors += !proto_proof.has_version()           || proto_proof.version() != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
-        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size() != proof.gen_index_hash.max_size();
+        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
+        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
         proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
         proof_errors += !proto_proof.has_expiryunixts();
         proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
@@ -485,7 +480,7 @@ DecryptedEnvelope decrypt_envelope(
         result.pro_status = verify_result == 0 ? ProStatus::Valid : ProStatus::InvalidUserSig;
 
         // Fill out the resulting proof structure, we have parsed successfully
-        result.pro_features = proto_flags;
+        result.pro_features = pro_msg.features();
         std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
         std::memcpy(
@@ -562,14 +557,21 @@ session_protocol_encrypt_for_destination(
 
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
-        const span_u8 ed25519_privkey,
+        const session_protocol_decrypt_envelope_keys* keys,
         const span_u8 envelope_plaintext,
         uint64_t unix_ts,
         const span_u8 pro_backend_pubkey) {
     session_protocol_decrypted_envelope result = {};
     try {
+
+        DecryptEnvelopeKey keys_cpp = {
+                .use_group_keys = keys->use_group_keys,
+                .group_keys =
+                        reinterpret_cast<const config::groups::Keys*>(keys->group_keys->internals),
+                .recipient_ed25519_privkey = keys->recipient_ed25519_privkey};
+
         DecryptedEnvelope result_cpp = decrypt_envelope(
-                ed25519_privkey.cpp_span(),
+                keys_cpp,
                 envelope_plaintext.cpp_span(),
                 std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
                 {});

@@ -500,7 +500,7 @@ PROTOBUF_CONSTEXPR ProMessage::ProMessage(
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.proof_)*/nullptr
-  , /*decltype(_impl_.flags_)*/0u} {}
+  , /*decltype(_impl_.features_)*/uint64_t{0u}} {}
 struct ProMessageDefaultTypeInternal {
   PROTOBUF_CONSTEXPR ProMessageDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -11307,7 +11307,7 @@ class ProMessage::_Internal {
   static void set_has_proof(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
-  static void set_has_flags(HasBits* has_bits) {
+  static void set_has_features(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
 };
@@ -11329,13 +11329,13 @@ ProMessage::ProMessage(const ProMessage& from)
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.proof_){nullptr}
-    , decltype(_impl_.flags_){}};
+    , decltype(_impl_.features_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   if (from._internal_has_proof()) {
     _this->_impl_.proof_ = new ::SessionProtos::ProProof(*from._impl_.proof_);
   }
-  _this->_impl_.flags_ = from._impl_.flags_;
+  _this->_impl_.features_ = from._impl_.features_;
   // @@protoc_insertion_point(copy_constructor:SessionProtos.ProMessage)
 }
 
@@ -11347,7 +11347,7 @@ inline void ProMessage::SharedCtor(
       decltype(_impl_._has_bits_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.proof_){nullptr}
-    , decltype(_impl_.flags_){0u}
+    , decltype(_impl_.features_){uint64_t{0u}}
   };
 }
 
@@ -11380,7 +11380,7 @@ void ProMessage::Clear() {
     GOOGLE_DCHECK(_impl_.proof_ != nullptr);
     _impl_.proof_->Clear();
   }
-  _impl_.flags_ = 0u;
+  _impl_.features_ = uint64_t{0u};
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
 }
@@ -11400,11 +11400,11 @@ const char* ProMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ct
         } else
           goto handle_unusual;
         continue;
-      // optional uint32 flags = 2;
+      // optional uint64 features = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
-          _Internal::set_has_flags(&has_bits);
-          _impl_.flags_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          _Internal::set_has_features(&has_bits);
+          _impl_.features_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -11447,10 +11447,10 @@ uint8_t* ProMessage::_InternalSerialize(
         _Internal::proof(this).GetCachedSize(), target, stream);
   }
 
-  // optional uint32 flags = 2;
+  // optional uint64 features = 2;
   if (cached_has_bits & 0x00000002u) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(2, this->_internal_flags(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_features(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -11478,9 +11478,9 @@ size_t ProMessage::ByteSizeLong() const {
           *_impl_.proof_);
     }
 
-    // optional uint32 flags = 2;
+    // optional uint64 features = 2;
     if (cached_has_bits & 0x00000002u) {
-      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_features());
     }
 
   }
@@ -11512,7 +11512,7 @@ void ProMessage::MergeFrom(const ProMessage& from) {
           from._internal_proof());
     }
     if (cached_has_bits & 0x00000002u) {
-      _this->_impl_.flags_ = from._impl_.flags_;
+      _this->_impl_.features_ = from._impl_.features_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
@@ -11535,8 +11535,8 @@ void ProMessage::InternalSwap(ProMessage* other) {
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.flags_)
-      + sizeof(ProMessage::_impl_.flags_)
+      PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.features_)
+      + sizeof(ProMessage::_impl_.features_)
       - PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.proof_)>(
           reinterpret_cast<char*>(&_impl_.proof_),
           reinterpret_cast<char*>(&other->_impl_.proof_));
