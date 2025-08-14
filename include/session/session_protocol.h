@@ -21,6 +21,9 @@ enum {
     PRO_STANDARD_CHARACTER_LIMIT = 2'000,
 };
 
+// Bit flags for features that are not currently able to be determined by the state stored in
+// Libsession. They are to be passed in by the client into `get_pro_msg_for_features` to return the
+// bitset of `PRO_FEATURES` that a message will use.
 typedef uint64_t PRO_EXTRA_FEATURES;
 enum PRO_EXTRA_FEATURES_ {
     PRO_EXTRA_FEATURES_NIL = 0,
@@ -28,6 +31,8 @@ enum PRO_EXTRA_FEATURES_ {
     PRO_EXTRA_FEATURES_ANIMATED_AVATAR = 1 << 1,
 };
 
+// Bitset of Session Pro features that a message uses. This bitset is stored in the protobuf
+// `Content.proMessage` when a message is sent for other clients to consume.
 typedef uint64_t PRO_FEATURES;
 enum PRO_FEATURES_ {
     PRO_FEATURES_NIL = 0,
@@ -38,7 +43,7 @@ enum PRO_FEATURES_ {
             PRO_FEATURES_10K_CHARACTER_LIMIT | PRO_FEATURES_PRO_BADGE | PRO_FEATURES_ANIMATED_AVATAR
 };
 
-enum PRO_STATUS {
+enum PRO_STATUS {  // See session::ProStatus
     PRO_STATUS_NIL,
     PRO_STATUS_INVALID_PRO_BACKEND_SIG,
     PRO_STATUS_INVALID_USER_SIG,
@@ -46,7 +51,7 @@ enum PRO_STATUS {
     PRO_STATUS_EXPIRED,
 };
 
-enum DESTINATION_TYPE {
+enum DESTINATION_TYPE {  // See session::DestinationType
     DESTINATION_TYPE_CONTACT,
     DESTINATION_TYPE_SYNC_MESSAGE,
     DESTINATION_TYPE_CLOSED_GROUP,
@@ -54,7 +59,7 @@ enum DESTINATION_TYPE {
     DESTINATION_TYPE_OPEN_GROUP_INBOX,
 };
 
-struct session_protocol_destination {
+struct session_protocol_destination {  // See session::Destination
     DESTINATION_TYPE type;
 
     // The pro signature is optional, set this flag to true to make the encryption function take
@@ -73,6 +78,8 @@ enum ENVELOPE_TYPE {
     ENVELOPE_TYPE_CLOSED_GROUP_MESSGE,
 };
 
+// Indicates which optional fields in the envelope has been populated out of the optional fields in
+// an envelope after it has been parsed off the wire.
 typedef uint32_t ENVELOPE_FLAGS;
 enum ENVELOPE_FLAGS_ {
     ENVELOPE_FLAGS_SOURCE = 1 << 0,
@@ -92,20 +99,10 @@ struct session_protocol_envelope {
 };
 
 struct session_protocol_decrypt_envelope_keys {
-    // Indicate to the envelope decrypting function that it should use the group keys to decrypt the
-    // envelope (e.g.: for groups v2 envelopes where the envelope is encrypted and the body
-    // unencrypted). The `group_keys` must be set if this flag is true. The recipient ed25519
-    // private key field is ignored if this flag is set.
     bool use_group_keys;
-
-    // Keys to use to decrypt the envelope.
     const config_group_keys* group_keys;
-
-    // The libsodium-style secret key of the sender, 64 bytes. Can also be passed as a 32-byte seed.
-    // Used to decrypt the encrypted content. This field is used if `use_group_keys` is false in
-    // which case the group keys are ignored. This is for envelopes where the envelope itself is
-    // unencrypted and the contents is encrypted for this secret key.
-    std::span<const uint8_t> recipient_ed25519_privkey;
+    const void* recipient_ed25519_privkey;
+    size_t recipient_ed25519_privkey_len;
 };
 
 struct session_protocol_decrypted_envelope {
@@ -173,9 +170,9 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_FEAT
 ///   an exception then this is caught internally and success is set to false.
 LIBSESSION_EXPORT
 session_protocol_encrypted_for_destination session_protocol_encrypt_for_destination(
-        const void *plaintext,
+        const void* plaintext,
         size_t plaintext_len,
-        const span_u8 ed25519_privkey,
+        const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
         NAMESPACE space);

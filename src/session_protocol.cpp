@@ -580,7 +580,9 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
                 .use_group_keys = keys->use_group_keys,
                 .group_keys =
                         reinterpret_cast<const config::groups::Keys*>(keys->group_keys->internals),
-                .recipient_ed25519_privkey = keys->recipient_ed25519_privkey};
+                .recipient_ed25519_privkey = {
+                        static_cast<const uint8_t*>(keys->recipient_ed25519_privkey),
+                        keys->recipient_ed25519_privkey_len}};
 
         DecryptedEnvelope result_cpp = decrypt_envelope(
                 keys_cpp,
