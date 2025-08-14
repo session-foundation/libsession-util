@@ -137,7 +137,7 @@ void UserProfile::set_pro_config(ProConfig const &pro) {
 
     const ProProof& pro_proof = pro.proof;
     auto proof_dict = root["p"];
-    proof_dict["v"] = pro_proof.version;
+    proof_dict["@"] = pro_proof.version;
     proof_dict["g"] = pro_proof.gen_index_hash;
     proof_dict["r"] = pro_proof.rotating_pubkey;
     proof_dict["e"] = pro_proof.expiry_unix_ts.time_since_epoch().count();
