@@ -3,10 +3,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#if defined(__cplusplus)
-#include <span>
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -15,10 +11,6 @@ extern "C" {
 struct span_u8 {
     uint8_t* data;
     size_t size;
-
-#if defined(__cplusplus)
-    std::span<uint8_t> cpp_span() const { return {data, size}; }
-#endif
 };
 
 struct bytes32 {
