@@ -89,7 +89,7 @@ array_uc32 ProProof::hash() const {
 }
 
 bool ProProof::load(const dict& root) {
-    std::optional<uint8_t> version = maybe_int(root, "v");
+    std::optional<uint8_t> version = maybe_int(root, "@");
     std::optional<std::vector<unsigned char>> maybe_gen_index_hash = maybe_vector(root, "g");
     std::optional<std::vector<unsigned char>> maybe_rotating_pubkey = maybe_vector(root, "r");
     std::optional<std::chrono::sys_seconds> maybe_expiry_unix_ts = maybe_ts(root, "e");

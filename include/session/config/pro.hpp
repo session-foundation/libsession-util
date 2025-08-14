@@ -13,7 +13,7 @@ enum ProProofVersion { ProProofVersion_v0 };
 
 /// keys used currently or in the past (so that we don't reuse):
 ///
-/// v - version
+/// @ - version
 /// g - gen_index_hash
 /// r - rotating ed25519 pubkey
 /// e - expiry unix timestamp (in seconds)
