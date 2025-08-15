@@ -24,6 +24,7 @@
 #include "session/multi_encrypt.hpp"
 #include "session/session_encrypt.hpp"
 #include "session/xed25519.hpp"
+#include "session/session_encrypt.hpp"
 
 using namespace std::literals;
 

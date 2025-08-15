@@ -700,8 +700,7 @@ class Keys : public ConfigSig {
     /// verifies the sender signature, decompresses the message (if necessary) and then returns the
     /// author pubkey and the plaintext data.
     ///
-    /// To prevent against memory exhaustion attacks, this method will fail if the value is
-    /// a compressed value that would decompress to a value larger than 1MB.
+    /// See: crypto/decrypt_group_message
     ///
     /// Inputs:
     /// - `ciphertext` -- an encrypted, encoded, signed, (possibly) compressed message as produced
