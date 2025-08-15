@@ -1,5 +1,6 @@
 #include <charconv>
 #include <session/util.hpp>
+#include <zstd.h>
 
 namespace session {
 
@@ -91,4 +92,60 @@ static_assert(std::is_same_v<
               std::chrono::seconds,
               decltype(std::declval<std::chrono::sys_seconds>().time_since_epoch())>);
 
+namespace {
+    struct zstd_decomp_freer {
+        void operator()(ZSTD_DStream* z) const { ZSTD_freeDStream(z); }
+    };
+
+    using zstd_decomp_ptr = std::unique_ptr<ZSTD_DStream, zstd_decomp_freer>;
+}  // namespace
+
+std::vector<unsigned char> zstd_compress(
+        std::span<const unsigned char> data, int level, std::span<const unsigned char> prefix) {
+    std::vector<unsigned char> compressed;
+    if (prefix.empty())
+        compressed.resize(ZSTD_compressBound(data.size()));
+    else {
+        compressed.resize(prefix.size() + ZSTD_compressBound(data.size()));
+        std::copy(prefix.begin(), prefix.end(), compressed.begin());
+    }
+    auto size = ZSTD_compress(
+            compressed.data() + prefix.size(),
+            compressed.size() - prefix.size(),
+            data.data(),
+            data.size(),
+            level);
+    if (ZSTD_isError(size))
+        throw std::runtime_error{"Compression failed: " + std::string{ZSTD_getErrorName(size)}};
+
+    compressed.resize(prefix.size() + size);
+    return compressed;
+}
+
+std::optional<std::vector<unsigned char>> zstd_decompress(
+        std::span<const unsigned char> data, size_t max_size) {
+    zstd_decomp_ptr z_decompressor{ZSTD_createDStream()};
+    auto* zds = z_decompressor.get();
+
+    ZSTD_initDStream(zds);
+    ZSTD_inBuffer input{/*.src=*/data.data(), /*.size=*/data.size(), /*.pos=*/0};
+    std::array<unsigned char, 4096> out_buf;
+    ZSTD_outBuffer output{/*.dst=*/out_buf.data(), /*.size=*/out_buf.size(), /*.pos=*/0};
+
+    std::vector<unsigned char> decompressed;
+
+    size_t ret;
+    do {
+        output.pos = 0;
+        if (ret = ZSTD_decompressStream(zds, &output, &input); ZSTD_isError(ret))
+            return std::nullopt;
+
+        if (max_size > 0 && decompressed.size() + output.pos > max_size)
+            return std::nullopt;
+
+        decompressed.insert(decompressed.end(), out_buf.begin(), out_buf.begin() + output.pos);
+    } while (ret > 0 || input.pos < input.size);
+
+    return decompressed;
+}
 }  // namespace session

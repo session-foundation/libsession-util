@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstring>
 #include <iterator>
-#include <memory>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -280,4 +279,15 @@ static_assert(std::is_same_v<
               std::chrono::seconds,
               decltype(std::declval<std::chrono::sys_seconds>().time_since_epoch())>);
 
+/// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
+/// serious error.
+std::vector<unsigned char> zstd_compress(
+        std::span<const unsigned char> data,
+        int level = 1,
+        std::span<const unsigned char> prefix = {});
+
+/// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
+/// then this returns nullopt if the decompressed size would exceed that limit.
+std::optional<std::vector<unsigned char>> zstd_decompress(
+        std::span<const unsigned char> data, size_t max_size = 0);
 }  // namespace session
