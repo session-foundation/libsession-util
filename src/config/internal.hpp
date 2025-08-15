@@ -254,19 +254,6 @@ void load_unknowns(
         oxenc::bt_dict_consumer& in,
         std::string_view previous,
         std::string_view until);
-
-/// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
-/// serious error.
-std::vector<unsigned char> zstd_compress(
-        std::span<const unsigned char> data,
-        int level = 1,
-        std::span<const unsigned char> prefix = {});
-
-/// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
-/// then this returns nullopt if the decompressed size would exceed that limit.
-std::optional<std::vector<unsigned char>> zstd_decompress(
-        std::span<const unsigned char> data, size_t max_size = 0);
-
 }  // namespace session::config
 
 namespace fmt {

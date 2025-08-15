@@ -84,6 +84,7 @@ target_link_libraries(util
     PUBLIC
     common
     oxen::logging
+    libzstd::static
 )
 
 target_link_libraries(crypto
@@ -100,7 +101,6 @@ target_link_libraries(config
     libsession::protos
     PRIVATE
     libsodium::sodium-internal
-    libzstd::static
 )
 
 if(ENABLE_ONIONREQ)
