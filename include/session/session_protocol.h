@@ -43,23 +43,23 @@ enum PRO_FEATURES_ {
             PRO_FEATURES_10K_CHARACTER_LIMIT | PRO_FEATURES_PRO_BADGE | PRO_FEATURES_ANIMATED_AVATAR
 };
 
-enum PRO_STATUS {  // See session::ProStatus
+typedef enum PRO_STATUS {  // See session::ProStatus
     PRO_STATUS_NIL,
     PRO_STATUS_INVALID_PRO_BACKEND_SIG,
     PRO_STATUS_INVALID_USER_SIG,
     PRO_STATUS_VALID,
     PRO_STATUS_EXPIRED,
-};
+} PRO_STATUS;
 
-enum DESTINATION_TYPE {  // See session::DestinationType
+typedef enum DESTINATION_TYPE {  // See session::DestinationType
     DESTINATION_TYPE_CONTACT,
     DESTINATION_TYPE_SYNC_MESSAGE,
     DESTINATION_TYPE_GROUP,
     DESTINATION_TYPE_COMMUNITY,
     DESTINATION_TYPE_COMMUNITY_INBOX,
-};
+} DESTINATION_TYPE;
 
-struct session_protocol_destination {  // See session::Destination
+typedef struct session_protocol_destination {  // See session::Destination
     DESTINATION_TYPE type;
 
     // The pro signature is optional, set this flag to true to make the encryption function take
@@ -71,12 +71,12 @@ struct session_protocol_destination {  // See session::Destination
     uint8_t community_inbox_server_pubkey[32];
     uint8_t group_ed25519_pubkey[33];
     uint8_t group_ed25519_privkey[32];
-};
+} session_protocol_destination;
 
-enum ENVELOPE_TYPE {
+typedef enum ENVELOPE_TYPE {
     ENVELOPE_TYPE_SESSION_MESSAGE,
     ENVELOPE_TYPE_CLOSED_GROUP_MESSGE,
-};
+} ENVELOPE_TYPE;
 
 // Indicates which optional fields in the envelope has been populated out of the optional fields in
 // an envelope after it has been parsed off the wire.
@@ -88,7 +88,7 @@ enum ENVELOPE_FLAGS_ {
     ENVELOPE_FLAGS_PRO_SIG = 1 << 3,
 };
 
-struct session_protocol_envelope {
+typedef struct session_protocol_envelope {
     ENVELOPE_FLAGS flags;
     ENVELOPE_TYPE type;
     uint64_t timestamp_ms;
@@ -96,15 +96,15 @@ struct session_protocol_envelope {
     uint32_t source_device;
     uint64_t server_timestamp;
     uint8_t pro_sig[64];
-};
+} session_protocol_envelope;
 
-struct session_protocol_decrypt_envelope_keys {
+typedef struct session_protocol_decrypt_envelope_keys {
     span_u8 group_ed25519_pubkey;
     const span_u8* ed25519_privkeys;
     size_t ed25519_privkeys_len;
-};
+} session_protocol_decrypt_envelope_keys;
 
-struct session_protocol_decrypted_envelope {
+typedef struct session_protocol_decrypted_envelope {
     // Indicates if the decryption was successful. If the decryption step failed and threw an
     // exception, this is false.
     bool success;
@@ -115,15 +115,15 @@ struct session_protocol_decrypted_envelope {
     PRO_STATUS pro_status;
     pro_proof pro_proof;
     PRO_FEATURES pro_features;
-};
+} session_protocol_decrypted_envelope;
 
-struct session_protocol_encrypted_for_destination {
+typedef struct session_protocol_encrypted_for_destination {
     // Indicates if the decryption was successful. If the decryption step failed and threw an
     // exception, this is false.
     bool success;
     bool encrypted;
     span_u8 ciphertext;
-};
+} session_protocol_encrypted_for_destination;
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
 ///
