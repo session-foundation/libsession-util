@@ -17,7 +17,8 @@ namespace session::onionreq {
 
 namespace detail {
 
-    session::network::x25519_pubkey pubkey_for_destination(network::network_destination destination);
+    session::network::x25519_pubkey pubkey_for_destination(
+            network::network_destination destination);
 }
 
 enum class EncryptType {
@@ -62,11 +63,14 @@ class Builder {
     void set_destination(network::network_destination destination);
     void set_destination_pubkey(network::x25519_pubkey x25519_pubkey);
     void add_hop(std::span<const unsigned char> remote_key);
-    void add_hop(std::pair<network::ed25519_pubkey, network::x25519_pubkey> keys) { hops_.push_back(keys); }
+    void add_hop(std::pair<network::ed25519_pubkey, network::x25519_pubkey> keys) {
+        hops_.push_back(keys);
+    }
 
     void generate(network::request_info& info); // TODO: Remove this once the refactoring is done
     std::vector<unsigned char> build(std::vector<unsigned char> payload);
-    std::vector<unsigned char> generate_onion_blob(const std::optional<std::vector<unsigned char>>& plaintext_body);
+    std::vector<unsigned char> generate_onion_blob(
+            const std::optional<std::vector<unsigned char>>& plaintext_body);
 
   private:
     std::vector<std::pair<network::ed25519_pubkey, network::x25519_pubkey>> hops_ = {};

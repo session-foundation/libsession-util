@@ -13,11 +13,11 @@ inline auto cat = oxen::log::Cat("network");
 
 Config::Config(const std::vector<std::any>& opts) {
     for (const auto& opt_any : opts) {
-        #define HANDLE_TYPE(T) \
-            if (const auto* p = std::any_cast<T>(&opt_any)) { \
-                handle_config_opt(*p); \
-                continue; \
-            }
+#define HANDLE_TYPE(T)                                \
+    if (const auto* p = std::any_cast<T>(&opt_any)) { \
+        handle_config_opt(*p);                        \
+        continue;                                     \
+    }
 
         HANDLE_TYPE(opt::netid);
         HANDLE_TYPE(opt::router);
@@ -46,9 +46,9 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::onionreq_path_failure_threshold);
         HANDLE_TYPE(opt::onionreq_min_path_count);
         HANDLE_TYPE(opt::onionreq_disable_pre_build_paths);
-        
+
         log::warning(cat, "Ignoring unknown option type in Config constructor");
-        #undef HANDLE_TYPE
+#undef HANDLE_TYPE
     }
 
     _init();
@@ -130,12 +130,19 @@ void Config::handle_config_opt(opt::redirect_retry_count rrc) {
 
 void Config::handle_config_opt(opt::retry_delay rd) {
     retry_delay = std::move(rd);
-    log::debug(cat, "Network config retry delay set to min: {}ms, max: {}ms", retry_delay.base_delay.count(), retry_delay.max_delay.count());
+    log::debug(
+            cat,
+            "Network config retry delay set to min: {}ms, max: {}ms",
+            retry_delay.base_delay.count(),
+            retry_delay.max_delay.count());
 }
 
 void Config::handle_config_opt(opt::request_timeout_check_frequency rtcf) {
     request_timeout_check_frequency = rtcf.frequency;
-    log::debug(cat, "Network config request timeout check frequency set to: {}ms", rtcf.frequency.count());
+    log::debug(
+            cat,
+            "Network config request timeout check frequency set to: {}ms",
+            rtcf.frequency.count());
 }
 
 // MARK: Snode Pool Options
@@ -149,7 +156,10 @@ void Config::handle_config_opt(opt::cache_directory dir) {
 
 void Config::handle_config_opt(opt::cache_expiration ce) {
     cache_expiration = ce.duration;
-    log::debug(cat, "Network config snode pool cache expiration set to {} minutes", ce.duration.count());
+    log::debug(
+            cat,
+            "Network config snode pool cache expiration set to {} minutes",
+            ce.duration.count());
 }
 
 void Config::handle_config_opt(opt::cache_refresh_retry_limit crrl) {
@@ -166,7 +176,8 @@ void Config::handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr) {
     cache_num_nodes_to_use_for_refresh = nnr.count;
     log::debug(
             cat,
-            "Network config number of cached nodes to be used for refreshing the snode pool cache set to {}{}",
+            "Network config number of cached nodes to be used for refreshing the snode pool cache "
+            "set to {}{}",
             nnr.count,
             (nnr.count > 0 ? "" : ", refreshes will always use a random seed node"));
 }
@@ -230,4 +241,4 @@ void Config::handle_config_opt(opt::onionreq_disable_pre_build_paths dpbp) {
     log::debug(cat, "Network config disabled pre-building onion request paths");
 }
 
-}  // namespace session::network
+}  // namespace session::network::config

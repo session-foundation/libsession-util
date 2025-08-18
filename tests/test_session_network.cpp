@@ -9,9 +9,9 @@
 #include <oxen/quic/gnutls_crypto.hpp>
 #include <session/curve25519.hpp>
 #include <session/ed25519.hpp>
+#include <session/network/key_types.hpp>
 #include <session/network/session_network_old.hpp>
 #include <session/onionreq/hop_encryption.hpp>
-#include <session/network/key_types.hpp>
 #include <tuple>
 
 #include "utils.hpp"
@@ -955,7 +955,13 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
 
     // Should exclude nodes which have the same IP if one was excluded
     std::vector<service_node> same_ip_snode_cache;
-    auto unique_node = service_node{ed_pk, oxen::quic::ipv4{"0.0.0.20"}, uint16_t{20}, uint16_t{20}, {2, 8, 0}, INVALID_SWARM_ID};
+    auto unique_node = service_node{
+            ed_pk,
+            oxen::quic::ipv4{"0.0.0.20"},
+            uint16_t{20},
+            uint16_t{20},
+            {2, 8, 0},
+            INVALID_SWARM_ID};
     for (uint16_t i = 0; i < 11; ++i)
         same_ip_snode_cache.emplace_back(test_node(ed_pk, i, false));
     same_ip_snode_cache.emplace_back(unique_node);

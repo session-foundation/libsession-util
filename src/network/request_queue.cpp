@@ -15,8 +15,14 @@ RequestQueue::~RequestQueue() {
     _loop->call_get([this] {
         for (auto& [category, callback] : _queue) {
             try {
-                callback(false, false, -1, {content_type_plain_text}, "Request cancelled: networking system is shutting down");
-            } catch (...) { /* Ignore exceptions during shutdown */ }
+                callback(
+                        false,
+                        false,
+                        -1,
+                        {content_type_plain_text},
+                        "Request cancelled: networking system is shutting down");
+            } catch (...) { /* Ignore exceptions during shutdown */
+            }
         }
     });
 }
@@ -25,7 +31,7 @@ void RequestQueue::add(Request request, network_response_callback_t callback) {
     _loop->call([this, req = std::move(request), cb = std::move(callback)]() {
         _queue.emplace_back(std::move(req), std::move(cb));
 
-        if (!_checker_active){
+        if (!_checker_active) {
             _checker_active = true;
             _loop->call_later(_check_frequency, [this] { check_timeouts(); });
         }
@@ -35,7 +41,7 @@ void RequestQueue::add(Request request, network_response_callback_t callback) {
 void RequestQueue::add_front(std::pair<Request, network_response_callback_t> req_pair) {
     _loop->call([this, pair = std::move(req_pair)] {
         _queue.emplace_front(std::move(pair));
-        
+
         if (!_checker_active && pair.first.overall_timeout) {
             _checker_active = true;
             _loop->call_later(_check_frequency, [this] { check_timeouts(); });
@@ -47,7 +53,7 @@ std::deque<std::pair<Request, network_response_callback_t>> RequestQueue::pop_al
     return _loop->call_get([this] {
         std::deque<std::pair<Request, network_response_callback_t>> popped_items;
         std::swap(_queue, popped_items);
-        
+
         return popped_items;
     });
 }

@@ -6,9 +6,9 @@
 #include <oxen/quic.hpp>
 
 #include "session/network/network_config.hpp"
+#include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
 #include "session/network/transport/network_transport.hpp"
-#include "session/network/routing/network_router.hpp"
 #include "session/platform.hpp"
 #include "session/types.hpp"
 
@@ -26,7 +26,9 @@ class Network_v2 {
 
   public:
     template <typename... Opt>
-        requires(!std::is_same_v<std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>, config::Config>)
+        requires(!std::is_same_v<
+                 std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,
+                 config::Config>)
     Network_v2(Opt&&... opts) : Network_v2(Config(std::forward<Opt>(opts)...)){};
     explicit Network_v2(config::Config config);
 
@@ -72,9 +74,7 @@ class Network_v2 {
     void configure();
 
     void _update_network_state(const std::string& body);
-    void _handle_421_retry(
-        Request original_request,
-        network_response_callback_t final_callback);
+    void _handle_421_retry(Request original_request, network_response_callback_t final_callback);
     Request _preprocess_request(Request request);
 };
 

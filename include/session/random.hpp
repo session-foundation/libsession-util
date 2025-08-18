@@ -63,7 +63,7 @@ std::string random_base32(size_t size);
 template <typename T>
 T get_uniform_distribution(T min, T max) {
     if (min > max)
-        return min; 
+        return min;
 
     const uint64_t range = static_cast<uint64_t>(max) - static_cast<uint64_t>(min) + 1;
     return static_cast<T>(static_cast<uint64_t>(min) + (csrng() % range));

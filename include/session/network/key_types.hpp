@@ -114,13 +114,11 @@ struct hash<session::network::pubkey_base<Derived, N>> {
 };
 
 template <>
-struct hash<session::network::legacy_pubkey> : hash<session::network::legacy_pubkey::PubKeyBase> {
-};
+struct hash<session::network::legacy_pubkey> : hash<session::network::legacy_pubkey::PubKeyBase> {};
 template <>
-struct hash<session::network::x25519_pubkey> : hash<session::network::x25519_pubkey::PubKeyBase> {
-};
+struct hash<session::network::x25519_pubkey> : hash<session::network::x25519_pubkey::PubKeyBase> {};
 template <>
-struct hash<session::network::ed25519_pubkey>
-        : hash<session::network::ed25519_pubkey::PubKeyBase> {};
+struct hash<session::network::ed25519_pubkey> : hash<session::network::ed25519_pubkey::PubKeyBase> {
+};
 
 }  // namespace std

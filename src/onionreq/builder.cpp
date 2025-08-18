@@ -22,12 +22,12 @@
 #include <oxen/quic/address.hpp>
 
 #include "session/export.h"
+#include "session/network/key_types.hpp"
 #include "session/network/service_node.hpp"
 #include "session/network/session_network_old.hpp"
+#include "session/network/session_network_types.hpp"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/hop_encryption.hpp"
-#include "session/network/key_types.hpp"
-#include "session/network/session_network_types.hpp"
 #include "session/util.hpp"
 #include "session/xed25519.hpp"
 
@@ -89,7 +89,9 @@ Builder::Builder(
 }
 
 void Builder::add_hop(std::span<const unsigned char> remote_key) {
-    hops_.push_back({network::ed25519_pubkey::from_bytes(remote_key), network::compute_x25519_pubkey(remote_key)});
+    hops_.push_back(
+            {network::ed25519_pubkey::from_bytes(remote_key),
+             network::compute_x25519_pubkey(remote_key)});
 }
 
 void Builder::set_destination(network_destination destination) {
@@ -126,7 +128,8 @@ void Builder::generate(network::request_info& info) {
     info.body = build(_generate_payload(info.original_body));
 }
 
-std::vector<unsigned char> Builder::generate_onion_blob(const std::optional<std::vector<unsigned char>>& plaintext_body) {
+std::vector<unsigned char> Builder::generate_onion_blob(
+        const std::optional<std::vector<unsigned char>>& plaintext_body) {
     return build(_generate_payload(plaintext_body));
 }
 
@@ -143,10 +146,7 @@ std::vector<unsigned char> Builder::_generate_payload(
         else
             params_json = nlohmann::json::object();
 
-        nlohmann::json wrapped_payload = {
-            {"method", endpoint_},
-            {"params", params_json}
-        };
+        nlohmann::json wrapped_payload = {{"method", endpoint_}, {"params", params_json}};
 
         std::string payload_str = wrapped_payload.dump();
         return {payload_str.begin(), payload_str.end()};
@@ -167,7 +167,7 @@ std::vector<unsigned char> Builder::_generate_payload(
 
     // When making a server request we need a leading forward-slash on the `endpoint`
     auto final_endpoint = endpoint_;
-    
+
     if (!final_endpoint.empty() && final_endpoint[0] != '/')
         final_endpoint = '/' + final_endpoint;
 

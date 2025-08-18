@@ -11,7 +11,10 @@ namespace session::onionreq {
 // Encryption/decription class for encryption/decrypting outgoing/incoming messages.
 class HopEncryption {
   public:
-    HopEncryption(network::x25519_seckey private_key, network::x25519_pubkey public_key, bool server = true) :
+    HopEncryption(
+            network::x25519_seckey private_key,
+            network::x25519_pubkey public_key,
+            bool server = true) :
             private_key_{std::move(private_key)},
             public_key_{std::move(public_key)},
             server_{server} {}

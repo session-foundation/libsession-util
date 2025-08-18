@@ -9,9 +9,9 @@
 #include <thread>
 #include <vector>
 
-#include "session/network/service_node.hpp"
-#include "session/network/network_config.hpp"
 #include "session/network/key_types.hpp"
+#include "session/network/network_config.hpp"
+#include "session/network/service_node.hpp"
 #include "swarm.hpp"
 
 namespace session::network {
@@ -23,25 +23,25 @@ namespace config {
         uint8_t cache_refresh_retry_limit;
         bool enforce_subnet_diversity;
         network::opt::retry_delay retry_delay;
-        
+
         opt::netid::Target netid;
         std::vector<service_node> seed_nodes;
-        
+
         size_t cache_min_size;
         uint8_t cache_num_nodes_to_use_for_refresh;
         uint16_t cache_node_failure_threshold;
         bool cache_refresh_using_legacy_endpoint;
     };
-}
+}  // namespace config
 
 class SnodePool {
   public:
     using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
 
     SnodePool(
-        config::SnodePoolConfig config,
-        std::shared_ptr<oxen::quic::Loop> loop,
-        network_fetcher_t bootstrap_fetcher);
+            config::SnodePoolConfig config,
+            std::shared_ptr<oxen::quic::Loop> loop,
+            network_fetcher_t bootstrap_fetcher);
     ~SnodePool();
 
     // Sets the network fetcher which should be used once the snode cache exists
@@ -58,8 +58,8 @@ class SnodePool {
 
     // Checks if the pool is empty or stale and triggers a refresh if needed
     void refresh_if_needed(
-        const std::vector<service_node>& in_use_nodes,
-        std::function<void()> on_refresh_complete = nullptr);
+            const std::vector<service_node>& in_use_nodes,
+            std::function<void()> on_refresh_complete = nullptr);
 
     void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
@@ -77,7 +77,8 @@ class SnodePool {
     // Data (protected by '_cache_mutex')
     std::vector<service_node> _snode_cache;
     std::vector<std::pair<swarm::swarm_id_t, std::vector<service_node>>> _all_swarms;
-    std::unordered_map<x25519_pubkey, std::pair<swarm::swarm_id_t, std::vector<service_node>>> _swarm_cache;
+    std::unordered_map<x25519_pubkey, std::pair<swarm::swarm_id_t, std::vector<service_node>>>
+            _swarm_cache;
     std::unordered_map<ed25519_pubkey, uint16_t> _snode_failure_counts;
 
     // Disk I/O
@@ -105,7 +106,11 @@ class SnodePool {
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
     void _launch_next_refresh_request(const std::string& request_id, bool is_bootstrap_request);
     void _retry_refresh_request(const std::string& request_id, bool is_bootstrap_request);
-    void _on_refresh_complete(std::string refresh_id, std::vector<std::vector<std::byte>> raw_results, bool is_bootstrap_request, bool cache_refresh_using_legacy_endpoint);
+    void _on_refresh_complete(
+            std::string refresh_id,
+            std::vector<std::vector<std::byte>> raw_results,
+            bool is_bootstrap_request,
+            bool cache_refresh_using_legacy_endpoint);
 };
 
 }  // namespace session::network

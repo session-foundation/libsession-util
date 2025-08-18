@@ -5,11 +5,10 @@ extern "C" {
 #endif
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include "session/export.h"
 #include "session/log_level.h"
-#include "session/network/service_node.h"
+#include "session/network/session_network_types.h"
 #include "session/onionreq/builder.h"
 #include "session/platform.h"
 
@@ -91,50 +90,15 @@ typedef struct {
 
 } session_network_config;
 
-typedef enum {
-    SESSION_NETWORK_REQUEST_CATEGORY_STANDARD,
-    SESSION_NETWORK_REQUEST_CATEGORY_UPLOAD,
-    SESSION_NETWORK_REQUEST_CATEGORY_DOWNLOAD
-} SESSION_NETWORK_REQUEST_CATEGORY;
-
-typedef struct network_v2_server_destination {
-    const char* method;
-    const char* protocol;
-    const char* host;
-    uint16_t port;
-    const char* x25519_pubkey_hex;
-    const char* const* headers_kv_pairs;
-    size_t headers_kv_pairs_len;
-} network_v2_server_destination;
-
-typedef struct {
-    // Only ONE of these pointers should be set, the other should be left null
-    const network_service_node* snode_dest;
-    const network_v2_server_destination* server_dest;
-    
-    const char* endpoint;
-    const unsigned char* body;
-    size_t body_size;
-    
-    SESSION_NETWORK_REQUEST_CATEGORY category;
-    uint64_t request_timeout_ms;
-    uint64_t overall_timeout_ms; // Use 0 for no overall timeout
-    
-    const char* upload_file_name; // Optional name for file uploads, null terminated
-    
-    const char* request_id; // Optional id for the request to trace through logs, null terminated
-
-} session_request_params;
-
 typedef void (*session_network_response_t)(
-    bool success,
-    bool timeout,
-    int16_t status_code,
-    const char* const* headers_kv_pairs,
-    size_t headers_kv_pairs_len,
-    const unsigned char* response,
-    size_t response_size,
-    void* ctx);
+        bool success,
+        bool timeout,
+        int16_t status_code,
+        const char* const* headers_kv_pairs,
+        size_t headers_kv_pairs_len,
+        const unsigned char* response,
+        size_t response_size,
+        void* ctx);
 
 /// API: network/session_network_default_config
 ///
@@ -149,13 +113,21 @@ LIBSESSION_EXPORT bool session_network_init(
         const session_network_config* config,
         char* error) LIBSESSION_WARN_UNUSED;
 
-/// API: network/network_free
+/// API: network/session_network_free
 ///
 /// Frees a network object.
 ///
 /// Inputs:
 /// - `network` -- [in] Pointer to network_object object
 LIBSESSION_EXPORT void session_network_free(network_object_v2* network);
+
+/// API: network/session_request_params_free
+///
+/// Frees a request params object.
+///
+/// Inputs:
+/// - `params` -- [in] Pointer to session_request_params object
+LIBSESSION_EXPORT void session_request_params_free(session_request_params* params);
 
 LIBSESSION_EXPORT uint64_t session_network_time_offset(network_object_v2* network);
 LIBSESSION_EXPORT int session_network_hardfork(network_object_v2* network);
@@ -174,10 +146,10 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
         size_t body_len);
 
 LIBSESSION_EXPORT void session_network_get_swarm(
-    network_object_v2* network,
-    const char* swarm_pubkey_hex,
-    void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
-    void* ctx);
+        network_object_v2* network,
+        const char* swarm_pubkey_hex,
+        void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
+        void* ctx);
 
 LIBSESSION_EXPORT void session_network_get_random_nodes(
         network_object_v2* network,
@@ -186,10 +158,10 @@ LIBSESSION_EXPORT void session_network_get_random_nodes(
         void* ctx);
 
 LIBSESSION_EXPORT void session_network_send_request(
-    network_object_v2* network,
-    const session_request_params* params,
-    session_network_response_t callback,
-    void* ctx);
+        network_object_v2* network,
+        const session_request_params* params,
+        session_network_response_t callback,
+        void* ctx);
 
 #ifdef __cplusplus
 }

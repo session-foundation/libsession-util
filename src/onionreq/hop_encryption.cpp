@@ -17,8 +17,8 @@
 #include <nlohmann/json.hpp>
 
 #include "session/export.h"
-#include "session/onionreq/builder.hpp"
 #include "session/network/key_types.hpp"
+#include "session/onionreq/builder.hpp"
 #include "session/util.hpp"
 #include "session/xed25519.hpp"
 
@@ -90,7 +90,9 @@ bool HopEncryption::response_long_enough(EncryptType type, size_t response_size)
 }
 
 std::vector<unsigned char> HopEncryption::encrypt(
-        EncryptType type, std::vector<unsigned char> plaintext, const network::x25519_pubkey& pubkey) const {
+        EncryptType type,
+        std::vector<unsigned char> plaintext,
+        const network::x25519_pubkey& pubkey) const {
     switch (type) {
         case EncryptType::xchacha20: return encrypt_xchacha20(plaintext, pubkey);
         case EncryptType::aes_gcm: return encrypt_aesgcm(plaintext, pubkey);

@@ -13,7 +13,8 @@ OnionReqParser::OnionReqParser(
         std::span<const unsigned char> x25519_sk,
         std::span<const unsigned char> req,
         size_t max_size) :
-        keys{network::x25519_pubkey::from_bytes(x25519_pk), network::x25519_seckey::from_bytes(x25519_sk)},
+        keys{network::x25519_pubkey::from_bytes(x25519_pk),
+             network::x25519_seckey::from_bytes(x25519_sk)},
         enc{keys.second, keys.first} {
     if (sodium_init() == -1)
         throw std::runtime_error{"Failed to initialize libsodium!"};

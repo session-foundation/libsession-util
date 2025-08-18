@@ -90,4 +90,4 @@ x25519_pubkey compute_x25519_pubkey(std::span<const unsigned char> ed25519_pk) {
     return x25519_pubkey::from_bytes({xpk.data(), 32});
 }
 
-}  // namespace session::onionreq
+}  // namespace session::network

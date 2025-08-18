@@ -30,16 +30,15 @@ std::string service_node::to_omq_string() const {
 service_node service_node::from(const network_service_node& node) {
     std::vector<unsigned char> pubkey;
     pubkey.reserve(32);
-    oxenc::from_hex(node.ed25519_pubkey_hex, node.ed25519_pubkey_hex + 64, std::back_inserter(pubkey));
+    oxenc::from_hex(
+            node.ed25519_pubkey_hex, node.ed25519_pubkey_hex + 64, std::back_inserter(pubkey));
 
-    return {
-        std::move(pubkey),
-        oxen::quic::ipv4{std::span<const uint8_t, 4>(node.ip, 4)},
-        node.https_port,
-        node.omq_port,
-        {node.version[0], node.version[1], node.version[2]},
-        node.swarm_id
-    };
+    return {std::move(pubkey),
+            oxen::quic::ipv4{std::span<const uint8_t, 4>(node.ip, 4)},
+            node.https_port,
+            node.omq_port,
+            {node.version[0], node.version[1], node.version[2]},
+            node.swarm_id};
 }
 
 void service_node::into(network_service_node& n) const {
@@ -78,7 +77,8 @@ service_node service_node::legacy_from_json(nlohmann::json json) {
                 auto json_version = json["storage_server_version"].get<std::vector<int>>();
 
                 for (size_t i = 0; i < 3; ++i)
-                    storage_server_version[i] = (i < json_version.size() ? static_cast<uint16_t>(json_version[i]) : 0);
+                    storage_server_version[i] =
+                            (i < json_version.size() ? static_cast<uint16_t>(json_version[i]) : 0);
             }
         } else {
             auto json_version = json["storage_server_version"].get<std::string>();
@@ -86,10 +86,10 @@ service_node service_node::legacy_from_json(nlohmann::json json) {
 
             for (size_t i = 0; i < 3 && i < split_version.size(); ++i) {
                 int value;
-                
+
                 if (!quic::parse_int(split_version[i], value))
                     throw std::invalid_argument{"Invalid version"};
-                
+
                 storage_server_version[i] = static_cast<uint16_t>(value);
             }
         }
@@ -191,7 +191,8 @@ service_node service_node::from_disk(std::string_view str) {
     if (parts.size() != 6)
         throw std::invalid_argument("Invalid service node serialisation: {}"_format(str));
     if (parts[0].size() != 64 || !oxenc::is_hex(parts[0]))
-        throw std::invalid_argument{"Invalid service node serialisation: pubkey is not hex or has wrong size"};
+        throw std::invalid_argument{
+                "Invalid service node serialisation: pubkey is not hex or has wrong size"};
 
     std::vector<unsigned char> pubkey;
     pubkey.reserve(32);
@@ -218,17 +219,16 @@ service_node service_node::from_disk(std::string_view str) {
     swarm_id_t swarm_id = INVALID_SWARM_ID;
     quic::parse_int(parts[5], swarm_id);
 
-    return {
-        pubkey,
-        quic::ipv4{std::string{parts[1]}},
-        https_port,
-        omq_port,
-        version_array,
-        swarm_id
-    };
+    return {pubkey,
+            quic::ipv4{std::string{parts[1]}},
+            https_port,
+            omq_port,
+            version_array,
+            swarm_id};
 }
 
-std::pair<std::vector<service_node>, int> service_node::process_snode_cache_bin(std::vector<std::byte> cache_bin) {
+std::pair<std::vector<service_node>, int> service_node::process_snode_cache_bin(
+        std::vector<std::byte> cache_bin) {
     constexpr size_t SNODE_SIZE = 51;
     constexpr size_t PK_SIZE = 32;
     constexpr size_t SWARM_ID_SIZE = 8;
@@ -239,13 +239,13 @@ std::pair<std::vector<service_node>, int> service_node::process_snode_cache_bin(
 
     // Sanity check field sizes
     static_assert(
-            PK_SIZE + SWARM_ID_SIZE + IP_SIZE + HTTPS_PORT_SIZE + OMQ_PORT_SIZE +
-                            VERSION_SIZE ==
+            PK_SIZE + SWARM_ID_SIZE + IP_SIZE + HTTPS_PORT_SIZE + OMQ_PORT_SIZE + VERSION_SIZE ==
                     SNODE_SIZE,
             "Field sizes do not sum to snode size");
 
     if (cache_bin.size() % SNODE_SIZE != 0)
-        throw std::runtime_error{"Snode cache size is not a multiple of snode size ({})."_format(SNODE_SIZE)};
+        throw std::runtime_error{
+                "Snode cache size is not a multiple of snode size ({})."_format(SNODE_SIZE)};
 
     // Parse the binary
     int failed_nodes = 0;
@@ -262,16 +262,16 @@ std::pair<std::vector<service_node>, int> service_node::process_snode_cache_bin(
             // Pubkey
             std::vector<unsigned char> pubkey;
             pubkey.assign(
-                reinterpret_cast<const unsigned char*>(current_ptr),
-                reinterpret_cast<const unsigned char*>(current_ptr) + PK_SIZE);
+                    reinterpret_cast<const unsigned char*>(current_ptr),
+                    reinterpret_cast<const unsigned char*>(current_ptr) + PK_SIZE);
             note_ptr += PK_SIZE;
 
             // Swarm ID
             uint64_t swarm_id_u64 = 0;
             for (int i = 0; i < SWARM_ID_SIZE; ++i)
                 swarm_id_u64 = (swarm_id_u64 << 8) |
-                                static_cast<uint64_t>(static_cast<unsigned char>(note_ptr[i]));
-            
+                               static_cast<uint64_t>(static_cast<unsigned char>(note_ptr[i]));
+
             swarm_id_t swarm_id = static_cast<swarm_id_t>(swarm_id_u64);
             note_ptr += SWARM_ID_SIZE;
 
@@ -307,7 +307,13 @@ std::pair<std::vector<service_node>, int> service_node::process_snode_cache_bin(
                 version_array[i] = static_cast<uint16_t>(static_cast<unsigned char>(note_ptr[i]));
             note_ptr += VERSION_SIZE;
 
-            nodes.emplace_back(std::move(pubkey), ip, https_port, quic_port, std::move(version_array), swarm_id);
+            nodes.emplace_back(
+                    std::move(pubkey),
+                    ip,
+                    https_port,
+                    quic_port,
+                    std::move(version_array),
+                    swarm_id);
         } catch (...) {
             failed_nodes++;
         }

@@ -5,14 +5,52 @@ extern "C" {
 #endif
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "../export.h"
+#include "session/network/service_node.h"
 
 typedef enum {
-    SESSION_NETWORK_CATEGORY_STANDARD = 0,
-    SESSION_NETWORK_CATEGORY_UPLOAD = 1,
-    SESSION_NETWORK_CATEGORY_DOWNLOAD = 2
-} SESSION_NETWORK_CATEGORY_TYPE;
+    SESSION_NETWORK_REQUEST_CATEGORY_STANDARD,
+    SESSION_NETWORK_REQUEST_CATEGORY_UPLOAD,
+    SESSION_NETWORK_REQUEST_CATEGORY_DOWNLOAD
+} SESSION_NETWORK_REQUEST_CATEGORY;
+
+typedef struct network_v2_server_destination {
+    const char* method;
+    const char* protocol;
+    const char* host;
+    uint16_t port;
+    const char* x25519_pubkey_hex;
+    const char* const* headers_kv_pairs;
+    size_t headers_kv_pairs_len;
+} network_v2_server_destination;
+
+typedef struct {
+    char ed25519_pubkey_hex[65];  // The 64-byte ed25519 pubkey in hex + null terminator.
+    uint8_t ip[4];
+    uint16_t port;
+} session_remote_address;
+
+typedef struct {
+    // Only ONE of these pointers should be set, the other should be left null
+    const network_service_node* snode_dest;
+    const network_v2_server_destination* server_dest;
+    const session_remote_address* remote_addr_dest;
+
+    const char* endpoint;
+    const unsigned char* body;
+    size_t body_size;
+
+    SESSION_NETWORK_REQUEST_CATEGORY category;
+    uint64_t request_timeout_ms;
+    uint64_t overall_timeout_ms;  // Use 0 for no overall timeout
+
+    const char* upload_file_name;  // Optional name for file uploads, null terminated
+
+    const char* request_id;  // Optional id for the request to trace through logs, null terminated
+
+} session_request_params;
 
 #ifdef __cplusplus
 }

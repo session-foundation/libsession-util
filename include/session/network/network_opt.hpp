@@ -1,8 +1,9 @@
 #pragma once
 
 #include <filesystem>
-#include "session/network/session_network_types.hpp"
+
 #include "session/network/service_node.hpp"
+#include "session/network/session_network_types.hpp"
 #include "session/types.hpp"
 
 namespace session::network {
@@ -13,7 +14,6 @@ namespace opt {
     namespace fs = std::filesystem;
     using namespace std::chrono_literals;
 
-
     namespace {
         inline std::vector<unsigned char> from_hex(std::string_view s) {
             std::vector<unsigned char> out;
@@ -22,11 +22,12 @@ namespace opt {
 
             return out;
         }
-    }
+    }  // namespace
 
     struct base {};
 
-    /// Can be used to override the default (mainnet) netid that the network will populate it's internal caches from, 'devnet' allows for specifying a custom server.
+    /// Can be used to override the default (mainnet) netid that the network will populate it's
+    /// internal caches from, 'devnet' allows for specifying a custom server.
     struct netid : base {
         enum class Target {
             mainnet,
@@ -47,37 +48,42 @@ namespace opt {
         static netid mainnet() {
             auto seed_nodes = {
                     service_node{
-                            from_hex("1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef"),
+                            from_hex("1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1"
+                                     "fef"),
                             oxen::quic::ipv4{"144.76.164.202"},
-                            uint16_t{0},    // TODO: Get this
+                            uint16_t{0},  // TODO: Get this
                             uint16_t{20200},
                             {2, 10, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            from_hex("1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7ce"),
+                            from_hex("1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a"
+                                     "7ce"),
                             oxen::quic::ipv4{"88.99.102.229"},
-                            uint16_t{0},    // TODO: Get this
+                            uint16_t{0},  // TODO: Get this
                             uint16_t{20201},
                             {2, 10, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            from_hex("1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e06199919f"),
+                            from_hex("1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e061999"
+                                     "19f"),
                             oxen::quic::ipv4{"195.16.73.17"},
-                            uint16_t{0},    // TODO: Get this
+                            uint16_t{0},  // TODO: Get this
                             uint16_t{20202},
                             {2, 10, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            from_hex("1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d78b"),
+                            from_hex("1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d"
+                                     "78b"),
                             oxen::quic::ipv4{"104.194.11.120"},
-                            uint16_t{0},    // TODO: Get this
+                            uint16_t{0},  // TODO: Get this
                             uint16_t{20203},
                             {2, 10, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
-                            from_hex("1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7b0"),
+                            from_hex("1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db"
+                                     "7b0"),
                             oxen::quic::ipv4{"104.194.8.115"},
-                            uint16_t{0},    // TODO: Get this
+                            uint16_t{0},  // TODO: Get this
                             uint16_t{20204},
                             {2, 10, 0},
                             swarm::INVALID_SWARM_ID},
@@ -97,7 +103,8 @@ namespace opt {
                     //         swarm::INVALID_SWARM_ID},  // This is the original one
 
                     service_node{
-                            from_hex("decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a811a"),
+                            from_hex("decaf20025ca6389d8225bda6a32d7fc4ee5176d21e3b2e9e08c3505a48a8"
+                                     "11a"),
                             oxen::quic::ipv4{"23.88.6.250"},
                             uint16_t{35520},
                             uint16_t{35420},
@@ -123,7 +130,7 @@ namespace opt {
                 case Target::devnet: return "devnet";
             }
 
-            return "mainnet";   // Shouldn't happen
+            return "mainnet";  // Shouldn't happen
         }
     };
 
@@ -137,15 +144,15 @@ namespace opt {
 
         Type type;
 
-        private:
-            explicit router(Type t) : type{t} {}
+      private:
+        explicit router(Type t) : type{t} {}
 
-        public:
-            router() = delete;
+      public:
+        router() = delete;
 
-            static router onion_requests() { return router(Type::onion_requests); }
-            static router lokinet() { return router(Type::lokinet); }
-            static router direct() { return router(Type::direct); }
+        static router onion_requests() { return router(Type::onion_requests); }
+        static router lokinet() { return router(Type::lokinet); }
+        static router direct() { return router(Type::direct); }
     };
 
     /// Can be used to override the default (quic_onionreq) transport layer used to send requests.
@@ -162,8 +169,7 @@ namespace opt {
         std::optional<network_callback_t> callback;
 
       private:
-        explicit transport(
-                Type t, std::optional<network_callback_t> callback = std::nullopt) :
+        explicit transport(Type t, std::optional<network_callback_t> callback = std::nullopt) :
                 type{t}, callback{std::move(callback)} {}
 
       public:
@@ -175,17 +181,20 @@ namespace opt {
         }
     };
 
-    /// Can be used to override the default (3) path length used when building onion request or lokinet paths.
+    /// Can be used to override the default (3) path length used when building onion request or
+    /// lokinet paths.
     struct path_length : base {
         uint8_t length;
 
         explicit path_length(uint8_t length) : length{length} {}
     };
 
-    /// Can be used to prevent the code from excluding nodes within the same `/24` subnet from being included in the same path when building onion request or lokinet paths.
+    /// Can be used to prevent the code from excluding nodes within the same `/24` subnet from being
+    /// included in the same path when building onion request or lokinet paths.
     struct disable_subnet_diversity : base {};
 
-    /// Can be used to override the default (1) number of request retries that will occur when receiving a 421 error.
+    /// Can be used to override the default (1) number of request retries that will occur when
+    /// receiving a 421 error.
     struct redirect_retry_count : base {
         uint8_t count;
 
@@ -196,7 +205,9 @@ namespace opt {
         std::chrono::milliseconds base_delay;
         std::chrono::milliseconds max_delay;
 
-        explicit retry_delay(std::chrono::milliseconds base_delay, std::chrono::milliseconds max_delay) : base_delay{base_delay}, max_delay{max_delay} {}
+        explicit retry_delay(
+                std::chrono::milliseconds base_delay, std::chrono::milliseconds max_delay) :
+                base_delay{base_delay}, max_delay{max_delay} {}
 
         /// API: retry_delay/exponential
         ///
@@ -206,7 +217,8 @@ namespace opt {
         /// Inputs:
         /// - 'failure_count' - [in] the number of times the request has already failed.
         inline std::chrono::milliseconds exponential(int failure_count) {
-            if (failure_count <= 0) return base_delay;
+            if (failure_count <= 0)
+                return base_delay;
 
             double delay_ms = base_delay.count() * std::pow(2.0, failure_count - 1);
             auto final_delay = std::chrono::milliseconds(static_cast<long long>(delay_ms));
@@ -215,51 +227,63 @@ namespace opt {
         }
     };
 
-    /// Can be used to override the default (250ms) fequency that is used to check if queued requests have timed out due to transport/router setup.
-    struct request_timeout_check_frequency: base {
+    /// Can be used to override the default (250ms) fequency that is used to check if queued
+    /// requests have timed out due to transport/router setup.
+    struct request_timeout_check_frequency : base {
         std::chrono::milliseconds frequency;
         explicit request_timeout_check_frequency(std::chrono::milliseconds f) : frequency{f} {}
     };
 
     // MARK: Snode Pool Options
 
-    /// Can be used to override the default ('.') path the network uses to cache files (eg. snode pool and lokinet bootstrap).
-    struct cache_directory: base {
+    /// Can be used to override the default ('.') path the network uses to cache files (eg. snode
+    /// pool and lokinet bootstrap).
+    struct cache_directory : base {
         fs::path path;
         explicit cache_directory(fs::path p) : path{p} {}
     };
 
-    /// Can be used to override the default (2h) duration that the snode cache can be used for before it needs to be refreshed.
+    /// Can be used to override the default (2h) duration that the snode cache can be used for
+    /// before it needs to be refreshed.
     struct cache_expiration : base {
         std::chrono::minutes duration;
         explicit cache_expiration(std::chrono::minutes duration) : duration{duration} {}
     };
 
-    /// Can be used to override the default (3) number of retries that will be made when trying to refresh the snode cache.
+    /// Can be used to override the default (3) number of retries that will be made when trying to
+    /// refresh the snode cache.
     ///
-    /// Note: This limit does not apply to the bootstrap request which will retry indefinitely since the code will be unusable otherwise.
+    /// Note: This limit does not apply to the bootstrap request which will retry indefinitely since
+    /// the code will be unusable otherwise.
     struct cache_refresh_retry_limit : base {
         uint8_t limit;
         explicit cache_refresh_retry_limit(uint8_t limit) : limit{limit} {}
     };
 
-    /// Can be used to override the default (12) minimum number of unused nodes before we trigger a snode cache refresh.
+    /// Can be used to override the default (12) minimum number of unused nodes before we trigger a
+    /// snode cache refresh.
     ///
-    /// Note: If the cache size is somehow smaller than this value (eg. Testnet is having issues) then the minimum size will be the full cache size (minus enough to build a path) or at least the size of a single path.
+    /// Note: If the cache size is somehow smaller than this value (eg. Testnet is having issues)
+    /// then the minimum size will be the full cache size (minus enough to build a path) or at least
+    /// the size of a single path.
     struct cache_min_size : base {
         size_t size;
         explicit cache_min_size(size_t size) : size{size} {}
     };
 
-    /// Can be used to override the default (3) number of cached nodes used to refresh the cache for any subsequent refreshes after populating from a seed node.
+    /// Can be used to override the default (3) number of cached nodes used to refresh the cache for
+    /// any subsequent refreshes after populating from a seed node.
     ///
-    /// Note: Providing a value of `0` will result in the cache _always_ being refreshed using a seed node.
+    /// Note: Providing a value of `0` will result in the cache _always_ being refreshed using a
+    /// seed node.
     struct cache_num_nodes_to_use_for_refresh : base {
         uint8_t count;
         explicit cache_num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
     };
 
-    /// Can be used to override the default (3) number of times a specific node in a path can receive an error before it is removed from the path and replaced by a new node (or the path is rebuilt if it happens to be the guard node).
+    /// Can be used to override the default (3) number of times a specific node in a path can
+    /// receive an error before it is removed from the path and replaced by a new node (or the path
+    /// is rebuilt if it happens to be the guard node).
     struct cache_node_failure_threshold : base {
         uint16_t count;
         explicit cache_node_failure_threshold(uint16_t count) : count{count} {}
@@ -289,21 +313,25 @@ namespace opt {
 
     // MARK: Onion Request Router Options
 
-    /// Can be used to override the default (3) number of times a path can receive an error before it is dropped and replaced by a new path.
+    /// Can be used to override the default (3) number of times a path can receive an error before
+    /// it is dropped and replaced by a new path.
     struct onionreq_path_failure_threshold : base {
         uint16_t count;
 
         explicit onionreq_path_failure_threshold(uint16_t count) : count{count} {}
     };
 
-    /// Can be used to override the default (3) number of times a path can receive an error before it is dropped and replaced by a new path.
+    /// Can be used to override the default (3) number of times a path can receive an error before
+    /// it is dropped and replaced by a new path.
     struct onionreq_path_build_retry_limit : base {
         uint16_t count;
 
         explicit onionreq_path_build_retry_limit(uint16_t count) : count{count} {}
     };
 
-    /// Can be used to override the default (2) minimum number of paths that are maintained for each request category when using onion requests. If `onionreq_single_path_mode` is provided this will be ignored.
+    /// Can be used to override the default (2) minimum number of paths that are maintained for each
+    /// request category when using onion requests. If `onionreq_single_path_mode` is provided this
+    /// will be ignored.
     struct onionreq_min_path_count : base {
         RequestCategory category;
         uint8_t min_count;
@@ -312,10 +340,14 @@ namespace opt {
                 category{category}, min_count{min_count} {}
     };
 
-    /// Can be used to force the onion request router to only use a single path regardless of what category the requests sent have. When this option is provided `onionreq_min_path_count` will be ignored.
+    /// Can be used to force the onion request router to only use a single path regardless of what
+    /// category the requests sent have. When this option is provided `onionreq_min_path_count` will
+    /// be ignored.
     struct onionreq_single_path_mode : base {};
 
-    /// Can be used to prevent the network instance from building onion request paths when initialised, when this option is provided paths will be built when the first request it made.
+    /// Can be used to prevent the network instance from building onion request paths when
+    /// initialised, when this option is provided paths will be built when the first request it
+    /// made.
     struct onionreq_disable_pre_build_paths : base {};
 
 }  //  namespace opt

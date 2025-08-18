@@ -1,7 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
+#include <session/network/key_types.hpp>
 #include <session/network/service_node.hpp>
 #include <session/network/swarm.hpp>
-#include <session/network/key_types.hpp>
 #include <tuple>
 
 #include "utils.hpp"

@@ -7,14 +7,14 @@
 #include <unordered_map>
 #include <vector>
 
-#include "session/network/routing/network_router.hpp"
 #include "session/network/request_queue.hpp"
+#include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
 
 namespace lokinet {
-    class Lokinet;
-    struct tunnel_info;
-}; // namespace lokinet
+class Lokinet;
+struct tunnel_info;
+};  // namespace lokinet
 
 namespace session::network {
 
@@ -26,10 +26,10 @@ namespace config {
 
         uint8_t path_length;
     };
-}
+}  // namespace config
 
 class LokinetRouter : public IRouter {
-private:
+  private:
     bool _ready = false;
     config::LokinetRouterConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
@@ -38,12 +38,10 @@ private:
     std::weak_ptr<ITransport> _transport;
 
     std::unordered_map<std::string, lokinet::tunnel_info> _active_tunnels;
-    std::unordered_map<
-            std::string,
-            std::vector<std::pair<Request, network_response_callback_t>>>
+    std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
 
-public:
+  public:
     LokinetRouter(
             config::LokinetRouterConfig config,
             std::shared_ptr<oxen::quic::Loop> loop,
@@ -52,12 +50,14 @@ public:
 
     void send_request(Request request, network_response_callback_t callback) override;
 
-private:
+  private:
     // All of the below functions should only be called from within `_loop`
     void _finish_setup();
     void _send_request_internal(Request request, network_response_callback_t callback);
-    void _establish_tunnel(const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id);
-    void _send_via_tunnel(lokinet::tunnel_info tunnel, Request request, network_response_callback_t callback);
+    void _establish_tunnel(
+            const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id);
+    void _send_via_tunnel(
+            lokinet::tunnel_info tunnel, Request request, network_response_callback_t callback);
 };
 
-} // namespace session::network
+}  // namespace session::network

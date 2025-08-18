@@ -26,7 +26,7 @@ struct Config {
 
     // Netid Options
     std::vector<service_node> seed_nodes;
-    
+
     // Snode Pool Options
     std::optional<fs::path> cache_directory;
     std::chrono::minutes cache_expiration = 2h;
@@ -55,7 +55,9 @@ struct Config {
     std::optional<opt::transport::network_callback_t> callbacks_callback;
 
     template <typename... Opt>
-        requires(sizeof...(Opt) > 0 && std::conjunction_v<std::is_base_of<opt::base, std::decay_t<Opt>>...>)
+        requires(
+                sizeof...(Opt) > 0 &&
+                std::conjunction_v<std::is_base_of<opt::base, std::decay_t<Opt>>...>)
     Config(Opt&&... opts) {
         // parse all options
         ((void)handle_config_opt(std::forward<Opt>(opts)), ...);
@@ -104,11 +106,10 @@ struct Config {
     void handle_config_opt(opt::onionreq_disable_pre_build_paths dpbp);
 
     template <typename Opt>
-    void handle_config_opt(std::optional<Opt> option)
-    {
+    void handle_config_opt(std::optional<Opt> option) {
         if (option)
             handle_config_opt(std::move(*option));
     }
 };
 
-}  // namespace session::network
+}  // namespace session::network::config
