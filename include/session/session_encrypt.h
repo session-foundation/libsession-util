@@ -68,7 +68,7 @@ LIBSESSION_EXPORT bool session_encrypt_for_blinded_recipient(
         unsigned char** ciphertext_out,
         size_t* ciphertext_len);
 
-typedef struct {
+typedef struct session_encrypt_group_message {
     bool success;
     span_u8 ciphertext;
 } session_encrypt_group_message;
@@ -214,7 +214,7 @@ LIBSESSION_EXPORT bool session_decrypt_for_blinded_recipient(
         unsigned char** plaintext_out,
         size_t* plaintext_len);
 
-typedef struct {
+typedef struct session_decrypt_group_message_result {
     bool success;
     size_t index;         // Index of the key that successfully decrypted the message
     char session_id[66];  // In hex

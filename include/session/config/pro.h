@@ -10,18 +10,18 @@ extern "C" {
 
 #include "../export.h"
 
-struct pro_proof {
+typedef struct pro_proof {
     uint8_t version;
     uint8_t gen_index_hash[32];
     uint8_t rotating_pubkey[32];
     uint64_t expiry_unix_ts;
     uint8_t sig[64];
-};
+} pro_proof;
 
-struct pro_pro_config {
+typedef struct pro_pro_config {
     uint8_t rotating_privkey[64];
     pro_proof proof;
-};
+} pro_pro_config;
 
 LIBSESSION_EXPORT pro_proof pro_proof_init(char const* dump, size_t dump_len);
 
