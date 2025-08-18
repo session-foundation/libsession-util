@@ -311,11 +311,11 @@ message GroupUpdateMemberChangeMessage {
 }
 
 message GroupUpdateMemberLeftMessage {
-  // the pubkey of the member left is included as part of the closed group encryption logic (senderIdentity on desktop)
+  // the pubkey of the member left is included as part of the group encryption logic (senderIdentity on desktop)
 }
 
 message GroupUpdateMemberLeftNotificationMessage {
-  // the pubkey of the member left is included as part of the closed group encryption logic (senderIdentity on desktop)
+  // the pubkey of the member left is included as part of the group encryption logic (senderIdentity on desktop)
 }
 
 message GroupUpdateInviteResponseMessage {

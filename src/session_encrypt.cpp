@@ -1,6 +1,8 @@
 #include "session/session_encrypt.hpp"
 
 #include <oxenc/base64.h>
+#include <oxenc/bt_producer.h>
+#include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <session/session_encrypt.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
@@ -14,8 +16,6 @@
 #include <sodium/crypto_secretbox.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
-#include <oxenc/bt_producer.h>
-#include <oxenc/bt_serialize.h>
 #include <zstd.h>
 
 #include <array>
@@ -419,7 +419,8 @@ std::vector<unsigned char> encrypt_for_group(
     // add below, but then also validation that this Ed25519 converts to the Session ID of the
     // claimed sender of the message inside the encoded message data.
     dict.append(
-            "a", std::string_view{reinterpret_cast<const char*>(user_ed25519_privkey.data()) + 32, 32});
+            "a",
+            std::string_view{reinterpret_cast<const char*>(user_ed25519_privkey.data()) + 32, 32});
 
     if (!compress)
         dict.append("d", to_string_view(plaintext));
@@ -430,7 +431,10 @@ std::vector<unsigned char> encrypt_for_group(
     // receive it.
     std::vector<unsigned char> to_sign(plaintext.size() + group_ed25519_pubkey.size());
     std::memcpy(to_sign.data(), plaintext.data(), plaintext.size());
-    std::memcpy(to_sign.data() + plaintext.size(), group_ed25519_pubkey.data(), group_ed25519_pubkey.size());
+    std::memcpy(
+            to_sign.data() + plaintext.size(),
+            group_ed25519_pubkey.data(),
+            group_ed25519_pubkey.size());
 
     std::array<unsigned char, 64> signature;
     crypto_sign_ed25519_detached(
@@ -704,15 +708,15 @@ DecryptGroupMessage decrypt_group_message(
         if (decrypt_ed25519_privkey.size() != 32 && decrypt_ed25519_privkey.size() != 64)
             throw std::invalid_argument{"Invalid decrypt_ed25519_privkey: expected 32 or 64 bytes"};
         decrypt_success = 0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                                            plain.data(),
-                                            nullptr,
-                                            nullptr,
-                                            ciphertext.data(),
-                                            ciphertext.size(),
-                                            nullptr,
-                                            0,
-                                            nonce.data(),
-                                            decrypt_ed25519_privkey.data());
+                                       plain.data(),
+                                       nullptr,
+                                       nullptr,
+                                       ciphertext.data(),
+                                       ciphertext.size(),
+                                       nullptr,
+                                       0,
+                                       nonce.data(),
+                                       decrypt_ed25519_privkey.data());
         if (decrypt_success) {
             result.index = index;
             break;
@@ -794,7 +798,10 @@ DecryptGroupMessage decrypt_group_message(
     // in encrypt_message).
     std::vector<unsigned char> to_verify(raw_data.size() + group_ed25519_pubkey.size());
     std::memcpy(to_verify.data(), raw_data.data(), raw_data.size());
-    std::memcpy(to_verify.data() + raw_data.size(), group_ed25519_pubkey.data(), group_ed25519_pubkey.size());
+    std::memcpy(
+            to_verify.data() + raw_data.size(),
+            group_ed25519_pubkey.data(),
+            group_ed25519_pubkey.size());
     if (0 != crypto_sign_ed25519_verify_detached(
                      ed_sig.data(), to_verify.data(), to_verify.size(), ed_pk.data()))
         throw std::runtime_error{"message signature failed validation"};
@@ -1086,14 +1093,14 @@ LIBSESSION_C_API bool session_encrypt_for_blinded_recipient(
         const unsigned char* plaintext_in,
         size_t plaintext_len,
         const unsigned char* ed25519_privkey,
-        const unsigned char* open_group_pubkey,
+        const unsigned char* community_pubkey,
         const unsigned char* recipient_blinded_id,
         unsigned char** ciphertext_out,
         size_t* ciphertext_len) {
     try {
         auto ciphertext = session::encrypt_for_blinded_recipient(
                 std::span<const unsigned char>{ed25519_privkey, 64},
-                std::span<const unsigned char>{open_group_pubkey, 32},
+                std::span<const unsigned char>{community_pubkey, 32},
                 std::span<const unsigned char>{recipient_blinded_id, 33},
                 std::span<const unsigned char>{plaintext_in, plaintext_len});
 
@@ -1107,17 +1114,16 @@ LIBSESSION_C_API bool session_encrypt_for_blinded_recipient(
 }
 
 LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
-        const unsigned char *user_ed25519_privkey,
+        const unsigned char* user_ed25519_privkey,
         size_t user_ed25519_privkey_len,
-        const unsigned char *group_ed25519_pubkey,
+        const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
-        const unsigned char *group_ed25519_privkey,
+        const unsigned char* group_ed25519_privkey,
         size_t group_ed25519_privkey_len,
-        const unsigned char *plaintext,
+        const unsigned char* plaintext,
         size_t plaintext_len,
         bool compress,
-        size_t padding)
-{
+        size_t padding) {
     session_encrypt_group_message result = {};
     try {
         std::vector<unsigned char> result_cpp = encrypt_for_group(
@@ -1128,10 +1134,10 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
                 compress,
                 padding);
         result = {
-            .success = true,
-            .ciphertext = span_u8_copy_or_throw(result_cpp.data(), result_cpp.size()),
+                .success = true,
+                .ciphertext = span_u8_copy_or_throw(result_cpp.data(), result_cpp.size()),
         };
-    } catch(...) {
+    } catch (...) {
     }
     return result;
 }
@@ -1188,7 +1194,7 @@ LIBSESSION_C_API bool session_decrypt_for_blinded_recipient(
         const unsigned char* ciphertext_in,
         size_t ciphertext_len,
         const unsigned char* ed25519_privkey,
-        const unsigned char* open_group_pubkey,
+        const unsigned char* community_pubkey,
         const unsigned char* sender_id,
         const unsigned char* recipient_id,
         char* session_id_out,
@@ -1197,7 +1203,7 @@ LIBSESSION_C_API bool session_decrypt_for_blinded_recipient(
     try {
         auto result = session::decrypt_from_blinded_recipient(
                 std::span<const unsigned char>{ed25519_privkey, 64},
-                std::span<const unsigned char>{open_group_pubkey, 32},
+                std::span<const unsigned char>{community_pubkey, 32},
                 std::span<const unsigned char>{sender_id, 33},
                 std::span<const unsigned char>{recipient_id, 33},
                 std::span<const unsigned char>{ciphertext_in, ciphertext_len});
@@ -1214,13 +1220,12 @@ LIBSESSION_C_API bool session_decrypt_for_blinded_recipient(
 }
 
 LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_message(
-        const span_u8 *decrypt_ed25519_privkey_list,
+        const span_u8* decrypt_ed25519_privkey_list,
         size_t decrypt_ed25519_privkey_len,
-        const unsigned char *group_ed25519_pubkey,
+        const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
-        const unsigned char *ciphertext,
-        size_t ciphertext_len)
-{
+        const unsigned char* ciphertext,
+        size_t ciphertext_len) {
     session_decrypt_group_message_result result = {};
     for (size_t index = 0; index < decrypt_ed25519_privkey_len; index++) {
         std::span<const uint8_t> key = {
@@ -1233,9 +1238,10 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
                     {group_ed25519_pubkey, group_ed25519_pubkey_len},
                     {ciphertext, ciphertext_len});
             result = {
-                .success = true,
-                .index = index,
-                .plaintext = span_u8_copy_or_throw(result.plaintext.data, result.plaintext.size),
+                    .success = true,
+                    .index = index,
+                    .plaintext =
+                            span_u8_copy_or_throw(result.plaintext.data, result.plaintext.size),
             };
             assert(result_cpp.session_id.size() == sizeof(result.session_id));
             std::memcpy(result.session_id, result_cpp.session_id.data(), sizeof(result.session_id));

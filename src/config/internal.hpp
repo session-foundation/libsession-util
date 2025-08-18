@@ -151,7 +151,7 @@ std::string session_id_to_bytes(std::string_view session_id, std::string_view pr
 std::array<unsigned char, 32> session_id_pk(
         std::string_view session_id, std::string_view prefix = "05");
 
-// Validates an open group pubkey; we accept it in hex, base32z, or base64 (padded or unpadded).
+// Validates a community pubkey; we accept it in hex, base32z, or base64 (padded or unpadded).
 // Throws std::invalid_argument if invalid.
 void check_encoded_pubkey(std::string_view pk);
 

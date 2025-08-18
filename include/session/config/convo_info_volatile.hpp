@@ -44,13 +44,13 @@ class val_loader;
 ///           included, but will be 0 if no messages are read.
 ///       u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
-/// g - group conversations (aka new, non-legacy closed groups).  The key is the group identifier
+/// g - group conversations (aka new, non-legacy groups).  The key is the group identifier
 ///     (beginning with 03).  Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
-/// C - legacy group conversations (aka closed groups).  The key is the group identifier (which
+/// C - legacy group conversations (aka groups).  The key is the group identifier (which
 ///     looks indistinguishable from a Session ID, but isn't really a proper Session ID).  Values
 ///     are dicts with keys:
 ///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,

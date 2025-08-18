@@ -303,7 +303,7 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 /// 64-byte
 ///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
 ///   from the seed.
-/// - `server_pk` -- the public key of the open group server to route the blinded message through
+/// - `server_pk` -- the public key of the community server to route the blinded message through
 /// (32 bytes).
 /// - `sender_id` -- the blinded id of the sender including the blinding prefix (33 bytes),
 ///   'blind15' or 'blind25' decryption will be chosed based on this value.
@@ -323,8 +323,8 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
         std::span<const unsigned char> ciphertext);
 
 struct DecryptGroupMessage {
-    size_t index; // Index of the key that successfully decrypted the message
-    std::string session_id; // In hex
+    size_t index;            // Index of the key that successfully decrypted the message
+    std::string session_id;  // In hex
     std::vector<unsigned char> plaintext;
 };
 

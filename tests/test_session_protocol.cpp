@@ -221,15 +221,15 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
 
     SECTION("Check non-encryptable messages produce only plaintext") {
         auto dest_list = {
-                DestinationType::OpenGroup,
-                DestinationType::OpenGroupInbox,
+                DestinationType::Community,
+                DestinationType::CommunityInbox,
                 DestinationType::Contact};
 
         for (auto dest_type : dest_list) {
-            if (dest_type == DestinationType::OpenGroup)
-                INFO("Trying open groups");
-            else if (dest_type == DestinationType::OpenGroupInbox)
-                INFO("Trying open group inbox");
+            if (dest_type == DestinationType::Community)
+                INFO("Trying community");
+            else if (dest_type == DestinationType::CommunityInbox)
+                INFO("Trying community inbox");
             else
                 INFO("Trying contacts to non-default namespace");
 
@@ -239,7 +239,7 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
             config::Namespace space = config::Namespace::Default;
             if (dest_type == DestinationType::Contact) {
                 space = config::Namespace::Contacts;
-            } else if (dest_type == DestinationType::OpenGroupInbox) {
+            } else if (dest_type == DestinationType::CommunityInbox) {
                 auto [blind15_pk, blind15_sk] = session::blind15_key_pair(
                         keys.ed_sk1, keys.ed_pk1, /*blind factor*/ nullptr);
                 dest.recipient_pubkey[0] = 0x15;
@@ -249,7 +249,7 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
             EncryptedForDestination encrypt_result = session::encrypt_for_destination(
                     to_span(protobuf_content_with_pro.plaintext), keys.ed_sk0, dest, space);
 
-            if (dest_type == DestinationType::OpenGroupInbox) {
+            if (dest_type == DestinationType::CommunityInbox) {
                 REQUIRE(encrypt_result.encrypted);
                 REQUIRE(encrypt_result.ciphertext.size());
             } else {
@@ -355,7 +355,7 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         EncryptedForDestination encrypt_result = {};
         {
             Destination dest = base_dest;
-            dest.type = DestinationType::ClosedGroup;
+            dest.type = DestinationType::Group;
             assert(dest.recipient_pubkey[0] == 0x05);
 
             encrypt_result = session::encrypt_for_destination(
@@ -418,10 +418,10 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         EncryptedForDestination encrypt_result = {};
         {
             Destination dest = base_dest;
-            dest.type = DestinationType::ClosedGroup;
-            dest.closed_group_pubkey[0] = 0x03;
-            std::memcpy(dest.closed_group_pubkey.data() + 1, group_v2_pk.data(), group_v2_pk.size());
-            dest.closed_group_keys = &group_v2_keys;
+            dest.type = DestinationType::Group;
+            dest.group_pubkey[0] = 0x03;
+            std::memcpy(dest.group_pubkey.data() + 1, group_v2_pk.data(), group_v2_pk.size());
+            dest.group_keys = &group_v2_keys;
 
             encrypt_result = session::encrypt_for_destination(
                     to_span(protobuf_content_with_pro.plaintext),
@@ -499,12 +499,11 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         std::span<const uint8_t> bad_key = keys.ed_sk0;
         DecryptEnvelopeKey bad_decrypt_keys = {};
         decrypt_keys.ed25519_privkeys = {&bad_key, 1};
-        REQUIRE_THROWS(
-                session::decrypt_envelope(
-                        bad_decrypt_keys,
-                        encrypt_result.ciphertext,
-                        protobuf_content_with_pro.proof.expiry_unix_ts,
-                        pro_backend_ed_pk));
+        REQUIRE_THROWS(session::decrypt_envelope(
+                bad_decrypt_keys,
+                encrypt_result.ciphertext,
+                protobuf_content_with_pro.proof.expiry_unix_ts,
+                pro_backend_ed_pk));
 
         // Try decrypt with multiple keys, 1 bad, 1 good key
         auto key_list = std::array{bad_key, key};

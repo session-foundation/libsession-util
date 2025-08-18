@@ -164,7 +164,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     std::array<unsigned char, 64> lg_sk;
     crypto_sign_ed25519_seed_keypair(
             lg_pk.data(), lg_sk.data(), reinterpret_cast<const unsigned char*>(lgroup_seed.data()));
-    // Note: this isn't exactly what Session actually does here for legacy closed groups (rather it
+    // Note: this isn't exactly what Session actually does here for legacy groups (rather it
     // uses X25519 keys) but for this test the distinction doesn't matter.
     c.enc_pubkey.assign(lg_pk.data(), lg_pk.data() + lg_pk.size());
     c.enc_seckey.assign(lg_sk.data(), lg_sk.data() + 32);
@@ -181,11 +181,11 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(groups.needs_push());
     CHECK(groups.needs_dump());
 
-    const auto open_group_pubkey =
+    const auto community_pubkey =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
 
     auto og = groups.get_or_construct_community(
-            "http://Example.ORG:5678", "SudokuRoom", open_group_pubkey);
+            "http://Example.ORG:5678", "SudokuRoom", community_pubkey);
     CHECK(og.base_url() == "http://example.org:5678");  // Note: lower-case
     CHECK(og.room() == "SudokuRoom");                   // Note: case-preserving
     CHECK(og.room_norm() == "sudokuroom");
@@ -281,7 +281,7 @@ TEST_CASE("User Groups", "[config][groups]") {
     CHECK(x2->base_url() == "http://example.org:5678");
     CHECK(x2->room() == "SudokuRoom");  // Case preserved from the stored value, not the input value
     CHECK(x2->room_norm() == "sudokuroom");
-    CHECK(x2->pubkey_hex() == to_hex(open_group_pubkey));
+    CHECK(x2->pubkey_hex() == to_hex(community_pubkey));
     CHECK(x2->priority == 14);
 
     CHECK_FALSE(g2.needs_push());
@@ -871,17 +871,17 @@ TEST_CASE("User groups mute_until & joined_at are always seconds", "[config][gro
     }
 
     {
-        const auto open_group_pubkey =
+        const auto community_pubkey =
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
         const auto url = "http://example.org:5678";
         const auto room = "sudoku_room";
-        auto comm = c.get_or_construct_community(url, room, open_group_pubkey);
+        auto comm = c.get_or_construct_community(url, room, community_pubkey);
         int64_t joined_at = get_timestamp_ms();
         int64_t mute_until = get_timestamp_ms();
         comm.joined_at = joined_at;
         comm.mute_until = mute_until;
         c.set(comm);
-        auto comm2 = c.get_or_construct_community(url, room, open_group_pubkey);
+        auto comm2 = c.get_or_construct_community(url, room, community_pubkey);
         CHECK(comm2.joined_at == joined_at / 1'000);    // joined_at was given in milliseconds
         CHECK(comm2.mute_until == mute_until / 1'000);  // mute_until was given in milliseconds
         c.erase_community(url, room);

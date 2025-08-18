@@ -22,8 +22,8 @@
 #include "session/config/groups/keys.h"
 #include "session/config/groups/members.hpp"
 #include "session/multi_encrypt.hpp"
-#include "session/xed25519.hpp"
 #include "session/session_encrypt.hpp"
+#include "session/xed25519.hpp"
 
 using namespace std::literals;
 
@@ -1242,7 +1242,6 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     if (!decrypt_success)  // none of the keys worked
         throw std::runtime_error{"unable to decrypt ciphertext with any current group keys"};
 
-
     std::pair<std::string, std::vector<unsigned char>> result;
     result.first = std::move(decrypt.session_id);
     result.second = std::move(decrypt.plaintext);
@@ -1363,8 +1362,7 @@ LIBSESSION_C_API const unsigned char* groups_keys_get_key(const config_group_key
     return keys[N].data();
 }
 
-LIBSESSION_C_API const span_u8 groups_keys_group_enc_key(const config_group_keys* conf)
-{
+LIBSESSION_C_API const span_u8 groups_keys_group_enc_key(const config_group_keys* conf) {
     span_u8 result = {};
     try {
         std::span<const uint8_t> key = unbox(conf).group_enc_key();
