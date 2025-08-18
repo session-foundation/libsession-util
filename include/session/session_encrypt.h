@@ -102,7 +102,9 @@ typedef struct session_encrypt_group_message {
 ///   use the default of next-multiple-of-256.
 ///
 /// Outputs:
-/// - `ciphertext` -- the encrypted, etc. value to send to the swarm
+/// - `success` -- True if the encryption was successful, false otherwise
+/// - `ciphertext` -- the encrypted, etc. value to send to the swarm. This ciphertext must be freed
+///   with the CRT's `free` when the caller is done with the memory.
 LIBSESSION_EXPORT session_encrypt_group_message session_encrypt_for_group(
         const unsigned char* user_ed25519_privkey,
         size_t user_ed25519_privkey_len,
@@ -218,7 +220,7 @@ typedef struct session_decrypt_group_message_result {
     bool success;
     size_t index;         // Index of the key that successfully decrypted the message
     char session_id[66];  // In hex
-    span_u8 plaintext;
+    span_u8 plaintext;    // Decrypted message on success. Must be freed by calling the CRT's `free`
 } session_decrypt_group_message_result;
 
 /// API: crypto/session_decrypt_group_message
@@ -238,8 +240,12 @@ typedef struct session_decrypt_group_message_result {
 ///   by `encrypt_message()`.
 ///
 /// Outputs:
-/// The struct with the results of decryption. On failure this sets the `success` boolean to false
-/// and all fields should be ignored except `success`.
+/// - `success` -- True if the decryption was successful, false otherwise
+/// - `index` -- Index of the key that successfully decrypted the message if decryption was
+///   successful.
+/// - `session_id` -- The 66 byte 05 prefixed session ID of the user that sent the message
+/// - `plaintext` -- Decrypted message if successful. This plaintext must be freed with the CRT's
+///   `free` when the caller is done with the memory.
 session_decrypt_group_message_result session_decrypt_group_message(
         const span_u8* decrypt_ed25519_privkey_list,
         size_t decrypt_ed25519_privkey_len,

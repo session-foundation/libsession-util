@@ -218,10 +218,16 @@ PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags)
 /// - `space` -- the namespace to encrypt the message for
 ///
 /// Outputs:
-/// - The encryption result for the plaintext. If the destination and namespace combination did not
-///   require encryption, no payload is returned in the ciphertext and the user should proceed with
-///   the plaintext. This should be validated by checking the `encrypted` flag on the result to
-///   determine if the ciphertext or plaintext is to be used.
+/// - `success` -- True if encryption was successful, if the underlying implementation threw
+///   an exception then this is caught internally and success is set to false. All remaining fields
+///   are to be ignored in the result on failure.
+/// - `encrypted` -- True if any encryption was performed. If the combination of the namespace and
+///   destination does not require encryption, this flag is false. In this case, `ciphertext` will
+///   not be assigned. The caller should proceed with the `plaintext` they initially passed in.
+/// - `ciphertext` -- Encryption result for the plaintext. If the destination and namespace
+///   combination did not require encryption, no payload is returned in the ciphertext and the user
+///   should proceed with the plaintext. This should be validated by checking the `encrypted` flag
+///   on the result to determine if the ciphertext or plaintext is to be used.
 ///
 ///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
 ///   encoded/wrapped if necessary).
@@ -270,8 +276,30 @@ EncryptedForDestination encrypt_for_destination(
 ///   issuer
 ///
 /// Outputs:
-/// - The decrypted envelope. It contains the fields of the envelope and the Session Pro metadata
-///   within the envelope if there were any.
+/// - `success` -- True if encryption was successful, if the underlying implementation threw
+///   an exception then this is caught internally and success is set to false. All remaining fields
+///   in the result are to be ignored on failure.
+/// - `envelope` -- Envelope structure that was decrypted/parsed from the `envelope_plaintext`
+/// - `content_plaintext` -- Decrypted contents of the envelope structure. This is the protobuf
+///   encoded stream that can be parsed into a protobuf `Content` structure.
+/// - `sender_ed25519_pubkey` -- The sender's ed25519 public key embedded in the encrypted payload.
+///   This is only set for session message envelopes. Groups envelopes only embed the sender's
+///   x25519 public key in which case this field is set to the zero public key.
+/// - `sender_x25519_pubkey` -- The sender's x25519 public key. It's always set on successful
+///   decryption either by extracting the key from the encrypted groups envelope, or, by deriving
+///   the x25519 key from the sender's ed25519 key in the case of a session message envelope.
+/// - `pro_status` -- The pro status associated with the envelope, if any, that the sender has
+///   embedded into the envelope being parsed. This field is set to nil if there was no pro metadata
+///   associated with the envelope.
+///
+///   This field should be used to determine the presence of pro and whether or not the caller
+///   can respect the contents of the pro proof and features. A valid pro proof that can be used
+///   effectively after parsing is indicated by this value being set to the Valid enum.
+/// - `pro_proof` -- The pro proof in the envelope. This field is set to all zeros if `pro_status`
+///   was nil, otherwise it's populated with proof data.
+/// - `pro_features` -- Pro features that were activated in this envelope by the sender. This field
+///   is only set if `pro_status` is not nil. It should only be enforced if the `pro_status` was
+///   the Valid enum.
 DecryptedEnvelope decrypt_envelope(
         const DecryptEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
