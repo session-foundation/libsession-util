@@ -1211,15 +1211,16 @@ std::vector<unsigned char> Keys::encrypt_message(
 std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
         std::span<const unsigned char> ciphertext) const {
     assert(_sign_pk);
-    std::pair<std::string, std::vector<unsigned char>> result;
 
     //
     // Decrypt, using all the possible keys, starting with a pending one (if we have one)
     //
+    DecryptGroupMessage decrypt = {};
     bool decrypt_success = false;
     if (auto pending = pending_key(); pending) {
         try {
-            result = decrypt_group_message(*pending, *_sign_pk, ciphertext);
+            std::span<std::span<const uint8_t>> key_list = {&(*pending), 1};
+            decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
             decrypt_success = true;
         } catch (const std::exception&) {
         }
@@ -1228,7 +1229,9 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     if (!decrypt_success) {
         for (auto& k : keys_) {
             try {
-                result = decrypt_group_message(k.key, *_sign_pk, ciphertext);
+                std::span<const uint8_t> key = {k.key.data(), k.key.size()};
+                std::span<std::span<const uint8_t>> key_list = {&key, 1};
+                decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
                 decrypt_success = true;
                 break;
             } catch (const std::exception&) {
@@ -1238,6 +1241,11 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
 
     if (!decrypt_success)  // none of the keys worked
         throw std::runtime_error{"unable to decrypt ciphertext with any current group keys"};
+
+
+    std::pair<std::string, std::vector<unsigned char>> result;
+    result.first = std::move(decrypt.session_id);
+    result.second = std::move(decrypt.plaintext);
     return result;
 }
 
@@ -1348,11 +1356,24 @@ LIBSESSION_C_API size_t groups_keys_size(const config_group_keys* conf) {
     return unbox(conf).size();
 }
 
-LIBSESSION_C_API const unsigned char* group_keys_get_key(const config_group_keys* conf, size_t N) {
+LIBSESSION_C_API const unsigned char* groups_keys_get_key(const config_group_keys* conf, size_t N) {
     auto keys = unbox(conf).group_keys();
     if (N >= keys.size())
         return nullptr;
     return keys[N].data();
+}
+
+LIBSESSION_C_API const span_u8 groups_keys_group_enc_key(const config_group_keys* conf)
+{
+    span_u8 result = {};
+    try {
+        std::span<const uint8_t> key = unbox(conf).group_enc_key();
+        result.data = const_cast<uint8_t*>(key.data());
+        result.size = key.size();
+        assert(result.size == 32);
+    } catch (const std::exception& e) {
+    }
+    return result;
 }
 
 LIBSESSION_C_API bool groups_keys_is_admin(const config_group_keys* conf) {

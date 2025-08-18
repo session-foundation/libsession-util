@@ -171,9 +171,9 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         }
 
         // Decrypt envelope
+        std::span<const uint8_t> key = keys.ed_sk1;
         DecryptEnvelopeKey decrypt_keys = {};
-        decrypt_keys.use_group_keys = false;
-        decrypt_keys.recipient_ed25519_privkey = keys.ed_sk1;
+        decrypt_keys.ed25519_privkeys = {&key, 1};
         DecryptedEnvelope decrypt_result = session::decrypt_envelope(
                 decrypt_keys, encrypt_result.ciphertext, timestamp_s, pro_backend_ed_pk);
 
@@ -274,9 +274,9 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         }
 
         // Decrypt envelope
+        std::span<const uint8_t> key = keys.ed_sk1;
         DecryptEnvelopeKey decrypt_keys = {};
-        decrypt_keys.use_group_keys = false;
-        decrypt_keys.recipient_ed25519_privkey = keys.ed_sk1;
+        decrypt_keys.ed25519_privkeys = {&key, 1};
         DecryptedEnvelope decrypt_result = session::decrypt_envelope(
                 decrypt_keys, encrypt_result.ciphertext, timestamp_s, pro_backend_ed_pk);
 
@@ -327,9 +327,9 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         }
 
         // Decrypt envelope
+        std::span<const uint8_t> key = keys.ed_sk1;
         DecryptEnvelopeKey decrypt_keys = {};
-        decrypt_keys.use_group_keys = false;
-        decrypt_keys.recipient_ed25519_privkey = keys.ed_sk1;
+        decrypt_keys.ed25519_privkeys = {&key, 1};
         DecryptedEnvelope decrypt_result = session::decrypt_envelope(
                 decrypt_keys, encrypt_result.ciphertext, timestamp_s, pro_backend_ed_pk);
 
@@ -374,9 +374,9 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         REQUIRE(ws_msg.request().has_body());
 
         // Decrypt envelope
+        std::span<const uint8_t> key = keys.ed_sk1;
         DecryptEnvelopeKey decrypt_keys = {};
-        decrypt_keys.use_group_keys = false;
-        decrypt_keys.recipient_ed25519_privkey = keys.ed_sk1;
+        decrypt_keys.ed25519_privkeys = {&key, 1};
         DecryptedEnvelope decrypt_result = session::decrypt_envelope(
                 decrypt_keys, to_span(ws_msg.request().body()), timestamp_s, pro_backend_ed_pk);
 
@@ -458,9 +458,9 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
         }
 
         // Decrypt envelope
+        std::span<const uint8_t> key = keys.ed_sk1;
         DecryptEnvelopeKey decrypt_keys = {};
-        decrypt_keys.use_group_keys = false;
-        decrypt_keys.recipient_ed25519_privkey = keys.ed_sk1;
+        decrypt_keys.ed25519_privkeys = {&key, 1};
         DecryptedEnvelope decrypt_result = session::decrypt_envelope(
                 decrypt_keys, encrypt_result.ciphertext, timestamp_s, pro_backend_ed_pk);
 
@@ -485,16 +485,6 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
                 pro_backend_ed_pk);
         REQUIRE(decrypt_result_again.pro_status == ProStatus::Expired);
 
-        // Try decrypt with bad key (ed_sk0 which was the sender; ed_sk1 the recipient)
-        DecryptEnvelopeKey bad_decrypt_keys = {};
-        bad_decrypt_keys.use_group_keys = false;
-        bad_decrypt_keys.recipient_ed25519_privkey = keys.ed_sk0;
-        CHECK_THROWS(session::decrypt_envelope(
-                bad_decrypt_keys,
-                encrypt_result.ciphertext,
-                protobuf_content_with_pro.proof.expiry_unix_ts,
-                pro_backend_ed_pk));
-
         // Try decrypt with a bad backend key
         array_uc32 bad_pro_backend_ed_pk = pro_backend_ed_pk;
         bad_pro_backend_ed_pk[0] ^= 1;
@@ -504,6 +494,28 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
                 protobuf_content_with_pro.proof.expiry_unix_ts,
                 bad_pro_backend_ed_pk);
         REQUIRE(decrypt_result_again.pro_status == ProStatus::InvalidProBackendSig);
+
+        // Try decrypt with bad key (ed_sk0 which was the sender; ed_sk1 the recipient)
+        std::span<const uint8_t> bad_key = keys.ed_sk0;
+        DecryptEnvelopeKey bad_decrypt_keys = {};
+        decrypt_keys.ed25519_privkeys = {&bad_key, 1};
+        REQUIRE_THROWS(
+                session::decrypt_envelope(
+                        bad_decrypt_keys,
+                        encrypt_result.ciphertext,
+                        protobuf_content_with_pro.proof.expiry_unix_ts,
+                        pro_backend_ed_pk));
+
+        // Try decrypt with multiple keys, 1 bad, 1 good key
+        auto key_list = std::array{bad_key, key};
+        DecryptEnvelopeKey multi_decrypt_keys = {};
+        multi_decrypt_keys.ed25519_privkeys = key_list;
+        decrypt_result_again = session::decrypt_envelope(
+                multi_decrypt_keys,
+                encrypt_result.ciphertext,
+                protobuf_content_with_pro.proof.expiry_unix_ts,
+                pro_backend_ed_pk);
+        REQUIRE(decrypt_result_again.pro_status == ProStatus::Valid);
     }
 
     SECTION("Encrypt/decrypt for sync messages with Pro and bad rotating signature") {
@@ -520,9 +532,9 @@ TEST_CASE("Session protocol helpers", "[session-protocol][helpers]") {
             REQUIRE(encrypt_result.encrypted);
         }
 
+        std::span<const uint8_t> key = keys.ed_sk1;
         DecryptEnvelopeKey decrypt_keys = {};
-        decrypt_keys.use_group_keys = false;
-        decrypt_keys.recipient_ed25519_privkey = keys.ed_sk1;
+        decrypt_keys.ed25519_privkeys = {&key, 1};
         DecryptedEnvelope decrypt_result = session::decrypt_envelope(
                 decrypt_keys, encrypt_result.ciphertext, timestamp_s, pro_backend_ed_pk);
         REQUIRE(decrypt_result.pro_status == ProStatus::InvalidUserSig);

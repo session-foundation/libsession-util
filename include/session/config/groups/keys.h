@@ -6,6 +6,7 @@ extern "C" {
 
 #include "../base.h"
 #include "../util.h"
+#include "../../types.h"
 
 // This is an opaque type analagous to `config_object` but specific to the groups keys object.
 //
@@ -131,6 +132,18 @@ LIBSESSION_EXPORT size_t groups_keys_size(const config_group_keys* conf);
 /// Outputs:
 /// - `const unsigned char*` -- pointer to the 32-byte key, or nullptr if there
 LIBSESSION_EXPORT const unsigned char* groups_keys_get_key(const config_group_keys* conf, size_t N);
+
+/// API: groups/groups_keys_group_enc_key
+///
+/// Accesses the current encryption key: that is, the most current group decryption key. Returns the
+/// 32 byte private key, or, an empty span if there are no encryption keys at all.
+///
+/// Inputs:
+/// - `conf` -- the groups config object
+///
+/// Outputs:
+/// - `true` if we have admin keys, `false` otherwise.
+LIBSESSION_EXPORT const span_u8 groups_keys_group_enc_key(const config_group_keys* conf);
 
 /// API: groups/groups_keys_is_admin
 ///

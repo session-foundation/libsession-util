@@ -322,9 +322,15 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
         std::span<const unsigned char> recipient_id,
         std::span<const unsigned char> ciphertext);
 
+struct DecryptGroupMessage {
+    size_t index; // Index of the key that successfully decrypted the message
+    std::string session_id; // In hex
+    std::vector<unsigned char> plaintext;
+};
+
 /// API: crypto/decrypt_group_message
 ///
-/// Decrypts group message content that was presumably encrypted with `encrypt_group_message`,
+/// Decrypts group message content that was presumably encrypted with `encrypt_for_group`,
 /// verifies the sender signature, decompresses the message (if necessary) and then returns the
 /// author pubkey and the plaintext data.
 ///
@@ -332,8 +338,9 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
 /// a compressed value that would decompress to a value larger than 1MB.
 ///
 /// Inputs:
-/// - `decrypt_ed25519_privkey` -- the private key to use to decrypt the message. Can be a 32-byte
-///   seed, or a 64-byte libsodium secret key. The public key component is not used.
+/// - `decrypt_ed25519_privkey_list` -- the list of private keys to try to decrypt the message with.
+///   Can be a 32-byte seed, or a 64-byte libsodium secret key. The public key component is not
+///   used.
 /// - `group_ed25519_pubkey` -- the 32 byte public key of the group
 /// - `ciphertext` -- an encrypted, encoded, signed, (possibly) compressed message as produced
 ///   by `encrypt_message()`.
@@ -347,8 +354,8 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
 /// some diagnostic info on what part failed.  Typically a production session client would catch
 /// (and possibly log) but otherwise ignore such exceptions and just not process the message if
 /// it throws.
-std::pair<std::string, std::vector<unsigned char>> decrypt_group_message(
-        std::span<const unsigned char> decrypt_ed25519_privkey,
+DecryptGroupMessage decrypt_group_message(
+        std::span<std::span<const unsigned char>> decrypt_ed25519_privkey_list,
         std::span<const unsigned char> group_ed25519_pubkey,
         std::span<const unsigned char> ciphertext);
 

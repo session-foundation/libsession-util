@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
@@ -52,7 +53,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         std::chrono::milliseconds dest_sent_timestamp_ms,
         std::span<const uint8_t> dest_open_group_inbox_server_pubkey,
         std::span<const uint8_t> dest_closed_group_pubkey,
-        const config::groups::Keys* dest_closed_group_keys,
+        std::span<const uint8_t> dest_closed_group_ed25519_privkey,
         config::Namespace space,
         UseMalloc use_malloc) {
 
@@ -60,6 +61,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
     assert(dest_recipient_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_open_group_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_closed_group_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
+    assert(dest_closed_group_ed25519_privkey.size() == 32 || dest_closed_group_ed25519_privkey.size() == 64);
 
     // All incoming arguments are passed in from typed, fixed-sized arrays so we do not need to
     // throw if these sizes are wrong. It being wrong would be a development error.
@@ -104,10 +106,6 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     dest_closed_group_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
             if (has_03_prefix) {
                 if (space == config::Namespace::GroupMessages) {
-                    if (!dest_closed_group_keys)
-                        throw std::runtime_error(
-                                "API misuse: Sending to a closed group into the group messages "
-                                "namespace requires the closed group keys to be set");
                     enc.mode = Mode::Envelope;
                     enc.before_envelope_encrypt_for_recipient_deterministic = false;
                     enc.after_envelope = AfterEnvelope::KeysEncryptMessage;
@@ -224,13 +222,15 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                 } break;
 
                 case AfterEnvelope::KeysEncryptMessage: {
-                    assert(dest_closed_group_keys &&
-                           "Dev error, API miuse was not detected. We should throw an exception "
-                           "when this happens earlier");
-
                     std::string bytes = envelope.SerializeAsString();
-                    std::vector<uint8_t> ciphertext =
-                            dest_closed_group_keys->encrypt_message(to_span(bytes));
+                    std::vector<uint8_t> ciphertext = encrypt_for_group(
+                            ed25519_privkey,
+                            dest_closed_group_pubkey,
+                            dest_closed_group_ed25519_privkey,
+                            to_span(bytes),
+                            /*compress*/ true,
+                            /*padding*/ 256);
+
                     if (use_malloc == UseMalloc::Yes) {
                         result.ciphertext_c =
                                 span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
@@ -291,8 +291,8 @@ EncryptedForDestination encrypt_for_destination(
             /*dest_recipient_pubkey=*/dest.recipient_pubkey,
             /*dest_sent_timestamp_ms=*/dest.sent_timestamp_ms,
             /*dest_open_group_inbox_server_pubkey=*/dest.open_group_inbox_server_pubkey,
-            /*dest_closed_group_pubkey=*/dest.closed_group_pubkey,
-            /*dest_closed_group_keys=*/dest.closed_group_keys,
+            /*dest_closed_group_ed25519_pubkey=*/dest.closed_group_ed25519_pubkey,
+            /*dest_closed_group_ed25519_privkey=*/dest.closed_group_ed25519_privkey,
             /*space=*/space,
             /*use_malloc=*/UseMalloc::No);
 
@@ -316,29 +316,26 @@ DecryptedEnvelope decrypt_envelope(
     // provided. We will decrypt the payload to get the plaintext. In all other cases, the envelope
     // is assumed to be unencrypted and can be used verbatim.
     std::vector<uint8_t> envelope_plaintext_from_group_keys;
-    if (keys.use_group_keys) {
-        if (!keys.group_keys)
-            throw std::runtime_error(
-                    "API misuse: Envelope decryption with group keys was requested but no key was "
-                    "set");
+    if (keys.group_ed25519_pubkey) {
+        // Decrypt using the keys
+        DecryptGroupMessage decrypt = decrypt_group_message(
+                keys.ed25519_privkeys, *keys.group_ed25519_pubkey, envelope_plaintext);
 
-        // Decrypt
-        std::string sender_x25519_pubkey;
-        std::tie(sender_x25519_pubkey, envelope_plaintext_from_group_keys) =
-                keys.group_keys->decrypt_message(envelope_plaintext);
-        if (sender_x25519_pubkey.size() != crypto_sign_ed25519_PUBLICKEYBYTES)
+        if (decrypt.session_id.size() != ((crypto_sign_ed25519_PUBLICKEYBYTES + 1) * 2))
             throw std::runtime_error{fmt::format(
-                    "Parse encrypted envelope failed, extracted x25519 pubkey was wrong size: {}",
-                    sender_x25519_pubkey.size())};
+                    "Parse encrypted envelope failed, extracted session ID was wrong size: "
+                    "{}",
+                    decrypt.session_id.size())};
 
         // Update the plaintext to use the decrypted envelope
-        envelope_plaintext = envelope_plaintext_from_group_keys;  // Update the plaintext
+        envelope_plaintext = std::move(decrypt.plaintext);
 
         // Copy keys out
-        std::memcpy(
-                result.sender_x25519_pubkey.data(),
-                sender_x25519_pubkey.data(),
-                sender_x25519_pubkey.size());
+        assert(decrypt.session_id.starts_with("05"));
+        oxenc::from_hex(
+                decrypt.session_id.begin() + 2,
+                decrypt.session_id.end() - 2,
+                result.sender_x25519_pubkey.begin());
     }
 
     if (!envelope.ParseFromArray(envelope_plaintext.data(), envelope_plaintext.size()))
@@ -389,12 +386,33 @@ DecryptedEnvelope decrypt_envelope(
     // Decrypt content
     // The envelope is encrypted in GroupsV2, contents unencrypted. In 1o1 and legacy groups, the
     // envelope is encrypted, contents is encrypted.
-    bool has_encrypted_content = !keys.use_group_keys;
-    if (has_encrypted_content) {
+    if (keys.group_ed25519_pubkey) {
+        result.content_plaintext.resize(envelope.content().size());
+        std::memcpy(
+                result.content_plaintext.data(),
+                envelope.content().data(),
+                envelope.content().size());
+    } else {
         std::span<const uint8_t> content_str = session::to_span(envelope.content());
-        auto [content_plaintext, sender_ed25519_pubkey] =
-                session::decrypt_incoming(keys.recipient_ed25519_privkey, content_str);
-        assert(result.sender_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
+        bool decrypt_success = false;
+        std::vector<uint8_t> content_plaintext;
+        std::vector<uint8_t> sender_ed25519_pubkey;
+        for (const auto& privkey_it : keys.ed25519_privkeys) {
+            try {
+                std::tie(content_plaintext, sender_ed25519_pubkey) =
+                        session::decrypt_incoming(privkey_it, content_str);
+                assert(result.sender_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
+                decrypt_success = true;
+                break;
+            } catch (const std::exception& e) {
+            }
+        }
+
+        if (!decrypt_success) {
+            throw std::runtime_error{fmt::format(
+                    "Envelope content decryption failed, tried {} key(s)",
+                    keys.ed25519_privkeys.size())};
+        }
 
         result.content_plaintext = std::move(content_plaintext);
         std::memcpy(
@@ -403,16 +421,12 @@ DecryptedEnvelope decrypt_envelope(
                 result.sender_ed25519_pubkey.size());
 
         if (crypto_sign_ed25519_pk_to_curve25519(
-                    result.sender_x25519_pubkey.data(), result.sender_ed25519_pubkey.data()) != 0)
+                    result.sender_x25519_pubkey.data(), result.sender_ed25519_pubkey.data()) !=
+            0)
             throw std::runtime_error(
-                    "Parse content failed, ed25519 public key could not be converted to x25519 "
+                    "Parse content failed, ed25519 public key could not be converted to "
+                    "x25519 "
                     "key.");
-    } else {
-        result.content_plaintext.resize(envelope.content().size());
-        std::memcpy(
-                result.content_plaintext.data(),
-                envelope.content().data(),
-                envelope.content().size());
     }
 
     // TODO: We parse the content in libsession to extract pro metadata but we return the unparsed
@@ -532,9 +546,8 @@ session_protocol_encrypt_for_destination(
                 /*dest_recipient_pubkey=*/dest->recipient_pubkey,
                 /*dest_sent_timestamp_ms=*/std::chrono::milliseconds(dest->sent_timestamp_ms),
                 /*dest_open_group_inbox_server_pubkey=*/dest->open_group_inbox_server_pubkey,
-                /*dest_closed_group_pubkey=*/dest->closed_group_pubkey,
-                /*dest_closed_group_keys=*/
-                static_cast<const config::groups::Keys*>(dest->closed_group_keys->internals),
+                /*dest_closed_group_ed25519_pubkey=*/dest->closed_group_ed25519_pubkey,
+                /*dest_closed_group_ed25519_privkey=*/dest->closed_group_ed25519_privkey,
                 /*space=*/static_cast<config::Namespace>(space),
                 /*use_malloc=*/UseMalloc::Yes);
 
@@ -565,22 +578,30 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         return result;
     std::memcpy(pro_backend_pubkey_cpp.data(), pro_backend_pubkey, pro_backend_pubkey_len);
 
+    // Setup decryption keys and decrypt
+    DecryptEnvelopeKey keys_cpp = {};
+    if (keys->group_ed25519_pubkey.size) {
+        keys_cpp.group_ed25519_pubkey = std::span<const uint8_t>(
+                keys->group_ed25519_pubkey.data, keys->group_ed25519_pubkey.size);
+    }
+
+    DecryptedEnvelope result_cpp = {};
+    for (size_t index = 0; index < keys->ed25519_privkeys_len; index++) {
+        std::span<const uint8_t> key = {
+                keys->ed25519_privkeys[index].data, keys->ed25519_privkeys[index].size};
+        keys_cpp.ed25519_privkeys = {&key, 1};
+        try {
+            result_cpp = decrypt_envelope(
+                    keys_cpp,
+                    {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
+                    std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
+                    pro_backend_pubkey_cpp);
+            break;
+        } catch (...) {
+        }
+    }
+
     try {
-        // Setup decryption keys and decrypt
-        DecryptEnvelopeKey keys_cpp = {
-                .use_group_keys = keys->use_group_keys,
-                .group_keys =
-                        reinterpret_cast<const config::groups::Keys*>(keys->group_keys->internals),
-                .recipient_ed25519_privkey = {
-                        static_cast<const uint8_t*>(keys->recipient_ed25519_privkey),
-                        keys->recipient_ed25519_privkey_len}};
-
-        DecryptedEnvelope result_cpp = decrypt_envelope(
-                keys_cpp,
-                {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
-                std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
-                pro_backend_pubkey_cpp);
-
         // Marshall into c type
         result = {
                 .success = false,
