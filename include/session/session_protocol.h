@@ -69,8 +69,8 @@ struct session_protocol_destination {  // See session::Destination
     uint8_t recipient_pubkey[33];
     uint64_t sent_timestamp_ms;
     uint8_t open_group_inbox_server_pubkey[32];
-    uint8_t closed_group_pubkey[33];
-    const config_group_keys* closed_group_keys;
+    uint8_t closed_group_ed25519_pubkey[33];
+    uint8_t closed_group_ed25519_privkey[32];
 };
 
 enum ENVELOPE_TYPE {
@@ -99,10 +99,9 @@ struct session_protocol_envelope {
 };
 
 struct session_protocol_decrypt_envelope_keys {
-    bool use_group_keys;
-    const config_group_keys* group_keys;
-    const void* recipient_ed25519_privkey;
-    size_t recipient_ed25519_privkey_len;
+    span_u8 group_ed25519_pubkey;
+    const span_u8 *ed25519_privkeys;
+    size_t ed25519_privkeys_len;
 };
 
 struct session_protocol_decrypted_envelope {

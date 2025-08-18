@@ -8,6 +8,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "export.h"
+#include "types.h"
 
 /// API: crypto/session_encrypt_for_recipient_deterministic
 ///
@@ -66,6 +67,53 @@ LIBSESSION_EXPORT bool session_encrypt_for_blinded_recipient(
         const unsigned char* recipient_blinded_id, /* 33 bytes */
         unsigned char** ciphertext_out,
         size_t* ciphertext_len);
+
+typedef struct {
+    bool success;
+    span_u8 ciphertext;
+} session_encrypt_group_message;
+
+/// API: crypto/session_encrypt_for_group
+///
+/// Compresses, signs, and encrypts group message content.
+///
+/// See: crypto/encrypt_for_group
+///
+/// This function will set `success` to false on failure:
+/// - if any of the keys passed in are invalidly sized or non-valid keys
+/// - if there no encryption keys are available at all (which should not occur in normal use).
+/// - if given a plaintext buffer larger than 1MB (even if the compressed version would be much
+///   smaller).  It is recommended that clients impose their own limits much smaller than this
+///   on data passed into encrypt_message; this limitation is in *this* function to match the
+///   `decrypt_message` limit which is merely intended to guard against decompression memory
+///   exhaustion attacks.
+///
+/// Inputs:
+/// - `user_ed25519_privkey` -- the private key of the user. Can be a 32-byte seed, or a 64-byte
+///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
+/// - `group_ed25519_pubkey` -- the 32 byte public key of the group
+/// - `group_ed25519_privkey` -- the private key of the user. Can be a 32-byte seed, or a 64-byte
+///   libsodium secret key
+/// - `plaintext` -- the binary message to encrypt.
+/// - `compress` -- can be specified as `false` to forcibly disable compression.  Normally
+///   omitted, to use compression if and only if it reduces the size.
+/// - `padding` -- the padding multiple: padding will be added as needed to attain a multiple of
+///   this value for the final result.  0 or 1 disables padding entirely.  Normally omitted to
+///   use the default of next-multiple-of-256.
+///
+/// Outputs:
+/// - `ciphertext` -- the encrypted, etc. value to send to the swarm
+LIBSESSION_EXPORT session_encrypt_group_message session_encrypt_for_group(
+        const unsigned char *user_ed25519_privkey,
+        size_t user_ed25519_privkey_len,
+        const unsigned char *group_ed25519_pubkey,
+        size_t group_ed25519_pubkey_len,
+        const unsigned char *group_ed25519_privkey,
+        size_t group_ed25519_privkey_len,
+        const unsigned char *plaintext,
+        size_t plaintext_len,
+        bool compress,
+        size_t padding);
 
 /// API: crypto/session_decrypt_incoming
 ///
@@ -165,6 +213,40 @@ LIBSESSION_EXPORT bool session_decrypt_for_blinded_recipient(
         char* session_id_out,                   /* 67 byte output buffer */
         unsigned char** plaintext_out,
         size_t* plaintext_len);
+
+typedef struct {
+    bool success;
+    size_t index; // Index of the key that successfully decrypted the message
+    char session_id[66]; // In hex
+    span_u8 plaintext;
+} session_decrypt_group_message_result;
+
+/// API: crypto/session_decrypt_group_message
+///
+/// Decrypts group message content that was presumably encrypted with `session_encrypt_for_group`,
+/// verifies the sender signature, decompresses the message (if necessary) and then returns the
+/// author pubkey and the plaintext data.
+///
+/// See: crypto/decrypt_group_message
+///
+/// Inputs:
+/// - `decrypt_ed25519_privkey_list` -- the list of private keys to try to decrypt the message with.
+///   Can be a 32-byte seed, or a 64-byte libsodium secret key. The public key component is not
+///   used.
+/// - `group_ed25519_pubkey` -- the 32 byte public key of the group
+/// - `ciphertext` -- an encrypted, encoded, signed, (possibly) compressed message as produced
+///   by `encrypt_message()`.
+///
+/// Outputs:
+/// The struct with the results of decryption. On failure this sets the `success` boolean to false
+/// and all fields should be ignored except `success`.
+session_decrypt_group_message_result session_decrypt_group_message(
+        const span_u8 *decrypt_ed25519_privkey_list,
+        size_t decrypt_ed25519_privkey_len,
+        const unsigned char *group_ed25519_pubkey,
+        size_t group_ed25519_pubkey_len,
+        const unsigned char *ciphertext,
+        size_t ciphertext_len);
 
 /// API: crypto/session_decrypt_ons_response
 ///
