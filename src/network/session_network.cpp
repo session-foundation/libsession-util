@@ -52,6 +52,21 @@ config::QuicTransportConfig build_quic_transport_config(const config::Config& ma
     };
 }
 
+config::LokinetRouterConfig build_lokinet_router_config(const config::Config& main_config) {
+    if (!main_config.cache_directory)
+        throw std::invalid_argument{"Lokinet requires a cache_directory to be configured."};
+
+    if (main_config.netid == opt::netid::Target::devnet)
+        throw std::invalid_argument{"Lokinet does not support devnet."};
+
+    return {
+        main_config.netid,
+        *main_config.cache_directory,
+        main_config.request_timeout_check_frequency,
+        main_config.path_length
+    };
+}
+
 config::OnionRequestRouterConfig build_onion_request_router_config(const config::Config& main_config) {
     return {
         main_config.retry_delay,
@@ -85,16 +100,6 @@ namespace detail {
 
 Network_v2::Network_v2(config::Config config) : config{config} {
     // Start by validating the configuration
-    switch (config.router) {
-        case opt::router::Type::lokinet:
-            if (!config.cache_directory)
-                throw std::invalid_argument{"Lokinet requires a cache_directory to be configured."};
-            break;
-
-        case opt::router::Type::onion_requests: break;
-        case opt::router::Type::direct: break;
-    }
-
     switch (config.transport) {
         case opt::transport::Type::quic: break;
         case opt::transport::Type::callbacks: break;
@@ -133,7 +138,7 @@ Network_v2::Network_v2(config::Config config) : config{config} {
             break;
 
         case opt::router::Type::lokinet:
-            // _router = std::make_unique<LokinetTransport>(_config, *_snode_pool, _loop);
+            _router = std::make_unique<LokinetRouter>(std::move(build_lokinet_router_config(config)), _loop, _snode_pool, _transport);
             break;
 
         case opt::router::Type::direct:

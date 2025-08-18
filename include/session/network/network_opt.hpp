@@ -115,6 +115,16 @@ namespace opt {
 
             return netid(Target::devnet, std::move(seed_nodes));
         }
+
+        static std::string to_string(Target target) {
+            switch (target) {
+                case Target::mainnet: return "mainnet";
+                case Target::testnet: return "testnet";
+                case Target::devnet: return "devnet";
+            }
+
+            return "mainnet";   // Shouldn't happen
+        }
     };
 
     /// Can be used to override the default (onion_requests) routing method for requests.

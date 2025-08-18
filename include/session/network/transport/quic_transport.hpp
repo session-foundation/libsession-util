@@ -54,7 +54,7 @@ public:
 
 private:
     void _send_request_internal(Request request, network_response_callback_t callback);
-    void _establish_connection(const service_node& target_node, const std::string& initiating_req_id);
+    void _establish_connection(const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id);
     void _send_on_connection(oxen::quic::ConnectionID conn_id, Request request, network_response_callback_t callback);
 };
 

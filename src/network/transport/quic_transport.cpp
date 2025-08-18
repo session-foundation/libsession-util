@@ -54,7 +54,7 @@ void QuicTransport::verify_connectivity(
         
         // Only try to establish a connection if we are the first to ask for one
         if (_pending_requests.count(pubkey_hex) == 0 && _pending_verification_callbacks.at(pubkey_hex).size() == 1)
-            _establish_connection(node, context_id);
+            _establish_connection({node.view_remote_key(), node.host(), node.omq_port}, context_id);
     });
 }
 
@@ -65,60 +65,73 @@ void QuicTransport::send_request(Request request, network_response_callback_t ca
     });
 }
 
+// MARK: Internal Logic
+
 void QuicTransport::_send_request_internal(Request request, network_response_callback_t callback) {
-    const auto* target_node = std::get_if<service_node>(&request.destination);
-    if (!target_node) {
+    std::optional<oxen::quic::RemoteAddress> remote;
+
+    std::visit([&remote, request_id = request.request_id](auto&& arg) {
+        using T = std::decay_t<decltype(arg)>;
+
+        if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
+            log::trace(cat, "[QuicTransport Request {}]: Using pre-resolved RemoteAddress.", request_id);
+            remote = arg;
+        } else if constexpr (std::is_same_v<T, service_node>) {
+            log::trace(cat, "[QuicTransport Request {}]: Resolving service_node to RemoteAddress.", request_id);
+            remote.emplace(arg.view_remote_key(), arg.host(), arg.omq_port);
+        }
+    }, request.destination);
+    
+    if (!remote) {
         log::critical(cat, "[QuicTransport Request {}] Invalid destination type!", request.request_id);
         return callback(false, false, -1, {content_type_plain_text},  "Internal error: invalid destination for QuicTransport");
     }
 
-    const auto target_pubkey_hex = oxenc::to_hex(target_node->view_remote_key());
+    const auto remote_pubkey_hex = oxenc::to_hex(remote->view_remote_key());
 
     // If an active connection exists then we can send the request over that
-    if (auto it = _active_connection_ids.find(target_pubkey_hex); it != _active_connection_ids.end()) {
+    if (auto it = _active_connection_ids.find(remote_pubkey_hex); it != _active_connection_ids.end()) {
         log::trace(cat, "[QuicTransport Request {}] Found active connection ID.", request.request_id);
         _send_on_connection(it->second, std::move(request), std::move(callback));
         return;
     }
 
     // If we should already be establishing a connection then we can just add this as a pending request and it'll be picked up once the connection is made
-    if (_pending_requests.count(target_pubkey_hex)) {
-        log::debug(cat, "[QuicTransport Request {}] Connection to {} is pending, queueing request.", request.request_id, target_node->to_string());
-        _pending_requests[target_pubkey_hex].emplace_back(std::move(request), std::move(callback));
+    if (_pending_requests.count(remote_pubkey_hex)) {
+        log::debug(cat, "[QuicTransport Request {}] Connection to {} is pending, queueing request.", request.request_id, remote_pubkey_hex);
+        _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
         return;
     }
 
     // No connection exists so we need to start a new one and queue the request
-    log::info(cat, "[QuicTransport Request {}] No connection to {}, initiating new connection.", request.request_id, target_node->to_string());
+    log::info(cat, "[QuicTransport Request {}] No connection to {}, initiating new connection.", request.request_id, remote_pubkey_hex);
     std::string initiating_req_id = request.request_id;
-    service_node target_node_copy = *target_node;
-    _pending_requests[target_pubkey_hex].emplace_back(std::move(request), std::move(callback));
-    _establish_connection(target_node_copy, initiating_req_id);
+    _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
+    _establish_connection(*remote, initiating_req_id);
 }
 
-void QuicTransport::_establish_connection(const service_node& target_node, const std::string& initiating_req_id) {
-    const auto target_pubkey_hex = oxenc::to_hex(target_node.view_remote_key());
+void QuicTransport::_establish_connection(const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id) {
+    const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
     auto conn_key_pair = ed25519::ed25519_key_pair();
     auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
-    auto remote = oxen::quic::RemoteAddress{target_node.view_remote_key(), target_node.host(), target_node.omq_port};
 
-    log::debug(cat, "[QuicTransport Request {}] Establishing new connection to {}", initiating_req_id, target_node.to_string());
+    log::debug(cat, "[QuicTransport Request {}] Establishing new connection to {}.", initiating_req_id, address_pubkey_hex);
     _endpoint->connect(
-        remote,
+        address,
         creds,
         oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
         oxen::quic::opt::keep_alive{_config.keep_alive},
-        [this, target_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn) {
-            log::info(cat, "[QuicTransport Request {}] Successfully established connection to {}", initiating_req_id, target_pubkey_hex);
+        [this, address_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn) {
+            log::info(cat, "[QuicTransport Request {}] Successfully established connection to {}.", initiating_req_id, address_pubkey_hex);
             
             auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
             auto conn_id = conn.reference_id();
             auto stream_id = stream->stream_id();
-            auto verification_callbacks = std::move(_pending_verification_callbacks[target_pubkey_hex]);
-            _pending_verification_callbacks.erase(target_pubkey_hex);
+            auto verification_callbacks = std::move(_pending_verification_callbacks[address_pubkey_hex]);
+            _pending_verification_callbacks.erase(address_pubkey_hex);
 
-            auto requests_to_process = std::move(_pending_requests[target_pubkey_hex]);
-            _pending_requests.erase(target_pubkey_hex);
+            auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
+            _pending_requests.erase(address_pubkey_hex);
 
             // Only persistent requests verify connectivity so if there is a verification callback then it should be persistent, otherwise if ANY of the requests require persistence then we should store the connection (if we don't store it then the connection will )
             bool is_persistent = !verification_callbacks.empty();
@@ -129,7 +142,7 @@ void QuicTransport::_establish_connection(const service_node& target_node, const
 
             if (is_persistent) {
                 _ephemeral_connection_ids.erase(conn_id);   // Just in case
-                _active_connection_ids.insert_or_assign(target_pubkey_hex, conn_id);
+                _active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
             } else
                 _ephemeral_connection_ids.insert(conn_id);
 
@@ -145,29 +158,29 @@ void QuicTransport::_establish_connection(const service_node& target_node, const
                     _send_on_connection(conn_id, std::move(req), std::move(cb));
             }
         },
-        [this, target_pubkey_hex, target_string = target_node.to_string(), initiating_req_id](oxen::quic::Connection& conn, uint64_t error_code) {
+        [this, address_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn, uint64_t error_code) {
             auto conn_id = conn.reference_id();
 
             if (error_code == NGTCP2_NO_ERROR)
-                log::info(cat, "[QuicTransport Request {}] Connection to {} closed gracefully.", initiating_req_id, target_string);
+                log::info(cat, "[QuicTransport Request {}] Connection to {} closed gracefully.", initiating_req_id, address_pubkey_hex);
             else if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
-                log::warning(cat, "[QuicTransport Request {}] Handshake timeout when connecting to {}. The node is likely unreachable.", initiating_req_id, target_string);
+                log::warning(cat, "[QuicTransport Request {}] Handshake timeout when connecting to {}. The node is likely unreachable.", initiating_req_id, address_pubkey_hex);
             else
-                log::warning(cat, "[QuicTransport Request {}] Connection to {} failed or was closed with error code: {}", initiating_req_id, target_string, error_code);
+                log::warning(cat, "[QuicTransport Request {}] Connection to {} failed or was closed with error code: {}", initiating_req_id, address_pubkey_hex, error_code);
 
             _ephemeral_connection_ids.erase(conn_id);
-            _active_connection_ids.erase(target_pubkey_hex);
+            _active_connection_ids.erase(address_pubkey_hex);
             _active_stream_ids.erase(conn_id);
 
             // Process any waiting verification requests
-            if (auto it = _pending_verification_callbacks.find(target_pubkey_hex); it != _pending_verification_callbacks.end()) {
+            if (auto it = _pending_verification_callbacks.find(address_pubkey_hex); it != _pending_verification_callbacks.end()) {
                 for (const auto& pending_cb : it->second)
                     pending_cb(false);
                 _pending_verification_callbacks.erase(it);
             }
 
             // Fail all the pending requests for this connection
-            if (auto it = _pending_requests.find(target_pubkey_hex); it != _pending_requests.end()) {
+            if (auto it = _pending_requests.find(address_pubkey_hex); it != _pending_requests.end()) {
                 auto to_fail = std::move(it->second);
                 _pending_requests.erase(it);
 

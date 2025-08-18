@@ -216,7 +216,7 @@ void OnionRequestRouter::send_request(Request request, network_response_callback
     });
 }
 
-// MARK: Private Functions
+// MARK: Internal Logic
 
 void OnionRequestRouter::_finish_setup() {
     // Start processing requests
