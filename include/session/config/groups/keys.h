@@ -4,9 +4,9 @@
 extern "C" {
 #endif
 
+#include "../../types.h"
 #include "../base.h"
 #include "../util.h"
-#include "../../types.h"
 
 // This is an opaque type analagous to `config_object` but specific to the groups keys object.
 //

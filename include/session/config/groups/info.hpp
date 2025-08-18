@@ -236,7 +236,7 @@ class Info : public ConfigBase {
     /// API: groups/Info::set_delete_before
     ///
     /// Sets a "delete before" unix timestamp: this instructs clients to delete all messages from
-    /// the closed group history with a timestamp earlier than this value.  Returns nullopt if no
+    /// the group history with a timestamp earlier than this value.  Returns nullopt if no
     /// delete-before timestamp is set.
     ///
     /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
@@ -250,7 +250,7 @@ class Info : public ConfigBase {
     /// API: groups/Info::get_delete_before
     ///
     /// Returns the delete-before unix timestamp (seconds) for the group; clients should delete all
-    /// messages from the closed group with timestamps earlier than this value, if set.
+    /// messages from the group with timestamps earlier than this value, if set.
     ///
     /// Returns std::nullopt if no delete-before timestamp is set.
     ///
@@ -279,7 +279,7 @@ class Info : public ConfigBase {
     /// API: groups/Info::get_delete_attach_before
     ///
     /// Returns the delete-attachments-before unix timestamp (seconds) for the group; clients should
-    /// delete all messages from the closed group with timestamps earlier than this value, if set.
+    /// delete all messages from the group with timestamps earlier than this value, if set.
     ///
     /// Returns std::nullopt if no delete-attachments-before timestamp is set.
     ///

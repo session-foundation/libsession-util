@@ -1,6 +1,7 @@
+#include <zstd.h>
+
 #include <charconv>
 #include <session/util.hpp>
-#include <zstd.h>
 
 namespace session {
 

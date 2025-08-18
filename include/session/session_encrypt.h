@@ -45,7 +45,7 @@ LIBSESSION_EXPORT bool session_encrypt_for_recipient_deterministic(
 /// - `plaintext_in` -- [in] Pointer to a data buffer containing the encrypted data.
 /// - `plaintext_len` -- [in] Length of `plaintext_in`
 /// - `ed25519_privkey` -- [in] the Ed25519 private key of the sender (64 bytes).
-/// - `open_group_pubkey` -- [in] the public key of the open group server to route
+/// - `community_pubkey` -- [in] the public key of the community server to route
 ///   the blinded message through (32 bytes).
 /// - `recipient_blinded_id` -- [in] the blinded id of the recipient including the blinding
 ///   prefix (33 bytes), 'blind15' or 'blind25' encryption will be chosed based on this value.
@@ -63,7 +63,7 @@ LIBSESSION_EXPORT bool session_encrypt_for_blinded_recipient(
         const unsigned char* plaintext_in,
         size_t plaintext_len,
         const unsigned char* ed25519_privkey,      /* 64 bytes */
-        const unsigned char* open_group_pubkey,    /* 32 bytes */
+        const unsigned char* community_pubkey,     /* 32 bytes */
         const unsigned char* recipient_blinded_id, /* 33 bytes */
         unsigned char** ciphertext_out,
         size_t* ciphertext_len);
@@ -104,13 +104,13 @@ typedef struct {
 /// Outputs:
 /// - `ciphertext` -- the encrypted, etc. value to send to the swarm
 LIBSESSION_EXPORT session_encrypt_group_message session_encrypt_for_group(
-        const unsigned char *user_ed25519_privkey,
+        const unsigned char* user_ed25519_privkey,
         size_t user_ed25519_privkey_len,
-        const unsigned char *group_ed25519_pubkey,
+        const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
-        const unsigned char *group_ed25519_privkey,
+        const unsigned char* group_ed25519_privkey,
         size_t group_ed25519_privkey_len,
-        const unsigned char *plaintext,
+        const unsigned char* plaintext,
         size_t plaintext_len,
         bool compress,
         size_t padding);
@@ -183,7 +183,7 @@ LIBSESSION_EXPORT bool session_decrypt_incoming_legacy_group(
 /// - `ciphertext_in` -- [in] Pointer to a data buffer containing the encrypted data.
 /// - `ciphertext_len` -- [in] Length of `ciphertext_in`
 /// - `ed25519_privkey` -- [in] the Ed25519 private key of the receiver (64 bytes).
-/// - `open_group_pubkey` -- [in] the public key of the open group server to route
+/// - `community_pubkey` -- [in] the public key of the community server to route
 ///   the blinded message through (32 bytes).
 /// - `sender_id` -- [in] the blinded id of the sender including the blinding prefix (33 bytes),
 ///   'blind15' or 'blind25' decryption will be chosed based on this value.
@@ -206,18 +206,18 @@ LIBSESSION_EXPORT bool session_decrypt_incoming_legacy_group(
 LIBSESSION_EXPORT bool session_decrypt_for_blinded_recipient(
         const unsigned char* ciphertext_in,
         size_t ciphertext_len,
-        const unsigned char* ed25519_privkey,   /* 64 bytes */
-        const unsigned char* open_group_pubkey, /* 32 bytes */
-        const unsigned char* sender_id,         /* 33 bytes */
-        const unsigned char* recipient_id,      /* 33 bytes */
-        char* session_id_out,                   /* 67 byte output buffer */
+        const unsigned char* ed25519_privkey,  /* 64 bytes */
+        const unsigned char* community_pubkey, /* 32 bytes */
+        const unsigned char* sender_id,        /* 33 bytes */
+        const unsigned char* recipient_id,     /* 33 bytes */
+        char* session_id_out,                  /* 67 byte output buffer */
         unsigned char** plaintext_out,
         size_t* plaintext_len);
 
 typedef struct {
     bool success;
-    size_t index; // Index of the key that successfully decrypted the message
-    char session_id[66]; // In hex
+    size_t index;         // Index of the key that successfully decrypted the message
+    char session_id[66];  // In hex
     span_u8 plaintext;
 } session_decrypt_group_message_result;
 
@@ -241,11 +241,11 @@ typedef struct {
 /// The struct with the results of decryption. On failure this sets the `success` boolean to false
 /// and all fields should be ignored except `success`.
 session_decrypt_group_message_result session_decrypt_group_message(
-        const span_u8 *decrypt_ed25519_privkey_list,
+        const span_u8* decrypt_ed25519_privkey_list,
         size_t decrypt_ed25519_privkey_len,
-        const unsigned char *group_ed25519_pubkey,
+        const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
-        const unsigned char *ciphertext,
+        const unsigned char* ciphertext,
         size_t ciphertext_len);
 
 /// API: crypto/session_decrypt_ons_response

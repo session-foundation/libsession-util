@@ -944,7 +944,7 @@ class ConfigBase : public ConfigSig {
     /// API: base/ConfigBase::load_key
     ///
     /// Called to load an ed25519 key for encryption; this is meant for use by single-ownership
-    /// config types, like UserProfile, but not shared config types (closed groups).
+    /// config types, like UserProfile, but not shared config types (groups).
     ///
     /// Takes a binary string which is either the 32-byte seed, or 64-byte libsodium secret (which
     /// is just the seed and pubkey concatenated together), and then calls `key(...)` with the seed.

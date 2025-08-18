@@ -5,7 +5,7 @@ extern "C" {
 #endif
 
 typedef enum NAMESPACE {
-    // Messages sent to an updated closed group which should be able to be retrieved by revoked
+    // Messages sent to an updated group which should be able to be retrieved by revoked
     // members are stored in this namespace
     NAMESPACE_REVOKED_RETRIEVABLE_GROUP_MESSAGES = -11,
 
@@ -16,7 +16,7 @@ typedef enum NAMESPACE {
     NAMESPACE_CONVO_INFO_VOLATILE = 4,
     NAMESPACE_USER_GROUPS = 5,
 
-    // Messages sent to a closed group:
+    // Messages sent to a group:
     NAMESPACE_GROUP_MESSAGES = 11,
     // Groups config namespaces (i.e. for shared config of the group itself, not one user's group
     // settings)

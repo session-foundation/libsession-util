@@ -48,12 +48,12 @@ enum class ProStatus {
 enum class DestinationType {
     Contact,
     SyncMessage,
-    /// Both legacy and non-legacy closed groups are to be identified as `ClosedGroup`. A non-legacy
-    /// group is detected by the (0x03) prefix byte on the given `dest_closed_group_pubkey`
-    /// specified in Destination.
-    ClosedGroup,
-    OpenGroup,
-    OpenGroupInbox,
+    /// Both legacy and non-legacy groups are to be identified as `Group`. A non-legacy
+    /// group is detected by the (0x03) prefix byte on the given `dest_group_pubkey` specified in
+    /// Destination.
+    Group,
+    Community,
+    CommunityInbox,
 };
 
 struct Destination {
@@ -66,23 +66,23 @@ struct Destination {
     std::optional<array_uc64> pro_sig;
 
     // Set to the recipient of the message if it requires one. Ignored otherwise (for example
-    // ignored in OpenGroup)
+    // ignored in type => Community)
     array_uc33 recipient_pubkey;
 
     // The timestamp to assign to the message envelope
     std::chrono::milliseconds sent_timestamp_ms;
 
-    // When type => OpenGroupInbox: set this pubkey to the server's key
-    array_uc32 open_group_inbox_server_pubkey;
+    // When type => CommunityInbox: set this pubkey to the server's key
+    array_uc32 community_inbox_server_pubkey;
 
-    // When type => ClosedGroup: set to the group keys for a 0x03 prefix (e.g. groups v2)
-    // `closed_group_pubkey` to encrypt the message. Public key of the group for groups v2 messages
-    array_uc33 closed_group_ed25519_pubkey;
+    // When type => Group: set to the group public keys for a 0x03 prefix (e.g. groups v2)
+    // `group_pubkey` to encrypt the message for.
+    array_uc33 group_ed25519_pubkey;
 
-    // When type => ClosedGroup: Set the private key of the group for groups v2 messages. Typically
+    // When type => Group: Set the private key of the group for groups v2 messages. Typically
     // the latest encryption key for the group, e.g: `Keys::group_enc_key` or
     // `groups_keys_group_enc_key`
-    array_uc32 closed_group_ed25519_privkey;
+    array_uc32 group_ed25519_privkey;
 };
 
 enum class EnvelopeType {
@@ -196,7 +196,7 @@ PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags)
 ///
 /// This function supports all combinatoric combinations of the destination type and namespace
 /// including returning plaintext if the message is not meant to be encrypted and or wrapping in the
-/// additional websocket wrapper or encrypting the envelope with the closed group keys if necessary
+/// additional websocket wrapper or encrypting the envelope with the group keys if necessary
 /// e.t.c.
 ///
 /// Calling this function requires filling out the options in the `Destination` struct with the
@@ -204,8 +204,8 @@ PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags)
 /// annotation on `Destination` for more information.
 ///
 /// This function throws if the API is misused (i.e.: A field was not set, but was required to be
-/// set for the given destination and namespace. For example the closed group keys not being set
-/// when sending to a group prefixed [0x3] key in a closed group into the group message namespace)
+/// set for the given destination and namespace. For example the group keys not being set
+/// when sending to a group prefixed [0x3] key in a group into the group message namespace)
 /// but otherwise returns a struct with values.
 ///
 /// Inputs:

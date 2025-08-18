@@ -70,11 +70,11 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(convos.needs_push());
     CHECK(convos.needs_dump());
 
-    const auto open_group_pubkey =
+    const auto community_pubkey =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
 
     auto og = convos.get_or_construct_community(
-            "http://Example.ORG:5678", "SudokuRoom", open_group_pubkey);
+            "http://Example.ORG:5678", "SudokuRoom", community_pubkey);
     CHECK(og.base_url() == "http://example.org:5678");  // Note: lower-case
     CHECK(og.room() == "sudokuroom");                   // Note: lower-case
     CHECK(og.pubkey().size() == 32);
@@ -145,7 +145,7 @@ TEST_CASE("Conversations", "[config][conversations]") {
     REQUIRE(x2);
     CHECK(x2->base_url() == "http://example.org:5678");
     CHECK(x2->room() == "sudokuroom");
-    CHECK(x2->pubkey_hex() == to_hex(open_group_pubkey));
+    CHECK(x2->pubkey_hex() == to_hex(community_pubkey));
     CHECK(x2->unread);
 
     auto x3 = convos2.get_group(benders_nightmare_group);
@@ -352,7 +352,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     CHECK(config_needs_push(conf));
     CHECK(config_needs_dump(conf));
 
-    const auto open_group_pubkey =
+    const auto community_pubkey =
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
 
     convo_info_volatile_community og;
@@ -373,7 +373,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     CHECK(conf->last_error == "Invalid community URL: room token contains invalid characters"sv);
 
     CHECK(convo_info_volatile_get_or_construct_community(
-            conf, &og, "http://Example.ORG:5678", "SudokuRoom", open_group_pubkey.data()));
+            conf, &og, "http://Example.ORG:5678", "SudokuRoom", community_pubkey.data()));
     CHECK(conf->last_error == nullptr);
     CHECK(og.base_url == "http://example.org:5678"sv);  // Note: lower-case
     CHECK(og.room == "sudokuroom"sv);                   // Note: lower-case
@@ -427,7 +427,7 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     REQUIRE(convo_info_volatile_get_community(conf2, &og, "http://EXAMPLE.org:5678", "sudokuRoom"));
     CHECK(og.base_url == "http://example.org:5678"sv);
     CHECK(og.room == "sudokuroom"sv);
-    CHECK(oxenc::to_hex(og.pubkey, og.pubkey + 32) == to_hex(open_group_pubkey));
+    CHECK(oxenc::to_hex(og.pubkey, og.pubkey + 32) == to_hex(community_pubkey));
 
     auto another_id = "051111111111111111111111111111111111111111111111111111111111111111";
     convo_info_volatile_1to1 c2;

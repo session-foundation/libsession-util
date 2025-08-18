@@ -54,9 +54,9 @@ enum PRO_STATUS {  // See session::ProStatus
 enum DESTINATION_TYPE {  // See session::DestinationType
     DESTINATION_TYPE_CONTACT,
     DESTINATION_TYPE_SYNC_MESSAGE,
-    DESTINATION_TYPE_CLOSED_GROUP,
-    DESTINATION_TYPE_OPEN_GROUP,
-    DESTINATION_TYPE_OPEN_GROUP_INBOX,
+    DESTINATION_TYPE_GROUP,
+    DESTINATION_TYPE_COMMUNITY,
+    DESTINATION_TYPE_COMMUNITY_INBOX,
 };
 
 struct session_protocol_destination {  // See session::Destination
@@ -68,9 +68,9 @@ struct session_protocol_destination {  // See session::Destination
     uint8_t pro_sig[64];
     uint8_t recipient_pubkey[33];
     uint64_t sent_timestamp_ms;
-    uint8_t open_group_inbox_server_pubkey[32];
-    uint8_t closed_group_ed25519_pubkey[33];
-    uint8_t closed_group_ed25519_privkey[32];
+    uint8_t community_inbox_server_pubkey[32];
+    uint8_t group_ed25519_pubkey[33];
+    uint8_t group_ed25519_privkey[32];
 };
 
 enum ENVELOPE_TYPE {
@@ -100,7 +100,7 @@ struct session_protocol_envelope {
 
 struct session_protocol_decrypt_envelope_keys {
     span_u8 group_ed25519_pubkey;
-    const span_u8 *ed25519_privkeys;
+    const span_u8* ed25519_privkeys;
     size_t ed25519_privkeys_len;
 };
 

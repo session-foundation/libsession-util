@@ -51,17 +51,17 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         std::span<const uint8_t> dest_pro_sig,
         std::span<const uint8_t> dest_recipient_pubkey,
         std::chrono::milliseconds dest_sent_timestamp_ms,
-        std::span<const uint8_t> dest_open_group_inbox_server_pubkey,
-        std::span<const uint8_t> dest_closed_group_pubkey,
-        std::span<const uint8_t> dest_closed_group_ed25519_privkey,
+        std::span<const uint8_t> dest_community_inbox_server_pubkey,
+        std::span<const uint8_t> dest_group_pubkey,
+        std::span<const uint8_t> dest_group_ed25519_privkey,
         config::Namespace space,
         UseMalloc use_malloc) {
 
     assert(dest_pro_sig.empty() || dest_pro_sig.size() == crypto_sign_ed25519_BYTES);
     assert(dest_recipient_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
-    assert(dest_open_group_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
-    assert(dest_closed_group_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
-    assert(dest_closed_group_ed25519_privkey.size() == 32 || dest_closed_group_ed25519_privkey.size() == 64);
+    assert(dest_community_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
+    assert(dest_group_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
+    assert(dest_group_ed25519_privkey.size() == 32 || dest_group_ed25519_privkey.size() == 64);
 
     // All incoming arguments are passed in from typed, fixed-sized arrays so we do not need to
     // throw if these sizes are wrong. It being wrong would be a development error.
@@ -78,7 +78,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         Nil,
         EnvelopeIsCipherText,  // No extra bit-mangling required after enveloping
         WrapInWSMessage,       // Wrap in the protobuf websocket message after enveloping
-        KeysEncryptMessage,    // Encrypt with the closed group keys after ennveloping
+        KeysEncryptMessage,    // Encrypt with the group keys after ennveloping
     };
 
     struct EncodeContext {
@@ -101,9 +101,9 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
     // Figure out how to encrypt the message based on the destination and setup the encoding context
     EncodeContext enc = {};
     switch (dest_type) {
-        case DestinationType::ClosedGroup: {
+        case DestinationType::Group: {
             bool has_03_prefix =
-                    dest_closed_group_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
+                    dest_group_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
             if (has_03_prefix) {
                 if (space == config::Namespace::GroupMessages) {
                     enc.mode = Mode::Envelope;
@@ -120,13 +120,13 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     enc.mode = Mode::Plaintext;
                 }
             } else {
-                // Legacy closed groups which have a 05 prefixed key
+                // Legacy groups which have a 05 prefixed key
                 enc.mode = Mode::Envelope;
                 enc.before_envelope_encrypt_for_recipient_deterministic = true;
                 enc.envelope_type =
                         SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
                 enc.after_envelope = AfterEnvelope::WrapInWSMessage;
-                enc.envelope_src = dest_closed_group_pubkey;
+                enc.envelope_src = dest_group_pubkey;
             }
         } break;
 
@@ -151,11 +151,11 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             enc.after_envelope = AfterEnvelope::EnvelopeIsCipherText;
         } break;
 
-        case DestinationType::OpenGroup: {
+        case DestinationType::Community: {
             enc.mode = Mode::Plaintext;
         } break;
 
-        case DestinationType::OpenGroupInbox: {
+        case DestinationType::CommunityInbox: {
             enc.mode = Mode::EncryptForBlindedRecipient;
         } break;
     }
@@ -225,8 +225,8 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     std::string bytes = envelope.SerializeAsString();
                     std::vector<uint8_t> ciphertext = encrypt_for_group(
                             ed25519_privkey,
-                            dest_closed_group_pubkey,
-                            dest_closed_group_ed25519_privkey,
+                            dest_group_pubkey,
+                            dest_group_ed25519_privkey,
                             to_span(bytes),
                             /*compress*/ true,
                             /*padding*/ 256);
@@ -262,7 +262,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             result.encrypted = true;
             std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
                     ed25519_privkey,
-                    dest_open_group_inbox_server_pubkey,
+                    dest_community_inbox_server_pubkey,
                     dest_recipient_pubkey,  // recipient blinded pubkey
                     plaintext);
 
@@ -290,9 +290,9 @@ EncryptedForDestination encrypt_for_destination(
             /*dest_pro_sig=*/dest.pro_sig ? *dest.pro_sig : std::span<const uint8_t>(),
             /*dest_recipient_pubkey=*/dest.recipient_pubkey,
             /*dest_sent_timestamp_ms=*/dest.sent_timestamp_ms,
-            /*dest_open_group_inbox_server_pubkey=*/dest.open_group_inbox_server_pubkey,
-            /*dest_closed_group_ed25519_pubkey=*/dest.closed_group_ed25519_pubkey,
-            /*dest_closed_group_ed25519_privkey=*/dest.closed_group_ed25519_privkey,
+            /*dest_community_inbox_server_pubkey=*/dest.community_inbox_server_pubkey,
+            /*dest_group_ed25519_pubkey=*/dest.group_ed25519_pubkey,
+            /*dest_group_ed25519_privkey=*/dest.group_ed25519_privkey,
             /*space=*/space,
             /*use_malloc=*/UseMalloc::No);
 
@@ -421,8 +421,7 @@ DecryptedEnvelope decrypt_envelope(
                 result.sender_ed25519_pubkey.size());
 
         if (crypto_sign_ed25519_pk_to_curve25519(
-                    result.sender_x25519_pubkey.data(), result.sender_ed25519_pubkey.data()) !=
-            0)
+                    result.sender_x25519_pubkey.data(), result.sender_ed25519_pubkey.data()) != 0)
             throw std::runtime_error(
                     "Parse content failed, ed25519 public key could not be converted to "
                     "x25519 "
@@ -545,9 +544,9 @@ session_protocol_encrypt_for_destination(
                 /*dest_pro_sig=*/dest->has_pro_sig ? dest->pro_sig : std::span<const uint8_t>(),
                 /*dest_recipient_pubkey=*/dest->recipient_pubkey,
                 /*dest_sent_timestamp_ms=*/std::chrono::milliseconds(dest->sent_timestamp_ms),
-                /*dest_open_group_inbox_server_pubkey=*/dest->open_group_inbox_server_pubkey,
-                /*dest_closed_group_ed25519_pubkey=*/dest->closed_group_ed25519_pubkey,
-                /*dest_closed_group_ed25519_privkey=*/dest->closed_group_ed25519_privkey,
+                /*dest_community_inbox_server_pubkey=*/dest->community_inbox_server_pubkey,
+                /*dest_group_ed25519_pubkey=*/dest->group_ed25519_pubkey,
+                /*dest_group_ed25519_privkey=*/dest->group_ed25519_privkey,
                 /*space=*/static_cast<config::Namespace>(space),
                 /*use_malloc=*/UseMalloc::Yes);
 

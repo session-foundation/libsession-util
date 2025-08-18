@@ -16,7 +16,7 @@ enum class Namespace : std::int16_t {
     ConvoInfoVolatile = NAMESPACE_CONVO_INFO_VOLATILE,
     UserGroups = NAMESPACE_USER_GROUPS,
 
-    // Messages sent to a closed group:
+    // Messages sent to a group:
     GroupMessages = NAMESPACE_GROUP_MESSAGES,
     // Groups config namespaces (i.e. for shared config of the group itself, not one user's group
     // settings)
