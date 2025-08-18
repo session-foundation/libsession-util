@@ -4,7 +4,7 @@
 #include <chrono>
 #include <memory>
 
-#include "session/network/network_transport.hpp"
+#include "session/network/transport/network_transport.hpp"
 #include "session/network/session_network_types.hpp"
 #include <oxen/quic/loop.hpp>
 

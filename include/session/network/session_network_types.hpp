@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "session/network/key_types.hpp"
+#include "session/network/session_network_types.h"
 #include "session/network/service_node.hpp"
 
 namespace session::network {
@@ -30,9 +31,9 @@ class status_code_exception : public std::runtime_error {
 };
 
 enum class RequestCategory {
-    standard,
-    upload,
-    download,
+    standard = SESSION_NETWORK_CATEGORY_STANDARD,
+    upload = SESSION_NETWORK_CATEGORY_UPLOAD,
+    download = SESSION_NETWORK_CATEGORY_DOWNLOAD,
 };
 
 inline std::string to_string(RequestCategory category) {
@@ -47,7 +48,6 @@ inline std::string to_string(RequestCategory category) {
 struct ServerDestination {
     std::string protocol;
     std::string host;
-    std::string endpoint;
     session::network::x25519_pubkey x25519_pubkey;
     std::optional<uint16_t> port;
     std::optional<std::vector<std::pair<std::string, std::string>>> headers;
@@ -56,21 +56,25 @@ struct ServerDestination {
     ServerDestination(
             std::string protocol,
             std::string host,
-            std::string endpoint,
             session::network::x25519_pubkey x25519_pubkey,
             std::optional<uint16_t> port = std::nullopt,
             std::optional<std::vector<std::pair<std::string, std::string>>> headers = std::nullopt,
             std::string method = "GET") :
             protocol{std::move(protocol)},
             host{std::move(host)},
-            endpoint{std::move(endpoint)},
             x25519_pubkey{std::move(x25519_pubkey)},
             port{std::move(port)},
             headers{std::move(headers)},
             method{std::move(method)} {}
 };
 
-using network_destination = std::variant<service_node, ServerDestination>;
+using network_destination = std::variant<service_node, ServerDestination, oxen::quic::RemoteAddress>;
+
+struct UploadInfo {
+    std::optional<std::string> file_name;
+};
+
+using RequestDetails = std::variant<std::monostate, UploadInfo>;
 
 struct Request {
     std::string request_id;
@@ -85,11 +89,16 @@ struct Request {
     /// An optional, overall timeout for the entire operation, starting from the moment the request is created. This includes time spent in queues waiting for a path to be built or a connection to be established. If this timeout is exceeded while the request is still in a queue, it will be timed out.
     std::optional<std::chrono::milliseconds> overall_timeout;
 
+    /// Any extra request details which may modify the structure of the request.
+    RequestDetails details;
+
     /// The time the request was created, this is used primarily for determining whether the `overall_timeout` has been exceeded.
     std::chrono::system_clock::time_point creation_time = std::chrono::system_clock::now();
 
     // If true, the transport should not cache/pool the connection used for this request, this is for one-shot requests like bootstrapping.
     bool ephemeral_connection;
+
+    int retry_count = 0;
 
     Request(
             std::string request_id,
@@ -99,6 +108,7 @@ struct Request {
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
+            RequestDetails details = std::monostate{},
             bool ephemeral_connection = false);
     
     Request(
@@ -109,6 +119,7 @@ struct Request {
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
             std::optional<std::string> request_id = std::nullopt,
+            RequestDetails details = std::monostate{},
             bool ephemeral_connection = false);
 
     std::chrono::milliseconds time_remaining() const {

@@ -31,6 +31,15 @@ namespace service_node_disk_format {
                             LINE_ENDING;
 }
 
+struct fork_versions {
+    int hardfork;
+    int softfork;
+
+    bool operator==(const fork_versions& other) const {
+        return hardfork == other.hardfork && softfork == other.softfork;
+    }
+};
+
 struct service_node {
     std::vector<unsigned char> _remote_pubkey;
     oxen::quic::ipv4 ip;
@@ -49,6 +58,7 @@ struct service_node {
 
     std::span<const unsigned char> view_remote_key() const { return _remote_pubkey; }
     std::string host() const { return ip.to_string(); }
+    session::network::x25519_pubkey swarm_pubkey() const;
 
     std::string to_string() const;
     std::string to_https_string() const;

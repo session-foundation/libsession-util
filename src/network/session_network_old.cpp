@@ -335,7 +335,6 @@ namespace detail {
         return ServerDestination{
                 server.protocol,
                 server.host,
-                server.endpoint,
                 x25519_pubkey::from_hex({server.x25519_pubkey, 64}),
                 server.port,
                 headers,
@@ -1901,7 +1900,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
     return;
 
     // Construct the onion request
-    auto builder = Builder::make(info.destination, path->nodes);
+    auto builder = Builder::make(info.destination, info.endpoint, path->nodes);
     try {
         info.body = builder.build(builder.generate_onion_blob(info.original_body));
     } catch (const std::exception& e) {

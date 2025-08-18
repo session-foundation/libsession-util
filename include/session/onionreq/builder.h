@@ -76,7 +76,6 @@ LIBSESSION_EXPORT void onion_request_builder_set_snode_destination(
 /// - `builder` -- [in] Pointer to the builder object
 /// - `protocol` -- [in] The protocol to use
 /// - `host` -- [in] The server host
-/// - `endpoint` -- [in] The endpoint to call
 /// - `method` -- [in] The HTTP method to use
 /// - `port` -- [in] The port to use
 /// - `x25519_pubkey` -- [in] The x25519 public key for server
@@ -84,7 +83,6 @@ LIBSESSION_EXPORT void onion_request_builder_set_server_destination(
         onion_request_builder_object* builder,
         const char* protocol,
         const char* host,
-        const char* endpoint,
         const char* method,
         uint16_t port,
         const char* x25519_pubkey);

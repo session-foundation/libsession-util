@@ -330,8 +330,9 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
                 to_vector(body.dump()),
                 RequestCategory::standard,
                 10s,
-                std::nullopt,   // overall_timeout
-                true            // ephemeral_connection
+                std::nullopt,     // overall_timeout
+                std::monostate{}, // details
+                true              // ephemeral_connection
             };
         }
         
@@ -342,8 +343,9 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
             std::nullopt,
             RequestCategory::standard,
             10s,
-            std::nullopt,   // overall_timeout
-            true            // ephemeral_connection
+            std::nullopt,     // overall_timeout
+            std::monostate{}, // details
+            true              // ephemeral_connection
         };
     }();
 
@@ -400,7 +402,6 @@ void SnodePool::_launch_next_refresh_request(const std::string& request_id, bool
 }
 
 void SnodePool::_retry_refresh_request(const std::string& request_id, bool is_bootstrap_request) {
-    std::unique_lock lock{_cache_mutex};
     _launch_next_refresh_request(request_id, is_bootstrap_request);
 }
 

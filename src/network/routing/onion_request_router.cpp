@@ -51,7 +51,7 @@ namespace {
         return PathSelectionBehaviour::random;
     }
 
-    std::vector<service_node> get_all_used_nodes(
+    std::vector<service_node> extract_nodes(
         const std::unordered_map<RequestCategory, std::vector<OnionPath>>& paths,
         const std::unordered_map<std::string, std::vector<service_node>>& pending_paths
     ) {
@@ -65,24 +65,6 @@ namespace {
             all_used_nodes.insert(all_used_nodes.end(), nodes.begin(), nodes.end());
 
         return all_used_nodes;
-    }
-
-    std::vector<unsigned char> wrap_onion_request_payload(const std::string& endpoint, const std::optional<std::vector<unsigned char>>& body) {
-        nlohmann::json params_json;
-
-        // TODO: Handle bencoded payloads and don't assume it's valid JSON when given JSON (add a `PayloadFormat` to the `Request` object?)
-        if (body)
-            params_json = nlohmann::json::parse(*body);
-        else
-            params_json = nlohmann::json::object();
-
-        nlohmann::json wrapped_payload = {
-            {"method", endpoint},
-            {"params", params_json}
-        };
-        
-        std::string payload_str = wrapped_payload.dump();
-        return {payload_str.begin(), payload_str.end()};
     }
 
     DecryptedResponse decrypt_v3_response(const session::onionreq::ResponseParser& parser, const std::string& response) {
@@ -222,11 +204,19 @@ OnionRequestRouter::OnionRequestRouter(
         log::critical(cat, "[OnionRouter]: SnodePool was destroyed, cannot setup router.");
 }
 
+std::vector<service_node> OnionRequestRouter::get_all_used_nodes() {
+    _loop->call_get([this] {
+        return extract_nodes(_paths, _pending_paths);
+    });
+}
+
 void OnionRequestRouter::send_request(Request request, network_response_callback_t callback) {
     _loop->call([this, req = std::move(request), cb = std::move(callback)] {
         _send_request_internal(std::move(req), std::move(cb));
     });
 }
+
+// MARK: Private Functions
 
 void OnionRequestRouter::_finish_setup() {
     // Start processing requests
@@ -355,7 +345,7 @@ void OnionRequestRouter::_build_path(RequestCategory category, std::optional<std
     
     _in_progress_path_builds[category]++;
 
-    auto nodes_to_exclude = get_all_used_nodes(_paths, _pending_paths);
+    auto nodes_to_exclude = extract_nodes(_paths, _pending_paths);
     nodes_to_exclude.insert(nodes_to_exclude.end(), nodes_to_exclude_.begin(), nodes_to_exclude_.end());
     
     std::vector<service_node> path_nodes;
@@ -584,9 +574,8 @@ void OnionRequestRouter::_send_on_path(OnionPath& path, Request request, network
     std::shared_ptr<session::onionreq::Builder> builder;
     
     try {
-        auto wrapped_payload = wrap_onion_request_payload(request.endpoint, request.body);
-        builder = std::make_shared<session::onionreq::Builder>(request.destination, path.nodes);
-        encrypted_blob = builder->generate_onion_blob(wrapped_payload);
+        builder = std::make_shared<session::onionreq::Builder>(request.destination, request.endpoint, path.nodes);
+        encrypted_blob = builder->generate_onion_blob(request.body);
     } catch (const std::exception& e) {
         log::warning(cat, "[OnionRouter Request {}]: Failed to prepare onion payload: {}", request.request_id, e.what());
         return callback(false, false, -1, {content_type_plain_text}, "Failed to construct onion request payload");
@@ -611,24 +600,80 @@ void OnionRequestRouter::_send_on_path(OnionPath& path, Request request, network
         transport->send_request(
             std::move(onion_request),
             [this, path_id = path.id, original_request = std::move(request), builder = std::move(builder), cb = std::move(callback)](bool success, bool timeout, int16_t status_code, auto headers, auto response) {
-                _decrement_and_cleanup_path(path_id, original_request.category);
-
-                if (!success || timeout) {
-                    _handle_request_failure(path_id, original_request, status_code, "Transport layer failure");
-                    return cb(false, timeout, status_code, std::move(headers), std::move(response));
-                }
+                auto final_success = success;
+                auto final_timeout = timeout;
+                auto final_status_code = status_code;
+                std::vector<std::pair<std::string, std::string>> final_headers = headers;
+                std::optional<std::string> body;
+                bool should_penalize_path = false;
+                bool is_server_dest = std::holds_alternative<ServerDestination>(original_request.destination);
                 
                 try {
                     DecryptedResponse decrypted = decrypt_onion_response(*builder, original_request, *response);
-
-                    if (decrypted.status_code < 200 || decrypted.status_code > 299)
-                        _handle_request_failure(path_id, original_request, decrypted.status_code, decrypted.body.value_or(""));
-
-                    cb(true, false, decrypted.status_code, std::move(decrypted.headers), std::move(decrypted.body));
+                    final_status_code = decrypted.status_code;
+                    headers = std::move(decrypted.headers);
+                    body = std::move(decrypted.body);
                 } catch (const std::exception& e) {
-                    _handle_request_failure(path_id, original_request, -1, "Decryption/Parsing failed");
-                    cb(false, false, -1, {content_type_plain_text}, "Failed to process onion response");
+                    final_success = false;
+                    headers = {content_type_plain_text};
+                    body = "Failed to decrypt onion response";
                 }
+
+                if (body.has_value(); auto uniform_error = Response::find_uniform_batch_error(*body))
+                    final_status_code = *uniform_error;
+
+                if (final_success)
+                    final_success = (final_status_code >= 200 && final_status_code <= 299);
+
+                if (!final_success) {
+                    switch (final_status_code) {
+                        // These errors that are NEVER the path's fault
+                        case 400: // Bad Request
+                        case 403: // Forbidden
+                        case 404: // Not Found
+                        case 406: // Not Acceptable (clock skew)
+                        case 425: // Too Early (also clock skew)
+                            // These are application-level or client-side errors. Do nothing to the path.
+                            log::trace(cat, "[OnionRouter Request {}]: Received benign error {}, path is considered healthy.",
+                                original_request.request_id, final_status_code);
+                            break;
+
+                        // These errors are only the path's fault if the destination is not a server
+                        case 500: // Internal Server Error
+                            if (!is_server_dest)
+                                should_penalize_path = true;
+                            break;
+
+                        case 504: // Gateway Timeout
+                            final_timeout = true;
+
+                            if (!is_server_dest)
+                                should_penalize_path = true;
+                            break;
+                            
+                        // Any other non-success code is treated as a potential path issue.
+                        default:
+                            should_penalize_path = true;
+                            break;
+                    }
+                }
+
+                // If we got a timeout and the destination wasn't a server then we need to assume it was from a path node
+                if (!is_server_dest && timeout)
+                    should_penalize_path = true;
+
+                // Handle the failure if needed
+                if (should_penalize_path) {
+                    log::debug(cat, "[OnionRouter Request {}]: Received error {} on path {}, handling failure.",
+                        original_request.request_id, final_status_code, path_id);
+                    _handle_path_failure(path_id, original_request.category, body);
+                }
+                
+                // Clean up paths if needed
+                _decrement_and_cleanup_path(path_id, original_request.category);
+
+                // Now we can trigger the callback with the result
+                return cb(final_success, final_timeout, final_status_code, std::move(headers), std::move(body));
             });
     else {
         log::critical(cat, "[OnionRouter]: Transport was destroyed, cannot send request.");
@@ -667,17 +712,16 @@ void OnionRequestRouter::_decrement_and_cleanup_path(const std::string& path_id,
     log::trace(cat, "[OnionRouter]: Request completed on path {}, which has already been removed.", path_id);
 }
 
-void OnionRequestRouter::_handle_request_failure(
+void OnionRequestRouter::_handle_path_failure(
     const std::string& path_id,
-    const Request& request,
-    int16_t status_code,
-    const std::string& error_body) {
-    auto& active_paths = _paths[request.category];
+    const RequestCategory& request_category,
+    const std::optional<std::string>& error_body) {
+    auto& active_paths = _paths[request_category];
     auto path_it = std::find_if(active_paths.begin(), active_paths.end(), [&path_id](const auto& p){ return p.id == path_id; });
 
     // If the path is no longer in the active list then no need to do anything
     if (path_it == active_paths.end()) {
-        log::trace(cat, "[OnionRouter Request {}]: Failure on path {}, but path is no longer active.", request.request_id, path_id);
+        log::trace(cat, "[OnionRouter Path {}]: Failure on path, but path is no longer active.", path_id);
         return;
     }
     
@@ -686,10 +730,12 @@ void OnionRequestRouter::_handle_request_failure(
     // Check if the response has one of the 'node_not_found' prefixes
     std::optional<std::string_view> ed25519PublicKey;
 
-    if (error_body.starts_with(node_not_found_prefix))
-        ed25519PublicKey = {error_body.data() + node_not_found_prefix.size()};
-    else if (error_body.starts_with(node_not_found_prefix_no_status))
-        ed25519PublicKey = {error_body.data() + node_not_found_prefix_no_status.size()};
+    if (error_body) {
+        if (error_body->starts_with(node_not_found_prefix))
+            ed25519PublicKey = {error_body->data() + node_not_found_prefix.size()};
+        else if (error_body->starts_with(node_not_found_prefix_no_status))
+            ed25519PublicKey = {error_body->data() + node_not_found_prefix_no_status.size()};
+    }
 
     // If we found a result then try to extract the pubkey and process it so we can handle it as a specific node failure instead of a path failure
     if (ed25519PublicKey && ed25519PublicKey->size() == 64 && oxenc::is_hex(*ed25519PublicKey)) {
@@ -706,7 +752,7 @@ void OnionRequestRouter::_handle_request_failure(
                 if (auto snode_pool = _snode_pool.lock()) {
                     snode_pool->record_node_failure(*bad_node_it);
 
-                    auto used_nodes = get_all_used_nodes(_paths, _pending_paths);
+                    auto used_nodes = extract_nodes(_paths, _pending_paths);
                     replacements = snode_pool->get_unused_nodes(1, used_nodes);
                 }
                 else {
@@ -729,8 +775,8 @@ void OnionRequestRouter::_handle_request_failure(
 
     // Increment the `failure_count` on the path
     path.failure_count++;
-    log::debug(cat, "[OnionRouter Request {}]: Recorded failure for path {}, total failures: {}/{}",
-        request.request_id, path.id, path.failure_count, _config.path_failure_threshold);
+    log::debug(cat, "[OnionRouter Path {}]: Recorded failure, total failures: {}/{}",
+        path.id, path.failure_count, _config.path_failure_threshold);
 
     // If the path has exceeded its failure threshold, retire it.
     if (path.failure_count >= _config.path_failure_threshold) {
@@ -749,18 +795,18 @@ void OnionRequestRouter::_handle_request_failure(
             active_paths.erase(path_it);
         } else {
             log::debug(cat, "[OnionRouter Path {}]: Retiring active path ({} pending requests), moving to pending drop.", path.id, path.pending_requests);
-            _paths_pending_drop[request.category].push_back(std::move(path));
+            _paths_pending_drop[request_category].push_back(std::move(path));
             active_paths.erase(path_it);
         }
 
         if (!_config.single_path_mode) {
-            const auto min_paths = _config.min_path_counts.at(request.category);
-            const auto current_active = (_paths.count(request.category) ? _paths.at(request.category).size() : 0);
-            const auto in_progress = _in_progress_path_builds[request.category];
+            const auto min_paths = _config.min_path_counts.at(request_category);
+            const auto current_active = (_paths.count(request_category) ? _paths.at(request_category).size() : 0);
+            const auto in_progress = _in_progress_path_builds[request_category];
 
             if (current_active + in_progress < min_paths) {
-                log::info(cat, "[OnionRouter]: Path count for {} is below the minimum {}, building replacement.", to_string(request.category, _config.single_path_mode), min_paths);
-                _build_path(request.category, "failure-replacement-" + request.request_id, nodes_to_exclude);
+                log::info(cat, "[OnionRouter]: Path count for {} is below the minimum {}, building replacement.", to_string(request_category, _config.single_path_mode), min_paths);
+                _build_path(request_category, "failure-replacement-" + path_id, nodes_to_exclude);
             }
         }
     }

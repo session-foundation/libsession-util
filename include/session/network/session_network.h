@@ -36,12 +36,6 @@ typedef enum {
     SESSION_NETWORK_TRANSPORT_CALLBACKS = 1,
 } SESSION_NETWORK_TRANSPORT;
 
-typedef enum {
-    SESSION_NETWORK_PATH_STANDARD = 0,
-    SESSION_NETWORK_PATH_UPLOAD = 1,
-    SESSION_NETWORK_PATH_DOWNLOAD = 2
-} SESSION_NETWORK_PATH_TYPE;
-
 typedef void (*session_network_request_t)(
         const char* url,
         const char* body_data,
@@ -56,6 +50,7 @@ typedef struct {
     SESSION_NETWORK_TRANSPORT transport;
     uint8_t path_length;
     bool enforce_subnet_diversity;
+    uint8_t redirect_retry_count;
     uint64_t min_retry_delay_ms;
     uint64_t max_retry_delay_ms;
     uint64_t request_timeout_check_frequency_ms;
@@ -106,7 +101,6 @@ typedef struct network_v2_server_destination {
     const char* method;
     const char* protocol;
     const char* host;
-    const char* endpoint;   // TODO: Remove this (duplicates the `Request.endpoint`)
     uint16_t port;
     const char* x25519_pubkey_hex;
     const char* const* headers_kv_pairs;
@@ -125,6 +119,8 @@ typedef struct {
     SESSION_NETWORK_REQUEST_CATEGORY category;
     uint64_t request_timeout_ms;
     uint64_t overall_timeout_ms; // Use 0 for no overall timeout
+    
+    const char* upload_file_name; // Optional name for file uploads, null terminated
     
     const char* request_id; // Optional id for the request to trace through logs, null terminated
 
@@ -161,6 +157,10 @@ LIBSESSION_EXPORT bool session_network_init(
 /// - `network` -- [in] Pointer to network_object object
 LIBSESSION_EXPORT void session_network_free(network_object_v2* network);
 
+LIBSESSION_EXPORT uint64_t session_network_time_offset(network_object_v2* network);
+LIBSESSION_EXPORT int session_network_hardfork(network_object_v2* network);
+LIBSESSION_EXPORT int session_network_softfork(network_object_v2* network);
+
 LIBSESSION_EXPORT void session_network_callbacks_respond(
         network_object_v2* network,
         session_response_handle_t* response_handle,
@@ -178,6 +178,12 @@ LIBSESSION_EXPORT void session_network_get_swarm(
     const char* swarm_pubkey_hex,
     void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
     void* ctx);
+
+LIBSESSION_EXPORT void session_network_get_random_nodes(
+        network_object_v2* network,
+        uint16_t count,
+        void (*callback)(network_service_node*, size_t, void*),
+        void* ctx);
 
 LIBSESSION_EXPORT void session_network_send_request(
     network_object_v2* network,

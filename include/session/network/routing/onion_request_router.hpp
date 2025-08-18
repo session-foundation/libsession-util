@@ -7,7 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "session/network/network_router.hpp"
+#include "session/network/routing/network_router.hpp"
 #include "session/network/request_queue.hpp"
 #include "session/network/snode_pool.hpp"
 
@@ -60,6 +60,7 @@ public:
             std::weak_ptr<SnodePool> snode_pool,
             std::weak_ptr<ITransport> transport);
 
+    std::vector<service_node> get_all_used_nodes() override;
     void send_request(Request request, network_response_callback_t callback) override;
 
 private:
@@ -74,11 +75,10 @@ private:
 
     void _send_on_path(OnionPath& path, Request request, network_response_callback_t callback);
     void _decrement_and_cleanup_path(const std::string& path_id, RequestCategory category);
-    void _handle_request_failure(
+    void _handle_path_failure(
         const std::string& path_id,
-        const Request& request,
-        int16_t status_code,
-        const std::string& error_body);
+        const RequestCategory& request_category,
+        const std::optional<std::string>& error_body);
 };
 
 } // namespace session::network

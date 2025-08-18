@@ -41,11 +41,13 @@ inline constexpr std::string_view to_string(EncryptType type) {
 class Builder {
   public:
     Builder(const network::network_destination& destination,
+            const std::string& endpoint,
             const std::vector<network::service_node>& nodes,
             const EncryptType enc_type_ = EncryptType::xchacha20);
 
     static Builder make(
             const network::network_destination& destination,
+            const std::string& endpoint,
             const std::vector<network::service_node>& nodes,
             const EncryptType enc_type_ = EncryptType::xchacha20);
 
@@ -68,6 +70,7 @@ class Builder {
 
   private:
     std::vector<std::pair<network::ed25519_pubkey, network::x25519_pubkey>> hops_ = {};
+    std::string endpoint_;
 
     // Snode request values
 
@@ -76,7 +79,6 @@ class Builder {
     // Proxied request values
 
     std::optional<std::string> host_ = std::nullopt;
-    std::optional<std::string> endpoint_ = std::nullopt;
     std::optional<std::string> protocol_ = std::nullopt;
     std::optional<std::string> method_ = std::nullopt;
     std::optional<uint16_t> port_ = std::nullopt;

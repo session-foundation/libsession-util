@@ -1,15 +1,18 @@
 #include "session/network/session_network.hpp"
 
+#include <oxenc/base64.h>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <any>
 #include <vector>
 
+#include "session/blinding.hpp"
 #include "session/network/session_network.h"
 #include "session/network/network_config.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/network/session_network_types.hpp"
 #include "session/network/transport/quic_transport.hpp"
+#include "session/network/routing/lokinet_router.hpp"
 #include "session/network/routing/onion_request_router.hpp"
 #include "session/random.hpp"
 
@@ -158,13 +161,205 @@ void Network_v2::get_swarm(
     _snode_pool->get_swarm(std::move(swarm_pubkey), std::move(callback));
 }
 
+void Network_v2::get_random_nodes(
+        uint16_t count, std::function<void(std::vector<service_node> nodes)> callback) {
+    _loop->call([this, count, cb = std::move(callback)] {
+        auto unused_nodes = _snode_pool->get_unused_nodes(count);
+
+        // If we don't have sufficient nodes then we need to refresh the snode cache
+        if (unused_nodes.size() < count) {
+            std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
+
+            return _snode_pool->refresh_if_needed(nodes_to_exclude, [this, count, cb = std::move(cb)] {
+                get_random_nodes(count, cb);
+            });
+        }
+        cb(unused_nodes);
+    });
+}
+
 void Network_v2::send_request(Request request, network_response_callback_t callback) {
     if (!_transport)
         return callback(false, false, -1, {content_type_plain_text}, "No transport layer configured");
     if (!_router)
         return callback(false, false, -1, {content_type_plain_text}, "No router configured");
 
-    _router->send_request(std::move(request), std::move(callback));
+    try {
+        auto processed_request = _preprocess_request(std::move(request));
+        auto router_callback = [this, original_req = processed_request, cb = std::move(callback)](bool success, bool timeout, int16_t status_code, auto headers, auto body) {
+            if (success && body)
+                _update_network_state(*body);
+
+            int16_t final_status_code = status_code;
+                
+            if (body.has_value(); auto uniform_error = Response::find_uniform_batch_error(*body))
+                final_status_code = *uniform_error;
+            
+            // If we got a 421 then our swarm info is out of data so we need to refresh our cache, the original request
+            // might succeed after this refresh so we should just automatically retry
+            if (final_status_code == 421) {
+                _handle_421_retry(std::move(original_req), std::move(cb));
+                return;
+            }
+
+            cb(false, timeout, status_code, std::move(headers), std::move(body));
+        };
+
+        _router->send_request(std::move(processed_request), std::move(router_callback));
+    } catch (const std::exception& e) {
+        return callback(false, false, -1, {content_type_plain_text}, e.what());
+    }
+}
+
+// MARK: Internal Logic
+
+Request Network_v2::_preprocess_request(Request request) {
+    std::visit([&](auto&& details) {
+        using T = std::decay_t<decltype(details)>;
+        
+        if constexpr (std::is_same_v<T, UploadInfo>) {
+            if (!request.body)
+                throw std::invalid_argument("Upload request must have a body.");
+            
+            if (request.category != RequestCategory::upload) {
+                log::warning(cat, "Request {} has UploadInfo but category is not 'upload', forcing to 'upload'.", request.request_id);
+                request.category = RequestCategory::upload;
+            }
+
+            // Add the required headers if they weren't provided
+            if (auto* dest = std::get_if<ServerDestination>(&request.destination)) {
+                if (!dest->headers)
+                    dest->headers.emplace();
+                
+                std::unordered_set<std::string> existing_keys;
+                if (dest->headers)
+                    for (const auto& [key, val] : *dest->headers)
+                        existing_keys.insert(key);
+
+                if (existing_keys.find("Content-Type") == existing_keys.end())
+                    dest->headers->emplace_back("Content-Type", "application/octet-stream");
+                    
+                if (existing_keys.find("Content-Disposition") == existing_keys.end()) {
+                    if (details.file_name)
+                        dest->headers->emplace_back("Content-Disposition", fmt::format("attachment; filename=\"{}\"", *details.file_name));
+                    else
+                        dest->headers->emplace_back("Content-Disposition", "attachment");
+                }
+            }
+        }
+        else if constexpr (std::is_same_v<T, std::monostate>) { /* No special handling */ }
+    }, request.details);
+    
+    return request;
+}
+
+void Network_v2::_update_network_state(const std::string& body) {
+    try {
+        auto json = nlohmann::json::parse(body);
+        const nlohmann::json* target_json = &json;
+
+        // If it was a batch/sequence request then take the one with the highest "t" value as that would have been the one which was returned last
+        if (json.contains("results") && json["results"].is_array()) {
+            log::trace(cat, "Parsing batch response for latest network state.");
+
+            int64_t max_t = -1;
+            const nlohmann::json* latest_body = nullptr;
+
+            for (const auto& result : json["results"]) {
+                if (!result.is_object() || !result.contains("body") || !result["body"].is_object())
+                    continue;
+                
+                const auto& result_body = result["body"];
+                
+                if (result_body.contains("t") && result_body["t"].is_number()) {
+                    int64_t current_t = result_body["t"].get<int64_t>();
+
+                    if (current_t > max_t) {
+                        max_t = current_t;
+                        latest_body = &result_body;
+                    }
+                }
+            }
+            
+            if (latest_body)
+                target_json = latest_body;
+        }
+        
+        // Update time offset
+        if (target_json->contains("t") && (*target_json)["t"].is_number()) {
+            auto server_time = std::chrono::seconds{(*target_json)["t"].get<int64_t>()};
+            auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()
+            );
+            _network_time_offset = server_time - now;
+            log::trace(cat, "Network offset set to: {}", (server_time - now).count());
+        }
+
+        // Update hardfork/softfork versions
+        if (target_json->contains("hf") && (*target_json)["hf"].is_array() && (*target_json)["hf"].size() >= 2) {
+            std::pair<int, int> new_versions = {
+                (*target_json)["hf"][0].get<int>(),
+                (*target_json)["hf"][1].get<int>()
+            };
+
+            auto current_versions = _fork_versions.load();
+            auto desired_next_versions = current_versions;
+
+            if (new_versions.first > desired_next_versions.hardfork)
+                desired_next_versions = {new_versions.first, new_versions.second};
+            else if (new_versions.first == desired_next_versions.hardfork &&  new_versions.second > desired_next_versions.softfork)
+                desired_next_versions.softfork = new_versions.second;
+
+            if (current_versions != desired_next_versions)
+                _fork_versions.compare_exchange_weak(current_versions, desired_next_versions);
+            log::trace(cat, "Fork version set to: {}.{}", desired_next_versions.hardfork, desired_next_versions.softfork);
+        }
+    } catch (const std::exception& e) {
+        log::warning(cat, "Failed to parse network state from response: {}", e.what());
+    }
+}
+
+void Network_v2::_handle_421_retry(
+    Request original_request,
+    network_response_callback_t final_callback
+) {
+    if (original_request.retry_count >= config.redirect_retry_count) {
+        log::error(cat, "Request {} received 421 but exceeded max retry count.", original_request.request_id);
+        return final_callback(false, false, 421, {content_type_plain_text}, "Exceeded retry limit for 421 error");
+    }
+
+    // Shouldn't automatically retry if the destination isn't a node (we on'y want to auto-retry due to a node being in the wrong swarm)
+    auto* original_dest_node = std::get_if<service_node>(&original_request.destination);
+    if (!original_dest_node)
+        return final_callback(false, false, 421, {content_type_plain_text}, "Received 421 from a non-service-node destination");
+
+    // If we got a 421 it means our snode cache is outdated (because the swarm the destination node belongs to doesn't match our cache anymore)
+    log::info(cat, "Request {} received 421 from node {}, refreshing swarm.", original_request.request_id, original_dest_node->to_string());
+
+    std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
+    _snode_pool->refresh_if_needed(std::move(nodes_to_exclude), [this, req_to_retry = std::move(original_request), cb = std::move(final_callback), failed_node = *original_dest_node] {
+        auto swarm_pubkey = failed_node.swarm_pubkey();
+
+        _snode_pool->get_swarm(swarm_pubkey, [this, req_to_retry = std::move(req_to_retry), cb = std::move(cb), failed_node](swarm::swarm_id_t, std::vector<service_node> swarm_nodes) {
+            std::optional<service_node> new_target;
+
+            for (const auto& node : swarm_nodes) {
+                if (node != failed_node) {
+                    new_target = node;
+                    break;
+                }
+            }
+
+            if (!new_target)
+                return cb(false, false, 421, {content_type_plain_text}, "421 Misdirected Request, but no other nodes in swarm to retry");
+
+            log::info(cat, "Request {} retrying 421 error on new node {}.", req_to_retry.request_id, new_target->to_string());
+            auto final_request = req_to_retry;
+            final_request.retry_count++;
+            final_request.destination = *new_target;
+            this->send_request(std::move(final_request), std::move(cb));
+        });
+    });
 }
 
 }  // namespace session::network
@@ -226,6 +421,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
 
     config.path_length = cpp_defaults.path_length;
     config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
+    config.redirect_retry_count = cpp_defaults.redirect_retry_count;
     config.min_retry_delay_ms = cpp_defaults.retry_delay.base_delay.count();
     config.max_retry_delay_ms = cpp_defaults.retry_delay.max_delay.count();
     config.request_timeout_check_frequency_ms = cpp_defaults.request_timeout_check_frequency.count();
@@ -335,6 +531,9 @@ LIBSESSION_C_API bool session_network_init(
 
         if (config->min_retry_delay_ms > 0 || config->max_retry_delay_ms > 0)
             cpp_opts.emplace_back(opt::retry_delay{std::chrono::milliseconds{config->min_retry_delay_ms}, std::chrono::milliseconds{config->max_retry_delay_ms}});
+
+        // A `0` value is valid for this option
+        cpp_opts.emplace_back(opt::redirect_retry_count{config->redirect_retry_count});
         
         if (config->request_timeout_check_frequency_ms > 0)
             cpp_opts.emplace_back(opt::request_timeout_check_frequency{std::chrono::milliseconds{config->request_timeout_check_frequency_ms}});
@@ -352,7 +551,7 @@ LIBSESSION_C_API bool session_network_init(
         if (config->cache_min_size > 0)
             cpp_opts.emplace_back(opt::cache_min_size{config->cache_min_size});
         
-        // A `0` value is valid for this case
+        // A `0` value is valid for this option
         cpp_opts.emplace_back(opt::cache_num_nodes_to_use_for_refresh{config->cache_num_nodes_to_use_for_refresh});
         
         if (config->cache_node_failure_threshold > 0)
@@ -423,7 +622,6 @@ LIBSESSION_C_API bool session_network_init(
         n_object->internals = n.release();
         *network = n_object.release();
         return true;
-        
     } catch (const std::exception& e) {
         return set_error(error, e);
     }
@@ -432,6 +630,18 @@ LIBSESSION_C_API bool session_network_init(
 LIBSESSION_C_API void network_free_v2(network_object_v2* network) {
     delete static_cast<session::network::Network_v2*>(network->internals);
     delete network;
+}
+
+LIBSESSION_C_API uint64_t session_network_time_offset(network_object_v2* network) {
+    return unbox(network).network_time_offset().count();
+}
+
+LIBSESSION_C_API int session_network_hardfork(network_object_v2* network) {
+    return unbox(network).hardfork();
+}
+
+LIBSESSION_C_API int session_network_softfork(network_object_v2* network) {
+    return unbox(network).softfork();
 }
 
 LIBSESSION_C_API void session_network_callbacks_respond(
@@ -473,6 +683,19 @@ LIBSESSION_C_API void session_network_get_swarm(
     unbox(network).get_swarm(
             x25519_pubkey::from_hex({swarm_pubkey_hex, 64}),
             [cb = std::move(callback), ctx](swarm_id_t, std::vector<service_node> nodes) {
+                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                cb(c_nodes.data(), c_nodes.size(), ctx);
+            });
+}
+
+LIBSESSION_C_API void session_network_get_random_nodes(
+        network_object_v2* network,
+        uint16_t count,
+        void (*callback)(network_service_node*, size_t, void*),
+        void* ctx) {
+    assert(callback);
+    unbox(network).get_random_nodes(
+            count, [cb = std::move(callback), ctx](std::vector<service_node> nodes) {
                 auto c_nodes = network::detail::convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
             });
@@ -523,7 +746,6 @@ LIBSESSION_C_API void session_network_send_request(
             dest = ServerDestination{
                 c_server.protocol,
                 c_server.host,
-                c_server.endpoint,  // TODO: Remove this (redundant duplication)
                 x25519_pubkey::from_hex(c_server.x25519_pubkey_hex),
                 (c_server.port > 0 ? std::optional{c_server.port} : std::nullopt),
                 headers,
@@ -544,7 +766,7 @@ LIBSESSION_C_API void session_network_send_request(
             dest,
             std::string{params->endpoint},
             body,
-            static_cast<RequestCategory>(params->category),     // TODO: Need to assert that these values match between C and C++
+            static_cast<RequestCategory>(params->category),
             std::chrono::milliseconds{params->request_timeout_ms},
             (params->overall_timeout_ms > 0 ? std::optional{std::chrono::milliseconds{params->overall_timeout_ms}} : std::nullopt),
             request_id

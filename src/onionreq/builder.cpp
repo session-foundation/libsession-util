@@ -69,15 +69,18 @@ EncryptType parse_enc_type(std::string_view enc_type) {
 
 Builder Builder::make(
         const network_destination& destination,
+        const std::string& endpoint,
         const std::vector<network::service_node>& nodes,
         const EncryptType enc_type_) {
-    return Builder{destination, nodes, enc_type_};
+    return Builder{destination, endpoint, nodes, enc_type_};
 }
 
 Builder::Builder(
         const network_destination& destination,
+        const std::string& endpoint,
         const std::vector<network::service_node>& nodes,
         const EncryptType enc_type_) :
+        endpoint_{endpoint},
         enc_type{enc_type_},
         destination_x25519_public_key{detail::pubkey_for_destination(destination)} {
     set_destination(destination);
@@ -96,7 +99,6 @@ void Builder::set_destination(network_destination destination) {
         ed25519_public_key_.emplace(network::ed25519_pubkey::from_bytes(dest->view_remote_key()));
     else if (auto* dest = std::get_if<ServerDestination>(&destination)) {
         host_.emplace(dest->host);
-        endpoint_.emplace(dest->endpoint);
         method_.emplace(dest->method);
 
         // Remove the '://' from the protocol if it was given
@@ -131,9 +133,24 @@ std::vector<unsigned char> Builder::generate_onion_blob(const std::optional<std:
 std::vector<unsigned char> Builder::_generate_payload(
         std::optional<std::vector<unsigned char>> body) const {
     // If we don't have the data required for a server request, then assume it's targeting a
-    // service node and, therefore, the `body` is the payload
-    if (!host_ || !endpoint_ || !protocol_ || !method_ || !destination_x25519_public_key)
-        return body.value_or(std::vector<unsigned char>{});
+    // service node which has a different structure (`method` is the endpoint and the body is
+    // `params`)
+    if (!host_ || !protocol_ || !method_ || !destination_x25519_public_key) {
+        nlohmann::json params_json;
+
+        if (body)
+            params_json = nlohmann::json::parse(*body);
+        else
+            params_json = nlohmann::json::object();
+
+        nlohmann::json wrapped_payload = {
+            {"method", endpoint_},
+            {"params", params_json}
+        };
+
+        std::string payload_str = wrapped_payload.dump();
+        return {payload_str.begin(), payload_str.end()};
+    }
 
     // Otherwise generate the payload for a server request
     auto headers_json = nlohmann::json::object();
@@ -148,9 +165,15 @@ std::vector<unsigned char> Builder::_generate_payload(
     if (body && !headers_json.contains("Content-Type"))
         headers_json["Content-Type"] = "application/json";
 
+    // When making a server request we need a leading forward-slash on the `endpoint`
+    auto final_endpoint = endpoint_;
+    
+    if (!final_endpoint.empty() && final_endpoint[0] != '/')
+        final_endpoint = '/' + final_endpoint;
+
     // Structure the request information
     nlohmann::json request_info{
-            {"method", *method_}, {"endpoint", *endpoint_}, {"headers", headers_json}};
+            {"method", *method_}, {"endpoint", final_endpoint}, {"headers", headers_json}};
     std::vector<std::string> payload{request_info.dump()};
 
     // If we were given a body, add it to the payload
@@ -358,16 +381,14 @@ LIBSESSION_C_API void onion_request_builder_set_server_destination(
         onion_request_builder_object* builder,
         const char* protocol,
         const char* host,
-        const char* endpoint,
         const char* method,
         uint16_t port,
         const char* x25519_pubkey) {
-    assert(builder && protocol && host && endpoint && protocol && x25519_pubkey);
+    assert(builder && protocol && host && protocol && x25519_pubkey);
 
     unbox(builder).set_destination(session::network::ServerDestination{
             protocol,
             host,
-            endpoint,
             session::network::x25519_pubkey::from_hex({x25519_pubkey, 64}),
             port,
             std::nullopt,

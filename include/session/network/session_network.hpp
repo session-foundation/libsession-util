@@ -7,8 +7,9 @@
 
 #include "session/network/network_config.hpp"
 #include "session/network/snode_pool.hpp"
-#include "session/network/network_transport.hpp"
-#include "session/network/network_router.hpp"
+#include "session/network/transport/network_transport.hpp"
+#include "session/network/routing/network_router.hpp"
+#include "session/platform.hpp"
 #include "session/types.hpp"
 
 namespace session::network {
@@ -31,6 +32,11 @@ class Network_v2 {
 
     virtual ~Network_v2();
 
+    std::chrono::milliseconds network_time_offset() const { return _network_time_offset; };
+    fork_versions fork() const { return _fork_versions.load(); };
+    int hardfork() const { return _fork_versions.load().hardfork; };
+    int softfork() const { return _fork_versions.load().softfork; };
+
     /// API: network/get_swarm
     ///
     /// Retrieves the swarm for the given pubkey.  If there is already an entry in the cache for the
@@ -45,10 +51,31 @@ class Network_v2 {
             session::network::x25519_pubkey swarm_pubkey,
             std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback);
 
+    /// API: network/get_random_nodes
+    ///
+    /// Retrieves a number of random nodes from the snode pool.  If the are no nodes in the pool a
+    /// new pool will be populated and the nodes will be retrieved from that.
+    ///
+    /// Inputs:
+    /// - 'count' - [in] the number of nodes to retrieve.
+    /// - 'callback' - [in] callback to be called with the retrieved nodes (in the case of an error
+    /// the callback will be called with an empty list).
+    void get_random_nodes(
+            uint16_t count, std::function<void(std::vector<service_node> nodes)> callback);
+
     void send_request(Request request, network_response_callback_t callback);
 
   private:
+    std::atomic<std::chrono::milliseconds> _network_time_offset{0ms};
+    std::atomic<fork_versions> _fork_versions{{0, 0}};
+
     void configure();
+
+    void _update_network_state(const std::string& body);
+    void _handle_421_retry(
+        Request original_request,
+        network_response_callback_t final_callback);
+    Request _preprocess_request(Request request);
 };
 
 }  // namespace session::network

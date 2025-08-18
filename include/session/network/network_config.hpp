@@ -20,6 +20,7 @@ struct Config {
     opt::transport::Type transport = opt::transport::Type::quic;
     uint8_t path_length = 3;
     bool enforce_subnet_diversity = true;
+    uint8_t redirect_retry_count = 1;
     opt::retry_delay retry_delay = opt::retry_delay(200ms, 5s);
     std::chrono::milliseconds request_timeout_check_frequency = 250ms;
 
@@ -77,6 +78,7 @@ struct Config {
     void handle_config_opt(opt::transport transport);
     void handle_config_opt(opt::path_length pl);
     void handle_config_opt(opt::disable_subnet_diversity dsd);
+    void handle_config_opt(opt::redirect_retry_count rrc);
     void handle_config_opt(opt::retry_delay rd);
     void handle_config_opt(opt::request_timeout_check_frequency rtcf);
 

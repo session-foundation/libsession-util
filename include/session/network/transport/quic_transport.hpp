@@ -7,7 +7,7 @@
 
 #include "session/network/key_types.hpp"
 #include "session/network/network_config.hpp"
-#include "session/network/network_transport.hpp"
+#include "session/network/transport/network_transport.hpp"
 
 namespace oxen::quic {
     class Loop;

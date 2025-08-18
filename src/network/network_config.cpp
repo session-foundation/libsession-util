@@ -24,6 +24,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::transport);
         HANDLE_TYPE(opt::path_length);
         HANDLE_TYPE(opt::disable_subnet_diversity);
+        HANDLE_TYPE(opt::redirect_retry_count);
         HANDLE_TYPE(opt::retry_delay);
         HANDLE_TYPE(opt::request_timeout_check_frequency);
 
@@ -120,6 +121,11 @@ void Config::handle_config_opt(opt::path_length pl) {
 void Config::handle_config_opt(opt::disable_subnet_diversity dsd) {
     enforce_subnet_diversity = false;
     log::debug(cat, "Network config disabled subnet diversity");
+}
+
+void Config::handle_config_opt(opt::redirect_retry_count rrc) {
+    redirect_retry_count = rrc.count;
+    log::debug(cat, "Network config redirect retry count set to {}", rrc.count);
 }
 
 void Config::handle_config_opt(opt::retry_delay rd) {

@@ -175,6 +175,13 @@ namespace opt {
     /// Can be used to prevent the code from excluding nodes within the same `/24` subnet from being included in the same path when building onion request or lokinet paths.
     struct disable_subnet_diversity : base {};
 
+    /// Can be used to override the default (1) number of request retries that will occur when receiving a 421 error.
+    struct redirect_retry_count : base {
+        uint8_t count;
+
+        explicit redirect_retry_count(uint8_t count) : count{count} {}
+    };
+
     struct retry_delay : base {
         std::chrono::milliseconds base_delay;
         std::chrono::milliseconds max_delay;
