@@ -442,75 +442,86 @@ DecryptedEnvelope decrypt_envelope(
     // envelope indistinguishable. If the message does not have pro then this signature must still
     // be set but will be ignored. So in all instances a signature must be attached (real or
     // dummy).
-    if (!envelope.has_prosig())
-        throw std::runtime_error("Parse envelope failed, message is missing pro signature");
+    //
+    // TODO: However for backwards compatibility, so old client's sending their envelopes to new
+    // clients won't have the pro signature set. We have to allow these for now until we
+    // deprecate the supporting of messages from those clients. For forwards compatibility, the new
+    // clients will send the message with the pro signature attached. The old clients will ignore
+    // the new fields.
+    //
+    // This should be deprecated in about 1-2yrs from this message. 2025-08-18 doyle
+    if (envelope.has_prosig()) {
+        // Copy (maybe dummy) pro signature into our result struct
+        const std::string& pro_sig = envelope.prosig();
+        if (pro_sig.size() != crypto_sign_ed25519_BYTES)
+            throw std::runtime_error("Parse envelope failed, pro signature has wrong size");
+        static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
+        std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
-    // Copy (maybe dummy) pro signature into our result struct
-    const std::string& pro_sig = envelope.prosig();
-    if (pro_sig.size() != crypto_sign_ed25519_BYTES)
-        throw std::runtime_error("Parse envelope failed, pro signature has wrong size");
-    static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
-    std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
+        if (content.has_promessage()) {
+            // Mark the envelope as having a pro signature that the caller can use.
+            result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
 
-    if (content.has_promessage()) {
-        // Mark the envelope as having a pro signature that the caller can use.
-        result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
+            // Extract the pro message
+            const SessionProtos::ProMessage& pro_msg = content.promessage();
+            if (!pro_msg.has_proof())
+                throw std::runtime_error(
+                        "Parse decrypted message failed, pro config missing proof");
+            if (!pro_msg.has_features())
+                throw std::runtime_error(
+                        "Parse decrypted message failed, pro config missing features");
 
-        // Extract the pro message
-        const SessionProtos::ProMessage& pro_msg = content.promessage();
-        if (!pro_msg.has_proof())
-            throw std::runtime_error("Parse decrypted message failed, pro config missing proof");
-        if (!pro_msg.has_features())
-            throw std::runtime_error("Parse decrypted message failed, pro config missing features");
-
-        // Parse the proof from protobufs
-        const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-        session::config::ProProof& proof = result.pro_proof;
-        // clang-format off
+            // Parse the proof from protobufs
+            const SessionProtos::ProProof& proto_proof = pro_msg.proof();
+            session::config::ProProof& proof = result.pro_proof;
+            // clang-format off
         size_t proof_errors = 0;
         proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
         proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
         proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
         proof_errors += !proto_proof.has_expiryunixts();
         proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
-        // clang-format on
-        if (proof_errors)
-            throw std::runtime_error("Parse decrypted message failed, pro metadata was malformed");
+            // clang-format on
+            if (proof_errors)
+                throw std::runtime_error(
+                        "Parse decrypted message failed, pro metadata was malformed");
 
-        // Verify the sig since we have extracted the rotating public key from the embedded proof
-        int verify_result = crypto_sign_ed25519_verify_detached(
-                reinterpret_cast<const unsigned char*>(pro_sig.data()),
-                result.content_plaintext.data(),
-                result.content_plaintext.size(),
-                reinterpret_cast<const unsigned char*>(proto_proof.rotatingpublickey().data()));
-        result.pro_status = verify_result == 0 ? ProStatus::Valid : ProStatus::InvalidUserSig;
+            // Verify the sig since we have extracted the rotating public key from the embedded
+            // proof
+            int verify_result = crypto_sign_ed25519_verify_detached(
+                    reinterpret_cast<const unsigned char*>(pro_sig.data()),
+                    result.content_plaintext.data(),
+                    result.content_plaintext.size(),
+                    reinterpret_cast<const unsigned char*>(proto_proof.rotatingpublickey().data()));
+            result.pro_status = verify_result == 0 ? ProStatus::Valid : ProStatus::InvalidUserSig;
 
-        // Fill out the resulting proof structure, we have parsed successfully
-        result.pro_features = pro_msg.features();
-        std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
+            // Fill out the resulting proof structure, we have parsed successfully
+            result.pro_features = pro_msg.features();
+            std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
-        std::memcpy(
-                proof.gen_index_hash.data(),
-                proto_proof.genindexhash().data(),
-                proto_proof.genindexhash().size());
-        std::memcpy(
-                proof.rotating_pubkey.data(),
-                proto_proof.rotatingpublickey().data(),
-                proto_proof.rotatingpublickey().size());
-        proof.expiry_unix_ts =
-                std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
-        std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+            std::memcpy(
+                    proof.gen_index_hash.data(),
+                    proto_proof.genindexhash().data(),
+                    proto_proof.genindexhash().size());
+            std::memcpy(
+                    proof.rotating_pubkey.data(),
+                    proto_proof.rotatingpublickey().data(),
+                    proto_proof.rotatingpublickey().size());
+            proof.expiry_unix_ts =
+                    std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
+            std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
-        if (result.pro_status == ProStatus::Valid) {
-            // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
-            // issued by an authoritative backend)
-            if (!proof.verify(pro_backend_pubkey))
-                result.pro_status = ProStatus::InvalidProBackendSig;
-
-            // Check if the proof has expired
             if (result.pro_status == ProStatus::Valid) {
-                if (unix_ts > result.pro_proof.expiry_unix_ts)
-                    result.pro_status = ProStatus::Expired;
+                // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
+                // issued by an authoritative backend)
+                if (!proof.verify(pro_backend_pubkey))
+                    result.pro_status = ProStatus::InvalidProBackendSig;
+
+                // Check if the proof has expired
+                if (result.pro_status == ProStatus::Valid) {
+                    if (unix_ts > result.pro_proof.expiry_unix_ts)
+                        result.pro_status = ProStatus::Expired;
+                }
             }
         }
     }
