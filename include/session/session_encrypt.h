@@ -71,6 +71,7 @@ LIBSESSION_EXPORT bool session_encrypt_for_blinded_recipient(
 typedef struct session_encrypt_group_message {
     bool success;
     span_u8 ciphertext;
+    size_t error_len_incl_null_terminator;
 } session_encrypt_group_message;
 
 /// API: crypto/session_encrypt_for_group
@@ -100,11 +101,26 @@ typedef struct session_encrypt_group_message {
 /// - `padding` -- the padding multiple: padding will be added as needed to attain a multiple of
 ///   this value for the final result.  0 or 1 disables padding entirely.  Normally omitted to
 ///   use the default of next-multiple-of-256.
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned `success` was false, untouched otherwise. If this is set to `NULL`, then on failure,
+///   the returned `error_len_incl_null_terminator` is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that `error` is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   `error` is NULL. This function will fill the buffer up to `error_len - 1` characters with the
+///   last character reserved for the null-terminator.
 ///
 /// Outputs:
 /// - `success` -- True if the encryption was successful, false otherwise
 /// - `ciphertext` -- the encrypted, etc. value to send to the swarm. This ciphertext must be freed
 ///   with the CRT's `free` when the caller is done with the memory.
+/// - `error_len_incl_null_terminator` The length of the error message if `success` was false. If
+///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
+///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length, including the null-terminator in order for the error message
+///   to be preserved in full.
 LIBSESSION_EXPORT session_encrypt_group_message session_encrypt_for_group(
         const unsigned char* user_ed25519_privkey,
         size_t user_ed25519_privkey_len,
@@ -115,7 +131,9 @@ LIBSESSION_EXPORT session_encrypt_group_message session_encrypt_for_group(
         const unsigned char* plaintext,
         size_t plaintext_len,
         bool compress,
-        size_t padding);
+        size_t padding,
+        char *error,
+        size_t error_len);
 
 /// API: crypto/session_decrypt_incoming
 ///
@@ -221,6 +239,7 @@ typedef struct session_decrypt_group_message_result {
     size_t index;         // Index of the key that successfully decrypted the message
     char session_id[66];  // In hex
     span_u8 plaintext;    // Decrypted message on success. Must be freed by calling the CRT's `free`
+    char error_len_incl_null_terminator;
 } session_decrypt_group_message_result;
 
 /// API: crypto/session_decrypt_group_message
@@ -238,6 +257,15 @@ typedef struct session_decrypt_group_message_result {
 /// - `group_ed25519_pubkey` -- the 32 byte public key of the group
 /// - `ciphertext` -- an encrypted, encoded, signed, (possibly) compressed message as produced
 ///   by `encrypt_message()`.
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned `success` was false, untouched otherwise. If this is set to `NULL`, then on failure,
+///   the returned `error_len_incl_null_terminator` is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that `error` is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   `error` is NULL. This function will fill the buffer up to `error_len - 1` characters with the
+///   last character reserved for the null-terminator.
 ///
 /// Outputs:
 /// - `success` -- True if the decryption was successful, false otherwise
@@ -246,13 +274,21 @@ typedef struct session_decrypt_group_message_result {
 /// - `session_id` -- The 66 byte 05 prefixed session ID of the user that sent the message
 /// - `plaintext` -- Decrypted message if successful. This plaintext must be freed with the CRT's
 ///   `free` when the caller is done with the memory.
+/// - `error_len_incl_null_terminator` The length of the error message if `success` was false. If
+///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
+///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length, including the null-terminator in order for the error message
+///   to be preserved in full.
 session_decrypt_group_message_result session_decrypt_group_message(
         const span_u8* decrypt_ed25519_privkey_list,
         size_t decrypt_ed25519_privkey_len,
         const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
         const unsigned char* ciphertext,
-        size_t ciphertext_len);
+        size_t ciphertext_len,
+        char *error,
+        size_t error_len);
 
 /// API: crypto/session_decrypt_ons_response
 ///

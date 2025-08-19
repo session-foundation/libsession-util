@@ -115,6 +115,7 @@ typedef struct session_protocol_decrypted_envelope {
     PRO_STATUS pro_status;
     pro_proof pro_proof;
     PRO_FEATURES pro_features;
+    size_t error_len_incl_null_terminator;
 } session_protocol_decrypted_envelope;
 
 typedef struct session_protocol_encrypted_for_destination {
@@ -123,6 +124,7 @@ typedef struct session_protocol_encrypted_for_destination {
     bool success;
     bool encrypted;
     span_u8 ciphertext;
+    size_t error_len_incl_null_terminator;
 } session_protocol_encrypted_for_destination;
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
@@ -157,6 +159,15 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTR
 /// - `dest` -- the extra metadata indicating the destination of the message and the necessary data
 ///   to encrypt a message for that destination.
 /// - `space` -- the namespace to encrypt the message for
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned `success` was false, untouched otherwise. If this is set to `NULL`, then on failure,
+///   the returned `error_len_incl_null_terminator` is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that `error` is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   `error` is NULL. This function will fill the buffer up to `error_len - 1` characters with the
+///   last character reserved for the null-terminator.
 ///
 /// Outputs:
 /// - `success` -- True if encryption was successful, if the underlying implementation threw
@@ -173,6 +184,12 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTR
 ///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
 ///   encoded/wrapped if necessary). The ciphertext must be freed with the CRT's `free` when the
 ///   caller is done with the memory.
+/// - `error_len_incl_null_terminator` The length of the error message if `success` was false. If
+///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
+///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length, including the null-terminator in order for the error message
+///   to be preserved in full.
 LIBSESSION_EXPORT
 session_protocol_encrypted_for_destination session_protocol_encrypt_for_destination(
         const void* plaintext,
@@ -180,7 +197,9 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
-        NAMESPACE space);
+        NAMESPACE space,
+        char* error,
+        size_t error_len);
 
 /// API: session_protocol/session_protocol_decrypt_envelope
 ///
@@ -211,6 +230,15 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
 ///   the proof, validating whether or not the attached proof was indeed issued by an authorised
 ///   issuer. Ignored if there's no proof in the message.
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned `success` was false, untouched otherwise. If this is set to `NULL`, then on failure,
+///   the returned `error_len_incl_null_terminator` is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that `error` is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   `error` is NULL. This function will fill the buffer up to `error_len - 1` characters with the
+///   last character reserved for the null-terminator.
 ///
 /// Outputs:
 /// - `success` -- True if encryption was successful, if the underlying implementation threw
@@ -239,6 +267,12 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 /// - `pro_features` -- Pro features that were activated in this envelope by the sender. This field
 ///   is only set if `pro_status` is not nil. It should only be enforced if the `pro_status` was
 ///   the Valid enum.
+/// - `error_len_incl_null_terminator` The length of the error message if `success` was false. If
+///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
+///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length, including the null-terminator in order for the error message
+///   to be preserved in full.
 LIBSESSION_EXPORT
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const session_protocol_decrypt_envelope_keys* keys,
@@ -246,7 +280,9 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         size_t envelope_plaintext_len,
         uint64_t unix_ts,
         const void* pro_backend_pubkey,
-        size_t pro_backend_pubkey_len);
+        size_t pro_backend_pubkey_len,
+        char* error,
+        size_t error_len);
 
 #ifdef __cplusplus
 }

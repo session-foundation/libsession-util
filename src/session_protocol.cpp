@@ -211,14 +211,16 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     req_msg->set_body(envelope.SerializeAsString());
 
                     // Write message as ciphertext
+                    [[maybe_unused]] bool serialized = false;
                     if (use_malloc == UseMalloc::Yes) {
-                        result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
-                        msg.SerializeToArray(result.ciphertext_c.data, result.ciphertext_c.size);
+                        result.ciphertext_c = span_u8_alloc_or_throw(msg.ByteSizeLong());
+                        serialized = msg.SerializeToArray(result.ciphertext_c.data, result.ciphertext_c.size);
                     } else {
                         result.ciphertext_cpp.resize(msg.ByteSizeLong());
-                        msg.SerializeToArray(
+                        serialized = msg.SerializeToArray(
                                 result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
                     }
+                    assert(serialized);
                 } break;
 
                 case AfterEnvelope::KeysEncryptMessage: {
@@ -240,15 +242,17 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                 } break;
 
                 case AfterEnvelope::EnvelopeIsCipherText: {
+                    [[maybe_unused]] bool serialized = false;
                     if (use_malloc == UseMalloc::Yes) {
                         result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
-                        envelope.SerializeToArray(
+                        serialized = envelope.SerializeToArray(
                                 result.ciphertext_c.data, result.ciphertext_c.size);
                     } else {
                         result.ciphertext_cpp.resize(envelope.ByteSizeLong());
-                        envelope.SerializeToArray(
+                        serialized = envelope.SerializeToArray(
                                 result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
                     }
+                    assert(serialized);
                 } break;
             }
 
@@ -393,18 +397,18 @@ DecryptedEnvelope decrypt_envelope(
                 envelope.content().data(),
                 envelope.content().size());
     } else {
-        std::span<const uint8_t> content_str = session::to_span(envelope.content());
+        const std::string& content = envelope.content();
         bool decrypt_success = false;
         std::vector<uint8_t> content_plaintext;
         std::vector<uint8_t> sender_ed25519_pubkey;
         for (const auto& privkey_it : keys.ed25519_privkeys) {
             try {
                 std::tie(content_plaintext, sender_ed25519_pubkey) =
-                        session::decrypt_incoming(privkey_it, content_str);
+                        session::decrypt_incoming(privkey_it, to_span(content));
                 assert(result.sender_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
                 decrypt_success = true;
                 break;
-            } catch (const std::exception& e) {
+            } catch (...) {
             }
         }
 
@@ -475,12 +479,12 @@ DecryptedEnvelope decrypt_envelope(
             const SessionProtos::ProProof& proto_proof = pro_msg.proof();
             session::config::ProProof& proof = result.pro_proof;
             // clang-format off
-        size_t proof_errors = 0;
-        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
-        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
-        proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
-        proof_errors += !proto_proof.has_expiryunixts();
-        proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
+            size_t proof_errors = 0;
+            proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
+            proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
+            proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
+            proof_errors += !proto_proof.has_expiryunixts();
+            proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
             // clang-format on
             if (proof_errors)
                 throw std::runtime_error(
@@ -531,20 +535,22 @@ DecryptedEnvelope decrypt_envelope(
 
 using namespace session;
 
-LIBSESSION_EXPORT
+LIBSESSION_C_API
 PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags) {
     PRO_FEATURES result = get_pro_features_for_msg(msg_size, flags);
     return result;
 }
 
-LIBSESSION_EXPORT session_protocol_encrypted_for_destination
+LIBSESSION_C_API session_protocol_encrypted_for_destination
 session_protocol_encrypt_for_destination(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
-        NAMESPACE space) {
+        NAMESPACE space,
+        char* error,
+        size_t error_len) {
     session_protocol_encrypted_for_destination result = {};
     try {
         EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
@@ -566,20 +572,30 @@ session_protocol_encrypt_for_destination(
                 .encrypted = result_internal.encrypted,
                 .ciphertext = result_internal.ciphertext_c,
         };
-    } catch (...) {
+    } catch (const std::exception& e) {
+        std::string error_cpp = e.what();
+        result.error_len_incl_null_terminator = std::snprintf(
+                                                        error,
+                                                        error_len,
+                                                        "%.*s",
+                                                        static_cast<int>(error_cpp.size()),
+                                                        error_cpp.data()) +
+                                                1;
     }
 
     return result;
 }
 
-LIBSESSION_EXPORT
+LIBSESSION_C_API
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const session_protocol_decrypt_envelope_keys* keys,
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
         uint64_t unix_ts,
         const void* pro_backend_pubkey,
-        size_t pro_backend_pubkey_len) {
+        size_t pro_backend_pubkey_len,
+        char* error,
+        size_t error_len) {
     session_protocol_decrypted_envelope result = {};
 
     // Setup the pro backend pubkey
@@ -606,77 +622,85 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
                     {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
                     std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
                     pro_backend_pubkey_cpp);
+            result.success = true;
             break;
-        } catch (...) {
+        } catch (const std::exception& e) {
+            std::string error_cpp = e.what();
+            result.error_len_incl_null_terminator = std::snprintf(
+                                                            error,
+                                                            error_len,
+                                                            "%.*s",
+                                                            static_cast<int>(error_cpp.size()),
+                                                            error_cpp.data()) +
+                                                    1;
         }
     }
 
-    try {
-        // Marshall into c type
-        result = {
-                .success = false,
-                .envelope =
-                        {
-                                .flags = result_cpp.envelope.flags,
-                                .type = static_cast<ENVELOPE_TYPE>(result_cpp.envelope.type),
-                                .timestamp_ms = static_cast<uint64_t>(
-                                        result_cpp.envelope.timestamp.count()),
-                                .source = {},
-                                .source_device = result_cpp.envelope.source_device,
-                                .server_timestamp = result_cpp.envelope.server_timestamp,
-                                .pro_sig = {},
-                        },
-                .content_plaintext = span_u8_copy_or_throw(
-                        result_cpp.content_plaintext.data(), result_cpp.content_plaintext.size()),
-                .sender_ed25519_pubkey = {},
-                .sender_x25519_pubkey = {},
-                .pro_status = static_cast<PRO_STATUS>(result_cpp.pro_status),
-                .pro_proof =
-                        {
-                                .version = result_cpp.pro_proof.version,
-                                .gen_index_hash = {},
-                                .rotating_pubkey = {},
-                                .expiry_unix_ts = static_cast<uint64_t>(
-                                        result_cpp.pro_proof.expiry_unix_ts.time_since_epoch()
-                                                .count()),
-                                .sig = {},
-                        },
-                .pro_features = result_cpp.pro_features};
-
-        std::memcpy(
-                result.envelope.source,
-                result_cpp.envelope.source.data(),
-                sizeof(result.envelope.source));
-        std::memcpy(
-                result.envelope.pro_sig,
-                result_cpp.envelope.pro_sig.data(),
-                sizeof(result.envelope.pro_sig));
-
-        std::memcpy(
-                result.sender_ed25519_pubkey,
-                result_cpp.sender_ed25519_pubkey.data(),
-                sizeof(result.sender_ed25519_pubkey));
-        std::memcpy(
-                result.sender_x25519_pubkey,
-                result_cpp.sender_x25519_pubkey.data(),
-                sizeof(result.sender_x25519_pubkey));
-
-        std::memcpy(
-                result.pro_proof.gen_index_hash,
-                result_cpp.pro_proof.gen_index_hash.data(),
-                sizeof(result.pro_proof.gen_index_hash));
-        std::memcpy(
-                result.pro_proof.rotating_pubkey,
-                result_cpp.pro_proof.rotating_pubkey.data(),
-                sizeof(result.pro_proof.rotating_pubkey));
-        std::memcpy(
-                result.pro_proof.sig,
-                result_cpp.pro_proof.sig.data(),
-                sizeof(result.pro_proof.sig));
-
-        result.success = true;
-    } catch (...) {
+    if (keys->ed25519_privkeys_len == 0) {
+        result.error_len_incl_null_terminator =
+                std::snprintf(error, error_len, "No keys ed25519_privkeys were provided") + 1;
     }
 
+    // Marshall into c type
+    try {
+        result.content_plaintext = span_u8_copy_or_throw(
+                result_cpp.content_plaintext.data(), result_cpp.content_plaintext.size());
+    } catch (const std::exception& e) {
+        std::string error_cpp = e.what();
+        result.success = false;
+        result.error_len_incl_null_terminator = std::snprintf(
+                                                        error,
+                                                        error_len,
+                                                        "%.*s",
+                                                        static_cast<int>(error_cpp.size()),
+                                                        error_cpp.data()) +
+                                                1;
+    }
+
+    result.envelope.flags = result_cpp.envelope.flags;
+    result.envelope.type = static_cast<ENVELOPE_TYPE>(result_cpp.envelope.type);
+    result.envelope.timestamp_ms = static_cast<uint64_t>(result_cpp.envelope.timestamp.count());
+    result.envelope.source_device = result_cpp.envelope.source_device;
+    result.envelope.server_timestamp = result_cpp.envelope.server_timestamp;
+    result.pro_status = static_cast<PRO_STATUS>(result_cpp.pro_status);
+    result.pro_proof.version = result_cpp.pro_proof.version;
+    result.pro_proof.expiry_unix_ts =
+            static_cast<uint64_t>(result_cpp.pro_proof.expiry_unix_ts.time_since_epoch().count());
+    result.pro_features = result_cpp.pro_features;
+
+    // Since we support multiple keys, if some of the keys failed but one of them succeeded, we will
+    // zero out the error buffer to avoid conflating one of the failures with the function actually
+    // succeeding.
+    if (result.success)
+        result.error_len_incl_null_terminator = 0;
+
+    std::memcpy(
+            result.envelope.source,
+            result_cpp.envelope.source.data(),
+            sizeof(result.envelope.source));
+    std::memcpy(
+            result.envelope.pro_sig,
+            result_cpp.envelope.pro_sig.data(),
+            sizeof(result.envelope.pro_sig));
+
+    std::memcpy(
+            result.sender_ed25519_pubkey,
+            result_cpp.sender_ed25519_pubkey.data(),
+            sizeof(result.sender_ed25519_pubkey));
+    std::memcpy(
+            result.sender_x25519_pubkey,
+            result_cpp.sender_x25519_pubkey.data(),
+            sizeof(result.sender_x25519_pubkey));
+
+    std::memcpy(
+            result.pro_proof.gen_index_hash,
+            result_cpp.pro_proof.gen_index_hash.data(),
+            sizeof(result.pro_proof.gen_index_hash));
+    std::memcpy(
+            result.pro_proof.rotating_pubkey,
+            result_cpp.pro_proof.rotating_pubkey.data(),
+            sizeof(result.pro_proof.rotating_pubkey));
+    std::memcpy(
+            result.pro_proof.sig, result_cpp.pro_proof.sig.data(), sizeof(result.pro_proof.sig));
     return result;
 }

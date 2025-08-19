@@ -56,7 +56,7 @@ bool pro_verify_internal(
         return false;
 
     session::array_uc32 rederived_pk;
-    [[maybe_unused]] session::cleared_uc32 rederived_sk;
+    [[maybe_unused]] session::cleared_uc64 rederived_sk;
     crypto_sign_ed25519_seed_keypair(
             rederived_pk.data(), rederived_sk.data(), rotating_privkey.data());
 
@@ -155,6 +155,14 @@ static_assert((sizeof((pro_pro_config*)0)->rotating_privkey) == crypto_sign_ed25
 static_assert((sizeof((pro_proof*)0)->gen_index_hash) == 32);
 static_assert((sizeof((pro_proof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
 static_assert((sizeof((pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
+
+LIBSESSION_C_API bytes32 pro_proof_hash(pro_proof const* proof) {
+    session::array_uc32 hash = proof_hash_internal(
+            proof->version, proof->gen_index_hash, proof->rotating_pubkey, proof->expiry_unix_ts);
+    bytes32 result = {};
+    std::memcpy(result.data, hash.data(), hash.size());
+    return result;
+}
 
 LIBSESSION_C_API bool pro_proof_verify(pro_proof const* proof, uint8_t const* verify_pubkey) {
     auto verify_pubkey_span =
