@@ -211,7 +211,7 @@ OnionRequestRouter::OnionRequestRouter(
 }
 
 std::vector<service_node> OnionRequestRouter::get_all_used_nodes() {
-    _loop->call_get([this] { return extract_nodes(_paths, _pending_paths); });
+    return _loop->call_get([this] { return extract_nodes(_paths, _pending_paths); });
 }
 
 void OnionRequestRouter::send_request(Request request, network_response_callback_t callback) {

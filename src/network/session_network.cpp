@@ -387,13 +387,14 @@ void Network_v2::_handle_421_retry(
             original_request.request_id,
             original_dest_node->to_string());
 
+    auto failed_node_copy = *original_dest_node;
     std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
     _snode_pool->refresh_if_needed(
             std::move(nodes_to_exclude),
             [this,
              req_to_retry = std::move(original_request),
              cb = std::move(final_callback),
-             failed_node = *original_dest_node] {
+             failed_node = failed_node_copy] {
                 auto swarm_pubkey = failed_node.swarm_pubkey();
 
                 _snode_pool->get_swarm(
@@ -403,6 +404,7 @@ void Network_v2::_handle_421_retry(
                          cb = std::move(cb),
                          failed_node](swarm::swarm_id_t, std::vector<service_node> swarm_nodes) {
                             std::optional<service_node> new_target;
+                            std::shuffle(swarm_nodes.begin(), swarm_nodes.end(), csrng);
 
                             for (const auto& node : swarm_nodes) {
                                 if (node != failed_node) {
