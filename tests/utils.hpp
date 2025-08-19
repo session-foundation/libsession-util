@@ -152,7 +152,8 @@ static inline TestKeys get_deterministic_test_keys() {
         crypto_sign_ed25519_seed_keypair(result.ed_pk0.data(), result.ed_sk0.data(), result.seed0.data());
 
         // X25519
-        assert(0 == crypto_sign_ed25519_pk_to_curve25519(result.curve_pk0.data(), result.ed_pk0.data()));
+        bool converted = crypto_sign_ed25519_pk_to_curve25519(result.curve_pk0.data(), result.ed_pk0.data());
+        assert(converted);
 
         // Session PK
         result.session_pk0[0] = 0x05;
@@ -169,7 +170,8 @@ static inline TestKeys get_deterministic_test_keys() {
         crypto_sign_ed25519_seed_keypair(result.ed_pk1.data(), result.ed_sk1.data(), result.seed1.data());
 
         // X25519
-        assert(0 == crypto_sign_ed25519_pk_to_curve25519(result.curve_pk1.data(), result.ed_pk1.data()));
+        bool converted = crypto_sign_ed25519_pk_to_curve25519(result.curve_pk1.data(), result.ed_pk1.data());
+        assert(converted);
 
         // Session PK
         result.session_pk1[0] = 0x05;
