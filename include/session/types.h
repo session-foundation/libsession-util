@@ -13,6 +13,10 @@ struct span_u8 {
     size_t size;
 };
 
+struct bytes32 {
+    uint8_t data[32];
+};
+
 /// Create a span of bytes that owns the `size` bytes of memory requested. If allocation fails, this
 /// function throws a runtime exception. The `data` pointer is span must be freed once the span
 /// is no longer needed.

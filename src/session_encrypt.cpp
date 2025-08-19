@@ -552,12 +552,13 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
     auto& [buf, sender_ed_pk] = result;
 
     buf.resize(outer_size);
-    if (0 != crypto_box_seal_open(
+    int opened = crypto_box_seal_open(
                      buf.data(),
                      ciphertext.data(),
                      ciphertext.size(),
                      x25519_pubkey.data(),
-                     x25519_seckey.data()))
+                     x25519_seckey.data());
+    if (opened != 0)
         throw std::runtime_error{"Decryption failed"};
 
     uc64 sig;
@@ -1123,7 +1124,9 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
         const unsigned char* plaintext,
         size_t plaintext_len,
         bool compress,
-        size_t padding) {
+        size_t padding,
+        char *error,
+        size_t error_len) {
     session_encrypt_group_message result = {};
     try {
         std::vector<unsigned char> result_cpp = encrypt_for_group(
@@ -1137,7 +1140,11 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
                 .success = true,
                 .ciphertext = span_u8_copy_or_throw(result_cpp.data(), result_cpp.size()),
         };
-    } catch (...) {
+    } catch (const std::exception& e) {
+        std::string error_cpp = e.what();
+        result.error_len_incl_null_terminator =
+                std::snprintf(error, error_len, "%.*s", (int)error_cpp.size(), error_cpp.data()) +
+                1;
     }
     return result;
 }
@@ -1225,7 +1232,9 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
         const unsigned char* ciphertext,
-        size_t ciphertext_len) {
+        size_t ciphertext_len,
+        char *error,
+        size_t error_len) {
     session_decrypt_group_message_result result = {};
     for (size_t index = 0; index < decrypt_ed25519_privkey_len; index++) {
         std::span<const uint8_t> key = {
@@ -1246,7 +1255,12 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
             assert(result_cpp.session_id.size() == sizeof(result.session_id));
             std::memcpy(result.session_id, result_cpp.session_id.data(), sizeof(result.session_id));
             break;
-        } catch (...) {
+        } catch (const std::exception& e) {
+            std::string error_cpp = e.what();
+            result.error_len_incl_null_terminator =
+                    std::snprintf(
+                            error, error_len, "%.*s", (int)error_cpp.size(), error_cpp.data()) +
+                    1;
         }
     }
     return result;

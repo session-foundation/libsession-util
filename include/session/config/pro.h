@@ -9,6 +9,7 @@ extern "C" {
 #include <stdint.h>
 
 #include "../export.h"
+#include "../types.h"
 
 typedef struct pro_proof {
     uint8_t version;
@@ -26,6 +27,8 @@ typedef struct pro_pro_config {
 LIBSESSION_EXPORT pro_proof pro_proof_init(char const* dump, size_t dump_len);
 
 LIBSESSION_EXPORT pro_pro_config pro_pro_init(char const* dump, size_t dump_len);
+
+LIBSESSION_EXPORT bytes32 pro_proof_hash(pro_proof const* proof);
 
 LIBSESSION_EXPORT bool pro_proof_verify(pro_proof const* proof, uint8_t const* verify_pubkey);
 

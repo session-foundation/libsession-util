@@ -38,22 +38,27 @@ namespace config::groups {
 }
 
 enum class ProStatus {
-    Nil,                   // Proof not set
-    InvalidProBackendSig,  // Proof set; pro proof sig was not produced by the Pro backend key
-    InvalidUserSig,        // Proof set; envelope pro sig was not produced by the Rotating key
-    Valid,                 // Proof set, is verified; has not expired
-    Expired,               // Proof set, is verified; has expired
+    // Proof not set
+    Nil = PRO_STATUS_NIL,
+    // Proof set; pro proof sig was not produced by the Pro backend key
+    InvalidProBackendSig = PRO_STATUS_INVALID_PRO_BACKEND_SIG,
+    // Proof set; envelope pro sig was not produced by the Rotating key
+    InvalidUserSig = PRO_STATUS_INVALID_USER_SIG,
+    // Proof set, is verified; has not expired
+    Valid = PRO_STATUS_VALID,
+    // Proof set, is verified; has expired
+    Expired = PRO_STATUS_EXPIRED,
 };
 
 enum class DestinationType {
-    Contact,
-    SyncMessage,
+    Contact = DESTINATION_TYPE_CONTACT,
+    SyncMessage = DESTINATION_TYPE_SYNC_MESSAGE,
     /// Both legacy and non-legacy groups are to be identified as `Group`. A non-legacy
     /// group is detected by the (0x03) prefix byte on the given `dest_group_pubkey` specified in
     /// Destination.
-    Group,
-    Community,
-    CommunityInbox,
+    Group = DESTINATION_TYPE_GROUP,
+    Community = DESTINATION_TYPE_COMMUNITY,
+    CommunityInbox = DESTINATION_TYPE_COMMUNITY_INBOX,
 };
 
 struct Destination {
