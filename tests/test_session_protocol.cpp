@@ -452,71 +452,26 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_decrypt_envelope_free(&decrypt_result);
     }
 
-    SECTION("Encrypt/decrypt for legacy groups (w/ encrypted envelope, plaintext content) with "
-            "Pro") {
-        // Encrypt
-        session_protocol_encrypted_for_destination encrypt_result = {};
-        {
-            session_protocol_destination dest = base_dest;
-            dest.type = DESTINATION_TYPE_GROUP;
-            assert(dest.recipient_pubkey[0] == 0x05);
+    SECTION("Encrypt/decrypt for legacy groups is rejected") {
+        session_protocol_destination dest = base_dest;
+        dest.type = DESTINATION_TYPE_GROUP;
+        assert(dest.recipient_pubkey[0] == 0x05);
 
-            encrypt_result = session_protocol_encrypt_for_destination(
-                    protobuf_content_with_pro.plaintext.data(),
-                    protobuf_content_with_pro.plaintext.size(),
-                    keys.ed_sk0.data(),
-                    keys.ed_sk0.size(),
-                    &dest,
-                    NAMESPACE_DEFAULT,
-                    error,
-                    sizeof(error));
-            REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
-            REQUIRE(encrypt_result.success);
-            REQUIRE(encrypt_result.encrypted);
-        }
-
-        // Legacy groups wrap in websocket message
-        WebSocketProtos::WebSocketMessage ws_msg;
-        REQUIRE(ws_msg.ParseFromArray(
-                encrypt_result.ciphertext.data, encrypt_result.ciphertext.size));
-        REQUIRE(ws_msg.has_request());
-        REQUIRE(ws_msg.request().has_body());
+        session_protocol_encrypted_for_destination encrypt_result =
+                session_protocol_encrypt_for_destination(
+                        protobuf_content_with_pro.plaintext.data(),
+                        protobuf_content_with_pro.plaintext.size(),
+                        keys.ed_sk0.data(),
+                        keys.ed_sk0.size(),
+                        &dest,
+                        NAMESPACE_DEFAULT,
+                        error,
+                        sizeof(error));
+        REQUIRE(encrypt_result.error_len_incl_null_terminator > 0);
+        REQUIRE(encrypt_result.error_len_incl_null_terminator <= sizeof(error));
+        REQUIRE(!encrypt_result.success);
+        REQUIRE(!encrypt_result.encrypted);
         session_protocol_encrypt_for_destination_free(&encrypt_result);
-
-        // Decrypt envelope
-        span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
-        session_protocol_decrypt_envelope_keys decrypt_keys = {};
-        decrypt_keys.ed25519_privkeys = &key;
-        decrypt_keys.ed25519_privkeys_len = 1;
-        session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
-                &decrypt_keys,
-                ws_msg.request().body().data(),
-                ws_msg.request().body().size(),
-                timestamp_s.time_since_epoch().count(),
-                pro_backend_ed_pk.data(),
-                pro_backend_ed_pk.size(),
-                error,
-                sizeof(error));
-        REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-        REQUIRE(decrypt_result.success);
-
-        // Verify pro
-        REQUIRE(decrypt_result.pro_status == PRO_STATUS_VALID);  // Pro was attached
-        bytes32 hash = pro_proof_hash(&decrypt_result.pro_proof);
-        REQUIRE(std::memcmp(
-                        hash.data,
-                        protobuf_content_with_pro.pro_proof_hash.data(),
-                        sizeof(hash.data)) == 0);
-        REQUIRE(decrypt_result.pro_features == PRO_FEATURES_NIL);  // No features requested
-
-        // Verify the content can be parsed w/ protobufs
-        SessionProtos::Content decrypt_content = {};
-        REQUIRE(decrypt_content.ParseFromArray(
-                decrypt_result.content_plaintext.data, decrypt_result.content_plaintext.size));
-        REQUIRE(decrypt_content.has_datamessage());
-        const SessionProtos::DataMessage& data = decrypt_content.datamessage();
-        REQUIRE(data.body() == data_body);
-        session_protocol_decrypt_envelope_free(&decrypt_result);
     }
 
     SECTION("Encrypt/decrypt for groups v2 (w/ encrypted envelope, plaintext content) with Pro") {
