@@ -114,8 +114,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                 } else if (space == config::Namespace::RevokedRetrievableGroupMessages) {
                     enc.mode = Mode::Plaintext;
                 } else {
-                    // Config messages should be sent directly rather than via this method (just
-                    // return plaintext and no-op). See:
+                    // See:
                     // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L494
                     enc.mode = Mode::Plaintext;
                 }
@@ -137,8 +136,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                 enc.envelope_type = SessionProtos::Envelope_Type::Envelope_Type_SESSION_MESSAGE;
                 enc.after_envelope = AfterEnvelope::EnvelopeIsCipherText;
             } else {
-                // Config messages should be sent directly rather than via this method (return just
-                // the plaintext and no-op) See:
+                // See:
                 // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L498
                 enc.mode = Mode::Plaintext;
             }
