@@ -15,10 +15,20 @@ extern "C" {
 #endif
 
 enum {
-    /// Number of characters that a standard message can use. If the message exceeds this then the
-    /// message must activate the higher character limit feature provided by Session Pro which
-    /// allows messages up to 10k characters.
+    /// TODO: This comment needs to be updated to be _codepoints_ once libsession implements the
+    /// character count for the platforms. Currently they use code units but it should be
+    /// codepoints. This allows the platforms to use their native text representation up until the
+    /// API boundary where they will convert to UTF8 to have it managed by libsession.
+
+    /// Maximum number of UTF16 code units that a standard message can use. If the message exceeds
+    /// this then the message must activate the higher character limit feature provided by Session
+    /// Pro which allows messages up to 10k characters.
     PRO_STANDARD_CHARACTER_LIMIT = 2'000,
+
+    /// Maximum number of UTF16 code units that a Session Pro entitled user can send in a message.
+    /// This is not used in the codebase, but is provided for convenience to centralise protocol
+    /// definitions for users of the library to consume.
+    PRO_HIGHER_CHARACTER_LIMIT = 10'000,
 };
 
 // Bit flags for features that are not currently able to be determined by the state stored in
