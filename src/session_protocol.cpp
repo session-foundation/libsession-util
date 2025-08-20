@@ -581,6 +581,14 @@ session_protocol_encrypt_for_destination(
     return result;
 }
 
+LIBSESSION_C_API void session_protocol_encrypt_for_destination_free(
+        session_protocol_encrypted_for_destination* encrypt) {
+    if (encrypt) {
+        free(encrypt->ciphertext.data);
+        *encrypt = {};
+    }
+}
+
 LIBSESSION_C_API
 session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const session_protocol_decrypt_envelope_keys* keys,
@@ -697,4 +705,12 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     std::memcpy(
             result.pro_proof.sig, result_cpp.pro_proof.sig.data(), sizeof(result.pro_proof.sig));
     return result;
+}
+
+LIBSESSION_C_API
+void session_protocol_decrypt_envelope_free(session_protocol_decrypted_envelope* envelope) {
+    if (envelope) {
+        free(envelope->content_plaintext.data);
+        *envelope = {};
+    }
 }

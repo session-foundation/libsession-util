@@ -155,6 +155,9 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTR
 ///
 /// See: session_protocol/encrypt_for_destination for more information
 ///
+/// The encryption result must be freed with `session_protocol_encrypt_for_destination_free` when
+/// the caller is done with the result.
+///
 /// Inputs:
 /// - `plaintext` -- the protobuf serialised payload containing the protobuf encoded stream,
 ///   `Content`. It must not be already be encrypted.
@@ -186,8 +189,7 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTR
 ///   on the result to determine if the ciphertext or plaintext is to be used.
 ///
 ///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
-///   encoded/wrapped if necessary). The ciphertext must be freed with the CRT's `free` when the
-///   caller is done with the memory.
+///   encoded/wrapped if necessary).
 /// - `error_len_incl_null_terminator` The length of the error message if `success` was false. If
 ///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
 ///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
@@ -205,6 +207,18 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
         char* error,
         size_t error_len);
 
+/// API: session_protocol/session_protocol_encrypt_for_destination_free
+///
+/// Free the encryption result for a destination produced by
+/// `session_protocol_encrypt_for_destination`. It is safe to pass a `NULL` or any result returned
+/// by the encrypt function irrespective of if the function succeeded or failed.
+///
+/// Inputs:
+/// - `encrypt` -- Encryption result to free. This object is zeroed out on free and should no longer
+///   be used after it is freed.
+LIBSESSION_EXPORT void session_protocol_encrypt_for_destination_free(
+        session_protocol_encrypted_for_destination* encrypt);
+
 /// API: session_protocol/session_protocol_decrypt_envelope
 ///
 /// Given an envelope payload (i.e.: protobuf encoded stream of `Envelope` or encrypted `Envelope`
@@ -216,6 +230,9 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 /// need to be set depending on the type of envelope payload passed into the function.
 ///
 /// See: session_protocol/decrypt_envelope for more information
+///
+/// The encryption result must be freed with `session_protocol_decrypt_envelope_free` when the
+/// caller is done with the result.
 ///
 /// Inputs:
 /// - `keys` -- the keys to decrypt either the envelope or the envelope contents. Groups v2
@@ -287,6 +304,18 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         size_t pro_backend_pubkey_len,
         char* error,
         size_t error_len);
+
+/// API: session_protocol/session_protocol_decrypt_envelope_free
+///
+/// Free the decryption result produced by `session_protocol_decrypt_envelope`. It is safe to pass a
+/// `NULL` or any result returned by the decrypt function irrespective of if the function succeeded
+/// or failed.
+///
+/// Inputs:
+/// - `envelope` -- Decryption result to free. This object is zeroed out on free and should no longer
+///   be used after it is freed.
+LIBSESSION_EXPORT void session_protocol_decrypt_envelope_free(
+        session_protocol_decrypted_envelope* envelope);
 
 #ifdef __cplusplus
 }
