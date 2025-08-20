@@ -347,19 +347,12 @@ DecryptedEnvelope decrypt_envelope(
     if (!envelope.ParseFromArray(envelope_plaintext.data(), envelope_plaintext.size()))
         throw std::runtime_error{"Parse envelope from plaintext failed"};
 
-    // Parse type (unconditionallty)
-    if (!envelope.has_type())
-        throw std::runtime_error("Parse envelope failed, missing type");
-
-    switch (envelope.type()) {
-        case SessionProtos::Envelope_Type_SESSION_MESSAGE:
-            result.envelope.type = EnvelopeType::SessionMessage;
-            break;
-
-        case SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE:
-            result.envelope.type = EnvelopeType::ClosedGroupMessage;
-            break;
-    }
+    // TODO: We do not parse the envelop type anymore, we infer the type from
+    // the namespace. Deciding whether or not we decrypt the envelope vs the content depends on
+    // whether or not the group keys were passed in so we don't care about the type anymore.
+    //
+    // When the type is removed, we can remove this TODO. This is just a reminder as to why we skip
+    // over that field but it's still in the schema and still being set on the sending side.
 
     // Parse source (optional)
     if (envelope.has_source()) {
@@ -660,7 +653,6 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     }
 
     result.envelope.flags = result_cpp.envelope.flags;
-    result.envelope.type = static_cast<ENVELOPE_TYPE>(result_cpp.envelope.type);
     result.envelope.timestamp_ms = static_cast<uint64_t>(result_cpp.envelope.timestamp.count());
     result.envelope.source_device = result_cpp.envelope.source_device;
     result.envelope.server_timestamp = result_cpp.envelope.server_timestamp;

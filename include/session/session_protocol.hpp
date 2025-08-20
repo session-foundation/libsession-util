@@ -90,14 +90,8 @@ struct Destination {
     array_uc32 group_ed25519_privkey;
 };
 
-enum class EnvelopeType {
-    SessionMessage = ENVELOPE_TYPE_SESSION_MESSAGE,
-    ClosedGroupMessage = ENVELOPE_TYPE_CLOSED_GROUP_MESSGE,
-};
-
 struct Envelope {
     ENVELOPE_FLAGS flags;
-    EnvelopeType type;
     std::chrono::milliseconds timestamp;
 
     // Optional fields. These fields are set if the appropriate flag has been set in `flags`

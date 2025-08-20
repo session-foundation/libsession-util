@@ -83,11 +83,6 @@ typedef struct session_protocol_destination {  // See session::Destination
     uint8_t group_ed25519_privkey[32];
 } session_protocol_destination;
 
-typedef enum ENVELOPE_TYPE {
-    ENVELOPE_TYPE_SESSION_MESSAGE,
-    ENVELOPE_TYPE_CLOSED_GROUP_MESSGE,
-} ENVELOPE_TYPE;
-
 // Indicates which optional fields in the envelope has been populated out of the optional fields in
 // an envelope after it has been parsed off the wire.
 typedef uint32_t ENVELOPE_FLAGS;
@@ -100,7 +95,6 @@ enum ENVELOPE_FLAGS_ {
 
 typedef struct session_protocol_envelope {
     ENVELOPE_FLAGS flags;
-    ENVELOPE_TYPE type;
     uint64_t timestamp_ms;
     uint8_t source[33];
     uint32_t source_device;
