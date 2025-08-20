@@ -8,8 +8,6 @@
 #include <session/types.hpp>
 
 namespace session::pro_backend {
-
-static_assert(PUBKEY.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
 master_rotating_sigs build_get_proof_sigs(
         const array_uc64& master_privkey,
         const array_uc64& rotating_privkey,
