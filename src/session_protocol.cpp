@@ -88,7 +88,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         // Type of message to mark the enevelope as
         std::optional<SessionProtos::Envelope_Type> envelope_type;
 
-        bool after_envelope_keys_encrypt_message; // Encrypt with group keys
+        bool after_envelope_keys_encrypt_message;  // Encrypt with group keys
     };
 
     // Figure out how to encrypt the message based on the destination and setup the encoding context
@@ -203,17 +203,17 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     result.ciphertext_cpp = std::move(ciphertext);
                 }
             } else {
-                    [[maybe_unused]] bool serialized = false;
-                    if (use_malloc == UseMalloc::Yes) {
-                        result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
-                        serialized = envelope.SerializeToArray(
-                                result.ciphertext_c.data, result.ciphertext_c.size);
-                    } else {
-                        result.ciphertext_cpp.resize(envelope.ByteSizeLong());
-                        serialized = envelope.SerializeToArray(
-                                result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
-                    }
-                    assert(serialized);
+                [[maybe_unused]] bool serialized = false;
+                if (use_malloc == UseMalloc::Yes) {
+                    result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
+                    serialized = envelope.SerializeToArray(
+                            result.ciphertext_c.data, result.ciphertext_c.size);
+                } else {
+                    result.ciphertext_cpp.resize(envelope.ByteSizeLong());
+                    serialized = envelope.SerializeToArray(
+                            result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
+                }
+                assert(serialized);
             }
 
         } break;

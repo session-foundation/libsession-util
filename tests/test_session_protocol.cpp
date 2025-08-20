@@ -210,7 +210,9 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 encrypt_result.ciphertext.size,
                 timestamp_s.time_since_epoch().count(),
                 pro_backend_ed_pk.data(),
-                pro_backend_ed_pk.size(),error, sizeof(error));
+                pro_backend_ed_pk.size(),
+                error,
+                sizeof(error));
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
         session_protocol_encrypt_for_destination_free(&encrypt_result);
@@ -222,9 +224,9 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_result.pro_status == PRO_STATUS_NIL);  // Pro was not attached
         REQUIRE(decrypt_result.pro_features == PRO_FEATURES_NIL);
         REQUIRE(std::memcmp(
-                decrypt_result_pro_hash.data,
-                nil_hash.data(),
-                sizeof(decrypt_result_pro_hash.data)) == 0);
+                        decrypt_result_pro_hash.data,
+                        nil_hash.data(),
+                        sizeof(decrypt_result_pro_hash.data)) == 0);
 
         // Verify it is decryptable
         SessionProtos::Content decrypt_content = {};
@@ -487,8 +489,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_encrypted_for_destination encrypt_result = {};
         {
             session_protocol_destination dest = base_dest;
-            dest.type                         = DESTINATION_TYPE_GROUP;
-            dest.group_ed25519_pubkey[0]      = 0x03;
+            dest.type = DESTINATION_TYPE_GROUP;
+            dest.group_ed25519_pubkey[0] = 0x03;
             std::memcpy(dest.group_ed25519_pubkey + 1, group_v2_pk.data(), group_v2_pk.size());
             std::memcpy(
                     dest.group_ed25519_privkey,
@@ -595,18 +597,15 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Try decrypt with a timestamp past the pro proof expiry date
         {
-            session_protocol_decrypted_envelope decrypt_result =
-                    session_protocol_decrypt_envelope(
-                            &decrypt_keys,
-                            encrypt_result.ciphertext.data,
-                            encrypt_result.ciphertext.size,
-                            protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch()
-                                            .count() +
-                                    1,
-                            pro_backend_ed_pk.data(),
-                            pro_backend_ed_pk.size(),
-                            error,
-                            sizeof(error));
+            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+                    &decrypt_keys,
+                    encrypt_result.ciphertext.data,
+                    encrypt_result.ciphertext.size,
+                    protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch().count() + 1,
+                    pro_backend_ed_pk.data(),
+                    pro_backend_ed_pk.size(),
+                    error,
+                    sizeof(error));
             REQUIRE(decrypt_result.success);
             REQUIRE(decrypt_result.pro_status == PRO_STATUS_EXPIRED);
             REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
@@ -617,17 +616,15 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         {
             array_uc32 bad_pro_backend_ed_pk = pro_backend_ed_pk;
             bad_pro_backend_ed_pk[0] ^= 1;
-            session_protocol_decrypted_envelope decrypt_result =
-                    session_protocol_decrypt_envelope(
-                            &decrypt_keys,
-                            encrypt_result.ciphertext.data,
-                            encrypt_result.ciphertext.size,
-                            protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch()
-                                    .count(),
-                            bad_pro_backend_ed_pk.data(),
-                            bad_pro_backend_ed_pk.size(),
-                            error,
-                            sizeof(error));
+            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+                    &decrypt_keys,
+                    encrypt_result.ciphertext.data,
+                    encrypt_result.ciphertext.size,
+                    protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch().count(),
+                    bad_pro_backend_ed_pk.data(),
+                    bad_pro_backend_ed_pk.size(),
+                    error,
+                    sizeof(error));
             REQUIRE(decrypt_result.success);
             REQUIRE(decrypt_result.pro_status == PRO_STATUS_INVALID_PRO_BACKEND_SIG);
             REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
@@ -663,17 +660,15 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             session_protocol_decrypt_envelope_keys multi_decrypt_keys = {};
             multi_decrypt_keys.ed25519_privkeys = key_list.data();
             multi_decrypt_keys.ed25519_privkeys_len = key_list.size();
-            session_protocol_decrypted_envelope decrypt_result =
-                    session_protocol_decrypt_envelope(
-                            &multi_decrypt_keys,
-                            encrypt_result.ciphertext.data,
-                            encrypt_result.ciphertext.size,
-                            protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch()
-                                    .count(),
-                            pro_backend_ed_pk.data(),
-                            pro_backend_ed_pk.size(),
-                            error,
-                            sizeof(error));
+            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+                    &multi_decrypt_keys,
+                    encrypt_result.ciphertext.data,
+                    encrypt_result.ciphertext.size,
+                    protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch().count(),
+                    pro_backend_ed_pk.data(),
+                    pro_backend_ed_pk.size(),
+                    error,
+                    sizeof(error));
             REQUIRE(decrypt_result.success);
             REQUIRE(decrypt_result.pro_status == PRO_STATUS_VALID);
             REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);

@@ -312,7 +312,8 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
 /// or failed.
 ///
 /// Inputs:
-/// - `envelope` -- Decryption result to free. This object is zeroed out on free and should no longer
+/// - `envelope` -- Decryption result to free. This object is zeroed out on free and should no
+/// longer
 ///   be used after it is freed.
 LIBSESSION_EXPORT void session_protocol_decrypt_envelope_free(
         session_protocol_decrypted_envelope* envelope);
