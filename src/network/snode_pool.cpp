@@ -663,10 +663,14 @@ void SnodePool::clear_cache() {
     _disk_write_cv.notify_one();
 }
 
-void SnodePool::record_node_failure(const service_node& node) {
+void SnodePool::record_node_failure(const service_node& node, bool permanent) {
+    record_node_failure(ed25519_pubkey::from_bytes(node.view_remote_key()), permanent);
+}
+
+void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
     std::lock_guard lock{_cache_mutex};
-    auto key = ed25519_pubkey::from_bytes(node.view_remote_key());
-    _snode_failure_counts[key]++;
+    _snode_failure_counts[key] =
+            (permanent ? _config.cache_node_failure_threshold : _snode_failure_counts[key] += 1);
     log::trace(
             cat,
             "Recorded failure for node {}, total failures: {}",

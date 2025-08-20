@@ -13,13 +13,6 @@ extern "C" {
 #include "session/onionreq/builder.h"
 #include "session/platform.h"
 
-typedef enum CONNECTION_STATUS {
-    CONNECTION_STATUS_UNKNOWN = 0,
-    CONNECTION_STATUS_CONNECTING = 1,
-    CONNECTION_STATUS_CONNECTED = 2,
-    CONNECTION_STATUS_DISCONNECTED = 3,
-} CONNECTION_STATUS;
-
 typedef struct network_object {
     // Internal opaque object pointer; calling code should leave this alone.
     void* internals;

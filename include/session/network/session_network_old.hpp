@@ -26,13 +26,6 @@ using network_response_callback_t = std::function<void(
         std::vector<std::pair<std::string, std::string>> headers,
         std::optional<std::string> response)>;
 
-enum class ConnectionStatus {
-    unknown,
-    connecting,
-    connected,
-    disconnected,
-};
-
 enum class PathType {
     standard,
     upload,

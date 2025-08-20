@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <deque>
 #include <memory>
 #include <mutex>
@@ -47,12 +48,18 @@ class LokinetRouter : public IRouter {
             std::shared_ptr<oxen::quic::Loop> loop,
             std::weak_ptr<SnodePool> snode_pool,
             std::weak_ptr<ITransport> transport);
+    ~LokinetRouter() override;
 
+    ConnectionStatus get_status() const override { return _status.load(); };
+    std::vector<PathInfo> get_active_paths() override;
     void send_request(Request request, network_response_callback_t callback) override;
 
   private:
+    std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
+
     // All of the below functions should only be called from within `_loop`
     void _finish_setup();
+    void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _establish_tunnel(
             const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id);

@@ -25,19 +25,23 @@ class Network_v2 {
     std::shared_ptr<IRouter> _router;
 
   public:
+    // Hook to be notified whenever the network connection status changes.
+    std::function<void(ConnectionStatus status)> on_status_changed;
+
     template <typename... Opt>
         requires(!std::is_same_v<
                  std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,
                  config::Config>)
     Network_v2(Opt&&... opts) : Network_v2(Config(std::forward<Opt>(opts)...)){};
     explicit Network_v2(config::Config config);
-
     virtual ~Network_v2();
 
     std::chrono::milliseconds network_time_offset() const { return _network_time_offset; };
     fork_versions fork() const { return _fork_versions.load(); };
     int hardfork() const { return _fork_versions.load().hardfork; };
     int softfork() const { return _fork_versions.load().softfork; };
+
+    std::vector<PathInfo> get_active_paths();
 
     /// API: network/get_swarm
     ///
@@ -68,11 +72,14 @@ class Network_v2 {
     void send_request(Request request, network_response_callback_t callback);
 
   private:
+    std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
     std::atomic<std::chrono::milliseconds> _network_time_offset{0ms};
     std::atomic<fork_versions> _fork_versions{{0, 0}};
 
     void configure();
 
+    void _recalculate_status();
+    void _update_status(ConnectionStatus new_status);
     void _update_network_state(const std::string& body);
     void _handle_421_retry(Request original_request, network_response_callback_t final_callback);
     Request _preprocess_request(Request request);

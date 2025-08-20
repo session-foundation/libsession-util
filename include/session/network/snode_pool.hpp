@@ -54,7 +54,8 @@ class SnodePool {
     void clear_cache();
 
     // Records that a specific node has failed a request
-    void record_node_failure(const service_node& node);
+    void record_node_failure(const service_node& node, bool permanent = false);
+    void record_node_failure(const ed25519_pubkey& key, bool permanent = false);
 
     // Checks if the pool is empty or stale and triggers a refresh if needed
     void refresh_if_needed(

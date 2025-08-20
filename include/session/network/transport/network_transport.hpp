@@ -6,8 +6,12 @@ namespace session::network {
 
 class ITransport {
   public:
+    std::function<void()> on_status_changed;
+
     virtual ~ITransport() = default;
 
+    virtual ConnectionStatus get_status() const = 0;
+    virtual void set_node_failure_reporter(node_failure_reporter_t reporter) {}
     virtual void verify_connectivity(
             service_node node,
             std::chrono::milliseconds timeout,

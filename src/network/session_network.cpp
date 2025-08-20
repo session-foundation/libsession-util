@@ -136,6 +136,13 @@ Network_v2::Network_v2(config::Config config) : config{config} {
     _snode_pool = std::make_shared<SnodePool>(
             std::move(build_snode_pool_config(config)), _loop, bootstrap_fetcher);
 
+    // Additional transport configuration
+    _transport->set_node_failure_reporter(
+            [pool = _snode_pool.get()](const ed25519_pubkey& pubkey, bool permanent) {
+                if (pool)
+                    pool->record_node_failure(pubkey, permanent);
+            });
+
     // Setup the router
     switch (config.router) {
         case opt::router::Type::onion_requests:
@@ -169,9 +176,23 @@ Network_v2::Network_v2(config::Config config) : config{config} {
                         "Router provided to the SnodePool standard fetcher has been destroyed.");
         });
     });
+
+    // Add hooks to update the connection status
+    _router->on_status_changed = [this] { _recalculate_status(); };
+    _transport->on_status_changed = [this] { _recalculate_status(); };
 }
 
-Network_v2::~Network_v2() {}
+Network_v2::~Network_v2() {
+    _update_status(ConnectionStatus::disconnected);
+    log::debug(cat, "[Network] Destroyed.");
+}
+
+std::vector<PathInfo> Network_v2::get_active_paths() {
+    if (_router)
+        return _router->get_active_paths();
+    
+    return {};
+}
 
 void Network_v2::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
@@ -225,7 +246,16 @@ void Network_v2::send_request(Request request, network_response_callback_t callb
                         return;
                     }
 
-                    auto final_success = (success && final_status_code >= 200 && final_status_code <= 299);
+                    // For debugging purposes we want to add a log if this was a successful request
+                    // after we did an automatic retry
+                    if (original_req.retry_count > 0)
+                        log::info(
+                                cat,
+                                "[Request {}] Received valid response after 421 retry.",
+                                original_req.request_id);
+
+                    auto final_success =
+                            (success && final_status_code >= 200 && final_status_code <= 299);
                     cb(final_success, timeout, status_code, std::move(headers), std::move(body));
                 };
 
@@ -236,6 +266,44 @@ void Network_v2::send_request(Request request, network_response_callback_t callb
 }
 
 // MARK: Internal Logic
+
+void Network_v2::_recalculate_status() {
+    _loop->call([this] {
+        if (!_transport || !_router)
+            return _update_status(ConnectionStatus::disconnected);
+
+        auto transport_status = _transport->get_status();
+        auto router_status = _router->get_status();
+
+        // If both layers report being fully connected then we are connected
+        if (transport_status == ConnectionStatus::connected &&
+            router_status == ConnectionStatus::connected)
+            _update_status(ConnectionStatus::connected);
+        // If either layer is disconnected, the whole system is disconnected
+        else if (
+                transport_status == ConnectionStatus::disconnected ||
+                router_status == ConnectionStatus::disconnected)
+            _update_status(ConnectionStatus::disconnected);
+        // If either layer is trying to connect, the whole system is connecting
+        else if (
+                transport_status == ConnectionStatus::connecting ||
+                router_status == ConnectionStatus::connecting)
+            _update_status(ConnectionStatus::connecting);
+        // Otherwise, we are in an unknown state
+        else
+            _update_status(ConnectionStatus::unknown);
+    });
+}
+
+void Network_v2::_update_status(ConnectionStatus new_status) {
+    if (_status == new_status)
+        return;
+
+    _status = new_status;
+
+    if (on_status_changed)
+        on_status_changed(new_status);
+}
 
 Request Network_v2::_preprocess_request(Request request) {
     std::visit(
@@ -746,6 +814,16 @@ LIBSESSION_C_API int session_network_softfork(network_object_v2* network) {
     return unbox(network).softfork();
 }
 
+LIBSESSION_C_API void session_network_set_status_changed_callback(
+        network_object_v2* network, void (*callback)(CONNECTION_STATUS status, void* ctx), void* ctx) {
+    if (!callback)
+        unbox(network).on_status_changed = nullptr;
+    else
+        unbox(network).on_status_changed = [cb = std::move(callback), ctx](ConnectionStatus status) {
+            cb(static_cast<CONNECTION_STATUS>(status), ctx);
+        };
+}
+
 LIBSESSION_C_API void session_network_callbacks_respond(
         network_object_v2* network,
         session_response_handle_t* response_handle,
@@ -773,6 +851,99 @@ LIBSESSION_C_API void session_network_callbacks_respond(
         body.emplace(body_, body_len);
 
     handle_guard->cpp_callback(success, timeout, status_code, std::move(headers), std::move(body));
+}
+
+LIBSESSION_C_API void session_network_get_active_paths(
+    network_object_v2* network,
+    session_path_info** out_paths,
+    size_t* out_paths_len) {
+    if (!network || !out_paths || !out_paths_len)
+        return;
+
+    *out_paths = nullptr;
+    *out_paths_len = 0;
+
+    try {
+        std::vector<PathInfo> cpp_paths = unbox(network).get_active_paths();
+        if (cpp_paths.empty())
+            return;
+
+        // Calculate the size of the data
+        size_t total_size = cpp_paths.size() * sizeof(session_path_info);
+        size_t total_nodes = 0;
+        for (const auto& path : cpp_paths)
+            total_nodes += path.nodes.size();
+        total_size += total_nodes * sizeof(network_service_node);
+        
+        size_t total_metadata_size = 0;
+        for (const auto& p : cpp_paths) {
+            std::visit([&](auto&& md) {
+                using T = std::decay_t<decltype(md)>;
+                if constexpr (std::is_same_v<T, OnionPathMetadata>)
+                    total_metadata_size += sizeof(session_onion_path_metadata);
+                else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>)
+                    total_metadata_size += sizeof(session_lokinet_tunnel_metadata);
+            }, p.metadata);
+        }
+        total_size += total_metadata_size;
+
+        // Allocate and assign the memory
+        unsigned char* buffer = static_cast<unsigned char*>(std::malloc(total_size));
+        if (!buffer)
+            return;
+
+        auto* c_paths_array = reinterpret_cast<session_path_info*>(buffer);
+        auto* current_node_ptr = reinterpret_cast<network_service_node*>(c_paths_array + cpp_paths.size());
+        unsigned char* current_metadata_ptr = reinterpret_cast<unsigned char*>(current_node_ptr + total_nodes);
+
+        for (size_t i = 0; i < cpp_paths.size(); ++i) {
+            const auto& cpp_path = cpp_paths[i];
+            auto& c_path = c_paths_array[i];
+            
+            new (&c_path) session_path_info{};
+            
+            c_path.nodes = current_node_ptr;
+            c_path.nodes_count = cpp_path.nodes.size();
+            for (const auto& cpp_node : cpp_path.nodes) {
+                new (current_node_ptr) network_service_node{};
+                cpp_node.into(*current_node_ptr);
+                current_node_ptr++;
+            }
+            
+            // Copy metadata
+            std::visit([&](auto&& m) {
+                using T = std::decay_t<decltype(m)>;
+
+                if constexpr (std::is_same_v<T, OnionPathMetadata>) {
+                    auto* meta = reinterpret_cast<session_onion_path_metadata*>(current_metadata_ptr);
+                    new (meta) session_onion_path_metadata{};
+                    meta->category = static_cast<SESSION_NETWORK_REQUEST_CATEGORY>(m.category);
+                    c_path.onion_metadata = meta;
+                    current_metadata_ptr += sizeof(session_onion_path_metadata);
+                } else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>) {
+                    auto* meta = reinterpret_cast<session_lokinet_tunnel_metadata*>(current_metadata_ptr);
+                    new (meta) session_lokinet_tunnel_metadata{};
+                    strncpy(meta->destination_pubkey, m.destination_pubkey.c_str(), sizeof(meta->destination_pubkey) - 1);
+                    meta->destination_pubkey[sizeof(meta->destination_pubkey) - 1] = '\0';
+                    strncpy(meta->destination_snode_address, m.destination_snode_address.c_str(), sizeof(meta->destination_snode_address) - 1);
+                    meta->destination_snode_address[sizeof(meta->destination_snode_address) - 1] = '\0';
+                    c_path.lokinet_metadata = meta;
+                    current_metadata_ptr += sizeof(session_lokinet_tunnel_metadata);
+                }
+            }, cpp_path.metadata);
+        }
+        
+        *out_paths = c_paths_array;
+        *out_paths_len = cpp_paths.size();
+    } catch (...) {
+        *out_paths = nullptr;
+        *out_paths_len = 0;
+    }
+}
+
+LIBSESSION_C_API void session_network_paths_free(session_path_info* paths) {
+    if (paths)
+        std::free(paths);
 }
 
 LIBSESSION_C_API void session_network_get_swarm(

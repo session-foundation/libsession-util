@@ -29,6 +29,13 @@ class status_code_exception : public std::runtime_error {
             std::runtime_error(message), status_code{status_code}, headers{headers} {}
 };
 
+enum class ConnectionStatus {
+    unknown = CONNECTION_STATUS_UNKNOWN,
+    connecting = CONNECTION_STATUS_CONNECTING,
+    connected = CONNECTION_STATUS_CONNECTED,
+    disconnected = CONNECTION_STATUS_DISCONNECTED,
+};
+
 enum class RequestCategory {
     standard = SESSION_NETWORK_REQUEST_CATEGORY_STANDARD,
     upload = SESSION_NETWORK_REQUEST_CATEGORY_UPLOAD,
@@ -138,6 +145,7 @@ struct Request {
     }
 };
 
+using node_failure_reporter_t = std::function<void(const ed25519_pubkey&, bool)>;
 using network_response_callback_t = std::function<void(
         bool success,
         bool timeout,
@@ -148,6 +156,19 @@ using network_response_callback_t = std::function<void(
 struct Response {
     static std::optional<std::pair<int16_t, bool>> parse_text_error(const std::string& body);
     static std::optional<int16_t> find_uniform_batch_error(const std::string& body);
+};
+
+struct OnionPathMetadata { RequestCategory category; };
+struct LokinetTunnelMetadata {
+    std::string destination_pubkey;
+    std::string destination_snode_address;
+};
+
+using PathMetadata = std::variant<OnionPathMetadata, LokinetTunnelMetadata>;
+
+struct PathInfo {
+    std::vector<service_node> nodes;
+    PathMetadata metadata;
 };
 
 }  // namespace session::network

@@ -62,7 +62,7 @@ LokinetRouter::LokinetRouter(
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
         _config{std::move(config)}, _loop{loop}, _transport{transport} {
-    log::trace(cat, "[LokinetRouter]: Initializing.");
+    log::trace(cat, "[LokinetRouter] Initializing.");
 
     auto test_ini = R"(
     [router]
@@ -74,6 +74,8 @@ LokinetRouter::LokinetRouter(
     )"_format(opt::netid::to_string(_config.netid), _config.cache_directory);
 
     try {
+        _update_status(ConnectionStatus::connecting);
+
         // TODO: Don't pass the loop for now.
         lokinet = std::make_shared<lokinet::Lokinet>(test_ini /*, loop*/);
 
@@ -86,13 +88,23 @@ LokinetRouter::LokinetRouter(
                 else
                     _loop->call([this] { _finish_setup(); });
             } else
-                log::critical(
-                        cat, "[LokinetRouter]: SnodePool was destroyed, cannot setup router.");
+                log::critical(cat, "[LokinetRouter] SnodePool was destroyed, cannot setup router.");
         });
     } catch (const std::exception& e) {
-        log::error(cat, "[LokinetRouter]: Failed to start lokinet ({}).", e.what());
+        log::error(cat, "[LokinetRouter] Failed to start lokinet ({}).", e.what());
+        _update_status(ConnectionStatus::disconnected);
         throw e;
     }
+}
+
+LokinetRouter::~LokinetRouter() {
+    _update_status(ConnectionStatus::disconnected);
+    log::debug(cat, "[LokinetRouter] Destroyed.");
+}
+
+std::vector<PathInfo> LokinetRouter::get_active_paths() {
+    // TODO: Implement this
+    return {};
 }
 
 void LokinetRouter::send_request(Request request, network_response_callback_t callback) {
@@ -106,7 +118,7 @@ void LokinetRouter::send_request(Request request, network_response_callback_t ca
 void LokinetRouter::_finish_setup() {
     // Start processing requests
     _ready = true;
-    log::debug(cat, "[LokinetRouter]: Finishing setup, router is now ready.");
+    log::debug(cat, "[LokinetRouter] Finishing setup, router is now ready.");
 
     auto requests_to_process = std::move(_pending_requests);
     if (requests_to_process.empty())
@@ -115,14 +127,14 @@ void LokinetRouter::_finish_setup() {
     // Process any requests that were queued before we were ready
     log::debug(
             cat,
-            "[LokinetRouter]: Processing {} requests queued during initialization.",
+            "[LokinetRouter] Processing {} requests queued during initialization.",
             requests_to_process.size());
 
     for (auto& [address, requests] : requests_to_process) {
         if (!requests.empty()) {
             log::debug(
                     cat,
-                    "[LokinetRouter]: Processing {} queued requests for address {}.",
+                    "[LokinetRouter] Processing {} queued requests for address {}.",
                     requests.size(),
                     address);
 
@@ -130,6 +142,17 @@ void LokinetRouter::_finish_setup() {
                 _send_request_internal(std::move(req), std::move(cb));
         }
     }
+}
+
+void LokinetRouter::_update_status(ConnectionStatus new_status) {
+    ConnectionStatus old_status = _status.load();
+    if (old_status == new_status)
+        return;
+
+    _status.store(new_status);
+
+    if (on_status_changed)
+        on_status_changed();
 }
 
 void LokinetRouter::_send_request_internal(Request request, network_response_callback_t callback) {
@@ -241,7 +264,7 @@ void LokinetRouter::_establish_tunnel(
     if (address_pubkey_hex.size() != 32) {
         log::critical(
                 cat,
-                "[LokinetRouter]: Destination had an invalid remote key, request {} is being "
+                "[LokinetRouter] Destination had an invalid remote key, request {} is being "
                 "dropped.",
                 initiating_req_id);
         // Fail all the pending requests for this connection
@@ -289,6 +312,9 @@ void LokinetRouter::_establish_tunnel(
                 _pending_requests.erase(address_pubkey_hex);
                 _active_tunnels.insert_or_assign(address_pubkey_hex, info);
 
+                // We had a successful connection so update the status to connected
+                _update_status(ConnectionStatus::connected);
+
                 if (!requests_to_process.empty()) {
                     log::debug(
                             cat,
@@ -309,6 +335,8 @@ void LokinetRouter::_establish_tunnel(
                         address_pubkey_hex,
                         errmsg);
 
+                _active_tunnels.erase(address_pubkey_hex);
+
                 // Fail all the pending requests for this connection
                 if (auto it = _pending_requests.find(address_pubkey_hex);
                     it != _pending_requests.end()) {
@@ -324,6 +352,10 @@ void LokinetRouter::_establish_tunnel(
                     for (auto& [req, cb] : to_fail)
                         cb(false, false, -1, {content_type_plain_text}, errmsg);
                 }
+
+                // If we have no longer have any active connections then we are disconnected
+                if (_active_tunnels.empty())
+                    _update_status(ConnectionStatus::disconnected);
             });
 }
 
@@ -365,7 +397,7 @@ void LokinetRouter::_send_via_tunnel(
     if (auto transport = _transport.lock())
         transport->send_request(std::move(lokinet_request), std::move(callback));
     else {
-        log::critical(cat, "[LokinetRouter]: Transport was destroyed, cannot send request.");
+        log::critical(cat, "[LokinetRouter] Transport was destroyed, cannot send request.");
         return;
     }
 }

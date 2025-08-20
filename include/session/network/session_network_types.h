@@ -10,10 +10,17 @@ extern "C" {
 #include "../export.h"
 #include "session/network/service_node.h"
 
+typedef enum CONNECTION_STATUS {
+    CONNECTION_STATUS_UNKNOWN,
+    CONNECTION_STATUS_CONNECTING,
+    CONNECTION_STATUS_CONNECTED,
+    CONNECTION_STATUS_DISCONNECTED,
+} CONNECTION_STATUS;
+
 typedef enum {
     SESSION_NETWORK_REQUEST_CATEGORY_STANDARD,
     SESSION_NETWORK_REQUEST_CATEGORY_UPLOAD,
-    SESSION_NETWORK_REQUEST_CATEGORY_DOWNLOAD
+    SESSION_NETWORK_REQUEST_CATEGORY_DOWNLOAD,
 } SESSION_NETWORK_REQUEST_CATEGORY;
 
 typedef struct network_v2_server_destination {
@@ -51,6 +58,25 @@ typedef struct {
     const char* request_id;  // Optional id for the request to trace through logs, null terminated
 
 } session_request_params;
+
+typedef struct {
+    SESSION_NETWORK_REQUEST_CATEGORY category;
+} session_onion_path_metadata;
+
+typedef struct {
+    char destination_pubkey[65];        // The 64-byte ed25519 pubkey in hex + null terminator.
+    char destination_snode_address[65]; // The 64-byte .snode address + null terminator.
+} session_lokinet_tunnel_metadata;
+
+typedef struct {
+    const network_service_node* nodes;
+    size_t nodes_count;
+
+    // Only ONE of these pointers should be set, the other should be left null
+    const session_onion_path_metadata* onion_metadata;
+    const session_lokinet_tunnel_metadata* lokinet_metadata;
+
+} session_path_info;
 
 #ifdef __cplusplus
 }

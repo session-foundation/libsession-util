@@ -133,6 +133,17 @@ LIBSESSION_EXPORT uint64_t session_network_time_offset(network_object_v2* networ
 LIBSESSION_EXPORT int session_network_hardfork(network_object_v2* network);
 LIBSESSION_EXPORT int session_network_softfork(network_object_v2* network);
 
+/// API: network/network_set_status_changed_callback
+///
+/// Registers a callback to be called whenever the network connection status changes.
+///
+/// Inputs:
+/// - `network` -- [in] Pointer to the network object
+/// - `callback` -- [in] callback to be called when the network connection status changes.
+/// - `ctx` -- [in, optional] Pointer to an optional context. Set to NULL if unused.
+LIBSESSION_EXPORT void session_network_set_status_changed_callback(
+        network_object_v2* network, void (*callback)(CONNECTION_STATUS status, void* ctx), void* ctx);
+
 LIBSESSION_EXPORT void session_network_callbacks_respond(
         network_object_v2* network,
         session_response_handle_t* response_handle,
@@ -144,6 +155,13 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
         size_t headers_size,
         const char* body,
         size_t body_len);
+
+LIBSESSION_EXPORT void session_network_get_active_paths(
+    network_object_v2* network,
+    session_path_info** out_paths,
+    size_t* out_paths_len);
+
+LIBSESSION_EXPORT void session_network_paths_free(session_path_info* paths);
 
 LIBSESSION_EXPORT void session_network_get_swarm(
         network_object_v2* network,

@@ -25,19 +25,25 @@ constexpr auto ALPN = "oxenstorage";
 QuicTransport::QuicTransport(
         config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop) :
         _config{std::move(config)}, _loop{loop} {
+    log::trace(cat, "[QuicTransport] Initializing.");
     _endpoint = quic::Endpoint::endpoint(
             *_loop,
             quic::Address{"0.0.0.0", 0},
             quic::opt::alpns{ALPN},
             (config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
                                           : std::nullopt));
-    log::debug(cat, "QuicTransport initialized.");
 }
 
 QuicTransport::~QuicTransport() {
+    _update_status(ConnectionStatus::disconnected);
+
     if (_endpoint)
         _loop->call_get([this] { _endpoint->close_conns(); });
-    log::debug(cat, "QuicTransport destroyed.");
+    log::debug(cat, "[QuicTransport] Destroyed.");
+}
+
+void QuicTransport::set_node_failure_reporter(node_failure_reporter_t reporter) {
+    _loop->call([this, r = std::move(reporter)] { _report_node_failure.emplace(std::move(r)); });
 }
 
 void QuicTransport::verify_connectivity(
@@ -64,13 +70,41 @@ void QuicTransport::verify_connectivity(
 }
 
 void QuicTransport::send_request(Request request, network_response_callback_t callback) {
-    log::trace(cat, "QuicTransport dispatching request {} to loop.", request.request_id);
+    log::trace(cat, "[QuicTransport] Dispatching request {} to loop.", request.request_id);
     _loop->call([this, req = std::move(request), cb = std::move(callback)] {
         _send_request_internal(std::move(req), std::move(cb));
     });
 }
 
 // MARK: Internal Logic
+
+void QuicTransport::_update_status(ConnectionStatus new_status) {
+    ConnectionStatus old_status = _status.load();
+    if (old_status == new_status)
+        return;
+
+    // Prevent swapping from "connected" back to "connecting" if a background connection is being
+    // established while we are already connected
+    if (old_status == ConnectionStatus::connected && new_status == ConnectionStatus::connecting)
+        return;
+
+    // If we already tried to reconnect but failed, then we want to prevent swapping between
+    // "disconnected" and "connecting"
+    if (old_status == ConnectionStatus::disconnected &&
+        new_status == ConnectionStatus::connecting && _has_attempted_reconnect)
+        return;
+
+    _status.store(new_status);
+
+    if (old_status == ConnectionStatus::disconnected && new_status == ConnectionStatus::connecting)
+        _has_attempted_reconnect = true;
+
+    if (new_status == ConnectionStatus::connected)
+        _has_attempted_reconnect = false;
+
+    if (on_status_changed)
+        on_status_changed();
+}
 
 void QuicTransport::_send_request_internal(Request request, network_response_callback_t callback) {
     std::optional<oxen::quic::RemoteAddress> remote;
@@ -146,6 +180,11 @@ void QuicTransport::_establish_connection(
     auto conn_key_pair = ed25519::ed25519_key_pair();
     auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
 
+    // If we are starting a connection attempt then transition to the "connecting" state
+    if (_status.load() == ConnectionStatus::unknown ||
+        _status.load() == ConnectionStatus::disconnected)
+        _update_status(ConnectionStatus::connecting);
+
     log::debug(
             cat,
             "[QuicTransport Request {}] Establishing new connection to {}.",
@@ -194,6 +233,9 @@ void QuicTransport::_establish_connection(
 
                 _active_stream_ids.insert_or_assign(conn_id, stream_id);
 
+                // We had a successful connection so update the status to connected
+                _update_status(ConnectionStatus::connected);
+
                 for (const auto& pending_cb : verification_callbacks)
                     pending_cb(true);
 
@@ -220,14 +262,21 @@ void QuicTransport::_establish_connection(
                             "[QuicTransport Request {}] Connection to {} closed gracefully.",
                             initiating_req_id,
                             address_pubkey_hex);
-                else if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
+                else if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT)) {
                     log::warning(
                             cat,
                             "[QuicTransport Request {}] Handshake timeout when connecting to {}. "
                             "The node is likely unreachable.",
                             initiating_req_id,
                             address_pubkey_hex);
-                else
+
+                    // If the connection failed with a handshake timeout then the node is
+                    // unreachable, either due to a device network issue or because the node is down
+                    // so permanently fail the node so it won't be used for subsequent requests
+                    // (until the next cache refresh)
+                    if (_report_node_failure)
+                        (*_report_node_failure)(ed25519_pubkey::from_hex(address_pubkey_hex), true);
+                } else
                     log::warning(
                             cat,
                             "[QuicTransport Request {}] Connection to {} failed or was closed with "
@@ -267,6 +316,10 @@ void QuicTransport::_establish_connection(
                     for (auto& [req, cb] : to_fail)
                         cb(false, false, -1, {content_type_plain_text}, failure_reason);
                 }
+
+                // If we have no longer have any active connections then we are disconnected
+                if (_active_connection_ids.empty())
+                    _update_status(ConnectionStatus::disconnected);
             });
 }
 
