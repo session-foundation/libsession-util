@@ -132,7 +132,7 @@ LIBSESSION_EXPORT session_encrypt_group_message session_encrypt_for_group(
         size_t plaintext_len,
         bool compress,
         size_t padding,
-        char *error,
+        char* error,
         size_t error_len);
 
 /// API: crypto/session_decrypt_incoming
@@ -287,7 +287,7 @@ session_decrypt_group_message_result session_decrypt_group_message(
         size_t group_ed25519_pubkey_len,
         const unsigned char* ciphertext,
         size_t ciphertext_len,
-        char *error,
+        char* error,
         size_t error_len);
 
 /// API: crypto/session_decrypt_ons_response

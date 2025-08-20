@@ -103,7 +103,8 @@ TEST_CASE("Session protocol deterministic encryption", "[session-protocol][encry
     std::vector<unsigned char> sid_raw;
     oxenc::from_hex(sid.begin(), sid.end(), std::back_inserter(sid_raw));
     REQUIRE(sid == "05d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
-    REQUIRE(sid_raw == "05d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72"_hexbytes);
+    REQUIRE(sid_raw ==
+            "05d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72"_hexbytes);
 
     const auto seed2 = "00112233445566778899aabbccddeeff00000000000000000000000000000000"_hexbytes;
     std::array<unsigned char, 32> ed_pk2, curve_pk2;

@@ -553,11 +553,11 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
 
     buf.resize(outer_size);
     int opened = crypto_box_seal_open(
-                     buf.data(),
-                     ciphertext.data(),
-                     ciphertext.size(),
-                     x25519_pubkey.data(),
-                     x25519_seckey.data());
+            buf.data(),
+            ciphertext.data(),
+            ciphertext.size(),
+            x25519_pubkey.data(),
+            x25519_seckey.data());
     if (opened != 0)
         throw std::runtime_error{"Decryption failed"};
 
@@ -1125,7 +1125,7 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
         size_t plaintext_len,
         bool compress,
         size_t padding,
-        char *error,
+        char* error,
         size_t error_len) {
     session_encrypt_group_message result = {};
     try {
@@ -1233,7 +1233,7 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         size_t group_ed25519_pubkey_len,
         const unsigned char* ciphertext,
         size_t ciphertext_len,
-        char *error,
+        char* error,
         size_t error_len) {
     session_decrypt_group_message_result result = {};
     for (size_t index = 0; index < decrypt_ed25519_privkey_len; index++) {
