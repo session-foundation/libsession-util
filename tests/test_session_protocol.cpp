@@ -528,44 +528,58 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         crypto_sign_ed25519_seed_keypair(
                 group_v2_pk.data(), group_v2_sk.data(), group_v2_seed.data());
 
-        auto group_v2_info = config::groups::Info(group_v2_pk, group_v2_sk, std::nullopt);
-        auto group_v2_members = config::groups::Members(group_v2_pk, group_v2_sk, std::nullopt);
-        auto group_v2_keys = config::groups::Keys(
-                keys.ed_sk0,
-                group_v2_pk,
-                group_v2_sk,
-                std::nullopt,
-                group_v2_info,
-                group_v2_members);
-
         // Encrypt
-#if 0
-        EncryptedForDestination encrypt_result = {};
+        session_protocol_encrypted_for_destination encrypt_result = {};
         {
-            Destination dest = base_dest;
-            dest.type = DestinationType::Group;
-            dest.group_pubkey[0] = 0x03;
-            std::memcpy(dest.group_pubkey.data() + 1, group_v2_pk.data(), group_v2_pk.size());
-            dest.group_keys = &group_v2_keys;
+            session_protocol_destination dest = base_dest;
+            dest.type                         = DESTINATION_TYPE_GROUP;
+            dest.group_ed25519_pubkey[0]      = 0x03;
+            std::memcpy(dest.group_ed25519_pubkey + 1, group_v2_pk.data(), group_v2_pk.size());
+            std::memcpy(
+                    dest.group_ed25519_privkey,
+                    group_v2_sk.data(),
+                    sizeof(dest.group_ed25519_privkey));
 
-            encrypt_result = session::encrypt_for_destination(
-                    to_span(protobuf_content_with_pro.plaintext),
-                    keys.ed_sk0,
-                    dest,
-                    config::Namespace::GroupMessages);
+            encrypt_result = session_protocol_encrypt_for_destination(
+                    protobuf_content_with_pro.plaintext.data(),
+                    protobuf_content_with_pro.plaintext.size(),
+                    keys.ed_sk0.data(),
+                    keys.ed_sk0.size(),
+                    &dest,
+                    NAMESPACE_GROUP_MESSAGES,
+                    error,
+                    sizeof(error));
+            INFO("Encrypt for group error: " << error);
+            REQUIRE(encrypt_result.success);
             REQUIRE(encrypt_result.encrypted);
+            REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
         }
 
         // Decrypt envelope
-        DecryptEnvelopeKey decrypt_keys = {};
-        decrypt_keys.use_group_keys = true;
-        decrypt_keys.group_keys = &group_v2_keys;
+        span_u8 key = {group_v2_sk.data(), group_v2_sk.size()};
+        session_protocol_decrypt_envelope_keys decrypt_keys = {};
+        decrypt_keys.group_ed25519_pubkey = {group_v2_pk.data(), group_v2_pk.size()};
+        decrypt_keys.ed25519_privkeys = &key;
+        decrypt_keys.ed25519_privkeys_len = 1;
 
         // TODO: Finish setting up a group so we can check the decrypted result for now this will
         // throw because the keys aren't setup correctly.
-        CHECK_THROWS(session::decrypt_envelope(
-                decrypt_keys, encrypt_result.ciphertext, timestamp_s, pro_backend_ed_pk));
-#endif
+        session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+                &decrypt_keys,
+                encrypt_result.ciphertext.data,
+                encrypt_result.ciphertext.size,
+                timestamp_s.time_since_epoch().count(),
+                pro_backend_ed_pk.data(),
+                pro_backend_ed_pk.size(),
+                error,
+                sizeof(error));
+        INFO("Decrypt for group error: " << error);
+        REQUIRE(decrypt_result.success);
+        REQUIRE(decrypt_result.pro_status == PRO_STATUS_VALID);
+        REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
+
+        free(encrypt_result.ciphertext.data);
+        free(decrypt_result.content_plaintext.data);
     }
 
     SECTION("Encrypt/decrypt for sync messages with Pro") {
