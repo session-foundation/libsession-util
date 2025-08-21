@@ -445,15 +445,6 @@ DecryptedEnvelope decrypt_envelope(
                 throw std::runtime_error(
                         "Parse decrypted message failed, pro metadata was malformed");
 
-            // Verify the sig since we have extracted the rotating public key from the embedded
-            // proof
-            int verify_result = crypto_sign_ed25519_verify_detached(
-                    reinterpret_cast<const unsigned char*>(pro_sig.data()),
-                    result.content_plaintext.data(),
-                    result.content_plaintext.size(),
-                    reinterpret_cast<const unsigned char*>(proto_proof.rotatingpublickey().data()));
-            pro.status = verify_result == 0 ? ProStatus::Valid : ProStatus::InvalidUserSig;
-
             // Fill out the resulting proof structure, we have parsed successfully
             pro.features = pro_msg.features();
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
@@ -470,18 +461,12 @@ DecryptedEnvelope decrypt_envelope(
                     std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
             std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
-            if (pro.status == ProStatus::Valid) {
-                // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
-                // issued by an authoritative backend)
-                if (!proof.verify(pro_backend_pubkey))
-                    pro.status = ProStatus::InvalidProBackendSig;
-
-                // Check if the proof has expired
-                if (pro.status == ProStatus::Valid) {
-                    if (unix_ts > pro.proof.expiry_unix_ts)
-                        pro.status = ProStatus::Expired;
-                }
-            }
+            // Evaluate the pro status given the extracted components (was it signed, is it expired,
+            // was the message signed validly?)
+            config::ProSignedMessage signed_msg = {};
+            signed_msg.sig = to_span(pro_sig);
+            signed_msg.msg = result.content_plaintext;
+            pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         }
     }
     return result;
@@ -563,9 +548,19 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
 
     // Setup the pro backend pubkey
     array_uc32 pro_backend_pubkey_cpp = {};
-    if (pro_backend_pubkey_len != sizeof(pro_backend_pubkey_cpp))
-        return result;
-    std::memcpy(pro_backend_pubkey_cpp.data(), pro_backend_pubkey, pro_backend_pubkey_len);
+    if (pro_backend_pubkey) {
+        if (pro_backend_pubkey_len != sizeof(pro_backend_pubkey_cpp)) {
+            result.error_len_incl_null_terminator = std::snprintf(
+                                                            error,
+                                                            error_len,
+                                                            "Invalid pro_backend_pubkey: Key was "
+                                                            "set but was not 32 bytes, was: %zu",
+                                                            pro_backend_pubkey_len) +
+                                                    1;
+            return result;
+        }
+        std::memcpy(pro_backend_pubkey_cpp.data(), pro_backend_pubkey, pro_backend_pubkey_len);
+    }
 
     // Setup decryption keys and decrypt
     DecryptEnvelopeKey keys_cpp = {};
@@ -645,8 +640,8 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     }
 
     // Since we support multiple keys, if some of the keys failed but one of them succeeded, we will
-    // zero out the error buffer to avoid conflating one of the failures with the function actually
-    // succeeding.
+    // zero out the error buffer to avoid conflating one of the failures when the function actually
+    // succeeded.
     if (result.success)
         result.error_len_incl_null_terminator = 0;
 

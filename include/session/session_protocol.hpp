@@ -37,15 +37,6 @@ namespace config::groups {
     class Keys;
 }
 
-enum class ProStatus {
-    // Pro proof sig was not signed by the Pro backend key
-    InvalidProBackendSig = PRO_STATUS_INVALID_PRO_BACKEND_SIG,
-    // Pro sig in the envelope was not signed by the Rotating key
-    InvalidUserSig = PRO_STATUS_INVALID_USER_SIG,
-    Valid = PRO_STATUS_VALID,      // Proof is verified; has not expired
-    Expired = PRO_STATUS_EXPIRED,  // Proof is verified; has expired
-};
-
 enum class DestinationType {
     Contact = DESTINATION_TYPE_CONTACT,
     SyncMessage = DESTINATION_TYPE_SYNC_MESSAGE,
@@ -102,7 +93,7 @@ struct Envelope {
 };
 
 struct DecryptedPro {
-    ProStatus status;  // Validity of the proof embedded in the envelope
+    config::ProStatus status;  // Validity of the proof embedded in the envelope
     // Session Pro proof that was embedded in the envelope, this is always populated irrespective of
     // the status but the validity of the contents should be verified by checking `status`
     config::ProProof proof;
