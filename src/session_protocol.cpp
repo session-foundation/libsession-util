@@ -419,6 +419,7 @@ DecryptedEnvelope decrypt_envelope(
         if (content.has_promessage()) {
             // Mark the envelope as having a pro signature that the caller can use.
             result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
+            DecryptedPro& pro = result.pro.emplace();
 
             // Extract the pro message
             const SessionProtos::ProMessage& pro_msg = content.promessage();
@@ -431,7 +432,7 @@ DecryptedEnvelope decrypt_envelope(
 
             // Parse the proof from protobufs
             const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-            session::config::ProProof& proof = result.pro_proof;
+            session::config::ProProof& proof = pro.proof;
             // clang-format off
             size_t proof_errors = 0;
             proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
@@ -451,10 +452,10 @@ DecryptedEnvelope decrypt_envelope(
                     result.content_plaintext.data(),
                     result.content_plaintext.size(),
                     reinterpret_cast<const unsigned char*>(proto_proof.rotatingpublickey().data()));
-            result.pro_status = verify_result == 0 ? ProStatus::Valid : ProStatus::InvalidUserSig;
+            pro.status = verify_result == 0 ? ProStatus::Valid : ProStatus::InvalidUserSig;
 
             // Fill out the resulting proof structure, we have parsed successfully
-            result.pro_features = pro_msg.features();
+            pro.features = pro_msg.features();
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
             std::memcpy(
@@ -469,16 +470,16 @@ DecryptedEnvelope decrypt_envelope(
                     std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
             std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
-            if (result.pro_status == ProStatus::Valid) {
+            if (pro.status == ProStatus::Valid) {
                 // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
                 // issued by an authoritative backend)
                 if (!proof.verify(pro_backend_pubkey))
-                    result.pro_status = ProStatus::InvalidProBackendSig;
+                    pro.status = ProStatus::InvalidProBackendSig;
 
                 // Check if the proof has expired
-                if (result.pro_status == ProStatus::Valid) {
-                    if (unix_ts > result.pro_proof.expiry_unix_ts)
-                        result.pro_status = ProStatus::Expired;
+                if (pro.status == ProStatus::Valid) {
+                    if (unix_ts > pro.proof.expiry_unix_ts)
+                        pro.status = ProStatus::Expired;
                 }
             }
         }
@@ -623,11 +624,25 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     result.envelope.timestamp_ms = static_cast<uint64_t>(result_cpp.envelope.timestamp.count());
     result.envelope.source_device = result_cpp.envelope.source_device;
     result.envelope.server_timestamp = result_cpp.envelope.server_timestamp;
-    result.pro_status = static_cast<PRO_STATUS>(result_cpp.pro_status);
-    result.pro_proof.version = result_cpp.pro_proof.version;
-    result.pro_proof.expiry_unix_ts =
-            static_cast<uint64_t>(result_cpp.pro_proof.expiry_unix_ts.time_since_epoch().count());
-    result.pro_features = result_cpp.pro_features;
+
+    if (result_cpp.pro) {
+        const DecryptedPro& pro = *result_cpp.pro;
+        result.pro_status = static_cast<PRO_STATUS>(pro.status);
+        result.pro_proof.version = pro.proof.version;
+        result.pro_proof.expiry_unix_ts =
+                static_cast<uint64_t>(pro.proof.expiry_unix_ts.time_since_epoch().count());
+        result.pro_features = pro.features;
+
+        std::memcpy(
+                result.pro_proof.gen_index_hash,
+                pro.proof.gen_index_hash.data(),
+                sizeof(result.pro_proof.gen_index_hash));
+        std::memcpy(
+                result.pro_proof.rotating_pubkey,
+                pro.proof.rotating_pubkey.data(),
+                sizeof(result.pro_proof.rotating_pubkey));
+        std::memcpy(result.pro_proof.sig, pro.proof.sig.data(), sizeof(pro.proof.sig));
+    }
 
     // Since we support multiple keys, if some of the keys failed but one of them succeeded, we will
     // zero out the error buffer to avoid conflating one of the failures with the function actually
@@ -653,16 +668,6 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
             result_cpp.sender_x25519_pubkey.data(),
             sizeof(result.sender_x25519_pubkey));
 
-    std::memcpy(
-            result.pro_proof.gen_index_hash,
-            result_cpp.pro_proof.gen_index_hash.data(),
-            sizeof(result.pro_proof.gen_index_hash));
-    std::memcpy(
-            result.pro_proof.rotating_pubkey,
-            result_cpp.pro_proof.rotating_pubkey.data(),
-            sizeof(result.pro_proof.rotating_pubkey));
-    std::memcpy(
-            result.pro_proof.sig, result_cpp.pro_proof.sig.data(), sizeof(result.pro_proof.sig));
     return result;
 }
 

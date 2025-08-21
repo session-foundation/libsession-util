@@ -38,16 +38,12 @@ namespace config::groups {
 }
 
 enum class ProStatus {
-    // Proof not set
-    Nil = PRO_STATUS_NIL,
-    // Proof set; pro proof sig was not produced by the Pro backend key
+    // Pro proof sig was not signed by the Pro backend key
     InvalidProBackendSig = PRO_STATUS_INVALID_PRO_BACKEND_SIG,
-    // Proof set; envelope pro sig was not produced by the Rotating key
+    // Pro sig in the envelope was not signed by the Rotating key
     InvalidUserSig = PRO_STATUS_INVALID_USER_SIG,
-    // Proof set, is verified; has not expired
-    Valid = PRO_STATUS_VALID,
-    // Proof set, is verified; has expired
-    Expired = PRO_STATUS_EXPIRED,
+    Valid = PRO_STATUS_VALID,      // Proof is verified; has not expired
+    Expired = PRO_STATUS_EXPIRED,  // Proof is verified; has expired
 };
 
 enum class DestinationType {
@@ -105,6 +101,14 @@ struct Envelope {
     array_uc64 pro_sig;
 };
 
+struct DecryptedPro {
+    ProStatus status;  // Validity of the proof embedded in the envelope
+    // Session Pro proof that was embedded in the envelope, this is always populated irrespective of
+    // the status but the validity of the contents should be verified by checking `status`
+    config::ProProof proof;
+    PRO_FEATURES features;  // Bit flag features that were used in the embedded message
+};
+
 struct DecryptedEnvelope {
     // The envelope parsed from the plaintext
     Envelope envelope;
@@ -121,18 +125,9 @@ struct DecryptedEnvelope {
     // a Groups v2 envelope or it's re-derived from the Ed25519 pubkey.
     array_uc32 sender_x25519_pubkey;
 
-    // Status flag for validity of the Session Pro proof embedded in the envelope if it has one.
-    // The status is set to `Nil` if there is no Session Pro proof in the message. Otherwise it's
-    // set to one of the other values to which the remaining pro fields will be populated with data
-    // parsed from the envelope.
-    ProStatus pro_status;
-
-    // The embedded Session Pro proof, only set if the status was not `Nil`.
-    config::ProProof pro_proof;
-
-    // Session Pro bit flag features that were used in the embedded message, only set if the status
-    // was not `Nil`.
-    PRO_FEATURES pro_features;
+    // Set if the envelope included a pro payload. The caller must check the status to determine if
+    // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
+    std::optional<DecryptedPro> pro;
 };
 
 struct DecryptEnvelopeKey {
