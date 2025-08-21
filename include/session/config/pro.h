@@ -16,7 +16,7 @@ typedef struct pro_config {
     pro_proof proof;
 } pro_pro_config;
 
-/// API: pro/pro_verify
+/// API: pro/pro_config_verify_signature
 ///
 /// Verify the proof was signed by the `verify_pubkey` and that the `rotating_privkey` in the `pro`
 /// config rederives to the `rotating_pubkey` embedded in the proof.
