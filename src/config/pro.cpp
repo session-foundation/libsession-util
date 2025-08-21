@@ -164,9 +164,11 @@ LIBSESSION_C_API bytes32 pro_proof_hash(pro_proof const* proof) {
     return result;
 }
 
-LIBSESSION_C_API bool pro_proof_verify(pro_proof const* proof, uint8_t const* verify_pubkey) {
-    auto verify_pubkey_span =
-            std::span<const std::uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
+LIBSESSION_C_API bool pro_proof_verify(
+        pro_proof const* proof, uint8_t const* verify_pubkey, size_t verify_pubkey_len) {
+    if (verify_pubkey_len != crypto_sign_ed25519_PUBLICKEYBYTES)
+        return false;
+    auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
     auto gen_index_hash =
             std::span<const std::uint8_t>(proof->gen_index_hash, sizeof proof->gen_index_hash);
     auto rotating_pubkey =
@@ -179,9 +181,9 @@ LIBSESSION_C_API bool pro_proof_verify(pro_proof const* proof, uint8_t const* ve
     return result;
 }
 
-LIBSESSION_C_API bool pro_pro_verify(pro_pro_config const* pro, uint8_t const* verify_pubkey) {
-    auto verify_pubkey_span =
-            std::span<const std::uint8_t>(verify_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES);
+LIBSESSION_C_API bool pro_pro_verify(
+        pro_pro_config const* pro, uint8_t const* verify_pubkey, size_t verify_pubkey_len) {
+    auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
     auto rotating_privkey =
             std::span<const std::uint8_t>(pro->rotating_privkey, sizeof pro->rotating_privkey);
     auto gen_index_hash = std::span<const std::uint8_t>(
