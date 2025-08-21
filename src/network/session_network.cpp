@@ -792,7 +792,7 @@ LIBSESSION_C_API bool session_network_init(
     }
 }
 
-LIBSESSION_C_API void network_free_v2(network_object_v2* network) {
+LIBSESSION_C_API void session_network_free(network_object_v2* network) {
     delete static_cast<session::network::Network_v2*>(network->internals);
     delete network;
 }

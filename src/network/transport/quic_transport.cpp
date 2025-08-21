@@ -69,6 +69,18 @@ void QuicTransport::verify_connectivity(
     });
 }
 
+void QuicTransport::add_failure_listener(const ed25519_pubkey& pubkey, std::function<void()> listener) {
+    _loop->call([this, pk_hex = pubkey.hex(), l = std::move(listener)]() mutable {
+        _failure_listeners[pk_hex].push_back(std::move(l));
+    });
+}
+
+void QuicTransport::remove_failure_listeners(const ed25519_pubkey& pubkey) {
+    _loop->call([this, pk_hex = pubkey.hex()] {
+        _failure_listeners.erase(pk_hex);
+    });
+}
+
 void QuicTransport::send_request(Request request, network_response_callback_t callback) {
     log::trace(cat, "[QuicTransport] Dispatching request {} to loop.", request.request_id);
     _loop->call([this, req = std::move(request), cb = std::move(callback)] {
@@ -215,7 +227,7 @@ void QuicTransport::_establish_connection(
                 // Only persistent requests verify connectivity so if there is a verification
                 // callback then it should be persistent, otherwise if ANY of the requests require
                 // persistence then we should store the connection (if we don't store it then the
-                // connection will )
+                // connection will timeout and be closed)
                 bool is_persistent = !verification_callbacks.empty();
                 if (!is_persistent)
                     is_persistent = std::any_of(
@@ -315,6 +327,15 @@ void QuicTransport::_establish_connection(
 
                     for (auto& [req, cb] : to_fail)
                         cb(false, false, -1, {content_type_plain_text}, failure_reason);
+                }
+
+                // Notify any failure listeners that the connection has been closed
+                if (auto it = _failure_listeners.find(address_pubkey_hex); it != _failure_listeners.end()) {
+                    auto to_fail = std::move(it->second);
+                    _failure_listeners.erase(it);
+
+                    for (const auto& listener : it->second)
+                        listener();
                 }
 
                 // If we have no longer have any active connections then we are disconnected

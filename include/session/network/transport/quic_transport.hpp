@@ -40,6 +40,7 @@ class QuicTransport : public ITransport {
             _pending_verification_callbacks;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
+    std::unordered_map<std::string, std::vector<std::function<void()>>> _failure_listeners;
 
   public:
     explicit QuicTransport(
@@ -53,6 +54,8 @@ class QuicTransport : public ITransport {
             std::chrono::milliseconds timeout,
             const std::string& request_id,
             std::function<void(bool success)> callback) override;
+    void add_failure_listener(const ed25519_pubkey& pubkey, std::function<void()> listener) override;
+    void remove_failure_listeners(const ed25519_pubkey& pubkey) override;
     void send_request(Request request, network_response_callback_t callback) override;
 
   private:
