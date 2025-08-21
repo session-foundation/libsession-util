@@ -869,20 +869,6 @@ class ConfigBase : public ConfigSig {
     std::unordered_set<std::string> _merge(
             std::span<const std::pair<std::string, std::span<const unsigned char>>> configs);
 
-    /// API: base/ConfigBase::resolve_conflicts
-    ///
-    /// Subclasses can override this to add custom logic in order to resolve conflicts when merging
-    /// multiple configs that have the same seq_no.  This function will remove any entries from
-    /// `diff` which have been handled by the custom resolution logic.
-    ///
-    /// Inputs:
-    /// - `data` -- The config data to be updated to the resolved state.
-    /// - `diff` -- The diffs from the conflicting config update.
-    /// - `source` -- The config data that the diffs conflicted with.
-    ///
-    /// Outputs: None
-    virtual void resolve_conflicts(dict& data, oxenc::bt_dict& diff, const dict& source) {};
-
     /// API: base/ConfigBase::extra_data
     ///
     /// Called when dumping to obtain any extra data that a subclass needs to store to reconstitute

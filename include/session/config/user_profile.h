@@ -92,7 +92,8 @@ LIBSESSION_EXPORT int user_profile_set_name(config_object* conf, const char* nam
 ///
 /// Obtains the current profile pic.  The pointers in the returned struct will be NULL if a profile
 /// pic is not currently set, and otherwise should be copied right away (they will not be valid
-/// beyond other API calls on this config object).
+/// beyond other API calls on this config object).  The returned value will be the latest profile pic
+/// between when the user last set their profile and when it was last re-uploaded.
 ///
 /// Declaration:
 /// ```cpp
@@ -110,7 +111,7 @@ LIBSESSION_EXPORT user_profile_pic user_profile_get_pic(const config_object* con
 
 /// API: user_profile/user_profile_set_pic
 ///
-/// Sets a user profile
+/// Sets a user profile pic
 ///
 /// Declaration:
 /// ```cpp
@@ -128,30 +129,25 @@ LIBSESSION_EXPORT user_profile_pic user_profile_get_pic(const config_object* con
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_EXPORT int user_profile_set_pic(config_object* conf, user_profile_pic pic);
 
-/// API: user_profile/user_profile_profile_pic_content_version
+/// API: user_profile/user_profile_set_reupload_pic
 ///
-/// Returns the version of the profile picture content; or `0` if it's never been set.
+/// Sets a user profile pic when reuploading
 ///
-/// Inputs: None
-///
-/// Outputs:
-/// - `uint32_t` - version of the profile picture content.  Will be `0` if it's never been set.
-LIBSESSION_EXPORT uint32_t user_profile_get_profile_pic_content_version(const config_object* conf);
-
-/// API: user_profile/user_profile_profile_pic_content_version
-///
-/// Sets the version for the profile picture content.  This should be updated when a user sets a
-/// new profile picture (or removes the current one), but now when re-uploading the current
-/// profile picture.
+/// Declaration:
+/// ```cpp
+/// INT user_profile_set_reupload_pic(
+///     [in]    config_object*      conf,
+///     [in]    user_profile_pic    pic
+/// );
+/// ```
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
-/// - `version` -- [in] version for the profile picture content.
+/// - `pic` -- [in] Pointer to the pic
 ///
 /// Outputs:
 /// - `int` -- Returns 0 on success, non-zero on error
-LIBSESSION_EXPORT int user_profile_set_profile_pic_content_version(
-        config_object* conf, uint32_t version);
+LIBSESSION_EXPORT int user_profile_set_reupload_pic(config_object* conf, user_profile_pic pic);
 
 /// API: user_profile/user_profile_get_nts_priority
 ///
@@ -272,8 +268,9 @@ LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int
 
 /// API: user_profile/user_profile_get_profile_updated
 ///
-/// returns the timestamp that the user last updated their public profile information; or `0` if
-/// it's never been updated.
+/// Returns the timestamp that the user last updated their profile information; or `0` if it's
+/// never been updated.  This value will return the latest timestamp between when the user last
+/// set their profile and when it was last re-uploaded.
 ///
 /// Inputs: None
 ///
@@ -281,19 +278,6 @@ LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int
 /// - `int64_t` - timestamp (unix seconds) that the user last updated their public profile
 /// information.  Will be `0` if it's never been updated.
 LIBSESSION_EXPORT int64_t user_profile_get_profile_updated(config_object* conf);
-
-/// API: user_profile/user_profile_set_profile_updated
-///
-/// Sets the timestamp that the user last updated their public profile information (should be
-/// updated by the clients when modifying public profile information via a user action, eg:
-/// `name`, `profile_pic`, `set_blinded_msgreqs`) but not when an "automated" change occurs (eg.
-/// re-uploading the display picture due to expiration).
-///
-/// Inputs:
-/// - `conf` -- [in] Pointer to the config object
-/// - `updated` -- [in] timestamp (unix seconds) that the user last updated their public profile
-/// information.
-LIBSESSION_EXPORT void user_profile_set_profile_updated(config_object* conf, int64_t updated);
 
 #ifdef __cplusplus
 }  // extern "C"

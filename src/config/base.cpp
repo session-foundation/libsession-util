@@ -531,9 +531,6 @@ std::unordered_set<std::string> ConfigBase::_merge(
             _config->verifier,
             _config->signer,
             config_lags(),
-            [&](dict& data, oxenc::bt_dict& diff, const dict& source) {
-                resolve_conflicts(data, diff, source);
-            },
             [&](size_t i, const config_error& e) {
                 log::warning(cat, "{}", e.what());
                 assert(i > 0);  // i == 0 means we can't deserialize our own serialization

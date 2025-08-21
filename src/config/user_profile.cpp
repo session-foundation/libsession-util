@@ -28,6 +28,9 @@ void UserProfile::set_name(std::string_view new_name) {
     if (new_name.size() > contact_info::MAX_NAME_LENGTH)
         throw std::invalid_argument{"Invalid profile name: exceeds maximum length"};
     set_nonempty_str(data["n"], new_name);
+    
+    const auto target_timestamp = (data["T"].integer_or(0) > data["t"].integer_or(0) ? "T" : "t");
+    data[target_timestamp] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 void UserProfile::set_name_truncated(std::string new_name) {
     set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
@@ -35,9 +38,14 @@ void UserProfile::set_name_truncated(std::string new_name) {
 
 profile_pic UserProfile::get_profile_pic() const {
     profile_pic pic{};
-    if (auto* url = data["p"].string(); url && !url->empty())
+
+    const bool use_primary_keys = (data["T"].integer_or(0) > data["t"].integer_or(0));
+    const auto url_key = (use_primary_keys ? "p" : "P");
+    const auto key_key = (use_primary_keys ? "q" : "Q");
+    
+    if (auto* url = data[url_key].string(); url && !url->empty())
         pic.url = *url;
-    if (auto* key = data["q"].string(); key && key->size() == 32)
+    if (auto* key = data[key_key].string(); key && key->size() == 32)
         pic.key.assign(
                 reinterpret_cast<const unsigned char*>(key->data()),
                 reinterpret_cast<const unsigned char*>(key->data()) + 32);
@@ -46,18 +54,26 @@ profile_pic UserProfile::get_profile_pic() const {
 
 void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
     set_pair_if(!url.empty() && key.size() == 32, data["p"], url, data["q"], key);
+    
+    // If the profile was removed then we should remove the "reupload" version as well
+    if (url.empty() || key.size() != 32) {
+        set_reupload_profile_pic({});
+    }
+
+    data["t"] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
 void UserProfile::set_profile_pic(profile_pic pic) {
     set_profile_pic(pic.url, pic.key);
 }
 
-uint32_t UserProfile::get_profile_pic_content_version() const {
-    return data["V"].integer_or(0);
+void UserProfile::set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key) {
+    set_pair_if(!url.empty() && key.size() == 32, data["P"], url, data["Q"], key);
+    data["T"] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
-void UserProfile::set_profile_pic_content_version(uint32_t version) {
-    set_nonzero_int(data["V"], version);
+void UserProfile::set_reupload_profile_pic(profile_pic pic) {
+    set_reupload_profile_pic(pic.url, pic.key);
 }
 
 void UserProfile::set_nts_priority(int priority) {
@@ -83,6 +99,9 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
         data["M"].erase();
     else
         data["M"] = static_cast<int>(*value);
+
+    const auto target_timestamp = (data["T"].integer_or(0) > data["t"].integer_or(0) ? "T" : "t");
+    data[target_timestamp] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
@@ -92,56 +111,13 @@ std::optional<bool> UserProfile::get_blinded_msgreqs() const {
 }
 
 std::chrono::sys_seconds UserProfile::get_profile_updated() const {
-    if (auto* t = data["t"].integer(); t)
+    if (auto* t = data["t"].integer(); t) {
+        if (auto* T = data["T"].integer(); T && T > t)
+            return std::chrono::sys_seconds{std::chrono::seconds{*T}};
         return std::chrono::sys_seconds{std::chrono::seconds{*t}};
+    }
     return std::chrono::sys_seconds{};
 }
-
-void UserProfile::set_profile_updated(std::chrono::sys_seconds updated) {
-    if (updated.time_since_epoch().count() == 0)
-        data["t"].erase();
-    else
-        data["t"] = static_cast<int>(updated.time_since_epoch().count());
-}
-
-void UserProfile::resolve_conflicts(dict& data, oxenc::bt_dict& diff, const dict& source) {
-    // The UserProfile config stores a timestamp indicating when the user explicitly updated their
-    // profile information but there are other situations where the profile information can be
-    // "automatically" updated by the clients (eg. re-uploading a display picture).  This hook
-    // pre-processes a conflict between these public profile values and removes any keys from the
-    // diff that should be ignored.
-    static const std::set<std::string> relevant_keys = {"n", "p", "q", "M", "t", "V"};
-
-    // No need to do anything if none of the relevant keys were modified
-    bool has_public_keys = false;
-    for (const auto& [key, _] : diff) {
-        if (relevant_keys.count(key)) {
-            has_public_keys = true;
-            break;
-        }
-    }
-
-    if (!has_public_keys)
-        return;
-
-    // A higher content version should win, in the case that they both match then we should only
-    // keep the local state if it has a higher timestamp
-    const auto local_content_version = int_or_0(data, "V");
-    const auto local_timestamp = ts_or_epoch(data, "t");
-    const auto incoming_full_content_version = int_or_0(source, "V");
-    const auto incoming_full_timestamp = ts_or_epoch(source, "t");
-    auto local_state_wins =
-            ((local_content_version > incoming_full_content_version) ||
-             (local_content_version == incoming_full_content_version &&
-              local_timestamp > incoming_full_timestamp));
-
-    // If the local state wins then we should remove the `relevant_keys` from the diff (ie. keep the
-    // local state), otherwise the standard `apply_diff` logic should result in the incoming values
-    // overriding the local ones
-    if (local_state_wins)
-        for (const auto& key : relevant_keys)
-            diff.erase(key);
-};
 
 extern "C" {
 
@@ -201,16 +177,16 @@ LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic 
             static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
-LIBSESSION_C_API uint32_t user_profile_get_profile_pic_content_version(const config_object* conf) {
-    return unbox<UserProfile>(conf)->get_profile_pic_content_version();
-}
+LIBSESSION_C_API int user_profile_set_reupload_pic(config_object* conf, user_profile_pic pic) {
+    std::string_view url{pic.url};
+    std::span<const unsigned char> key;
+    if (!url.empty())
+        key = {pic.key, 32};
 
-LIBSESSION_C_API int user_profile_set_profile_pic_content_version(
-        config_object* conf, uint32_t version) {
     return wrap_exceptions(
             conf,
             [&] {
-                unbox<UserProfile>(conf)->set_profile_pic_content_version(version);
+                unbox<UserProfile>(conf)->set_reupload_profile_pic(url, key);
                 return 0;
             },
             static_cast<int>(SESSION_ERR_BAD_VALUE));
@@ -247,10 +223,6 @@ LIBSESSION_C_API void user_profile_set_blinded_msgreqs(config_object* conf, int 
 
 LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
     return unbox<UserProfile>(conf)->get_profile_updated().time_since_epoch().count();
-}
-
-LIBSESSION_C_API void user_profile_set_profile_updated(config_object* conf, int64_t updated) {
-    unbox<UserProfile>(conf)->set_profile_updated(to_sys_seconds(updated));
 }
 
 }  // extern "C"
