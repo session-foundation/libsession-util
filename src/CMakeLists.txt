@@ -93,6 +93,7 @@ target_link_libraries(crypto
     util
     PRIVATE
     libsodium::sodium-internal
+    nlohmann_json::nlohmann_json
     libsession::protos
 )
 

@@ -13,6 +13,11 @@ struct span_u8 {
     size_t size;
 };
 
+struct string8 {
+    char* data;
+    size_t size;
+};
+
 struct bytes32 {
     uint8_t data[32];
 };
@@ -23,6 +28,14 @@ struct bytes33 {
 
 struct bytes64 {
     uint8_t data[64];
+};
+
+/// Basic bump allocating arena
+struct arena_t
+{
+    uint8_t *data;
+    size_t size;
+    size_t max;
 };
 
 /// Create a span of bytes that owns the `size` bytes of memory requested. If allocation fails, this
@@ -52,6 +65,14 @@ span_u8 span_u8_copy_or_throw(const void* data, size_t size);
 /// NULL is passed in then this function returns the number of bytes actually needed to write the
 /// entire string (as per normal snprintf behaviour).
 int snprintf_bytes_written_clamped(char* buffer, size_t size, char const* fmt, ...);
+
+string8 string8_alloc_or_throw(size_t size);
+
+string8 string8_copy_or_throw(const void* data, size_t size);
+
+void* arena_alloc(arena_t* arena, size_t bytes);
+
+string8 arena_alloc_to_string8(arena_t* arena, void const* data, size_t size);
 
 #ifdef __cplusplus
 }
