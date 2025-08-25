@@ -574,7 +574,7 @@ session_protocol_encrypt_for_destination(
         };
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
-        result.error_len_incl_null_terminator = std::snprintf(
+        result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
                                                         error,
                                                         error_len,
                                                         "%.*s",
@@ -610,7 +610,7 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     array_uc32 pro_backend_pubkey_cpp = {};
     if (pro_backend_pubkey) {
         if (pro_backend_pubkey_len != sizeof(pro_backend_pubkey_cpp)) {
-            result.error_len_incl_null_terminator = std::snprintf(
+            result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
                                                             error,
                                                             error_len,
                                                             "Invalid pro_backend_pubkey: Key was "
@@ -644,7 +644,7 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
             break;
         } catch (const std::exception& e) {
             std::string error_cpp = e.what();
-            result.error_len_incl_null_terminator = std::snprintf(
+            result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
                                                             error,
                                                             error_len,
                                                             "%.*s",
@@ -656,7 +656,9 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
 
     if (keys->ed25519_privkeys_len == 0) {
         result.error_len_incl_null_terminator =
-                std::snprintf(error, error_len, "No keys ed25519_privkeys were provided") + 1;
+                snprintf_bytes_written_clamped(
+                        error, error_len, "No keys ed25519_privkeys were provided") +
+                1;
     }
 
     // Marshall into c type
@@ -666,7 +668,7 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
         result.success = false;
-        result.error_len_incl_null_terminator = std::snprintf(
+        result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
                                                         error,
                                                         error_len,
                                                         "%.*s",

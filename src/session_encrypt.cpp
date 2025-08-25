@@ -1143,7 +1143,8 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
         result.error_len_incl_null_terminator =
-                std::snprintf(error, error_len, "%.*s", (int)error_cpp.size(), error_cpp.data()) +
+                snprintf_bytes_written_clamped(
+                        error, error_len, "%.*s", (int)error_cpp.size(), error_cpp.data()) +
                 1;
     }
     return result;
@@ -1258,7 +1259,7 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         } catch (const std::exception& e) {
             std::string error_cpp = e.what();
             result.error_len_incl_null_terminator =
-                    std::snprintf(
+                    snprintf_bytes_written_clamped(
                             error, error_len, "%.*s", (int)error_cpp.size(), error_cpp.data()) +
                     1;
         }
