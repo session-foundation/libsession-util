@@ -224,9 +224,9 @@ EncryptedForDestination encrypt_for_destination(
 
 /// API: session_protocol/decrypt_envelope
 ///
-/// Given an envelope payload (i.e.: protobuf encoded stream of `Envelope` or encrypted `Envelope`
-/// using a Groups v2 key) parse (or decrypt) the envelope and return the envelope content decrypted
-/// if necessary.
+/// Given an envelope payload (i.e.: protobuf encoded stream of `WebsocketRequestMessage` which
+/// wraps an `Envelope` for 1o1 messages/sync messages, or `Envelope` encrypted using a Groups v2
+/// key) parse (or decrypt) the envelope and return the envelope content decrypted if necessary.
 ///
 /// A groups v2 envelope will get decrypted with the group keys. A non-groups v2 envelope will get
 /// decrypted with the specified Ed25519 private key in the `keys` object. Only one of these keys
