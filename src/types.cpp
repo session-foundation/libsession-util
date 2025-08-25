@@ -1,6 +1,8 @@
 #include <fmt/core.h>
 #include <session/types.h>
 
+#include <cstdarg>
+
 span_u8 span_u8_alloc_or_throw(size_t size) {
     span_u8 result = {};
     result.size = size;
@@ -14,5 +16,17 @@ span_u8 span_u8_alloc_or_throw(size_t size) {
 span_u8 span_u8_copy_or_throw(const void* data, size_t size) {
     span_u8 result = span_u8_alloc_or_throw(size);
     std::memcpy(result.data, data, result.size);
+    return result;
+}
+
+int snprintf_bytes_written_clamped(char* buffer, size_t size, char const* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    int bytes_required_not_incl_null = vsnprintf(buffer, size, fmt, args);
+    va_end(args);
+
+    int result = bytes_required_not_incl_null;
+    if (buffer)
+        result = std::min(static_cast<int>(size), result);
     return result;
 }
