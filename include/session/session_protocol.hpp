@@ -163,8 +163,8 @@ struct EncryptedForDestination {
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `msg_size` -- the size of the message in bytes to determine if the message requires access to
-///   the higher character limit available in Session Pro
+/// - `msg_size` -- the size of the message in UTF16 code units to determine if the message requires
+///   access to the higher character limit available in Session Pro
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
 ///
@@ -232,10 +232,9 @@ EncryptedForDestination encrypt_for_destination(
 /// decrypted with the specified Ed25519 private key in the `keys` object. Only one of these keys
 /// need to be set depending on the type of envelope payload passed into the function.
 ///
-/// If the message does not use Session Pro features, the pro status will be set to nil and all
-/// other pro fields are to be ignored. If the pro status is non-nil then the pro fields will be
-/// populated with data about the Session Pro proof embedded in the envelope including the features
-/// used and if the proof was valid/expired e.t.c.
+/// If the message does not use Session Pro features, the `pro` object will be set to nil. Otherwise
+/// the pro fields will be populated with data about the Session Pro proof embedded in the envelope
+/// including the features used and if the proof was valid/expired e.t.c.
 ///
 /// This function will throw if parsing failed such as a required field is missing, the field is
 /// smaller or larger than expected, decryption failed, or an invariant failed. Notably this

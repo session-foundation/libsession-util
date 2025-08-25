@@ -128,8 +128,8 @@ typedef struct session_protocol_encrypted_for_destination {
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `msg_size` -- the size of the message in bytes to determine if the message requires access to
-///   the higher character limit available in Session Pro
+/// - `msg_size` -- the size of the message in UTF16 code units to determine if the message requires
+///   access to the higher character limit available in Session Pro
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
 ///
@@ -216,10 +216,6 @@ LIBSESSION_EXPORT void session_protocol_encrypt_for_destination_free(
 /// Given an envelope payload (i.e.: protobuf encoded stream of `WebsocketRequestMessage` which
 /// wraps an `Envelope` for 1o1 messages/sync messages, or `Envelope` encrypted using a Groups v2
 /// key) parse (or decrypt) the envelope and return the envelope content decrypted if necessary.
-///
-/// A groups v2 envelope will get decrypted with the group keys. A non-groups v2 envelope will get
-/// decrypted with the specified Ed25519 private key in the `keys` object. Only one of these keys
-/// need to be set depending on the type of envelope payload passed into the function.
 ///
 /// See: session_protocol/decrypt_envelope for more information
 ///
