@@ -66,12 +66,16 @@ span_u8 span_u8_copy_or_throw(const void* data, size_t size);
 /// entire string (as per normal snprintf behaviour).
 int snprintf_bytes_written_clamped(char* buffer, size_t size, char const* fmt, ...);
 
+/// Allocate the string with the specific size. Throws on allocation failure.
 string8 string8_alloc_or_throw(size_t size);
 
+/// Create a string by copying the given pointer and size. Throws on allocation failure
 string8 string8_copy_or_throw(const void* data, size_t size);
 
+/// Allocate memory from the basic bump allocating arena. Returns a null pointer on failure.
 void* arena_alloc(arena_t* arena, size_t bytes);
 
+/// Create a string and allocate a copy of the data at pointer and size
 string8 arena_alloc_to_string8(arena_t* arena, void const* data, size_t size);
 
 #ifdef __cplusplus
