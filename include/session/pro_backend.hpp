@@ -4,6 +4,43 @@
 #include <session/types.hpp>
 #include <string>
 
+/// Helper functions to construct payloads to communicate with the Session Pro Backend. The data
+/// structures here are largely bindings to the endpoints exposed on the Session Pro Backend:
+///
+///   github.com/Doy-lee/session-pro-backend/blob/2afe310adad52f211e3b2cfcbdfc9eda6ff1778e/server.py#L24
+///
+/// The high level summary of the functionality in this file. Clients can:
+///
+/// 1. Build a request with `AddProPaymentRequest::to_json` from a Session Pro payment and submit it
+///    to the backend to register the specified Ed25519 keys for Session Pro.
+///
+///    Server responds JSON to be parsed with `GetProPaymentsRequest::parse`. Clients should
+///    validate the response and update their `UserProfile` by constructing a `ProConfig` with the
+///    proof from the response filling in the remaining fields appropriately in `ProConfig`
+///
+///    The server will only respond successfully if it can also independently verify the purchase
+///    otherwise an error is returned and can be read from the `ResponseHeader` after parsing the
+///    raw response.
+///
+/// 2. Attach the proof to their messages. Libsession has helper functions to embed the proof into
+///    their messages via the helper functions in the Session Protocol header file.
+///
+/// 3. Periodically poll the global revocation list which overrides the validity of current
+///    circulating proofs. This is done by constructing the request via
+///    `GetProRevocationsRequest::to_json` and sending it to the backend.
+///
+///    Server responds JSON to be parsed with `GetProRevocationResponse::parse` which contains the
+///    list that clients should cache. Any incoming messages with a Pro proof that is in the list of
+///    revoked proofs will not be entitled to Pro features.
+///
+/// 4. Query the list of historical payments that the master Ed25519 key has registered by building
+///    a `GetProPaymentsRequest::to_json` query and submitting it.
+///
+///    Server responds JSON to be parsed with `GetProPaymentsResponse::parse` which they can use to
+///    populate their client's payment history.
+///
+/// See the unit tests for examples of the API.
+
 namespace session::pro_backend {
 
 /// TODO: Assign the Session Pro backend public key for verifying proofs to allow users of the
