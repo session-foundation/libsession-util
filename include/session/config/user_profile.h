@@ -92,8 +92,8 @@ LIBSESSION_EXPORT int user_profile_set_name(config_object* conf, const char* nam
 ///
 /// Obtains the current profile pic.  The pointers in the returned struct will be NULL if a profile
 /// pic is not currently set, and otherwise should be copied right away (they will not be valid
-/// beyond other API calls on this config object).  The returned value will be the latest profile pic
-/// between when the user last set their profile and when it was last re-uploaded.
+/// beyond other API calls on this config object).  The returned value will be the latest profile
+/// pic between when the user last set their profile and when it was last re-uploaded.
 ///
 /// Declaration:
 /// ```cpp

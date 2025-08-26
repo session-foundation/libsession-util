@@ -35,6 +35,8 @@ using namespace std::literals;
 class UserProfile : public ConfigBase {
 
   public:
+    friend class UserProfileTester;
+
     // No default constructor
     UserProfile() = delete;
 

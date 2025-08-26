@@ -28,9 +28,10 @@ void UserProfile::set_name(std::string_view new_name) {
     if (new_name.size() > contact_info::MAX_NAME_LENGTH)
         throw std::invalid_argument{"Invalid profile name: exceeds maximum length"};
     set_nonempty_str(data["n"], new_name);
-    
-    const auto target_timestamp = (data["T"].integer_or(0) > data["t"].integer_or(0) ? "T" : "t");
-    data[target_timestamp] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
+
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] =
+            static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 void UserProfile::set_name_truncated(std::string new_name) {
     set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
@@ -39,10 +40,10 @@ void UserProfile::set_name_truncated(std::string new_name) {
 profile_pic UserProfile::get_profile_pic() const {
     profile_pic pic{};
 
-    const bool use_primary_keys = (data["T"].integer_or(0) > data["t"].integer_or(0));
+    const bool use_primary_keys = (data["t"].integer_or(0) >= data["T"].integer_or(0));
     const auto url_key = (use_primary_keys ? "p" : "P");
     const auto key_key = (use_primary_keys ? "q" : "Q");
-    
+
     if (auto* url = data[url_key].string(); url && !url->empty())
         pic.url = *url;
     if (auto* key = data[key_key].string(); key && key->size() == 32)
@@ -54,22 +55,22 @@ profile_pic UserProfile::get_profile_pic() const {
 
 void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
     set_pair_if(!url.empty() && key.size() == 32, data["p"], url, data["q"], key);
-    
-    // If the profile was removed then we should remove the "reupload" version as well
-    if (url.empty() || key.size() != 32) {
-        set_reupload_profile_pic({});
-    }
 
-    data["t"] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
+    // If the profile was removed then we should remove the "reupload" version as well
+    if (url.empty() || key.size() != 32)
+        set_reupload_profile_pic({});
+
+    data["t"] = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
 void UserProfile::set_profile_pic(profile_pic pic) {
     set_profile_pic(pic.url, pic.key);
 }
 
-void UserProfile::set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key) {
+void UserProfile::set_reupload_profile_pic(
+        std::string_view url, std::span<const unsigned char> key) {
     set_pair_if(!url.empty() && key.size() == 32, data["P"], url, data["Q"], key);
-    data["T"] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
+    data["T"] = static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
 void UserProfile::set_reupload_profile_pic(profile_pic pic) {
@@ -100,8 +101,9 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
     else
         data["M"] = static_cast<int>(*value);
 
-    const auto target_timestamp = (data["T"].integer_or(0) > data["t"].integer_or(0) ? "T" : "t");
-    data[target_timestamp] = static_cast<int>(std::chrono::system_clock::now().time_since_epoch().count());
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] =
+            static_cast<uint64_t>(std::chrono::system_clock::now().time_since_epoch().count());
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
