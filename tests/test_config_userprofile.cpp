@@ -312,6 +312,8 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Change the name on both clients:
     user_profile_set_name(conf, "Nibbler");
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
+
     user_profile_set_name(conf2, "Raz");
 
     // And, on conf2, we're also going to change some other things:
@@ -329,6 +331,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(user_profile_get_blinded_msgreqs(conf2) == -1);
     user_profile_set_blinded_msgreqs(conf2, 1);
     CHECK(user_profile_get_blinded_msgreqs(conf2) == 1);
+    UserProfileTester::set_profile_updated(conf2, std::chrono::sys_seconds{124s});
 
     // Both have changes, so push need a push
     CHECK(config_needs_push(conf));
