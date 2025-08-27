@@ -328,7 +328,6 @@ void SnodePool::_launch_next_refresh_request(
                     cat,
                     "No more candidate nodes, aborting refresh for request ID {}.",
                     request_id);
-            std::unique_lock lock{_cache_mutex};
             _current_snode_cache_refresh_id.reset();
             _refresh_candidate_nodes.clear();
             return;
