@@ -667,9 +667,9 @@ LIBSESSION_C_API bytes32 pro_proof_hash(pro_proof const* proof) {
     if (proof) {
         session::array_uc32 hash = proof_hash_internal(
                 proof->version,
-                proof->gen_index_hash,
-                proof->rotating_pubkey,
-                proof->expiry_unix_ts);
+                proof->gen_index_hash.data,
+                proof->rotating_pubkey.data,
+                proof->expiry_unix_ts_s);
         std::memcpy(result.data, hash.data(), hash.size());
     }
     return result;
@@ -681,8 +681,11 @@ LIBSESSION_C_API bool pro_proof_verify_signature(
         return false;
     auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
     session::array_uc32 hash = proof_hash_internal(
-            proof->version, proof->gen_index_hash, proof->rotating_pubkey, proof->expiry_unix_ts);
-    bool result = proof_verify_signature_internal(hash, proof->sig, verify_pubkey_span);
+            proof->version,
+            proof->gen_index_hash.data,
+            proof->rotating_pubkey.data,
+            proof->expiry_unix_ts_s);
+    bool result = proof_verify_signature_internal(hash, proof->sig.data, verify_pubkey_span);
     return result;
 }
 
@@ -694,12 +697,12 @@ LIBSESSION_C_API bool pro_proof_verify_message(
         size_t msg_len) {
     std::span<const uint8_t> sig_span = {sig, sig_len};
     std::span<const uint8_t> msg_span = {msg, msg_len};
-    bool result = proof_verify_message_internal(proof->rotating_pubkey, sig_span, msg_span);
+    bool result = proof_verify_message_internal(proof->rotating_pubkey.data, sig_span, msg_span);
     return result;
 }
 
 LIBSESSION_C_API bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_s) {
-    bool result = proof && proof_is_active_internal(proof->expiry_unix_ts, unix_ts_s);
+    bool result = proof && proof_is_active_internal(proof->expiry_unix_ts_s, unix_ts_s);
     return result;
 }
 
@@ -969,19 +972,19 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const DecryptedPro& pro = *result_cpp.pro;
         result.pro_status = static_cast<PRO_STATUS>(pro.status);
         result.pro_proof.version = pro.proof.version;
-        result.pro_proof.expiry_unix_ts =
+        result.pro_proof.expiry_unix_ts_s =
                 static_cast<uint64_t>(pro.proof.expiry_unix_ts.time_since_epoch().count());
         result.pro_features = pro.features;
 
         std::memcpy(
-                result.pro_proof.gen_index_hash,
+                result.pro_proof.gen_index_hash.data,
                 pro.proof.gen_index_hash.data(),
                 sizeof(result.pro_proof.gen_index_hash));
         std::memcpy(
-                result.pro_proof.rotating_pubkey,
+                result.pro_proof.rotating_pubkey.data,
                 pro.proof.rotating_pubkey.data(),
                 sizeof(result.pro_proof.rotating_pubkey));
-        std::memcpy(result.pro_proof.sig, pro.proof.sig.data(), sizeof(pro.proof.sig));
+        std::memcpy(result.pro_proof.sig.data, pro.proof.sig.data(), sizeof(pro.proof.sig));
     }
 
     // Since we support multiple keys, if some of the keys failed but one of them succeeded, we will

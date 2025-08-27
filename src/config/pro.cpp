@@ -89,19 +89,19 @@ LIBSESSION_C_API bool pro_config_verify_signature(
 
     session::config::ProConfig config = {};
     std::memcpy(
-            config.rotating_privkey.data(), pro->rotating_privkey, sizeof pro->rotating_privkey);
+            config.rotating_privkey.data(), pro->rotating_privkey.data, sizeof pro->rotating_privkey.data);
     config.proof.version = pro->proof.version;
     std::memcpy(
             config.proof.gen_index_hash.data(),
-            pro->proof.gen_index_hash,
-            sizeof pro->proof.gen_index_hash);
+            pro->proof.gen_index_hash.data,
+            sizeof pro->proof.gen_index_hash.data);
     std::memcpy(
             config.proof.rotating_pubkey.data(),
-            pro->proof.rotating_pubkey,
-            sizeof pro->proof.rotating_pubkey);
+            pro->proof.rotating_pubkey.data,
+            sizeof pro->proof.rotating_pubkey.data);
     config.proof.expiry_unix_ts =
-            std::chrono::sys_seconds(std::chrono::seconds(pro->proof.expiry_unix_ts));
-    std::memcpy(config.proof.sig.data(), pro->proof.sig, sizeof pro->proof.sig);
+            std::chrono::sys_seconds(std::chrono::seconds(pro->proof.expiry_unix_ts_s));
+    std::memcpy(config.proof.sig.data(), pro->proof.sig.data, sizeof pro->proof.sig.data);
 
     session::array_uc32 verify_pubkey_cpp;
     std::memcpy(verify_pubkey_cpp.data(), verify_pubkey, verify_pubkey_len);

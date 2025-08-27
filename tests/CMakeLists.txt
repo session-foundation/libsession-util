@@ -60,6 +60,14 @@ target_link_libraries(testAll PRIVATE
     test_libs
     Catch2::Catch2)
 
+option(TEST_PRO_BACKEND_WITH_DEV_SERVER "Run the Pro Backend tests relying on a development server at 127.0.0.1:5000 and CURL" OFF)
+if (TEST_PRO_BACKEND_WITH_DEV_SERVER)
+    find_package(CURL REQUIRED)
+    target_link_libraries(testAll PRIVATE CURL::libcurl)
+    target_compile_definitions(testAll PRIVATE TEST_PRO_BACKEND_WITH_DEV_SERVER)
+endif()
+
+
 # This one is compiled to a separate binary because it manipulates the logging level and sinks, and
 # thus breaks logging in any tests that would run after it if bundled into the main testAll:
 add_executable(testLogging test_logging.cpp)

@@ -2,6 +2,7 @@
 #include <oxenc/hex.h>
 #include <session/export.h>
 #include <session/pro_backend.h>
+#include <session/sodium_array.hpp>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 
@@ -13,6 +14,12 @@
 #include "SessionProtos.pb.h"
 
 namespace {
+
+// NOTE: Personalization data must match
+// https://github.com/Doy-lee/session-pro-backend/blob/2afe310adad52f211e3b2cfcbdfc9eda6ff1778e/backend.py#L156
+constexpr std::string_view PRO_BACKEND_BLAKE2B_PERSONALIZATION = "SeshProBackend__";
+static_assert(PRO_BACKEND_BLAKE2B_PERSONALIZATION.size() == crypto_generichash_blake2b_PERSONALBYTES);
+
 const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
     nlohmann::json result;
     try {
@@ -33,20 +40,20 @@ const T json_require(
     } else {
         bool success = false;
         std::string_view type = {};
-        if constexpr (session::config::is_one_of<T, double, float>) {
+        if constexpr (session::is_one_of<T, double, float>) {
             type = "a float";
             success = it->is_number_float();
-        } else if constexpr (session::config::is_one_of<T, uint64_t, uint32_t, uint16_t, uint8_t>) {
+        } else if constexpr (session::is_one_of<T, uint64_t, uint32_t, uint16_t, uint8_t>) {
             type = "a number";
             success = it->is_number();
-        } else if constexpr (session::config::is_one_of<T, std::string, std::string_view>) {
+        } else if constexpr (session::is_one_of<T, std::string, std::string_view>) {
             type = "a string";
             success = it->is_string();
-        } else if constexpr (session::config::is_one_of<T, nlohmann::json::array_t>) {
+        } else if constexpr (session::is_one_of<T, nlohmann::json::array_t>) {
             type = "an array";
             success = it->is_array();
         } else {
-            static_assert(session::config::is_one_of<T, nlohmann::json::object_t>);
+            static_assert(session::is_one_of<T, nlohmann::json::object_t>);
             type = "an object";
             success = it->is_object();
         }
@@ -132,34 +139,35 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         throw std::invalid_argument{"Invalid payment_token_hash: expected 32 bytes"};
 
     cleared_uc64 master_from_seed;
-    if (master_privkey.size() == 32) {
+    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
         crypto_sign_ed25519_seed_keypair(
                 master_pubkey.data(), master_from_seed.data(), master_privkey.data());
         master_privkey = master_from_seed;
-    } else if (master_privkey.size() != 64) {
+    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
         throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
     }
 
     cleared_uc64 rotating_from_seed;
-    if (rotating_privkey.size() == 32) {
+    if (rotating_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 rotating_pubkey;
         crypto_sign_ed25519_seed_keypair(
                 rotating_pubkey.data(), rotating_from_seed.data(), rotating_privkey.data());
         rotating_privkey = rotating_from_seed;
-    } else if (rotating_privkey.size() != 64) {
+    } else if (rotating_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
         throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
     }
 
-    // Hash components to 32 bytes
+    // Hash components to 32 bytes, must match:
+    //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L171
     array_uc32 hash_to_sign = {};
-    crypto_generichash_blake2b_state state;
-    crypto_generichash_blake2b_init(&state, /*key*/ nullptr, 0, hash_to_sign.max_size());
+    crypto_generichash_blake2b_state state = {};
+    make_blake2b32_hasher(&state);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
-            &state, master_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
+            &state, master_privkey.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(
-            &state, rotating_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
+            &state, rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(&state, payment_token_hash.data(), payment_token_hash.size());
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
@@ -190,17 +198,18 @@ bool AddProPaymentOrGetProProofResponse::parse(std::string_view json) {
         return errors.empty();
     }
 
+    // Parse errors
+    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+        parse_json_response_errors(j, errors);
+        return false;
+    }
+
     auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
     if (errors.size())
         return errors.empty();
 
-    // Parse errors
-    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, errors);
-        return errors.empty();
-    }
-
     // Parse payload
+    version = json_require<uint8_t>(result_obj, "version", errors);
     auto expiry_unix_ts_s = json_require<uint64_t>(result_obj, "expiry_unix_ts_s", errors);
     expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_unix_ts_s));
     json_require_fixed_bytes_from_hex(
@@ -249,12 +258,13 @@ MasterRotatingSignatures GetProProofRequest::build_sigs(
         throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
     }
 
-    // Hash components to 32 bytes
+    // Hash components to 32 bytes, must match:
+    //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
     uint8_t version = 0;
     uint64_t unix_ts_s = unix_ts.count();
     array_uc32 hash_to_sign = {};
-    crypto_generichash_blake2b_state state;
-    crypto_generichash_blake2b_init(&state, /*key*/ nullptr, 0, hash_to_sign.max_size());
+    crypto_generichash_blake2b_state state = {};
+    make_blake2b32_hasher(&state);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state, master_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
@@ -299,15 +309,15 @@ bool GetProRevocationsResponse::parse(std::string_view json) {
         return errors.empty();
     }
 
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
-    if (errors.size())
-        return errors.empty();
-
     // Parse errors
     if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
         parse_json_response_errors(j, errors);
-        return errors.empty();
+        return false;
     }
+
+    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
+    if (errors.size())
+        return errors.empty();
 
     // Parse payload
     ticket = json_require<uint32_t>(result_obj, "ticket", errors);
@@ -354,6 +364,47 @@ std::string GetProPaymentsRequest::to_json() const {
     return result;
 }
 
+array_uc64 GetProPaymentsRequest::build_sig(
+        uint8_t version,
+        std::span<const uint8_t> master_privkey,
+        std::chrono::sys_seconds unix_ts,
+        uint32_t page) {
+    cleared_uc64 master_from_seed;
+    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
+        array_uc32 master_pubkey;
+        crypto_sign_ed25519_seed_keypair(
+                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
+        master_privkey = master_from_seed;
+    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
+        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
+    }
+
+    // Hash components to 32 bytes, must match:
+    //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
+    array_uc32 hash_to_sign = {};
+    crypto_generichash_blake2b_state state = {};
+    uint64_t unix_ts_s = unix_ts.time_since_epoch().count();
+    make_blake2b32_hasher(&state);
+    crypto_generichash_blake2b_update(&state, &version, sizeof(version));
+    crypto_generichash_blake2b_update(
+            &state, master_privkey.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
+    crypto_generichash_blake2b_update(
+            &state, reinterpret_cast<unsigned char*>(&unix_ts_s), sizeof(unix_ts_s));
+    crypto_generichash_blake2b_update(
+            &state, reinterpret_cast<unsigned char*>(&page), sizeof(page));
+    crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
+
+    // Sign the hash
+    array_uc64 result = {};
+    crypto_sign_ed25519_detached(
+            result.data(),
+            nullptr,
+            hash_to_sign.data(),
+            hash_to_sign.size(),
+            master_privkey.data());
+    return result;
+}
+
 bool GetProPaymentsResponse::parse(std::string_view json) {
     // Parse basics
     *this = {};
@@ -364,15 +415,15 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
         return errors.empty();
     }
 
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
-    if (errors.size())
-        return errors.empty();
-
     // Parse errors
     if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
         parse_json_response_errors(j, errors);
-        return errors.empty();
+        return false;
     }
+
+    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
+    if (errors.size())
+        return errors.empty();
 
     // Parse payload
     pages = json_require<uint32_t>(result_obj, "pages", errors);
@@ -413,6 +464,17 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
     }
     return errors.empty();
 }
+
+void make_blake2b32_hasher(crypto_generichash_blake2b_state *hasher)
+{
+    crypto_generichash_blake2b_init_salt_personal(
+            hasher,
+            /*key*/ nullptr,
+            0,
+            32,
+            /*salt*/ nullptr,
+            reinterpret_cast<const unsigned char*>(PRO_BACKEND_BLAKE2B_PERSONALIZATION.data()));
+}
 }  // namespace session::pro_backend
 
 using namespace session::pro_backend;
@@ -450,7 +512,7 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
-        result.error_count = std::snprintf(
+        result.error_count = snprintf_bytes_written_clamped(
                 result.error,
                 sizeof(result.error_count),
                 "%.*s",
@@ -482,7 +544,36 @@ session_pro_backend_get_pro_proof_request_build_sigs(
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
-        result.error_count = std::snprintf(
+        result.error_count = snprintf_bytes_written_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+    return result;
+}
+
+LIBSESSION_C_API session_pro_backend_signature
+session_pro_backend_get_pro_payments_request_build_sig(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_s,
+        uint32_t page)
+{
+    // Convert C inputs to C++ types
+    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::chrono::sys_seconds ts{std::chrono::seconds(unix_ts_s)};
+
+    session_pro_backend_signature result = {};
+    try {
+        auto sig = GetProPaymentsRequest::build_sig(request_version, master_span, ts, page);
+        std::memcpy(result.sig.data, sig.data(), sig.size());
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_bytes_written_clamped(
                 result.error,
                 sizeof(result.error_count),
                 "%.*s",
@@ -657,6 +748,7 @@ session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
     // Note that a response error and success case folds into the same code path. A success and error
     // response returns the same struct just with different fields populated.
     result.header.status = cpp.status;
+    result.version = cpp.version;
     result.expiry_unix_ts_s =
             std::chrono::duration_cast<std::chrono::seconds>(cpp.expiry_unix_ts.time_since_epoch())
                     .count();

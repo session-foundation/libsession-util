@@ -44,10 +44,10 @@ typedef struct pro_signed_message {
 
 typedef struct pro_proof {
     uint8_t version;
-    uint8_t gen_index_hash[32];
-    uint8_t rotating_pubkey[32];
-    uint64_t expiry_unix_ts;
-    uint8_t sig[64];
+    bytes32 gen_index_hash;
+    bytes32 rotating_pubkey;
+    uint64_t expiry_unix_ts_s;
+    bytes64 sig;
 } pro_proof;
 
 // Bit flags for features that are not currently able to be determined by the state stored in

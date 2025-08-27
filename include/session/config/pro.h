@@ -12,7 +12,7 @@ extern "C" {
 #include "session/session_protocol.h"
 
 typedef struct pro_config {
-    uint8_t rotating_privkey[64];
+    bytes64 rotating_privkey;
     pro_proof proof;
 } pro_pro_config;
 

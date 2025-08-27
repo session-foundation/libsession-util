@@ -37,6 +37,13 @@ typedef struct {
 } session_pro_backend_master_rotating_signatures;
 
 typedef struct {
+    bool success;
+    char error[256];
+    size_t error_count;
+    bytes64 sig;
+} session_pro_backend_signature;
+
+typedef struct {
     uint8_t version;
     bytes32 master_pkey;
     bytes32 rotating_pkey;
@@ -56,6 +63,7 @@ typedef struct {
 
 typedef struct {
     session_pro_backend_response_header header;
+    uint8_t version;
     uint64_t expiry_unix_ts_s;
     bytes32 gen_index_hash;
     bytes32 rotating_pkey;
@@ -152,7 +160,6 @@ session_pro_backend_add_pro_payment_request_build_sigs(
 /// - `rotating_privkey` -- Ed25519 rotating private key (32-byte or 64-byte libsodium format).
 /// - `rotating_privkey_len` -- Length of rotating_privkey.
 /// - `unix_ts_s` -- Unix timestamp (seconds) for the request.
-/// - `out_sigs` -- Pointer to store the master and rotating signatures.
 ///
 /// Outputs:
 /// - `bool` - True if signatures are built successfully, false otherwise.
@@ -169,6 +176,32 @@ session_pro_backend_get_pro_proof_request_build_sigs(
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
         uint64_t unix_ts_s);
+
+/// API: session_pro_backend/get_pro_payments_request_build_sig
+///
+/// Builds the signature for GetProPaymentsRequest
+/// Returns false if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
+/// Using 64-byte libsodium keys is more efficient.
+///
+/// Inputs:
+/// - `request_version` -- Version of the request.
+/// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
+/// - `master_privkey_len` -- Length of master_privkey.
+/// - `unix_ts_s` -- Unix timestamp (seconds) for the request.
+/// - `page` -- The page in the paginated list of historical payments to request
+///
+/// Outputs:
+/// - `bool` - True if signature was built successfully, false otherwise.
+/// - `error` - Backing error buffer for the signatures if `success` is false
+/// - `errors_count` - length of the error if `success` is false
+/// - `sig` - 64 byte signature
+LIBSESSION_EXPORT
+session_pro_backend_signature session_pro_backend_get_pro_payments_request_build_sig(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_s,
+        uint32_t page);
 
 /// API: session_pro_backend/add_pro_payment_request_to_json
 ///

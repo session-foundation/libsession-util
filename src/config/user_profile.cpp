@@ -285,15 +285,15 @@ LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro
         static_assert(sizeof pro->proof.sig == sizeof(val->proof.sig));
         pro->proof.version = val->proof.version;
         std::memcpy(
-                pro->proof.gen_index_hash,
+                pro->proof.gen_index_hash.data,
                 val->proof.gen_index_hash.data(),
                 val->proof.gen_index_hash.size());
         std::memcpy(
-                pro->proof.rotating_pubkey,
+                pro->proof.rotating_pubkey.data,
                 val->proof.rotating_pubkey.data(),
                 val->proof.rotating_pubkey.size());
-        pro->proof.expiry_unix_ts = val->proof.expiry_unix_ts.time_since_epoch().count();
-        std::memcpy(pro->proof.sig, val->proof.sig.data(), val->proof.sig.size());
+        pro->proof.expiry_unix_ts_s = val->proof.expiry_unix_ts.time_since_epoch().count();
+        std::memcpy(pro->proof.sig.data, val->proof.sig.data(), val->proof.sig.size());
         return true;
     }
     return false;
@@ -304,15 +304,15 @@ LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro
     val.proof.version = pro->proof.version;
     std::memcpy(
             val.proof.gen_index_hash.data(),
-            pro->proof.gen_index_hash,
+            pro->proof.gen_index_hash.data,
             val.proof.gen_index_hash.size());
     std::memcpy(
             val.proof.rotating_pubkey.data(),
-            pro->proof.rotating_pubkey,
+            pro->proof.rotating_pubkey.data,
             val.proof.rotating_pubkey.size());
     val.proof.expiry_unix_ts =
-            std::chrono::sys_seconds(std::chrono::seconds(pro->proof.expiry_unix_ts));
-    std::memcpy(val.proof.sig.data(), pro->proof.sig, val.proof.sig.size());
+            std::chrono::sys_seconds(std::chrono::seconds(pro->proof.expiry_unix_ts_s));
+    std::memcpy(val.proof.sig.data(), pro->proof.sig.data, val.proof.sig.size());
     unbox<UserProfile>(conf)->set_pro_config(val);
 }
 }  // extern "C"

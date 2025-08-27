@@ -32,11 +32,11 @@ TEST_CASE("Pro", "[config][pro]") {
                 pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
 
         // C
-        std::memcpy(pro.rotating_privkey, rotating_sk.data(), rotating_sk.size());
+        std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
         pro.proof.version = pro_cpp.proof.version;
-        std::memcpy(pro.proof.rotating_pubkey, rotating_pk.data(), rotating_pk.size());
-        pro.proof.expiry_unix_ts = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
-        std::memcpy(pro.proof.gen_index_hash, gen_index_hash.data(), gen_index_hash.size());
+        std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
+        pro.proof.expiry_unix_ts_s = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
+        std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
     }
 
     // Generate and write the hashes that are signed by the faux pro backend into the proof
@@ -60,7 +60,7 @@ TEST_CASE("Pro", "[config][pro]") {
         CHECK(sig_result == 0);
 
         sig_result = crypto_sign_ed25519_detached(
-                pro.proof.sig,
+                pro.proof.sig.data,
                 nullptr,
                 hash_to_sign.data,
                 sizeof(hash_to_sign.data),
@@ -82,8 +82,8 @@ TEST_CASE("Pro", "[config][pro]") {
         CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts));
         CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1s));
 
-        CHECK(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts));
-        CHECK_FALSE(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts + 1));
+        CHECK(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_s));
+        CHECK_FALSE(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_s + 1));
     }
 
     // Verify it can verify messages signed with the rotating public key

@@ -7,6 +7,7 @@
 #include <list>
 #include <memory>
 #include <session/config.hpp>
+#include <session/types.hpp>
 #include <session/util.hpp>
 #include <span>
 #include <type_traits>
@@ -28,9 +29,6 @@ class bt_dict_consumer;
 }  // namespace oxenc
 
 namespace session::config {
-
-template <typename T, typename... U>
-static constexpr bool is_one_of = (std::is_same_v<T, U> || ...);
 
 /// True for a dict_value direct subtype, but not scalar sub-subtypes.
 template <typename T>
