@@ -10,6 +10,10 @@ class ITransport {
 
     virtual ~ITransport() = default;
 
+    virtual void suspend() = 0;
+    virtual void resume() = 0;
+    virtual void close_connections() = 0;
+
     virtual ConnectionStatus get_status() const = 0;
     virtual void set_node_failure_reporter(node_failure_reporter_t reporter) {}
     virtual void verify_connectivity(

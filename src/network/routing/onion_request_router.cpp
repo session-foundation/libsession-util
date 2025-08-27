@@ -211,22 +211,34 @@ OnionRequestRouter::OnionRequestRouter(
 }
 
 OnionRequestRouter::~OnionRequestRouter() {
-    _loop->call([this] {
-        // Remove any failure listeners for the guard nodes of the current paths
-        if (auto transport = _transport.lock())
-            for (const auto& [category, path_list] : _paths)
-                for (const auto& p : path_list)
-                    if (!p.nodes.empty())
-                        transport->remove_failure_listeners(ed25519_pubkey::from_bytes(p.nodes[0].view_remote_key()));
-        
-        // The connection status is recalculated based on these values so we need to call them
-        // before recalculation so it correctly detects the "disconnected" state
-        _paths.clear();
-        _in_progress_path_builds.clear();
-
-        _update_status();
-    });
+    // Use 'call_get' to force this to be synchronous
+    if (_loop)
+        _loop->call_get([this] { _close_connections(); });
     log::debug(cat, "[OnionRequestRouter] Destroyed.");
+}
+
+// MARK: IRouter
+
+void OnionRequestRouter::suspend() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = true;
+        _close_connections();
+        log::info(cat, "[OnionRequestRouter] Suspended.");
+    });
+}
+
+void OnionRequestRouter::resume() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = false;
+        log::info(cat, "[OnionRequestRouter] Resumed.");
+    });
+}
+
+void OnionRequestRouter::close_connections() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] { _close_connections(); });
 }
 
 std::vector<PathInfo> OnionRequestRouter::get_active_paths() {
@@ -307,6 +319,41 @@ void OnionRequestRouter::_finish_setup() {
     }
 }
 
+void OnionRequestRouter::_close_connections() {
+    // Cancel any pending requests (they can't succeed once the connection is closed)
+    for (auto& [path_type, path_type_queue] : _request_queues) {
+        auto to_fail = path_type_queue.pop_all();
+        
+        for (const auto& [req, callback] : to_fail)
+            callback(
+                    false,
+                    false,
+                    ERROR_NETWORK_SUSPENDED,
+                    {content_type_plain_text},
+                    "Network is suspended.");
+    }
+
+    // Remove any failure listeners for the guard nodes of the current paths
+    if (auto transport = _transport.lock())
+        for (const auto& [category, path_list] : _paths)
+            for (const auto& p : path_list)
+                if (!p.nodes.empty())
+                    transport->remove_failure_listeners(ed25519_pubkey::from_bytes(p.nodes[0].view_remote_key()));
+    
+    // Clear all storage of requests, paths and connections so that we are in a fresh state on
+    // relaunch
+    //
+    // The connection status is recalculated based on these values so we need to call them
+    // before recalculation so it correctly detects the "disconnected" state
+    _paths.clear();
+    _paths_pending_drop.clear();
+    _in_progress_path_builds.clear();
+    _path_build_retries.clear();
+    _pending_paths.clear();
+    _update_status();
+    log::info(cat, "[OnionRequestRouter] Closed all connections.");
+}
+
 void OnionRequestRouter::_update_status() {
     ConnectionStatus new_status = ConnectionStatus::disconnected;
 
@@ -330,13 +377,22 @@ void OnionRequestRouter::_update_status() {
 
 void OnionRequestRouter::_send_request_internal(
         Request request, network_response_callback_t callback) {
+    // If we are suspended then fail immediately
+    if (_suspended)
+        return callback(
+                false,
+                false,
+                ERROR_NETWORK_SUSPENDED,
+                {content_type_plain_text},
+                "OnionRequestRouter is suspended.");
+
     auto initiating_req_category =
             (_config.single_path_mode ? RequestCategory::standard : request.category);
 
     if (!_ready) {
         log::debug(
                 cat,
-                "[OnionRouter Request {}]: Router not ready, queueing request.",
+                "[OnionRequestRouter Request {}]: Router not ready, queueing request.",
                 request.request_id);
 
         try {
@@ -424,6 +480,11 @@ void OnionRequestRouter::_build_path(
         RequestCategory category,
         std::optional<std::string> initiating_req_id,
         const std::vector<service_node>& nodes_to_exclude_) {
+    if (_suspended) {
+        log::info(cat, "Ignoring build_path call as network is suspended.");
+        return;
+    }
+
     const std::string req_id_log = (initiating_req_id ? *initiating_req_id : "internal");
     const std::string path_id = "P-" + random::random_base32(4);
     log::info(

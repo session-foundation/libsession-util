@@ -11,6 +11,7 @@
 
 namespace session::network {
 
+constexpr int16_t ERROR_NETWORK_SUSPENDED = -10001;
 constexpr int16_t ERROR_BUILD_TIMEOUT = -10003;
 
 const std::pair<std::string, std::string> content_type_plain_text = {

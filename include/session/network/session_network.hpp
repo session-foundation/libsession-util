@@ -23,6 +23,7 @@ class Network_v2 {
     std::shared_ptr<SnodePool> _snode_pool;
     std::shared_ptr<ITransport> _transport;
     std::shared_ptr<IRouter> _router;
+    bool _suspended = false;
 
   public:
     // Hook to be notified whenever the network connection status changes.
@@ -41,6 +42,11 @@ class Network_v2 {
     int hardfork() const { return _fork_versions.load().hardfork; };
     int softfork() const { return _fork_versions.load().softfork; };
 
+    void suspend();
+    void resume();
+    void close_connections();
+    void clear_cache();
+    
     std::vector<PathInfo> get_active_paths();
 
     /// API: network/get_swarm
@@ -78,6 +84,7 @@ class Network_v2 {
 
     void configure();
 
+    void _close_connections();
     void _recalculate_status();
     void _update_status(ConnectionStatus new_status);
     void _update_network_state(const std::string& body);

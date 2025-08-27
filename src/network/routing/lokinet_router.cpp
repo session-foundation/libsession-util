@@ -98,8 +98,40 @@ LokinetRouter::LokinetRouter(
 }
 
 LokinetRouter::~LokinetRouter() {
-    _update_status(ConnectionStatus::disconnected);
+    // Use 'call_get' to force this to be synchronous
+    if (_loop)
+        _loop->call_get([this] {
+            _update_status(ConnectionStatus::disconnected);
+        });
     log::debug(cat, "[LokinetRouter] Destroyed.");
+}
+
+// MARK: IRouter
+
+void LokinetRouter::suspend() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = true;
+        _close_connections();
+        log::info(cat, "[LokinetRouter] Suspended.");
+    });
+}
+
+void LokinetRouter::resume() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = false;
+        log::info(cat, "[LokinetRouter] Resumed.");
+    });
+}
+
+void LokinetRouter::close_connections() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] { _close_connections(); });
+}
+
+void LokinetRouter::clear_cache() {
+    // TODO: Implement this
 }
 
 std::vector<PathInfo> LokinetRouter::get_active_paths() {
@@ -142,6 +174,27 @@ void LokinetRouter::_finish_setup() {
                 _send_request_internal(std::move(req), std::move(cb));
         }
     }
+}
+
+void LokinetRouter::_close_connections() {
+    // TODO: Need to close any active connections on the lokinet instance
+
+    // Cancel any pending requests (they can't succeed once the connection is closed)
+    for (const auto& [pubkey, pupkey_requests] : _pending_requests)
+        for (const auto& [info, callback] : pupkey_requests)
+            callback(
+                    false,
+                    false,
+                    ERROR_NETWORK_SUSPENDED,
+                    {content_type_plain_text},
+                    "Network is suspended.");
+
+    // Clear all storage of requests, paths and connections so that we are in a fresh state on
+    // relaunch
+    _active_tunnels.clear();
+    _pending_requests.clear();
+    _update_status(ConnectionStatus::disconnected);
+    log::info(cat, "[LokinetRouter] Closed all connections.");
 }
 
 void LokinetRouter::_update_status(ConnectionStatus new_status) {

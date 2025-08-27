@@ -129,6 +129,11 @@ LIBSESSION_EXPORT void session_network_free(network_object_v2* network);
 /// - `params` -- [in] Pointer to session_request_params object
 LIBSESSION_EXPORT void session_request_params_free(session_request_params* params);
 
+LIBSESSION_EXPORT void session_network_suspend(network_object_v2* network);
+LIBSESSION_EXPORT void session_network_resume(network_object_v2* network);
+LIBSESSION_EXPORT void session_network_close_connections(network_object_v2* network);
+LIBSESSION_EXPORT void session_network_clear_cache(network_object_v2* network);
+
 LIBSESSION_EXPORT uint64_t session_network_time_offset(network_object_v2* network);
 LIBSESSION_EXPORT int session_network_hardfork(network_object_v2* network);
 LIBSESSION_EXPORT int session_network_softfork(network_object_v2* network);

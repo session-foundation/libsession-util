@@ -245,6 +245,11 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
     {
         std::unique_lock lock{_cache_mutex};
 
+        if (_suspended) {
+            log::info(cat, "Ignoring refresh as pool is suspended.");
+            return;
+        }
+
         // Only allow a single cache refresh at a time
         if (_current_snode_cache_refresh_id) {
             log::debug(
@@ -645,6 +650,18 @@ void SnodePool::_on_refresh_complete(
 
 // MARK: Public Functions
 
+void SnodePool::suspend() {
+    std::unique_lock lock{_cache_mutex};
+    _suspended = true;
+    log::info(cat, "Suspended.");
+}
+
+void SnodePool::resume() {
+    std::unique_lock lock{_cache_mutex};
+    _suspended = false;
+    log::info(cat, "Resumed.");
+}
+
 void SnodePool::set_standard_fetcher(network_fetcher_t standard_fetcher) {
     std::unique_lock lock{_cache_mutex};
     _standard_fetcher = std::move(standard_fetcher);
@@ -685,6 +702,11 @@ void SnodePool::refresh_if_needed(
 
     {
         std::lock_guard lock{_cache_mutex};
+
+        if (_suspended) {
+            log::info(cat, "Ignoring refresh as pool is suspended.");
+            return;
+        }
 
         // Don't bother if we are alread doing a refresh
         if (_current_snode_cache_refresh_id)

@@ -41,6 +41,7 @@ struct OnionPath {
 class OnionRequestRouter : public IRouter {
   private:
     bool _ready = false;
+    bool _suspended = false;
     config::OnionRequestRouterConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::weak_ptr<SnodePool> _snode_pool;
@@ -62,6 +63,11 @@ class OnionRequestRouter : public IRouter {
             std::weak_ptr<ITransport> transport);
     ~OnionRequestRouter() override;
 
+    void suspend() override;
+    void resume() override;
+    void close_connections() override;
+    void clear_cache() override {}
+
     ConnectionStatus get_status() const override { return _status.load(); };
     std::vector<PathInfo> get_active_paths() override;
     std::vector<service_node> get_all_used_nodes() override;
@@ -72,6 +78,7 @@ class OnionRequestRouter : public IRouter {
 
     // All of the below functions should only be called from within `_loop`
     void _finish_setup();
+    void _close_connections();
     void _update_status();
     void _send_request_internal(Request request, network_response_callback_t callback);
 

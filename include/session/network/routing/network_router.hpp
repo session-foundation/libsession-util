@@ -10,6 +10,11 @@ class IRouter {
 
     virtual ~IRouter() = default;
 
+    virtual void suspend() = 0;
+    virtual void resume() = 0;
+    virtual void close_connections() = 0;
+    virtual void clear_cache() = 0;
+
     virtual ConnectionStatus get_status() const = 0;
     virtual std::vector<PathInfo> get_active_paths() { return {}; };
     virtual std::vector<service_node> get_all_used_nodes() { return {}; };

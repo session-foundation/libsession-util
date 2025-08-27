@@ -44,6 +44,9 @@ class SnodePool {
             network_fetcher_t bootstrap_fetcher);
     ~SnodePool();
 
+    void suspend();
+    void resume();
+
     // Sets the network fetcher which should be used once the snode cache exists
     void set_standard_fetcher(network_fetcher_t standard_fetcher);
 
@@ -70,6 +73,7 @@ class SnodePool {
             size_t count, const std::vector<service_node>& exclude = {});
 
   private:
+    bool _suspended = false;
     config::SnodePoolConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     network_fetcher_t _bootstrap_fetcher;

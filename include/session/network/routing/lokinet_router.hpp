@@ -32,6 +32,7 @@ namespace config {
 class LokinetRouter : public IRouter {
   private:
     bool _ready = false;
+    bool _suspended = false;
     config::LokinetRouterConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<lokinet::Lokinet> lokinet;
@@ -50,6 +51,11 @@ class LokinetRouter : public IRouter {
             std::weak_ptr<ITransport> transport);
     ~LokinetRouter() override;
 
+    void suspend() override;
+    void resume() override;
+    void close_connections() override;
+    void clear_cache() override;
+
     ConnectionStatus get_status() const override { return _status.load(); };
     std::vector<PathInfo> get_active_paths() override;
     void send_request(Request request, network_response_callback_t callback) override;
@@ -59,6 +65,7 @@ class LokinetRouter : public IRouter {
 
     // All of the below functions should only be called from within `_loop`
     void _finish_setup();
+    void _close_connections();
     void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _establish_tunnel(

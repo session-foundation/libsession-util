@@ -29,6 +29,7 @@ namespace config {
 
 class QuicTransport : public ITransport {
   private:
+    bool _suspended = false;
     config::QuicTransportConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<oxen::quic::Endpoint> _endpoint;
@@ -46,6 +47,10 @@ class QuicTransport : public ITransport {
     explicit QuicTransport(
             config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop);
     ~QuicTransport() override;
+
+    void suspend() override;
+    void resume() override;
+    void close_connections() override;
 
     ConnectionStatus get_status() const override { return _status.load(); };
     void set_node_failure_reporter(node_failure_reporter_t reporter) override;
@@ -69,6 +74,7 @@ class QuicTransport : public ITransport {
     // disconnected
     bool _has_attempted_reconnect = false;
 
+    void _close_connections();
     void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _establish_connection(

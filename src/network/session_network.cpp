@@ -183,9 +183,61 @@ Network_v2::Network_v2(config::Config config) : config{config} {
 }
 
 Network_v2::~Network_v2() {
-    _update_status(ConnectionStatus::disconnected);
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
     log::debug(cat, "[Network] Destroyed.");
 }
+
+void Network_v2::clear_cache() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        if (_snode_pool)
+            _snode_pool->clear_cache();
+        if (_router)
+            _router->clear_cache();
+    });
+}
+
+// MARK: Connection
+
+void Network_v2::suspend() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = true;
+
+        if (_snode_pool)
+            _snode_pool->suspend();
+        if (_transport)
+            _transport->suspend();
+        if (_router)
+            _router->suspend();
+
+        _close_connections();
+        log::info(cat, "Suspended.");
+    });
+}
+
+void Network_v2::resume() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        if (_snode_pool)
+            _snode_pool->resume();
+        if (_transport)
+            _transport->resume();
+        if (_router)
+            _router->resume();
+
+        _suspended = false;
+        log::info(cat, "Resumed.");
+    });
+}
+
+void Network_v2::close_connections() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] { _close_connections(); });
+}
+
+// MARK: Interface
 
 std::vector<PathInfo> Network_v2::get_active_paths() {
     if (_router)
@@ -266,6 +318,16 @@ void Network_v2::send_request(Request request, network_response_callback_t callb
 }
 
 // MARK: Internal Logic
+
+void Network_v2::_close_connections() {
+    if (_transport)
+        _transport->close_connections();
+    if (_router)
+        _router->close_connections();
+
+    _recalculate_status();
+    log::info(cat, "Closed all connections.");
+}
 
 void Network_v2::_recalculate_status() {
     _loop->call([this] {
@@ -800,6 +862,22 @@ LIBSESSION_C_API void session_network_free(network_object_v2* network) {
 LIBSESSION_C_API void session_request_params_free(session_request_params* params) {
     if (params)
         std::free(params);
+}
+
+LIBSESSION_C_API void session_network_suspend(network_object_v2* network) {
+    unbox(network).suspend();
+}
+
+LIBSESSION_C_API void session_network_resume(network_object_v2* network) {
+    unbox(network).resume();
+}
+
+LIBSESSION_C_API void session_network_close_connections(network_object_v2* network) {
+    unbox(network).close_connections();
+}
+
+LIBSESSION_C_API void session_network_clear_cache(network_object_v2* network) {
+    unbox(network).clear_cache();
 }
 
 LIBSESSION_C_API uint64_t session_network_time_offset(network_object_v2* network) {

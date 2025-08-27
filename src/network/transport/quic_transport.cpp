@@ -35,11 +35,34 @@ QuicTransport::QuicTransport(
 }
 
 QuicTransport::~QuicTransport() {
-    _update_status(ConnectionStatus::disconnected);
-
-    if (_endpoint)
-        _loop->call_get([this] { _endpoint->close_conns(); });
+    // Use 'call_get' to force this to be synchronous
+    if (_loop)
+        _loop->call_get([this] { _close_connections(); });
     log::debug(cat, "[QuicTransport] Destroyed.");
+}
+
+// MARK: ITransport
+
+void QuicTransport::suspend() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = true;
+        _close_connections();
+        log::info(cat, "[QuicTransport] Suspended.");
+    });
+}
+
+void QuicTransport::resume() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = false;
+        log::info(cat, "[QuicTransport] Resumed.");
+    });
+}
+
+void QuicTransport::close_connections() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] { _close_connections(); });
 }
 
 void QuicTransport::set_node_failure_reporter(node_failure_reporter_t reporter) {
@@ -90,6 +113,39 @@ void QuicTransport::send_request(Request request, network_response_callback_t ca
 
 // MARK: Internal Logic
 
+void QuicTransport::_close_connections() {
+    // Explicitly close all connections then reset the endpoint
+    if (_endpoint)
+        _endpoint->close_conns();
+    _endpoint.reset();
+
+    // Cancel any pending verifications (they can't succeed once the connection is closed)
+    for (const auto& [pubkey, callbacks] : _pending_verification_callbacks)
+        for (const auto& callback : callbacks)
+            callback(false);
+
+    // Cancel any pending requests (they can't succeed once the connection is closed)
+    for (const auto& [pubkey, pupkey_requests] : _pending_requests)
+        for (const auto& [info, callback] : pupkey_requests)
+            callback(
+                    false,
+                    false,
+                    ERROR_NETWORK_SUSPENDED,
+                    {content_type_plain_text},
+                    "QuickTransport is suspended.");
+
+    // Clear all storage of requests, paths and connections so that we are in a fresh state on
+    // relaunch
+    _ephemeral_connection_ids.clear();
+    _active_connection_ids.clear();
+    _active_stream_ids.clear();
+    _pending_verification_callbacks.clear();
+    _pending_requests.clear();
+
+    _update_status(ConnectionStatus::disconnected);
+    log::info(cat, "[QuicTransport] Closed all connections.");
+}
+
 void QuicTransport::_update_status(ConnectionStatus new_status) {
     ConnectionStatus old_status = _status.load();
     if (old_status == new_status)
@@ -119,6 +175,15 @@ void QuicTransport::_update_status(ConnectionStatus new_status) {
 }
 
 void QuicTransport::_send_request_internal(Request request, network_response_callback_t callback) {
+    // If we are suspended then fail immediately
+    if (_suspended)
+        return callback(
+                false,
+                false,
+                ERROR_NETWORK_SUSPENDED,
+                {content_type_plain_text},
+                "QuickTransport is suspended.");
+
     std::optional<oxen::quic::RemoteAddress> remote;
 
     std::visit(
