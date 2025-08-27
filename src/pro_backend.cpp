@@ -442,11 +442,12 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
         }
 
         // Parse payment item
-        auto obj            = it.get<nlohmann::json::object_t>();
-        auto activation_ts  = json_require<uint64_t>(obj, "activation_unix_ts_s", errors);
-        auto archive_ts     = json_require<uint64_t>(obj, "archive_unix_ts_s", errors);
-        auto creation_ts    = json_require<uint64_t>(obj, "creation_unix_ts_s", errors);
-        auto sub_duration_s = json_require<uint64_t>(obj, "subscription_duration_s", errors);
+        auto obj              = it.get<nlohmann::json::object_t>();
+        auto activation_ts    = json_require<uint64_t>(obj, "activation_unix_ts_s", errors);
+        auto archive_ts       = json_require<uint64_t>(obj, "archive_unix_ts_s", errors);
+        auto creation_ts      = json_require<uint64_t>(obj, "creation_unix_ts_s", errors);
+        auto sub_duration_s   = json_require<uint64_t>(obj, "subscription_duration_s", errors);
+        auto payment_provider = json_require<uint32_t>(obj, "payment_provider", errors);
 
         ProPaymentItem item        = {};
         item.activation_unix_ts    = std::chrono::sys_seconds(std::chrono::seconds(activation_ts));
@@ -454,6 +455,12 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
         item.creation_unix_ts      = std::chrono::sys_seconds(std::chrono::seconds(creation_ts));
         item.subscription_duration = std::chrono::seconds(sub_duration_s);
         json_require_fixed_bytes_from_hex(obj, "payment_token_hash", errors, item.payment_token_hash);
+        if (payment_provider > SESSION_PRO_PAYMENT_PROVIDER_NIL &&
+            payment_provider < SESSION_PRO_PAYMENT_PROVIDER_LAST) {
+            item.payment_provider = static_cast<SESSION_PRO_PAYMENT_PROVIDER>(payment_provider);
+        } else {
+            errors.push_back(fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
+        }
 
         // Handle parsing result
         if (errors.size())
@@ -900,6 +907,7 @@ LIBSESSION_C_API session_pro_backend_get_pro_payments_response session_pro_backe
                                         .count();
         dest.subscription_duration =
                 std::chrono::duration_cast<std::chrono::seconds>(src.subscription_duration).count();
+        dest.payment_provider = src.payment_provider;
         std::memcpy(
                 dest.payment_token_hash.data,
                 src.payment_token_hash.data(),

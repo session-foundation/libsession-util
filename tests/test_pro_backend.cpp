@@ -31,6 +31,7 @@ static bool string8_equals(string8 s8, std::string_view str) {
     fprintf(stderr, "item.archive_unix_ts_s: %zu\n", item.archive_unix_ts_s);
     fprintf(stderr, "item.creation_unix_ts_s: %zu\n", item.creation_unix_ts_s);
     fprintf(stderr, "item.subscription_duration: %zu\n", item.subscription_duration);
+    fprintf(stderr, "item.payment_provider: %u\n", item.payment_provider);
     fprintf(stderr, "item.payment_token_hash: %s\n", oxenc::to_hex(item.payment_token_hash.data).c_str());
 }
 
@@ -470,6 +471,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     {"archive_unix_ts_s", unix_ts_s + 3600},
                     {"creation_unix_ts_s", unix_ts_s - 3600},
                     {"subscription_duration_s", 86400},
+                    {"payment_provider", SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
                     {"payment_token_hash", oxenc::to_hex(payment_token_hash.data)}
                 }
             })}
@@ -488,6 +490,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         REQUIRE(result.items_count == 1);
         REQUIRE(result.items != nullptr);
         REQUIRE(result.items[0].activation_unix_ts_s == unix_ts_s);
+        REQUIRE(result.items[0].payment_provider > SESSION_PRO_PAYMENT_PROVIDER_NIL);
+        REQUIRE(result.items[0].payment_provider < SESSION_PRO_PAYMENT_PROVIDER_LAST);
         REQUIRE(result.items[0].archive_unix_ts_s == unix_ts_s + 3600);
         REQUIRE(result.items[0].creation_unix_ts_s == unix_ts_s - 3600);
         REQUIRE(result.items[0].subscription_duration == 86400);

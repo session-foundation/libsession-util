@@ -1,11 +1,12 @@
 #pragma once
 
+#include <session/pro_backend.h>
+
 #include <chrono>
+#include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <span>
 #include <string>
-#include <chrono>
-#include <session/session_protocol.hpp>
 
 /// Helper functions to construct payloads to communicate with the Session Pro Backend. The data
 /// structures here are largely bindings to the endpoints exposed on the Session Pro Backend:
@@ -19,7 +20,8 @@
 ///
 ///    Server responds JSON to be parsed with `GetProPaymentsRequest::parse`. Clients should
 ///    validate the response and update their `UserProfile` by constructing a `ProConfig` with the
-///    proof from the response filling in the remaining fields appropriately in `ProConfig`
+///    proof from the response by using `ProProof::from_pro_backend_response()` and filling in the
+///    relevant private key that the proof was authorised for.
 ///
 ///    The server will only respond successfully if it can also independently verify the purchase
 ///    otherwise an error is returned and can be read from the `ResponseHeader` after parsing the
@@ -305,6 +307,9 @@ struct ProPaymentItem {
 
     /// Subscription duration in seconds
     std::chrono::seconds subscription_duration;
+
+    /// Store front that this particular payment came from
+    SESSION_PRO_PAYMENT_PROVIDER payment_provider;
 
     /// 32-byte hash of the payment token
     array_uc32 payment_token_hash;

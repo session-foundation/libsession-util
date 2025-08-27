@@ -16,6 +16,15 @@ enum {
     SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR = 1,
 };
 
+/// Store front that a Session Pro payment came from. Must match:
+///   https://github.com/Doy-lee/session-pro-backend/blob/3a1bdf2bfdc83487280e9b1d9a40aac8fd168dd6/base.py#L14
+typedef enum SESSION_PRO_PAYMENT_PROVIDER {
+  SESSION_PRO_PAYMENT_PROVIDER_NIL = 0,
+  SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE = 1,
+  SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE = 2,
+  SESSION_PRO_PAYMENT_PROVIDER_LAST = SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE + 1,
+} SESSION_PRO_PAYMENT_PROVIDER;
+
 typedef struct session_pro_backend_response_header {
     uint32_t status;
     /// Array of error messages (NULL if no errors), with errors_count elements
@@ -98,6 +107,7 @@ typedef struct session_pro_backend_pro_payment_item {
     uint64_t archive_unix_ts_s;
     uint64_t creation_unix_ts_s;
     uint64_t subscription_duration;
+    SESSION_PRO_PAYMENT_PROVIDER payment_provider;
     bytes32 payment_token_hash;
 } session_pro_backend_pro_payment_item;
 
