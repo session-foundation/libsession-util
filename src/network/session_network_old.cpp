@@ -638,7 +638,7 @@ void Network::_close_connections() {
             callback(
                     false,
                     false,
-                    error_network_suspended,
+                    ERROR_NETWORK_SUSPENDED,
                     {content_type_plain_text},
                     "Network is suspended.");
 
@@ -1878,7 +1878,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
                 return cb(
                         false,
                         false,
-                        error_network_suspended,
+                        ERROR_NETWORK_SUSPENDED,
                         {content_type_plain_text},
                         "Network is suspended.");
 

@@ -164,9 +164,8 @@ Network_v2::Network_v2(config::Config config) : config{config} {
     }
 
     // Now that we have our router setup we need to setup the `standard_fetcher` on the `SnodePool`
-    _snode_pool->set_standard_fetcher([r = std::weak_ptr{_router}, loop = _loop](
-                                              Request req,
-                                              network_response_callback_t on_complete) {
+    auto standard_fetcher = [r = std::weak_ptr{_router}, loop = _loop](
+                                    Request req, network_response_callback_t on_complete) {
         loop->call([r, req = std::move(req), on_complete = std::move(on_complete)] {
             if (auto router = r.lock())
                 router->send_request(std::move(req), std::move(on_complete));
@@ -175,7 +174,17 @@ Network_v2::Network_v2(config::Config config) : config{config} {
                         cat,
                         "Router provided to the SnodePool standard fetcher has been destroyed.");
         });
-    });
+    };
+    auto standard_fetcher_connected = [r = std::weak_ptr{_router}, loop = _loop]() -> bool {
+        return loop->call_get([r] {
+            if (auto router = r.lock())
+                return router->get_status() == ConnectionStatus::connected;
+
+            return false;
+        });
+    };
+    _snode_pool->set_standard_fetcher(
+            std::move(standard_fetcher), std::move(standard_fetcher_connected));
 
     // Add hooks to update the connection status
     _router->on_status_changed = [this] { _recalculate_status(); };

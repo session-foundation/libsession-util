@@ -37,6 +37,7 @@ namespace config {
 class SnodePool {
   public:
     using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
+    using fetcher_connectivity_check_t = std::function<bool()>;
 
     SnodePool(
             config::SnodePoolConfig config,
@@ -48,7 +49,8 @@ class SnodePool {
     void resume();
 
     // Sets the network fetcher which should be used once the snode cache exists
-    void set_standard_fetcher(network_fetcher_t standard_fetcher);
+    void set_standard_fetcher(
+            network_fetcher_t standard_fetcher, fetcher_connectivity_check_t connectivity_check);
 
     // Returns the number of nodes currently in the pool
     size_t size();
@@ -78,6 +80,7 @@ class SnodePool {
     std::shared_ptr<oxen::quic::Loop> _loop;
     network_fetcher_t _bootstrap_fetcher;
     std::optional<network_fetcher_t> _standard_fetcher;
+    std::optional<fetcher_connectivity_check_t> _standard_fetcher_connectivity_check;
 
     // Data (protected by '_cache_mutex')
     std::vector<service_node> _snode_cache;

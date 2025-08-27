@@ -273,16 +273,19 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
         auto bootstrap_mode =
                 (_config.cache_num_nodes_to_use_for_refresh == 0 ||
                  _snode_cache.size() < _config.cache_num_nodes_to_use_for_refresh);
-        is_bootstrap = (!_standard_fetcher || bootstrap_mode);
+        auto standard_fetcher_not_ready =
+                (!_standard_fetcher_connectivity_check || !_standard_fetcher ||
+                 (*_standard_fetcher_connectivity_check)());
+        is_bootstrap = (bootstrap_mode || standard_fetcher_not_ready);
         num_nodes_for_refresh = (is_bootstrap ? 1 : _config.cache_num_nodes_to_use_for_refresh);
         _refresh_candidate_nodes = (is_bootstrap ? _config.seed_nodes : _snode_cache);
         std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
 
-        if (is_bootstrap && !bootstrap_mode)
+        if (is_bootstrap && !standard_fetcher_not_ready)
             log::warning(
                     cat,
-                    "No standard fetcher set, using bootstrap fetcher to fetch from seed nodes for "
-                    "cache refresh {}",
+                    "{}, using bootstrap fetcher to fetch from seed nodes for cache refresh {}",
+                    (!_standard_fetcher ? "No standard fetcher set" : "Standard fetcher not ready"),
                     request_id);
         else if (is_bootstrap)
             log::debug(
@@ -661,9 +664,11 @@ void SnodePool::resume() {
     log::info(cat, "Resumed.");
 }
 
-void SnodePool::set_standard_fetcher(network_fetcher_t standard_fetcher) {
+void SnodePool::set_standard_fetcher(
+        network_fetcher_t standard_fetcher, fetcher_connectivity_check_t connectivity_check) {
     std::unique_lock lock{_cache_mutex};
     _standard_fetcher = std::move(standard_fetcher);
+    _standard_fetcher_connectivity_check = std::move(connectivity_check);
 }
 
 size_t SnodePool::size() {
