@@ -12,6 +12,24 @@
 /// A complimentary file to session encrypt (which has the low level encryption function for Session
 /// protocol types). This file contains high-level helper functions for decoding payloads on the
 /// Session protocol. Prefer functions here before resorting to the lower-level cryptography.
+///
+/// The general overview is that this file introduces functionality to abstract away protobufs types
+/// on the Session Protocol from client implementations by wrapping the data structures where
+/// necessary in libsession. In general clients will use the functions in this file as follows:
+///
+/// - Derive Session Pro feature flags from a message for populating the new Pro fields for messages
+///
+/// - Wrap and/or encrypt a plaintext content message into an Envelope or Websocket message
+///   (depending on the configured namespace and destination) ready to be sent on the wire with
+///   `encrypt_for_destination`.
+///
+/// - Decrypt an incoming message in its websocket wrapped, and or encrypted envelope form with
+///   `decrypt_envelope`
+///
+/// TODO: In future the goal is to begin abstracting more protobuf types away from client
+/// implementations such that the only dependency clients need to encode and decode Session Protocol
+/// messages is libsession itself and that it will provide wrapper/proxy types for and handle
+/// converting those into the wire format.
 
 // NOTE: In the CPP file we use C-style enums for bitfields and CPP-style enums for non-bitfield
 // enums where we can to benefit from the type-safety of strong enums.
