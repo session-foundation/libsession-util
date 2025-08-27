@@ -65,14 +65,26 @@ void Config::handle_config_opt(opt::netid netid_) {
 
     switch (netid_.target) {
         case opt::netid::Target::mainnet:
-            log::debug(cat, "Network config set to mainnet with {} seed nodes", seed_nodes.size());
+            log::debug(
+                    cat,
+                    "Network config set to mainnet with {} seed node{}",
+                    seed_nodes.size(),
+                    seed_nodes.size() == 1 ? "" : "s");
             break;
         case opt::netid::Target::testnet:
-            log::debug(cat, "Network config set to testnet with {} seed nodes", seed_nodes.size());
+            log::debug(
+                    cat,
+                    "Network config set to testnet with {} seed node{}",
+                    seed_nodes.size(),
+                    seed_nodes.size() == 1 ? "" : "s");
             break;
 
         case opt::netid::Target::devnet:
-            log::debug(cat, "Network config set to devnet with {} seed nodes", seed_nodes.size());
+            log::debug(
+                    cat,
+                    "Network config set to devnet with {} seed node{}",
+                    seed_nodes.size(),
+                    seed_nodes.size() == 1 ? "" : "s");
             break;
     }
 }

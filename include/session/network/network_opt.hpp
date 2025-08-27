@@ -50,42 +50,42 @@ namespace opt {
                     service_node{
                             from_hex("1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1"
                                      "fef"),
-                            oxen::quic::ipv4{"144.76.164.202"},
-                            uint16_t{0},  // TODO: Get this
+                            oxen::quic::ipv4{"95.216.33.113"},
+                            uint16_t{22100},
                             uint16_t{20200},
-                            {2, 10, 0},
+                            {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
                             from_hex("1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a"
                                      "7ce"),
-                            oxen::quic::ipv4{"88.99.102.229"},
-                            uint16_t{0},  // TODO: Get this
+                            oxen::quic::ipv4{"37.27.236.229"},
+                            uint16_t{22101},
                             uint16_t{20201},
-                            {2, 10, 0},
+                            {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
                             from_hex("1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e061999"
                                      "19f"),
-                            oxen::quic::ipv4{"195.16.73.17"},
-                            uint16_t{0},  // TODO: Get this
+                            oxen::quic::ipv4{"172.96.140.124"},
+                            uint16_t{22102},
                             uint16_t{20202},
-                            {2, 10, 0},
+                            {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
                             from_hex("1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d"
                                      "78b"),
-                            oxen::quic::ipv4{"104.194.11.120"},
-                            uint16_t{0},  // TODO: Get this
+                            oxen::quic::ipv4{"208.73.207.54"},
+                            uint16_t{22103},
                             uint16_t{20203},
-                            {2, 10, 0},
+                            {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
                     service_node{
                             from_hex("1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db"
                                      "7b0"),
                             oxen::quic::ipv4{"104.194.8.115"},
-                            uint16_t{0},  // TODO: Get this
+                            uint16_t{22104},
                             uint16_t{20204},
-                            {2, 10, 0},
+                            {2, 11, 0},
                             swarm::INVALID_SWARM_ID},
             };
 
