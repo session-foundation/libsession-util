@@ -133,8 +133,7 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         std::uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
-        std::span<const uint8_t> payment_token_hash,
-        std::chrono::sys_seconds unix_ts) {
+        std::span<const uint8_t> payment_token_hash) {
     if (payment_token_hash.size() != 32)
         throw std::invalid_argument{"Invalid payment_token_hash: expected 32 bytes"};
 
@@ -209,14 +208,14 @@ bool AddProPaymentOrGetProProofResponse::parse(std::string_view json) {
         return errors.empty();
 
     // Parse payload
-    version = json_require<uint8_t>(result_obj, "version", errors);
+    proof.version = json_require<uint8_t>(result_obj, "version", errors);
     auto expiry_unix_ts_s = json_require<uint64_t>(result_obj, "expiry_unix_ts_s", errors);
-    expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_unix_ts_s));
+    proof.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_unix_ts_s));
     json_require_fixed_bytes_from_hex(
-            result_obj, "gen_index_hash", errors, gen_index_hash);
+            result_obj, "gen_index_hash", errors, proof.gen_index_hash);
     json_require_fixed_bytes_from_hex(
-            result_obj, "rotating_pkey", errors, rotating_pkey);
-    json_require_fixed_bytes_from_hex(result_obj, "sig", errors, sig);
+            result_obj, "rotating_pkey", errors, proof.rotating_pubkey);
+    json_require_fixed_bytes_from_hex(result_obj, "sig", errors, proof.sig);
     return errors.empty();
 }
 
@@ -494,19 +493,17 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
         const uint8_t* payment_token_hash,
-        size_t payment_token_hash_len,
-        uint64_t unix_ts_s) {
+        size_t payment_token_hash_len) {
 
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const uint8_t> token_span(payment_token_hash, payment_token_hash_len);
-    std::chrono::sys_seconds ts{std::chrono::seconds{unix_ts_s}};
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
         auto sigs = AddProPaymentRequest::build_sigs(
-            request_version, master_span, rotating_span, token_span, ts);
+                request_version, master_span, rotating_span, token_span);
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
@@ -748,13 +745,19 @@ session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
     // Note that a response error and success case folds into the same code path. A success and error
     // response returns the same struct just with different fields populated.
     result.header.status = cpp.status;
-    result.version = cpp.version;
-    result.expiry_unix_ts_s =
-            std::chrono::duration_cast<std::chrono::seconds>(cpp.expiry_unix_ts.time_since_epoch())
+    result.proof.version = cpp.proof.version;
+    result.proof.expiry_unix_ts_s =
+            std::chrono::duration_cast<std::chrono::seconds>(cpp.proof.expiry_unix_ts.time_since_epoch())
                     .count();
-    std::memcpy(result.gen_index_hash.data, cpp.gen_index_hash.data(), cpp.gen_index_hash.size());
-    std::memcpy(result.rotating_pkey.data, cpp.rotating_pkey.data(), cpp.rotating_pkey.size());
-    std::memcpy(result.sig.data, cpp.sig.data(), cpp.sig.size());
+    std::memcpy(
+            result.proof.gen_index_hash.data,
+            cpp.proof.gen_index_hash.data(),
+            cpp.proof.gen_index_hash.size());
+    std::memcpy(
+            result.proof.rotating_pubkey.data,
+            cpp.proof.rotating_pubkey.data(),
+            cpp.proof.rotating_pubkey.size());
+    std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.size());
 
     // Copy errors
     result.header.errors_count = cpp.errors.size();

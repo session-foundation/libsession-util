@@ -2,7 +2,10 @@
 
 #include <chrono>
 #include <session/types.hpp>
+#include <span>
 #include <string>
+#include <chrono>
+#include <session/session_protocol.hpp>
 
 /// Helper functions to construct payloads to communicate with the Session Pro Backend. The data
 /// structures here are largely bindings to the endpoints exposed on the Session Pro Backend:
@@ -22,8 +25,9 @@
 ///    otherwise an error is returned and can be read from the `ResponseHeader` after parsing the
 ///    raw response.
 ///
-/// 2. Attach the proof to their messages. Libsession has helper functions to embed the proof into
-///    their messages via the helper functions in the Session Protocol header file.
+/// 2. Attach the `ProProof` constructed from (1) into their messages. Libsession has helper
+///    functions to embed the proof into their messages via the helper functions in the Session
+///    Protocol header file.
 ///
 /// 3. Periodically poll the global revocation list which overrides the validity of current
 ///    circulating proofs. This is done by constructing the request via
@@ -111,7 +115,6 @@ struct AddProPaymentRequest {
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
     /// - `payment_token_hash` -- 32-byte hash of the payment token.
-    /// - `unix_ts` -- Unix timestamp (seconds) for the request.
     ///
     /// Outputs:
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
@@ -119,30 +122,14 @@ struct AddProPaymentRequest {
             std::uint8_t request_version,
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
-            std::span<const uint8_t> payment_token_hash,
-            std::chrono::sys_seconds unix_ts);
+            std::span<const uint8_t> payment_token_hash);
 };
 
 /// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
 /// is the raw parse result that can then be converted into the config::ProProof or equivalent
 /// structure.
 struct AddProPaymentOrGetProProofResponse : public ResponseHeader {
-    /// Version of the proof
-    uint8_t version;
-
-    /// Unix timestamp (seconds) of when the proof expires
-    std::chrono::sys_seconds expiry_unix_ts;
-
-    /// 32-byte hash of the internal generation index shared across all proofs generated under the
-    /// same group of payments
-    array_uc32 gen_index_hash;
-
-    /// 32-byte Ed25519 Session Pro rotating public key authorized to use the proof
-    array_uc32 rotating_pkey;
-
-    /// 64-byte signature by the Session Pro backend to allow other clients to validate that the
-    /// proof was issued by an authoritative backend.
-    array_uc64 sig;
+    ProProof proof;
 
     /// API: pro/AddProPaymentOrGetProProofResponse::parse
     ///
