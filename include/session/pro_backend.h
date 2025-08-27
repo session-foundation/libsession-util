@@ -18,21 +18,22 @@ enum {
 
 /// Store front that a Session Pro payment came from. Must match:
 ///   https://github.com/Doy-lee/session-pro-backend/blob/3a1bdf2bfdc83487280e9b1d9a40aac8fd168dd6/base.py#L14
-typedef enum SESSION_PRO_PAYMENT_PROVIDER {
-  SESSION_PRO_PAYMENT_PROVIDER_NIL,
-  SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE,
-  SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE,
-  SESSION_PRO_PAYMENT_PROVIDER_COUNT,
-} SESSION_PRO_PAYMENT_PROVIDER;
+typedef enum SESSION_PRO_BACKEND_PAYMENT_PROVIDER {
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL,
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE,
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE,
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT,
+} SESSION_PRO_BACKEND_PAYMENT_PROVIDER;
 
-typedef struct session_pro_payment_provider_metadata {
+typedef struct session_pro_backend_payment_provider_metadata {
     string8 request_refund_support_url;
     string8 subscription_page_url;
-} session_pro_payment_provider_metadata;
+} session_pro_backend_payment_provider_metadata;
 
 /// The centralised list of common URLs and properties for handling payment provider specific
 /// integrations. Especially useful for cross-device management of Session Pro subscriptions.
-const session_pro_payment_provider_metadata PAYMENT_PROVIDER_METADATA[SESSION_PRO_PAYMENT_PROVIDER_COUNT] = {
+// clang-format off
+const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT] = {
     /*SESSION_PRO_PAYMENT_PROVIDER_NIL*/ {
         .request_refund_support_url = string8_literal(""),
         .subscription_page_url      = string8_literal(""),
@@ -46,6 +47,7 @@ const session_pro_payment_provider_metadata PAYMENT_PROVIDER_METADATA[SESSION_PR
         .subscription_page_url      = string8_literal("https://account.apple.com/account/manage/section/subscriptions")
     }
 };
+// clang-format on
 
 typedef struct session_pro_backend_response_header {
     uint32_t status;
@@ -129,7 +131,7 @@ typedef struct session_pro_backend_pro_payment_item {
     uint64_t archive_unix_ts_s;
     uint64_t creation_unix_ts_s;
     uint64_t subscription_duration;
-    SESSION_PRO_PAYMENT_PROVIDER payment_provider;
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
     bytes32 payment_token_hash;
 } session_pro_backend_pro_payment_item;
 
@@ -195,8 +197,7 @@ session_pro_backend_add_pro_payment_request_build_sigs(
 /// - `master_sig` - Master signature
 /// - `rotating_sig` - Rotating signature
 LIBSESSION_EXPORT
-session_pro_backend_master_rotating_signatures
-session_pro_backend_get_pro_proof_request_build_sigs(
+session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof_request_build_sigs(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -280,8 +281,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_payments_request_to_json
 LIBSESSION_EXPORT
 session_pro_backend_add_pro_payment_or_get_pro_proof_response
 session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
-        const char* json,
-        size_t json_len);
+        const char* json, size_t json_len);
 
 /// API: session_pro_backend/get_pro_revocations_response_parse
 ///
@@ -293,9 +293,7 @@ session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
 /// - `json_len` -- Length of the JSON string.
 LIBSESSION_EXPORT
 session_pro_backend_get_pro_revocations_response
-session_pro_backend_get_pro_revocations_response_parse(
-        const char* json,
-        size_t json_len);
+session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t json_len);
 
 /// API: session_pro_backend/get_pro_payments_response_parse
 ///
@@ -306,10 +304,8 @@ session_pro_backend_get_pro_revocations_response_parse(
 /// - `json` -- JSON string to parse.
 /// - `json_len` -- Length of the JSON string.
 LIBSESSION_EXPORT
-session_pro_backend_get_pro_payments_response
-session_pro_backend_get_pro_payments_response_parse(
-        const char* json,
-        size_t json_len);
+session_pro_backend_get_pro_payments_response session_pro_backend_get_pro_payments_response_parse(
+        const char* json, size_t json_len);
 
 /// API: session_pro_backend/to_json_free
 ///

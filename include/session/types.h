@@ -18,7 +18,7 @@ struct string8 {
     size_t size;
 };
 
-#define string8_literal(literal) {(char *)literal, sizeof(literal) - 1}
+#define string8_literal(literal) {(char*)literal, sizeof(literal) - 1}
 
 struct bytes32 {
     uint8_t data[32];
@@ -33,9 +33,8 @@ struct bytes64 {
 };
 
 /// Basic bump allocating arena
-struct arena_t
-{
-    uint8_t *data;
+struct arena_t {
+    uint8_t* data;
     size_t size;
     size_t max;
 };

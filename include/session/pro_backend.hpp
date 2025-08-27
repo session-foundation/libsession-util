@@ -312,7 +312,7 @@ struct ProPaymentItem {
     std::chrono::seconds subscription_duration;
 
     /// Store front that this particular payment came from
-    SESSION_PRO_PAYMENT_PROVIDER payment_provider;
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
 
     /// 32-byte hash of the payment token
     array_uc32 payment_token_hash;
@@ -340,5 +340,5 @@ struct GetProPaymentsResponse : public ResponseHeader {
     bool parse(std::string_view json);
 };
 
-void make_blake2b32_hasher(struct crypto_generichash_blake2b_state *hasher);
+void make_blake2b32_hasher(struct crypto_generichash_blake2b_state* hasher);
 }  // namespace session::pro_backend

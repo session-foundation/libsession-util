@@ -26,20 +26,23 @@ static bool string8_equals(string8 s8, std::string_view str) {
     fprintf(stderr, "proof.sig: %s\n", oxenc::to_hex(proof.sig.data).c_str());
 }
 
-[[maybe_unused]] static void dump_pro_payment_item(const session_pro_backend_pro_payment_item& item) {
+[[maybe_unused]] static void dump_pro_payment_item(
+        const session_pro_backend_pro_payment_item& item) {
     fprintf(stderr, "item.activation_unix_ts_s: %zu\n", item.activation_unix_ts_s);
     fprintf(stderr, "item.archive_unix_ts_s: %zu\n", item.archive_unix_ts_s);
     fprintf(stderr, "item.creation_unix_ts_s: %zu\n", item.creation_unix_ts_s);
     fprintf(stderr, "item.subscription_duration: %zu\n", item.subscription_duration);
     fprintf(stderr, "item.payment_provider: %u\n", item.payment_provider);
-    fprintf(stderr, "item.payment_token_hash: %s\n", oxenc::to_hex(item.payment_token_hash.data).c_str());
+    fprintf(stderr,
+            "item.payment_token_hash: %s\n",
+            oxenc::to_hex(item.payment_token_hash.data).c_str());
 }
 
-[[maybe_unused]] static void dump_pro_revocation(const session_pro_backend_pro_revocation_item& item) {
+[[maybe_unused]] static void dump_pro_revocation(
+        const session_pro_backend_pro_revocation_item& item) {
     fprintf(stderr, "item.expiry_unix_ts: %zu\n", item.expiry_unix_ts_s);
     fprintf(stderr, "item.gen_index_hash: %s\n", oxenc::to_hex(item.gen_index_hash.data).c_str());
 }
-
 
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
 #include <curl/curl.h>
@@ -87,7 +90,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
 
     bytes32 payment_token_hash;
     randombytes_buf(payment_token_hash.data, sizeof(payment_token_hash.data));
-    uint64_t unix_ts_s = 1698765432; // Arbitrary timestamp
+    uint64_t unix_ts_s = 1698765432;  // Arbitrary timestamp
 
     SECTION("session_pro_backend_add_pro_payment_request_build_sigs") {
         // Valid inputs
@@ -292,7 +295,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         session_pro_backend_get_pro_payments_request request = {};
         request.version = 0;
         request.master_pkey = master_pubkey;
-        request.master_sig = master_privkey; // Write some junk
+        request.master_sig = master_privkey;  // Write some junk
         request.unix_ts_s = unix_ts_s;
         request.page = 1;
 
@@ -328,12 +331,11 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         nlohmann::json j;
         j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
         j["result"] = {
-            {"version", 0},
-            {"expiry_unix_ts_s", unix_ts_s},
-            {"gen_index_hash", oxenc::to_hex(payment_token_hash.data)},
-            {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
-            {"sig", oxenc::to_hex(master_privkey.data)}
-        };
+                {"version", 0},
+                {"expiry_unix_ts_s", unix_ts_s},
+                {"gen_index_hash", oxenc::to_hex(payment_token_hash.data)},
+                {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
+                {"sig", oxenc::to_hex(master_privkey.data)}};
         std::string json = j.dump();
 
         // Valid JSON
@@ -389,7 +391,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
 
         // Invalid JSON
         json = "{invalid}";
-        result = session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(json.data(), json.size());
+        result = session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
+                json.data(), json.size());
         REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
         REQUIRE(result.header.errors_count > 0);
         REQUIRE(result.header.errors != nullptr);
@@ -420,7 +423,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         std::string json = j.dump();
 
         // Valid JSON
-        auto result = session_pro_backend_get_pro_revocations_response_parse(json.data(), json.size());
+        auto result =
+                session_pro_backend_get_pro_revocations_response_parse(json.data(), json.size());
         for (size_t index = 0; index < result.header.errors_count; index++)
             INFO(result.header.errors[index].data);
         REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
@@ -463,19 +467,17 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         nlohmann::json j;
         j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
         j["result"] = {
-            {"pages", 2},
-            {"payments", 10},
-            {"items", nlohmann::json::array({
-                {
-                    {"activation_unix_ts_s", unix_ts_s},
-                    {"archive_unix_ts_s", unix_ts_s + 3600},
-                    {"creation_unix_ts_s", unix_ts_s - 3600},
-                    {"subscription_duration_s", 86400},
-                    {"payment_provider", SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
-                    {"payment_token_hash", oxenc::to_hex(payment_token_hash.data)}
-                }
-            })}
-        };
+                {"pages", 2},
+                {"payments", 10},
+                {"items",
+                 nlohmann::json::array(
+                         {{{"activation_unix_ts_s", unix_ts_s},
+                           {"archive_unix_ts_s", unix_ts_s + 3600},
+                           {"creation_unix_ts_s", unix_ts_s - 3600},
+                           {"subscription_duration_s", 86400},
+                           {"payment_provider",
+                            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
+                           {"payment_token_hash", oxenc::to_hex(payment_token_hash.data)}}})}};
         std::string json = j.dump();
 
         // Valid JSON
@@ -490,8 +492,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         REQUIRE(result.items_count == 1);
         REQUIRE(result.items != nullptr);
         REQUIRE(result.items[0].activation_unix_ts_s == unix_ts_s);
-        REQUIRE(result.items[0].payment_provider > SESSION_PRO_PAYMENT_PROVIDER_NIL);
-        REQUIRE(result.items[0].payment_provider < SESSION_PRO_PAYMENT_PROVIDER_COUNT);
+        REQUIRE(result.items[0].payment_provider > SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL);
+        REQUIRE(result.items[0].payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT);
         REQUIRE(result.items[0].archive_unix_ts_s == unix_ts_s + 3600);
         REQUIRE(result.items[0].creation_unix_ts_s == unix_ts_s - 3600);
         REQUIRE(result.items[0].subscription_duration == 86400);

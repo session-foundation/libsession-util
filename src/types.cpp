@@ -31,8 +31,7 @@ int snprintf_bytes_written_clamped(char* buffer, size_t size, char const* fmt, .
     return result;
 }
 
-string8 string8_alloc_or_throw(size_t size)
-{
+string8 string8_alloc_or_throw(size_t size) {
     string8 result = {};
     result.size = size;
     result.data = static_cast<char*>(malloc(size + 1 /*null-terminator*/));
@@ -43,8 +42,7 @@ string8 string8_alloc_or_throw(size_t size)
     return result;
 }
 
-string8 string8_copy_or_throw(const void *data, size_t size)
-{
+string8 string8_copy_or_throw(const void* data, size_t size) {
     string8 result = string8_alloc_or_throw(size);
     std::memcpy(result.data, data, result.size);
     result.data[result.size] = 0;

@@ -2,13 +2,13 @@
 #include <oxenc/hex.h>
 #include <session/export.h>
 #include <session/pro_backend.h>
-#include <session/sodium_array.hpp>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <session/pro_backend.hpp>
+#include <session/sodium_array.hpp>
 #include <session/types.hpp>
 #include <session/session_encrypt.hpp>
 #include "SessionProtos.pb.h"
@@ -18,7 +18,8 @@ namespace {
 // NOTE: Personalization data must match
 // https://github.com/Doy-lee/session-pro-backend/blob/2afe310adad52f211e3b2cfcbdfc9eda6ff1778e/backend.py#L156
 constexpr std::string_view PRO_BACKEND_BLAKE2B_PERSONALIZATION = "SeshProBackend__";
-static_assert(PRO_BACKEND_BLAKE2B_PERSONALIZATION.size() == crypto_generichash_blake2b_PERSONALBYTES);
+static_assert(
+        PRO_BACKEND_BLAKE2B_PERSONALIZATION.size() == crypto_generichash_blake2b_PERSONALBYTES);
 
 const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
     nlohmann::json result;
@@ -33,7 +34,8 @@ const nlohmann::json json_parse(std::string_view json, std::vector<std::string>&
 template <typename T>
 const T json_require(
         const nlohmann::json& j, std::string_view key, std::vector<std::string>& errors) {
-    T result = {};;
+    T result = {};
+    ;
     auto it = j.find(key);
     if (it == j.end()) {
         errors.push_back(fmt::format("Key '{}' is missing", key));
@@ -66,8 +68,7 @@ const T json_require(
     return result;
 }
 
-void parse_json_response_errors(const nlohmann::json& j, std::vector<std::string>& errors)
-{
+void parse_json_response_errors(const nlohmann::json& j, std::vector<std::string>& errors) {
     const auto& array = json_require<nlohmann::json::array_t>(j, "errors", errors);
     errors.reserve(errors.size() + array.size());
     for (size_t index = 0; index < array.size(); index++) {
@@ -75,12 +76,11 @@ void parse_json_response_errors(const nlohmann::json& j, std::vector<std::string
         if (it.is_string()) {
             errors.push_back(it.get<std::string>());
         } else {
-            errors.push_back(
-                    fmt::format(
-                            "Aborting parse, 'result.errors[{}]' was not a string "
-                            "error: '{}'",
-                            index,
-                            it.dump(1)));
+            errors.push_back(fmt::format(
+                    "Aborting parse, 'result.errors[{}]' was not a string "
+                    "error: '{}'",
+                    index,
+                    it.dump(1)));
             break;
         }
     }
@@ -97,13 +97,12 @@ bool json_require_fixed_bytes_from_hex(
 
     size_t hex_avail = dest.size() * 2;
     if (hex.size() != hex_avail) {
-        errors.push_back(
-                fmt::format(
-                        "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
-                        key,
-                        hex,
-                        hex_avail,
-                        hex.size()));
+        errors.push_back(fmt::format(
+                "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
+                key,
+                hex,
+                hex_avail,
+                hex.size()));
         return false;
     }
 
@@ -164,9 +163,13 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
     make_blake2b32_hasher(&state);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
-            &state, master_privkey.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
+            &state,
+            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(
-            &state, rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
+            &state,
+            rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(&state, payment_token_hash.data(), payment_token_hash.size());
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
@@ -326,11 +329,8 @@ bool GetProRevocationsResponse::parse(std::string_view json) {
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
         if (!it.is_object()) {
-            errors.push_back(
-                    fmt::format(
-                            "Aborting parse, 'items[{}]' was not an object: {}",
-                            index,
-                            it.dump(1)));
+            errors.push_back(fmt::format(
+                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
             break;
         }
 
@@ -340,8 +340,7 @@ bool GetProRevocationsResponse::parse(std::string_view json) {
 
         ProRevocationItem item = {};
         item.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_unix_ts));
-        json_require_fixed_bytes_from_hex(
-                obj, "gen_index_hash", errors, item.gen_index_hash);
+        json_require_fixed_bytes_from_hex(obj, "gen_index_hash", errors, item.gen_index_hash);
 
         // Handle parsing result
         if (errors.size())
@@ -386,7 +385,9 @@ array_uc64 GetProPaymentsRequest::build_sig(
     make_blake2b32_hasher(&state);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
-            &state, master_privkey.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
+            &state,
+            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<unsigned char*>(&unix_ts_s), sizeof(unix_ts_s));
     crypto_generichash_blake2b_update(
@@ -433,33 +434,33 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
         if (!it.is_object()) {
-            errors.push_back(
-                    fmt::format(
-                            "Aborting parse, 'items[{}]' was not an object: {}",
-                            index,
-                            it.dump(1)));
+            errors.push_back(fmt::format(
+                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
             break;
         }
 
         // Parse payment item
-        auto obj              = it.get<nlohmann::json::object_t>();
-        auto activation_ts    = json_require<uint64_t>(obj, "activation_unix_ts_s", errors);
-        auto archive_ts       = json_require<uint64_t>(obj, "archive_unix_ts_s", errors);
-        auto creation_ts      = json_require<uint64_t>(obj, "creation_unix_ts_s", errors);
-        auto sub_duration_s   = json_require<uint64_t>(obj, "subscription_duration_s", errors);
+        auto obj = it.get<nlohmann::json::object_t>();
+        auto activation_ts = json_require<uint64_t>(obj, "activation_unix_ts_s", errors);
+        auto archive_ts = json_require<uint64_t>(obj, "archive_unix_ts_s", errors);
+        auto creation_ts = json_require<uint64_t>(obj, "creation_unix_ts_s", errors);
+        auto sub_duration_s = json_require<uint64_t>(obj, "subscription_duration_s", errors);
         auto payment_provider = json_require<uint32_t>(obj, "payment_provider", errors);
 
-        ProPaymentItem item        = {};
-        item.activation_unix_ts    = std::chrono::sys_seconds(std::chrono::seconds(activation_ts));
-        item.archive_unix_ts       = std::chrono::sys_seconds(std::chrono::seconds(archive_ts));
-        item.creation_unix_ts      = std::chrono::sys_seconds(std::chrono::seconds(creation_ts));
+        ProPaymentItem item = {};
+        item.activation_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(activation_ts));
+        item.archive_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(archive_ts));
+        item.creation_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(creation_ts));
         item.subscription_duration = std::chrono::seconds(sub_duration_s);
-        json_require_fixed_bytes_from_hex(obj, "payment_token_hash", errors, item.payment_token_hash);
-        if (payment_provider > SESSION_PRO_PAYMENT_PROVIDER_NIL &&
-            payment_provider < SESSION_PRO_PAYMENT_PROVIDER_COUNT) {
-            item.payment_provider = static_cast<SESSION_PRO_PAYMENT_PROVIDER>(payment_provider);
+        json_require_fixed_bytes_from_hex(
+                obj, "payment_token_hash", errors, item.payment_token_hash);
+        if (payment_provider > SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL &&
+            payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT) {
+            item.payment_provider =
+                    static_cast<SESSION_PRO_BACKEND_PAYMENT_PROVIDER>(payment_provider);
         } else {
-            errors.push_back(fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
+            errors.push_back(
+                    fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
         }
 
         // Handle parsing result
@@ -471,8 +472,7 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
     return errors.empty();
 }
 
-void make_blake2b32_hasher(crypto_generichash_blake2b_state *hasher)
-{
+void make_blake2b32_hasher(crypto_generichash_blake2b_state* hasher) {
     crypto_generichash_blake2b_init_salt_personal(
             hasher,
             /*key*/ nullptr,
@@ -490,7 +490,7 @@ using namespace session::pro_backend;
 #define STRING8_LIT(val) {(char*)val, sizeof(val) - 1}
 
 static string8 C_PARSE_ERROR_OUT_OF_MEMORY = STRING8_LIT("Ran out-of-memory creating C response");
-static string8 C_PARSE_ERROR_INVALID_ARGS  = STRING8_LIT("One or more C arguments were NULL");
+static string8 C_PARSE_ERROR_INVALID_ARGS = STRING8_LIT("One or more C arguments were NULL");
 
 LIBSESSION_C_API session_pro_backend_master_rotating_signatures
 session_pro_backend_add_pro_payment_request_build_sigs(
@@ -564,8 +564,7 @@ session_pro_backend_get_pro_payments_request_build_sig(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_s,
-        uint32_t page)
-{
+        uint32_t page) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_seconds ts{std::chrono::seconds(unix_ts_s)};
@@ -596,24 +595,11 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
     // Construct C++ struct
     AddProPaymentRequest cpp = {};
     cpp.version = request->version;
-    std::memcpy(
-            cpp.master_pkey.data(),
-            request->master_pkey.data,
-            cpp.master_pkey.size());
-    std::memcpy(
-            cpp.rotating_pkey.data(),
-            request->rotating_pkey.data,
-            cpp.rotating_pkey.size());
-    std::memcpy(
-            cpp.payment_token.data(),
-            request->payment_token.data,
-            cpp.payment_token.size());
-    std::memcpy(
-            cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
-    std::memcpy(
-            cpp.rotating_sig.data(),
-            request->rotating_sig.data,
-            cpp.rotating_sig.size());
+    std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
+    std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
+    std::memcpy(cpp.payment_token.data(), request->payment_token.data, cpp.payment_token.size());
+    std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
+    std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
 
     try {
         std::string json = cpp.to_json();
@@ -634,23 +620,11 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_proof_r
     // Construct C++ struct
     GetProProofRequest cpp;
     cpp.version = request->version;
-    std::memcpy(
-            cpp.master_pkey.data(),
-            request->master_pkey.data,
-            cpp.master_pkey.size());
-    std::memcpy(
-            cpp.rotating_pkey.data(),
-            request->rotating_pkey.data,
-            cpp.rotating_pkey.size());
+    std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
+    std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
     cpp.unix_ts = std::chrono::seconds{request->unix_ts_s};
-    std::memcpy(
-            cpp.master_sig.data(),
-            request->master_sig.data,
-            cpp.master_sig.size());
-    std::memcpy(
-            cpp.rotating_sig.data(),
-            request->rotating_sig.data,
-            cpp.rotating_sig.size());
+    std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
+    std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
 
     try {
         std::string json = cpp.to_json();
@@ -662,7 +636,8 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_proof_r
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_revocations_request_to_json(
+LIBSESSION_C_API session_pro_backend_to_json
+session_pro_backend_get_pro_revocations_request_to_json(
         const session_pro_backend_get_pro_revocations_request* request) {
     session_pro_backend_to_json result = {};
     if (!request)
@@ -693,13 +668,8 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_payment
     GetProPaymentsRequest cpp = {};
     cpp.version = request->version;
     std::memcpy(
-            cpp.master_pkey.data(),
-            request->master_pkey.data,
-            sizeof(request->master_pkey.data));
-    std::memcpy(
-            cpp.master_sig.data(),
-            request->master_sig.data,
-            sizeof(request->master_sig.data));
+            cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
+    std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
     cpp.unix_ts = std::chrono::sys_seconds{std::chrono::seconds{request->unix_ts_s}};
     cpp.page = request->page;
 
@@ -749,8 +719,8 @@ session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
     }
 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
-    // Note that a response error and success case folds into the same code path. A success and error
-    // response returns the same struct just with different fields populated.
+    // Note that a response error and success case folds into the same code path. A success and
+    // error response returns the same struct just with different fields populated.
     result.header.status = cpp.status;
     result.proof.version = cpp.proof.version;
     result.proof.expiry_unix_ts_s =
@@ -822,8 +792,8 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
 
     // Copy errors
     result.header.errors_count = cpp.errors.size();
-    result.header.errors =
-            (string8*)arena_alloc(&arena, result.header.errors_count * sizeof(*result.header.errors));
+    result.header.errors = (string8*)arena_alloc(
+            &arena, result.header.errors_count * sizeof(*result.header.errors));
     for (size_t index = 0; index < cpp.errors.size(); index++) {
         const std::string& it = cpp.errors[index];
         result.header.errors[index] = arena_alloc_to_string8(&arena, it.data(), it.size());
@@ -845,8 +815,8 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_get_pro_payments_response session_pro_backend_get_pro_payments_response_parse(
-        const char* json, size_t json_len) {
+LIBSESSION_C_API session_pro_backend_get_pro_payments_response
+session_pro_backend_get_pro_payments_response_parse(const char* json, size_t json_len) {
     session_pro_backend_get_pro_payments_response result = {};
     if (!json) {
         result.header.status = 1;
@@ -897,14 +867,14 @@ LIBSESSION_C_API session_pro_backend_get_pro_payments_response session_pro_backe
         const ProPaymentItem& src = cpp.items[index];
         session_pro_backend_pro_payment_item& dest = result.items[index];
         dest.activation_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
-                                          src.activation_unix_ts.time_since_epoch())
-                                          .count();
+                                            src.activation_unix_ts.time_since_epoch())
+                                            .count();
         dest.archive_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
-                                       src.archive_unix_ts.time_since_epoch())
-                                       .count();
+                                         src.archive_unix_ts.time_since_epoch())
+                                         .count();
         dest.creation_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
-                                        src.creation_unix_ts.time_since_epoch())
-                                        .count();
+                                          src.creation_unix_ts.time_since_epoch())
+                                          .count();
         dest.subscription_duration =
                 std::chrono::duration_cast<std::chrono::seconds>(src.subscription_duration).count();
         dest.payment_provider = src.payment_provider;
@@ -916,8 +886,8 @@ LIBSESSION_C_API session_pro_backend_get_pro_payments_response session_pro_backe
 
     // Copy errors
     result.header.errors_count = cpp.errors.size();
-    result.header.errors =
-            (string8*)arena_alloc(&arena, result.header.errors_count * sizeof(*result.header.errors));
+    result.header.errors = (string8*)arena_alloc(
+            &arena, result.header.errors_count * sizeof(*result.header.errors));
     for (size_t index = 0; index < cpp.errors.size(); index++) {
         const std::string& it = cpp.errors[index];
         result.header.errors[index] = arena_alloc_to_string8(&arena, it.data(), it.size());
