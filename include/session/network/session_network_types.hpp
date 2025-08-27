@@ -159,7 +159,9 @@ struct Response {
     static std::optional<int16_t> find_uniform_batch_error(const std::string& body);
 };
 
-struct OnionPathMetadata { RequestCategory category; };
+struct OnionPathMetadata {
+    RequestCategory category;
+};
 struct LokinetTunnelMetadata {
     std::string destination_pubkey;
     std::string destination_snode_address;

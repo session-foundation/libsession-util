@@ -249,7 +249,7 @@ std::vector<PathInfo> OnionRequestRouter::get_active_paths() {
         for (const auto& [category, path_list] : _paths)
             for (const auto& p : path_list)
                 result.push_back({p.nodes, OnionPathMetadata{category}});
-        
+
         return result;
     });
 }
@@ -323,7 +323,7 @@ void OnionRequestRouter::_close_connections() {
     // Cancel any pending requests (they can't succeed once the connection is closed)
     for (auto& [path_type, path_type_queue] : _request_queues) {
         auto to_fail = path_type_queue.pop_all();
-        
+
         for (const auto& [req, callback] : to_fail)
             callback(
                     false,
@@ -338,8 +338,9 @@ void OnionRequestRouter::_close_connections() {
         for (const auto& [category, path_list] : _paths)
             for (const auto& p : path_list)
                 if (!p.nodes.empty())
-                    transport->remove_failure_listeners(ed25519_pubkey::from_bytes(p.nodes[0].view_remote_key()));
-    
+                    transport->remove_failure_listeners(
+                            ed25519_pubkey::from_bytes(p.nodes[0].view_remote_key()));
+
     // Clear all storage of requests, paths and connections so that we are in a fresh state on
     // relaunch
     //
@@ -773,26 +774,32 @@ void OnionRequestRouter::_on_guard_connectivity_response(
         }
     }
 
-    // Now that we've established a path we need to start observing it in case the connection is lost
+    // Now that we've established a path we need to start observing it in case the connection is
+    // lost
     if (auto transport = _transport.lock()) {
         transport->add_failure_listener(
-            ed25519_pubkey::from_bytes(guard_node.view_remote_key()),
-            [this, pid = path_id, category] {
-                log::warning(cat, "[OnionRequestRouter Path {}]: Transport reported connection failure, retiring path.", pid);
+                ed25519_pubkey::from_bytes(guard_node.view_remote_key()),
+                [this, pid = path_id, category] {
+                    log::warning(
+                            cat,
+                            "[OnionRequestRouter Path {}]: Transport reported connection failure, "
+                            "retiring path.",
+                            pid);
 
-                // Set the failure_count of the path to the max value and report the error to trigger a rebuild
-                auto& active_paths = _paths[category];
-                auto path_it = std::find_if(active_paths.begin(), active_paths.end(), [&pid](const auto& p) {
-                    return p.id == pid;
+                    // Set the failure_count of the path to the max value and report the error to
+                    // trigger a rebuild
+                    auto& active_paths = _paths[category];
+                    auto path_it = std::find_if(
+                            active_paths.begin(), active_paths.end(), [&pid](const auto& p) {
+                                return p.id == pid;
+                            });
+
+                    if (path_it != active_paths.end()) {
+                        path_it->failure_count = _config.path_failure_threshold;
+                    }
+
+                    _handle_path_failure(pid, category, "Guard connection lost");
                 });
-
-                if (path_it != active_paths.end()) {
-                    path_it->failure_count = _config.path_failure_threshold;
-                }
-
-                _handle_path_failure(pid, category, "Guard connection lost");
-            }
-        );
     }
 }
 
@@ -1182,7 +1189,8 @@ void OnionRequestRouter::_handle_path_failure(
         // Remove failure listeners for the path
         if (auto transport = _transport.lock())
             if (!path.nodes.empty())
-                transport->remove_failure_listeners(ed25519_pubkey::from_bytes(path.nodes[0].view_remote_key()));
+                transport->remove_failure_listeners(
+                        ed25519_pubkey::from_bytes(path.nodes[0].view_remote_key()));
 
         // Store for subsequent path building
         const auto old_path_id = path.id;
@@ -1204,11 +1212,14 @@ void OnionRequestRouter::_handle_path_failure(
         }
 
         // Automatically rebuild if needed
-        RequestCategory category_to_rebuild = (_config.single_path_mode ? RequestCategory::standard : request_category);
-        const auto min_paths = (_config.single_path_mode ? 1 : _config.min_path_counts.at(category_to_rebuild));
-        const auto current_active = (_paths.count(category_to_rebuild) ? _paths.at(category_to_rebuild).size() : 0);
+        RequestCategory category_to_rebuild =
+                (_config.single_path_mode ? RequestCategory::standard : request_category);
+        const auto min_paths =
+                (_config.single_path_mode ? 1 : _config.min_path_counts.at(category_to_rebuild));
+        const auto current_active =
+                (_paths.count(category_to_rebuild) ? _paths.at(category_to_rebuild).size() : 0);
         const auto in_progress = _in_progress_path_builds[category_to_rebuild];
-        
+
         if (current_active + in_progress < min_paths) {
             log::info(
                     cat,

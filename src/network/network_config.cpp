@@ -44,6 +44,7 @@ Config::Config(const std::vector<std::any>& opts) {
 
         // Onion request router options
         HANDLE_TYPE(opt::onionreq_path_failure_threshold);
+        HANDLE_TYPE(opt::onionreq_path_build_retry_limit);
         HANDLE_TYPE(opt::onionreq_min_path_count);
         HANDLE_TYPE(opt::onionreq_disable_pre_build_paths);
 

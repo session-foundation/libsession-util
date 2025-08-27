@@ -59,7 +59,8 @@ class QuicTransport : public ITransport {
             std::chrono::milliseconds timeout,
             const std::string& request_id,
             std::function<void(bool success)> callback) override;
-    void add_failure_listener(const ed25519_pubkey& pubkey, std::function<void()> listener) override;
+    void add_failure_listener(
+            const ed25519_pubkey& pubkey, std::function<void()> listener) override;
     void remove_failure_listeners(const ed25519_pubkey& pubkey) override;
     void send_request(Request request, network_response_callback_t callback) override;
 
@@ -83,6 +84,12 @@ class QuicTransport : public ITransport {
             oxen::quic::ConnectionID conn_id,
             Request request,
             network_response_callback_t callback);
+    void _fail_connection(
+            const std::string& address_pubkey_hex,
+            const std::string& initiating_req_id,
+            std::optional<oxen::quic::ConnectionID> conn_id,
+            std::optional<uint64_t> error_code,
+            std::optional<std::string> custom_error);
 };
 
 }  // namespace session::network

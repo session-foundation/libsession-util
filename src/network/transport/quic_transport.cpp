@@ -92,16 +92,15 @@ void QuicTransport::verify_connectivity(
     });
 }
 
-void QuicTransport::add_failure_listener(const ed25519_pubkey& pubkey, std::function<void()> listener) {
+void QuicTransport::add_failure_listener(
+        const ed25519_pubkey& pubkey, std::function<void()> listener) {
     _loop->call([this, pk_hex = pubkey.hex(), l = std::move(listener)]() mutable {
         _failure_listeners[pk_hex].push_back(std::move(l));
     });
 }
 
 void QuicTransport::remove_failure_listeners(const ed25519_pubkey& pubkey) {
-    _loop->call([this, pk_hex = pubkey.hex()] {
-        _failure_listeners.erase(pk_hex);
-    });
+    _loop->call([this, pk_hex = pubkey.hex()] { _failure_listeners.erase(pk_hex); });
 }
 
 void QuicTransport::send_request(Request request, network_response_callback_t callback) {
@@ -267,146 +266,83 @@ void QuicTransport::_establish_connection(
             "[QuicTransport Request {}] Establishing new connection to {}.",
             initiating_req_id,
             address_pubkey_hex);
-    _endpoint->connect(
-            address,
-            creds,
-            oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
-            oxen::quic::opt::keep_alive{_config.keep_alive},
-            [this, address_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn) {
-                log::info(
-                        cat,
-                        "[QuicTransport Request {}] Successfully established connection to {}.",
-                        initiating_req_id,
-                        address_pubkey_hex);
-
-                auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
-                auto conn_id = conn.reference_id();
-                auto stream_id = stream->stream_id();
-                auto verification_callbacks =
-                        std::move(_pending_verification_callbacks[address_pubkey_hex]);
-                _pending_verification_callbacks.erase(address_pubkey_hex);
-
-                auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
-                _pending_requests.erase(address_pubkey_hex);
-
-                // Only persistent requests verify connectivity so if there is a verification
-                // callback then it should be persistent, otherwise if ANY of the requests require
-                // persistence then we should store the connection (if we don't store it then the
-                // connection will timeout and be closed)
-                bool is_persistent = !verification_callbacks.empty();
-                if (!is_persistent)
-                    is_persistent = std::any_of(
-                            requests_to_process.begin(),
-                            requests_to_process.end(),
-                            [](const auto& req_pair) {
-                                return !req_pair.first.ephemeral_connection;
-                            });
-
-                if (is_persistent) {
-                    _ephemeral_connection_ids.erase(conn_id);  // Just in case
-                    _active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
-                } else
-                    _ephemeral_connection_ids.insert(conn_id);
-
-                _active_stream_ids.insert_or_assign(conn_id, stream_id);
-
-                // We had a successful connection so update the status to connected
-                _update_status(ConnectionStatus::connected);
-
-                for (const auto& pending_cb : verification_callbacks)
-                    pending_cb(true);
-
-                if (!requests_to_process.empty()) {
-                    log::debug(
-                            cat,
-                            "[QuicTransport] Processing {} pending requests on new stream {} with "
-                            "conn {}.",
-                            requests_to_process.size(),
-                            stream_id,
-                            conn_id.to_string());
-
-                    for (auto&& [req, cb] : std::move(requests_to_process))
-                        _send_on_connection(conn_id, std::move(req), std::move(cb));
-                }
-            },
-            [this, address_pubkey_hex, initiating_req_id](
-                    oxen::quic::Connection& conn, uint64_t error_code) {
-                auto conn_id = conn.reference_id();
-
-                if (error_code == NGTCP2_NO_ERROR)
+    try {
+        _endpoint->connect(
+                address,
+                creds,
+                oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
+                oxen::quic::opt::keep_alive{_config.keep_alive},
+                [this, address_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn) {
                     log::info(
                             cat,
-                            "[QuicTransport Request {}] Connection to {} closed gracefully.",
-                            initiating_req_id,
-                            address_pubkey_hex);
-                else if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT)) {
-                    log::warning(
-                            cat,
-                            "[QuicTransport Request {}] Handshake timeout when connecting to {}. "
-                            "The node is likely unreachable.",
+                            "[QuicTransport Request {}] Successfully established connection to {}.",
                             initiating_req_id,
                             address_pubkey_hex);
 
-                    // If the connection failed with a handshake timeout then the node is
-                    // unreachable, either due to a device network issue or because the node is down
-                    // so permanently fail the node so it won't be used for subsequent requests
-                    // (until the next cache refresh)
-                    if (_report_node_failure)
-                        (*_report_node_failure)(ed25519_pubkey::from_hex(address_pubkey_hex), true);
-                } else
-                    log::warning(
-                            cat,
-                            "[QuicTransport Request {}] Connection to {} failed or was closed with "
-                            "error code: {}",
-                            initiating_req_id,
+                    auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
+                    auto conn_id = conn.reference_id();
+                    auto stream_id = stream->stream_id();
+                    auto verification_callbacks =
+                            std::move(_pending_verification_callbacks[address_pubkey_hex]);
+                    _pending_verification_callbacks.erase(address_pubkey_hex);
+
+                    auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
+                    _pending_requests.erase(address_pubkey_hex);
+
+                    // Only persistent requests verify connectivity so if there is a verification
+                    // callback then it should be persistent, otherwise if ANY of the requests
+                    // require persistence then we should store the connection (if we don't store it
+                    // then the connection will timeout and be closed)
+                    bool is_persistent = !verification_callbacks.empty();
+                    if (!is_persistent)
+                        is_persistent = std::any_of(
+                                requests_to_process.begin(),
+                                requests_to_process.end(),
+                                [](const auto& req_pair) {
+                                    return !req_pair.first.ephemeral_connection;
+                                });
+
+                    if (is_persistent) {
+                        _ephemeral_connection_ids.erase(conn_id);  // Just in case
+                        _active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
+                    } else
+                        _ephemeral_connection_ids.insert(conn_id);
+
+                    _active_stream_ids.insert_or_assign(conn_id, stream_id);
+
+                    // We had a successful connection so update the status to connected
+                    _update_status(ConnectionStatus::connected);
+
+                    for (const auto& pending_cb : verification_callbacks)
+                        pending_cb(true);
+
+                    if (!requests_to_process.empty()) {
+                        log::debug(
+                                cat,
+                                "[QuicTransport] Processing {} pending requests on new stream {} "
+                                "with "
+                                "conn {}.",
+                                requests_to_process.size(),
+                                stream_id,
+                                conn_id.to_string());
+
+                        for (auto&& [req, cb] : std::move(requests_to_process))
+                            _send_on_connection(conn_id, std::move(req), std::move(cb));
+                    }
+                },
+                [this, address_pubkey_hex, initiating_req_id](
+                        oxen::quic::Connection& conn, uint64_t error_code) {
+                    _fail_connection(
                             address_pubkey_hex,
-                            error_code);
-
-                _ephemeral_connection_ids.erase(conn_id);
-                _active_connection_ids.erase(address_pubkey_hex);
-                _active_stream_ids.erase(conn_id);
-
-                // Process any waiting verification requests
-                if (auto it = _pending_verification_callbacks.find(address_pubkey_hex);
-                    it != _pending_verification_callbacks.end()) {
-                    for (const auto& pending_cb : it->second)
-                        pending_cb(false);
-                    _pending_verification_callbacks.erase(it);
-                }
-
-                // Fail all the pending requests for this connection
-                if (auto it = _pending_requests.find(address_pubkey_hex);
-                    it != _pending_requests.end()) {
-                    auto to_fail = std::move(it->second);
-                    _pending_requests.erase(it);
-
-                    std::string failure_reason = "Failed to establish connection to service node";
-                    if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
-                        failure_reason += " (handshake timeout)";
-
-                    log::error(
-                            cat,
-                            "[QuicTransport] Failing {} pending requests due to connection "
-                            "failure.",
-                            to_fail.size());
-
-                    for (auto& [req, cb] : to_fail)
-                        cb(false, false, -1, {content_type_plain_text}, failure_reason);
-                }
-
-                // Notify any failure listeners that the connection has been closed
-                if (auto it = _failure_listeners.find(address_pubkey_hex); it != _failure_listeners.end()) {
-                    auto to_fail = std::move(it->second);
-                    _failure_listeners.erase(it);
-
-                    for (const auto& listener : it->second)
-                        listener();
-                }
-
-                // If we have no longer have any active connections then we are disconnected
-                if (_active_connection_ids.empty())
-                    _update_status(ConnectionStatus::disconnected);
-            });
+                            initiating_req_id,
+                            conn.reference_id(),
+                            error_code,
+                            std::nullopt);
+                });
+    } catch (const std::exception& e) {
+        _fail_connection(
+                address_pubkey_hex, initiating_req_id, std::nullopt, std::nullopt, e.what());
+    }
 }
 
 void QuicTransport::_send_on_connection(
@@ -549,6 +485,97 @@ void QuicTransport::_send_on_connection(
                         cat, "[QuicTransport Request {}] Received raw success response.", req_id);
                 cb(true, false, 200, {}, std::string{resp.body()});
             });
+}
+
+void QuicTransport::_fail_connection(
+        const std::string& address_pubkey_hex,
+        const std::string& initiating_req_id,
+        std::optional<oxen::quic::ConnectionID> conn_id,
+        std::optional<uint64_t> error_code,
+        std::optional<std::string> custom_error) {
+    if (error_code == NGTCP2_NO_ERROR)
+        log::info(
+                cat,
+                "[QuicTransport Request {}] Connection to {} closed gracefully.",
+                initiating_req_id,
+                address_pubkey_hex);
+    else if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT)) {
+        log::warning(
+                cat,
+                "[QuicTransport Request {}] Handshake timeout when connecting to {}. "
+                "The node is likely unreachable.",
+                initiating_req_id,
+                address_pubkey_hex);
+
+        // If the connection failed with a handshake timeout then the node is
+        // unreachable, either due to a device network issue or because the node is down
+        // so permanently fail the node so it won't be used for subsequent requests
+        // (until the next cache refresh)
+        if (_report_node_failure)
+            (*_report_node_failure)(ed25519_pubkey::from_hex(address_pubkey_hex), true);
+    } else if (error_code)
+        log::warning(
+                cat,
+                "[QuicTransport Request {}] Connection to {} failed or was closed with "
+                "error code: {}",
+                initiating_req_id,
+                address_pubkey_hex,
+                *error_code);
+    else
+        log::error(
+                cat,
+                "[QuicTransport Request {}] Connection to {} failed or was closed due to error: "
+                "{}.",
+                initiating_req_id,
+                address_pubkey_hex,
+                custom_error.value_or("Unknown error"));
+
+    _active_connection_ids.erase(address_pubkey_hex);
+
+    if (conn_id) {
+        _ephemeral_connection_ids.erase(*conn_id);
+        _active_stream_ids.erase(*conn_id);
+    }
+
+    // Process any waiting verification requests
+    if (auto it = _pending_verification_callbacks.find(address_pubkey_hex);
+        it != _pending_verification_callbacks.end()) {
+        for (const auto& pending_cb : it->second)
+            pending_cb(false);
+        _pending_verification_callbacks.erase(it);
+    }
+
+    // Fail all the pending requests for this connection
+    if (auto it = _pending_requests.find(address_pubkey_hex); it != _pending_requests.end()) {
+        auto to_fail = std::move(it->second);
+        _pending_requests.erase(it);
+
+        std::string failure_reason = "Failed to establish connection to service node";
+        if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
+            failure_reason += " (handshake timeout)";
+
+        log::error(
+                cat,
+                "[QuicTransport] Failing {} pending requests due to connection "
+                "failure.",
+                to_fail.size());
+
+        for (auto& [req, cb] : to_fail)
+            cb(false, false, -1, {content_type_plain_text}, failure_reason);
+    }
+
+    // Notify any failure listeners that the connection has been closed
+    if (auto it = _failure_listeners.find(address_pubkey_hex); it != _failure_listeners.end()) {
+        auto to_fail = std::move(it->second);
+        _failure_listeners.erase(it);
+
+        for (const auto& listener : it->second)
+            listener();
+    }
+
+    // If we have no longer have any active connections then we are disconnected
+    if (_active_connection_ids.empty())
+        _update_status(ConnectionStatus::disconnected);
 }
 
 }  // namespace session::network

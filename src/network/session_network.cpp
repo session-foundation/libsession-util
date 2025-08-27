@@ -242,7 +242,7 @@ void Network_v2::close_connections() {
 std::vector<PathInfo> Network_v2::get_active_paths() {
     if (_router)
         return _router->get_active_paths();
-    
+
     return {};
 }
 
@@ -893,11 +893,14 @@ LIBSESSION_C_API int session_network_softfork(network_object_v2* network) {
 }
 
 LIBSESSION_C_API void session_network_set_status_changed_callback(
-        network_object_v2* network, void (*callback)(CONNECTION_STATUS status, void* ctx), void* ctx) {
+        network_object_v2* network,
+        void (*callback)(CONNECTION_STATUS status, void* ctx),
+        void* ctx) {
     if (!callback)
         unbox(network).on_status_changed = nullptr;
     else
-        unbox(network).on_status_changed = [cb = std::move(callback), ctx](ConnectionStatus status) {
+        unbox(network).on_status_changed = [cb = std::move(callback),
+                                            ctx](ConnectionStatus status) {
             cb(static_cast<CONNECTION_STATUS>(status), ctx);
         };
 }
@@ -932,9 +935,7 @@ LIBSESSION_C_API void session_network_callbacks_respond(
 }
 
 LIBSESSION_C_API void session_network_get_active_paths(
-    network_object_v2* network,
-    session_path_info** out_paths,
-    size_t* out_paths_len) {
+        network_object_v2* network, session_path_info** out_paths, size_t* out_paths_len) {
     if (!network || !out_paths || !out_paths_len)
         return;
 
@@ -952,16 +953,18 @@ LIBSESSION_C_API void session_network_get_active_paths(
         for (const auto& path : cpp_paths)
             total_nodes += path.nodes.size();
         total_size += total_nodes * sizeof(network_service_node);
-        
+
         size_t total_metadata_size = 0;
         for (const auto& p : cpp_paths) {
-            std::visit([&](auto&& md) {
-                using T = std::decay_t<decltype(md)>;
-                if constexpr (std::is_same_v<T, OnionPathMetadata>)
-                    total_metadata_size += sizeof(session_onion_path_metadata);
-                else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>)
-                    total_metadata_size += sizeof(session_lokinet_tunnel_metadata);
-            }, p.metadata);
+            std::visit(
+                    [&](auto&& md) {
+                        using T = std::decay_t<decltype(md)>;
+                        if constexpr (std::is_same_v<T, OnionPathMetadata>)
+                            total_metadata_size += sizeof(session_onion_path_metadata);
+                        else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>)
+                            total_metadata_size += sizeof(session_lokinet_tunnel_metadata);
+                    },
+                    p.metadata);
         }
         total_size += total_metadata_size;
 
@@ -971,15 +974,17 @@ LIBSESSION_C_API void session_network_get_active_paths(
             return;
 
         auto* c_paths_array = reinterpret_cast<session_path_info*>(buffer);
-        auto* current_node_ptr = reinterpret_cast<network_service_node*>(c_paths_array + cpp_paths.size());
-        unsigned char* current_metadata_ptr = reinterpret_cast<unsigned char*>(current_node_ptr + total_nodes);
+        auto* current_node_ptr =
+                reinterpret_cast<network_service_node*>(c_paths_array + cpp_paths.size());
+        unsigned char* current_metadata_ptr =
+                reinterpret_cast<unsigned char*>(current_node_ptr + total_nodes);
 
         for (size_t i = 0; i < cpp_paths.size(); ++i) {
             const auto& cpp_path = cpp_paths[i];
             auto& c_path = c_paths_array[i];
-            
+
             new (&c_path) session_path_info{};
-            
+
             c_path.nodes = current_node_ptr;
             c_path.nodes_count = cpp_path.nodes.size();
             for (const auto& cpp_node : cpp_path.nodes) {
@@ -987,30 +992,40 @@ LIBSESSION_C_API void session_network_get_active_paths(
                 cpp_node.into(*current_node_ptr);
                 current_node_ptr++;
             }
-            
-            // Copy metadata
-            std::visit([&](auto&& m) {
-                using T = std::decay_t<decltype(m)>;
 
-                if constexpr (std::is_same_v<T, OnionPathMetadata>) {
-                    auto* meta = reinterpret_cast<session_onion_path_metadata*>(current_metadata_ptr);
-                    new (meta) session_onion_path_metadata{};
-                    meta->category = static_cast<SESSION_NETWORK_REQUEST_CATEGORY>(m.category);
-                    c_path.onion_metadata = meta;
-                    current_metadata_ptr += sizeof(session_onion_path_metadata);
-                } else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>) {
-                    auto* meta = reinterpret_cast<session_lokinet_tunnel_metadata*>(current_metadata_ptr);
-                    new (meta) session_lokinet_tunnel_metadata{};
-                    strncpy(meta->destination_pubkey, m.destination_pubkey.c_str(), sizeof(meta->destination_pubkey) - 1);
-                    meta->destination_pubkey[sizeof(meta->destination_pubkey) - 1] = '\0';
-                    strncpy(meta->destination_snode_address, m.destination_snode_address.c_str(), sizeof(meta->destination_snode_address) - 1);
-                    meta->destination_snode_address[sizeof(meta->destination_snode_address) - 1] = '\0';
-                    c_path.lokinet_metadata = meta;
-                    current_metadata_ptr += sizeof(session_lokinet_tunnel_metadata);
-                }
-            }, cpp_path.metadata);
+            // Copy metadata
+            std::visit(
+                    [&](auto&& m) {
+                        using T = std::decay_t<decltype(m)>;
+
+                        if constexpr (std::is_same_v<T, OnionPathMetadata>) {
+                            auto* meta = reinterpret_cast<session_onion_path_metadata*>(
+                                    current_metadata_ptr);
+                            new (meta) session_onion_path_metadata{};
+                            meta->category =
+                                    static_cast<SESSION_NETWORK_REQUEST_CATEGORY>(m.category);
+                            c_path.onion_metadata = meta;
+                            current_metadata_ptr += sizeof(session_onion_path_metadata);
+                        } else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>) {
+                            auto* meta = reinterpret_cast<session_lokinet_tunnel_metadata*>(
+                                    current_metadata_ptr);
+                            new (meta) session_lokinet_tunnel_metadata{};
+                            strncpy(meta->destination_pubkey,
+                                    m.destination_pubkey.c_str(),
+                                    sizeof(meta->destination_pubkey) - 1);
+                            meta->destination_pubkey[sizeof(meta->destination_pubkey) - 1] = '\0';
+                            strncpy(meta->destination_snode_address,
+                                    m.destination_snode_address.c_str(),
+                                    sizeof(meta->destination_snode_address) - 1);
+                            meta->destination_snode_address
+                                    [sizeof(meta->destination_snode_address) - 1] = '\0';
+                            c_path.lokinet_metadata = meta;
+                            current_metadata_ptr += sizeof(session_lokinet_tunnel_metadata);
+                        }
+                    },
+                    cpp_path.metadata);
         }
-        
+
         *out_paths = c_paths_array;
         *out_paths_len = cpp_paths.size();
     } catch (...) {

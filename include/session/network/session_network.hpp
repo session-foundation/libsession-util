@@ -46,7 +46,7 @@ class Network_v2 {
     void resume();
     void close_connections();
     void clear_cache();
-    
+
     std::vector<PathInfo> get_active_paths();
 
     /// API: network/get_swarm

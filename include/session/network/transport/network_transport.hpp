@@ -21,7 +21,8 @@ class ITransport {
             std::chrono::milliseconds timeout,
             const std::string& request_id,
             std::function<void(bool success)> callback) = 0;
-    virtual void add_failure_listener(const ed25519_pubkey& pubkey, std::function<void()> listener) = 0;
+    virtual void add_failure_listener(
+            const ed25519_pubkey& pubkey, std::function<void()> listener) = 0;
     virtual void remove_failure_listeners(const ed25519_pubkey& pubkey) = 0;
 
     virtual void send_request(Request request, network_response_callback_t callback) = 0;

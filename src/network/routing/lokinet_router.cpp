@@ -100,9 +100,7 @@ LokinetRouter::LokinetRouter(
 LokinetRouter::~LokinetRouter() {
     // Use 'call_get' to force this to be synchronous
     if (_loop)
-        _loop->call_get([this] {
-            _update_status(ConnectionStatus::disconnected);
-        });
+        _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
     log::debug(cat, "[LokinetRouter] Destroyed.");
 }
 
@@ -209,6 +207,15 @@ void LokinetRouter::_update_status(ConnectionStatus new_status) {
 }
 
 void LokinetRouter::_send_request_internal(Request request, network_response_callback_t callback) {
+    // If we are suspended then fail immediately
+    if (_suspended)
+        return callback(
+                false,
+                false,
+                ERROR_NETWORK_SUSPENDED,
+                {content_type_plain_text},
+                "LokinetRouter is suspended.");
+
     // If the request is being sent to a `ServerDestination` then we need to make a proxied request
     // instead
     if (std::holds_alternative<ServerDestination>(request.destination)) {

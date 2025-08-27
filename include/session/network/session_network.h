@@ -147,7 +147,9 @@ LIBSESSION_EXPORT int session_network_softfork(network_object_v2* network);
 /// - `callback` -- [in] callback to be called when the network connection status changes.
 /// - `ctx` -- [in, optional] Pointer to an optional context. Set to NULL if unused.
 LIBSESSION_EXPORT void session_network_set_status_changed_callback(
-        network_object_v2* network, void (*callback)(CONNECTION_STATUS status, void* ctx), void* ctx);
+        network_object_v2* network,
+        void (*callback)(CONNECTION_STATUS status, void* ctx),
+        void* ctx);
 
 LIBSESSION_EXPORT void session_network_callbacks_respond(
         network_object_v2* network,
@@ -162,9 +164,7 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
         size_t body_len);
 
 LIBSESSION_EXPORT void session_network_get_active_paths(
-    network_object_v2* network,
-    session_path_info** out_paths,
-    size_t* out_paths_len);
+        network_object_v2* network, session_path_info** out_paths, size_t* out_paths_len);
 
 LIBSESSION_EXPORT void session_network_paths_free(session_path_info* paths);
 

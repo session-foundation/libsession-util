@@ -64,8 +64,8 @@ typedef struct {
 } session_onion_path_metadata;
 
 typedef struct {
-    char destination_pubkey[65];        // The 64-byte ed25519 pubkey in hex + null terminator.
-    char destination_snode_address[65]; // The 64-byte .snode address + null terminator.
+    char destination_pubkey[65];         // The 64-byte ed25519 pubkey in hex + null terminator.
+    char destination_snode_address[65];  // The 64-byte .snode address + null terminator.
 } session_lokinet_tunnel_metadata;
 
 typedef struct {

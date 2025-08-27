@@ -48,7 +48,6 @@ namespace {
         load_cache_exception(std::string message) : std::runtime_error(message) {}
     };
 
-    constexpr int16_t error_network_suspended = -10001;
     constexpr int16_t error_building_onion_request = -10002;
     constexpr int16_t error_path_build_timeout = -10003;
 
