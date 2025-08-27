@@ -1,9 +1,9 @@
 #pragma once
 
+#include <session/session_protocol.h>
 #include <session/types.h>
 #include <stddef.h>
 #include <stdint.h>
-#include <session/session_protocol.h>
 
 #include "export.h"
 
@@ -19,11 +19,33 @@ enum {
 /// Store front that a Session Pro payment came from. Must match:
 ///   https://github.com/Doy-lee/session-pro-backend/blob/3a1bdf2bfdc83487280e9b1d9a40aac8fd168dd6/base.py#L14
 typedef enum SESSION_PRO_PAYMENT_PROVIDER {
-  SESSION_PRO_PAYMENT_PROVIDER_NIL = 0,
-  SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE = 1,
-  SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE = 2,
-  SESSION_PRO_PAYMENT_PROVIDER_LAST = SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE + 1,
+  SESSION_PRO_PAYMENT_PROVIDER_NIL,
+  SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE,
+  SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE,
+  SESSION_PRO_PAYMENT_PROVIDER_COUNT,
 } SESSION_PRO_PAYMENT_PROVIDER;
+
+typedef struct session_pro_payment_provider_metadata {
+    string8 request_refund_support_url;
+    string8 subscription_page_url;
+} session_pro_payment_provider_metadata;
+
+/// The centralised list of common URLs and properties for handling payment provider specific
+/// integrations. Especially useful for cross-device management of Session Pro subscriptions.
+const session_pro_payment_provider_metadata PAYMENT_PROVIDER_METADATA[SESSION_PRO_PAYMENT_PROVIDER_COUNT] = {
+    /*SESSION_PRO_PAYMENT_PROVIDER_NIL*/ {
+        .request_refund_support_url = string8_literal(""),
+        .subscription_page_url      = string8_literal(""),
+    },
+    /*SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE*/ {
+        .request_refund_support_url = string8_literal("https://support.google.com/googleplay/workflow/9813244"),
+        .subscription_page_url      = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
+    },
+    /*SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE*/ {
+        .request_refund_support_url = string8_literal("https://support.apple.com/118223"),
+        .subscription_page_url      = string8_literal("https://account.apple.com/account/manage/section/subscriptions")
+    }
+};
 
 typedef struct session_pro_backend_response_header {
     uint32_t status;

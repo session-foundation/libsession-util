@@ -491,7 +491,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         REQUIRE(result.items != nullptr);
         REQUIRE(result.items[0].activation_unix_ts_s == unix_ts_s);
         REQUIRE(result.items[0].payment_provider > SESSION_PRO_PAYMENT_PROVIDER_NIL);
-        REQUIRE(result.items[0].payment_provider < SESSION_PRO_PAYMENT_PROVIDER_LAST);
+        REQUIRE(result.items[0].payment_provider < SESSION_PRO_PAYMENT_PROVIDER_COUNT);
         REQUIRE(result.items[0].archive_unix_ts_s == unix_ts_s + 3600);
         REQUIRE(result.items[0].creation_unix_ts_s == unix_ts_s - 3600);
         REQUIRE(result.items[0].subscription_duration == 86400);

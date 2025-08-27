@@ -45,7 +45,10 @@
 ///    Server responds JSON to be parsed with `GetProPaymentsResponse::parse` which they can use to
 ///    populate their client's payment history.
 ///
-/// See the unit tests for examples of the API.
+/// 5. Get a list of per-payment provider URLs, such as links to the support page for refunds and
+///    subscription via the `PAYMENT_PROVIDER_METADATA` global variable defined in the C header.
+///
+/// See the unit tests for examples of using the APIs mentioned.
 
 namespace session::pro_backend {
 

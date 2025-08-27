@@ -456,7 +456,7 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
         item.subscription_duration = std::chrono::seconds(sub_duration_s);
         json_require_fixed_bytes_from_hex(obj, "payment_token_hash", errors, item.payment_token_hash);
         if (payment_provider > SESSION_PRO_PAYMENT_PROVIDER_NIL &&
-            payment_provider < SESSION_PRO_PAYMENT_PROVIDER_LAST) {
+            payment_provider < SESSION_PRO_PAYMENT_PROVIDER_COUNT) {
             item.payment_provider = static_cast<SESSION_PRO_PAYMENT_PROVIDER>(payment_provider);
         } else {
             errors.push_back(fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));

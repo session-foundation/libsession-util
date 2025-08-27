@@ -18,6 +18,8 @@ struct string8 {
     size_t size;
 };
 
+#define string8_literal(literal) {(char *)literal, sizeof(literal) - 1}
+
 struct bytes32 {
     uint8_t data[32];
 };
