@@ -31,7 +31,7 @@ Config::Config(const std::vector<std::any>& opts) {
         // Snode pool options
         HANDLE_TYPE(opt::cache_directory);
         HANDLE_TYPE(opt::cache_expiration);
-        HANDLE_TYPE(opt::cache_refresh_retry_limit);
+        HANDLE_TYPE(opt::cache_min_lifetime);
         HANDLE_TYPE(opt::cache_min_size);
         HANDLE_TYPE(opt::cache_num_nodes_to_use_for_refresh);
         HANDLE_TYPE(opt::cache_node_failure_threshold);
@@ -66,25 +66,15 @@ void Config::handle_config_opt(opt::netid netid_) {
     switch (netid_.target) {
         case opt::netid::Target::mainnet:
             log::debug(
-                    cat,
-                    "Network config set to mainnet with {} seed node{}",
-                    seed_nodes.size(),
-                    seed_nodes.size() == 1 ? "" : "s");
+                    cat, "Network config set to mainnet with {} seed node(s)", seed_nodes.size());
             break;
         case opt::netid::Target::testnet:
             log::debug(
-                    cat,
-                    "Network config set to testnet with {} seed node{}",
-                    seed_nodes.size(),
-                    seed_nodes.size() == 1 ? "" : "s");
+                    cat, "Network config set to testnet with {} seed node(s)", seed_nodes.size());
             break;
 
         case opt::netid::Target::devnet:
-            log::debug(
-                    cat,
-                    "Network config set to devnet with {} seed node{}",
-                    seed_nodes.size(),
-                    seed_nodes.size() == 1 ? "" : "s");
+            log::debug(cat, "Network config set to devnet with {} seed node(s)", seed_nodes.size());
             break;
     }
 }
@@ -175,9 +165,12 @@ void Config::handle_config_opt(opt::cache_expiration ce) {
             ce.duration.count());
 }
 
-void Config::handle_config_opt(opt::cache_refresh_retry_limit crrl) {
-    cache_refresh_retry_limit = crrl.limit;
-    log::debug(cat, "Network config snode pool cache refresh retry limit set to {}", crrl.limit);
+void Config::handle_config_opt(opt::cache_min_lifetime mcl) {
+    cache_min_lifetime = mcl.duration;
+    log::debug(
+            cat,
+            "Network config snode pool minimum cache lifetime set to {}ms",
+            mcl.duration.count());
 }
 
 void Config::handle_config_opt(opt::cache_min_size mcs) {

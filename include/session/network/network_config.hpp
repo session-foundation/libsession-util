@@ -30,7 +30,7 @@ struct Config {
     // Snode Pool Options
     std::optional<fs::path> cache_directory;
     std::chrono::minutes cache_expiration = 2h;
-    uint8_t cache_refresh_retry_limit = 3;
+    std::chrono::milliseconds cache_min_lifetime = 2s;
     size_t cache_min_size = 12;
     uint8_t cache_num_nodes_to_use_for_refresh = 3;
     uint8_t cache_node_failure_threshold = 3;
@@ -87,7 +87,7 @@ struct Config {
     // Snode pool options
     void handle_config_opt(opt::cache_directory dir);
     void handle_config_opt(opt::cache_expiration ce);
-    void handle_config_opt(opt::cache_refresh_retry_limit crrl);
+    void handle_config_opt(opt::cache_min_lifetime mcl);
     void handle_config_opt(opt::cache_min_size mcs);
     void handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr);
     void handle_config_opt(opt::cache_node_failure_threshold nft);

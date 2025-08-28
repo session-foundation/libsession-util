@@ -52,7 +52,7 @@ class LokinetRouter : public IRouter {
     ~LokinetRouter() override;
 
     void suspend() override;
-    void resume() override;
+    void resume(bool automatically_reconnect = true) override;
     void close_connections() override;
     void clear_cache() override;
 

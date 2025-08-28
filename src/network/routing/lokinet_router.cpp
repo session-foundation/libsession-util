@@ -115,9 +115,12 @@ void LokinetRouter::suspend() {
     });
 }
 
-void LokinetRouter::resume() {
+void LokinetRouter::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
+        if (!_suspended)
+            return;
+
         _suspended = false;
         log::info(cat, "[LokinetRouter] Resumed.");
     });

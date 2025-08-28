@@ -250,14 +250,12 @@ namespace opt {
         explicit cache_expiration(std::chrono::minutes duration) : duration{duration} {}
     };
 
-    /// Can be used to override the default (3) number of retries that will be made when trying to
-    /// refresh the snode cache.
-    ///
-    /// Note: This limit does not apply to the bootstrap request which will retry indefinitely since
-    /// the code will be unusable otherwise.
-    struct cache_refresh_retry_limit : base {
-        uint8_t limit;
-        explicit cache_refresh_retry_limit(uint8_t limit) : limit{limit} {}
+    /// Can be used to override the default (2s) minimum duration that the snode cache should live
+    /// for, if a refresh is triggered within this period it will be delayed until the minimum
+    /// duration has passed to prevent excessive looping.
+    struct cache_min_lifetime : base {
+        std::chrono::milliseconds duration;
+        explicit cache_min_lifetime(std::chrono::milliseconds duration) : duration{duration} {}
     };
 
     /// Can be used to override the default (12) minimum number of unused nodes before we trigger a

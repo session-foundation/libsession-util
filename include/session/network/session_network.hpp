@@ -43,7 +43,7 @@ class Network_v2 {
     int softfork() const { return _fork_versions.load().softfork; };
 
     void suspend();
-    void resume();
+    void resume(bool automatically_reconnect = true);
     void close_connections();
     void clear_cache();
 

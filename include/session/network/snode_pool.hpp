@@ -20,7 +20,7 @@ namespace config {
     struct SnodePoolConfig {
         std::optional<std::filesystem::path> cache_directory;
         std::chrono::minutes cache_expiration;
-        uint8_t cache_refresh_retry_limit;
+        std::chrono::milliseconds cache_min_lifetime;
         bool enforce_subnet_diversity;
         network::opt::retry_delay retry_delay;
 
@@ -42,15 +42,15 @@ class SnodePool {
     SnodePool(
             config::SnodePoolConfig config,
             std::shared_ptr<oxen::quic::Loop> loop,
-            network_fetcher_t bootstrap_fetcher);
+            network_fetcher_t direct_fetcher);
     ~SnodePool();
 
     void suspend();
     void resume();
 
     // Sets the network fetcher which should be used once the snode cache exists
-    void set_standard_fetcher(
-            network_fetcher_t standard_fetcher, fetcher_connectivity_check_t connectivity_check);
+    void set_routed_fetcher(
+            network_fetcher_t routed_fetcher, fetcher_connectivity_check_t connectivity_check);
 
     // Returns the number of nodes currently in the pool
     size_t size();
@@ -78,9 +78,9 @@ class SnodePool {
     bool _suspended = false;
     config::SnodePoolConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
-    network_fetcher_t _bootstrap_fetcher;
-    std::optional<network_fetcher_t> _standard_fetcher;
-    std::optional<fetcher_connectivity_check_t> _standard_fetcher_connectivity_check;
+    network_fetcher_t _direct_fetcher;
+    std::optional<network_fetcher_t> _routed_fetcher;
+    std::optional<fetcher_connectivity_check_t> _routed_fetcher_connectivity_check;
 
     // Data (protected by '_cache_mutex')
     std::vector<service_node> _snode_cache;
@@ -112,13 +112,20 @@ class SnodePool {
 
     // Refresh functions
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
-    void _launch_next_refresh_request(const std::string& request_id, bool is_bootstrap_request);
-    void _retry_refresh_request(const std::string& request_id, bool is_bootstrap_request);
+    void _launch_next_refresh_request(
+            const std::string& request_id,
+            const bool use_direct_fetcher,
+            const uint8_t total_requests);
+    void _retry_refresh_request(
+            const std::string& request_id,
+            const bool use_direct_fetcher,
+            const uint8_t total_requests);
     void _on_refresh_complete(
             std::string refresh_id,
             std::vector<std::vector<std::byte>> raw_results,
-            bool is_bootstrap_request,
-            bool cache_refresh_using_legacy_endpoint);
+            const bool use_direct_fetcher,
+            const uint8_t total_requests,
+            const bool from_legacy_endpoint);
 };
 
 }  // namespace session::network

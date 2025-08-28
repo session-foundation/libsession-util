@@ -26,12 +26,7 @@ QuicTransport::QuicTransport(
         config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop) :
         _config{std::move(config)}, _loop{loop} {
     log::trace(cat, "[QuicTransport] Initializing.");
-    _endpoint = quic::Endpoint::endpoint(
-            *_loop,
-            quic::Address{"0.0.0.0", 0},
-            quic::opt::alpns{ALPN},
-            (config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
-                                          : std::nullopt));
+    _recreate_endpoint();
 }
 
 QuicTransport::~QuicTransport() {
@@ -46,15 +41,21 @@ QuicTransport::~QuicTransport() {
 void QuicTransport::suspend() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
+        if (!_suspended)
+            return;
+
         _suspended = true;
         _close_connections();
         log::info(cat, "[QuicTransport] Suspended.");
     });
 }
 
-void QuicTransport::resume() {
+void QuicTransport::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
+        // Recreate the endpoint before updating the `_suspended` flag to avoid the chance that
+        // something will try to use it before we are ready
+        _recreate_endpoint();
         _suspended = false;
         log::info(cat, "[QuicTransport] Resumed.");
     });
@@ -111,6 +112,15 @@ void QuicTransport::send_request(Request request, network_response_callback_t ca
 }
 
 // MARK: Internal Logic
+
+void QuicTransport::_recreate_endpoint() {
+    _endpoint = quic::Endpoint::endpoint(
+            *_loop,
+            quic::Address{"0.0.0.0", 0},
+            quic::opt::alpns{ALPN},
+            (_config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
+                                           : std::nullopt));
+}
 
 void QuicTransport::_close_connections() {
     // Explicitly close all connections then reset the endpoint
@@ -513,6 +523,14 @@ void QuicTransport::_fail_connection(
         // (until the next cache refresh)
         if (_report_node_failure)
             (*_report_node_failure)(ed25519_pubkey::from_hex(address_pubkey_hex), true);
+    } else if (error_code == quic::CONN_SEND_FAIL) {
+        log::warning(
+                cat,
+                "[QuicTransport Request {}] Connection to {} failed as we were unable to send it a "
+                "packet (error: {})",
+                initiating_req_id,
+                address_pubkey_hex,
+                *error_code);
     } else if (error_code)
         log::warning(
                 cat,
@@ -556,7 +574,7 @@ void QuicTransport::_fail_connection(
 
         log::error(
                 cat,
-                "[QuicTransport] Failing {} pending requests due to connection "
+                "[QuicTransport] Failing {} pending request(s) due to connection "
                 "failure.",
                 to_fail.size());
 

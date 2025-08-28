@@ -36,7 +36,7 @@ namespace {
     config::SnodePoolConfig build_snode_pool_config(const config::Config& main_config) {
         return {main_config.cache_directory,
                 main_config.cache_expiration,
-                main_config.cache_refresh_retry_limit,
+                main_config.cache_min_lifetime,
                 main_config.enforce_subnet_diversity,
                 main_config.retry_delay,
                 main_config.netid,
@@ -164,18 +164,17 @@ Network_v2::Network_v2(config::Config config) : config{config} {
     }
 
     // Now that we have our router setup we need to setup the `standard_fetcher` on the `SnodePool`
-    auto standard_fetcher = [r = std::weak_ptr{_router}, loop = _loop](
-                                    Request req, network_response_callback_t on_complete) {
+    auto routed_fetcher = [r = std::weak_ptr{_router}, loop = _loop](
+                                  Request req, network_response_callback_t on_complete) {
         loop->call([r, req = std::move(req), on_complete = std::move(on_complete)] {
             if (auto router = r.lock())
                 router->send_request(std::move(req), std::move(on_complete));
             else
                 log::error(
-                        cat,
-                        "Router provided to the SnodePool standard fetcher has been destroyed.");
+                        cat, "Router provided to the SnodePool routed_fetcher has been destroyed.");
         });
     };
-    auto standard_fetcher_connected = [r = std::weak_ptr{_router}, loop = _loop]() -> bool {
+    auto routed_fetcher_connected = [r = std::weak_ptr{_router}, loop = _loop]() -> bool {
         return loop->call_get([r] {
             if (auto router = r.lock())
                 return router->get_status() == ConnectionStatus::connected;
@@ -183,8 +182,7 @@ Network_v2::Network_v2(config::Config config) : config{config} {
             return false;
         });
     };
-    _snode_pool->set_standard_fetcher(
-            std::move(standard_fetcher), std::move(standard_fetcher_connected));
+    _snode_pool->set_routed_fetcher(std::move(routed_fetcher), std::move(routed_fetcher_connected));
 
     // Add hooks to update the connection status
     _router->on_status_changed = [this] { _recalculate_status(); };
@@ -226,15 +224,18 @@ void Network_v2::suspend() {
     });
 }
 
-void Network_v2::resume() {
+void Network_v2::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _loop->call_get([this, automatically_reconnect] {
+        if (!_suspended)
+            return;
+
         if (_snode_pool)
             _snode_pool->resume();
         if (_transport)
-            _transport->resume();
+            _transport->resume(automatically_reconnect);
         if (_router)
-            _router->resume();
+            _router->resume(automatically_reconnect);
 
         _suspended = false;
         log::info(cat, "Resumed.");
@@ -647,7 +648,10 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.cache_dir = nullptr;
     config.cache_expiration_minutes =
             std::chrono::duration_cast<std::chrono::minutes>(cpp_defaults.cache_expiration).count();
-    config.cache_refresh_retry_limit = cpp_defaults.cache_refresh_retry_limit;
+    config.cache_min_lifetime_ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(cpp_defaults.cache_min_lifetime)
+                    .count();
+    ;
     config.cache_min_size = cpp_defaults.cache_min_size;
     config.cache_num_nodes_to_use_for_refresh = cpp_defaults.cache_num_nodes_to_use_for_refresh;
     config.cache_node_failure_threshold = cpp_defaults.cache_node_failure_threshold;
@@ -771,9 +775,9 @@ LIBSESSION_C_API bool session_network_init(
             cpp_opts.emplace_back(
                     opt::cache_expiration{std::chrono::minutes{config->cache_expiration_minutes}});
 
-        if (config->cache_refresh_retry_limit > 0)
-            cpp_opts.emplace_back(
-                    opt::cache_refresh_retry_limit{config->cache_refresh_retry_limit});
+        if (config->cache_min_lifetime_ms > 0)
+            cpp_opts.emplace_back(opt::cache_min_lifetime{
+                    std::chrono::milliseconds{config->cache_min_lifetime_ms}});
 
         if (config->cache_min_size > 0)
             cpp_opts.emplace_back(opt::cache_min_size{config->cache_min_size});
@@ -877,8 +881,9 @@ LIBSESSION_C_API void session_network_suspend(network_object_v2* network) {
     unbox(network).suspend();
 }
 
-LIBSESSION_C_API void session_network_resume(network_object_v2* network) {
-    unbox(network).resume();
+LIBSESSION_C_API void session_network_resume(
+        network_object_v2* network, bool automatically_reconnect) {
+    unbox(network).resume(automatically_reconnect);
 }
 
 LIBSESSION_C_API void session_network_close_connections(network_object_v2* network) {

@@ -11,7 +11,7 @@ class IRouter {
     virtual ~IRouter() = default;
 
     virtual void suspend() = 0;
-    virtual void resume() = 0;
+    virtual void resume(bool automatically_reconnect = true) = 0;
     virtual void close_connections() = 0;
     virtual void clear_cache() = 0;
 

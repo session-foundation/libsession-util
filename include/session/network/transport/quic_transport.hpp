@@ -49,7 +49,7 @@ class QuicTransport : public ITransport {
     ~QuicTransport() override;
 
     void suspend() override;
-    void resume() override;
+    void resume(bool automatically_reconnect = true) override;
     void close_connections() override;
 
     ConnectionStatus get_status() const override { return _status.load(); };
@@ -75,6 +75,7 @@ class QuicTransport : public ITransport {
     // disconnected
     bool _has_attempted_reconnect = false;
 
+    void _recreate_endpoint();
     void _close_connections();
     void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);

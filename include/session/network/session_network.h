@@ -61,7 +61,7 @@ typedef struct {
     // Snode pool options
     const char* cache_dir;
     uint32_t cache_expiration_minutes;
-    uint8_t cache_refresh_retry_limit;
+    uint64_t cache_min_lifetime_ms;
     size_t cache_min_size;
     uint8_t cache_num_nodes_to_use_for_refresh;
     uint8_t cache_node_failure_threshold;
@@ -130,7 +130,8 @@ LIBSESSION_EXPORT void session_network_free(network_object_v2* network);
 LIBSESSION_EXPORT void session_request_params_free(session_request_params* params);
 
 LIBSESSION_EXPORT void session_network_suspend(network_object_v2* network);
-LIBSESSION_EXPORT void session_network_resume(network_object_v2* network);
+LIBSESSION_EXPORT void session_network_resume(
+        network_object_v2* network, bool automatically_reconnect);
 LIBSESSION_EXPORT void session_network_close_connections(network_object_v2* network);
 LIBSESSION_EXPORT void session_network_clear_cache(network_object_v2* network);
 

@@ -228,10 +228,17 @@ void OnionRequestRouter::suspend() {
     });
 }
 
-void OnionRequestRouter::resume() {
+void OnionRequestRouter::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] {
+    _loop->call_get([this, automatically_reconnect] {
+        if (!_suspended)
+            return;
+
         _suspended = false;
+
+        if (automatically_reconnect)
+            _pre_build_paths_if_needed();
+
         log::info(cat, "[OnionRequestRouter] Resumed.");
     });
 }
@@ -272,6 +279,26 @@ void OnionRequestRouter::_finish_setup() {
     log::debug(cat, "[OnionRequestRouter] Finishing setup, router is now ready.");
 
     // Pre-build paths if needed
+    _pre_build_paths_if_needed();
+
+    // Process any requests that were queued before we were ready
+    for (auto& [category, queue] : _request_queues) {
+        if (!queue.is_empty()) {
+            auto pending = queue.pop_all();
+            log::debug(
+                    cat,
+                    "[OnionRequestRouter] Processing {} requests queued during initialization for "
+                    "category '{}'.",
+                    pending.size(),
+                    to_string(category));
+
+            for (auto& [req, cb] : pending)
+                _send_request_internal(std::move(req), std::move(cb));
+        }
+    }
+}
+
+void OnionRequestRouter::_pre_build_paths_if_needed() {
     if (!_config.disable_pre_build_paths) {
         log::info(cat, "[OnionRequestRouter] Pre-building initial paths.");
 
@@ -301,22 +328,6 @@ void OnionRequestRouter::_finish_setup() {
         }
     } else
         log::debug(cat, "[OnionRequestRouter] Path pre-building is disabled.");
-
-    // Process any requests that were queued before we were ready
-    for (auto& [category, queue] : _request_queues) {
-        if (!queue.is_empty()) {
-            auto pending = queue.pop_all();
-            log::debug(
-                    cat,
-                    "[OnionRequestRouter] Processing {} requests queued during initialization for "
-                    "category '{}'.",
-                    pending.size(),
-                    to_string(category));
-
-            for (auto& [req, cb] : pending)
-                _send_request_internal(std::move(req), std::move(cb));
-        }
-    }
 }
 
 void OnionRequestRouter::_close_connections() {
@@ -358,9 +369,14 @@ void OnionRequestRouter::_close_connections() {
 void OnionRequestRouter::_update_status() {
     ConnectionStatus new_status = ConnectionStatus::disconnected;
 
-    // If we have at least one active path we are considered connected
-    if (std::any_of(_paths.begin(), _paths.end(), [](const auto& p) { return !p.second.empty(); }))
+    // If we have at least one active "standard" path we are considered connected
+    auto paths_it = _paths.find(RequestCategory::standard);
+    if (paths_it != _paths.end() && !paths_it->second.empty())
         new_status = ConnectionStatus::connected;
+    // If we have at least one active non-standard path then considered connecting (not properly
+    // connected, but some requests may work)
+    else if (std::any_of(_paths.begin(), _paths.end(), [](const auto& p) { return !p.second.empty(); }))
+        new_status = ConnectionStatus::connecting;
     // Otherwise if we are building one then we are connecting
     else if (std::any_of(
                      _in_progress_path_builds.begin(),
@@ -480,14 +496,15 @@ void OnionRequestRouter::_send_request_internal(
 void OnionRequestRouter::_build_path(
         RequestCategory category,
         std::optional<std::string> initiating_req_id,
-        const std::vector<service_node>& nodes_to_exclude_) {
+        const std::vector<service_node>& nodes_to_exclude_,
+        std::optional<std::string> original_path_id) {
     if (_suspended) {
         log::info(cat, "Ignoring build_path call as network is suspended.");
         return;
     }
 
     const std::string req_id_log = (initiating_req_id ? *initiating_req_id : "internal");
-    const std::string path_id = "P-" + random::random_base32(4);
+    const std::string path_id = original_path_id.value_or("P-" + random::random_base32(4));
     log::info(
             cat,
             "[OnionRouter Request {} Path {}]: Starting build for {} path.",
@@ -681,9 +698,10 @@ void OnionRequestRouter::_on_guard_connectivity_response(
                 delay.count(),
                 retries,
                 _config.path_build_retry_limit);
+        _update_status();
 
-        _loop->call_later(delay, [this, category, initiating_req_id, guard_node] {
-            _build_path(category, initiating_req_id, {guard_node});
+        _loop->call_later(delay, [this, path_id, category, initiating_req_id, guard_node] {
+            _build_path(category, initiating_req_id, {guard_node}, path_id);
         });
         return;
     }
@@ -794,9 +812,8 @@ void OnionRequestRouter::_on_guard_connectivity_response(
                                 return p.id == pid;
                             });
 
-                    if (path_it != active_paths.end()) {
+                    if (path_it != active_paths.end())
                         path_it->failure_count = _config.path_failure_threshold;
-                    }
 
                     _handle_path_failure(pid, category, "Guard connection lost");
                 });
@@ -944,6 +961,9 @@ void OnionRequestRouter::_send_on_path(
                             std::holds_alternative<ServerDestination>(original_request.destination);
 
                     try {
+                        if (!response)
+                            throw std::runtime_error{"Unexpected empty repsonse"};
+
                         DecryptedResponse decrypted =
                                 decrypt_onion_response(*builder, original_request, *response);
                         final_status_code = decrypted.status_code;
@@ -952,7 +972,12 @@ void OnionRequestRouter::_send_on_path(
                     } catch (const std::exception& e) {
                         final_success = false;
                         headers = {content_type_plain_text};
-                        body = "Failed to decrypt onion response";
+
+                        if (success && !timeout)
+                            body = "Failed to decrypt onion response due to error: {}"_format(
+                                    e.what());
+                        else
+                            body = *response;
                     }
 
                     if (body.has_value();
@@ -1098,77 +1123,86 @@ void OnionRequestRouter::_handle_path_failure(
         return;
     }
 
+    // Increment the `failure_count` on the path
     OnionPath& path = *path_it;
+    path.failure_count++;
 
-    // Check if the response has one of the 'node_not_found' prefixes
-    std::optional<std::string_view> ed25519PublicKey;
+    // If the path is still potentially valid then check if the response has one of the
+    // 'node_not_found' prefixes
+    if (path.failure_count < _config.path_failure_threshold) {
+        std::optional<std::string_view> ed25519PublicKey;
 
-    if (error_body) {
-        if (error_body->starts_with(node_not_found_prefix))
-            ed25519PublicKey = {error_body->data() + node_not_found_prefix.size()};
-        else if (error_body->starts_with(node_not_found_prefix_no_status))
-            ed25519PublicKey = {error_body->data() + node_not_found_prefix_no_status.size()};
-    }
+        if (error_body) {
+            if (error_body->starts_with(node_not_found_prefix))
+                ed25519PublicKey = {error_body->data() + node_not_found_prefix.size()};
+            else if (error_body->starts_with(node_not_found_prefix_no_status))
+                ed25519PublicKey = {error_body->data() + node_not_found_prefix_no_status.size()};
+        }
 
-    // If we found a result then try to extract the pubkey and process it so we can handle it as a
-    // specific node failure instead of a path failure
-    if (ed25519PublicKey && ed25519PublicKey->size() == 64 && oxenc::is_hex(*ed25519PublicKey)) {
-        try {
-            session::network::ed25519_pubkey bad_node_pk =
-                    session::network::ed25519_pubkey::from_hex(*ed25519PublicKey);
-            auto edpk_view = to_span(bad_node_pk.view());
+        // If we found a result then try to extract the pubkey and replace that node in the path. We
+        // do still want to increment the `failure_count` on the path in this case to prevent a
+        // rogue relay from using this error as a mechanism to take full control of the path
+        if (ed25519PublicKey && ed25519PublicKey->size() == 64 &&
+            oxenc::is_hex(*ed25519PublicKey)) {
+            try {
+                session::network::ed25519_pubkey bad_node_pk =
+                        session::network::ed25519_pubkey::from_hex(*ed25519PublicKey);
+                auto edpk_view = to_span(bad_node_pk.view());
 
-            auto bad_node_it = std::find_if(
-                    path.nodes.begin(), path.nodes.end(), [&edpk_view](const auto& node) {
-                        return to_string_view(node.view_remote_key()) == to_string_view(edpk_view);
-                    });
+                auto bad_node_it = std::find_if(
+                        path.nodes.begin(), path.nodes.end(), [&edpk_view](const auto& node) {
+                            return to_string_view(node.view_remote_key()) ==
+                                   to_string_view(edpk_view);
+                        });
 
-            if (bad_node_it != path.nodes.end()) {
-                log::debug(
-                        cat,
-                        "[OnionRouter Path {}]: Failure identified for specific node {}.",
-                        path.id,
-                        bad_node_pk.view());
-                std::vector<service_node> replacements;
-
-                if (auto snode_pool = _snode_pool.lock()) {
-                    snode_pool->record_node_failure(*bad_node_it);
-
-                    auto used_nodes = extract_nodes(_paths, _pending_paths);
-                    replacements = snode_pool->get_unused_nodes(1, used_nodes);
-                } else {
-                    log::critical(
+                if (bad_node_it != path.nodes.end()) {
+                    log::debug(
                             cat,
-                            "[OnionRequestRouter] SnodePool was destroyed, cannot repair path.");
-                    return;
-                }
-
-                // If we found a replacement node then swap out the bad one and reset the path
-                // failure count (assume the bad node was the cause of any failures), we can then
-                // stop here (the path is repaired so no need to continue)
-                if (!replacements.empty()) {
-                    log::info(
-                            cat,
-                            "[OnionRouter Path {}]: Repairing path by replacing node {} with {}.",
+                            "[OnionRouter Path {}]: Failure identified for specific node {}.",
                             path.id,
-                            bad_node_it->to_string(),
-                            replacements[0].to_string());
-                    *bad_node_it = replacements[0];
-                    path.failure_count = 0;
-                    return;
-                }
+                            bad_node_pk.view());
+                    std::vector<service_node> replacements;
 
-                log::warning(
-                        cat,
-                        "[OnionRouter Path {}]: Could not find replacement node to repair path.",
-                        path.id);
+                    if (auto snode_pool = _snode_pool.lock()) {
+                        // Flag the bad node as permanently failed until the next cache refresh
+                        snode_pool->record_node_failure(*bad_node_it, true);
+
+                        auto used_nodes = extract_nodes(_paths, _pending_paths);
+                        replacements = snode_pool->get_unused_nodes(1, used_nodes);
+
+                        // If we found a replacement node then swap out the bad one and reset the
+                        // path failure count (assume the bad node was the cause of any failures),
+                        // we can then stop here (the path is repaired so no need to continue)
+                        if (!replacements.empty()) {
+                            log::info(
+                                    cat,
+                                    "[OnionRouter Path {}]: Repairing path by replacing node {} "
+                                    "with {}.",
+                                    path.id,
+                                    bad_node_it->to_string(),
+                                    replacements[0].to_string());
+                            *bad_node_it = replacements[0];
+                        } else {
+                            log::warning(
+                                    cat,
+                                    "[OnionRouter Path {}]: Cannot repair path due to lack of "
+                                    "replacement node, dropping instead.",
+                                    path.id);
+                            path.failure_count = _config.path_failure_threshold;
+                        }
+                    } else {
+                        log::critical(
+                                cat,
+                                "[OnionRequestRouter] Cannot repair path as SnodePool was "
+                                "destroyed, dropping instead.");
+                        path.failure_count = _config.path_failure_threshold;
+                    }
+                }
+            } catch (...) { /* Invalid pubkey, fall through to general failure */
             }
-        } catch (...) { /* Invalid pubkey, fall through to general failure */
         }
     }
 
-    // Increment the `failure_count` on the path
-    path.failure_count++;
     log::debug(
             cat,
             "[OnionRouter Path {}]: Recorded failure, total failures: {}/{}",
@@ -1199,6 +1233,7 @@ void OnionRequestRouter::_handle_path_failure(
         if (path.pending_requests == 0) {
             log::debug(cat, "[OnionRouter Path {}]: Retiring idle path immediately.", old_path_id);
             active_paths.erase(path_it);
+            _update_status();
         } else {
             log::debug(
                     cat,

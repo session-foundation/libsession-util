@@ -64,7 +64,7 @@ class OnionRequestRouter : public IRouter {
     ~OnionRequestRouter() override;
 
     void suspend() override;
-    void resume() override;
+    void resume(bool automatically_reconnect = true) override;
     void close_connections() override;
     void clear_cache() override {}
 
@@ -78,6 +78,7 @@ class OnionRequestRouter : public IRouter {
 
     // All of the below functions should only be called from within `_loop`
     void _finish_setup();
+    void _pre_build_paths_if_needed();
     void _close_connections();
     void _update_status();
     void _send_request_internal(Request request, network_response_callback_t callback);
@@ -85,7 +86,8 @@ class OnionRequestRouter : public IRouter {
     void _build_path(
             RequestCategory category,
             std::optional<std::string> initiating_req_id,
-            const std::vector<service_node>& nodes_to_exclude);
+            const std::vector<service_node>& nodes_to_exclude,
+            std::optional<std::string> original_path_id = std::nullopt);
     void _on_guard_connectivity_response(
             const std::string& path_id,
             RequestCategory category,
