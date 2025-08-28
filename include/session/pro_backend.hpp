@@ -145,7 +145,7 @@ struct AddProPaymentOrGetProProofResponse : public ResponseHeader {
     ///
     /// Outputs:
     /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
-    bool parse(std::string_view json);
+    static AddProPaymentOrGetProProofResponse parse(std::string_view json);
 };
 
 /// Request a new Session Pro proof from the backend. The specified `master_pkey` must have
@@ -248,7 +248,7 @@ struct GetProRevocationsResponse : public ResponseHeader {
     ///
     /// Outputs:
     /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
-    bool parse(std::string_view json);
+    static GetProRevocationsResponse parse(std::string_view json);
 };
 
 struct GetProPaymentsRequest {
@@ -337,7 +337,7 @@ struct GetProPaymentsResponse : public ResponseHeader {
     ///
     /// Outputs:
     /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
-    bool parse(std::string_view json);
+    static GetProPaymentsResponse parse(std::string_view json);
 };
 
 void make_blake2b32_hasher(struct crypto_generichash_blake2b_state* hasher);

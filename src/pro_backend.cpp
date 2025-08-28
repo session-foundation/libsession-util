@@ -190,36 +190,36 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
     return result;
 }
 
-bool AddProPaymentOrGetProProofResponse::parse(std::string_view json) {
+AddProPaymentOrGetProProofResponse AddProPaymentOrGetProProofResponse::parse(std::string_view json) {
     // Parse basics
-    *this = {};
-    nlohmann::json j = json_parse(json, errors);
-    status = json_require<uint8_t>(j, "status", errors);
-    if (errors.size()) {
-        status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
-        return errors.empty();
+    AddProPaymentOrGetProProofResponse result = {};
+    nlohmann::json j = json_parse(json, result.errors);
+    result.status = json_require<uint8_t>(j, "status", result.errors);
+    if (result.errors.size()) {
+        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+        return result;
     }
 
     // Parse errors
-    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, errors);
-        return false;
+    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+        parse_json_response_errors(j, result.errors);
+        return result;
     }
 
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
-    if (errors.size())
-        return errors.empty();
+    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
+    if (result.errors.size())
+        return result;
 
     // Parse payload
-    proof.version = json_require<uint8_t>(result_obj, "version", errors);
-    auto expiry_unix_ts_s = json_require<uint64_t>(result_obj, "expiry_unix_ts_s", errors);
-    proof.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_unix_ts_s));
+    result.proof.version = json_require<uint8_t>(result_obj, "version", result.errors);
+    auto expiry_unix_ts_s = json_require<uint64_t>(result_obj, "expiry_unix_ts_s", result.errors);
+    result.proof.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_unix_ts_s));
     json_require_fixed_bytes_from_hex(
-            result_obj, "gen_index_hash", errors, proof.gen_index_hash);
+            result_obj, "gen_index_hash", result.errors, result.proof.gen_index_hash);
     json_require_fixed_bytes_from_hex(
-            result_obj, "rotating_pkey", errors, proof.rotating_pubkey);
-    json_require_fixed_bytes_from_hex(result_obj, "sig", errors, proof.sig);
-    return errors.empty();
+            result_obj, "rotating_pkey", result.errors, result.proof.rotating_pubkey);
+    json_require_fixed_bytes_from_hex(result_obj, "sig", result.errors, result.proof.sig);
+    return result;
 }
 
 std::string GetProProofRequest::to_json() const {
@@ -301,54 +301,58 @@ std::string GetProRevocationsRequest::to_json() const {
     return result;
 }
 
-bool GetProRevocationsResponse::parse(std::string_view json) {
+GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json) {
     // Parse basics
-    *this = {};
-    nlohmann::json j = json_parse(json, errors);
-    status = json_require<uint8_t>(j, "status", errors);
-    if (errors.size()) {
-        status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
-        return errors.empty();
+    GetProRevocationsResponse result = {};
+    nlohmann::json j = json_parse(json, result.errors);
+    result.status = json_require<uint8_t>(j, "status", result.errors);
+    if (result.errors.size()) {
+        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+        return result;
     }
 
     // Parse errors
-    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, errors);
-        return false;
+    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+        parse_json_response_errors(j, result.errors);
+        return result;
     }
 
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
-    if (errors.size())
-        return errors.empty();
+    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
+    if (result.errors.size())
+        return result;
 
     // Parse payload
-    ticket = json_require<uint32_t>(result_obj, "ticket", errors);
+    result.ticket = json_require<uint32_t>(result_obj, "ticket", result.errors);
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", errors);
-    items.reserve(array.size());
+    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
+    result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
         if (!it.is_object()) {
-            errors.push_back(fmt::format(
-                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
+            result.errors.push_back(
+                    fmt::format(
+                            "Aborting parse, 'items[{}]' was not an object: {}",
+                            index,
+                            it.dump(1)));
             break;
         }
 
         // Parse revocation item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto expiry_unix_ts = json_require<uint64_t>(obj, "expiry_unix_ts_s", errors);
+        auto expiry_unix_ts = json_require<uint64_t>(obj, "expiry_unix_ts_s", result.errors);
 
         ProRevocationItem item = {};
         item.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_unix_ts));
-        json_require_fixed_bytes_from_hex(obj, "gen_index_hash", errors, item.gen_index_hash);
+        json_require_fixed_bytes_from_hex(
+                obj, "gen_index_hash", result.errors, item.gen_index_hash);
 
         // Handle parsing result
-        if (errors.size())
+        if (result.errors.size())
             break;
-        items.emplace_back(std::move(item));
+        result.items.emplace_back(std::move(item));
     }
 
-    return errors.empty();
+    return result;
 }
 
 std::string GetProPaymentsRequest::to_json() const {
@@ -405,47 +409,50 @@ array_uc64 GetProPaymentsRequest::build_sig(
     return result;
 }
 
-bool GetProPaymentsResponse::parse(std::string_view json) {
+GetProPaymentsResponse GetProPaymentsResponse::parse(std::string_view json) {
     // Parse basics
-    *this = {};
-    nlohmann::json j = json_parse(json, errors);
-    status = json_require<uint8_t>(j, "status", errors);
-    if (errors.size()) {
-        status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
-        return errors.empty();
+    GetProPaymentsResponse result = {};
+    nlohmann::json j = json_parse(json, result.errors);
+    result.status = json_require<uint8_t>(j, "status", result.errors);
+    if (result.errors.size()) {
+        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+        return result;
     }
 
     // Parse errors
-    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, errors);
-        return false;
+    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+        parse_json_response_errors(j, result.errors);
+        return result;
     }
 
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", errors);
-    if (errors.size())
-        return errors.empty();
+    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
+    if (result.errors.size())
+        return result;
 
     // Parse payload
-    pages = json_require<uint32_t>(result_obj, "pages", errors);
-    payments = json_require<uint32_t>(result_obj, "payments", errors);
+    result.pages = json_require<uint32_t>(result_obj, "pages", result.errors);
+    result.payments = json_require<uint32_t>(result_obj, "payments", result.errors);
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", errors);
-    items.reserve(array.size());
+    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
+    result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
         if (!it.is_object()) {
-            errors.push_back(fmt::format(
-                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
+            result.errors.push_back(
+                    fmt::format(
+                            "Aborting parse, 'items[{}]' was not an object: {}",
+                            index,
+                            it.dump(1)));
             break;
         }
 
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto activation_ts = json_require<uint64_t>(obj, "activation_unix_ts_s", errors);
-        auto archive_ts = json_require<uint64_t>(obj, "archive_unix_ts_s", errors);
-        auto creation_ts = json_require<uint64_t>(obj, "creation_unix_ts_s", errors);
-        auto sub_duration_s = json_require<uint64_t>(obj, "subscription_duration_s", errors);
-        auto payment_provider = json_require<uint32_t>(obj, "payment_provider", errors);
+        auto activation_ts = json_require<uint64_t>(obj, "activation_unix_ts_s", result.errors);
+        auto archive_ts = json_require<uint64_t>(obj, "archive_unix_ts_s", result.errors);
+        auto creation_ts = json_require<uint64_t>(obj, "creation_unix_ts_s", result.errors);
+        auto sub_duration_s = json_require<uint64_t>(obj, "subscription_duration_s", result.errors);
+        auto payment_provider = json_require<uint32_t>(obj, "payment_provider", result.errors);
 
         ProPaymentItem item = {};
         item.activation_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(activation_ts));
@@ -453,23 +460,23 @@ bool GetProPaymentsResponse::parse(std::string_view json) {
         item.creation_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(creation_ts));
         item.subscription_duration = std::chrono::seconds(sub_duration_s);
         json_require_fixed_bytes_from_hex(
-                obj, "payment_token_hash", errors, item.payment_token_hash);
+                obj, "payment_token_hash", result.errors, item.payment_token_hash);
         if (payment_provider > SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL &&
             payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT) {
             item.payment_provider =
                     static_cast<SESSION_PRO_BACKEND_PAYMENT_PROVIDER>(payment_provider);
         } else {
-            errors.push_back(
+            result.errors.push_back(
                     fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
         }
 
         // Handle parsing result
-        if (errors.size())
+        if (result.errors.size())
             break;
 
-        items.emplace_back(std::move(item));
+        result.items.emplace_back(std::move(item));
     }
-    return errors.empty();
+    return result;
 }
 
 void make_blake2b32_hasher(crypto_generichash_blake2b_state* hasher) {
@@ -695,8 +702,7 @@ session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    AddProPaymentOrGetProProofResponse cpp = {};
-    cpp.parse({json, json_len});
+    auto cpp = AddProPaymentOrGetProProofResponse::parse({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -758,8 +764,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    GetProRevocationsResponse cpp = {};
-    cpp.parse({json, json_len});
+    GetProRevocationsResponse cpp = GetProRevocationsResponse::parse({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -826,8 +831,7 @@ session_pro_backend_get_pro_payments_response_parse(const char* json, size_t jso
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    GetProPaymentsResponse cpp = {};
-    cpp.parse({json, json_len});
+    auto cpp = GetProPaymentsResponse::parse({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
