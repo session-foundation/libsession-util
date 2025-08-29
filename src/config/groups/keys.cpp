@@ -1240,7 +1240,9 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     }
 
     if (!decrypt_success)  // none of the keys worked
-        throw std::runtime_error{"unable to decrypt ciphertext with any current group keys"};
+        throw std::runtime_error{fmt::format(
+                "unable to decrypt ciphertext with any current group keys; tried {}",
+                keys_.size() + (pending_key() ? 1 : 0))};
 
     std::pair<std::string, std::vector<unsigned char>> result;
     result.first = std::move(decrypt.session_id);

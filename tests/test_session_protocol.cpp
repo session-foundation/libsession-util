@@ -22,6 +22,8 @@ struct SerialisedProtobufContentWithProForTesting {
     std::string plaintext;
     array_uc64 sig_over_plaintext_with_user_pro_key;
     array_uc32 pro_proof_hash;
+    bytes64 sig_over_plaintext_with_user_pro_key_c;
+    bytes32 pro_proof_hash_c;
 };
 
 static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_session_pro(
@@ -76,6 +78,15 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             result.plaintext.size(),
             user_rotating_privkey.data());
 
+    // Setup the C versions for convenience
+    std::memcpy(
+            result.sig_over_plaintext_with_user_pro_key_c.data,
+            result.sig_over_plaintext_with_user_pro_key.data(),
+            sizeof(result.sig_over_plaintext_with_user_pro_key_c.data));
+    std::memcpy(
+            result.pro_proof_hash_c.data,
+            result.pro_proof_hash.data(),
+            sizeof(result.pro_proof_hash_c.data));
     return result;
 }
 
@@ -114,38 +125,36 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt with and w/o pro sig produce same payload size") {
         // Same payload size because the encrypt function should put in a dummy signature if one
         // wasn't specific to make pro and non-pro envelopes indistinguishable.
-
-        session_protocol_destination dest = {};
-        dest.type = DESTINATION_TYPE_CONTACT;
-        dest.sent_timestamp_ms = timestamp_ms.count();
-        std::memcpy(dest.recipient_pubkey, keys.session_pk1.data(), sizeof(dest.recipient_pubkey));
+        bytes33 recipient_pubkey = {};
+        std::memcpy(recipient_pubkey.data, keys.session_pk1.data(), sizeof(recipient_pubkey.data));
 
         // Withhold the pro signature
-        dest.has_pro_sig = false;
         char error[256];
         session_protocol_encrypted_for_destination encrypt_without_pro_sig =
-                session_protocol_encrypt_for_destination(
+                session_protocol_encrypt_and_wrap_for_1o1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
                         keys.ed_sk0.size(),
-                        &dest,
-                        NAMESPACE_DEFAULT,
+                        timestamp_ms.count(),
+                        &recipient_pubkey,
+                        nullptr,
                         error,
                         sizeof(error));
         INFO(error);
         REQUIRE(encrypt_without_pro_sig.error_len_incl_null_terminator == 0);
 
         // Set the pro signature
-        dest.has_pro_sig = true;
+        bytes64 pro_sig = {};
         session_protocol_encrypted_for_destination encrypt_with_pro_sig =
-                session_protocol_encrypt_for_destination(
+                session_protocol_encrypt_and_wrap_for_1o1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
                         keys.ed_sk0.size(),
-                        &dest,
-                        NAMESPACE_DEFAULT,
+                        timestamp_ms.count(),
+                        &recipient_pubkey,
+                        &pro_sig,
                         error,
                         sizeof(error));
         REQUIRE(encrypt_with_pro_sig.error_len_incl_null_terminator == 0);
@@ -180,19 +189,18 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Encrypt
         session_protocol_encrypted_for_destination encrypt_result = {};
         {
-            session_protocol_destination dest = {};
-            dest.type = DESTINATION_TYPE_CONTACT;
-            dest.sent_timestamp_ms = timestamp_ms.count();
-            REQUIRE(sizeof(dest.recipient_pubkey) == keys.session_pk1.size());
-            std::memcpy(dest.recipient_pubkey, keys.session_pk1.data(), keys.session_pk1.size());
+            bytes64* pro_sig = nullptr;
+            bytes33 recipient_pubkey = {};
+            std::memcpy(recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
 
-            encrypt_result = session_protocol_encrypt_for_destination(
+            encrypt_result = session_protocol_encrypt_and_wrap_for_1o1(
                     plaintext.data(),
                     plaintext.size(),
                     keys.ed_sk0.data(),
                     keys.ed_sk0.size(),
-                    &dest,
-                    NAMESPACE_DEFAULT,
+                    timestamp_ms.count(),
+                    &recipient_pubkey,
+                    pro_sig,
                     error,
                     sizeof(error));
             REQUIRE(encrypt_result.encrypted);
@@ -258,16 +266,18 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     PRO_FEATURES_NIL);
 
     // Setup base destination object with the pro signature w/ Session pubkey 1 as the recipient
+    bytes64 base_pro_sig = {};
+    std::memcpy(
+            base_pro_sig.data,
+            protobuf_content_with_pro.sig_over_plaintext_with_user_pro_key.data(),
+            sizeof(base_pro_sig.data));
+
     session_protocol_destination base_dest = {};
     base_dest.sent_timestamp_ms = timestamp_ms.count();
-    base_dest.has_pro_sig = true;
-    std::memcpy(
-            base_dest.pro_sig,
-            protobuf_content_with_pro.sig_over_plaintext_with_user_pro_key.data(),
-            sizeof(base_dest.pro_sig));
+    base_dest.pro_sig = &base_pro_sig;
 
-    REQUIRE(sizeof(base_dest.recipient_pubkey) == keys.session_pk1.size());
-    std::memcpy(base_dest.recipient_pubkey, keys.session_pk1.data(), keys.session_pk1.size());
+    REQUIRE(sizeof(base_dest.recipient_pubkey.data) == keys.session_pk1.size());
+    std::memcpy(base_dest.recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
 
     SECTION("Check non-encryptable messages produce only plaintext") {
         auto dest_list = {
@@ -292,8 +302,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             } else if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX) {
                 auto [blind15_pk, blind15_sk] = session::blind15_key_pair(
                         keys.ed_sk1, keys.ed_pk1, /*blind factor*/ nullptr);
-                dest.recipient_pubkey[0] = 0x15;
-                std::memcpy(dest.recipient_pubkey + 1, blind15_pk.data(), blind15_pk.size());
+                dest.recipient_pubkey.data[0] = 0x15;
+                std::memcpy(dest.recipient_pubkey.data + 1, blind15_pk.data(), blind15_pk.size());
             }
 
             session_protocol_encrypted_for_destination encrypt_result =
@@ -321,22 +331,19 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encrypt/decrypt for contact in default namespace with Pro") {
         // Encrypt content
-        session_protocol_encrypted_for_destination encrypt_result = {};
-        {
-            session_protocol_destination dest = base_dest;
-            dest.type = DESTINATION_TYPE_CONTACT;
-            encrypt_result = session_protocol_encrypt_for_destination(
-                    protobuf_content_with_pro.plaintext.data(),
-                    protobuf_content_with_pro.plaintext.size(),
-                    keys.ed_sk0.data(),
-                    keys.ed_sk0.size(),
-                    &dest,
-                    NAMESPACE_DEFAULT,
-                    error,
-                    sizeof(error));
-            REQUIRE(encrypt_result.encrypted);
-            REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
-        }
+        session_protocol_encrypted_for_destination encrypt_result =
+                session_protocol_encrypt_and_wrap_for_1o1(
+                        protobuf_content_with_pro.plaintext.data(),
+                        protobuf_content_with_pro.plaintext.size(),
+                        keys.ed_sk0.data(),
+                        keys.ed_sk0.size(),
+                        base_dest.sent_timestamp_ms,
+                        &base_dest.recipient_pubkey,
+                        base_dest.pro_sig,
+                        error,
+                        sizeof(error));
+        REQUIRE(encrypt_result.encrypted);
+        REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
@@ -393,28 +400,20 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         features);
 
         // Encrypt content
-        session_protocol_encrypted_for_destination encrypt_result = {};
-        {
-            session_protocol_destination dest = base_dest;
-            dest.type = DESTINATION_TYPE_CONTACT;
-            std::memcpy(
-                    dest.pro_sig,
-                    protobuf_content_with_pro_and_features.sig_over_plaintext_with_user_pro_key
-                            .data(),
-                    sizeof(dest.pro_sig));
-
-            encrypt_result = session_protocol_encrypt_for_destination(
-                    protobuf_content_with_pro_and_features.plaintext.data(),
-                    protobuf_content_with_pro_and_features.plaintext.size(),
-                    keys.ed_sk0.data(),
-                    keys.ed_sk0.size(),
-                    &dest,
-                    NAMESPACE_DEFAULT,
-                    error,
-                    sizeof(error));
-            REQUIRE(encrypt_result.encrypted);
-            REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
-        }
+        session_protocol_encrypted_for_destination encrypt_result =
+                session_protocol_encrypt_and_wrap_for_1o1(
+                        protobuf_content_with_pro_and_features.plaintext.data(),
+                        protobuf_content_with_pro_and_features.plaintext.size(),
+                        keys.ed_sk0.data(),
+                        keys.ed_sk0.size(),
+                        base_dest.sent_timestamp_ms,
+                        &base_dest.recipient_pubkey,
+                        &protobuf_content_with_pro_and_features
+                                 .sig_over_plaintext_with_user_pro_key_c,
+                        error,
+                        sizeof(error));
+        REQUIRE(encrypt_result.encrypted);
+        REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
@@ -457,7 +456,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt/decrypt for legacy groups is rejected") {
         session_protocol_destination dest = base_dest;
         dest.type = DESTINATION_TYPE_GROUP;
-        assert(dest.recipient_pubkey[0] == 0x05);
+        assert(dest.recipient_pubkey.data[0] == 0x05);
 
         session_protocol_encrypted_for_destination encrypt_result =
                 session_protocol_encrypt_for_destination(
@@ -488,22 +487,22 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Encrypt
         session_protocol_encrypted_for_destination encrypt_result = {};
         {
-            session_protocol_destination dest = base_dest;
-            dest.type = DESTINATION_TYPE_GROUP;
-            dest.group_ed25519_pubkey[0] = 0x03;
-            std::memcpy(dest.group_ed25519_pubkey + 1, group_v2_pk.data(), group_v2_pk.size());
+            bytes33 group_v2_session_pk = {};
+            bytes32 group_v2_session_sk = {};
+            group_v2_session_pk.data[0] = 0x03;
+            std::memcpy(group_v2_session_pk.data + 1, group_v2_pk.data(), group_v2_pk.size());
             std::memcpy(
-                    dest.group_ed25519_privkey,
-                    group_v2_sk.data(),
-                    sizeof(dest.group_ed25519_privkey));
+                    group_v2_session_sk.data, group_v2_sk.data(), sizeof(group_v2_session_sk.data));
 
-            encrypt_result = session_protocol_encrypt_for_destination(
+            encrypt_result = session_protocol_encrypt_and_wrap_for_group(
                     protobuf_content_with_pro.plaintext.data(),
                     protobuf_content_with_pro.plaintext.size(),
                     keys.ed_sk0.data(),
                     keys.ed_sk0.size(),
-                    &dest,
-                    NAMESPACE_GROUP_MESSAGES,
+                    base_dest.sent_timestamp_ms,
+                    &group_v2_session_pk,
+                    &group_v2_session_sk,
+                    base_dest.pro_sig,
                     error,
                     sizeof(error));
             INFO("Encrypt for group error: " << error);
@@ -541,22 +540,19 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encrypt/decrypt for sync messages with Pro") {
         // Encrypt
-        session_protocol_encrypted_for_destination encrypt_result = {};
-        {
-            session_protocol_destination dest = base_dest;
-            dest.type = DESTINATION_TYPE_SYNC_MESSAGE;
-            encrypt_result = session_protocol_encrypt_for_destination(
-                    protobuf_content_with_pro.plaintext.data(),
-                    protobuf_content_with_pro.plaintext.size(),
-                    keys.ed_sk0.data(),
-                    keys.ed_sk0.size(),
-                    &dest,
-                    NAMESPACE_DEFAULT,
-                    error,
-                    sizeof(error));
-            REQUIRE(encrypt_result.encrypted);
-            REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
-        }
+        session_protocol_encrypted_for_destination encrypt_result =
+                session_protocol_encrypt_and_wrap_for_1o1(
+                        protobuf_content_with_pro.plaintext.data(),
+                        protobuf_content_with_pro.plaintext.size(),
+                        keys.ed_sk0.data(),
+                        keys.ed_sk0.size(),
+                        base_dest.sent_timestamp_ms,
+                        &base_dest.recipient_pubkey,
+                        base_dest.pro_sig,
+                        error,
+                        sizeof(error));
+        REQUIRE(encrypt_result.encrypted);
+        REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
@@ -680,17 +676,17 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt/decrypt for sync messages with Pro and bad rotating signature") {
         session_protocol_encrypted_for_destination encrypt_result = {};
         {
-            session_protocol_destination dest = base_dest;
-            dest.type = DESTINATION_TYPE_SYNC_MESSAGE;
-            dest.has_pro_sig = true;
-            dest.pro_sig[0] ^= 1;  // Break the sig by flipping a bit
-            encrypt_result = session_protocol_encrypt_for_destination(
+            bytes64 pro_sig = base_pro_sig;
+            pro_sig.data[0] ^= 1;  // Break the sig by flipping a bit
+
+            encrypt_result = session_protocol_encrypt_and_wrap_for_1o1(
                     protobuf_content_with_pro.plaintext.data(),
                     protobuf_content_with_pro.plaintext.size(),
                     keys.ed_sk0.data(),
                     keys.ed_sk0.size(),
-                    &dest,
-                    NAMESPACE_DEFAULT,
+                    base_dest.sent_timestamp_ms,
+                    &base_dest.recipient_pubkey,
+                    &pro_sig,
                     error,
                     sizeof(error));
             REQUIRE(encrypt_result.encrypted);

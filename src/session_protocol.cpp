@@ -34,6 +34,58 @@ PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES extra)
     return result;
 }
 
+EncryptedForDestination encrypt_and_wrap_for_1o1(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        const array_uc33& recipient_pubkey,
+        const std::optional<array_uc64>& pro_sig)
+{
+    Destination dest = {};
+    dest.type = DestinationType::Contact;
+    dest.pro_sig = pro_sig;
+    dest.sent_timestamp_ms = sent_timestamp;
+    dest.recipient_pubkey = recipient_pubkey;
+    EncryptedForDestination result = encrypt_for_destination(plaintext, ed25519_privkey, dest, config::Namespace::Default);
+    return result;
+}
+
+EncryptedForDestination encrypt_and_wrap_for_community_inbox(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        const array_uc33& recipient_pubkey,
+        const array_uc32& community_pubkey,
+        const std::optional<array_uc64>& pro_sig)
+{
+    Destination dest = {};
+    dest.type = DestinationType::CommunityInbox;
+    dest.pro_sig = pro_sig;
+    dest.sent_timestamp_ms = sent_timestamp;
+    dest.recipient_pubkey = recipient_pubkey;
+    dest.community_inbox_server_pubkey = community_pubkey;
+    EncryptedForDestination result = encrypt_for_destination(plaintext, ed25519_privkey, dest, config::Namespace::Default);
+    return result;
+}
+
+EncryptedForDestination encrypt_and_wrap_for_group(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        const array_uc33& group_ed25519_pubkey,
+        const cleared_uc32& group_ed25519_privkey,
+        const std::optional<array_uc64>& pro_sig)
+{
+    Destination dest = {};
+    dest.type = DestinationType::Group;
+    dest.pro_sig = pro_sig;
+    dest.sent_timestamp_ms = sent_timestamp;
+    dest.group_ed25519_pubkey = group_ed25519_pubkey;
+    dest.group_ed25519_privkey = group_ed25519_privkey;
+    EncryptedForDestination result = encrypt_for_destination(plaintext, ed25519_privkey, dest, config::Namespace::GroupMessages);
+    return result;
+}
+
 // Interop between the C and CPP API. The C api will request malloc which writes to `ciphertext_c`.
 // This pointer is taken verbatim and avoids requiring a copy from the CPP vector. The CPP api will
 // steal the contents from `ciphertext_cpp`.
@@ -541,6 +593,100 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTR
     return result;
 }
 
+LIBSESSION_C_API
+session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_1o1(
+        const void* plaintext,
+        size_t plaintext_len,
+        const void* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        uint64_t sent_timestamp_ms,
+        const bytes33* recipient_pubkey,
+        const bytes64* pro_sig,
+        char* error,
+        size_t error_len) {
+
+    session_protocol_destination dest = {};
+    dest.type = DESTINATION_TYPE_CONTACT;
+    dest.pro_sig = pro_sig;
+    dest.recipient_pubkey = *recipient_pubkey;
+    dest.sent_timestamp_ms = sent_timestamp_ms;
+
+    session_protocol_encrypted_for_destination result = session_protocol_encrypt_for_destination(
+            plaintext,
+            plaintext_len,
+            ed25519_privkey,
+            ed25519_privkey_len,
+            &dest,
+            NAMESPACE_DEFAULT,
+            error,
+            error_len);
+    return result;
+}
+
+LIBSESSION_C_API
+session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_community_inbox(
+        const void* plaintext,
+        size_t plaintext_len,
+        const void* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        uint64_t sent_timestamp_ms,
+        const bytes33* recipient_pubkey,
+        const bytes32* community_pubkey,
+        const bytes64* pro_sig,
+        char* error,
+        size_t error_len) {
+
+    session_protocol_destination dest = {};
+    dest.type = DESTINATION_TYPE_COMMUNITY_INBOX;
+    dest.pro_sig = pro_sig;
+    dest.sent_timestamp_ms = sent_timestamp_ms;
+    dest.recipient_pubkey = *recipient_pubkey;
+    dest.community_inbox_server_pubkey = *community_pubkey;
+
+    session_protocol_encrypted_for_destination result = session_protocol_encrypt_for_destination(
+            plaintext,
+            plaintext_len,
+            ed25519_privkey,
+            ed25519_privkey_len,
+            &dest,
+            NAMESPACE_DEFAULT,
+            error,
+            error_len);
+    return result;
+}
+
+LIBSESSION_C_API
+session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_group(
+        const void* plaintext,
+        size_t plaintext_len,
+        const void* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        uint64_t sent_timestamp_ms,
+        const bytes33* group_ed25519_pubkey,
+        const bytes32* group_ed25519_privkey,
+        const bytes64* pro_sig,
+        char* error,
+        size_t error_len) {
+
+    session_protocol_destination dest = {};
+    dest.type = DESTINATION_TYPE_GROUP;
+    dest.pro_sig = pro_sig;
+    dest.group_ed25519_pubkey = *group_ed25519_pubkey;
+    dest.group_ed25519_privkey = *group_ed25519_privkey;
+    dest.sent_timestamp_ms = sent_timestamp_ms;
+
+    session_protocol_encrypted_for_destination result = session_protocol_encrypt_for_destination(
+            plaintext,
+            plaintext_len,
+            ed25519_privkey,
+            ed25519_privkey_len,
+            &dest,
+            NAMESPACE_GROUP_MESSAGES,
+            error,
+            error_len);
+    return result;
+}
+
 LIBSESSION_C_API session_protocol_encrypted_for_destination
 session_protocol_encrypt_for_destination(
         const void* plaintext,
@@ -558,12 +704,12 @@ session_protocol_encrypt_for_destination(
                 /*ed25519_privkey=*/
                 {static_cast<const uint8_t*>(ed25519_privkey), ed25519_privkey_len},
                 /*dest_type=*/static_cast<DestinationType>(dest->type),
-                /*dest_pro_sig=*/dest->has_pro_sig ? dest->pro_sig : std::span<const uint8_t>(),
-                /*dest_recipient_pubkey=*/dest->recipient_pubkey,
+                /*dest_pro_sig=*/dest->pro_sig ? dest->pro_sig->data : std::span<const uint8_t>(),
+                /*dest_recipient_pubkey=*/dest->recipient_pubkey.data,
                 /*dest_sent_timestamp_ms=*/std::chrono::milliseconds(dest->sent_timestamp_ms),
-                /*dest_community_inbox_server_pubkey=*/dest->community_inbox_server_pubkey,
-                /*dest_group_ed25519_pubkey=*/dest->group_ed25519_pubkey,
-                /*dest_group_ed25519_privkey=*/dest->group_ed25519_privkey,
+                /*dest_community_inbox_server_pubkey=*/dest->community_inbox_server_pubkey.data,
+                /*dest_group_ed25519_pubkey=*/dest->group_ed25519_pubkey.data,
+                /*dest_group_ed25519_privkey=*/dest->group_ed25519_privkey.data,
                 /*space=*/static_cast<config::Namespace>(space),
                 /*use_malloc=*/UseMalloc::Yes);
 
@@ -708,22 +854,22 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         result.error_len_incl_null_terminator = 0;
 
     std::memcpy(
-            result.envelope.source,
+            result.envelope.source.data,
             result_cpp.envelope.source.data(),
-            sizeof(result.envelope.source));
+            sizeof(result.envelope.source.data));
     std::memcpy(
-            result.envelope.pro_sig,
+            result.envelope.pro_sig.data,
             result_cpp.envelope.pro_sig.data(),
-            sizeof(result.envelope.pro_sig));
+            sizeof(result.envelope.pro_sig.data));
 
     std::memcpy(
-            result.sender_ed25519_pubkey,
+            result.sender_ed25519_pubkey.data,
             result_cpp.sender_ed25519_pubkey.data(),
-            sizeof(result.sender_ed25519_pubkey));
+            sizeof(result.sender_ed25519_pubkey.data));
     std::memcpy(
-            result.sender_x25519_pubkey,
+            result.sender_x25519_pubkey.data,
             result_cpp.sender_x25519_pubkey.data(),
-            sizeof(result.sender_x25519_pubkey));
+            sizeof(result.sender_x25519_pubkey.data));
 
     return result;
 }

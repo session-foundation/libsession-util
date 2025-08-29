@@ -64,15 +64,14 @@ typedef enum DESTINATION_TYPE {  // See session::DestinationType
 typedef struct session_protocol_destination {  // See session::Destination
     DESTINATION_TYPE type;
 
-    // The pro signature is optional, set this flag to true to make the encryption function take
-    // into account the signature or otherwise the signature is ignored.
-    bool has_pro_sig;
-    uint8_t pro_sig[64];
-    uint8_t recipient_pubkey[33];
+    // The pro signature is optional, set the pointer to a 64 byte pro signature
+    // to include it into the encrypted message, ignored otherwise
+    const bytes64 *pro_sig;
+    bytes33 recipient_pubkey;
     uint64_t sent_timestamp_ms;
-    uint8_t community_inbox_server_pubkey[32];
-    uint8_t group_ed25519_pubkey[33];
-    uint8_t group_ed25519_privkey[32];
+    bytes32 community_inbox_server_pubkey;
+    bytes33 group_ed25519_pubkey;
+    bytes32 group_ed25519_privkey;
 } session_protocol_destination;
 
 // Indicates which optional fields in the envelope has been populated out of the optional fields in
@@ -88,10 +87,10 @@ enum ENVELOPE_FLAGS_ {
 typedef struct session_protocol_envelope {
     ENVELOPE_FLAGS flags;
     uint64_t timestamp_ms;
-    uint8_t source[33];
+    bytes33 source;
     uint32_t source_device;
     uint64_t server_timestamp;
-    uint8_t pro_sig[64];
+    bytes64 pro_sig;
 } session_protocol_envelope;
 
 typedef struct session_protocol_decrypt_envelope_keys {
@@ -106,8 +105,8 @@ typedef struct session_protocol_decrypted_envelope {
     bool success;
     session_protocol_envelope envelope;
     span_u8 content_plaintext;
-    uint8_t sender_ed25519_pubkey[32];
-    uint8_t sender_x25519_pubkey[32];
+    bytes32 sender_ed25519_pubkey;
+    bytes32 sender_x25519_pubkey;
     PRO_STATUS pro_status;
     pro_proof pro_proof;
     PRO_FEATURES pro_features;
@@ -138,6 +137,44 @@ typedef struct session_protocol_encrypted_for_destination {
 ///   `Content`
 LIBSESSION_EXPORT
 PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags);
+
+LIBSESSION_EXPORT
+session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_1o1(
+        const void* plaintext,
+        size_t plaintext_len,
+        const void* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        uint64_t sent_timestamp_ms,
+        const bytes33* recipient_pubkey,
+        const bytes64* pro_sig,
+        char* error,
+        size_t error_len);
+
+LIBSESSION_EXPORT
+session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_community_inbox(
+        const void* plaintext,
+        size_t plaintext_len,
+        const void* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        uint64_t sent_timestamp_ms,
+        const bytes33* recipient_pubkey,
+        const bytes32* community_pubkey,
+        const bytes64* pro_sig,
+        char* error,
+        size_t error_len);
+
+LIBSESSION_EXPORT
+session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_group(
+        const void* plaintext,
+        size_t plaintext_len,
+        const void* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        uint64_t sent_timestamp_ms,
+        const bytes33* group_ed25519_pubkey,
+        const bytes32* group_ed25519_privkey,
+        const bytes64* pro_sig,
+        char* error,
+        size_t error_len);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination
 ///
