@@ -57,12 +57,12 @@ struct Destination {
     // this signature.
     std::optional<array_uc64> pro_sig;
 
-    // Set to the recipient of the message if it requires one. Ignored otherwise (for example
-    // ignored in type => Community)
-    array_uc33 recipient_pubkey;
-
     // The timestamp to assign to the message envelope
     std::chrono::milliseconds sent_timestamp_ms;
+    //
+    // When type => (CommunityInbox || SyncMessage || Contact): set to the recipient's Session
+    // public key
+    array_uc33 recipient_pubkey;
 
     // When type => CommunityInbox: set this pubkey to the server's key
     array_uc32 community_inbox_server_pubkey;
@@ -74,7 +74,7 @@ struct Destination {
     // When type => Group: Set the private key of the group for groups v2 messages. Typically
     // the latest encryption key for the group, e.g: `Keys::group_enc_key` or
     // `groups_keys_group_enc_key`
-    array_uc32 group_ed25519_privkey;
+    cleared_uc32 group_ed25519_privkey;
 };
 
 struct Envelope {
@@ -172,6 +172,29 @@ struct EncryptedForDestination {
 /// - Session Pro feature flags suitable for writing directly into the protobuf `ProMessage` in
 ///   `Content`
 PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags);
+
+EncryptedForDestination encrypt_and_wrap_for_1o1(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        const array_uc33& recipient_pubkey,
+        const std::optional<array_uc64>& pro_sig);
+
+EncryptedForDestination encrypt_and_wrap_for_community_inbox(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        const array_uc33& recipient_pubkey,
+        const array_uc32& community_pubkey,
+        const std::optional<array_uc64>& pro_sig);
+
+EncryptedForDestination encrypt_and_wrap_for_group(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        const array_uc33& group_ed25519_pubkey,
+        const cleared_uc32& group_ed25519_privkey,
+        const std::optional<array_uc64>& pro_sig);
 
 /// API: session_protocol/encrypt_for_destination
 ///

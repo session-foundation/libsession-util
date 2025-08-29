@@ -26,7 +26,7 @@ int snprintf_bytes_written_clamped(char* buffer, size_t size, char const* fmt, .
     va_end(args);
 
     int result = bytes_required_not_incl_null;
-    if (buffer)
-        result = std::min(static_cast<int>(size), result);
+    if (buffer && size && bytes_required_not_incl_null >= (size - 1))
+        result = size - 1;
     return result;
 }
