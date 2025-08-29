@@ -260,7 +260,7 @@ typedef struct session_protocol_pro_features_for_msg {
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        char const* utf8, size_t utf8_size, PRO_EXTRA_FEATURES extra);
+        char const* utf8, size_t utf8_size, PRO_EXTRA_FEATURES extra) NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_utf16
 ///
@@ -283,7 +283,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        uint16_t const* utf16, size_t utf16_size, PRO_EXTRA_FEATURES extra);
+        uint16_t const* utf16, size_t utf16_size, PRO_EXTRA_FEATURES extra) NON_NULL_ARG(1);
 
 /// API: session_protocol_encrypt_for_1o1
 ///
@@ -337,9 +337,9 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
         const bytes33* recipient_pubkey,
-        const bytes64* pro_sig,
-        char* error,
-        size_t error_len);
+        OPTIONAL const bytes64* pro_sig,
+        OPTIONAL char* error,
+        size_t error_len) NON_NULL_ARG(1, 3, 6);
 
 /// API: session_protocol_encrypt_for_community_inbox
 ///
@@ -398,9 +398,9 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_communit
         uint64_t sent_timestamp_ms,
         const bytes33* recipient_pubkey,
         const bytes32* community_pubkey,
-        const bytes64* pro_sig,
-        char* error,
-        size_t error_len);
+        OPTIONAL const bytes64* pro_sig,
+        OPTIONAL char* error,
+        size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
 
 /// API: session_protocol_encrypt_for_group
 ///
@@ -460,8 +460,8 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
         const bytes33* group_ed25519_pubkey,
         const bytes32* group_ed25519_privkey,
         const bytes64* pro_sig,
-        char* error,
-        size_t error_len);
+        OPTIONAL char* error,
+        size_t error_len) NON_NULL_ARG(1, 3, 6, 7, 8);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination
 ///
@@ -510,8 +510,8 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
-        char* error,
-        size_t error_len);
+        OPTIONAL char* error,
+        size_t error_len) NON_NULL_ARG(1, 3, 5);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination_free
 ///
@@ -604,8 +604,8 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         uint64_t unix_ts,
         const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
-        char* error,
-        size_t error_len);
+        OPTIONAL char* error,
+        size_t error_len) NON_NULL_ARG(1, 2, 5);
 
 /// API: session_protocol/session_protocol_decrypt_envelope_free
 ///

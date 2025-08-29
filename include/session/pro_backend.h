@@ -174,7 +174,7 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
         const uint8_t* payment_token_hash,
-        size_t payment_token_hash_len);
+        size_t payment_token_hash_len) NON_NULL_ARG(2, 4, 6);
 
 /// API: session_pro_backend/get_pro_proof_request_build_sigs
 ///
@@ -203,7 +203,7 @@ session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t unix_ts_s);
+        uint64_t unix_ts_s) NON_NULL_ARG(2, 4);
 
 /// API: session_pro_backend/get_pro_payments_request_build_sig
 ///
@@ -229,7 +229,7 @@ session_pro_backend_signature session_pro_backend_get_pro_payments_request_build
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_s,
-        uint32_t page);
+        uint32_t page) NON_NULL_ARG(2);
 
 /// API: session_pro_backend/add_pro_payment_request_to_json
 ///

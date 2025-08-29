@@ -7,6 +7,13 @@
 extern "C" {
 #endif
 
+#define OPTIONAL
+#if defined(_MSC_VER)
+  #define NON_NULL_ARG(...)
+#else
+  #define NON_NULL_ARG(...) __attribute__((nonnull(__VA_ARGS__)))
+#endif
+
 /// C friendly buffer structure that is a pointer and length to a span of bytes.
 struct span_u8 {
     uint8_t* data;
