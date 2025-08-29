@@ -1,6 +1,5 @@
 #include <stdint.h>
 
-#include "config/namespaces.h"
 #include "config/pro.h"
 #include "export.h"
 #include "types.h"
@@ -64,7 +63,7 @@ typedef struct session_protocol_destination {  // See session::Destination
 
     // The pro signature is optional, set the pointer to a 64 byte pro signature
     // to include it into the encrypted message, ignored otherwise
-    const bytes64 *pro_sig;
+    const bytes64* pro_sig;
     bytes33 recipient_pubkey;
     uint64_t sent_timestamp_ms;
     bytes32 community_inbox_server_pubkey;
@@ -115,7 +114,6 @@ typedef struct session_protocol_encrypted_for_destination {
     // Indicates if the encryption was successful. If any step failed and threw an exception, this
     // is false.
     bool success;
-    bool encrypted;
     span_u8 ciphertext;
     size_t error_len_incl_null_terminator;
 } session_protocol_encrypted_for_destination;
@@ -136,8 +134,52 @@ typedef struct session_protocol_encrypted_for_destination {
 LIBSESSION_EXPORT
 PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags);
 
+/// API: session_protocol_encrypt_for_1o1
+///
+/// Encrypt a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
+/// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
+/// transmission to a single recipient.
+///
+/// See: session_protocol/encrypt_for_1o1 for more information
+///
+/// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
+/// the caller is done with the result.
+///
+/// Inputs:
+/// - `plaintext` -- The protobuf serialized payload containing the Content to be encrypted
+/// - `plaintext_len` -- The length of the plaintext buffer in bytes.
+/// - `ed25519_privkey` -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
+///   a 32-byte seed. Used to encrypt the plaintext.
+/// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
+/// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
+/// - `recipient_pubkey` -- The recipient's Session public key (33 bytes).
+/// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
+///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
+///   be set in the Content protobuf. Pass NULL if not using Session Pro features.
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
+///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that error is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   error is NULL. This function will fill the buffer up to error_len - 1 characters with the last
+///   character reserved for the null-terminator.
+///
+/// Outputs:
+/// - `success` -- True if encryption was successful, if the underlying implementation threw
+///   an exception then this is caught internally and success is set to false. All remaining fields
+///   are to be ignored in the result on failure.
+/// - `ciphertext` -- Encryption result for the plaintext. The returned payload is suitable for
+///   sending on the wire (i.e: it has been protobuf encoded/wrapped if necessary).
+/// - `error_len_incl_null_terminator` -- The length of the error message if success was false. If
+///   the user passes in a non-NULL error buffer this is the amount of characters written to the
+///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length, including the null-terminator in order for the error message
+///   to be preserved in full.
 LIBSESSION_EXPORT
-session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_1o1(
+session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -148,8 +190,56 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
         char* error,
         size_t error_len);
 
+/// API: session_protocol_encrypt_for_community_inbox
+///
+/// Encrypt a plaintext message for a community inbox in the Session Protocol. This function wraps
+/// the plaintext in the necessary structures and encrypts it for transmission to a community inbox
+/// server.
+///
+/// See: session_protocol/encrypt_for_community_inbox for more information
+///
+/// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
+/// the caller is done with the result.
+///
+/// Inputs:
+/// - `plaintext `-- The protobuf serialized payload containing the Content to be encrypted. Must
+///   not be already encrypted.
+/// - `plaintext_len` -- The length of the plaintext buffer in bytes.
+/// - `ed25519_privkey` -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
+///   a 32-byte seed. Used to encrypt the plaintext.
+/// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
+/// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
+/// - `recipient_pubkey` -- The recipient's Session public key (33 bytes).
+/// - `community_pubkey` -- The community inbox server's public key (32 bytes).
+/// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
+///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
+///   be set in the Content protobuf. Pass NULL if not using Session Pro features. TODO: Pro sig
+///   is not incorporated into community/inbox messages yet.
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
+///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that error is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   error is NULL. This function will fill the buffer up to error_len - 1 characters with the
+///   last character reserved for the null-terminator.
+///
+/// Outputs:
+/// - `success` -- True if encryption was successful, if the underlying implementation threw
+///   an exception then this is caught internally and success is set to false. All remaining fields
+///   are to be ignored in the result on failure.
+/// - `ciphertext` -- Encryption result for the plaintext. The returned payload is suitable for
+///   sending on the wire (i.e: it has been protobuf encoded/wrapped if necessary).
+/// - `error_len_incl_null_terminator` -- The length of the error message if success was false. If
+///   the user passes in a non-NULL error buffer this is the amount of characters written to the
+///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length, including the null-terminator in order for the error message
+///   to be preserved in full.
+
 LIBSESSION_EXPORT
-session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_community_inbox(
+session_protocol_encrypted_for_destination session_protocol_encrypt_for_community_inbox(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -161,8 +251,56 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
         char* error,
         size_t error_len);
 
+/// API: session_protocol_encrypt_for_group
+///
+/// Encrypt a plaintext message for a group in the Session Protocol. This function wraps the
+/// plaintext in the necessary structures and encrypts it for transmission to a group, using the
+/// group's encryption key. Only v2 groups, (0x03) prefixed keys are supported. Passing a legacy
+/// group (0x05) prefixed key will cause the function to return a failure with an error message.
+///
+/// See: session_protocol/encrypt_for_group for more information
+///
+/// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
+/// the caller is done with the result.
+///
+/// Inputs:
+/// - `plaintext` -- The protobuf serialized payload containing the Content to be encrypted. Must
+///   not be already encrypted.
+/// - `plaintext_len` -- The length of the plaintext buffer in bytes.
+/// - `ed25519_privkey` -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
+///   a 32-byte seed. Used to encrypt the plaintext.
+/// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
+/// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
+/// - `group_ed25519_pubkey` -- The group's public key (33 bytes) for encryption with a 0x03 prefix.
+/// - `group_ed25519_privkey` -- The group's private key (32 bytes) for groups v2 messages, typically
+///   the latest encryption key for the group (e.g., Keys::group_enc_key).
+/// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
+///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
+///   be set in the Content protobuf. Pass NULL if not using Session Pro features.
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
+///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that error is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   error is NULL. This function will fill the buffer up to error_len - 1 characters with the
+///   last character reserved for the null-terminator.
+///
+/// Outputs:
+/// - `success` -- True if encryption was successful, if the underlying implementation threw
+///   an exception then this is caught internally and success is set to false. All remaining fields
+///   are to be ignored in the result on failure.
+/// - `ciphertext` -- Encryption result for the plaintext. The returned payload is suitable for
+///   sending on the wire (i.e: it has been protobuf encoded/wrapped if necessary).
+/// - `error_len_incl_null_terminator` -- The length of the error message if success was false. If
+///   the user passes in a non-NULL error buffer this is the amount of characters written to the
+///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length, including the null-terminator in order for the error message
+///   to be preserved in full.
 LIBSESSION_EXPORT
-session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_group(
+session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -192,7 +330,6 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
 ///   passed as a 32-byte seed. Used to encrypt the plaintext.
 /// - `dest` -- the extra metadata indicating the destination of the message and the necessary data
 ///   to encrypt a message for that destination.
-/// - `space` -- the namespace to encrypt the message for
 /// - `error` -- Pointer to the character buffer to be populated with the error message if the
 ///   returned `success` was false, untouched otherwise. If this is set to `NULL`, then on failure,
 ///   the returned `error_len_incl_null_terminator` is the number of bytes required by the user to
@@ -207,16 +344,8 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
 /// - `success` -- True if encryption was successful, if the underlying implementation threw
 ///   an exception then this is caught internally and success is set to false. All remaining fields
 ///   are to be ignored in the result on failure.
-/// - `encrypted` -- True if any encryption was performed. If the combination of the namespace and
-///   destination does not require encryption, this flag is false. In this case, `ciphertext` will
-///   not be assigned. The caller should proceed with the `plaintext` they initially passed in.
-/// - `ciphertext` -- Encryption result for the plaintext. If the destination and namespace
-///   combination did not require encryption, no payload is returned in the ciphertext and the user
-///   should proceed with the plaintext. This should be validated by checking the `encrypted` flag
-///   on the result to determine if the ciphertext or plaintext is to be used.
-///
-///   The retured payload is suitable for sending on the wire (i.e: it has been protobuf
-///   encoded/wrapped if necessary).
+/// - `ciphertext` -- Encryption result for the plaintext. The retured payload is suitable for
+///   sending on the wire (i.e: it has been protobuf encoded/wrapped if necessary).
 /// - `error_len_incl_null_terminator` The length of the error message if `success` was false. If
 ///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
 ///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
@@ -230,7 +359,6 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
-        NAMESPACE space,
         char* error,
         size_t error_len);
 

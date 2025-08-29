@@ -34,55 +34,52 @@ PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES extra)
     return result;
 }
 
-EncryptedForDestination encrypt_and_wrap_for_1o1(
+std::vector<uint8_t> encrypt_for_1o1(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
-        const std::optional<array_uc64>& pro_sig)
-{
+        const std::optional<array_uc64>& pro_sig) {
     Destination dest = {};
     dest.type = DestinationType::ContactOrSyncMessage;
     dest.pro_sig = pro_sig;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
-    EncryptedForDestination result = encrypt_for_destination(plaintext, ed25519_privkey, dest, config::Namespace::Default);
+    std::vector<uint8_t> result = encrypt_for_destination(plaintext, ed25519_privkey, dest);
     return result;
 }
 
-EncryptedForDestination encrypt_and_wrap_for_community_inbox(
+std::vector<uint8_t> encrypt_for_community_inbox(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
         const array_uc32& community_pubkey,
-        const std::optional<array_uc64>& pro_sig)
-{
+        const std::optional<array_uc64>& pro_sig) {
     Destination dest = {};
     dest.type = DestinationType::CommunityInbox;
     dest.pro_sig = pro_sig;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     dest.community_inbox_server_pubkey = community_pubkey;
-    EncryptedForDestination result = encrypt_for_destination(plaintext, ed25519_privkey, dest, config::Namespace::Default);
+    std::vector<uint8_t> result = encrypt_for_destination(plaintext, ed25519_privkey, dest);
     return result;
 }
 
-EncryptedForDestination encrypt_and_wrap_for_group(
+std::vector<uint8_t> encrypt_for_group(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& group_ed25519_pubkey,
         const cleared_uc32& group_ed25519_privkey,
-        const std::optional<array_uc64>& pro_sig)
-{
+        const std::optional<array_uc64>& pro_sig) {
     Destination dest = {};
     dest.type = DestinationType::Group;
     dest.pro_sig = pro_sig;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.group_ed25519_pubkey = group_ed25519_pubkey;
     dest.group_ed25519_privkey = group_ed25519_privkey;
-    EncryptedForDestination result = encrypt_for_destination(plaintext, ed25519_privkey, dest, config::Namespace::GroupMessages);
+    std::vector<uint8_t> result = encrypt_for_destination(plaintext, ed25519_privkey, dest);
     return result;
 }
 
@@ -90,7 +87,6 @@ EncryptedForDestination encrypt_and_wrap_for_group(
 // This pointer is taken verbatim and avoids requiring a copy from the CPP vector. The CPP api will
 // steal the contents from `ciphertext_cpp`.
 struct EncryptedForDestinationInternal {
-    bool encrypted;
     std::vector<uint8_t> ciphertext_cpp;
     span_u8 ciphertext_c;
 };
@@ -106,7 +102,6 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         std::span<const uint8_t> dest_community_inbox_server_pubkey,
         std::span<const uint8_t> dest_group_ed25519_pubkey,
         std::span<const uint8_t> dest_group_ed25519_privkey,
-        config::Namespace space,
         UseMalloc use_malloc) {
 
     assert(dest_pro_sig.empty() || dest_pro_sig.size() == crypto_sign_ed25519_BYTES);
@@ -121,7 +116,6 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
     EncryptedForDestinationInternal result = {};
     enum class Mode {
         Envelope,
-        Plaintext,
         EncryptForBlindedRecipient,
     };
 
@@ -159,19 +153,11 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             bool has_03_prefix =
                     dest_group_ed25519_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
             if (has_03_prefix) {
-                if (space == config::Namespace::GroupMessages) {
-                    enc.mode = Mode::Envelope;
-                    enc.before_envelope_encrypt_for_recipient_deterministic = false;
-                    enc.after_envelope = AfterEnvelope::KeysEncryptMessage;
-                    enc.envelope_type =
-                            SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
-                } else if (space == config::Namespace::RevokedRetrievableGroupMessages) {
-                    enc.mode = Mode::Plaintext;
-                } else {
-                    // See:
-                    // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L494
-                    enc.mode = Mode::Plaintext;
-                }
+                enc.mode = Mode::Envelope;
+                enc.before_envelope_encrypt_for_recipient_deterministic = false;
+                enc.after_envelope = AfterEnvelope::KeysEncryptMessage;
+                enc.envelope_type =
+                        SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
             } else {
                 // Legacy groups which have a 05 prefixed key
                 throw std::runtime_error{
@@ -226,7 +212,6 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                 envelope.set_prosig(dest_pro_sig.data(), dest_pro_sig.size());
             }
 
-            result.encrypted = true;
             switch (enc.after_envelope) {
                 case AfterEnvelope::Nil:
                     assert(false && "Dev error, after envelope action was not set");
@@ -294,12 +279,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
 
         } break;
 
-        case Mode::Plaintext: {
-            // No-op. We do not populate the ciphertext because there was no encryption.
-        } break;
-
         case Mode::EncryptForBlindedRecipient: {
-            result.encrypted = true;
             std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
                     ed25519_privkey,
                     dest_community_inbox_server_pubkey,
@@ -317,11 +297,10 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
     return result;
 }
 
-EncryptedForDestination encrypt_for_destination(
+std::vector<uint8_t> encrypt_for_destination(
         std::span<const unsigned char> plaintext,
         std::span<const unsigned char> ed25519_privkey,
-        const Destination& dest,
-        config::Namespace space) {
+        const Destination& dest) {
 
     EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
             /*plaintext=*/plaintext,
@@ -333,13 +312,9 @@ EncryptedForDestination encrypt_for_destination(
             /*dest_community_inbox_server_pubkey=*/dest.community_inbox_server_pubkey,
             /*dest_group_ed25519_pubkey=*/dest.group_ed25519_pubkey,
             /*dest_group_ed25519_privkey=*/dest.group_ed25519_privkey,
-            /*space=*/space,
             /*use_malloc=*/UseMalloc::No);
 
-    EncryptedForDestination result = {
-            .encrypted = result_internal.encrypted,
-            .ciphertext = std::move(result_internal.ciphertext_cpp),
-    };
+    std::vector<uint8_t> result = std::move(result_internal.ciphertext_cpp);
     return result;
 }
 
@@ -577,7 +552,7 @@ PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTR
 }
 
 LIBSESSION_C_API
-session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_1o1(
+session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -600,14 +575,13 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
             ed25519_privkey,
             ed25519_privkey_len,
             &dest,
-            NAMESPACE_DEFAULT,
             error,
             error_len);
     return result;
 }
 
 LIBSESSION_C_API
-session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_community_inbox(
+session_protocol_encrypted_for_destination session_protocol_encrypt_for_community_inbox(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -632,14 +606,13 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
             ed25519_privkey,
             ed25519_privkey_len,
             &dest,
-            NAMESPACE_DEFAULT,
             error,
             error_len);
     return result;
 }
 
 LIBSESSION_C_API
-session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for_group(
+session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -664,7 +637,6 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
             ed25519_privkey,
             ed25519_privkey_len,
             &dest,
-            NAMESPACE_GROUP_MESSAGES,
             error,
             error_len);
     return result;
@@ -677,7 +649,6 @@ session_protocol_encrypt_for_destination(
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
-        NAMESPACE space,
         char* error,
         size_t error_len) {
     session_protocol_encrypted_for_destination result = {};
@@ -693,12 +664,10 @@ session_protocol_encrypt_for_destination(
                 /*dest_community_inbox_server_pubkey=*/dest->community_inbox_server_pubkey.data,
                 /*dest_group_ed25519_pubkey=*/dest->group_ed25519_pubkey.data,
                 /*dest_group_ed25519_privkey=*/dest->group_ed25519_privkey.data,
-                /*space=*/static_cast<config::Namespace>(space),
                 /*use_malloc=*/UseMalloc::Yes);
 
         result = {
                 .success = true,
-                .encrypted = result_internal.encrypted,
                 .ciphertext = result_internal.ciphertext_c,
         };
     } catch (const std::exception& e) {
