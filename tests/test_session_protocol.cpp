@@ -131,7 +131,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Withhold the pro signature
         char error[256];
         session_protocol_encrypted_for_destination encrypt_without_pro_sig =
-                session_protocol_encrypt_and_wrap_for_1o1(
+                session_protocol_encrypt_for_1o1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
@@ -147,7 +147,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Set the pro signature
         bytes64 pro_sig = {};
         session_protocol_encrypted_for_destination encrypt_with_pro_sig =
-                session_protocol_encrypt_and_wrap_for_1o1(
+                session_protocol_encrypt_for_1o1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
@@ -158,9 +158,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         error,
                         sizeof(error));
         REQUIRE(encrypt_with_pro_sig.error_len_incl_null_terminator == 0);
-
-        REQUIRE(encrypt_without_pro_sig.encrypted);
-        REQUIRE(encrypt_with_pro_sig.encrypted);
 
         // Should have the same payload size
         REQUIRE(encrypt_without_pro_sig.ciphertext.size == encrypt_with_pro_sig.ciphertext.size);
@@ -193,7 +190,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             bytes33 recipient_pubkey = {};
             std::memcpy(recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
 
-            encrypt_result = session_protocol_encrypt_and_wrap_for_1o1(
+            encrypt_result = session_protocol_encrypt_for_1o1(
                     plaintext.data(),
                     plaintext.size(),
                     keys.ed_sk0.data(),
@@ -203,7 +200,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     pro_sig,
                     error,
                     sizeof(error));
-            REQUIRE(encrypt_result.encrypted);
             REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
         }
 
@@ -281,8 +277,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Check non-encryptable messages produce only plaintext") {
         auto dest_list = {
-                DESTINATION_TYPE_COMMUNITY_INBOX,
-                DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE};
+                DESTINATION_TYPE_COMMUNITY_INBOX, DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE};
 
         for (auto dest_type : dest_list) {
             if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX)
@@ -292,8 +287,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
             session_protocol_destination dest = base_dest;
             dest.type = dest_type;
-
-            NAMESPACE space = NAMESPACE_DEFAULT;
             if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX) {
                 auto [blind15_pk, blind15_sk] = session::blind15_key_pair(
                         keys.ed_sk1, keys.ed_pk1, /*blind factor*/ nullptr);
@@ -308,11 +301,9 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                             keys.ed_sk0.data(),
                             keys.ed_sk0.size(),
                             &dest,
-                            space,
                             error,
                             sizeof(error));
 
-            REQUIRE(encrypt_result.encrypted);
             REQUIRE(encrypt_result.ciphertext.size > 0);
             REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
             session_protocol_encrypt_for_destination_free(&encrypt_result);
@@ -322,7 +313,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt/decrypt for contact in default namespace with Pro") {
         // Encrypt content
         session_protocol_encrypted_for_destination encrypt_result =
-                session_protocol_encrypt_and_wrap_for_1o1(
+                session_protocol_encrypt_for_1o1(
                         protobuf_content_with_pro.plaintext.data(),
                         protobuf_content_with_pro.plaintext.size(),
                         keys.ed_sk0.data(),
@@ -332,7 +323,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         base_dest.pro_sig,
                         error,
                         sizeof(error));
-        REQUIRE(encrypt_result.encrypted);
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt envelope
@@ -391,7 +381,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Encrypt content
         session_protocol_encrypted_for_destination encrypt_result =
-                session_protocol_encrypt_and_wrap_for_1o1(
+                session_protocol_encrypt_for_1o1(
                         protobuf_content_with_pro_and_features.plaintext.data(),
                         protobuf_content_with_pro_and_features.plaintext.size(),
                         keys.ed_sk0.data(),
@@ -402,7 +392,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                                  .sig_over_plaintext_with_user_pro_key_c,
                         error,
                         sizeof(error));
-        REQUIRE(encrypt_result.encrypted);
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt envelope
@@ -455,13 +444,11 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         keys.ed_sk0.data(),
                         keys.ed_sk0.size(),
                         &dest,
-                        NAMESPACE_DEFAULT,
                         error,
                         sizeof(error));
         REQUIRE(encrypt_result.error_len_incl_null_terminator > 0);
         REQUIRE(encrypt_result.error_len_incl_null_terminator <= sizeof(error));
         REQUIRE(!encrypt_result.success);
-        REQUIRE(!encrypt_result.encrypted);
         session_protocol_encrypt_for_destination_free(&encrypt_result);
     }
 
@@ -484,7 +471,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             std::memcpy(
                     group_v2_session_sk.data, group_v2_sk.data(), sizeof(group_v2_session_sk.data));
 
-            encrypt_result = session_protocol_encrypt_and_wrap_for_group(
+            encrypt_result = session_protocol_encrypt_for_group(
                     protobuf_content_with_pro.plaintext.data(),
                     protobuf_content_with_pro.plaintext.size(),
                     keys.ed_sk0.data(),
@@ -497,7 +484,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     sizeof(error));
             INFO("Encrypt for group error: " << error);
             REQUIRE(encrypt_result.success);
-            REQUIRE(encrypt_result.encrypted);
             REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
         }
 
@@ -531,7 +517,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt/decrypt for sync messages with Pro") {
         // Encrypt
         session_protocol_encrypted_for_destination encrypt_result =
-                session_protocol_encrypt_and_wrap_for_1o1(
+                session_protocol_encrypt_for_1o1(
                         protobuf_content_with_pro.plaintext.data(),
                         protobuf_content_with_pro.plaintext.size(),
                         keys.ed_sk0.data(),
@@ -541,7 +527,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         base_dest.pro_sig,
                         error,
                         sizeof(error));
-        REQUIRE(encrypt_result.encrypted);
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt
@@ -669,7 +654,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             bytes64 pro_sig = base_pro_sig;
             pro_sig.data[0] ^= 1;  // Break the sig by flipping a bit
 
-            encrypt_result = session_protocol_encrypt_and_wrap_for_1o1(
+            encrypt_result = session_protocol_encrypt_for_1o1(
                     protobuf_content_with_pro.plaintext.data(),
                     protobuf_content_with_pro.plaintext.size(),
                     keys.ed_sk0.data(),
@@ -679,7 +664,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &pro_sig,
                     error,
                     sizeof(error));
-            REQUIRE(encrypt_result.encrypted);
             REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
         }
 
