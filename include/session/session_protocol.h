@@ -272,7 +272,8 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_communit
 /// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
 /// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
 /// - `group_ed25519_pubkey` -- The group's public key (33 bytes) for encryption with a 0x03 prefix.
-/// - `group_ed25519_privkey` -- The group's private key (32 bytes) for groups v2 messages, typically
+/// - `group_ed25519_privkey` -- The group's private key (32 bytes) for groups v2 messages,
+///   typically
 ///   the latest encryption key for the group (e.g., Keys::group_enc_key).
 /// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
 ///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
