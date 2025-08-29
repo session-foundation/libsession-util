@@ -281,14 +281,11 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Check non-encryptable messages produce only plaintext") {
         auto dest_list = {
-                DESTINATION_TYPE_COMMUNITY,
                 DESTINATION_TYPE_COMMUNITY_INBOX,
-                DESTINATION_TYPE_CONTACT};
+                DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE};
 
         for (auto dest_type : dest_list) {
-            if (dest_type == DESTINATION_TYPE_COMMUNITY)
-                INFO("Trying community");
-            else if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX)
+            if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX)
                 INFO("Trying community inbox");
             else
                 INFO("Trying contacts to non-default namespace");
@@ -297,9 +294,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             dest.type = dest_type;
 
             NAMESPACE space = NAMESPACE_DEFAULT;
-            if (dest_type == DESTINATION_TYPE_CONTACT) {
-                space = NAMESPACE_CONTACTS;
-            } else if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX) {
+            if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX) {
                 auto [blind15_pk, blind15_sk] = session::blind15_key_pair(
                         keys.ed_sk1, keys.ed_pk1, /*blind factor*/ nullptr);
                 dest.recipient_pubkey.data[0] = 0x15;
@@ -317,13 +312,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                             error,
                             sizeof(error));
 
-            if (dest_type == DESTINATION_TYPE_COMMUNITY_INBOX) {
-                REQUIRE(encrypt_result.encrypted);
-                REQUIRE(encrypt_result.ciphertext.size > 0);
-            } else {
-                REQUIRE_FALSE(encrypt_result.encrypted);
-                REQUIRE(encrypt_result.ciphertext.size == 0);
-            }
+            REQUIRE(encrypt_result.encrypted);
+            REQUIRE(encrypt_result.ciphertext.size > 0);
             REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
             session_protocol_encrypt_for_destination_free(&encrypt_result);
         }

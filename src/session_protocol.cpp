@@ -42,7 +42,7 @@ EncryptedForDestination encrypt_and_wrap_for_1o1(
         const std::optional<array_uc64>& pro_sig)
 {
     Destination dest = {};
-    dest.type = DestinationType::Contact;
+    dest.type = DestinationType::ContactOrSyncMessage;
     dest.pro_sig = pro_sig;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
@@ -180,28 +180,11 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
             }
         } break;
 
-        case DestinationType::Contact: {
-            if (space == config::Namespace::Default) {
-                enc.mode = Mode::Envelope;
-                enc.before_envelope_encrypt_for_recipient_deterministic = true;
-                enc.envelope_type = SessionProtos::Envelope_Type::Envelope_Type_SESSION_MESSAGE;
-                enc.after_envelope = AfterEnvelope::WrapInWSMessage;
-            } else {
-                // See:
-                // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L498
-                enc.mode = Mode::Plaintext;
-            }
-        } break;
-
-        case DestinationType::SyncMessage: {
+        case DestinationType::ContactOrSyncMessage: {
             enc.mode = Mode::Envelope;
             enc.before_envelope_encrypt_for_recipient_deterministic = true;
             enc.envelope_type = SessionProtos::Envelope_Type::Envelope_Type_SESSION_MESSAGE;
             enc.after_envelope = AfterEnvelope::WrapInWSMessage;
-        } break;
-
-        case DestinationType::Community: {
-            enc.mode = Mode::Plaintext;
         } break;
 
         case DestinationType::CommunityInbox: {
@@ -606,7 +589,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_and_wrap_for
         size_t error_len) {
 
     session_protocol_destination dest = {};
-    dest.type = DESTINATION_TYPE_CONTACT;
+    dest.type = DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE;
     dest.pro_sig = pro_sig;
     dest.recipient_pubkey = *recipient_pubkey;
     dest.sent_timestamp_ms = sent_timestamp_ms;

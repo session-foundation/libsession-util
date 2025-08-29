@@ -444,7 +444,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     bad_compressed.back() ^= 0b100;
     CHECK_THROWS_WITH(
             members.back().keys.decrypt_message(bad_compressed),
-            "unable to decrypt ciphertext with any current group keys");
+            "unable to decrypt ciphertext with any current group keys; tried 4");
 
     // Duplicate members[1] from dumps
     auto& m1b = members.emplace_back(

@@ -38,13 +38,11 @@ namespace config::groups {
 }
 
 enum class DestinationType {
-    Contact = DESTINATION_TYPE_CONTACT,
-    SyncMessage = DESTINATION_TYPE_SYNC_MESSAGE,
+    ContactOrSyncMessage = DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE,
     /// Both legacy and non-legacy groups are to be identified as `Group`. A non-legacy
     /// group is detected by the (0x03) prefix byte on the given `dest_group_pubkey` specified in
     /// Destination.
     Group = DESTINATION_TYPE_GROUP,
-    Community = DESTINATION_TYPE_COMMUNITY,
     CommunityInbox = DESTINATION_TYPE_COMMUNITY_INBOX,
 };
 
