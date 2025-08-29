@@ -168,6 +168,13 @@ class ProProof {
     array_uc32 hash() const;
 };
 
+struct ProFeaturesForMsg {
+    bool success;
+    std::string_view error;
+    PRO_FEATURES features;
+    size_t codepoint_count;
+};
+
 enum class DestinationType {
     ContactOrSyncMessage = DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE,
     /// Both legacy and non-legacy groups are to be identified as `Group`. A non-legacy
@@ -188,6 +195,10 @@ struct Destination {
 
     // The timestamp to assign to the message envelope
     std::chrono::milliseconds sent_timestamp_ms;
+
+    // When type => (CommunityInbox || SyncMessage || Contact): set to the recipient's Session
+    // public key
+    array_uc33 recipient_pubkey;
 
     // When type => CommunityInbox: set this pubkey to the server's key
     array_uc32 community_inbox_server_pubkey;

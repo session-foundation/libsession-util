@@ -1,6 +1,8 @@
 #include <fmt/core.h>
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
+#include <session/config/groups/keys.h>
+#include <simdutf.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
@@ -132,19 +134,46 @@ array_uc32 ProProof::hash() const {
     return result;
 }
 
-PRO_FEATURES get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES extra) {
-    PRO_FEATURES result = PRO_FEATURES_NIL;
+session::ProFeaturesForMsg pro_features_for_utf8_or_16(
+        const void* utf, size_t utf_size, PRO_EXTRA_FEATURES extra, bool is_utf8) {
+    session::ProFeaturesForMsg result = {};
+    simdutf::result validate = is_utf8 ? simdutf::validate_utf8_with_errors(
+                                                 reinterpret_cast<const char*>(utf), utf_size)
+                                       : simdutf::validate_utf16_with_errors(
+                                                 reinterpret_cast<const char16_t*>(utf), utf_size);
+    if (validate.is_ok()) {
+        result.success = true;
+        result.codepoint_count =
+                is_utf8 ? simdutf::count_utf8(reinterpret_cast<const char*>(utf), utf_size)
+                        : simdutf::count_utf16(reinterpret_cast<const char16_t*>(utf), utf_size);
+        if (result.codepoint_count > PRO_STANDARD_CHARACTER_LIMIT)
+            result.features |= PRO_FEATURES_10K_CHARACTER_LIMIT;
 
-    if (msg_size > PRO_STANDARD_CHARACTER_LIMIT)
-        result |= PRO_FEATURES_10K_CHARACTER_LIMIT;
+        if (extra & PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
+            result.features |= PRO_FEATURES_ANIMATED_AVATAR;
 
-    if (extra & PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
-        result |= PRO_FEATURES_ANIMATED_AVATAR;
+        if (extra & PRO_EXTRA_FEATURES_PRO_BADGE)
+            result.features |= PRO_FEATURES_PRO_BADGE;
 
-    if (extra & PRO_EXTRA_FEATURES_PRO_BADGE)
-        result |= PRO_FEATURES_PRO_BADGE;
+        assert((result.features & ~PRO_FEATURES_ALL) == 0);
+    } else {
+        result.error = simdutf::error_to_string(validate.error);
+    }
+    return result;
+}
+};  // namespace
 
-    assert((result & ~PRO_FEATURES_ALL) == 0);
+namespace session {
+
+ProFeaturesForMsg pro_features_for_utf8(
+        const char* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ true);
+    return result;
+}
+
+ProFeaturesForMsg pro_features_for_utf16(
+        const uint16_t* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
     return result;
 }
 
@@ -735,8 +764,30 @@ LIBSESSION_C_API PRO_STATUS pro_proof_status(
 }
 
 LIBSESSION_C_API
-PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags) {
-    PRO_FEATURES result = get_pro_features_for_msg(msg_size, flags);
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
+        const char* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+    ProFeaturesForMsg result_cpp =
+            pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ true);
+    session_protocol_pro_features_for_msg result = {
+            .success = result_cpp.success,
+            .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
+            .features = result_cpp.features,
+            .codepoint_count = result_cpp.codepoint_count,
+    };
+    return result;
+}
+
+LIBSESSION_C_API
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
+        const uint16_t* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+    ProFeaturesForMsg result_cpp =
+            pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
+    session_protocol_pro_features_for_msg result = {
+            .success = result_cpp.success,
+            .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
+            .features = result_cpp.features,
+            .codepoint_count = result_cpp.codepoint_count,
+    };
     return result;
 }
 

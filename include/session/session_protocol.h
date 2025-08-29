@@ -13,17 +13,12 @@ extern "C" {
 #endif
 
 enum {
-    /// TODO: This comment needs to be updated to be _codepoints_ once libsession implements the
-    /// character count for the platforms. Currently they use code units but it should be
-    /// codepoints. This allows the platforms to use their native text representation up until the
-    /// API boundary where they will convert to UTF8 to have it managed by libsession.
-
-    /// Maximum number of UTF16 code units that a standard message can use. If the message exceeds
+    /// Maximum number of UTF16 code points that a standard message can use. If the message exceeds
     /// this then the message must activate the higher character limit feature provided by Session
     /// Pro which allows messages up to 10k characters.
     PRO_STANDARD_CHARACTER_LIMIT = 2'000,
 
-    /// Maximum number of UTF16 code units that a Session Pro entitled user can send in a message.
+    /// Maximum number of UTF16 code points that a Session Pro entitled user can send in a message.
     /// This is not used in the codebase, but is provided for convenience to centralise protocol
     /// definitions for users of the library to consume.
     PRO_HIGHER_CHARACTER_LIMIT = 10'000,
@@ -237,20 +232,58 @@ LIBSESSION_EXPORT PRO_STATUS pro_proof_status(
         const pro_signed_message* signed_msg);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
+typedef struct session_protocol_pro_features_for_msg {
+    bool success;
+    string8 error;
+    PRO_FEATURES features;
+    size_t codepoint_count;
+} session_protocol_pro_features_for_msg;
+
+/// API: session_protocol/session_protocol_get_pro_features_for_utf8
 ///
-/// Determine the Pro features that are used in a given conversation message.
+/// Determine the Pro features that are used in a given UTF8 message.
 ///
 /// Inputs:
-/// - `msg_size` -- the size of the message in UTF16 code units to determine if the message requires
-///   access to the higher character limit available in Session Pro
+/// - `utf8` -- the utf8 string to count the number of codepoints in to determine if it needs the
+///   higher character limit available in Session Pro
+/// - `utf8_size` -- the number of code units (aka. bytes) the string has
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
 ///
 /// Outputs:
-/// - Session Pro feature flags suitable for writing directly into the protobuf `ProMessage` in
-///   `Content`
+/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
+///   When false, all fields except for `error` should be ignored from the result object.
+/// - `error` -- If `success` is false, this is populated with an error code describing the error,
+//    otherwise it's empty.
+/// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
+///   `ProMessage` in `Content`
+/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
-PRO_FEATURES session_protocol_get_pro_features_for_msg(size_t msg_size, PRO_EXTRA_FEATURES flags);
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
+        char const* utf8, size_t utf8_size, PRO_EXTRA_FEATURES extra);
+
+/// API: session_protocol/session_protocol_get_pro_features_for_utf16
+///
+/// Determine the Pro features that are used in a given UTF16 message.
+///
+/// Inputs:
+/// - `utf8` -- the utf16 string to count the number of codepoints in to determine if it needs the
+///   higher character limit available in Session Pro
+/// - `utf16_size` -- the number of code units (aka. bytes) the string has
+/// - `flags` -- extra pro features that are known by clients that they wish to be activated on
+///   this message
+///
+/// Outputs:
+/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
+///   When false, all fields except for `error` should be ignored from the result object.
+/// - `error` -- If `success` is false, this is populated with an error code describing the error,
+//    otherwise it's empty.
+/// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
+///   `ProMessage` in `Content`
+/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
+LIBSESSION_EXPORT
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
+        uint16_t const* utf16, size_t utf16_size, PRO_EXTRA_FEATURES extra);
 
 /// API: session_protocol_encrypt_for_1o1
 ///
@@ -391,8 +424,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_communit
 /// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
 /// - `group_ed25519_pubkey` -- The group's public key (33 bytes) for encryption with a 0x03 prefix.
 /// - `group_ed25519_privkey` -- The group's private key (32 bytes) for groups v2 messages,
-///   typically
-///   the latest encryption key for the group (e.g., Keys::group_enc_key).
+///   typically the latest encryption key for the group (e.g., Keys::group_enc_key).
 /// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
 ///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
 ///   be set in the Content protobuf. Pass NULL if not using Session Pro features.

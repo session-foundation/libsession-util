@@ -91,21 +91,48 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     // Do tests that require no setup
     SECTION("Ensure get pro fetaures detects large message") {
         // Try a message below the size threshold
-        PRO_FEATURES features = session_protocol_get_pro_features_for_msg(
-                PRO_STANDARD_CHARACTER_LIMIT,
-                PRO_EXTRA_FEATURES_PRO_BADGE | PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
-        REQUIRE(features == (PRO_FEATURES_PRO_BADGE | PRO_FEATURES_ANIMATED_AVATAR));
+        {
+            auto msg = std::string(PRO_STANDARD_CHARACTER_LIMIT, 'a');
+            session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                    msg.data(),
+                    msg.size(),
+                    PRO_EXTRA_FEATURES_PRO_BADGE | PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
+            REQUIRE(pro_msg.success);
+            REQUIRE(pro_msg.features == (PRO_FEATURES_PRO_BADGE | PRO_FEATURES_ANIMATED_AVATAR));
+            REQUIRE(pro_msg.codepoint_count == msg.size());
+        }
+
+        // Try an invalid message
+        {
+            std::string_view msg = "\xFF";
+            session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                    msg.data(), msg.size(), PRO_FEATURES_NIL);
+            REQUIRE(!pro_msg.success);
+            REQUIRE(pro_msg.error.size);
+        }
 
         // Try a message exceeding the size threshold
-        features = session_protocol_get_pro_features_for_msg(
-                PRO_STANDARD_CHARACTER_LIMIT + 1,
-                PRO_EXTRA_FEATURES_PRO_BADGE | PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
-        REQUIRE(features == (PRO_FEATURES_10K_CHARACTER_LIMIT | PRO_FEATURES_PRO_BADGE |
-                             PRO_FEATURES_ANIMATED_AVATAR));
+        {
+            auto msg = std::string(PRO_STANDARD_CHARACTER_LIMIT + 1, 'a');
+            session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                    msg.data(),
+                    msg.size(),
+                    PRO_EXTRA_FEATURES_PRO_BADGE | PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
+            REQUIRE(pro_msg.success);
+            REQUIRE(pro_msg.features == (PRO_FEATURES_10K_CHARACTER_LIMIT | PRO_FEATURES_PRO_BADGE |
+                                         PRO_FEATURES_ANIMATED_AVATAR));
+            REQUIRE(pro_msg.codepoint_count == msg.size());
+        }
 
         // Try asking for just one extra feature
-        features = session_protocol_get_pro_features_for_msg(100, PRO_EXTRA_FEATURES_PRO_BADGE);
-        REQUIRE(features == PRO_FEATURES_PRO_BADGE);
+        {
+            auto msg = std::string(PRO_STANDARD_CHARACTER_LIMIT, 'a');
+            session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                    msg.data(), msg.size(), PRO_EXTRA_FEATURES_PRO_BADGE);
+            REQUIRE(pro_msg.success);
+            REQUIRE(pro_msg.features == PRO_FEATURES_PRO_BADGE);
+            REQUIRE(pro_msg.codepoint_count == msg.size());
+        }
     }
 
     // Tests that require some setup code
@@ -363,9 +390,9 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         std::string large_message;
         large_message.resize(PRO_STANDARD_CHARACTER_LIMIT + 1);
 
-        PRO_FEATURES features =
-                get_pro_features_for_msg(large_message.size(), PRO_EXTRA_FEATURES_PRO_BADGE);
-        REQUIRE(features == (PRO_FEATURES_10K_CHARACTER_LIMIT | PRO_FEATURES_PRO_BADGE));
+        session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                large_message.data(), large_message.size(), PRO_EXTRA_FEATURES_PRO_BADGE);
+        REQUIRE(pro_msg.features == (PRO_FEATURES_10K_CHARACTER_LIMIT | PRO_FEATURES_PRO_BADGE));
 
         SerialisedProtobufContentWithProForTesting protobuf_content_with_pro_and_features =
                 build_protobuf_content_with_session_pro(
@@ -373,7 +400,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         /*user_rotating_privkey*/ user_pro_ed_sk,
                         /*pro_backend_privkey*/ pro_backend_ed_sk,
                         /*pro_expiry_unix_ts*/ timestamp_s,
-                        features);
+                        pro_msg.features);
 
         // Encrypt content
         session_protocol_encrypted_for_destination encrypt_result =
