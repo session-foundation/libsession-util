@@ -132,8 +132,8 @@ void SnodePool::_load_from_disk() {
             }
         }
 
-        if (loaded_cache_data.size() > 0 && loaded_cache.size() == 0 && invalid_entries == 0)
-            throw std::runtime_error{"Snode cache has invalid format."};
+        if (loaded_cache_data.size() > 0 && loaded_cache.size() == 0)
+            throw std::runtime_error{"Snode cache has invalid format"};
 
         if (invalid_entries > 0)
             log::warning(cat, "Skipped {} invalid entries in snode cache.", invalid_entries);
@@ -270,7 +270,7 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
         // there are enough cached nodes
         const auto cache_insufficient =
                 (_config.cache_num_nodes_to_use_for_refresh > 0 &&
-                 _snode_cache.size() >= _config.cache_num_nodes_to_use_for_refresh);
+                 _snode_cache.size() < _config.cache_num_nodes_to_use_for_refresh);
         use_routed_fetcher =
                 (cache_insufficient && _routed_fetcher && _routed_fetcher_connectivity_check &&
                  (*_routed_fetcher_connectivity_check)());
@@ -314,7 +314,11 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
         // If we (somehow) have no candidate nodes then error and reset the state so we can try
         // again later
         if (_refresh_candidate_nodes.empty()) {
-            log::critical(cat, "Cannot refresh cache: no seed nodes are configured!");
+            log::critical(
+                    cat,
+                    "Cannot refresh cache: {}",
+                    (use_seed_nodes ? "No seed nodes are configured!"
+                                    : "Found no nodes and decided not to use seed nodes!"));
             _current_snode_cache_refresh_id.reset();
             return;
         }

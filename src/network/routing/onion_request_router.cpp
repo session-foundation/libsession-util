@@ -375,7 +375,8 @@ void OnionRequestRouter::_update_status() {
         new_status = ConnectionStatus::connected;
     // If we have at least one active non-standard path then considered connecting (not properly
     // connected, but some requests may work)
-    else if (std::any_of(_paths.begin(), _paths.end(), [](const auto& p) { return !p.second.empty(); }))
+    else if (std::any_of(
+                     _paths.begin(), _paths.end(), [](const auto& p) { return !p.second.empty(); }))
         new_status = ConnectionStatus::connecting;
     // Otherwise if we are building one then we are connecting
     else if (std::any_of(

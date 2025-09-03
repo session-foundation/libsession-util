@@ -336,7 +336,7 @@ void LokinetRouter::_establish_tunnel(
             _pending_requests.erase(it);
             log::error(
                     cat,
-                    "[LokinetRouter] Failing {} pending requests due to connection failure.",
+                    "[LokinetRouter] Failing {} pending request(s) due to connection failure.",
                     to_fail.size());
 
             for (auto& [req, cb] : to_fail)
