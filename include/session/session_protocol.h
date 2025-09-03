@@ -144,7 +144,7 @@ typedef struct session_protocol_encrypted_for_destination {
 ///
 /// Outputs:
 /// - `bytes32` -- The 32 byte hash calculated from the proof
-LIBSESSION_EXPORT bytes32 pro_proof_hash(pro_proof const* proof);
+LIBSESSION_EXPORT bytes32 pro_proof_hash(pro_proof const* proof) NON_NULL_ARG(1);
 
 /// API: pro/pro_proof_verify_signature
 ///
@@ -160,7 +160,8 @@ LIBSESSION_EXPORT bytes32 pro_proof_hash(pro_proof const* proof);
 /// Outputs:
 /// - `bool` -- True if verified, false otherwise
 LIBSESSION_EXPORT bool pro_proof_verify_signature(
-        pro_proof const* proof, uint8_t const* verify_pubkey, size_t verify_pubkey_len);
+        pro_proof const* proof, uint8_t const* verify_pubkey, size_t verify_pubkey_len)
+        NON_NULL_ARG(1, 2);
 
 /// API: pro/pro_proof_verify_message
 ///
@@ -183,7 +184,7 @@ LIBSESSION_EXPORT bool pro_proof_verify_message(
         uint8_t const* sig,
         size_t sig_len,
         uint8_t const* msg,
-        size_t msg_len);
+        size_t msg_len) NON_NULL_ARG(1, 2, 4);
 
 /// API: pro/pro_proof_is_active
 ///
@@ -196,7 +197,8 @@ LIBSESSION_EXPORT bool pro_proof_verify_message(
 ///
 /// Outputs:
 /// - `bool` -- True if expired, false otherwise
-LIBSESSION_EXPORT bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_s);
+LIBSESSION_EXPORT bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_s)
+        NON_NULL_ARG(1);
 
 /// API: pro/pro_proof_status
 ///
@@ -229,7 +231,7 @@ LIBSESSION_EXPORT PRO_STATUS pro_proof_status(
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
         uint64_t unix_ts_s,
-        const pro_signed_message* signed_msg);
+        OPTIONAL const pro_signed_message* signed_msg) NON_NULL_ARG(1, 2);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
 typedef struct session_protocol_pro_features_for_msg {
@@ -254,7 +256,7 @@ typedef struct session_protocol_pro_features_for_msg {
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
 ///   When false, all fields except for `error` should be ignored from the result object.
 /// - `error` -- If `success` is false, this is populated with an error code describing the error,
-//    otherwise it's empty.
+///   otherwise it's empty. This string is read-only and should not be modified.
 /// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
@@ -277,7 +279,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
 ///   When false, all fields except for `error` should be ignored from the result object.
 /// - `error` -- If `success` is false, this is populated with an error code describing the error,
-//    otherwise it's empty.
+///   otherwise it's empty.
 /// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
