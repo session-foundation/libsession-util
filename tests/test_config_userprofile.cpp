@@ -37,6 +37,10 @@ struct UserProfileTester {
         session::config::unbox<session::config::UserProfile>(conf)->data["T"] =
                 static_cast<int>(value.time_since_epoch().count());
     }
+
+    static uint64_t get_raw_profile_updated_value(config_object* conf) {
+        return session::config::unbox<session::config::UserProfile>(conf)->data["t"].integer_or(0);
+    }
 };
 }  // namespace
 
@@ -511,4 +515,20 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     user_profile_set_blinded_msgreqs(conf, 2);
     CHECK(UserProfileTester::get_reupload_profile_updated_value(conf).time_since_epoch().count() !=
           124);
+
+    // Ensure the timestamp is stored in seconds seconds (was incorrectly stored as microseconds)
+    auto time_before_call = std::chrono::system_clock::now();
+    CHECK(0 == user_profile_set_pic(conf, p));
+    auto time_after_call = std::chrono::system_clock::now();
+    auto before_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(time_before_call.time_since_epoch())
+                    .count();
+    auto after_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(time_before_call.time_since_epoch())
+                    .count();
+
+    auto raw_value = UserProfileTester::get_raw_profile_updated_value(conf);
+    INFO("Checking if raw_value " << raw_value << " is within the range [" << before_seconds << ", "
+                                  << after_seconds << "]");
+    CHECK((raw_value >= before_seconds && raw_value <= after_seconds));
 }
