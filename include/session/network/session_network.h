@@ -164,6 +164,8 @@ LIBSESSION_EXPORT void session_network_callbacks_respond(
         const char* body,
         size_t body_len);
 
+LIBSESSION_EXPORT CONNECTION_STATUS session_network_get_status(network_object_v2* network);
+
 LIBSESSION_EXPORT void session_network_get_active_paths(
         network_object_v2* network, session_path_info** out_paths, size_t* out_paths_len);
 

@@ -249,6 +249,10 @@ void Network_v2::close_connections() {
 
 // MARK: Interface
 
+ConnectionStatus Network_v2::get_status() {
+    return _status.load();
+}
+
 std::vector<PathInfo> Network_v2::get_active_paths() {
     if (_router)
         return _router->get_active_paths();
@@ -523,7 +527,7 @@ void Network_v2::_handle_421_retry(
     // belongs to doesn't match our cache anymore)
     log::info(
             cat,
-            "Request {} received 421 from node {}, refreshing swarm.",
+            "Request {} received 421 from node {}, refreshing swarm if stale.",
             original_request.request_id,
             original_dest_node->to_string());
 
@@ -946,6 +950,13 @@ LIBSESSION_C_API void session_network_callbacks_respond(
         body.emplace(body_, body_len);
 
     handle_guard->cpp_callback(success, timeout, status_code, std::move(headers), std::move(body));
+}
+
+LIBSESSION_C_API CONNECTION_STATUS session_network_get_status(network_object_v2* network) {
+    if (!network)
+        return CONNECTION_STATUS_UNKNOWN;
+
+    return static_cast<CONNECTION_STATUS>(unbox(network).get_status());
 }
 
 LIBSESSION_C_API void session_network_get_active_paths(
