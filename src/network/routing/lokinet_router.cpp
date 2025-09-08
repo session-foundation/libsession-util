@@ -71,7 +71,7 @@ LokinetRouter::LokinetRouter(
     [logging]
     type=none
     level=*=debug,quic=info
-    )"_format(opt::netid::to_string(_config.netid), _config.cache_directory);
+    )"_format(opt::netid::to_string(_config.netid), _config.cache_directory.string());
 
     try {
         _update_status(ConnectionStatus::connecting);
@@ -362,7 +362,7 @@ void LokinetRouter::_establish_tunnel(
             initiating_req_id,
             address_pubkey_hex);
     lokinet->establish_udp(
-            lokinet_address,
+            lokinet_address.to_string(),
             test_port,
             [this, address_pubkey_hex, initiating_req_id](lokinet::tunnel_info info) mutable {
                 log::info(
