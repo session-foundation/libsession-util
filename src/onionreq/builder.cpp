@@ -124,10 +124,6 @@ void Builder::set_destination_pubkey(session::network::x25519_pubkey x25519_pubk
     destination_x25519_public_key.emplace(x25519_pubkey);
 }
 
-void Builder::generate(network::request_info& info) {
-    info.body = build(_generate_payload(info.original_body));
-}
-
 std::vector<unsigned char> Builder::generate_onion_blob(
         const std::optional<std::vector<unsigned char>>& plaintext_body) {
     return build(_generate_payload(plaintext_body));

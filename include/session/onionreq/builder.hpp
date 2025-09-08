@@ -67,7 +67,6 @@ class Builder {
         hops_.push_back(keys);
     }
 
-    void generate(network::request_info& info); // TODO: Remove this once the refactoring is done
     std::vector<unsigned char> build(std::vector<unsigned char> payload);
     std::vector<unsigned char> generate_onion_blob(
             const std::optional<std::vector<unsigned char>>& plaintext_body);

@@ -109,7 +109,6 @@ if(ENABLE_ONIONREQ)
         network/request_queue.cpp
         network/service_node.cpp
         network/session_network_internal.cpp
-        network/session_network_old.cpp
         network/session_network_types.cpp
         network/session_network.cpp
         network/snode_pool.cpp
