@@ -952,7 +952,16 @@ void OnionRequestRouter::_send_on_path(
                         int16_t status_code,
                         auto headers,
                         auto response) {
-                    _handle_transport_response(path_id, std::move(original_request), std::move(builder), success, timeout, status_code, std::move(headers), std::move(response), std::move(cb));
+                    _handle_transport_response(
+                            path_id,
+                            std::move(original_request),
+                            std::move(builder),
+                            success,
+                            timeout,
+                            status_code,
+                            std::move(headers),
+                            std::move(response),
+                            std::move(cb));
                 });
     else {
         log::critical(cat, "[OnionRequestRouter] Transport was destroyed, cannot send request.");
@@ -976,8 +985,7 @@ void OnionRequestRouter::_handle_transport_response(
     std::vector<std::pair<std::string, std::string>> final_headers = headers;
     std::optional<std::string> body;
     bool should_penalize_path = false;
-    bool is_server_dest =
-            std::holds_alternative<ServerDestination>(original_request.destination);
+    bool is_server_dest = std::holds_alternative<ServerDestination>(original_request.destination);
 
     try {
         if (!response_body)
@@ -993,14 +1001,12 @@ void OnionRequestRouter::_handle_transport_response(
         headers = {content_type_plain_text};
 
         if (success && !timeout)
-            body = "Failed to decrypt onion response due to error: {}"_format(
-                    e.what());
+            body = "Failed to decrypt onion response due to error: {}"_format(e.what());
         else
             body = *response_body;
     }
 
-    if (body.has_value();
-        auto uniform_error = Response::find_uniform_batch_error(*body))
+    if (body.has_value(); auto uniform_error = Response::find_uniform_batch_error(*body))
         final_status_code = *uniform_error;
 
     if (final_success)
@@ -1018,7 +1024,8 @@ void OnionRequestRouter::_handle_transport_response(
                 // the path.
                 log::trace(
                         cat,
-                        "[OnionRouter Request {}]: Received benign error {}, path is considered healthy.",
+                        "[OnionRouter Request {}]: Received benign error {}, path is considered "
+                        "healthy.",
                         original_request.request_id,
                         final_status_code);
                 break;
@@ -1063,7 +1070,8 @@ void OnionRequestRouter::_handle_transport_response(
     _decrement_and_cleanup_path(path_id, original_request.category);
 
     // Now we can trigger the callback with the result
-    return callback(final_success, final_timeout, final_status_code, std::move(headers), std::move(body));
+    return callback(
+            final_success, final_timeout, final_status_code, std::move(headers), std::move(body));
 }
 
 void OnionRequestRouter::_decrement_and_cleanup_path(

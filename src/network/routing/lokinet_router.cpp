@@ -61,7 +61,7 @@ LokinetRouter::LokinetRouter(
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)}, _loop{loop}, _transport{transport} {
+        _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport} {
     log::trace(cat, "[LokinetRouter] Initializing.");
 
     auto test_ini = R"(
@@ -324,7 +324,7 @@ void LokinetRouter::_establish_tunnel(
     auto key = address.view_remote_key();
     auto address_pubkey_hex = oxenc::to_hex(key);
 
-    if (address_pubkey_hex.size() != 32) {
+    if (address_pubkey_hex.size() != 64) {
         log::critical(
                 cat,
                 "[LokinetRouter] Destination had an invalid remote key, request {} is being "

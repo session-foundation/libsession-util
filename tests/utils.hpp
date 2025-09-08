@@ -95,9 +95,7 @@ class CallTracker {
         return (it != call_counts_.end()) ? it->second : 0;
     }
 
-    bool called(const std::string& name, int times = 1) {
-        return (get_call_count(name) >= times);
-    }
+    bool called(const std::string& name, int times = 1) { return (get_call_count(name) >= times); }
 
     [[nodiscard]] bool called(
             const std::string& name, std::chrono::milliseconds timeout, int times = 1) {
@@ -122,7 +120,7 @@ class CallTracker {
         auto predicate = [&]() { return call_counts_.contains(name); };
 
         if (predicate())
-            return false; // Already called
+            return false;  // Already called
 
         bool was_called_during_wait = call_cv_.wait_for(lock, duration, predicate);
         return !was_called_during_wait;
@@ -205,4 +203,3 @@ template <typename... T>
 std::set<std::common_type_t<T...>> make_set(T&&... args) {
     return {std::forward<T>(args)...};
 }
-
