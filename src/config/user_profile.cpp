@@ -30,10 +30,7 @@ void UserProfile::set_name(std::string_view new_name) {
     set_nonempty_str(data["n"], new_name);
 
     const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] =
-            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
-                                          std::chrono::system_clock::now().time_since_epoch())
-                                          .count());
+    data[target_timestamp] = ts_now();
 }
 void UserProfile::set_name_truncated(std::string new_name) {
     set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
@@ -62,9 +59,7 @@ void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned
     if (url.empty() || key.size() != 32)
         set_reupload_profile_pic({});
 
-    data["t"] = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
-                                              std::chrono::system_clock::now().time_since_epoch())
-                                              .count());
+    data["t"] = ts_now();
 }
 
 void UserProfile::set_profile_pic(profile_pic pic) {
@@ -74,9 +69,7 @@ void UserProfile::set_profile_pic(profile_pic pic) {
 void UserProfile::set_reupload_profile_pic(
         std::string_view url, std::span<const unsigned char> key) {
     set_pair_if(!url.empty() && key.size() == 32, data["P"], url, data["Q"], key);
-    data["T"] = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
-                                              std::chrono::system_clock::now().time_since_epoch())
-                                              .count());
+    data["T"] = ts_now();
 }
 
 void UserProfile::set_reupload_profile_pic(profile_pic pic) {
@@ -108,10 +101,7 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
         data["M"] = static_cast<int>(*value);
 
     const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] =
-            static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
-                                          std::chrono::system_clock::now().time_since_epoch())
-                                          .count());
+    data[target_timestamp] = ts_now();
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
@@ -121,10 +111,10 @@ std::optional<bool> UserProfile::get_blinded_msgreqs() const {
 }
 
 std::chrono::sys_seconds UserProfile::get_profile_updated() const {
-    if (auto* t = data["t"].integer(); t) {
-        if (auto* T = data["T"].integer(); T && T > t)
-            return std::chrono::sys_seconds{std::chrono::seconds{*T}};
-        return std::chrono::sys_seconds{std::chrono::seconds{*t}};
+    if (auto t = data["t"].sys_seconds()) {
+        if (auto T = data["T"].sys_seconds(); T && *T > *t)
+            return *T;
+        return *t;
     }
     return std::chrono::sys_seconds{};
 }
