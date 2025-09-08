@@ -24,7 +24,6 @@
 #include "session/export.h"
 #include "session/network/key_types.hpp"
 #include "session/network/service_node.hpp"
-#include "session/network/session_network_old.hpp"
 #include "session/network/session_network_types.hpp"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/hop_encryption.hpp"

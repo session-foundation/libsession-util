@@ -1,5 +1,4 @@
 #include <catch2/catch_test_macros.hpp>
-#include <session/network/session_network_old.hpp>
 #include <session/onionreq/hop_encryption.hpp>
 #include <session/onionreq/parser.hpp>
 
