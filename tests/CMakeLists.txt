@@ -27,6 +27,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_proto.cpp
     test_random.cpp
     test_session_encrypt.cpp
+    test_utils.cpp
     test_xed25519.cpp
 
     case_logger.cpp
@@ -36,6 +37,7 @@ if (ENABLE_ONIONREQ)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_session_network.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_onion_request_router.cpp)
 endif()
 
 add_library(test_libs INTERFACE)

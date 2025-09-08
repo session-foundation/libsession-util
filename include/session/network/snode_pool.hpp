@@ -59,19 +59,19 @@ class SnodePool {
     void clear_cache();
 
     // Records that a specific node has failed a request
-    void record_node_failure(const service_node& node, bool permanent = false);
-    void record_node_failure(const ed25519_pubkey& key, bool permanent = false);
+    virtual void record_node_failure(const service_node& node, bool permanent = false);
+    virtual void record_node_failure(const ed25519_pubkey& key, bool permanent = false);
 
     // Checks if the pool is empty or stale and triggers a refresh if needed
-    void refresh_if_needed(
+    virtual void refresh_if_needed(
             const std::vector<service_node>& in_use_nodes,
             std::function<void()> on_refresh_complete = nullptr);
 
-    void get_swarm(
+    virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
             std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback);
 
-    std::vector<service_node> get_unused_nodes(
+    virtual std::vector<service_node> get_unused_nodes(
             size_t count, const std::vector<service_node>& exclude = {});
 
   private:

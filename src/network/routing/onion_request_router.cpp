@@ -952,111 +952,118 @@ void OnionRequestRouter::_send_on_path(
                         int16_t status_code,
                         auto headers,
                         auto response) {
-                    auto final_success = success;
-                    auto final_timeout = timeout;
-                    auto final_status_code = status_code;
-                    std::vector<std::pair<std::string, std::string>> final_headers = headers;
-                    std::optional<std::string> body;
-                    bool should_penalize_path = false;
-                    bool is_server_dest =
-                            std::holds_alternative<ServerDestination>(original_request.destination);
-
-                    try {
-                        if (!response)
-                            throw std::runtime_error{"Unexpected empty repsonse"};
-
-                        DecryptedResponse decrypted =
-                                decrypt_onion_response(*builder, original_request, *response);
-                        final_status_code = decrypted.status_code;
-                        headers = std::move(decrypted.headers);
-                        body = std::move(decrypted.body);
-                    } catch (const std::exception& e) {
-                        final_success = false;
-                        headers = {content_type_plain_text};
-
-                        if (success && !timeout)
-                            body = "Failed to decrypt onion response due to error: {}"_format(
-                                    e.what());
-                        else
-                            body = *response;
-                    }
-
-                    if (body.has_value();
-                        auto uniform_error = Response::find_uniform_batch_error(*body))
-                        final_status_code = *uniform_error;
-
-                    if (final_success)
-                        final_success = (final_status_code >= 200 && final_status_code <= 299);
-
-                    if (!final_success) {
-                        switch (final_status_code) {
-                            // These errors that are NEVER the path's fault
-                            case 400:  // Bad Request
-                            case 403:  // Forbidden
-                            case 404:  // Not Found
-                            case 406:  // Not Acceptable (clock skew)
-                            case 425:  // Too Early (also clock skew)
-                                // These are application-level or client-side errors. Do nothing to
-                                // the path.
-                                log::trace(
-                                        cat,
-                                        "[OnionRouter Request {}]: Received benign error {}, path "
-                                        "is considered healthy.",
-                                        original_request.request_id,
-                                        final_status_code);
-                                break;
-
-                            // These errors are only the path's fault if the destination is not a
-                            // server
-                            case 500:  // Internal Server Error
-                                if (!is_server_dest)
-                                    should_penalize_path = true;
-                                break;
-
-                            case 504:  // Gateway Timeout
-                                final_timeout = true;
-
-                                if (!is_server_dest)
-                                    should_penalize_path = true;
-                                break;
-
-                            // Any other non-success code is treated as a potential path issue.
-                            default: should_penalize_path = true; break;
-                        }
-                    }
-
-                    // If we got a timeout and the destination wasn't a server then we need to
-                    // assume it was from a path node
-                    if (!is_server_dest && timeout)
-                        should_penalize_path = true;
-
-                    // Handle the failure if needed
-                    if (should_penalize_path) {
-                        log::debug(
-                                cat,
-                                "[OnionRouter Request {}]: Received error {} on path {}, handling "
-                                "failure.",
-                                original_request.request_id,
-                                final_status_code,
-                                path_id);
-                        _handle_path_failure(path_id, original_request.category, body);
-                    }
-
-                    // Clean up paths if needed
-                    _decrement_and_cleanup_path(path_id, original_request.category);
-
-                    // Now we can trigger the callback with the result
-                    return cb(
-                            final_success,
-                            final_timeout,
-                            final_status_code,
-                            std::move(headers),
-                            std::move(body));
+                    _handle_transport_response(path_id, std::move(original_request), std::move(builder), success, timeout, status_code, std::move(headers), std::move(response), std::move(cb));
                 });
     else {
         log::critical(cat, "[OnionRequestRouter] Transport was destroyed, cannot send request.");
         return;
     }
+}
+
+void OnionRequestRouter::_handle_transport_response(
+        std::string path_id,
+        Request original_request,
+        std::shared_ptr<session::onionreq::Builder> builder,
+        bool success,
+        bool timeout,
+        int16_t status_code,
+        std::vector<std::pair<std::string, std::string>> headers,
+        std::optional<std::string> response_body,
+        network_response_callback_t callback) {
+    auto final_success = success;
+    auto final_timeout = timeout;
+    auto final_status_code = status_code;
+    std::vector<std::pair<std::string, std::string>> final_headers = headers;
+    std::optional<std::string> body;
+    bool should_penalize_path = false;
+    bool is_server_dest =
+            std::holds_alternative<ServerDestination>(original_request.destination);
+
+    try {
+        if (!response_body)
+            throw std::runtime_error{"Unexpected empty repsonse"};
+
+        DecryptedResponse decrypted =
+                decrypt_onion_response(*builder, original_request, *response_body);
+        final_status_code = decrypted.status_code;
+        headers = std::move(decrypted.headers);
+        body = std::move(decrypted.body);
+    } catch (const std::exception& e) {
+        final_success = false;
+        headers = {content_type_plain_text};
+
+        if (success && !timeout)
+            body = "Failed to decrypt onion response due to error: {}"_format(
+                    e.what());
+        else
+            body = *response_body;
+    }
+
+    if (body.has_value();
+        auto uniform_error = Response::find_uniform_batch_error(*body))
+        final_status_code = *uniform_error;
+
+    if (final_success)
+        final_success = (final_status_code >= 200 && final_status_code <= 299);
+
+    if (!final_success) {
+        switch (final_status_code) {
+            // These errors that are NEVER the path's fault
+            case 400:  // Bad Request
+            case 403:  // Forbidden
+            case 404:  // Not Found
+            case 406:  // Not Acceptable (clock skew)
+            case 425:  // Too Early (also clock skew)
+                // These are application-level or client-side errors. Do nothing to
+                // the path.
+                log::trace(
+                        cat,
+                        "[OnionRouter Request {}]: Received benign error {}, path is considered healthy.",
+                        original_request.request_id,
+                        final_status_code);
+                break;
+
+            // These errors are only the path's fault if the destination is not a
+            // server
+            case 500:  // Internal Server Error
+                if (!is_server_dest)
+                    should_penalize_path = true;
+                break;
+
+            case 504:  // Gateway Timeout
+                final_timeout = true;
+
+                if (!is_server_dest)
+                    should_penalize_path = true;
+                break;
+
+            // Any other non-success code is treated as a potential path issue.
+            default: should_penalize_path = true; break;
+        }
+    }
+
+    // If we got a timeout and the destination wasn't a server then we need to
+    // assume it was from a path node
+    if (!is_server_dest && timeout)
+        should_penalize_path = true;
+
+    // Handle the failure if needed
+    if (should_penalize_path) {
+        log::debug(
+                cat,
+                "[OnionRouter Request {}]: Received error {} on path {}, handling "
+                "failure.",
+                original_request.request_id,
+                final_status_code,
+                path_id);
+        _handle_path_failure(path_id, original_request.category, body);
+    }
+
+    // Clean up paths if needed
+    _decrement_and_cleanup_path(path_id, original_request.category);
+
+    // Now we can trigger the callback with the result
+    return callback(final_success, final_timeout, final_status_code, std::move(headers), std::move(body));
 }
 
 void OnionRequestRouter::_decrement_and_cleanup_path(
