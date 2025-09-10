@@ -719,7 +719,7 @@ class ConfigBase : public ConfigSig {
         /// Inputs:
         /// - `value` -- replaces current value with given sys_seconds's time_since_epoch() value.
         void operator=(std::chrono::sys_seconds value) {
-            assign_if_changed(value.time_since_epoch().count());
+            assign_if_changed(static_cast<int64_t>(value.time_since_epoch().count()));
         }
 
         /// API: base/ConfigBase::DictFieldProxy::operator=(config::set)
