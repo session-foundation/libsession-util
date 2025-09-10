@@ -1,6 +1,7 @@
 #include "session/network/routing/lokinet_router.hpp"
 
 #include <fmt/ranges.h>
+#include <fmt/std.h>
 #include <oxenc/base64.h>
 
 #include <llarp/contact/router_id.hpp>
@@ -71,7 +72,7 @@ LokinetRouter::LokinetRouter(
     [logging]
     type=none
     level=*=debug,quic=info
-    )"_format(opt::netid::to_string(_config.netid), _config.cache_directory.string());
+    )"_format(opt::netid::to_string(_config.netid), _config.cache_directory);
 
     try {
         _update_status(ConnectionStatus::connecting);
@@ -458,10 +459,51 @@ void LokinetRouter::_send_via_tunnel(
             remaining_overall_timeout};
 
     if (auto transport = _transport.lock())
-        transport->send_request(std::move(lokinet_request), std::move(callback));
+        transport->send_request(
+                std::move(lokinet_request),
+                [this, original_request = std::move(request), cb = std::move(callback)](
+                        bool success,
+                        bool timeout,
+                        int16_t status_code,
+                        auto headers,
+                        auto response) {
+                    _handle_transport_response(
+                            success,
+                            timeout,
+                            status_code,
+                            std::move(headers),
+                            std::move(response),
+                            std::move(cb));
+                });
     else {
         log::critical(cat, "[LokinetRouter] Transport was destroyed, cannot send request.");
         return;
+    }
+}
+
+void LokinetRouter::_handle_transport_response(
+        bool success,
+        bool timeout,
+        int16_t status_code_,
+        std::vector<std::pair<std::string, std::string>> headers,
+        std::optional<std::string> response_body,
+        network_response_callback_t callback) {
+    // If we weren't given a body then just return the data directly
+    if (!response_body)
+        return callback(success, timeout, status_code_, headers, response_body);
+
+    // Otherwise the response will be a json array of [{status_code}, {body}]
+    try {
+        nlohmann::json response_json = nlohmann::json::parse(*response_body);
+
+        if (!response_json.is_array() || response_json.size() != 2)
+            throw std::runtime_error{"Unexpected JSON response structure."};
+
+        uint16_t status_code = response_json[0].get<uint16_t>();
+        std::string data = response_json[1].dump();
+        return callback(success, timeout, status_code, headers, data);
+    } catch (const std::exception& e) {
+        return callback(false, timeout, status_code_, {content_type_plain_text}, e.what());
     }
 }
 
