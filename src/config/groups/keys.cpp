@@ -1382,7 +1382,8 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     // The value we verify is the raw data *followed by* the group Ed25519 pubkey.  (See the comment
     // in encrypt_message).
     assert(_sign_pk);
-    std::vector<unsigned char> to_verify(raw_data.size() + _sign_pk->size());
+    std::vector<unsigned char> to_verify;
+    to_verify.resize(raw_data.size() + _sign_pk->size());
     std::memcpy(to_verify.data(), raw_data.data(), raw_data.size());
     std::memcpy(to_verify.data() + raw_data.size(), _sign_pk->data(), _sign_pk->size());
     if (0 != crypto_sign_ed25519_verify_detached(

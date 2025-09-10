@@ -5,6 +5,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <session/config/base.hpp>
 #include <session/config/user_profile.hpp>
 #include <session/util.hpp>
 #include <string_view>
@@ -12,6 +13,36 @@
 #include "utils.hpp"
 
 using namespace std::literals;
+
+namespace {
+struct UserProfileTester {
+    static std::chrono::sys_seconds get_profile_updated_value(config_object* conf) {
+        return std::chrono::sys_seconds{std::chrono::seconds{
+                session::config::unbox<session::config::UserProfile>(conf)->data["t"].integer_or(
+                        0)}};
+    }
+
+    static void set_profile_updated(config_object* conf, std::chrono::sys_seconds value) {
+        session::config::unbox<session::config::UserProfile>(conf)->data["t"] =
+                static_cast<int>(value.time_since_epoch().count());
+    }
+
+    static std::chrono::sys_seconds get_reupload_profile_updated_value(config_object* conf) {
+        return std::chrono::sys_seconds{std::chrono::seconds{
+                session::config::unbox<session::config::UserProfile>(conf)->data["T"].integer_or(
+                        0)}};
+    }
+
+    static void set_reupload_profile_updated(config_object* conf, std::chrono::sys_seconds value) {
+        session::config::unbox<session::config::UserProfile>(conf)->data["T"] =
+                static_cast<int>(value.time_since_epoch().count());
+    }
+
+    static uint64_t get_raw_profile_updated_value(config_object* conf) {
+        return session::config::unbox<session::config::UserProfile>(conf)->data["t"].integer_or(0);
+    }
+};
+}  // namespace
 
 TEST_CASE("UserProfile", "[config][user_profile]") {
 
@@ -130,6 +161,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     memcpy(p.key, "secret78901234567890123456789012", 32);
     CHECK(0 == user_profile_set_pic(conf, p));
     user_profile_set_nts_priority(conf, 9);
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
 
     // Retrieve them just to make sure they set properly:
     name = user_profile_get_name(conf);
@@ -167,6 +199,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "1:n" "6:Kallie"
             "1:p" "34:http://example.org/omg-pic-123.bmp"
             "1:q" "32:secret78901234567890123456789012"
+            "1:t" "i123e"
           "e"
           "1:<" "l"
             "l" "i0e" "32:" + session::to_string(exp_hash0) + "de" "e"
@@ -176,6 +209,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "1:n" "0:"
             "1:p" "0:"
             "1:q" "0:"
+            "1:t" "0:"
           "e"
         "e");
     // clang-format on
@@ -282,6 +316,8 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Change the name on both clients:
     user_profile_set_name(conf, "Nibbler");
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
+
     user_profile_set_name(conf2, "Raz");
 
     // And, on conf2, we're also going to change some other things:
@@ -299,6 +335,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(user_profile_get_blinded_msgreqs(conf2) == -1);
     user_profile_set_blinded_msgreqs(conf2, 1);
     CHECK(user_profile_get_blinded_msgreqs(conf2) == 1);
+    UserProfileTester::set_profile_updated(conf2, std::chrono::sys_seconds{124s});
 
     // Both have changes, so push need a push
     CHECK(config_needs_push(conf));
@@ -414,4 +451,84 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK_FALSE(config_needs_dump(conf2));
     CHECK_FALSE(config_needs_push(conf));
     CHECK_FALSE(config_needs_push(conf2));
+
+    // Check the current pic
+    pic = user_profile_get_pic(conf);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
+    CHECK(pic.url == "http://new.example.com/pic"sv);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "qwert\0yuio1234567890123456789012"_bytes);
+
+    // Reupload the "current" pic and confirm it gets returned
+    strcpy(p.url, "testUrl");
+    memcpy(p.key, "secret78901234567890123456789000", 32);
+    CHECK(0 == user_profile_set_reupload_pic(conf, p));
+
+    pic = user_profile_get_pic(conf);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
+    CHECK(pic.url == "testUrl"sv);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "secret78901234567890123456789000"_bytes);
+
+    // Upload a "new" pic and it now gets returned
+    strcpy(p.url, "testNewUrl");
+    memcpy(p.key, "secret78901234567890123456789111", 32);
+    CHECK(0 == user_profile_set_pic(conf, p));
+    pic = user_profile_get_pic(conf);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
+    CHECK(pic.url == "testNewUrl"sv);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "secret78901234567890123456789111"_bytes);
+
+    // Ensure the timestamp for the last modified pic gets updated correctly when the name gets set
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    CHECK(0 == user_profile_set_pic(conf, p));
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
+    user_profile_set_name(conf, "test1");
+    CHECK(UserProfileTester::get_profile_updated_value(conf).time_since_epoch().count() != 123);
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{124s});
+    CHECK(0 == user_profile_set_reupload_pic(conf, p));
+    user_profile_set_name(conf, "test2");
+    CHECK(UserProfileTester::get_reupload_profile_updated_value(conf).time_since_epoch().count() !=
+          124);
+
+    // Ensure the timestamp for the last modified pic gets updated correctly when the blinded msgreq
+    // is set
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    CHECK(0 == user_profile_set_pic(conf, p));
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
+    user_profile_set_blinded_msgreqs(conf, 1);
+    CHECK(UserProfileTester::get_profile_updated_value(conf).time_since_epoch().count() != 123);
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{124s});
+    CHECK(0 == user_profile_set_reupload_pic(conf, p));
+    user_profile_set_blinded_msgreqs(conf, 2);
+    CHECK(UserProfileTester::get_reupload_profile_updated_value(conf).time_since_epoch().count() !=
+          124);
+
+    // Ensure the timestamp is stored in seconds seconds (was incorrectly stored as microseconds)
+    auto time_before_call = std::chrono::system_clock::now();
+    CHECK(0 == user_profile_set_pic(conf, p));
+    auto time_after_call = std::chrono::system_clock::now();
+    auto before_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(time_before_call.time_since_epoch())
+                    .count();
+    auto after_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(time_before_call.time_since_epoch())
+                    .count();
+
+    auto raw_value = UserProfileTester::get_raw_profile_updated_value(conf);
+    INFO("Checking if raw_value " << raw_value << " is within the range [" << before_seconds << ", "
+                                  << after_seconds << "]");
+    CHECK((raw_value >= before_seconds && raw_value <= after_seconds));
 }
