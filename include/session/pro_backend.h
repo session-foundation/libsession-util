@@ -25,6 +25,18 @@ typedef enum SESSION_PRO_BACKEND_PAYMENT_PROVIDER {
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT,
 } SESSION_PRO_BACKEND_PAYMENT_PROVIDER;
 
+/// Store front that a Session Pro payment came from. Must match:
+///   https://github.com/Doy-lee/session-pro-backend/blob/f4e2c84794470e7932ba1a1968fdb49117bb5870/backend.py#L18
+typedef enum SESSION_PRO_BACKEND_PAYMENT_STATUS {
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL,
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_UNREDEEMED,
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED,
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_ACTIVATED,
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_EXPIRED,
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_REFUNDED,
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_COUNT,
+} SESSION_PRO_BACKEND_PAYMENT_STATUS;
+
 typedef struct session_pro_backend_payment_provider_metadata {
     string8 request_refund_support_url;
     string8 subscription_page_url;
@@ -77,11 +89,17 @@ typedef struct session_pro_backend_signature {
     bytes64 sig;
 } session_pro_backend_signature;
 
+typedef struct session_pro_backend_add_pro_payment_user_transaction {
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
+    char payment_id[128];
+    size_t payment_id_count;
+} session_pro_backend_add_pro_payment_user_transaction;
+
 typedef struct session_pro_backend_add_pro_payment_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes32 rotating_pkey;
-    bytes32 payment_token;
+    session_pro_backend_add_pro_payment_user_transaction payment_tx;
     bytes64 master_sig;
     bytes64 rotating_sig;
 } session_pro_backend_add_pro_payment_request;
@@ -127,12 +145,21 @@ typedef struct session_pro_backend_get_pro_payments_request {
 } session_pro_backend_get_pro_payments_request;
 
 typedef struct session_pro_backend_pro_payment_item {
-    uint64_t activation_unix_ts_s;
-    uint64_t archive_unix_ts_s;
-    uint64_t creation_unix_ts_s;
-    uint64_t subscription_duration;
+    SESSION_PRO_BACKEND_PAYMENT_STATUS status;
+    uint64_t subscription_duration_s;
+    uint64_t activated_unix_ts_s;
+    uint64_t expired_unix_ts_s;
+    uint64_t refunded_unix_ts_s;
+    uint64_t redeemed_unix_ts_s;
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
-    bytes32 payment_token_hash;
+    char google_payment_token[128];
+    size_t google_payment_token_count;
+    char apple_original_tx_id[128];
+    size_t apple_original_tx_id_count;
+    char apple_tx_id[128];
+    size_t apple_tx_id_count;
+    char apple_web_line_order_id[128];
+    size_t apple_web_line_order_id_count;
 } session_pro_backend_pro_payment_item;
 
 typedef struct session_pro_backend_get_pro_payments_response {
@@ -173,8 +200,9 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        const uint8_t* payment_token_hash,
-        size_t payment_token_hash_len) NON_NULL_ARG(2, 4, 6);
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 4, 7);
 
 /// API: session_pro_backend/get_pro_proof_request_build_sigs
 ///

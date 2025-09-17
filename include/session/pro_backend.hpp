@@ -73,6 +73,11 @@ struct MasterRotatingSignatures {
     array_uc64 rotating_sig;
 };
 
+struct AddProPaymentUserTransaction {
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
+    std::string payment_id;
+};
+
 /// Register a new Session Pro proof to the backend. The payment is registered under the
 /// `master_pkey` and authorises the `rotating_pkey` to use the proof. In practice this means that
 /// the caller will receive a Session Pro Proof that can be attached to messages that have to be
@@ -92,8 +97,8 @@ struct AddProPaymentRequest {
     /// Pro proof
     array_uc32 rotating_pkey;
 
-    /// 32-byte payment token hash from a third-party store proving purchase of a subscription
-    array_uc32 payment_token;
+    /// Transaction containing the payment details to register on the Session Pro backend
+    AddProPaymentUserTransaction payment_tx;
 
     /// 64-byte signature proving knowledge of the master key's secret component
     array_uc64 master_sig;
@@ -127,7 +132,8 @@ struct AddProPaymentRequest {
             std::uint8_t request_version,
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
-            std::span<const uint8_t> payment_token_hash);
+            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+            std::span<const uint8_t> payment_tx_payment_id);
 };
 
 /// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
@@ -297,16 +303,21 @@ struct GetProPaymentsRequest {
 };
 
 struct ProPaymentItem {
+    /// Describes the current status of the consumption of the payment for Session Pro entitlement
+    SESSION_PRO_BACKEND_PAYMENT_STATUS status;
+
     /// Unix timestamp (seconds) when the payment was activated for Session Pro.
     /// 0 if not activated (e.g., another active subscription or refunded).
-    std::chrono::sys_seconds activation_unix_ts;
+    std::chrono::sys_seconds activated_unix_ts;
 
-    /// Unix timestamp (seconds) when the payment was archived (e.g., refunded or revoked).
-    /// 0 if not archived.
-    std::chrono::sys_seconds archive_unix_ts;
+    /// Unix timestamp (seconds) when the payment was expired. 0 if not activated
+    std::chrono::sys_seconds expired_unix_ts;
 
-    /// Unix timestamp (seconds) of payment registration, rounded to the next day
-    std::chrono::sys_seconds creation_unix_ts;
+    /// Unix timestamp (seconds) when the payment was redeemed. 0 if not activated
+    std::chrono::sys_seconds redeemed_unix_ts;
+
+    /// Unix timestamp (seconds) when the payment was refunded. 0 if not activated
+    std::chrono::sys_seconds refunded_unix_ts;
 
     /// Subscription duration in seconds
     std::chrono::seconds subscription_duration;
@@ -314,8 +325,20 @@ struct ProPaymentItem {
     /// Store front that this particular payment came from
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
 
-    /// 32-byte hash of the payment token
-    array_uc32 payment_token_hash;
+    /// When payment provider is set to Google Play Store, this is the platform-specific purchase
+    /// token
+    std::string google_payment_token;
+
+    /// When payment provider is set to iOS App Store, this is the platform-specific original
+    /// transaction ID
+    std::string apple_original_tx_id;
+
+    /// When payment provider is set to iOS App Store, this is the platform-specific transaction ID
+    std::string apple_tx_id;
+
+    /// When payment provider is set to iOS App Store, this is the platform-specific web line order
+    /// ID
+    std::string apple_web_line_order_id;
 };
 
 struct GetProPaymentsResponse : public ResponseHeader {

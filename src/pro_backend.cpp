@@ -121,7 +121,17 @@ std::string AddProPaymentRequest::to_json() const {
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
-    j["payment_token"] = oxenc::to_hex(payment_token);
+    j["payment_tx"]["provider"] = payment_tx.provider;
+    switch (payment_tx.provider) {
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
+            j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
+        } break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
+            j["payment_tx"]["apple_tx_id"] = payment_tx.payment_id;
+        } break;
+    }
     j["master_sig"] = oxenc::to_hex(master_sig);
     j["rotating_sig"] = oxenc::to_hex(rotating_sig);
     std::string result = j.dump();
@@ -132,10 +142,8 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         std::uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
-        std::span<const uint8_t> payment_token_hash) {
-    if (payment_token_hash.size() != 32)
-        throw std::invalid_argument{"Invalid payment_token_hash: expected 32 bytes"};
-
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        std::span<const uint8_t> payment_tx_payment_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -170,7 +178,13 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
             &state,
             rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
             crypto_sign_ed25519_PUBLICKEYBYTES);
-    crypto_generichash_blake2b_update(&state, payment_token_hash.data(), payment_token_hash.size());
+
+    uint8_t provider_u8 = payment_tx_provider;
+    crypto_generichash_blake2b_update(&state, &provider_u8, sizeof(provider_u8));
+    crypto_generichash_blake2b_update(
+            &state,
+            reinterpret_cast<const uint8_t*>(payment_tx_payment_id.data()),
+            payment_tx_payment_id.size());
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash with both keys
@@ -443,19 +457,27 @@ GetProPaymentsResponse GetProPaymentsResponse::parse(std::string_view json) {
 
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto activation_ts = json_require<uint64_t>(obj, "activation_unix_ts_s", result.errors);
-        auto archive_ts = json_require<uint64_t>(obj, "archive_unix_ts_s", result.errors);
-        auto creation_ts = json_require<uint64_t>(obj, "creation_unix_ts_s", result.errors);
+        auto status = json_require<uint64_t>(obj, "status", result.errors);
+        auto activated_ts = json_require<uint64_t>(obj, "activated_unix_ts_s", result.errors);
+        auto expired_ts = json_require<uint64_t>(obj, "expired_unix_ts_s", result.errors);
+        auto redeemed_ts = json_require<uint64_t>(obj, "redeemed_unix_ts_s", result.errors);
+        auto refunded_ts = json_require<uint64_t>(obj, "refunded_unix_ts_s", result.errors);
         auto sub_duration_s = json_require<uint64_t>(obj, "subscription_duration_s", result.errors);
         auto payment_provider = json_require<uint32_t>(obj, "payment_provider", result.errors);
 
         ProPaymentItem item = {};
-        item.activation_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(activation_ts));
-        item.archive_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(archive_ts));
-        item.creation_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(creation_ts));
+        if (status > SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL &&
+            status < SESSION_PRO_BACKEND_PAYMENT_STATUS_COUNT) {
+            item.status = static_cast<SESSION_PRO_BACKEND_PAYMENT_STATUS>(status);
+        } else {
+            result.errors.push_back(fmt::format("Status value was out-of-bounds: {}", status));
+        }
+
+        item.activated_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(activated_ts));
+        item.expired_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expired_ts));
+        item.redeemed_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(redeemed_ts));
+        item.refunded_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(refunded_ts));
         item.subscription_duration = std::chrono::seconds(sub_duration_s);
-        json_require_fixed_bytes_from_hex(
-                obj, "payment_token_hash", result.errors, item.payment_token_hash);
         if (payment_provider > SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL &&
             payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT) {
             item.payment_provider =
@@ -463,6 +485,33 @@ GetProPaymentsResponse GetProPaymentsResponse::parse(std::string_view json) {
         } else {
             result.errors.push_back(
                     fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
+        }
+
+        switch (item.payment_provider) {
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
+            } break;
+
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
+                item.google_payment_token =
+                        json_require<std::string>(obj, "google_payment_token", result.errors);
+                assert(item.google_payment_token.size() <
+                       sizeof(((session_pro_backend_pro_payment_item*)0)->google_payment_token));
+            } break;
+
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
+                item.apple_original_tx_id =
+                        json_require<std::string>(obj, "apple_original_tx_id", result.errors);
+                item.apple_tx_id = json_require<std::string>(obj, "apple_tx_id", result.errors);
+                item.apple_web_line_order_id =
+                        json_require<std::string>(obj, "apple_web_line_order_id", result.errors);
+                assert(item.apple_original_tx_id.size() <
+                       sizeof(((session_pro_backend_pro_payment_item*)0)->apple_original_tx_id));
+                assert(item.apple_tx_id.size() <
+                       sizeof(((session_pro_backend_pro_payment_item*)0)->apple_tx_id));
+                assert(item.apple_web_line_order_id.size() <
+                       sizeof(((session_pro_backend_pro_payment_item*)0)->apple_web_line_order_id));
+            } break;
         }
 
         // Handle parsing result
@@ -501,18 +550,24 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        const uint8_t* payment_token_hash,
-        size_t payment_token_hash_len) {
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len) {
 
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::span<const uint8_t> token_span(payment_token_hash, payment_token_hash_len);
+    std::span<const uint8_t> payment_tx_payment_id_span(
+            payment_tx_payment_id, payment_tx_payment_id_len);
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
         auto sigs = AddProPaymentRequest::build_sigs(
-                request_version, master_span, rotating_span, token_span);
+                request_version,
+                master_span,
+                rotating_span,
+                payment_tx_provider,
+                payment_tx_payment_id_span);
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
@@ -599,7 +654,9 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
     cpp.version = request->version;
     std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
     std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
-    std::memcpy(cpp.payment_token.data(), request->payment_token.data, cpp.payment_token.size());
+    cpp.payment_tx.provider = request->payment_tx.provider;
+    cpp.payment_tx.payment_id =
+            std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
     std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
 
@@ -832,11 +889,6 @@ session_pro_backend_get_pro_payments_response_parse(const char* json, size_t jso
     arena_t arena = {};
     {
         arena.max += cpp.items.size() * sizeof(*result.items);
-        static_assert(
-                sizeof(cpp.items[0]) >= sizeof(*result.items),
-                "Ensure we allocate enough memory. We might slightly over-allocate but that's not "
-                "a big deal");
-
         for (auto it : cpp.errors)
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
@@ -865,22 +917,46 @@ session_pro_backend_get_pro_payments_response_parse(const char* json, size_t jso
     for (size_t index = 0; index < result.items_count; ++index) {
         const ProPaymentItem& src = cpp.items[index];
         session_pro_backend_pro_payment_item& dest = result.items[index];
-        dest.activation_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
-                                            src.activation_unix_ts.time_since_epoch())
-                                            .count();
-        dest.archive_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
-                                         src.archive_unix_ts.time_since_epoch())
-                                         .count();
-        dest.creation_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
-                                          src.creation_unix_ts.time_since_epoch())
-                                          .count();
-        dest.subscription_duration =
+        dest.status = src.status;
+        dest.subscription_duration_s =
                 std::chrono::duration_cast<std::chrono::seconds>(src.subscription_duration).count();
+        dest.activated_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
+                                           src.activated_unix_ts.time_since_epoch())
+                                           .count();
+        dest.expired_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
+                                         src.expired_unix_ts.time_since_epoch())
+                                         .count();
+        dest.refunded_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
+                                          src.refunded_unix_ts.time_since_epoch())
+                                          .count();
+        dest.redeemed_unix_ts_s = std::chrono::duration_cast<std::chrono::seconds>(
+                                          src.redeemed_unix_ts.time_since_epoch())
+                                          .count();
         dest.payment_provider = src.payment_provider;
-        std::memcpy(
-                dest.payment_token_hash.data,
-                src.payment_token_hash.data(),
-                src.payment_token_hash.size());
+        switch (dest.payment_provider) {
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
+
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
+                dest.google_payment_token_count = snprintf_bytes_written_clamped(
+                        dest.google_payment_token,
+                        sizeof(dest.google_payment_token),
+                        src.google_payment_token.data());
+            } break;
+
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
+                dest.apple_original_tx_id_count = snprintf_bytes_written_clamped(
+                        dest.apple_original_tx_id,
+                        sizeof(dest.apple_original_tx_id),
+                        src.apple_original_tx_id.data());
+                dest.apple_tx_id_count = snprintf_bytes_written_clamped(
+                        dest.apple_tx_id, sizeof(dest.apple_tx_id), src.apple_tx_id.data());
+                dest.apple_web_line_order_id_count = snprintf_bytes_written_clamped(
+                        dest.apple_web_line_order_id,
+                        sizeof(dest.apple_web_line_order_id),
+                        src.apple_web_line_order_id.data());
+            } break;
+        }
     }
 
     // Copy errors
