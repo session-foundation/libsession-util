@@ -23,7 +23,7 @@ typedef enum {
     SESSION_NETWORK_REQUEST_CATEGORY_DOWNLOAD,
 } SESSION_NETWORK_REQUEST_CATEGORY;
 
-typedef struct network_v2_server_destination {
+typedef struct network_server_destination {
     const char* method;
     const char* protocol;
     const char* host;
@@ -31,7 +31,7 @@ typedef struct network_v2_server_destination {
     const char* x25519_pubkey_hex;
     const char* const* headers_kv_pairs;
     size_t headers_kv_pairs_len;
-} network_v2_server_destination;
+} network_server_destination;
 
 typedef struct {
     char ed25519_pubkey_hex[65];  // The 64-byte ed25519 pubkey in hex + null terminator.
@@ -42,7 +42,7 @@ typedef struct {
 typedef struct {
     // Only ONE of these pointers should be set, the other should be left null
     const network_service_node* snode_dest;
-    const network_v2_server_destination* server_dest;
+    const network_server_destination* server_dest;
     const session_remote_address* remote_addr_dest;
 
     const char* endpoint;

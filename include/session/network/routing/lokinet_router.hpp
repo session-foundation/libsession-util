@@ -72,6 +72,13 @@ class LokinetRouter : public IRouter {
             const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id);
     void _send_via_tunnel(
             lokinet::tunnel_info tunnel, Request request, network_response_callback_t callback);
+    void _handle_transport_response(
+            bool success,
+            bool timeout,
+            int16_t status_code,
+            std::vector<std::pair<std::string, std::string>> headers,
+            std::optional<std::string> response_body,
+            network_response_callback_t callback);
 };
 
 }  // namespace session::network

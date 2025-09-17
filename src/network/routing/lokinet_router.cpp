@@ -94,7 +94,7 @@ LokinetRouter::LokinetRouter(
     } catch (const std::exception& e) {
         log::error(cat, "[LokinetRouter] Failed to start lokinet ({}).", e.what());
         _update_status(ConnectionStatus::disconnected);
-        throw e;
+        throw;
     }
 }
 

@@ -29,7 +29,7 @@ session_request_params* convert_cpp_request_to_c(const session::network::Request
                 if constexpr (std::is_same_v<T, service_node>) {
                     total_size += sizeof(network_service_node);
                 } else if constexpr (std::is_same_v<T, ServerDestination>) {
-                    total_size += sizeof(network_v2_server_destination);
+                    total_size += sizeof(network_server_destination);
                     add_string_size(arg.protocol);
                     add_string_size(arg.host);
                     add_string_size(arg.method);
@@ -97,10 +97,10 @@ session_request_params* convert_cpp_request_to_c(const session::network::Request
                     current_ptr += sizeof(network_service_node);
                 } else if constexpr (std::is_same_v<T, ServerDestination>) {
                     auto* c_server_dest =
-                            reinterpret_cast<network_v2_server_destination*>(current_ptr);
-                    new (c_server_dest) network_v2_server_destination{};
+                            reinterpret_cast<network_server_destination*>(current_ptr);
+                    new (c_server_dest) network_server_destination{};
                     c_params->server_dest = c_server_dest;
-                    current_ptr += sizeof(network_v2_server_destination);
+                    current_ptr += sizeof(network_server_destination);
 
                     c_server_dest->protocol = copy_string(arg.protocol);
                     c_server_dest->host = copy_string(arg.host);

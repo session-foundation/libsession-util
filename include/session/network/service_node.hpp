@@ -28,8 +28,8 @@ namespace service_node_disk_format {
 }  // namespace service_node_disk_format
 
 struct fork_versions {
-    int hardfork;
-    int softfork;
+    uint16_t hardfork;
+    uint16_t softfork;
 
     bool operator==(const fork_versions& other) const {
         return hardfork == other.hardfork && softfork == other.softfork;

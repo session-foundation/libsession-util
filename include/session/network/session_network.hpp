@@ -16,7 +16,7 @@ namespace session::network {
 
 namespace fs = std::filesystem;
 
-class Network_v2 {
+class Network {
   private:
     const config::Config config;
     std::shared_ptr<oxen::quic::Loop> _loop;
@@ -28,19 +28,20 @@ class Network_v2 {
   public:
     // Hook to be notified whenever the network connection status changes.
     std::function<void(ConnectionStatus status)> on_status_changed;
+    std::function<void(std::chrono::milliseconds network_time_offset, int hardfork, int softfork)> on_network_info_changed;
 
     template <typename... Opt>
         requires(!std::is_same_v<
                  std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,
                  config::Config>)
-    Network_v2(Opt&&... opts) : Network_v2(Config(std::forward<Opt>(opts)...)){};
-    explicit Network_v2(config::Config config);
-    virtual ~Network_v2();
+    Network(Opt&&... opts) : Network(Config(std::forward<Opt>(opts)...)){};
+    explicit Network(config::Config config);
+    virtual ~Network();
 
     std::chrono::milliseconds network_time_offset() const { return _network_time_offset; };
     fork_versions fork() const { return _fork_versions.load(); };
-    int hardfork() const { return _fork_versions.load().hardfork; };
-    int softfork() const { return _fork_versions.load().softfork; };
+    uint16_t hardfork() const { return _fork_versions.load().hardfork; };
+    uint16_t softfork() const { return _fork_versions.load().softfork; };
 
     void suspend();
     void resume(bool automatically_reconnect = true);

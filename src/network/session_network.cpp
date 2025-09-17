@@ -96,7 +96,7 @@ namespace detail {
 
 }  // namespace detail
 
-Network_v2::Network_v2(config::Config config) : config{config} {
+Network::Network(config::Config config) : config{config} {
     // Start by validating the configuration
     switch (config.transport) {
         case opt::transport::Type::quic: break;
@@ -189,13 +189,13 @@ Network_v2::Network_v2(config::Config config) : config{config} {
     _transport->on_status_changed = [this] { _recalculate_status(); };
 }
 
-Network_v2::~Network_v2() {
+Network::~Network() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
     log::debug(cat, "[Network] Destroyed.");
 }
 
-void Network_v2::clear_cache() {
+void Network::clear_cache() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         if (_snode_pool)
@@ -207,7 +207,7 @@ void Network_v2::clear_cache() {
 
 // MARK: Connection
 
-void Network_v2::suspend() {
+void Network::suspend() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         _suspended = true;
@@ -224,7 +224,7 @@ void Network_v2::suspend() {
     });
 }
 
-void Network_v2::resume(bool automatically_reconnect) {
+void Network::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this, automatically_reconnect] {
         if (!_suspended)
@@ -242,31 +242,31 @@ void Network_v2::resume(bool automatically_reconnect) {
     });
 }
 
-void Network_v2::close_connections() {
+void Network::close_connections() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] { _close_connections(); });
 }
 
 // MARK: Interface
 
-ConnectionStatus Network_v2::get_status() {
+ConnectionStatus Network::get_status() {
     return _status.load();
 }
 
-std::vector<PathInfo> Network_v2::get_active_paths() {
+std::vector<PathInfo> Network::get_active_paths() {
     if (_router)
         return _router->get_active_paths();
 
     return {};
 }
 
-void Network_v2::get_swarm(
+void Network::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
     _snode_pool->get_swarm(std::move(swarm_pubkey), std::move(callback));
 }
 
-void Network_v2::get_random_nodes(
+void Network::get_random_nodes(
         uint16_t count, std::function<void(std::vector<service_node> nodes)> callback) {
     _loop->call([this, count, cb = std::move(callback)] {
         auto unused_nodes = _snode_pool->get_unused_nodes(count);
@@ -283,7 +283,7 @@ void Network_v2::get_random_nodes(
     });
 }
 
-void Network_v2::send_request(Request request, network_response_callback_t callback) {
+void Network::send_request(Request request, network_response_callback_t callback) {
     if (!_transport)
         return callback(
                 false, false, -1, {content_type_plain_text}, "No transport layer configured");
@@ -333,7 +333,7 @@ void Network_v2::send_request(Request request, network_response_callback_t callb
 
 // MARK: Internal Logic
 
-void Network_v2::_close_connections() {
+void Network::_close_connections() {
     if (_transport)
         _transport->close_connections();
     if (_router)
@@ -343,7 +343,7 @@ void Network_v2::_close_connections() {
     log::info(cat, "Closed all connections.");
 }
 
-void Network_v2::_recalculate_status() {
+void Network::_recalculate_status() {
     _loop->call([this] {
         if (!_transport || !_router)
             return _update_status(ConnectionStatus::disconnected);
@@ -371,7 +371,7 @@ void Network_v2::_recalculate_status() {
     });
 }
 
-void Network_v2::_update_status(ConnectionStatus new_status) {
+void Network::_update_status(ConnectionStatus new_status) {
     if (_status == new_status)
         return;
 
@@ -381,7 +381,7 @@ void Network_v2::_update_status(ConnectionStatus new_status) {
         on_status_changed(new_status);
 }
 
-Request Network_v2::_preprocess_request(Request request) {
+Request Network::_preprocess_request(Request request) {
     std::visit(
             [&](auto&& details) {
                 using T = std::decay_t<decltype(details)>;
@@ -430,7 +430,7 @@ Request Network_v2::_preprocess_request(Request request) {
     return request;
 }
 
-void Network_v2::_update_network_state(const std::string& body) {
+void Network::_update_network_state(const std::string& body) {
     try {
         auto json = nlohmann::json::parse(body);
         const nlohmann::json* target_json = &json;
@@ -463,6 +463,9 @@ void Network_v2::_update_network_state(const std::string& body) {
                 target_json = latest_body;
         }
 
+        auto old_offset = _network_time_offset.load();
+        auto old_versions = _fork_versions.load();
+
         // Update time offset
         if (target_json->contains("t") && (*target_json)["t"].is_number()) {
             auto server_time = std::chrono::seconds{(*target_json)["t"].get<int64_t>()};
@@ -475,10 +478,9 @@ void Network_v2::_update_network_state(const std::string& body) {
         // Update hardfork/softfork versions
         if (target_json->contains("hf") && (*target_json)["hf"].is_array() &&
             (*target_json)["hf"].size() >= 2) {
-            std::pair<int, int> new_versions = {
-                    (*target_json)["hf"][0].get<int>(), (*target_json)["hf"][1].get<int>()};
+            std::pair<uint16_t, uint16_t> new_versions = {(*target_json)["hf"][0].get<uint16_t>(), (*target_json)["hf"][1].get<uint16_t>()};
 
-            auto current_versions = _fork_versions.load();
+            auto current_versions = old_versions;
             auto desired_next_versions = current_versions;
 
             if (new_versions.first > desired_next_versions.hardfork)
@@ -496,12 +498,21 @@ void Network_v2::_update_network_state(const std::string& body) {
                     desired_next_versions.hardfork,
                     desired_next_versions.softfork);
         }
+
+        // If the network info changed then call the callback
+        if (on_network_info_changed) {
+            auto new_offset = _network_time_offset.load();
+            auto new_versions = _fork_versions.load();
+
+            if (new_offset != old_offset || new_versions != old_versions)
+                on_network_info_changed(new_offset, new_versions.hardfork, new_versions.softfork);
+        }
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to parse network state from response: {}", e.what());
     }
 }
 
-void Network_v2::_handle_421_retry(
+void Network::_handle_421_retry(
         Request original_request, network_response_callback_t final_callback) {
     if (original_request.retry_count >= config.redirect_retry_count) {
         log::error(
@@ -589,9 +600,9 @@ struct session_response_handle_cpp_t {
 
 namespace {
 
-inline session::network::Network_v2& unbox(network_object_v2* network_) {
+inline session::network::Network& unbox(network_object* network_) {
     assert(network_ && network_->internals);
-    return *static_cast<session::network::Network_v2*>(network_->internals);
+    return *static_cast<session::network::Network*>(network_->internals);
 }
 
 inline bool set_error(char* error, const std::exception& e) {
@@ -686,7 +697,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
 }
 
 LIBSESSION_C_API bool session_network_init(
-        network_object_v2** network, const session_network_config* config, char* error) {
+        network_object** network, const session_network_config* config, char* error) {
     if (!network || !config)
         return set_error(error, std::invalid_argument{"network or config were null."});
 
@@ -861,8 +872,8 @@ LIBSESSION_C_API bool session_network_init(
 
         // Construct the Network instance
         Config final_config(cpp_opts);
-        auto n = std::make_unique<Network_v2>(std::move(final_config));
-        auto n_object = std::make_unique<network_object_v2>();
+        auto n = std::make_unique<Network>(std::move(final_config));
+        auto n_object = std::make_unique<network_object>();
         n_object->internals = n.release();
         *network = n_object.release();
         return true;
@@ -871,8 +882,8 @@ LIBSESSION_C_API bool session_network_init(
     }
 }
 
-LIBSESSION_C_API void session_network_free(network_object_v2* network) {
-    delete static_cast<session::network::Network_v2*>(network->internals);
+LIBSESSION_C_API void session_network_free(network_object* network) {
+    delete static_cast<session::network::Network*>(network->internals);
     delete network;
 }
 
@@ -881,37 +892,37 @@ LIBSESSION_C_API void session_request_params_free(session_request_params* params
         std::free(params);
 }
 
-LIBSESSION_C_API void session_network_suspend(network_object_v2* network) {
+LIBSESSION_C_API void session_network_suspend(network_object* network) {
     unbox(network).suspend();
 }
 
 LIBSESSION_C_API void session_network_resume(
-        network_object_v2* network, bool automatically_reconnect) {
+        network_object* network, bool automatically_reconnect) {
     unbox(network).resume(automatically_reconnect);
 }
 
-LIBSESSION_C_API void session_network_close_connections(network_object_v2* network) {
+LIBSESSION_C_API void session_network_close_connections(network_object* network) {
     unbox(network).close_connections();
 }
 
-LIBSESSION_C_API void session_network_clear_cache(network_object_v2* network) {
+LIBSESSION_C_API void session_network_clear_cache(network_object* network) {
     unbox(network).clear_cache();
 }
 
-LIBSESSION_C_API uint64_t session_network_time_offset(network_object_v2* network) {
+LIBSESSION_C_API uint64_t session_network_time_offset(network_object* network) {
     return unbox(network).network_time_offset().count();
 }
 
-LIBSESSION_C_API int session_network_hardfork(network_object_v2* network) {
+LIBSESSION_C_API uint16_t session_network_hardfork(network_object* network) {
     return unbox(network).hardfork();
 }
 
-LIBSESSION_C_API int session_network_softfork(network_object_v2* network) {
+LIBSESSION_C_API uint16_t session_network_softfork(network_object* network) {
     return unbox(network).softfork();
 }
 
 LIBSESSION_C_API void session_network_set_status_changed_callback(
-        network_object_v2* network,
+        network_object* network,
         void (*callback)(CONNECTION_STATUS status, void* ctx),
         void* ctx) {
     if (!callback)
@@ -923,8 +934,20 @@ LIBSESSION_C_API void session_network_set_status_changed_callback(
         };
 }
 
+LIBSESSION_C_API void session_network_set_network_info_changed_callback(
+        network_object* network,
+        void (*callback)(uint64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
+        void* ctx) {
+    if (!callback)
+        unbox(network).on_network_info_changed = nullptr;
+    else
+        unbox(network).on_network_info_changed = [cb = std::move(callback), ctx](std::chrono::milliseconds network_time_offset, uint16_t hardfork, uint16_t softfork) {
+            cb(network_time_offset.count(), hardfork, softfork, ctx);
+        };
+}
+
 LIBSESSION_C_API void session_network_callbacks_respond(
-        network_object_v2* network,
+        network_object* network,
         session_response_handle_t* response_handle,
         bool success,
         bool timeout,
@@ -952,7 +975,7 @@ LIBSESSION_C_API void session_network_callbacks_respond(
     handle_guard->cpp_callback(success, timeout, status_code, std::move(headers), std::move(body));
 }
 
-LIBSESSION_C_API CONNECTION_STATUS session_network_get_status(network_object_v2* network) {
+LIBSESSION_C_API CONNECTION_STATUS session_network_get_status(network_object* network) {
     if (!network)
         return CONNECTION_STATUS_UNKNOWN;
 
@@ -960,7 +983,7 @@ LIBSESSION_C_API CONNECTION_STATUS session_network_get_status(network_object_v2*
 }
 
 LIBSESSION_C_API void session_network_get_active_paths(
-        network_object_v2* network, session_path_info** out_paths, size_t* out_paths_len) {
+        network_object* network, session_path_info** out_paths, size_t* out_paths_len) {
     if (!network || !out_paths || !out_paths_len)
         return;
 
@@ -1065,7 +1088,7 @@ LIBSESSION_C_API void session_network_paths_free(session_path_info* paths) {
 }
 
 LIBSESSION_C_API void session_network_get_swarm(
-        network_object_v2* network,
+        network_object* network,
         const char* swarm_pubkey_hex,
         void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
         void* ctx) {
@@ -1079,7 +1102,7 @@ LIBSESSION_C_API void session_network_get_swarm(
 }
 
 LIBSESSION_C_API void session_network_get_random_nodes(
-        network_object_v2* network,
+        network_object* network,
         uint16_t count,
         void (*callback)(network_service_node*, size_t, void*),
         void* ctx) {
@@ -1092,7 +1115,7 @@ LIBSESSION_C_API void session_network_get_random_nodes(
 }
 
 LIBSESSION_C_API void session_network_send_request(
-        network_object_v2* network,
+        network_object* network,
         const session_request_params* params,
         session_network_response_t callback,
         void* ctx) {
