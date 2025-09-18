@@ -909,7 +909,7 @@ LIBSESSION_C_API void session_network_clear_cache(network_object* network) {
     unbox(network).clear_cache();
 }
 
-LIBSESSION_C_API uint64_t session_network_time_offset(network_object* network) {
+LIBSESSION_C_API int64_t session_network_time_offset(network_object* network) {
     return unbox(network).network_time_offset().count();
 }
 
@@ -936,7 +936,7 @@ LIBSESSION_C_API void session_network_set_status_changed_callback(
 
 LIBSESSION_C_API void session_network_set_network_info_changed_callback(
         network_object* network,
-        void (*callback)(uint64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
+        void (*callback)(int64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
         void* ctx) {
     if (!callback)
         unbox(network).on_network_info_changed = nullptr;

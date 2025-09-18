@@ -134,7 +134,7 @@ LIBSESSION_EXPORT void session_network_resume(network_object* network, bool auto
 LIBSESSION_EXPORT void session_network_close_connections(network_object* network);
 LIBSESSION_EXPORT void session_network_clear_cache(network_object* network);
 
-LIBSESSION_EXPORT uint64_t session_network_time_offset(network_object* network);
+LIBSESSION_EXPORT int64_t session_network_time_offset(network_object* network);
 LIBSESSION_EXPORT uint16_t session_network_hardfork(network_object* network);
 LIBSESSION_EXPORT uint16_t session_network_softfork(network_object* network);
 
@@ -153,7 +153,7 @@ LIBSESSION_EXPORT void session_network_set_status_changed_callback(
 
 LIBSESSION_EXPORT void session_network_set_network_info_changed_callback(
         network_object* netowrk,
-        void (*callback)(uint64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
+        void (*callback)(int64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
         void* ctx);
 
 LIBSESSION_EXPORT void session_network_callbacks_respond(
