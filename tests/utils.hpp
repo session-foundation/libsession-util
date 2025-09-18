@@ -72,6 +72,8 @@ class CallTracker {
             call_cv_.notify_all();
     }
 
+    std::vector<std::string> calls_to_ignore() { return calls_to_ignore_; }
+
     bool check_should_ignore_and_log_call(const std::string& name) {
         func_called(name);
         return std::find(calls_to_ignore_.begin(), calls_to_ignore_.end(), name) !=

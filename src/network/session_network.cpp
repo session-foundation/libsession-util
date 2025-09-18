@@ -478,7 +478,9 @@ void Network::_update_network_state(const std::string& body) {
         // Update hardfork/softfork versions
         if (target_json->contains("hf") && (*target_json)["hf"].is_array() &&
             (*target_json)["hf"].size() >= 2) {
-            std::pair<uint16_t, uint16_t> new_versions = {(*target_json)["hf"][0].get<uint16_t>(), (*target_json)["hf"][1].get<uint16_t>()};
+            std::pair<uint16_t, uint16_t> new_versions = {
+                    (*target_json)["hf"][0].get<uint16_t>(),
+                    (*target_json)["hf"][1].get<uint16_t>()};
 
             auto current_versions = old_versions;
             auto desired_next_versions = current_versions;
@@ -922,9 +924,7 @@ LIBSESSION_C_API uint16_t session_network_softfork(network_object* network) {
 }
 
 LIBSESSION_C_API void session_network_set_status_changed_callback(
-        network_object* network,
-        void (*callback)(CONNECTION_STATUS status, void* ctx),
-        void* ctx) {
+        network_object* network, void (*callback)(CONNECTION_STATUS status, void* ctx), void* ctx) {
     if (!callback)
         unbox(network).on_status_changed = nullptr;
     else
@@ -936,14 +936,19 @@ LIBSESSION_C_API void session_network_set_status_changed_callback(
 
 LIBSESSION_C_API void session_network_set_network_info_changed_callback(
         network_object* network,
-        void (*callback)(int64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
+        void (*callback)(
+                int64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
         void* ctx) {
     if (!callback)
         unbox(network).on_network_info_changed = nullptr;
     else
-        unbox(network).on_network_info_changed = [cb = std::move(callback), ctx](std::chrono::milliseconds network_time_offset, uint16_t hardfork, uint16_t softfork) {
-            cb(network_time_offset.count(), hardfork, softfork, ctx);
-        };
+        unbox(network).on_network_info_changed =
+                [cb = std::move(callback), ctx](
+                        std::chrono::milliseconds network_time_offset,
+                        uint16_t hardfork,
+                        uint16_t softfork) {
+                    cb(network_time_offset.count(), hardfork, softfork, ctx);
+                };
 }
 
 LIBSESSION_C_API void session_network_callbacks_respond(

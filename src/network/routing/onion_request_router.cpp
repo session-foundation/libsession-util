@@ -989,7 +989,7 @@ void OnionRequestRouter::_handle_transport_response(
 
     try {
         if (!response_body)
-            throw std::runtime_error{"Unexpected empty repsonse"};
+            throw std::runtime_error{"Unexpected empty response"};
 
         DecryptedResponse decrypted =
                 decrypt_onion_response(*builder, original_request, *response_body);
@@ -1000,7 +1000,7 @@ void OnionRequestRouter::_handle_transport_response(
         final_success = false;
         headers = {content_type_plain_text};
 
-        if (success && !timeout)
+        if ((success && !timeout) || !response_body.has_value())
             body = "Failed to decrypt onion response due to error: {}"_format(e.what());
         else
             body = *response_body;

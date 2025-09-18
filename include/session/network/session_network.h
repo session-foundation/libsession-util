@@ -130,7 +130,8 @@ LIBSESSION_EXPORT void session_network_free(network_object* network);
 LIBSESSION_EXPORT void session_request_params_free(session_request_params* params);
 
 LIBSESSION_EXPORT void session_network_suspend(network_object* network);
-LIBSESSION_EXPORT void session_network_resume(network_object* network, bool automatically_reconnect);
+LIBSESSION_EXPORT void session_network_resume(
+        network_object* network, bool automatically_reconnect);
 LIBSESSION_EXPORT void session_network_close_connections(network_object* network);
 LIBSESSION_EXPORT void session_network_clear_cache(network_object* network);
 
@@ -147,13 +148,12 @@ LIBSESSION_EXPORT uint16_t session_network_softfork(network_object* network);
 /// - `callback` -- [in] callback to be called when the network connection status changes.
 /// - `ctx` -- [in, optional] Pointer to an optional context. Set to NULL if unused.
 LIBSESSION_EXPORT void session_network_set_status_changed_callback(
-        network_object* network,
-        void (*callback)(CONNECTION_STATUS status, void* ctx),
-        void* ctx);
+        network_object* network, void (*callback)(CONNECTION_STATUS status, void* ctx), void* ctx);
 
 LIBSESSION_EXPORT void session_network_set_network_info_changed_callback(
         network_object* netowrk,
-        void (*callback)(int64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
+        void (*callback)(
+                int64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
         void* ctx);
 
 LIBSESSION_EXPORT void session_network_callbacks_respond(

@@ -28,7 +28,8 @@ class Network {
   public:
     // Hook to be notified whenever the network connection status changes.
     std::function<void(ConnectionStatus status)> on_status_changed;
-    std::function<void(std::chrono::milliseconds network_time_offset, int hardfork, int softfork)> on_network_info_changed;
+    std::function<void(std::chrono::milliseconds network_time_offset, int hardfork, int softfork)>
+            on_network_info_changed;
 
     template <typename... Opt>
         requires(!std::is_same_v<

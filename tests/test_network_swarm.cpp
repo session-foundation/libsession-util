@@ -13,6 +13,9 @@ using namespace session::network::swarm;
 swarm_id_t get_swarm_id(
         std::string swarm_pubkey_hex,
         std::vector<std::pair<swarm_id_t, std::vector<service_node>>> swarms) {
+    if (swarm_pubkey_hex.size() == 66)
+        swarm_pubkey_hex = swarm_pubkey_hex.substr(2);
+
     auto pk = x25519_pubkey::from_hex(swarm_pubkey_hex);
     return get_swarm(pk, swarms).first;
 }

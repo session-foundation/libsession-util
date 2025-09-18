@@ -8,7 +8,7 @@
 
 #include "utils.hpp"
 
-#ifndef DISABLE_ONIONREQ
+#ifndef DISABLE_NETWORKING
 #include <oxen/quic/network.hpp>
 #endif
 
@@ -88,7 +88,7 @@ TEST_CASE("Logging callbacks", "[logging]") {
                   line1));
 }
 
-#ifndef DISABLE_ONIONREQ
+#ifndef DISABLE_NETWORKING
 TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
     oxen::log::clear_sinks();
     simple_logs.clear();

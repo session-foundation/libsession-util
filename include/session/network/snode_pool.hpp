@@ -61,6 +61,9 @@ class SnodePool {
     // Records that a specific node has failed a request
     virtual void record_node_failure(const service_node& node, bool permanent = false);
     virtual void record_node_failure(const ed25519_pubkey& key, bool permanent = false);
+    uint16_t node_failure_count(const service_node& node);
+    uint16_t node_failure_count(const ed25519_pubkey& key);
+    void clear_node_failure_counts();
 
     // Checks if the pool is empty or stale and triggers a refresh if needed
     virtual void refresh_if_needed(

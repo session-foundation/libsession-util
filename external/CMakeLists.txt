@@ -102,7 +102,7 @@ if(CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
-if(ENABLE_ONIONREQ)
+if(ENABLE_NETWORKING)
   set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
   libsession_system_or_submodule(OXENQUIC quic oxen::quic liboxenquic>=1.6 lokinet/external/oxen-libquic)
 endif()
@@ -190,7 +190,7 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
 libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json::nlohmann_json nlohmann_json>=3.7.0 lokinet/external/nlohmann)
 
-if(ENABLE_LOKINET)
+if(ENABLE_NETWORKING)
     set(LOKINET_FULL OFF CACHE BOOL "")
     set(LOKINET_DAEMON OFF CACHE BOOL "")
     set(LOKINET_NATIVE_BUILD OFF CACHE BOOL "")

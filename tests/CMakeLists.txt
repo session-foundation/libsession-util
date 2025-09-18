@@ -33,7 +33,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     case_logger.cpp
 )
 
-if (ENABLE_ONIONREQ)
+if(ENABLE_NETWORKING)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_session_network.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
@@ -48,10 +48,10 @@ target_link_libraries(test_libs INTERFACE
     nlohmann_json::nlohmann_json
     oxen::logging)
 
-if (ENABLE_ONIONREQ)
-    target_link_libraries(test_libs INTERFACE libsession::onionreq)
+if (ENABLE_NETWORKING)
+    target_link_libraries(test_libs INTERFACE libsession::network)
 else()
-    target_compile_definitions(test_libs INTERFACE DISABLE_ONIONREQ)
+    target_compile_definitions(test_libs INTERFACE DISABLE_NETWORKING)
 endif()
 
 add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})

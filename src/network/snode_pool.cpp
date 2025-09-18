@@ -716,6 +716,23 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
             _snode_failure_counts[key]);
 }
 
+uint16_t SnodePool::node_failure_count(const service_node& node) {
+    return node_failure_count(ed25519_pubkey::from_bytes(node.view_remote_key()));
+}
+
+uint16_t SnodePool::node_failure_count(const ed25519_pubkey& key) {
+    std::lock_guard lock{_cache_mutex};
+    if (_snode_failure_counts.contains(key))
+        return _snode_failure_counts.at(key);
+
+    return 0;
+}
+
+void SnodePool::clear_node_failure_counts() {
+    std::lock_guard lock{_cache_mutex};
+    _snode_failure_counts.clear();
+}
+
 void SnodePool::refresh_if_needed(
         const std::vector<service_node>& in_use_nodes, std::function<void()> on_refresh_complete) {
     bool needs_to_start_refresh = false;
