@@ -367,22 +367,22 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
     return result;
 }
 
-std::string GetProPaymentsRequest::to_json() const {
+std::string GetProStatusRequest::to_json() const {
     nlohmann::json j;
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["master_sig"] = oxenc::to_hex(master_sig);
     j["unix_ts_s"] = unix_ts.time_since_epoch().count();
-    j["page"] = page;
+    j["history"] = history;
     std::string result = j.dump();
     return result;
 }
 
-array_uc64 GetProPaymentsRequest::build_sig(
+array_uc64 GetProStatusRequest::build_sig(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::chrono::sys_seconds unix_ts,
-        uint32_t page) {
+        bool history) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -406,8 +406,9 @@ array_uc64 GetProPaymentsRequest::build_sig(
             crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<unsigned char*>(&unix_ts_s), sizeof(unix_ts_s));
+    uint8_t history_u8 = history;
     crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<unsigned char*>(&page), sizeof(page));
+            &state, reinterpret_cast<unsigned char*>(&history_u8), sizeof(history_u8));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash
@@ -421,9 +422,9 @@ array_uc64 GetProPaymentsRequest::build_sig(
     return result;
 }
 
-GetProPaymentsResponse GetProPaymentsResponse::parse(std::string_view json) {
+GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
     // Parse basics
-    GetProPaymentsResponse result = {};
+    GetProStatusResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
     result.status = json_require<uint8_t>(j, "status", result.errors);
     if (result.errors.size()) {
@@ -442,8 +443,12 @@ GetProPaymentsResponse GetProPaymentsResponse::parse(std::string_view json) {
         return result;
 
     // Parse payload
-    result.pages = json_require<uint32_t>(result_obj, "pages", result.errors);
-    result.payments = json_require<uint32_t>(result_obj, "payments", result.errors);
+    uint32_t user_status = json_require<uint32_t>(result_obj, "status", result.errors);
+    if (user_status >= SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT) {
+        result.errors.push_back(fmt::format("User pro status value was out-of-bounds: {}", user_status));
+        return result;
+    }
+    result.user_status = static_cast<SESSION_PRO_BACKEND_USER_PRO_STATUS>(user_status);
 
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
@@ -616,7 +621,7 @@ session_pro_backend_get_pro_proof_request_build_sigs(
 }
 
 LIBSESSION_C_API session_pro_backend_signature
-session_pro_backend_get_pro_payments_request_build_sig(
+session_pro_backend_get_pro_status_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -628,7 +633,7 @@ session_pro_backend_get_pro_payments_request_build_sig(
 
     session_pro_backend_signature result = {};
     try {
-        auto sig = GetProPaymentsRequest::build_sig(request_version, master_span, ts, page);
+        auto sig = GetProStatusRequest::build_sig(request_version, master_span, ts, page);
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -717,20 +722,20 @@ session_pro_backend_get_pro_revocations_request_to_json(
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_payments_request_to_json(
-        const session_pro_backend_get_pro_payments_request* request) {
+LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_status_request_to_json(
+        const session_pro_backend_get_pro_status_request* request) {
     session_pro_backend_to_json result = {};
     if (!request)
         return result;
 
     // Construct C++ struct
-    GetProPaymentsRequest cpp = {};
+    GetProStatusRequest cpp = {};
     cpp.version = request->version;
     std::memcpy(
             cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
     cpp.unix_ts = std::chrono::sys_seconds{std::chrono::seconds{request->unix_ts_s}};
-    cpp.page = request->page;
+    cpp.history = request->history;
 
     try {
         std::string json = cpp.to_json();
@@ -872,9 +877,9 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_get_pro_payments_response
-session_pro_backend_get_pro_payments_response_parse(const char* json, size_t json_len) {
-    session_pro_backend_get_pro_payments_response result = {};
+LIBSESSION_C_API session_pro_backend_get_pro_status_response
+session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_len) {
+    session_pro_backend_get_pro_status_response result = {};
     if (!json) {
         result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
@@ -883,7 +888,7 @@ session_pro_backend_get_pro_payments_response_parse(const char* json, size_t jso
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = GetProPaymentsResponse::parse({json, json_len});
+    auto cpp = GetProStatusResponse::parse({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -908,8 +913,7 @@ session_pro_backend_get_pro_payments_response_parse(const char* json, size_t jso
 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
     result.header.status = cpp.status;
-    result.pages = cpp.pages;
-    result.payments = cpp.payments;
+    result.status = cpp.user_status;
     result.items_count = cpp.items.size();
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
             &arena, result.items_count * sizeof(*result.items));
@@ -994,8 +998,8 @@ LIBSESSION_C_API void session_pro_backend_get_pro_revocations_response_free(
     }
 }
 
-LIBSESSION_C_API void session_pro_backend_get_pro_payments_response_free(
-        session_pro_backend_get_pro_payments_response* response) {
+LIBSESSION_C_API void session_pro_backend_get_pro_status_response_free(
+        session_pro_backend_get_pro_status_response* response) {
     if (response) {
         free(response->header.internal_arena_buf_);
         *response = {};

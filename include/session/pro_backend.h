@@ -25,7 +25,7 @@ typedef enum SESSION_PRO_BACKEND_PAYMENT_PROVIDER {
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT,
 } SESSION_PRO_BACKEND_PAYMENT_PROVIDER;
 
-/// Store front that a Session Pro payment came from. Must match:
+/// Must match:
 ///   https://github.com/Doy-lee/session-pro-backend/blob/f4e2c84794470e7932ba1a1968fdb49117bb5870/backend.py#L18
 typedef enum SESSION_PRO_BACKEND_PAYMENT_STATUS {
     SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL,
@@ -36,6 +36,15 @@ typedef enum SESSION_PRO_BACKEND_PAYMENT_STATUS {
     SESSION_PRO_BACKEND_PAYMENT_STATUS_REFUNDED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_COUNT,
 } SESSION_PRO_BACKEND_PAYMENT_STATUS;
+
+/// Must match:
+///   https://github.com/Doy-lee/session-pro-backend/blob/a0e0ba24bc4ab3a062465d861aa57df2269b6dde/server.py#L373
+typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
+    SESSION_PRO_BACKEND_USER_PRO_STATUS_NEVER_BEEN_PRO,
+    SESSION_PRO_BACKEND_USER_PRO_STATUS_ACTIVE,
+    SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED,
+    SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT,
+} SESSION_PRO_BACKEND_USER_PRO_STATUS;
 
 typedef struct session_pro_backend_payment_provider_metadata {
     string8 request_refund_support_url;
@@ -136,13 +145,13 @@ typedef struct session_pro_backend_get_pro_revocations_response {
     size_t items_count;
 } session_pro_backend_get_pro_revocations_response;
 
-typedef struct session_pro_backend_get_pro_payments_request {
+typedef struct session_pro_backend_get_pro_status_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes64 master_sig;
     uint64_t unix_ts_s;
-    uint32_t page;
-} session_pro_backend_get_pro_payments_request;
+    bool history;
+} session_pro_backend_get_pro_status_request;
 
 typedef struct session_pro_backend_pro_payment_item {
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
@@ -162,14 +171,13 @@ typedef struct session_pro_backend_pro_payment_item {
     size_t apple_web_line_order_id_count;
 } session_pro_backend_pro_payment_item;
 
-typedef struct session_pro_backend_get_pro_payments_response {
+typedef struct session_pro_backend_get_pro_status_response {
     session_pro_backend_response_header header;
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
     size_t items_count;
-    uint32_t pages;
-    uint32_t payments;
-} session_pro_backend_get_pro_payments_response;
+    SESSION_PRO_BACKEND_USER_PRO_STATUS status;
+} session_pro_backend_get_pro_status_response;
 
 /// API: session_pro_backend/add_pro_payment_request_build_sigs
 ///
@@ -233,7 +241,7 @@ session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof
         size_t rotating_privkey_len,
         uint64_t unix_ts_s) NON_NULL_ARG(2, 4);
 
-/// API: session_pro_backend/get_pro_payments_request_build_sig
+/// API: session_pro_backend/get_pro_status_request_build_sig
 ///
 /// Builds the signature for GetProPaymentsRequest
 /// Returns false if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
@@ -252,7 +260,7 @@ session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof
 /// - `errors_count` - length of the error if `success` is false
 /// - `sig` - 64 byte signature
 LIBSESSION_EXPORT
-session_pro_backend_signature session_pro_backend_get_pro_payments_request_build_sig(
+session_pro_backend_signature session_pro_backend_get_pro_status_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -289,13 +297,13 @@ LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_get_pro_revocations_request_to_json(
         const session_pro_backend_get_pro_revocations_request* request);
 
-/// API: session_pro_backend/get_pro_payments_request_to_json
+/// API: session_pro_backend/get_pro_status_request_to_json
 ///
 /// Serializes a `GetProPaymentsRequest` to a JSON string.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_payments_request_to_json(
-        const session_pro_backend_get_pro_payments_request* request);
+session_pro_backend_to_json session_pro_backend_get_pro_status_request_to_json(
+        const session_pro_backend_get_pro_status_request* request);
 
 /// API: session_pro_backend/add_pro_payment_or_get_pro_proof_response_parse
 ///
@@ -323,16 +331,16 @@ LIBSESSION_EXPORT
 session_pro_backend_get_pro_revocations_response
 session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t json_len);
 
-/// API: session_pro_backend/get_pro_payments_response_parse
+/// API: session_pro_backend/get_pro_status_response_parse
 ///
 /// Parses a JSON string into a GetProPaymentsResponse struct.
-/// The caller must free the response using session_pro_backend_get_pro_payments_response_free.
+/// The caller must free the response using session_pro_backend_get_pro_status_response_free.
 ///
 /// Inputs:
 /// - `json` -- JSON string to parse.
 /// - `json_len` -- Length of the JSON string.
 LIBSESSION_EXPORT
-session_pro_backend_get_pro_payments_response session_pro_backend_get_pro_payments_response_parse(
+session_pro_backend_get_pro_status_response session_pro_backend_get_pro_status_response_parse(
         const char* json, size_t json_len);
 
 /// API: session_pro_backend/to_json_free
@@ -355,12 +363,12 @@ LIBSESSION_EXPORT
 void session_pro_backend_get_pro_revocations_response_free(
         session_pro_backend_get_pro_revocations_response* response);
 
-/// API: session_pro_backend/get_pro_payments_response_free
+/// API: session_pro_backend/get_pro_status_response_free
 ///
 /// Frees the respone
 LIBSESSION_EXPORT
-void session_pro_backend_get_pro_payments_response_free(
-        session_pro_backend_get_pro_payments_response* response);
+void session_pro_backend_get_pro_status_response_free(
+        session_pro_backend_get_pro_status_response* response);
 
 #ifdef __cplusplus
 }  // extern "C"

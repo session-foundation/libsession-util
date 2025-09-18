@@ -39,10 +39,10 @@
 ///    list that clients should cache. Any incoming messages with a Pro proof that is in the list of
 ///    revoked proofs will not be entitled to Pro features.
 ///
-/// 4. Query the list of historical payments that the master Ed25519 key has registered by building
-///    a `GetProPaymentsRequest::to_json` query and submitting it.
+/// 4. Query the status (and optionally payment history) of a user's Session Pro Master Ed25519 key
+///    has registered by building a `GetProStatusRequest::to_json` query and submitting it.
 ///
-///    Server responds JSON to be parsed with `GetProPaymentsResponse::parse` which they can use to
+///    Server responds JSON to be parsed with `GetProStatusResponse::parse` which they can use to
 ///    populate their client's payment history.
 ///
 /// 5. Get a list of per-payment provider URLs, such as links to the support page for refunds and
@@ -257,7 +257,7 @@ struct GetProRevocationsResponse : public ResponseHeader {
     static GetProRevocationsResponse parse(std::string_view json);
 };
 
-struct GetProPaymentsRequest {
+struct GetProStatusRequest {
     /// Request version for the API
     std::uint8_t version;
 
@@ -270,8 +270,8 @@ struct GetProPaymentsRequest {
     /// Unix timestamp (seconds) of the request
     std::chrono::sys_seconds unix_ts;
 
-    /// Page number for paginated API requests
-    std::uint32_t page;
+    /// Flag to request payment history from the backend
+    bool history;
 
     /// API: pro/AddProPaymentRequest::build_sigs
     ///
@@ -283,7 +283,7 @@ struct GetProPaymentsRequest {
     /// - `request_version` -- Version of the request to build a hash for
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `unix_ts` -- Unix timestamp (seconds) for the request.
-    /// - `page` -- The page in the paginated list of historical payments to request
+    /// - `history` -- Flag to request payment history from the backend
     ///
     /// Outputs:
     /// - `array_uc64` - the 64-byte signature
@@ -291,7 +291,7 @@ struct GetProPaymentsRequest {
             uint8_t version,
             std::span<const uint8_t> master_privkey,
             std::chrono::sys_seconds unix_ts,
-            uint32_t page);
+            bool history);
 
     /// API: pro/GetProProofRequest::to_json
     ///
@@ -341,15 +341,12 @@ struct ProPaymentItem {
     std::string apple_web_line_order_id;
 };
 
-struct GetProPaymentsResponse : public ResponseHeader {
+struct GetProStatusResponse : public ResponseHeader {
     /// List of payment items for the master public key
     std::vector<ProPaymentItem> items;
 
-    /// Total pages available in the paginated API
-    std::uint32_t pages;
-
-    /// Total payments for the user (active, refunded, or non-active)
-    std::uint32_t payments;
+    /// Current Session Pro entitlement status for the master public key
+    SESSION_PRO_BACKEND_USER_PRO_STATUS user_status;
 
     /// API: pro/GetProPaymentsResponse::parse
     ///
@@ -360,7 +357,7 @@ struct GetProPaymentsResponse : public ResponseHeader {
     ///
     /// Outputs:
     /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
-    static GetProPaymentsResponse parse(std::string_view json);
+    static GetProStatusResponse parse(std::string_view json);
 };
 
 void make_blake2b32_hasher(struct crypto_generichash_blake2b_state* hasher);
