@@ -69,6 +69,8 @@ LokinetRouter::LokinetRouter(
     [router]
     netid={}
     data-dir={}
+    [bind]
+    listen=:0
     [logging]
     type=none
     level=*=debug,quic=info

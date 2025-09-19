@@ -78,6 +78,8 @@ class SnodePool {
             size_t count, const std::vector<service_node>& exclude = {});
 
   private:
+    friend class TestSnodePool;
+
     bool _suspended = false;
     config::SnodePoolConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;

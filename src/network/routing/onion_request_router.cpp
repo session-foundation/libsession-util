@@ -1044,6 +1044,9 @@ void OnionRequestRouter::_handle_transport_response(
                     should_penalize_path = true;
                 break;
 
+            // A status of -1 generally indicates either a timeout or some internal error
+            case -1: break;
+
             // Any other non-success code is treated as a potential path issue.
             default: should_penalize_path = true; break;
         }

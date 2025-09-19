@@ -40,6 +40,19 @@ class TestOnionRequestRouter {
         return 0;
     }
 
+    static void build_path(
+            OnionRequestRouter& router,
+            RequestCategory category,
+            std::optional<std::string> initiating_req_id = std::nullopt,
+            const std::vector<service_node>& nodes_to_exclude_ = {},
+            std::optional<std::string> original_path_id = std::nullopt) {
+        router._build_path(category, initiating_req_id, nodes_to_exclude_, original_path_id);
+    }
+
+    static OnionPath* find_valid_path(OnionRequestRouter& router, const Request& request) {
+        return router._find_valid_path(request);
+    }
+
     static void handle_transport_response(
             OnionRequestRouter& router,
             std::string path_id,
@@ -183,11 +196,10 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     auto target2 = service_node{ed_pk2, oxen::quic::ipv4{"127.0.0.1"}, 20002, 30002, {2, 11, 0}, 0};
     auto target3 = service_node{ed_pk3, oxen::quic::ipv4{"127.0.0.1"}, 20003, 30003, {2, 11, 0}, 0};
     auto target4 = service_node{ed_pk4, oxen::quic::ipv4{"127.0.0.1"}, 20004, 30004, {2, 11, 0}, 0};
-    auto path = OnionPath{"Test", {target2, target3, target4}};
     auto request =
             Request{"AAAA", target, "info", to_vector("test"), RequestCategory::standard, 0ms};
-    auto builder = std::make_shared<session::onionreq::Builder>(
-            request.destination, request.endpoint, path.nodes);
+    std::optional<OnionPath> path;
+    std::optional<std::shared_ptr<session::onionreq::Builder>> builder;
     Result result;
 
     auto loop = std::make_shared<oxen::quic::Loop>();
@@ -202,13 +214,16 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
         snode_pool->clear_node_failure_counts();
         snode_pool->reset_calls();
         snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
+        path.emplace(OnionPath{"Test", {target2, target3, target4}});
+        builder.emplace(std::make_shared<session::onionreq::Builder>(
+                request.destination, request.endpoint, path->nodes));
         router.emplace(config, loop, snode_pool, transport);
-        TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path});
+        TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
         TestOnionRequestRouter::handle_transport_response(
                 *router,
                 "Test",
                 request,
-                builder,
+                *builder,
                 false,
                 false,
                 code,
@@ -240,13 +255,16 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     snode_pool->clear_node_failure_counts();
     snode_pool->reset_calls();
     snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
+    path.emplace(OnionPath{"Test", {target2, target3, target4}});
+    builder.emplace(std::make_shared<session::onionreq::Builder>(
+            request.destination, request.endpoint, path->nodes));
     router.emplace(config, loop, snode_pool, transport);
-    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path});
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
             "Test",
             request,
-            builder,
+            *builder,
             false,
             false,
             500,
@@ -276,6 +294,9 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     REQUIRE(snode_pool->node_failure_count(target2) == 0);
     snode_pool->reset_calls();
     snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
+    path.emplace(OnionPath{"Test", {target2, target3, target4}});
+    builder.emplace(std::make_shared<session::onionreq::Builder>(
+            request.destination, request.endpoint, path->nodes));
     router.emplace(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(
             *router,
@@ -285,7 +306,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             *router,
             "Test",
             request,
-            builder,
+            *builder,
             false,
             false,
             500,
@@ -315,13 +336,16 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     snode_pool->reset_calls();
     snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
     snode_pool->mock_unused_nodes = {target};
+    path.emplace(OnionPath{"Test", {target2, target3, target4}});
+    builder.emplace(std::make_shared<session::onionreq::Builder>(
+            request.destination, request.endpoint, path->nodes));
     router.emplace(config, loop, snode_pool, transport);
-    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path});
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
             "Test",
             request,
-            builder,
+            *builder,
             false,
             false,
             500,
@@ -352,13 +376,16 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     snode_pool->clear_node_failure_counts();
     snode_pool->reset_calls();
     snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
+    path.emplace(OnionPath{"Test", {target2, target3, target4}});
+    builder.emplace(std::make_shared<session::onionreq::Builder>(
+            request.destination, request.endpoint, path->nodes));
     router.emplace(config, loop, snode_pool, transport);
-    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path});
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
             "Test",
             request,
-            builder,
+            *builder,
             false,
             false,
             421,
@@ -401,13 +428,16 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     snode_pool->clear_node_failure_counts();
     snode_pool->reset_calls();
     snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
+    path.emplace(OnionPath{"Test", {target2, target3, target4}});
+    builder.emplace(std::make_shared<session::onionreq::Builder>(
+            request.destination, request.endpoint, path->nodes));
     router.emplace(config, loop, snode_pool, transport);
-    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path});
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
             "Test",
             server_request,
-            builder,
+            *builder,
             false,
             true,
             -1,
@@ -440,13 +470,16 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
         snode_pool->clear_node_failure_counts();
         snode_pool->reset_calls();
         snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
+        path.emplace(OnionPath{"Test", {target2, target3, target4}});
+        builder.emplace(std::make_shared<session::onionreq::Builder>(
+                request.destination, request.endpoint, path->nodes));
         router.emplace(config, loop, snode_pool, transport);
-        TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path});
+        TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
         TestOnionRequestRouter::handle_transport_response(
                 *router,
                 "Test",
                 server_request,
-                builder,
+                *builder,
                 false,
                 false,
                 code,
@@ -474,3 +507,123 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     }
 }
 
+TEST_CASE("Network", "[network][onion_request_router][build_path]") {
+    config::SnodePoolConfig pool_config = {
+            std::nullopt,
+            std::chrono::minutes{5},
+            std::chrono::minutes{5},
+            false,
+            network::opt::retry_delay{50ms, 200ms},
+            opt::netid::Target::testnet,
+            {},
+            0,
+            0,
+            3,  // Node failure threshold
+            false};
+    config::OnionRequestRouterConfig config = {
+            network::opt::retry_delay{50ms, 200ms},
+            50ms,
+            3,
+            3,
+            10,
+            true,
+            true,
+            {{RequestCategory::standard, 1}}};
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
+    auto transport = std::make_shared<TestTransport>();
+    std::optional<OnionRequestRouter> router;
+
+    // Nothing should happen if the network is suspended
+    snode_pool->reset_calls();
+    snode_pool->ignore_calls_to("refresh_if_needed", "get_unused_nodes");
+    router.emplace(config, loop, snode_pool, transport);
+    router->suspend();
+    TestOnionRequestRouter::build_path(*router, RequestCategory::standard);
+    CHECK(snode_pool->did_not_call("get_unused_nodes"));
+
+    // If the unused nodes are empty it refreshes them
+    snode_pool->reset_calls();
+    snode_pool->ignore_calls_to("refresh_if_needed", "get_unused_nodes");
+    router.emplace(config, loop, snode_pool, transport);
+    TestOnionRequestRouter::build_path(*router, RequestCategory::standard);
+    CHECK(snode_pool->called("get_unused_nodes"));
+    CHECK(snode_pool->called("refresh_if_needed"));
+}
+
+TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
+    config::SnodePoolConfig pool_config = {
+            std::nullopt,
+            std::chrono::minutes{5},
+            std::chrono::minutes{5},
+            false,
+            network::opt::retry_delay{50ms, 200ms},
+            opt::netid::Target::testnet,
+            {},
+            0,
+            0,
+            3,  // cache_node_failure_threshold
+            false};
+    config::OnionRequestRouterConfig config = {
+            network::opt::retry_delay{50ms, 200ms},
+            50ms,
+            3,
+            3,
+            10,
+            true,
+            false,
+            {{RequestCategory::standard, 1}}};
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
+    auto ed_pk3 = "e17a692033200ae41350df9709754edde7343e2cf2f23e88f993319e0720e5e5"_hexbytes;
+    auto ed_pk4 = "7b633fa6fb462b90db6f0f50384190ce7715e31b7aa93d87dbd7e94e33d4251f"_hexbytes;
+    auto target = service_node{ed_pk, oxen::quic::ipv4{"127.0.0.1"}, 20001, 30001, {2, 11, 0}, 0};
+    auto target2 = service_node{ed_pk2, oxen::quic::ipv4{"127.0.0.1"}, 20002, 30002, {2, 11, 0}, 0};
+    auto target3 = service_node{ed_pk3, oxen::quic::ipv4{"127.0.0.1"}, 20003, 30003, {2, 11, 0}, 0};
+    auto target4 = service_node{ed_pk4, oxen::quic::ipv4{"127.0.0.1"}, 20004, 30004, {2, 11, 0}, 0};
+    auto path1 = OnionPath{"Test1", {target, target2, target3}};
+    auto path2 = OnionPath{"Test2", {target2, target3, target4}};
+    auto request =
+            Request{"AAAA", target, "info", to_vector("test"), RequestCategory::standard, 0ms};
+    Result result;
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
+    auto transport = std::make_shared<TestTransport>();
+    std::optional<OnionRequestRouter> router;
+
+    // It returns nothing when given no path options
+    snode_pool->ignore_calls_to("refresh_if_needed");
+    router.emplace(config, loop, snode_pool, transport);
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {});
+    CHECK(TestOnionRequestRouter::find_valid_path(*router, request) == nullptr);
+
+    // It excludes paths which include the IP of the target
+    snode_pool->ignore_calls_to("refresh_if_needed");
+    router.emplace(config, loop, snode_pool, transport);
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path1});
+    CHECK(TestOnionRequestRouter::find_valid_path(*router, request) == nullptr);
+
+    // It returns a path when there is a valid one
+    snode_pool->ignore_calls_to("refresh_if_needed");
+    router.emplace(config, loop, snode_pool, transport);
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path2});
+    CHECK(TestOnionRequestRouter::find_valid_path(*router, request) != nullptr);
+
+    // In 'single_path_mode' it does allow the path to include the IP of the target (so that
+    // requests can still be made)
+    config = {
+            network::opt::retry_delay{50ms, 200ms},
+            50ms,
+            3,
+            3,
+            10,
+            true,
+            true,  // single path mode
+            {{RequestCategory::standard, 1}}};
+    snode_pool->ignore_calls_to("refresh_if_needed");
+    router.emplace(config, loop, snode_pool, transport);
+    TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path1});
+    CHECK(TestOnionRequestRouter::find_valid_path(*router, request) != nullptr);
+}
+}  // namespace session::network
