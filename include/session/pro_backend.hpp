@@ -170,8 +170,8 @@ struct GetProProofRequest {
     /// 32-byte Ed25519 Session Pro rotating public key authorized to use the generated proof
     array_uc32 rotating_pkey;
 
-    /// Unix timestamp (seconds) of the request
-    std::chrono::seconds unix_ts;
+    /// Unix timestamp of the request
+    std::chrono::sys_time<std::chrono::milliseconds> unix_ts;
 
     /// 64-byte signature proving knowledge of the master key's secret component
     array_uc64 master_sig;
@@ -189,7 +189,7 @@ struct GetProProofRequest {
     /// - `request_version` -- Version of the request to build a hash for
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `unix_ts` -- Unix timestamp (seconds) for the request.
+    /// - `unix_ts` -- Unix timestamp for the request.
     ///
     /// Outputs:
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
@@ -197,7 +197,7 @@ struct GetProProofRequest {
             std::uint8_t request_version,
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
-            std::chrono::seconds unix_ts);
+            std::chrono::sys_time<std::chrono::milliseconds> unix_ts);
 
     /// API: pro/GetProProofRequest::to_json
     ///
@@ -233,8 +233,8 @@ struct ProRevocationItem {
     /// 32-byte hash of the generation index, identifying a proof
     array_uc32 gen_index_hash;
 
-    /// Unix timestamp (seconds) when the proof expires
-    std::chrono::sys_seconds expiry_unix_ts;
+    /// Unix timestamp when the proof expires
+    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts;
 };
 
 struct GetProRevocationsResponse : public ResponseHeader {
@@ -267,8 +267,8 @@ struct GetProStatusRequest {
     /// 64-byte signature proving knowledge of the master public key's secret component
     array_uc64 master_sig;
 
-    /// Unix timestamp (seconds) of the request
-    std::chrono::sys_seconds unix_ts;
+    /// Unix timestamp of the request
+    std::chrono::sys_time<std::chrono::milliseconds> unix_ts;
 
     /// Flag to request payment history from the backend
     bool history;
@@ -282,7 +282,7 @@ struct GetProStatusRequest {
     /// Inputs:
     /// - `request_version` -- Version of the request to build a hash for
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `unix_ts` -- Unix timestamp (seconds) for the request.
+    /// - `unix_ts` -- Unix timestamp for the request.
     /// - `history` -- Flag to request payment history from the backend
     ///
     /// Outputs:
@@ -290,7 +290,7 @@ struct GetProStatusRequest {
     static array_uc64 build_sig(
             uint8_t version,
             std::span<const uint8_t> master_privkey,
-            std::chrono::sys_seconds unix_ts,
+            std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
             bool history);
 
     /// API: pro/GetProProofRequest::to_json
@@ -306,18 +306,18 @@ struct ProPaymentItem {
     /// Describes the current status of the consumption of the payment for Session Pro entitlement
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
 
-    /// Unix timestamp (seconds) when the payment was activated for Session Pro.
+    /// Unix timestamp when the payment was activated for Session Pro.
     /// 0 if not activated (e.g., another active subscription or refunded).
-    std::chrono::sys_seconds activated_unix_ts;
+    std::chrono::sys_time<std::chrono::milliseconds> activated_unix_ts;
 
-    /// Unix timestamp (seconds) when the payment was expired. 0 if not activated
-    std::chrono::sys_seconds expired_unix_ts;
+    /// Unix timestamp of when the payment was expired. 0 if not activated
+    std::chrono::sys_time<std::chrono::milliseconds> expired_unix_ts;
 
-    /// Unix timestamp (seconds) when the payment was redeemed. 0 if not activated
-    std::chrono::sys_seconds redeemed_unix_ts;
+    /// Unix timestamp of when the payment was redeemed. 0 if not activated
+    std::chrono::sys_time<std::chrono::milliseconds> redeemed_unix_ts;
 
-    /// Unix timestamp (seconds) when the payment was refunded. 0 if not activated
-    std::chrono::sys_seconds refunded_unix_ts;
+    /// Unix timestamp of when the payment was refunded. 0 if not activated
+    std::chrono::sys_time<std::chrono::milliseconds> refunded_unix_ts;
 
     /// Subscription duration in seconds
     std::chrono::seconds subscription_duration;

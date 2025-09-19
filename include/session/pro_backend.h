@@ -117,7 +117,7 @@ typedef struct session_pro_backend_get_pro_proof_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes32 rotating_pkey;
-    uint64_t unix_ts_s;
+    uint64_t unix_ts_ms;
     bytes64 master_sig;
     bytes64 rotating_sig;
 } session_pro_backend_get_pro_proof_request;
@@ -134,7 +134,7 @@ typedef struct session_pro_backend_get_pro_revocations_request {
 
 typedef struct session_pro_backend_pro_revocation_item {
     bytes32 gen_index_hash;
-    uint64_t expiry_unix_ts_s;
+    uint64_t expiry_unix_ts_ms;
 } session_pro_backend_pro_revocation_item;
 
 typedef struct session_pro_backend_get_pro_revocations_response {
@@ -149,20 +149,22 @@ typedef struct session_pro_backend_get_pro_status_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes64 master_sig;
-    uint64_t unix_ts_s;
+    uint64_t unix_ts_ms;
     bool history;
 } session_pro_backend_get_pro_status_request;
 
 typedef struct session_pro_backend_pro_payment_item {
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
     uint64_t subscription_duration_s;
-    uint64_t activated_unix_ts_s;
-    uint64_t expired_unix_ts_s;
-    uint64_t refunded_unix_ts_s;
-    uint64_t redeemed_unix_ts_s;
+    uint64_t activated_unix_ts_ms;
+    uint64_t expired_unix_ts_ms;
+    uint64_t refunded_unix_ts_ms;
+    uint64_t redeemed_unix_ts_ms;
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
     char google_payment_token[128];
     size_t google_payment_token_count;
+    char google_order_id[128];
+    size_t google_order_id_count;
     char apple_original_tx_id[128];
     size_t apple_original_tx_id_count;
     char apple_tx_id[128];
@@ -224,7 +226,7 @@ session_pro_backend_add_pro_payment_request_build_sigs(
 /// - `master_privkey_len` -- Length of master_privkey.
 /// - `rotating_privkey` -- Ed25519 rotating private key (32-byte or 64-byte libsodium format).
 /// - `rotating_privkey_len` -- Length of rotating_privkey.
-/// - `unix_ts_s` -- Unix timestamp (seconds) for the request.
+/// - `unix_ts_ms` -- Unix timestamp for the request.
 ///
 /// Outputs:
 /// - `bool` - True if signatures are built successfully, false otherwise.
@@ -239,7 +241,7 @@ session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t unix_ts_s) NON_NULL_ARG(2, 4);
+        uint64_t unix_ts_ms) NON_NULL_ARG(2, 4);
 
 /// API: session_pro_backend/get_pro_status_request_build_sig
 ///
@@ -251,7 +253,7 @@ session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof
 /// - `request_version` -- Version of the request.
 /// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
 /// - `master_privkey_len` -- Length of master_privkey.
-/// - `unix_ts_s` -- Unix timestamp (seconds) for the request.
+/// - `unix_ts_ms` -- Unix timestamp for the request.
 /// - `page` -- The page in the paginated list of historical payments to request
 ///
 /// Outputs:
@@ -264,7 +266,7 @@ session_pro_backend_signature session_pro_backend_get_pro_status_request_build_s
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t unix_ts_s,
+        uint64_t unix_ts_ms,
         uint32_t page) NON_NULL_ARG(2);
 
 /// API: session_pro_backend/add_pro_payment_request_to_json

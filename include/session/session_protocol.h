@@ -41,7 +41,7 @@ typedef struct pro_proof {
     uint8_t version;
     bytes32 gen_index_hash;
     bytes32 rotating_pubkey;
-    uint64_t expiry_unix_ts_s;
+    uint64_t expiry_unix_ts_ms;
     bytes64 sig;
 } pro_proof;
 
@@ -197,7 +197,7 @@ LIBSESSION_EXPORT bool pro_proof_verify_message(
 ///
 /// Outputs:
 /// - `bool` -- True if expired, false otherwise
-LIBSESSION_EXPORT bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_s)
+LIBSESSION_EXPORT bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_ms)
         NON_NULL_ARG(1);
 
 /// API: pro/pro_proof_status

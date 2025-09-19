@@ -292,7 +292,7 @@ LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro
                 pro->proof.rotating_pubkey.data,
                 val->proof.rotating_pubkey.data(),
                 val->proof.rotating_pubkey.size());
-        pro->proof.expiry_unix_ts_s = val->proof.expiry_unix_ts.time_since_epoch().count();
+        pro->proof.expiry_unix_ts_ms = val->proof.expiry_unix_ts.time_since_epoch().count();
         std::memcpy(pro->proof.sig.data, val->proof.sig.data(), val->proof.sig.size());
         return true;
     }
@@ -310,8 +310,8 @@ LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro
             val.proof.rotating_pubkey.data(),
             pro->proof.rotating_pubkey.data,
             val.proof.rotating_pubkey.size());
-    val.proof.expiry_unix_ts =
-            std::chrono::sys_seconds(std::chrono::seconds(pro->proof.expiry_unix_ts_s));
+    val.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(pro->proof.expiry_unix_ts_ms));
     std::memcpy(val.proof.sig.data(), pro->proof.sig.data, val.proof.sig.size());
     unbox<UserProfile>(conf)->set_pro_config(val);
 }

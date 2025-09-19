@@ -35,7 +35,7 @@ TEST_CASE("Pro", "[config][pro]") {
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
         pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
-        pro.proof.expiry_unix_ts_s = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
+        pro.proof.expiry_unix_ts_ms = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
         std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
     }
 
@@ -80,10 +80,10 @@ TEST_CASE("Pro", "[config][pro]") {
     // Verify expiry
     {
         CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts));
-        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1s));
+        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1ms));
 
-        CHECK(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_s));
-        CHECK_FALSE(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_s + 1));
+        CHECK(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms));
+        CHECK_FALSE(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms + 1));
     }
 
     // Verify it can verify messages signed with the rotating public key

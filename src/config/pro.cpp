@@ -100,8 +100,8 @@ LIBSESSION_C_API bool pro_config_verify_signature(
             config.proof.rotating_pubkey.data(),
             pro->proof.rotating_pubkey.data,
             sizeof pro->proof.rotating_pubkey.data);
-    config.proof.expiry_unix_ts =
-            std::chrono::sys_seconds(std::chrono::seconds(pro->proof.expiry_unix_ts_s));
+    config.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(pro->proof.expiry_unix_ts_ms));
     std::memcpy(config.proof.sig.data(), pro->proof.sig.data, sizeof pro->proof.sig.data);
 
     session::array_uc32 verify_pubkey_cpp;

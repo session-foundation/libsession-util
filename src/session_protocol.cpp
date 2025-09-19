@@ -69,8 +69,8 @@ bool proof_verify_message_internal(
     return result;
 }
 
-bool proof_is_active_internal(uint64_t expiry_unix_ts, uint64_t unix_ts_s) {
-    bool result = unix_ts_s <= expiry_unix_ts;
+bool proof_is_active_internal(uint64_t expiry_unix_ts_ms, uint64_t unix_ts_ms) {
+    bool result = unix_ts_ms <= expiry_unix_ts_ms;
     return result;
 }
 }  // namespace
@@ -100,15 +100,17 @@ bool ProProof::verify_message(std::span<const uint8_t> sig, std::span<const uint
     return result;
 }
 
-bool ProProof::is_active(std::chrono::sys_seconds unix_ts) const {
+bool ProProof::is_active(std::chrono::sys_time<std::chrono::milliseconds> unix_ts) const {
     bool result = proof_is_active_internal(
-            expiry_unix_ts.time_since_epoch().count(), unix_ts.time_since_epoch().count());
+            std::chrono::duration_cast<std::chrono::milliseconds>(expiry_unix_ts.time_since_epoch())
+                    .count(),
+            unix_ts.time_since_epoch().count());
     return result;
 }
 
 ProStatus ProProof::status(
         std::span<const uint8_t> verify_pubkey,
-        std::chrono::sys_seconds unix_ts,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const std::optional<ProSignedMessage>& signed_msg) {
     ProStatus result = ProStatus::Valid;
     // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
@@ -699,7 +701,7 @@ LIBSESSION_C_API bytes32 pro_proof_hash(pro_proof const* proof) {
                 proof->version,
                 proof->gen_index_hash.data,
                 proof->rotating_pubkey.data,
-                proof->expiry_unix_ts_s);
+                proof->expiry_unix_ts_ms);
         std::memcpy(result.data, hash.data(), hash.size());
     }
     return result;
@@ -714,7 +716,7 @@ LIBSESSION_C_API bool pro_proof_verify_signature(
             proof->version,
             proof->gen_index_hash.data,
             proof->rotating_pubkey.data,
-            proof->expiry_unix_ts_s);
+            proof->expiry_unix_ts_ms);
     bool result = proof_verify_signature_internal(hash, proof->sig.data, verify_pubkey_span);
     return result;
 }
@@ -731,8 +733,8 @@ LIBSESSION_C_API bool pro_proof_verify_message(
     return result;
 }
 
-LIBSESSION_C_API bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_s) {
-    bool result = proof && proof_is_active_internal(proof->expiry_unix_ts_s, unix_ts_s);
+LIBSESSION_C_API bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_ms) {
+    bool result = proof && proof_is_active_internal(proof->expiry_unix_ts_ms, unix_ts_ms);
     return result;
 }
 
@@ -1024,7 +1026,7 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const DecryptedPro& pro = *result_cpp.pro;
         result.pro_status = static_cast<PRO_STATUS>(pro.status);
         result.pro_proof.version = pro.proof.version;
-        result.pro_proof.expiry_unix_ts_s =
+        result.pro_proof.expiry_unix_ts_ms =
                 static_cast<uint64_t>(pro.proof.expiry_unix_ts.time_since_epoch().count());
         result.pro_features = pro.features;
 

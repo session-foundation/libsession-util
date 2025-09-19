@@ -31,16 +31,16 @@ static bool string8_equals(string8 s8, std::string_view str) {
     fprintf(stderr,
             "proof.rotating_pubkey: %s\n",
             oxenc::to_hex(proof.rotating_pubkey.data).c_str());
-    fprintf(stderr, "proof.expiry_unix_ts_s: %zu\n", proof.expiry_unix_ts_s);
+    fprintf(stderr, "proof.expiry_unix_ts_ms: %zu\n", proof.expiry_unix_ts_ms);
     fprintf(stderr, "proof.sig: %s\n", oxenc::to_hex(proof.sig.data).c_str());
 }
 
 [[maybe_unused]] static void dump_pro_payment_item(
         const session_pro_backend_pro_payment_item& item) {
-    fprintf(stderr, "item.activated_unix_ts_s: %zu\n", item.activated_unix_ts_s);
-    fprintf(stderr, "item.expired_unix_ts_s: %zu\n", item.expired_unix_ts_s);
-    fprintf(stderr, "item.redeemed_unix_ts_s: %zu\n", item.redeemed_unix_ts_s);
-    fprintf(stderr, "item.refunded_unix_ts_s: %zu\n", item.refunded_unix_ts_s);
+    fprintf(stderr, "item.activated_unix_ts_ms: %zu\n", item.activated_unix_ts_ms);
+    fprintf(stderr, "item.expired_unix_ts_ms: %zu\n", item.expired_unix_ts_ms);
+    fprintf(stderr, "item.redeemed_unix_ts_ms: %zu\n", item.redeemed_unix_ts_ms);
+    fprintf(stderr, "item.refunded_unix_ts_ms: %zu\n", item.refunded_unix_ts_ms);
     fprintf(stderr, "item.subscription_duration: %zu\n", item.subscription_duration_s);
     fprintf(stderr, "item.payment_provider: %u\n", item.payment_provider);
     fprintf(stderr,
@@ -60,7 +60,7 @@ static bool string8_equals(string8 s8, std::string_view str) {
 
 [[maybe_unused]] static void dump_pro_revocation(
         const session_pro_backend_pro_revocation_item& item) {
-    fprintf(stderr, "item.expiry_unix_ts: %zu\n", item.expiry_unix_ts_s);
+    fprintf(stderr, "item.expiry_unix_ts: %zu\n", item.expiry_unix_ts_ms);
     fprintf(stderr, "item.gen_index_hash: %s\n", oxenc::to_hex(item.gen_index_hash.data).c_str());
 }
 
@@ -124,7 +124,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 fake_google_payment_token_hex.data(),
                 payment_tx.payment_id_count);
 
-        uint64_t unix_ts_s = 1698765432;  // Arbitrary timestamp
+        uint64_t unix_ts_ms = 1698765432ULL * 1000;  // Arbitrary timestamp
 
         SECTION("session_pro_backend_add_pro_payment_request_build_sigs") {
             // Valid inputs
@@ -184,13 +184,17 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     sizeof(master_privkey),
                     rotating_privkey.data,
                     sizeof(rotating_privkey),
-                    unix_ts_s);
+                    unix_ts_ms);
             REQUIRE(result.success);
             REQUIRE(result.error_count == 0);
 
             // Verify signatures match C++ implementation
             auto cpp_sigs = GetProProofRequest::build_sigs(
-                    0, master_privkey.data, rotating_privkey.data, std::chrono::seconds{unix_ts_s});
+                    0,
+                    master_privkey.data,
+                    rotating_privkey.data,
+                    std::chrono::sys_time<std::chrono::milliseconds>(
+                            std::chrono::milliseconds{unix_ts_ms}));
             REQUIRE(std::memcmp(
                             result.master_sig.data,
                             cpp_sigs.master_sig.data(),
@@ -207,7 +211,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     sizeof(master_privkey),
                     rotating_privkey.data,
                     sizeof(rotating_privkey) - 1,
-                    unix_ts_s);
+                    unix_ts_ms);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
         }
@@ -263,7 +267,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             request.version = 0;
             request.master_pkey = master_pubkey;
             request.rotating_pkey = rotating_pubkey;
-            request.unix_ts_s = unix_ts_s;
+            request.unix_ts_ms = unix_ts_ms;
 
             // Note just write some junk to the request
             request.master_sig = master_privkey;
@@ -283,7 +287,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey));
                 std::memcpy(
                         cpp.rotating_pkey.data(), rotating_pubkey.data, sizeof(rotating_pubkey));
-                cpp.unix_ts = std::chrono::seconds{unix_ts_s};
+                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                        std::chrono::milliseconds{unix_ts_ms});
                 std::memcpy(cpp.master_sig.data(), master_privkey.data, sizeof(master_privkey));
                 std::memcpy(
                         cpp.rotating_sig.data(), rotating_privkey.data, sizeof(rotating_privkey));
@@ -339,7 +344,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             request.version = 0;
             request.master_pkey = master_pubkey;
             request.master_sig = master_privkey;  // Write some junk
-            request.unix_ts_s = unix_ts_s;
+            request.unix_ts_ms = unix_ts_ms;
             request.history = true;
 
             // Valid request
@@ -355,7 +360,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 cpp.version = 0;
                 std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey));
                 std::memcpy(cpp.master_sig.data(), master_privkey.data, sizeof(master_privkey));
-                cpp.unix_ts = std::chrono::sys_seconds{std::chrono::seconds{unix_ts_s}};
+                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
+                        std::chrono::milliseconds{unix_ts_ms}};
                 cpp.history = request.history;
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
@@ -380,7 +386,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
                     {"version", 0},
-                    {"expiry_unix_ts_s", unix_ts_s},
+                    {"expiry_unix_ts_ms", unix_ts_ms},
                     {"gen_index_hash",
                      oxenc::to_hex(
                              fake_gen_index_hash,
@@ -403,7 +409,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
                 REQUIRE(result.header.errors_count == 0);
                 REQUIRE(result.header.errors == nullptr);
-                REQUIRE(result.proof.expiry_unix_ts_s == unix_ts_s);
+                REQUIRE(result.proof.expiry_unix_ts_ms == unix_ts_ms);
                 REQUIRE(std::memcmp(
                                 result.proof.gen_index_hash.data,
                                 fake_gen_index_hash,
@@ -432,7 +438,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                                 result.proof.rotating_pubkey.data,
                                 result_cpp.proof.rotating_pubkey.data(),
                                 result_cpp.proof.rotating_pubkey.size()) == 0);
-                REQUIRE(result.proof.expiry_unix_ts_s ==
+                REQUIRE(result.proof.expiry_unix_ts_ms ==
                         result_cpp.proof.expiry_unix_ts.time_since_epoch().count());
                 REQUIRE(std::memcmp(
                                 result.proof.sig.data,
@@ -481,7 +487,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             randombytes_buf(fake_gen_index_hash, sizeof(fake_gen_index_hash));
 
             auto obj = nlohmann::json::object();
-            obj["expiry_unix_ts_s"] = unix_ts_s;
+            obj["expiry_unix_ts_ms"] = unix_ts_ms;
             obj["gen_index_hash"] = oxenc::to_hex(
                     fake_gen_index_hash, fake_gen_index_hash + sizeof(fake_gen_index_hash));
             j["result"]["items"].push_back(obj);
@@ -502,7 +508,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.ticket == 123);
                 REQUIRE(result.items_count == 1);
                 REQUIRE(result.items != nullptr);
-                REQUIRE(result.items[0].expiry_unix_ts_s == unix_ts_s);
+                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
                 REQUIRE(std::memcmp(
                                 result.items[0].gen_index_hash.data,
                                 fake_gen_index_hash,
@@ -546,10 +552,10 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                      nlohmann::json::array(
                              {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_ACTIVATED},
                                {"subscription_duration_s", 86400},
-                               {"activated_unix_ts_s", unix_ts_s},
-                               {"expired_unix_ts_s", unix_ts_s},
-                               {"refunded_unix_ts_s", unix_ts_s + 3600},
-                               {"redeemed_unix_ts_s", unix_ts_s - 3600},
+                               {"activated_unix_ts_ms", unix_ts_ms},
+                               {"expired_unix_ts_ms", unix_ts_ms},
+                               {"refunded_unix_ts_ms", unix_ts_ms + 3600},
+                               {"redeemed_unix_ts_ms", unix_ts_ms - 3600},
                                {"payment_provider",
                                 SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
                                {"google_payment_token",
@@ -573,10 +579,10 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_ACTIVATED);
                 REQUIRE(result.items[0].subscription_duration_s == 86400);
-                REQUIRE(result.items[0].activated_unix_ts_s == unix_ts_s);
-                REQUIRE(result.items[0].expired_unix_ts_s == unix_ts_s);
-                REQUIRE(result.items[0].refunded_unix_ts_s == unix_ts_s + 3600);
-                REQUIRE(result.items[0].redeemed_unix_ts_s == unix_ts_s - 3600);
+                REQUIRE(result.items[0].activated_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.items[0].expired_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.items[0].refunded_unix_ts_ms == unix_ts_ms + 3600);
+                REQUIRE(result.items[0].redeemed_unix_ts_ms == unix_ts_ms - 3600);
                 REQUIRE(result.items[0].payment_provider ==
                         SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE);
                 REQUIRE(result.items[0].google_payment_token_count == payment_tx.payment_id_count);
@@ -728,7 +734,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
 
         // Authorise new key
         {
-            uint64_t now_unix_ts_s = time(nullptr);
+            uint64_t now_unix_ts_ms = time(nullptr) * 1000;
             // Build request
             session_pro_backend_master_rotating_signatures pro_sigs =
                     session_pro_backend_get_pro_proof_request_build_sigs(
@@ -737,13 +743,13 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             sizeof(master_privkey),
                             rotating_privkey.data,
                             sizeof(rotating_privkey),
-                            now_unix_ts_s);
+                            now_unix_ts_ms);
 
             session_pro_backend_get_pro_proof_request request = {};
             request.version = 0;
             request.master_pkey = master_pubkey;
             request.rotating_pkey = rotating_pubkey;
-            request.unix_ts_s = now_unix_ts_s;
+            request.unix_ts_ms = now_unix_ts_ms;
             request.master_sig = pro_sigs.master_sig;
             request.rotating_sig = pro_sigs.rotating_sig;
 
@@ -793,7 +799,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             session_pro_backend_get_pro_status_request request = {};
             request.version = 0;
             request.master_pkey = master_pubkey;
-            request.unix_ts_s = time(nullptr);
+            request.unix_ts_ms = time(nullptr) * 1000;
             request.history = true;
 
             session_pro_backend_signature sig =
@@ -801,7 +807,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             request.version,
                             master_privkey.data,
                             sizeof(master_privkey.data),
-                            request.unix_ts_s,
+                            request.unix_ts_ms,
                             request.history);
             REQUIRE(sig.success);
             request.master_sig = sig.sig;
@@ -843,14 +849,14 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             session_pro_backend_get_pro_status_request request = {};
             request.version = 0;
             request.master_pkey = master_pubkey;
-            request.unix_ts_s = time(nullptr);
+            request.unix_ts_ms = time(nullptr) * 1000;
 
             session_pro_backend_signature sig =
                     session_pro_backend_get_pro_status_request_build_sig(
                             request.version,
                             master_privkey.data,
                             sizeof(master_privkey.data),
-                            request.unix_ts_s,
+                            request.unix_ts_ms,
                             request.history);
             REQUIRE(sig.success);
             request.master_sig = sig.sig;
@@ -997,8 +1003,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             first_pro_proof.gen_index_hash.data,
                             sizeof(first_pro_proof.gen_index_hash)) == 0);
 
-            REQUIRE(response.items[response.items_count - 1].expiry_unix_ts_s ==
-                    first_pro_proof.expiry_unix_ts_s);
+            REQUIRE(response.items[response.items_count - 1].expiry_unix_ts_ms ==
+                    first_pro_proof.expiry_unix_ts_ms);
         }
     }
 #endif

@@ -84,7 +84,7 @@ class ProProof {
     array_uc32 rotating_pubkey;
 
     /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid to
-    std::chrono::sys_seconds expiry_unix_ts;
+    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts;
 
     /// Signature over the contents of the proof. It is signed by the Session Pro Backend key which
     /// is the entity responsible for issueing tamper-proof Sesison Pro certificates for Session
@@ -128,12 +128,12 @@ class ProProof {
     /// proof's `expiry_unix_ts`
     ///
     /// Inputs:
-    /// - `unix_ts` -- Unix timestamp in seconds to compared against the embedded `expiry_unix_ts`
+    /// - `unix_ts` -- Unix timestamp to compare against the embedded `expiry_unix_ts`
     ///   to determine if the proof has expired or not
     ///
     /// Outputs:
     /// - `bool` - True if proof is active (i.e. has not expired), false otherwise.
-    bool is_active(std::chrono::sys_seconds unix_ts) const;
+    bool is_active(std::chrono::sys_time<std::chrono::milliseconds> unix_ts) const;
 
     /// API: pro/Proof::status
     ///
@@ -148,7 +148,7 @@ class ProProof {
     /// Inputs:
     /// - `verify_pubkey` -- 32 byte Ed25519 public key of the corresponding secret key to check if
     ///   they are the original signatory of the proof.
-    /// - `unix_ts` -- Unix timestamp in seconds to compared against the embedded `expiry_unix_ts`
+    /// - `unix_ts` -- Unix timestamp to compared against the embedded `expiry_unix_ts`
     ///   to determine if the proof has expired or not
     /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
     ///   the embedded `rotating_pubkey` in the proof signed the given message.
@@ -159,7 +159,7 @@ class ProProof {
     ///   possible enum values. Otherwise this funtion can return all possible values.
     ProStatus status(
             std::span<const uint8_t> verify_pubkey,
-            std::chrono::sys_seconds unix_ts,
+            std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
             const std::optional<ProSignedMessage>& signed_msg);
 
     /// API: pro/Proof::hash
