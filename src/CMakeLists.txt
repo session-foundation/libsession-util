@@ -43,6 +43,7 @@ add_libsession_util_library(util
 )
 
 add_libsession_util_library(crypto
+    attachments.cpp
     blinding.cpp
     curve25519.cpp
     ed25519.cpp
