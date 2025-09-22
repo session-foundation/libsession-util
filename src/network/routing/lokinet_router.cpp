@@ -10,6 +10,8 @@
 #include <oxen/log/format.hpp>
 
 #include "session/network/network_opt.hpp"
+#include "session/onionreq/builder.hpp"
+#include "session/onionreq/response_parser.hpp"
 
 using namespace oxen;
 using namespace session;
@@ -21,6 +23,31 @@ namespace session::network {
 
 namespace {
     auto cat = oxen::log::Cat("network");
+
+    static constexpr std::string PROXIED_REQUESTS_KEY = "proxied_requests";
+
+    std::string pending_request_key(const network_destination& dest) {
+        std::optional<std::string> key;
+
+        std::visit(
+                [&key](auto&& arg) {
+                    using T = std::decay_t<decltype(arg)>;
+
+                    if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
+                        key = oxenc::to_hex(arg.view_remote_key());
+                    } else if constexpr (std::is_same_v<T, service_node>) {
+                        key = oxenc::to_hex(arg.view_remote_key());
+                    } else if constexpr (std::is_same_v<T, ServerDestination>) {
+                        key = PROXIED_REQUESTS_KEY;
+                    }
+                },
+                dest);
+
+        if (!key)
+            throw std::runtime_error{"Invalid destination"};
+
+        return *key;
+    }
 
     oxen::quic::RemoteAddress address_for_destination(
             const network_destination& dest, const std::string& request_id) {
@@ -55,6 +82,7 @@ namespace {
 
         return *address;
     }
+
 }  // namespace
 
 LokinetRouter::LokinetRouter(
@@ -83,27 +111,23 @@ LokinetRouter::LokinetRouter(
         lokinet = std::make_shared<lokinet::Lokinet>(test_ini /*, loop*/);
 
         // TODO: Remove this hack to wait for lokinet to be ready before any requests get sent
-        auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
-        _loop->call_later(5000ms, [weak_self] {
-            if (auto self = weak_self.lock()) {
-                if (auto snode_pool = self->_snode_pool.lock()) {
-                    if (snode_pool->size() == 0)
-                        snode_pool->refresh_if_needed({}, [weak_self] {
-                            if (auto self = weak_self.lock())
-                                self->_loop->call([weak_self] {
-                                    if (auto self = weak_self.lock())
-                                        self->_finish_setup();
-                                });
-                        });
-                    else
+        _loop->call_later(5000ms, [this] {
+            auto snode_pool = _snode_pool.lock();
+            if (!snode_pool) {
+                log::critical(cat, "[LokinetRouter] SnodePool was destroyed, cannot setup router.");
+                return;
+            }
+
+            if (snode_pool->size() == 0)
+                snode_pool->refresh_if_needed({}, [weak_self = weak_from_this()] {
+                    if (auto self = weak_self.lock())
                         self->_loop->call([weak_self] {
                             if (auto self = weak_self.lock())
                                 self->_finish_setup();
                         });
-                } else
-                    log::critical(
-                            cat, "[LokinetRouter] SnodePool was destroyed, cannot setup router.");
-            }
+                });
+            else
+                _finish_setup();
         });
     } catch (const std::exception& e) {
         log::error(cat, "[LokinetRouter] Failed to start lokinet ({}).", e.what());
@@ -156,8 +180,7 @@ std::vector<PathInfo> LokinetRouter::get_active_paths() {
 }
 
 void LokinetRouter::send_request(Request request, network_response_callback_t callback) {
-    auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
-    _loop->call([weak_self, req = std::move(request), cb = std::move(callback)] {
+    _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
         if (auto self = weak_self.lock())
             self->_send_request_internal(std::move(req), std::move(cb));
     });
@@ -236,55 +259,8 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
                 {content_type_plain_text},
                 "LokinetRouter is suspended.");
 
-    // If the request is being sent to a `ServerDestination` then we need to make a proxied request
-    // instead
-    if (std::holds_alternative<ServerDestination>(request.destination)) {
-        log::critical(
-                cat,
-                "[LokinetRouter Request {}] Server request are currently unsupported!",
-                request.request_id);
-        return callback(
-                false,
-                false,
-                -1,
-                {content_type_plain_text},
-                "Internal error: invalid destination for LokinetRouter");
-    }
-    //     log::debug(cat, "[LokinetRouter Request {}]: Destination is a server. Finding a proxy node.", request.request_id);
-
-    //     auto snode_pool = _snode_pool.lock();
-    //     if (!snode_pool) {
-    //         return callback(false, false, -1, {}, "SnodePool was destroyed, cannot find proxy.", std::nullopt);
-    //     }
-        
-    //     // Get a random, healthy node to act as our proxy.
-    //     auto proxy_nodes = snode_pool->get_unused_nodes(1);
-    //     if (proxy_nodes.empty()) {
-    //         return callback(false, false, -1, {}, "No available service nodes to use as a proxy.", std::nullopt);
-    //     }
-    //     service_node proxy_node = proxy_nodes[0];
-        
-    //     log::debug(cat, "[LokinetRouter Request {}]: Selected {} as proxy.", request.request_id, proxy_node.to_string());
-        
-    //     // --- Create the new, wrapped request for the proxy ---
-    //     Request proxy_request;
-    //     proxy_request.request_id = request.request_id;
-    //     proxy_request.destination = proxy_node; // The destination is now the proxy node
-    //     proxy_request.endpoint = "onion_req";   // The endpoint is always "onion_req"
-    //     proxy_request.body = create_proxy_request_body(request); // The body is the wrapper
-    //     proxy_request.category = request.category;
-    //     proxy_request.request_timeout = request.request_timeout;
-    //     proxy_request.overall_timeout = request.overall_timeout;
-    //     proxy_request.creation_time = request.creation_time;
-        
-    //     // Now, recursively call ourselves with this new, well-defined request.
-    //     // This will now hit the "direct Lokinet destination" path at the top of the function.
-    //     _send_request_internal(std::move(proxy_request), std::move(callback));
-    //     return;
-    // }
-
-    auto address = address_for_destination(request.destination, request.request_id);
-    const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
+    // Queue the request if we aren't ready
+    auto key = pending_request_key(request.destination);
 
     if (!_ready) {
         log::debug(
@@ -294,8 +270,7 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
 
         // Queue the request if not ready. We need the pubkey hex as the key.
         try {
-            _pending_requests[address_pubkey_hex].emplace_back(
-                    std::move(request), std::move(callback));
+            _pending_requests[key].emplace_back(std::move(request), std::move(callback));
         } catch (const std::exception& e) {
             log::critical(
                     cat,
@@ -307,33 +282,208 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
         return;
     }
 
-    if (auto it = _active_tunnels.find(address_pubkey_hex); it != _active_tunnels.end()) {
-        log::trace(cat, "[LokinetRouter Request {}] Found active tunnel.", request.request_id);
-        _send_via_tunnel(it->second, std::move(request), std::move(callback));
-        return;
-    }
-
-    // If we should already be establishing a tunnel then we can just add this as a pending request
-    // and it'll be picked up once the tunnel is made
-    if (_pending_requests.count(address_pubkey_hex)) {
+    // If the request is being sent to a `ServerDestination` then we need to make a proxied request
+    // instead
+    if (std::holds_alternative<ServerDestination>(request.destination)) {
         log::debug(
                 cat,
-                "[LokinetRouter Request {}] Tunnel to {} is pending, queueing request.",
-                request.request_id,
-                address_pubkey_hex);
-        _pending_requests[address_pubkey_hex].emplace_back(std::move(request), std::move(callback));
+                "[LokinetRouter Request {}]: Destination is a server, finding a proxy node.",
+                request.request_id);
+        _send_proxy_request(std::move(request), std::move(callback));
         return;
     }
 
-    // No tunnel exists so we need to start a new one and queue the request
-    log::info(
+    // When sending a direct request the response will be a json array of [{status_code}, {body}] so
+    // we need to process that before triggering the callback
+    auto json_parsing_callback =
+            [cb = std::move(callback)](
+                    bool success, bool timeout, int16_t status_code_, auto headers, auto response) {
+                if (!response)
+                    return cb(success, timeout, status_code_, headers, response);
+
+                try {
+                    nlohmann::json response_json = nlohmann::json::parse(*response);
+
+                    if (!response_json.is_array() || response_json.size() != 2)
+                        throw std::runtime_error{"Unexpected JSON response structure."};
+
+                    uint16_t status_code = response_json[0].get<uint16_t>();
+                    std::string data = response_json[1].dump();
+                    return cb(success, timeout, status_code, headers, data);
+                } catch (const std::exception& e) {
+                    return cb(false, timeout, status_code_, {content_type_plain_text}, e.what());
+                }
+            };
+
+    _send_direct_request(std::move(request), std::move(json_parsing_callback));
+}
+
+void LokinetRouter::_send_direct_request(Request request, network_response_callback_t callback) {
+    try {
+        if (std::holds_alternative<ServerDestination>(request.destination))
+            throw std::runtime_error{"Attempted to send server request directly"};
+
+        auto address = address_for_destination(request.destination, request.request_id);
+        const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
+
+        if (auto it = _active_tunnels.find(address_pubkey_hex); it != _active_tunnels.end()) {
+            log::trace(cat, "[LokinetRouter Request {}] Found active tunnel.", request.request_id);
+            _send_via_tunnel(it->second, std::move(request), std::move(callback));
+            return;
+        }
+
+        // Add the request to the pending queue to be picked up once we have a tunnel for it
+        std::string initiating_req_id = request.request_id;
+        _pending_requests[address_pubkey_hex].emplace_back(std::move(request), std::move(callback));
+
+        // If there is only a single pending request then we wouldn't have started establishing a
+        // tunnel
+        if (_pending_requests.at(address_pubkey_hex).size() == 1) {
+            log::info(
+                    cat,
+                    "[LokinetRouter Request {}] No tunnel to {}, initiating new tunnel.",
+                    initiating_req_id,
+                    address_pubkey_hex);
+            _establish_tunnel(address, initiating_req_id);
+        } else
+            log::debug(
+                    cat,
+                    "[LokinetRouter Request {}] Tunnel to {} is pending, queueing request.",
+                    initiating_req_id,
+                    address_pubkey_hex);
+    } catch (const std::exception& e) {
+        log::error(
+                cat,
+                "[LokinetRouter Request {}] Failed to send request due to error: {}",
+                request.request_id,
+                e.what());
+        return callback(
+                false,
+                false,
+                -1,
+                {content_type_plain_text},
+                "Failed to send request due to error: {}"_format(e.what()));
+    }
+}
+
+void LokinetRouter::_send_proxy_request(Request request, network_response_callback_t callback) {
+    auto snode_pool = _snode_pool.lock();
+    if (!snode_pool) {
+        return callback(
+                false,
+                false,
+                -1,
+                {content_type_plain_text},
+                "SnodePool was destroyed, cannot find proxy.");
+    }
+
+    auto proxy_nodes = snode_pool->get_unused_nodes(1);
+
+    if (proxy_nodes.empty()) {
+        log::warning(
+                cat,
+                "[LokinetRouter Request {}]: No available proxy nodes, waiting for SnodePool "
+                "refresh.",
+                request.request_id);
+
+        snode_pool->refresh_if_needed(
+                {},
+                [weak_self = weak_from_this(),
+                 req = std::move(request),
+                 cb = std::move(callback)]() {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return;
+
+                    auto snode_pool = self->_snode_pool.lock();
+                    if (!snode_pool)
+                        return cb(
+                                false,
+                                false,
+                                -1,
+                                {content_type_plain_text},
+                                "SnodePool was destroyed, cannot find proxy.");
+
+                    if (snode_pool->get_unused_nodes(1).empty())
+                        return cb(
+                                false,
+                                false,
+                                -1,
+                                {content_type_plain_text},
+                                "SnodePool refresh failed.");
+
+                    log::info(
+                            cat,
+                            "[LokinetRouter Request {}]: SnodePool refresh complete, retrying "
+                            "proxy selection.",
+                            req.request_id);
+                    self->_send_proxy_request(std::move(req), std::move(cb));
+                });
+        return;
+    }
+
+    service_node proxy_node = proxy_nodes[0];
+    std::vector<unsigned char> encrypted_blob;
+    std::shared_ptr<onionreq::ResponseParser> parser;
+    log::debug(
             cat,
-            "[LokinetRouter Request {}] No tunnel to {}, initiating new tunnel.",
+            "[LokinetRouter Request {}]: Selected {} as proxy.",
             request.request_id,
-            address_pubkey_hex);
-    std::string initiating_req_id = request.request_id;
-    _pending_requests[address_pubkey_hex].emplace_back(std::move(request), std::move(callback));
-    _establish_tunnel(address, initiating_req_id);
+            proxy_node.to_string());
+
+    try {
+        std::vector<service_node> proxy_path = {proxy_node};
+        auto builder = onionreq::Builder(request.destination, request.endpoint, proxy_path);
+        encrypted_blob = builder.generate_onion_blob(request.body);
+        parser = std::make_shared<onionreq::ResponseParser>(builder);
+    } catch (const std::exception& e) {
+        log::warning(
+                cat,
+                "[LokinetRouter Request {}]: Failed to build proxy request payload: {}",
+                request.request_id,
+                e.what());
+        return callback(
+                false, false, -1, {content_type_plain_text}, "Failed to build proxy request");
+    }
+
+    Request proxy_request{
+            request.request_id,
+            network_destination{proxy_node},  // Send to the proxy node
+            std::string{"onion_req"},         // Send to onion request handling endpoint
+            std::move(encrypted_blob),        // Encrypted payload
+            request.category,
+            request.time_remaining(),
+            request.overall_timeout};
+
+    auto proxy_callback =
+            [parser = std::move(parser), cb = std::move(callback)](
+                    bool success, bool timeout, int16_t status, auto headers, auto response) {
+                try {
+                    if (!success)
+                        throw std::runtime_error{response.value_or("Unknown request failure")};
+                    if (timeout)
+                        throw std::runtime_error{response.value_or("Timed out")};
+                    if (!response)
+                        throw std::runtime_error{"Unexpected empty response"};
+
+                    onionreq::DecryptedResponse decrypted = parser->decrypted_response(*response);
+                    cb(true,
+                       false,
+                       decrypted.status_code,
+                       std::move(decrypted.headers),
+                       std::move(decrypted.body));
+                } catch (const std::exception& e) {
+                    cb(false,
+                       timeout,
+                       status,
+                       std::move(headers),
+                       "Failed to handle proxied request response due to error: {}"_format(
+                               e.what()));
+                }
+            };
+
+    // Now that we have a service_node destination we can send a direct request
+    _send_direct_request(std::move(proxy_request), std::move(proxy_callback));
 }
 
 void LokinetRouter::_establish_tunnel(
@@ -378,72 +528,76 @@ void LokinetRouter::_establish_tunnel(
             "[LokinetRouter Request {}] Establishing new tunnel to {}.",
             initiating_req_id,
             address_pubkey_hex);
-    auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
     lokinet->establish_udp(
             lokinet_address.to_string(),
             test_port,
-            [weak_self, address_pubkey_hex, initiating_req_id](lokinet::tunnel_info info) mutable {
-                if (auto self = weak_self.lock()) {
-                    log::info(
+            [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
+                    lokinet::tunnel_info info) mutable {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                log::info(
+                        cat,
+                        "[LokinetRouter Request {}] Tunnel to remote {} established.",
+                        initiating_req_id,
+                        address_pubkey_hex);
+
+                auto requests_to_process = std::move(self->_pending_requests[address_pubkey_hex]);
+                self->_pending_requests.erase(address_pubkey_hex);
+                self->_active_tunnels.insert_or_assign(address_pubkey_hex, info);
+
+                // We had a successful connection so update the status to connected
+                self->_update_status(ConnectionStatus::connected);
+
+                if (!requests_to_process.empty()) {
+                    log::debug(
                             cat,
-                            "[LokinetRouter Request {}] Tunnel to remote {} established.",
-                            initiating_req_id,
-                            address_pubkey_hex);
+                            "[LokinetRouter] Processing {} pending requests on new tunnel to "
+                            "{}.",
+                            requests_to_process.size(),
+                            info.remote);
 
-                    auto requests_to_process =
-                            std::move(self->_pending_requests[address_pubkey_hex]);
-                    self->_pending_requests.erase(address_pubkey_hex);
-                    self->_active_tunnels.insert_or_assign(address_pubkey_hex, info);
-
-                    // We had a successful connection so update the status to connected
-                    self->_update_status(ConnectionStatus::connected);
-
-                    if (!requests_to_process.empty()) {
-                        log::debug(
-                                cat,
-                                "[LokinetRouter] Processing {} pending requests on new tunnel to "
-                                "{}.",
-                                requests_to_process.size(),
-                                info.remote);
-
-                        for (auto&& [req, cb] : std::move(requests_to_process))
-                            self->_send_via_tunnel(info, std::move(req), std::move(cb));
-                    }
+                    for (auto&& [req, cb] : std::move(requests_to_process))
+                        self->_send_via_tunnel(info, std::move(req), std::move(cb));
                 }
             },
-            [weak_self, address_pubkey_hex, initiating_req_id](std::string errmsg) mutable {
-                if (auto self = weak_self.lock()) {
-                    log::info(
+            [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
+                    std::string errmsg) mutable {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                log::info(
+                        cat,
+                        "[LokinetRouter Request {}] Unable to establish lokinet UDP connection "
+                        "to "
+                        "{} due to error: {}.",
+                        initiating_req_id,
+                        address_pubkey_hex,
+                        errmsg);
+
+                self->_active_tunnels.erase(address_pubkey_hex);
+
+                // Fail all the pending requests for this connection
+                if (auto it = self->_pending_requests.find(address_pubkey_hex);
+                    it != self->_pending_requests.end()) {
+                    auto to_fail = std::move(it->second);
+                    self->_pending_requests.erase(it);
+
+                    log::error(
                             cat,
-                            "[LokinetRouter Request {}] Unable to establish lokinet UDP connection "
-                            "to "
-                            "{} due to error: {}.",
-                            initiating_req_id,
-                            address_pubkey_hex,
-                            errmsg);
+                            "[LokinetRouter] Failing {} pending requests due to UDP connection "
+                            "failure.",
+                            to_fail.size());
 
-                    self->_active_tunnels.erase(address_pubkey_hex);
-
-                    // Fail all the pending requests for this connection
-                    if (auto it = self->_pending_requests.find(address_pubkey_hex);
-                        it != self->_pending_requests.end()) {
-                        auto to_fail = std::move(it->second);
-                        self->_pending_requests.erase(it);
-
-                        log::error(
-                                cat,
-                                "[LokinetRouter] Failing {} pending requests due to UDP connection "
-                                "failure.",
-                                to_fail.size());
-
-                        for (auto& [req, cb] : to_fail)
-                            cb(false, false, -1, {content_type_plain_text}, errmsg);
-                    }
-
-                    // If we have no longer have any active connections then we are disconnected
-                    if (self->_active_tunnels.empty())
-                        self->_update_status(ConnectionStatus::disconnected);
+                    for (auto& [req, cb] : to_fail)
+                        cb(false, false, -1, {content_type_plain_text}, errmsg);
                 }
+
+                // If we have no longer have any active connections then we are disconnected
+                if (self->_active_tunnels.empty())
+                    self->_update_status(ConnectionStatus::disconnected);
             });
 }
 
@@ -455,6 +609,12 @@ void LokinetRouter::_send_via_tunnel(
     auto timeout = request.time_remaining();
     if (timeout <= std::chrono::milliseconds::zero())
         return callback(false, true, 408, {content_type_plain_text}, "Request already timed out");
+
+    auto transport = _transport.lock();
+    if (!transport) {
+        log::critical(cat, "[LokinetRouter] Transport was destroyed, cannot send request.");
+        return;
+    }
 
     // We have a valid connection and stream so we can send the request
     log::debug(cat, "[LokinetRouter Request {}] Sending to {}.", request.request_id, tunnel.remote);
@@ -482,55 +642,7 @@ void LokinetRouter::_send_via_tunnel(
             request.time_remaining(),
             remaining_overall_timeout};
 
-    if (auto transport = _transport.lock()) {
-        auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
-        transport->send_request(
-                std::move(lokinet_request),
-                [weak_self, original_request = std::move(request), cb = std::move(callback)](
-                        bool success,
-                        bool timeout,
-                        int16_t status_code,
-                        auto headers,
-                        auto response) {
-                    if (auto self = weak_self.lock())
-                        self->_handle_transport_response(
-                                success,
-                                timeout,
-                                status_code,
-                                std::move(headers),
-                                std::move(response),
-                                std::move(cb));
-                });
-    } else {
-        log::critical(cat, "[LokinetRouter] Transport was destroyed, cannot send request.");
-        return;
-    }
-}
-
-void LokinetRouter::_handle_transport_response(
-        bool success,
-        bool timeout,
-        int16_t status_code_,
-        std::vector<std::pair<std::string, std::string>> headers,
-        std::optional<std::string> response_body,
-        network_response_callback_t callback) {
-    // If we weren't given a body then just return the data directly
-    if (!response_body)
-        return callback(success, timeout, status_code_, headers, response_body);
-
-    // Otherwise the response will be a json array of [{status_code}, {body}]
-    try {
-        nlohmann::json response_json = nlohmann::json::parse(*response_body);
-
-        if (!response_json.is_array() || response_json.size() != 2)
-            throw std::runtime_error{"Unexpected JSON response structure."};
-
-        uint16_t status_code = response_json[0].get<uint16_t>();
-        std::string data = response_json[1].dump();
-        return callback(success, timeout, status_code, headers, data);
-    } catch (const std::exception& e) {
-        return callback(false, timeout, status_code_, {content_type_plain_text}, e.what());
-    }
+    transport->send_request(std::move(lokinet_request), std::move(callback));
 }
 
 }  // namespace session::network

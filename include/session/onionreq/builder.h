@@ -87,17 +87,6 @@ LIBSESSION_EXPORT void onion_request_builder_set_server_destination(
         uint16_t port,
         const char* x25519_pubkey);
 
-/// API: onion_request_builder_set_destination_pubkey
-///
-/// Wrapper around session::onionreq::Builder::set_destination_pubkey.
-///
-/// Inputs:
-/// - `builder` -- [in] Pointer to the builder object
-/// - `x25519_pubkey` -- [in] The x25519 public key for server (Hex string of exactly 64
-/// characters).
-LIBSESSION_EXPORT void onion_request_builder_set_destination_pubkey(
-        onion_request_builder_object* builder, const char* x25519_pubkey);
-
 /// API: onion_request_builder_add_hop
 ///
 /// Wrapper around session::onionreq::Builder::add_hop.  ed25519_pubkey and

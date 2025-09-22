@@ -81,7 +81,8 @@ Builder::Builder(
         const EncryptType enc_type_) :
         endpoint_{endpoint},
         enc_type{enc_type_},
-        destination_x25519_public_key{detail::pubkey_for_destination(destination)} {
+        is_v4_request{std::holds_alternative<network::ServerDestination>(destination)},
+        destination_x25519_public_key_{detail::pubkey_for_destination(destination)} {
     set_destination(destination);
     for (auto& n : nodes)
         add_hop(n.view_remote_key());
@@ -96,9 +97,11 @@ void Builder::add_hop(std::span<const unsigned char> remote_key) {
 void Builder::set_destination(network_destination destination) {
     ed25519_public_key_.reset();
 
-    if (auto* dest = std::get_if<session::network::service_node>(&destination))
+    if (auto* dest = std::get_if<session::network::service_node>(&destination)) {
+        is_v4_request = false;
         ed25519_public_key_.emplace(network::ed25519_pubkey::from_bytes(dest->view_remote_key()));
-    else if (auto* dest = std::get_if<ServerDestination>(&destination)) {
+    } else if (auto* dest = std::get_if<ServerDestination>(&destination)) {
+        is_v4_request = true;
         host_.emplace(dest->host);
         method_.emplace(dest->method);
 
@@ -118,11 +121,6 @@ void Builder::set_destination(network_destination destination) {
         throw std::invalid_argument{"Invalid destination type."};
 }
 
-void Builder::set_destination_pubkey(session::network::x25519_pubkey x25519_pubkey) {
-    destination_x25519_public_key.reset();
-    destination_x25519_public_key.emplace(x25519_pubkey);
-}
-
 std::vector<unsigned char> Builder::generate_onion_blob(
         const std::optional<std::vector<unsigned char>>& plaintext_body) {
     return build(_generate_payload(plaintext_body));
@@ -133,7 +131,7 @@ std::vector<unsigned char> Builder::_generate_payload(
     // If we don't have the data required for a server request, then assume it's targeting a
     // service node which has a different structure (`method` is the endpoint and the body is
     // `params`)
-    if (!host_ || !protocol_ || !method_ || !destination_x25519_public_key) {
+    if (!host_ || !protocol_ || !method_ || !destination_x25519_public_key_) {
         nlohmann::json params_json;
 
         if (body)
@@ -230,7 +228,7 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
 
         // The data we send to the destination differs depending on whether the destination is a
         // server or a service node
-        if (host_ && protocol_ && destination_x25519_public_key) {
+        if (host_ && protocol_ && destination_x25519_public_key_) {
             final_route = {
                     {"host", *host_},
                     {"target", "/oxen/v4/lsrpc"},  // All servers support V4 onion requests
@@ -242,8 +240,8 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
                     {"enc_type", to_string(enc_type)},
             };
 
-            blob = e.encrypt(enc_type, payload, *destination_x25519_public_key);
-        } else if (ed25519_public_key_ && destination_x25519_public_key) {
+            blob = e.encrypt(enc_type, payload, *destination_x25519_public_key_);
+        } else if (ed25519_public_key_ && destination_x25519_public_key_) {
             nlohmann::json control{{"headers", ""}};
             final_route = {
                     {"destination", ed25519_public_key_.value().hex()},  // Next hop's ed25519 key
@@ -257,9 +255,9 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
             auto data = encode_size(payload.size());
             data.insert(data.end(), payload.begin(), payload.end());
             data.insert(data.end(), control_span.begin(), control_span.end());
-            blob = e.encrypt(enc_type, data, *destination_x25519_public_key);
+            blob = e.encrypt(enc_type, data, *destination_x25519_public_key_);
         } else {
-            if (!destination_x25519_public_key.has_value())
+            if (!destination_x25519_public_key_.has_value())
                 throw std::runtime_error{"Destination not set: No destination x25519 public key"};
             if (!ed25519_public_key_.has_value())
                 throw std::runtime_error{"Destination not set: No destination ed25519 public key"};
@@ -388,14 +386,6 @@ LIBSESSION_C_API void onion_request_builder_set_server_destination(
             port,
             std::nullopt,
             method});
-}
-
-LIBSESSION_C_API void onion_request_builder_set_destination_pubkey(
-        onion_request_builder_object* builder, const char* x25519_pubkey) {
-    assert(builder && x25519_pubkey);
-
-    unbox(builder).set_destination_pubkey(
-            session::network::x25519_pubkey::from_hex({x25519_pubkey, 64}));
 }
 
 LIBSESSION_C_API void onion_request_builder_add_hop(

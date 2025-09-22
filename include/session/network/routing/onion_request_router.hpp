@@ -12,10 +12,6 @@
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
 
-namespace session::onionreq {
-class Builder;
-}
-
 namespace session::network {
 
 namespace config {
@@ -106,12 +102,11 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void _handle_transport_response(
             std::string path_id,
             Request original_request,
-            std::shared_ptr<session::onionreq::Builder> builder,
             bool success,
             bool timeout,
             int16_t status_code,
             std::vector<std::pair<std::string, std::string>> headers,
-            std::optional<std::string> response_body,
+            std::optional<std::string> decrypted_body,
             network_response_callback_t callback);
 
     void _decrement_and_cleanup_path(const std::string& path_id, RequestCategory category);

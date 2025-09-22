@@ -103,8 +103,7 @@ void RequestQueue::check_timeouts() {
     }
 
     // Otherwise schedule the next check
-    auto weak_self = std::weak_ptr<RequestQueue>(shared_from_this());
-    _loop->call_later(_check_frequency, [weak_self] {
+    _loop->call_later(_check_frequency, [weak_self = weak_from_this()] {
         if (auto self = weak_self.lock())
             self->check_timeouts();
     });

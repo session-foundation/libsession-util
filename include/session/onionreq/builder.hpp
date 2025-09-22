@@ -53,15 +53,17 @@ class Builder {
             const EncryptType enc_type_ = EncryptType::xchacha20);
 
     EncryptType enc_type;
-    std::optional<network::x25519_pubkey> destination_x25519_public_key = std::nullopt;
+    bool is_v4_request;
     std::optional<network::x25519_keypair> final_hop_x25519_keypair = std::nullopt;
 
     Builder(EncryptType enc_type_ = EncryptType::xchacha20) : enc_type{enc_type_} {}
 
     void set_enc_type(EncryptType enc_type_) { enc_type = enc_type_; }
+    std::optional<network::x25519_pubkey> get_destination_x25519_public_key() const {
+        return destination_x25519_public_key_;
+    };
 
     void set_destination(network::network_destination destination);
-    void set_destination_pubkey(network::x25519_pubkey x25519_pubkey);
     void add_hop(std::span<const unsigned char> remote_key);
     void add_hop(std::pair<network::ed25519_pubkey, network::x25519_pubkey> keys) {
         hops_.push_back(keys);
@@ -74,6 +76,7 @@ class Builder {
   private:
     std::vector<std::pair<network::ed25519_pubkey, network::x25519_pubkey>> hops_ = {};
     std::string endpoint_;
+    std::optional<network::x25519_pubkey> destination_x25519_public_key_ = std::nullopt;
 
     // Snode request values
 

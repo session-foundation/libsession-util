@@ -57,8 +57,7 @@ void DirectRouter::resume(bool automatically_reconnect) {
 }
 
 void DirectRouter::send_request(Request request, network_response_callback_t callback) {
-    auto weak_self = std::weak_ptr<DirectRouter>(shared_from_this());
-    _loop->call([weak_self, req = std::move(request), cb = std::move(callback)] {
+    _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
         if (auto self = weak_self.lock())
             self->_send_request_internal(std::move(req), std::move(cb));
     });
@@ -87,29 +86,25 @@ void DirectRouter::_send_request_internal(Request request, network_response_call
                 {content_type_plain_text},
                 "DirectRouter is suspended.");
 
-    if (auto transport = _transport.lock()) {
-        auto weak_self = std::weak_ptr<DirectRouter>(shared_from_this());
-        transport->send_request(
-                std::move(request),
-                [weak_self, cb = std::move(callback)](
-                        bool success,
-                        bool timeout,
-                        int16_t status_code,
-                        auto headers,
-                        auto response) {
-                    if (auto self = weak_self.lock())
-                        self->_handle_transport_response(
-                                success,
-                                timeout,
-                                status_code,
-                                std::move(headers),
-                                std::move(response),
-                                std::move(cb));
-                });
-    } else {
+    auto transport = _transport.lock();
+    if (!transport) {
         log::critical(cat, "[DirectRouter] Transport was destroyed, cannot send request.");
         return;
     }
+
+    transport->send_request(
+            std::move(request),
+            [weak_self = weak_from_this(), cb = std::move(callback)](
+                    bool success, bool timeout, int16_t status_code, auto headers, auto response) {
+                if (auto self = weak_self.lock())
+                    self->_handle_transport_response(
+                            success,
+                            timeout,
+                            status_code,
+                            std::move(headers),
+                            std::move(response),
+                            std::move(cb));
+            });
 }
 
 void DirectRouter::_handle_transport_response(
