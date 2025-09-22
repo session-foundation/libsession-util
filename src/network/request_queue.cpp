@@ -28,31 +28,43 @@ RequestQueue::~RequestQueue() {
 }
 
 void RequestQueue::add(Request request, network_response_callback_t callback) {
-    _loop->call([this, req = std::move(request), cb = std::move(callback)]() {
-        _queue.emplace_back(std::move(req), std::move(cb));
+    _loop->call([self = shared_from_this(), req = std::move(request), cb = std::move(callback)]() {
+        auto has_timeout = req.overall_timeout.has_value();
+        self->_queue.emplace_back(std::move(req), std::move(cb));
 
-        if (!_checker_active) {
-            _checker_active = true;
-            _loop->call_later(_check_frequency, [this] { check_timeouts(); });
+        if (has_timeout && !self->_checker_active) {
+            self->_checker_active = true;
+
+            auto weak_self = std::weak_ptr<RequestQueue>(self);
+            self->_loop->call_later(self->_check_frequency, [weak_self] {
+                if (auto self = weak_self.lock())
+                    self->check_timeouts();
+            });
         }
     });
 }
 
 void RequestQueue::add_front(std::pair<Request, network_response_callback_t> req_pair) {
-    _loop->call([this, pair = std::move(req_pair)] {
-        _queue.emplace_front(std::move(pair));
+    _loop->call([self = shared_from_this(), pair = std::move(req_pair)] {
+        auto has_timeout = pair.first.overall_timeout.has_value();
+        self->_queue.emplace_front(std::move(pair));
 
-        if (!_checker_active && pair.first.overall_timeout) {
-            _checker_active = true;
-            _loop->call_later(_check_frequency, [this] { check_timeouts(); });
+        if (has_timeout && !self->_checker_active) {
+            self->_checker_active = true;
+
+            auto weak_self = std::weak_ptr<RequestQueue>(self);
+            self->_loop->call_later(self->_check_frequency, [weak_self] {
+                if (auto self = weak_self.lock())
+                    self->check_timeouts();
+            });
         }
     });
 }
 
 std::deque<std::pair<Request, network_response_callback_t>> RequestQueue::pop_all() {
-    return _loop->call_get([this] {
+    return _loop->call_get([self = shared_from_this()] {
         std::deque<std::pair<Request, network_response_callback_t>> popped_items;
-        std::swap(_queue, popped_items);
+        std::swap(self->_queue, popped_items);
 
         return popped_items;
     });
@@ -63,7 +75,7 @@ void RequestQueue::check_timeouts() {
     bool has_remaining_timeout_requests = false;
 
     std::erase_if(_queue, [&has_remaining_timeout_requests, &time_now](const auto& request) {
-        // If the request doesn't have a path build timeout then ignore it
+        // If the request doesn't have an overall timeout then ignore it
         if (!request.first.overall_timeout)
             return false;
 
@@ -91,7 +103,11 @@ void RequestQueue::check_timeouts() {
     }
 
     // Otherwise schedule the next check
-    _loop->call_later(_check_frequency, [this] { check_timeouts(); });
+    auto weak_self = std::weak_ptr<RequestQueue>(shared_from_this());
+    _loop->call_later(_check_frequency, [weak_self] {
+        if (auto self = weak_self.lock())
+            self->check_timeouts();
+    });
 }
 
 }  // namespace session::network::detail

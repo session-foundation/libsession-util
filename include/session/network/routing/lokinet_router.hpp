@@ -29,7 +29,7 @@ namespace config {
     };
 }  // namespace config
 
-class LokinetRouter : public IRouter {
+class LokinetRouter : public IRouter, public std::enable_shared_from_this<LokinetRouter> {
   private:
     bool _ready = false;
     bool _suspended = false;

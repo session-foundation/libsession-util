@@ -115,6 +115,7 @@ if(ENABLE_NETWORKING)
         network/swarm.cpp
         network/backends/session_file_server.cpp
         network/transport/quic_transport.cpp
+        network/routing/direct_router.cpp
         network/routing/lokinet_router.cpp
         network/routing/onion_request_router.cpp
     )

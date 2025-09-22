@@ -9,6 +9,7 @@
 #include <session/curve25519.hpp>
 #include <session/ed25519.hpp>
 #include <session/network/key_types.hpp>
+#include <session/network/request_queue.hpp>
 #include <session/network/routing/onion_request_router.hpp>
 #include <session/onionreq/hop_encryption.hpp>
 #include <tuple>
@@ -29,6 +30,12 @@ class TestOnionRequestRouter {
 
     static std::vector<OnionPath> get_paths(OnionRequestRouter& router, RequestCategory category) {
         return router._paths[category];
+    }
+
+    static void set_request_queues(
+            OnionRequestRouter& router,
+            std::unordered_map<RequestCategory, std::shared_ptr<detail::RequestQueue>> queues) {
+        router._request_queues = queues;
     }
 
     static uint16_t failure_count(
@@ -76,6 +83,40 @@ class TestOnionRequestRouter {
                 std::move(callback));
     }
 };
+
+namespace detail {
+    class TestRequestQueue : public detail::RequestQueue, public CallTracker {
+      public:
+        TestRequestQueue(
+                std::shared_ptr<oxen::quic::Loop> loop, std::chrono::milliseconds check_frequency) :
+                detail::RequestQueue(loop, check_frequency) {};
+
+        void add(Request request, network_response_callback_t callback) override {
+            if (check_should_ignore_and_log_call("add"))
+                return;
+            detail::RequestQueue::add(std::move(request), std::move(callback));
+        }
+
+        void add_front(std::pair<Request, network_response_callback_t> req_pair) override {
+            if (check_should_ignore_and_log_call("add_front"))
+                return;
+            detail::RequestQueue::add_front(std::move(req_pair));
+        }
+
+        std::deque<std::pair<Request, network_response_callback_t>> pop_all() override {
+            if (check_should_ignore_and_log_call("pop_all"))
+                return {};
+            return detail::RequestQueue::pop_all();
+        }
+
+      private:
+        void check_timeouts() override {
+            if (check_should_ignore_and_log_call("check_timeouts"))
+                return;
+            detail::RequestQueue::check_timeouts();
+        }
+    };
+}  // namespace detail
 
 namespace {
     class TestSnodePool : public SnodePool, public CallTracker {
@@ -142,18 +183,18 @@ namespace {
                 const std::string& request_id,
                 std::function<void(bool success)> callback) override {
             func_called("verify_connectivity");
-        };
+        }
         void add_failure_listener(
                 const ed25519_pubkey& pubkey, std::function<void()> listener) override {
             func_called("add_failure_listener");
-        };
+        }
         void remove_failure_listeners(const ed25519_pubkey& pubkey) override {
             func_called("remove_failure_listeners");
-        };
+        }
 
         void send_request(Request request, network_response_callback_t callback) override {
             func_called("send_request");
-        };
+        }
     };
 
     struct Result {
@@ -205,7 +246,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
     auto transport = std::make_shared<TestTransport>();
-    std::optional<OnionRequestRouter> router;
+    std::shared_ptr<OnionRequestRouter> router;
 
     // Check the handling of the codes which make no changes
     auto codes_with_no_changes = {400, 404, 406, 425};
@@ -217,7 +258,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
         path.emplace(OnionPath{"Test", {target2, target3, target4}});
         builder.emplace(std::make_shared<session::onionreq::Builder>(
                 request.destination, request.endpoint, path->nodes));
-        router.emplace(config, loop, snode_pool, transport);
+        router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
         TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
         TestOnionRequestRouter::handle_transport_response(
                 *router,
@@ -258,7 +299,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     builder.emplace(std::make_shared<session::onionreq::Builder>(
             request.destination, request.endpoint, path->nodes));
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
@@ -297,7 +338,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     builder.emplace(std::make_shared<session::onionreq::Builder>(
             request.destination, request.endpoint, path->nodes));
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(
             *router,
             RequestCategory::standard,
@@ -339,7 +380,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     builder.emplace(std::make_shared<session::onionreq::Builder>(
             request.destination, request.endpoint, path->nodes));
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
@@ -379,7 +420,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     builder.emplace(std::make_shared<session::onionreq::Builder>(
             request.destination, request.endpoint, path->nodes));
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
@@ -431,7 +472,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     builder.emplace(std::make_shared<session::onionreq::Builder>(
             request.destination, request.endpoint, path->nodes));
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
     TestOnionRequestRouter::handle_transport_response(
             *router,
@@ -473,7 +514,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
         path.emplace(OnionPath{"Test", {target2, target3, target4}});
         builder.emplace(std::make_shared<session::onionreq::Builder>(
                 request.destination, request.endpoint, path->nodes));
-        router.emplace(config, loop, snode_pool, transport);
+        router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
         TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {*path});
         TestOnionRequestRouter::handle_transport_response(
                 *router,
@@ -532,12 +573,12 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
     auto transport = std::make_shared<TestTransport>();
-    std::optional<OnionRequestRouter> router;
+    std::shared_ptr<OnionRequestRouter> router;
 
     // Nothing should happen if the network is suspended
     snode_pool->reset_calls();
     snode_pool->ignore_calls_to("refresh_if_needed", "get_unused_nodes");
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     router->suspend();
     TestOnionRequestRouter::build_path(*router, RequestCategory::standard);
     CHECK(snode_pool->did_not_call("get_unused_nodes"));
@@ -545,7 +586,7 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
     // If the unused nodes are empty it refreshes them
     snode_pool->reset_calls();
     snode_pool->ignore_calls_to("refresh_if_needed", "get_unused_nodes");
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::build_path(*router, RequestCategory::standard);
     CHECK(snode_pool->called("get_unused_nodes"));
     CHECK(snode_pool->called("refresh_if_needed"));
@@ -585,28 +626,27 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
     auto path2 = OnionPath{"Test2", {target2, target3, target4}};
     auto request =
             Request{"AAAA", target, "info", to_vector("test"), RequestCategory::standard, 0ms};
-    Result result;
 
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
     auto transport = std::make_shared<TestTransport>();
-    std::optional<OnionRequestRouter> router;
+    std::shared_ptr<OnionRequestRouter> router;
 
     // It returns nothing when given no path options
     snode_pool->ignore_calls_to("refresh_if_needed");
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {});
     CHECK(TestOnionRequestRouter::find_valid_path(*router, request) == nullptr);
 
     // It excludes paths which include the IP of the target
     snode_pool->ignore_calls_to("refresh_if_needed");
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path1});
     CHECK(TestOnionRequestRouter::find_valid_path(*router, request) == nullptr);
 
     // It returns a path when there is a valid one
     snode_pool->ignore_calls_to("refresh_if_needed");
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path2});
     CHECK(TestOnionRequestRouter::find_valid_path(*router, request) != nullptr);
 
@@ -622,8 +662,115 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
             true,  // single path mode
             {{RequestCategory::standard, 1}}};
     snode_pool->ignore_calls_to("refresh_if_needed");
-    router.emplace(config, loop, snode_pool, transport);
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(*router, RequestCategory::standard, {path1});
     CHECK(TestOnionRequestRouter::find_valid_path(*router, request) != nullptr);
 }
+
+TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeouts]") {
+    config::SnodePoolConfig pool_config = {
+            std::nullopt,
+            std::chrono::minutes{5},
+            std::chrono::minutes{5},
+            false,
+            network::opt::retry_delay{50ms, 200ms},
+            opt::netid::Target::testnet,
+            {},
+            0,
+            0,
+            3,  // cache_node_failure_threshold
+            false};
+    config::OnionRequestRouterConfig config = {
+            network::opt::retry_delay{50ms, 200ms},
+            50ms,
+            3,
+            3,
+            10,
+            true,
+            false,
+            {{RequestCategory::standard, 1}}};
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
+    auto target = service_node{ed_pk, oxen::quic::ipv4{"127.0.0.1"}, 20001, 30001, {2, 11, 0}, 0};
+    auto target2 = service_node{ed_pk, oxen::quic::ipv4{"127.0.0.1"}, 20002, 30002, {2, 11, 0}, 0};
+    auto target3 = service_node{ed_pk, oxen::quic::ipv4{"127.0.0.1"}, 20003, 30003, {2, 11, 0}, 0};
+    auto target4 = service_node{ed_pk, oxen::quic::ipv4{"127.0.0.1"}, 20004, 30004, {2, 11, 0}, 0};
+    auto path = OnionPath{"Test1", {target2, target3, target4}};
+    auto request =
+            Request{"AAAA", target, "info", to_vector("test"), RequestCategory::standard, 0ms};
+    Result result;
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
+    auto transport = std::make_shared<TestTransport>();
+    auto queue = std::make_shared<detail::TestRequestQueue>(loop, 50ms);
+    std::shared_ptr<OnionRequestRouter> router;
+    snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
+
+    // Test that it doesn't start checking for timeouts when the request doesn't have an overall timeout
+    request =
+            Request{"AAAA",
+                    target,
+                    "info",
+                    to_vector("test"),
+                    RequestCategory::standard,
+                    1000ms,
+                    std::nullopt};
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
+    queue = std::make_shared<detail::TestRequestQueue>(loop, 50ms);
+    TestOnionRequestRouter::set_request_queues(*router, {{RequestCategory::standard, queue}});
+    router->send_request(
+            request,
+            [&result](
+                    bool success,
+                    bool timeout,
+                    int16_t status_code,
+                    std::vector<std::pair<std::string, std::string>> headers,
+                    std::optional<std::string> response) {
+                result = {success, timeout, status_code, headers, response};
+            });
+    CHECK(queue->did_not_call("check_timeouts", 250ms));
+
+    // Test that it does start checking for timeouts when the request has an overall timeout
+    request = Request{
+            "AAAA", target, "info", to_vector("test"), RequestCategory::standard, 1000ms, 1000ms};
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
+    queue = std::make_shared<detail::TestRequestQueue>(loop, 50ms);
+    TestOnionRequestRouter::set_request_queues(*router, {{RequestCategory::standard, queue}});
+    router->send_request(
+            request,
+            [&result](
+                    bool success,
+                    bool timeout,
+                    int16_t status_code,
+                    std::vector<std::pair<std::string, std::string>> headers,
+                    std::optional<std::string> response) {
+                result = {success, timeout, status_code, headers, response};
+            });
+    CHECK(queue->called("add", 250ms));
+    CHECK(queue->called("check_timeouts", 250ms));
+
+    // Test that it fails the request with a timeout if it has an overall timeout and the path build takes too long
+    std::promise<Result> prom;
+    request = Request{
+            "AAAA", target, "info", to_vector("test"), RequestCategory::standard, 1000ms, 200ms};
+    router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
+    queue = std::make_shared<detail::TestRequestQueue>(loop, 50ms);
+    TestOnionRequestRouter::set_request_queues(*router, {{RequestCategory::standard, queue}});
+    router->send_request(
+            request,
+            [&prom](bool success,
+                    bool timeout,
+                    int16_t status_code,
+                    std::vector<std::pair<std::string, std::string>> headers,
+                    std::optional<std::string> response) {
+                prom.set_value({success, timeout, status_code, headers, response});
+            });
+
+    // Wait for the result to be set
+    result = prom.get_future().get();
+
+    CHECK_FALSE(result.success);
+    CHECK(result.timeout);
+}
+
 }  // namespace session::network

@@ -299,7 +299,7 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
                     request_id,
                     (!_routed_fetcher ? "No routed fetcher set" : "Routed fetcher not ready"),
                     num_nodes_for_refresh);
-        else if (use_routed_fetcher && use_seed_nodes)  // TODO: Do we want this case?????
+        else if (use_routed_fetcher && use_seed_nodes)
             log::debug(
                     cat,
                     "[Request {}] Refreshing using seed nodes (cache is insufficient).",
@@ -355,17 +355,20 @@ void SnodePool::_launch_next_refresh_request(
                     "trying again in {}ms.",
                     request_id,
                     delay.count());
-            _loop->call_later(delay, [this] {
+            auto weak_self = std::weak_ptr<SnodePool>(shared_from_this());
+            _loop->call_later(delay, [weak_self] {
                 // We need to wait until after the `call_later` to reset the `refresh_id` (and clear
                 // previous results) as if we don't then additional refreshes could be triggered
                 // during the delay
-                {
-                    std::unique_lock lock{_cache_mutex};
-                    _current_snode_cache_refresh_id.reset();
-                    _snode_refresh_results.clear();
-                }
+                if (auto self = weak_self.lock()) {
+                    {
+                        std::unique_lock lock{self->_cache_mutex};
+                        self->_current_snode_cache_refresh_id.reset();
+                        self->_snode_refresh_results.clear();
+                    }
 
-                _refresh_snode_cache();
+                    self->_refresh_snode_cache();
+                }
             });
             return;
         }
@@ -482,10 +485,12 @@ void SnodePool::_launch_next_refresh_request(
                             "Failed to refresh cache from one node: {}. Trying another in {}ms.",
                             e.what(),
                             delay.count());
+                    auto weak_self = std::weak_ptr<SnodePool>(shared_from_this());
                     _loop->call_later(
-                            delay, [this, request_id, use_direct_fetcher, total_requests] {
-                                _retry_refresh_request(
-                                        request_id, use_direct_fetcher, total_requests);
+                            delay, [weak_self, request_id, use_direct_fetcher, total_requests] {
+                                if (auto self = weak_self.lock())
+                                    self->_retry_refresh_request(
+                                            request_id, use_direct_fetcher, total_requests);
                             });
                     return;
                 }
@@ -596,9 +601,12 @@ void SnodePool::_on_refresh_complete(
                     delay.count(),
                     (i + 1),
                     e.what());
-            _loop->call_later(delay, [this, refresh_id, use_direct_fetcher, total_requests] {
-                for (uint8_t i = 0; i < total_requests; ++i)
-                    _launch_next_refresh_request(refresh_id, use_direct_fetcher, total_requests);
+            auto weak_self = std::weak_ptr<SnodePool>(shared_from_this());
+            _loop->call_later(delay, [weak_self, refresh_id, use_direct_fetcher, total_requests] {
+                if (auto self = weak_self.lock())
+                    for (uint8_t i = 0; i < total_requests; ++i)
+                        self->_launch_next_refresh_request(
+                                refresh_id, use_direct_fetcher, total_requests);
             });
             return;
         }
@@ -799,9 +807,13 @@ void SnodePool::refresh_if_needed(
     // Kick off a refresh if needed (if none was needed then we should trigger the
     // on_refresh_complete callback immediately)
     if (needs_to_start_refresh)
-        if (delay)
-            _loop->call_later(*delay, [this] { _refresh_snode_cache(); });
-        else
+        if (delay) {
+            auto weak_self = std::weak_ptr<SnodePool>(shared_from_this());
+            _loop->call_later(*delay, [weak_self] {
+                if (auto self = weak_self.lock())
+                    self->_refresh_snode_cache();
+            });
+        } else
             _refresh_snode_cache();
     else if (!already_running && on_refresh_complete)
         on_refresh_complete();
@@ -812,7 +824,11 @@ std::vector<service_node> SnodePool::get_unused_nodes(
     // Kick of a cache refresh in the background if needed (call_soon to ensure it is scheduled
     // after whatever called `get_unused_nodes` which may be something trying to make it's own
     // request that we would want to run first)
-    _loop->call_soon([this, exclude_nodes] { refresh_if_needed(exclude_nodes); });
+    auto weak_self = std::weak_ptr<SnodePool>(shared_from_this());
+    _loop->call_soon([weak_self, exclude_nodes] {
+        if (auto self = weak_self.lock())
+            self->refresh_if_needed(exclude_nodes);
+    });
 
     // Then try to get the desired number of nodes from the current cache
     std::vector<service_node> result;
@@ -913,7 +929,11 @@ void SnodePool::get_swarm(
     lock.unlock();
 
     // Trigger a non-blocking background refresh if the data is stale
-    _loop->call_soon([this] { refresh_if_needed({}); });
+    auto weak_self = std::weak_ptr<SnodePool>(shared_from_this());
+    _loop->call_soon([weak_self] {
+        if (auto self = weak_self.lock())
+            self->refresh_if_needed({});
+    });
 
     // Perform the swarm calculation using our local copy of the data
     auto swarm = swarm::get_swarm(swarm_pubkey, all_swarms_copy);

@@ -10,8 +10,10 @@
 
 namespace session::network::detail {
 
-class RequestQueue {
+class RequestQueue : public std::enable_shared_from_this<RequestQueue> {
   private:
+    friend class TestRequestQueue;
+
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::chrono::milliseconds _check_frequency;
 
@@ -26,13 +28,13 @@ class RequestQueue {
 
     bool is_empty() const { return _queue.empty(); };
 
-    void add(Request request, network_response_callback_t callback);
-    void add_front(std::pair<Request, network_response_callback_t> req_pair);
+    virtual void add(Request request, network_response_callback_t callback);
+    virtual void add_front(std::pair<Request, network_response_callback_t> req_pair);
 
-    std::deque<std::pair<Request, network_response_callback_t>> pop_all();
+    virtual std::deque<std::pair<Request, network_response_callback_t>> pop_all();
 
   private:
-    void check_timeouts();
+    virtual void check_timeouts();
 };
 
 }  // namespace session::network::detail

@@ -83,15 +83,27 @@ LokinetRouter::LokinetRouter(
         lokinet = std::make_shared<lokinet::Lokinet>(test_ini /*, loop*/);
 
         // TODO: Remove this hack to wait for lokinet to be ready before any requests get sent
-        _loop->call_later(5000ms, [this] {
-            if (auto snode_pool = _snode_pool.lock()) {
-                if (snode_pool->size() == 0)
-                    snode_pool->refresh_if_needed(
-                            {}, [this] { _loop->call([this] { _finish_setup(); }); });
-                else
-                    _loop->call([this] { _finish_setup(); });
-            } else
-                log::critical(cat, "[LokinetRouter] SnodePool was destroyed, cannot setup router.");
+        auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
+        _loop->call_later(5000ms, [weak_self] {
+            if (auto self = weak_self.lock()) {
+                if (auto snode_pool = self->_snode_pool.lock()) {
+                    if (snode_pool->size() == 0)
+                        snode_pool->refresh_if_needed({}, [weak_self] {
+                            if (auto self = weak_self.lock())
+                                self->_loop->call([weak_self] {
+                                    if (auto self = weak_self.lock())
+                                        self->_finish_setup();
+                                });
+                        });
+                    else
+                        self->_loop->call([weak_self] {
+                            if (auto self = weak_self.lock())
+                                self->_finish_setup();
+                        });
+                } else
+                    log::critical(
+                            cat, "[LokinetRouter] SnodePool was destroyed, cannot setup router.");
+            }
         });
     } catch (const std::exception& e) {
         log::error(cat, "[LokinetRouter] Failed to start lokinet ({}).", e.what());
@@ -144,8 +156,10 @@ std::vector<PathInfo> LokinetRouter::get_active_paths() {
 }
 
 void LokinetRouter::send_request(Request request, network_response_callback_t callback) {
-    _loop->call([this, req = std::move(request), cb = std::move(callback)] {
-        _send_request_internal(std::move(req), std::move(cb));
+    auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
+    _loop->call([weak_self, req = std::move(request), cb = std::move(callback)] {
+        if (auto self = weak_self.lock())
+            self->_send_request_internal(std::move(req), std::move(cb));
     });
 }
 
@@ -364,64 +378,72 @@ void LokinetRouter::_establish_tunnel(
             "[LokinetRouter Request {}] Establishing new tunnel to {}.",
             initiating_req_id,
             address_pubkey_hex);
+    auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
     lokinet->establish_udp(
             lokinet_address.to_string(),
             test_port,
-            [this, address_pubkey_hex, initiating_req_id](lokinet::tunnel_info info) mutable {
-                log::info(
-                        cat,
-                        "[LokinetRouter Request {}] Tunnel to remote {} established.",
-                        initiating_req_id,
-                        address_pubkey_hex);
-
-                auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
-                _pending_requests.erase(address_pubkey_hex);
-                _active_tunnels.insert_or_assign(address_pubkey_hex, info);
-
-                // We had a successful connection so update the status to connected
-                _update_status(ConnectionStatus::connected);
-
-                if (!requests_to_process.empty()) {
-                    log::debug(
+            [weak_self, address_pubkey_hex, initiating_req_id](lokinet::tunnel_info info) mutable {
+                if (auto self = weak_self.lock()) {
+                    log::info(
                             cat,
-                            "[LokinetRouter] Processing {} pending requests on new tunnel to {}.",
-                            requests_to_process.size(),
-                            info.remote);
+                            "[LokinetRouter Request {}] Tunnel to remote {} established.",
+                            initiating_req_id,
+                            address_pubkey_hex);
 
-                    for (auto&& [req, cb] : std::move(requests_to_process))
-                        _send_via_tunnel(info, std::move(req), std::move(cb));
+                    auto requests_to_process =
+                            std::move(self->_pending_requests[address_pubkey_hex]);
+                    self->_pending_requests.erase(address_pubkey_hex);
+                    self->_active_tunnels.insert_or_assign(address_pubkey_hex, info);
+
+                    // We had a successful connection so update the status to connected
+                    self->_update_status(ConnectionStatus::connected);
+
+                    if (!requests_to_process.empty()) {
+                        log::debug(
+                                cat,
+                                "[LokinetRouter] Processing {} pending requests on new tunnel to "
+                                "{}.",
+                                requests_to_process.size(),
+                                info.remote);
+
+                        for (auto&& [req, cb] : std::move(requests_to_process))
+                            self->_send_via_tunnel(info, std::move(req), std::move(cb));
+                    }
                 }
             },
-            [this, address_pubkey_hex, initiating_req_id](std::string errmsg) mutable {
-                log::info(
-                        cat,
-                        "[LokinetRouter Request {}] Unable to establish lokinet UDP connection to "
-                        "{} due to error: {}.",
-                        initiating_req_id,
-                        address_pubkey_hex,
-                        errmsg);
-
-                _active_tunnels.erase(address_pubkey_hex);
-
-                // Fail all the pending requests for this connection
-                if (auto it = _pending_requests.find(address_pubkey_hex);
-                    it != _pending_requests.end()) {
-                    auto to_fail = std::move(it->second);
-                    _pending_requests.erase(it);
-
-                    log::error(
+            [weak_self, address_pubkey_hex, initiating_req_id](std::string errmsg) mutable {
+                if (auto self = weak_self.lock()) {
+                    log::info(
                             cat,
-                            "[LokinetRouter] Failing {} pending requests due to UDP connection "
-                            "failure.",
-                            to_fail.size());
+                            "[LokinetRouter Request {}] Unable to establish lokinet UDP connection "
+                            "to "
+                            "{} due to error: {}.",
+                            initiating_req_id,
+                            address_pubkey_hex,
+                            errmsg);
 
-                    for (auto& [req, cb] : to_fail)
-                        cb(false, false, -1, {content_type_plain_text}, errmsg);
+                    self->_active_tunnels.erase(address_pubkey_hex);
+
+                    // Fail all the pending requests for this connection
+                    if (auto it = self->_pending_requests.find(address_pubkey_hex);
+                        it != self->_pending_requests.end()) {
+                        auto to_fail = std::move(it->second);
+                        self->_pending_requests.erase(it);
+
+                        log::error(
+                                cat,
+                                "[LokinetRouter] Failing {} pending requests due to UDP connection "
+                                "failure.",
+                                to_fail.size());
+
+                        for (auto& [req, cb] : to_fail)
+                            cb(false, false, -1, {content_type_plain_text}, errmsg);
+                    }
+
+                    // If we have no longer have any active connections then we are disconnected
+                    if (self->_active_tunnels.empty())
+                        self->_update_status(ConnectionStatus::disconnected);
                 }
-
-                // If we have no longer have any active connections then we are disconnected
-                if (_active_tunnels.empty())
-                    _update_status(ConnectionStatus::disconnected);
             });
 }
 
@@ -460,24 +482,26 @@ void LokinetRouter::_send_via_tunnel(
             request.time_remaining(),
             remaining_overall_timeout};
 
-    if (auto transport = _transport.lock())
+    if (auto transport = _transport.lock()) {
+        auto weak_self = std::weak_ptr<LokinetRouter>(shared_from_this());
         transport->send_request(
                 std::move(lokinet_request),
-                [this, original_request = std::move(request), cb = std::move(callback)](
+                [weak_self, original_request = std::move(request), cb = std::move(callback)](
                         bool success,
                         bool timeout,
                         int16_t status_code,
                         auto headers,
                         auto response) {
-                    _handle_transport_response(
-                            success,
-                            timeout,
-                            status_code,
-                            std::move(headers),
-                            std::move(response),
-                            std::move(cb));
+                    if (auto self = weak_self.lock())
+                        self->_handle_transport_response(
+                                success,
+                                timeout,
+                                status_code,
+                                std::move(headers),
+                                std::move(response),
+                                std::move(cb));
                 });
-    else {
+    } else {
         log::critical(cat, "[LokinetRouter] Transport was destroyed, cannot send request.");
         return;
     }

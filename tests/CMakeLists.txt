@@ -34,10 +34,10 @@ set(LIB_SESSION_UTESTS_SOURCES
 )
 
 if(ENABLE_NETWORKING)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_session_network.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onion_request_router.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_snode_pool.cpp)
 endif()
 
 add_library(test_libs INTERFACE)

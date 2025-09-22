@@ -67,7 +67,11 @@ void QuicTransport::close_connections() {
 }
 
 void QuicTransport::set_node_failure_reporter(node_failure_reporter_t reporter) {
-    _loop->call([this, r = std::move(reporter)] { _report_node_failure.emplace(std::move(r)); });
+    auto weak_self = std::weak_ptr<QuicTransport>(shared_from_this());
+    _loop->call([weak_self, r = std::move(reporter)] {
+        if (auto self = weak_self.lock())
+            self->_report_node_failure.emplace(std::move(r));
+    });
 }
 
 void QuicTransport::verify_connectivity(
@@ -77,37 +81,50 @@ void QuicTransport::verify_connectivity(
         std::function<void(bool success)> callback) {
     // For Quic, a successful connection IS a successful ping so we can just check for an existing
     // connection and, if one doesn't exist, try to establish one
-    _loop->call([this, node = std::move(node), cb = std::move(callback), context_id]() {
-        const auto pubkey_hex = oxenc::to_hex(node.view_remote_key());
+    auto weak_self = std::weak_ptr<QuicTransport>(shared_from_this());
+    _loop->call([weak_self, node = std::move(node), cb = std::move(callback), context_id]() {
+        if (auto self = weak_self.lock()) {
+            const auto pubkey_hex = oxenc::to_hex(node.view_remote_key());
 
-        // If we already have a connection we can stop here
-        if (_active_connection_ids.count(pubkey_hex) || _pending_requests.count(pubkey_hex))
-            return cb(true);
+            // If we already have a connection we can stop here
+            if (self->_active_connection_ids.count(pubkey_hex) ||
+                self->_pending_requests.count(pubkey_hex))
+                return cb(true);
 
-        _pending_verification_callbacks[pubkey_hex].push_back(std::move(cb));
+            self->_pending_verification_callbacks[pubkey_hex].push_back(std::move(cb));
 
-        // Only try to establish a connection if we are the first to ask for one
-        if (_pending_requests.count(pubkey_hex) == 0 &&
-            _pending_verification_callbacks.at(pubkey_hex).size() == 1)
-            _establish_connection({node.view_remote_key(), node.host(), node.omq_port}, context_id);
+            // Only try to establish a connection if we are the first to ask for one
+            if (self->_pending_requests.count(pubkey_hex) == 0 &&
+                self->_pending_verification_callbacks.at(pubkey_hex).size() == 1)
+                self->_establish_connection(
+                        {node.view_remote_key(), node.host(), node.omq_port}, context_id);
+        }
     });
 }
 
 void QuicTransport::add_failure_listener(
         const ed25519_pubkey& pubkey, std::function<void()> listener) {
-    _loop->call([this, pk_hex = pubkey.hex(), l = std::move(listener)]() mutable {
-        _failure_listeners[pk_hex].push_back(std::move(l));
+    auto weak_self = std::weak_ptr<QuicTransport>(shared_from_this());
+    _loop->call([weak_self, pk_hex = pubkey.hex(), l = std::move(listener)]() mutable {
+        if (auto self = weak_self.lock())
+            self->_failure_listeners[pk_hex].push_back(std::move(l));
     });
 }
 
 void QuicTransport::remove_failure_listeners(const ed25519_pubkey& pubkey) {
-    _loop->call([this, pk_hex = pubkey.hex()] { _failure_listeners.erase(pk_hex); });
+    auto weak_self = std::weak_ptr<QuicTransport>(shared_from_this());
+    _loop->call([weak_self, pk_hex = pubkey.hex()] {
+        if (auto self = weak_self.lock())
+            self->_failure_listeners.erase(pk_hex);
+    });
 }
 
 void QuicTransport::send_request(Request request, network_response_callback_t callback) {
     log::trace(cat, "[QuicTransport] Dispatching request {} to loop.", request.request_id);
-    _loop->call([this, req = std::move(request), cb = std::move(callback)] {
-        _send_request_internal(std::move(req), std::move(cb));
+    auto weak_self = std::weak_ptr<QuicTransport>(shared_from_this());
+    _loop->call([weak_self, req = std::move(request), cb = std::move(callback)] {
+        if (auto self = weak_self.lock())
+            self->_send_request_internal(std::move(req), std::move(cb));
     });
 }
 
@@ -277,77 +294,85 @@ void QuicTransport::_establish_connection(
             initiating_req_id,
             address_pubkey_hex);
     try {
+        auto weak_self = std::weak_ptr<QuicTransport>(shared_from_this());
         _endpoint->connect(
                 address,
                 creds,
                 oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
-                [this, address_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn) {
-                    log::info(
-                            cat,
-                            "[QuicTransport Request {}] Successfully established connection to {}.",
-                            initiating_req_id,
-                            address_pubkey_hex);
-
-                    auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
-                    auto conn_id = conn.reference_id();
-                    auto stream_id = stream->stream_id();
-                    auto verification_callbacks =
-                            std::move(_pending_verification_callbacks[address_pubkey_hex]);
-                    _pending_verification_callbacks.erase(address_pubkey_hex);
-
-                    auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
-                    _pending_requests.erase(address_pubkey_hex);
-
-                    // Only persistent requests verify connectivity so if there is a verification
-                    // callback then it should be persistent, otherwise if ANY of the requests
-                    // require persistence then we should store the connection (if we don't store it
-                    // then the connection will timeout and be closed)
-                    bool is_persistent = !verification_callbacks.empty();
-                    if (!is_persistent)
-                        is_persistent = std::any_of(
-                                requests_to_process.begin(),
-                                requests_to_process.end(),
-                                [](const auto& req_pair) {
-                                    return !req_pair.first.ephemeral_connection;
-                                });
-
-                    if (is_persistent) {
-                        _ephemeral_connection_ids.erase(conn_id);  // Just in case
-                        _active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
-                    } else
-                        _ephemeral_connection_ids.insert(conn_id);
-
-                    _active_stream_ids.insert_or_assign(conn_id, stream_id);
-
-                    // We had a successful connection so update the status to connected
-                    _update_status(ConnectionStatus::connected);
-
-                    for (const auto& pending_cb : verification_callbacks)
-                        pending_cb(true);
-
-                    if (!requests_to_process.empty()) {
-                        log::debug(
+                [weak_self, address_pubkey_hex, initiating_req_id](oxen::quic::Connection& conn) {
+                    if (auto self = weak_self.lock()) {
+                        log::info(
                                 cat,
-                                "[QuicTransport] Processing {} pending requests on new stream {} "
-                                "with "
-                                "conn {}.",
-                                requests_to_process.size(),
-                                stream_id,
-                                conn_id.to_string());
+                                "[QuicTransport Request {}] Successfully established connection to "
+                                "{}.",
+                                initiating_req_id,
+                                address_pubkey_hex);
 
-                        for (auto&& [req, cb] : std::move(requests_to_process))
-                            _send_on_connection(conn_id, std::move(req), std::move(cb));
+                        auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
+                        auto conn_id = conn.reference_id();
+                        auto stream_id = stream->stream_id();
+                        auto verification_callbacks = std::move(
+                                self->_pending_verification_callbacks[address_pubkey_hex]);
+                        self->_pending_verification_callbacks.erase(address_pubkey_hex);
+
+                        auto requests_to_process =
+                                std::move(self->_pending_requests[address_pubkey_hex]);
+                        self->_pending_requests.erase(address_pubkey_hex);
+
+                        // Only persistent requests verify connectivity so if there is a
+                        // verification callback then it should be persistent, otherwise if ANY of
+                        // the requests require persistence then we should store the connection (if
+                        // we don't store it then the connection will timeout and be closed)
+                        bool is_persistent = !verification_callbacks.empty();
+                        if (!is_persistent)
+                            is_persistent = std::any_of(
+                                    requests_to_process.begin(),
+                                    requests_to_process.end(),
+                                    [](const auto& req_pair) {
+                                        return !req_pair.first.ephemeral_connection;
+                                    });
+
+                        if (is_persistent) {
+                            self->_ephemeral_connection_ids.erase(conn_id);  // Just in case
+                            self->_active_connection_ids.insert_or_assign(
+                                    address_pubkey_hex, conn_id);
+                        } else
+                            self->_ephemeral_connection_ids.insert(conn_id);
+
+                        self->_active_stream_ids.insert_or_assign(conn_id, stream_id);
+
+                        // We had a successful connection so update the status to connected
+                        self->_update_status(ConnectionStatus::connected);
+
+                        for (const auto& pending_cb : verification_callbacks)
+                            pending_cb(true);
+
+                        if (!requests_to_process.empty()) {
+                            log::debug(
+                                    cat,
+                                    "[QuicTransport] Processing {} pending requests on new stream "
+                                    "{} "
+                                    "with "
+                                    "conn {}.",
+                                    requests_to_process.size(),
+                                    stream_id,
+                                    conn_id.to_string());
+
+                            for (auto&& [req, cb] : std::move(requests_to_process))
+                                self->_send_on_connection(conn_id, std::move(req), std::move(cb));
+                        }
                     }
                 },
-                [this, address_pubkey_hex, initiating_req_id](
+                [weak_self, address_pubkey_hex, initiating_req_id](
                         oxen::quic::Connection& conn, uint64_t error_code) {
-                    _fail_connection(
-                            address_pubkey_hex,
-                            initiating_req_id,
-                            conn.reference_id(),
-                            error_code,
-                            std::nullopt);
+                    if (auto self = weak_self.lock())
+                        self->_fail_connection(
+                                address_pubkey_hex,
+                                initiating_req_id,
+                                conn.reference_id(),
+                                error_code,
+                                std::nullopt);
                 });
     } catch (const std::exception& e) {
         _fail_connection(
@@ -439,61 +464,66 @@ void QuicTransport::_send_on_connection(
     if (request.body)
         payload = to_span<std::byte>(*request.body);
 
+    auto weak_self = std::weak_ptr<QuicTransport>(shared_from_this());
     stream->command(
             request.endpoint,
             payload,
             timeout,
-            [this, cb = std::move(callback), conn_id, stream_id, req_id = request.request_id](
+            [weak_self, cb = std::move(callback), conn_id, stream_id, req_id = request.request_id](
                     quic::message resp) {
-                log::trace(cat, "[QuicTransport Request {}] Received response.", req_id);
+                if (auto self = weak_self.lock()) {
+                    log::trace(cat, "[QuicTransport Request {}] Received response.", req_id);
 
-                // If this connection was an ephemeral connection then we should close it (don't
-                // want to keep it alive longer than needed)
-                if (_ephemeral_connection_ids.count(conn_id)) {
-                    _ephemeral_connection_ids.erase(conn_id);
-                    _active_stream_ids.erase(conn_id);
+                    // If this connection was an ephemeral connection then we should close it (don't
+                    // want to keep it alive longer than needed)
+                    if (self->_ephemeral_connection_ids.count(conn_id)) {
+                        self->_ephemeral_connection_ids.erase(conn_id);
+                        self->_active_stream_ids.erase(conn_id);
 
-                    if (auto conn = _endpoint->get_conn(conn_id))
-                        conn->close_connection();
-                }
+                        if (auto conn = self->_endpoint->get_conn(conn_id))
+                            conn->close_connection();
+                    }
 
-                // Trigger the callback based on the response we got
-                if (resp.timed_out) {
-                    log::debug(cat, "[QuicTransport Request {}] Timed out.", req_id);
-                    return cb(false, true, 408, {content_type_plain_text}, "Request timed out");
-                }
+                    // Trigger the callback based on the response we got
+                    if (resp.timed_out) {
+                        log::debug(cat, "[QuicTransport Request {}] Timed out.", req_id);
+                        return cb(false, true, 408, {content_type_plain_text}, "Request timed out");
+                    }
 
-                if (resp.is_error()) {
-                    auto final_timeout = resp.timed_out;
-                    auto final_status_code = -1;
-                    std::string err_body =
-                            (resp.body().empty() ? "Unknown QUIC layer error"
-                                                 : std::string{resp.body()});
+                    if (resp.is_error()) {
+                        auto final_timeout = resp.timed_out;
+                        auto final_status_code = -1;
+                        std::string err_body =
+                                (resp.body().empty() ? "Unknown QUIC layer error"
+                                                     : std::string{resp.body()});
 
-                    // The response doesn't provide a status code but the body can include it, in
-                    // which case we should try to extract it from the body so we can perform any
-                    // status code related logic
-                    if (auto result = Response::parse_text_error(err_body)) {
-                        final_status_code = result->first;
-                        final_timeout = result->second;
+                        // The response doesn't provide a status code but the body can include it,
+                        // in which case we should try to extract it from the body so we can perform
+                        // any status code related logic
+                        if (auto result = Response::parse_text_error(err_body)) {
+                            final_status_code = result->first;
+                            final_timeout = result->second;
+                        }
+
+                        log::debug(
+                                cat,
+                                "[QuicTransport Request {}] Failed with QUIC error: {}.",
+                                req_id,
+                                err_body);
+                        return cb(
+                                false,
+                                final_timeout,
+                                final_status_code,
+                                {content_type_plain_text},
+                                err_body);
                     }
 
                     log::debug(
                             cat,
-                            "[QuicTransport Request {}] Failed with QUIC error: {}.",
-                            req_id,
-                            err_body);
-                    return cb(
-                            false,
-                            final_timeout,
-                            final_status_code,
-                            {content_type_plain_text},
-                            err_body);
+                            "[QuicTransport Request {}] Received raw success response.",
+                            req_id);
+                    cb(true, false, 200, {}, std::string{resp.body()});
                 }
-
-                log::debug(
-                        cat, "[QuicTransport Request {}] Received raw success response.", req_id);
-                cb(true, false, 200, {}, std::string{resp.body()});
             });
 }
 

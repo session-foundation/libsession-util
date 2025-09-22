@@ -27,7 +27,7 @@ namespace config {
     };
 }  // namespace config
 
-class QuicTransport : public ITransport {
+class QuicTransport : public ITransport, public std::enable_shared_from_this<QuicTransport> {
   private:
     bool _suspended = false;
     config::QuicTransportConfig _config;

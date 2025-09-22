@@ -10,6 +10,7 @@
 #include "session/blinding.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/network_opt.hpp"
+#include "session/network/routing/direct_router.hpp"
 #include "session/network/routing/lokinet_router.hpp"
 #include "session/network/routing/onion_request_router.hpp"
 #include "session/network/session_network.h"
@@ -159,7 +160,7 @@ Network::Network(config::Config config) : config{config} {
             break;
 
         case opt::router::Type::direct:
-            // _router = std::make_unique<DirectTransport>(_config, *_snode_pool, _loop);
+            _router = std::make_unique<DirectRouter>(_loop, _transport);
             break;
     }
 

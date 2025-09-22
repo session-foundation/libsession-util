@@ -90,4 +90,8 @@ struct service_node {
     auto operator<=>(const service_node& other) const = default;
 };
 
+inline std::ostream& operator<<(std::ostream& os, const service_node& sn) {
+    return os << sn.to_string();
+}
+
 }  // namespace session::network

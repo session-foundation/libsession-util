@@ -191,15 +191,15 @@ OnionRequestRouter::OnionRequestRouter(
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)},
-        _loop{loop},
-        _snode_pool{snode_pool},
-        _transport{transport},
-        _request_queues{
-                {RequestCategory::standard, {loop, _config.request_timeout_check_frequency}},
-                {RequestCategory::upload, {loop, _config.request_timeout_check_frequency}},
-                {RequestCategory::download, {loop, _config.request_timeout_check_frequency}}} {
+        _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport} {
     log::trace(cat, "[OnionRequestRouter] Initializing.");
+
+    _request_queues[RequestCategory::standard] =
+            std::make_shared<detail::RequestQueue>(loop, _config.request_timeout_check_frequency);
+    _request_queues[RequestCategory::upload] =
+            std::make_shared<detail::RequestQueue>(loop, _config.request_timeout_check_frequency);
+    _request_queues[RequestCategory::download] =
+            std::make_shared<detail::RequestQueue>(loop, _config.request_timeout_check_frequency);
 
     if (auto snode_pool = _snode_pool.lock()) {
         if (snode_pool->size() == 0)
@@ -266,8 +266,10 @@ std::vector<service_node> OnionRequestRouter::get_all_used_nodes() {
 }
 
 void OnionRequestRouter::send_request(Request request, network_response_callback_t callback) {
-    _loop->call([this, req = std::move(request), cb = std::move(callback)] {
-        _send_request_internal(std::move(req), std::move(cb));
+    auto weak_self = std::weak_ptr<OnionRequestRouter>(shared_from_this());
+    _loop->call([weak_self, req = std::move(request), cb = std::move(callback)] {
+        if (auto self = weak_self.lock())
+            self->_send_request_internal(std::move(req), std::move(cb));
     });
 }
 
@@ -283,8 +285,8 @@ void OnionRequestRouter::_finish_setup() {
 
     // Process any requests that were queued before we were ready
     for (auto& [category, queue] : _request_queues) {
-        if (!queue.is_empty()) {
-            auto pending = queue.pop_all();
+        if (!queue->is_empty()) {
+            auto pending = queue->pop_all();
             log::debug(
                     cat,
                     "[OnionRequestRouter] Processing {} requests queued during initialization for "
@@ -333,7 +335,7 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
 void OnionRequestRouter::_close_connections() {
     // Cancel any pending requests (they can't succeed once the connection is closed)
     for (auto& [path_type, path_type_queue] : _request_queues) {
-        auto to_fail = path_type_queue.pop_all();
+        auto to_fail = path_type_queue->pop_all();
 
         for (const auto& [req, callback] : to_fail)
             callback(
@@ -415,7 +417,7 @@ void OnionRequestRouter::_send_request_internal(
 
         try {
             _request_queues.at(initiating_req_category)
-                    .add(std::move(request), std::move(callback));
+                    ->add(std::move(request), std::move(callback));
         } catch (const std::exception& e) {
             log::critical(
                     cat,
@@ -457,7 +459,7 @@ void OnionRequestRouter::_send_request_internal(
     auto initiating_req_id = request.request_id;
 
     try {
-        _request_queues.at(initiating_req_category).add(std::move(request), std::move(callback));
+        _request_queues.at(initiating_req_category)->add(std::move(request), std::move(callback));
     } catch (const std::exception& e) {
         log::critical(
                 cat,
@@ -531,8 +533,8 @@ void OnionRequestRouter::_build_path(
             return;
         }
 
-        if (!queue_it->second.is_empty()) {
-            auto to_fail = queue_it->second.pop_all();
+        if (!queue_it->second->is_empty()) {
+            auto to_fail = queue_it->second->pop_all();
 
             for (const auto& [req, cb] : to_fail)
                 cb(false,
@@ -572,16 +574,21 @@ void OnionRequestRouter::_build_path(
                 path_nodes.size());
         _in_progress_path_builds[category]--;
 
-        if (auto snode_pool = _snode_pool.lock())
+        if (auto snode_pool = _snode_pool.lock()) {
+            auto weak_self = std::weak_ptr<OnionRequestRouter>(shared_from_this());
             snode_pool->refresh_if_needed(
-                    nodes_to_exclude, [this, category, initiating_req_id, nodes_to_exclude]() {
-                        log::info(
-                                cat,
-                                "[OnionRouter Request {}]: SnodePool refresh complete, retrying "
-                                "path build.",
-                                initiating_req_id.value_or("internal"));
-                        _build_path(category, initiating_req_id, nodes_to_exclude);
+                    nodes_to_exclude, [weak_self, category, initiating_req_id, nodes_to_exclude]() {
+                        if (auto self = weak_self.lock()) {
+                            log::info(
+                                    cat,
+                                    "[OnionRouter Request {}]: SnodePool refresh complete, "
+                                    "retrying "
+                                    "path build.",
+                                    initiating_req_id.value_or("internal"));
+                            self->_build_path(category, initiating_req_id, nodes_to_exclude);
+                        }
                     });
+        }
         return;
     }
 
@@ -595,15 +602,18 @@ void OnionRequestRouter::_build_path(
             path_id,
             guard_node.to_string());
 
-    if (auto transport = _transport.lock())
+    if (auto transport = _transport.lock()) {
+        auto weak_self = std::weak_ptr<OnionRequestRouter>(shared_from_this());
         transport->verify_connectivity(
                 guard_node,
                 3s,
                 "{} - Path Build {}"_format(req_id_log, path_id),
-                [this, path_id, category, initiating_req_id](bool success) {
-                    _on_guard_connectivity_response(path_id, category, initiating_req_id, success);
+                [weak_self, path_id, category, initiating_req_id](bool success) {
+                    if (auto self = weak_self.lock())
+                        self->_on_guard_connectivity_response(
+                                path_id, category, initiating_req_id, success);
                 });
-    else {
+    } else {
         log::critical(cat, "[OnionRequestRouter] Transport was destroyed, cannot build path.");
         return;
     }
@@ -672,8 +682,8 @@ void OnionRequestRouter::_on_guard_connectivity_response(
                 return;
             }
 
-            if (!queue_it->second.is_empty()) {
-                auto to_fail = queue_it->second.pop_all();
+            if (!queue_it->second->is_empty()) {
+                auto to_fail = queue_it->second->pop_all();
                 log::error(
                         cat,
                         "[OnionRequestRouter] Failing {} queued requests for '{}' paths due to "
@@ -701,8 +711,10 @@ void OnionRequestRouter::_on_guard_connectivity_response(
                 _config.path_build_retry_limit);
         _update_status();
 
-        _loop->call_later(delay, [this, path_id, category, initiating_req_id, guard_node] {
-            _build_path(category, initiating_req_id, {guard_node}, path_id);
+        auto weak_self = std::weak_ptr<OnionRequestRouter>(shared_from_this());
+        _loop->call_later(delay, [weak_self, path_id, category, initiating_req_id, guard_node] {
+            if (auto self = weak_self.lock())
+                self->_build_path(category, initiating_req_id, {guard_node}, path_id);
         });
         return;
     }
@@ -729,7 +741,7 @@ void OnionRequestRouter::_on_guard_connectivity_response(
         return;
     }
 
-    auto pending_requests = queue_it->second.pop_all();
+    auto pending_requests = queue_it->second->pop_all();
 
     if (!pending_requests.empty()) {
         std::deque<std::pair<Request, network_response_callback_t>> requeue;
@@ -779,7 +791,7 @@ void OnionRequestRouter::_on_guard_connectivity_response(
 
             while (!requeue.empty()) {
                 auto& req_pair = requeue.back();
-                queue_it->second.add_front(std::move(req_pair));
+                queue_it->second->add_front(std::move(req_pair));
                 requeue.pop_back();
             }
 
@@ -796,27 +808,31 @@ void OnionRequestRouter::_on_guard_connectivity_response(
     // Now that we've established a path we need to start observing it in case the connection is
     // lost
     if (auto transport = _transport.lock()) {
+        auto weak_self = std::weak_ptr<OnionRequestRouter>(shared_from_this());
         transport->add_failure_listener(
                 ed25519_pubkey::from_bytes(guard_node.view_remote_key()),
-                [this, pid = path_id, category] {
-                    log::warning(
-                            cat,
-                            "[OnionRequestRouter Path {}]: Transport reported connection failure, "
-                            "retiring path.",
-                            pid);
+                [weak_self, pid = path_id, category] {
+                    if (auto self = weak_self.lock()) {
+                        log::warning(
+                                cat,
+                                "[OnionRequestRouter Path {}]: Transport reported connection "
+                                "failure, "
+                                "retiring path.",
+                                pid);
 
-                    // Set the failure_count of the path to the max value and report the error to
-                    // trigger a rebuild
-                    auto& active_paths = _paths[category];
-                    auto path_it = std::find_if(
-                            active_paths.begin(), active_paths.end(), [&pid](const auto& p) {
-                                return p.id == pid;
-                            });
+                        // Set the failure_count of the path to the max value and report the error
+                        // to trigger a rebuild
+                        auto& active_paths = self->_paths[category];
+                        auto path_it = std::find_if(
+                                active_paths.begin(), active_paths.end(), [&pid](const auto& p) {
+                                    return p.id == pid;
+                                });
 
-                    if (path_it != active_paths.end())
-                        path_it->failure_count = _config.path_failure_threshold;
+                        if (path_it != active_paths.end())
+                            path_it->failure_count = self->_config.path_failure_threshold;
 
-                    _handle_path_failure(pid, category, "Guard connection lost");
+                        self->_handle_path_failure(pid, category, "Guard connection lost");
+                    }
                 });
     }
 }
@@ -939,10 +955,11 @@ void OnionRequestRouter::_send_on_path(
     // Increment the `pending_requests` and actually send the `onion_request`
     path.pending_requests++;
 
-    if (auto transport = _transport.lock())
+    if (auto transport = _transport.lock()) {
+        auto weak_self = std::weak_ptr<OnionRequestRouter>(shared_from_this());
         transport->send_request(
                 std::move(onion_request),
-                [this,
+                [weak_self,
                  path_id = path.id,
                  original_request = std::move(request),
                  builder = std::move(builder),
@@ -952,18 +969,19 @@ void OnionRequestRouter::_send_on_path(
                         int16_t status_code,
                         auto headers,
                         auto response) {
-                    _handle_transport_response(
-                            path_id,
-                            std::move(original_request),
-                            std::move(builder),
-                            success,
-                            timeout,
-                            status_code,
-                            std::move(headers),
-                            std::move(response),
-                            std::move(cb));
+                    if (auto self = weak_self.lock())
+                        self->_handle_transport_response(
+                                path_id,
+                                std::move(original_request),
+                                std::move(builder),
+                                success,
+                                timeout,
+                                status_code,
+                                std::move(headers),
+                                std::move(response),
+                                std::move(cb));
                 });
-    else {
+    } else {
         log::critical(cat, "[OnionRequestRouter] Transport was destroyed, cannot send request.");
         return;
     }

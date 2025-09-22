@@ -34,7 +34,7 @@ namespace config {
     };
 }  // namespace config
 
-class SnodePool {
+class SnodePool : public std::enable_shared_from_this<SnodePool> {
   public:
     using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
     using fetcher_connectivity_check_t = std::function<bool()>;

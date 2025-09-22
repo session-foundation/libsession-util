@@ -42,7 +42,7 @@ struct OnionPath {
     std::string to_string() const;
 };
 
-class OnionRequestRouter : public IRouter {
+class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<OnionRequestRouter> {
   private:
     friend class TestOnionRequestRouter;
 
@@ -55,7 +55,7 @@ class OnionRequestRouter : public IRouter {
 
     std::unordered_map<RequestCategory, std::vector<OnionPath>> _paths;
     std::unordered_map<RequestCategory, std::vector<OnionPath>> _paths_pending_drop;
-    std::unordered_map<RequestCategory, detail::RequestQueue> _request_queues;
+    std::unordered_map<RequestCategory, std::shared_ptr<detail::RequestQueue>> _request_queues;
 
     std::unordered_map<RequestCategory, int> _in_progress_path_builds;
     std::unordered_map<std::string, int> _path_build_retries;
