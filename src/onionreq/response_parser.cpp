@@ -19,9 +19,9 @@ namespace session::onionreq {
 ResponseParser::ResponseParser(session::onionreq::Builder builder) {
     auto dest_x25519_pubkey = builder.get_destination_x25519_public_key();
 
-    if (!dest_x25519_pubkey.has_value())
+    if (!dest_x25519_pubkey)
         throw std::runtime_error{"Builder does not contain destination x25519 public key"};
-    if (!builder.final_hop_x25519_keypair.has_value())
+    if (!builder.final_hop_x25519_keypair)
         throw std::runtime_error{"Builder does not contain final keypair"};
 
     enc_type_ = builder.enc_type;

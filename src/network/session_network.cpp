@@ -293,43 +293,44 @@ void Network::send_request(Request request, network_response_callback_t callback
 
     try {
         auto processed_request = _preprocess_request(std::move(request));
-        auto router_callback = [this, original_req = processed_request, cb = std::move(callback)](
-                                       bool success,
-                                       bool timeout,
-                                       int16_t status_code,
-                                       auto headers,
-                                       auto body) {
-            // If we got a successful response (with a body) and the request was sent to a service
-            // node then we should update the network state based on the response (Note: we don't
-            // want to do this for server requests because they could include values in different
-            // formats, eg. the "Session Network" API returns `t` in seconds)
-            if (success && body && std::holds_alternative<service_node>(original_req.destination))
-                _update_network_state(*body);
+        auto router_callback =
+                [this, original_req = processed_request, cb = std::move(callback)](
+                        bool success, bool timeout, int16_t status_code, auto headers, auto body) {
+                    // If we got a successful response (with a body) and the request was sent to a
+                    // service node then we should update the network state based on the response
+                    // (Note: we don't want to do this for server requests because they could
+                    // include values in different formats, eg. the "Session Network" API returns
+                    // `t` in seconds)
+                    if (success && body &&
+                        std::holds_alternative<service_node>(original_req.destination))
+                        _update_network_state(*body);
 
-            int16_t final_status_code = status_code;
+                    int16_t final_status_code = status_code;
 
-            if (body.has_value(); auto uniform_error = Response::find_uniform_batch_error(*body))
-                final_status_code = *uniform_error;
+                    if (body)
+                        if (auto uniform_error = Response::find_uniform_batch_error(*body))
+                            final_status_code = *uniform_error;
 
-            // If we got a 421 then our swarm info is out of data so we need to refresh our
-            // cache, the original request might succeed after this refresh so we should
-            // just automatically retry
-            if (final_status_code == 421) {
-                _handle_421_retry(std::move(original_req), std::move(cb));
-                return;
-            }
+                    // If we got a 421 then our swarm info is out of data so we need to refresh our
+                    // cache, the original request might succeed after this refresh so we should
+                    // just automatically retry
+                    if (final_status_code == 421) {
+                        _handle_421_retry(std::move(original_req), std::move(cb));
+                        return;
+                    }
 
-            // For debugging purposes we want to add a log if this was a successful request
-            // after we did an automatic retry
-            if (original_req.retry_count > 0)
-                log::info(
-                        cat,
-                        "[Request {}] Received valid response after 421 retry.",
-                        original_req.request_id);
+                    // For debugging purposes we want to add a log if this was a successful request
+                    // after we did an automatic retry
+                    if (original_req.retry_count > 0)
+                        log::info(
+                                cat,
+                                "[Request {}] Received valid response after 421 retry.",
+                                original_req.request_id);
 
-            auto final_success = (success && final_status_code >= 200 && final_status_code <= 299);
-            cb(final_success, timeout, status_code, std::move(headers), std::move(body));
-        };
+                    auto final_success =
+                            (success && final_status_code >= 200 && final_status_code <= 299);
+                    cb(final_success, timeout, status_code, std::move(headers), std::move(body));
+                };
 
         _router->send_request(std::move(processed_request), std::move(router_callback));
     } catch (const std::exception& e) {

@@ -170,7 +170,7 @@ std::vector<unsigned char> Builder::_generate_payload(
     std::vector<std::string> payload{request_info.dump()};
 
     // If we were given a body, add it to the payload
-    if (body.has_value())
+    if (body)
         payload.emplace_back(session::to_string(*body));
 
     auto result = oxenc::bt_serialize(payload);
@@ -257,9 +257,9 @@ std::vector<unsigned char> Builder::build(std::vector<unsigned char> payload) {
             data.insert(data.end(), control_span.begin(), control_span.end());
             blob = e.encrypt(enc_type, data, *destination_x25519_public_key_);
         } else {
-            if (!destination_x25519_public_key_.has_value())
+            if (!destination_x25519_public_key_)
                 throw std::runtime_error{"Destination not set: No destination x25519 public key"};
-            if (!ed25519_public_key_.has_value())
+            if (!ed25519_public_key_)
                 throw std::runtime_error{"Destination not set: No destination ed25519 public key"};
             throw std::runtime_error{
                     "Destination not set: " + host_.value_or("N/A") + ", " +

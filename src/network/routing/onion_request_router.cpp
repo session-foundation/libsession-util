@@ -928,9 +928,9 @@ void OnionRequestRouter::_handle_transport_response(
     bool should_penalize_path = false;
     bool is_server_dest = std::holds_alternative<ServerDestination>(original_request.destination);
 
-    if (decrypted_body.has_value();
-        auto uniform_error = Response::find_uniform_batch_error(*decrypted_body))
-        final_status_code = *uniform_error;
+    if (decrypted_body)
+        if (auto uniform_error = Response::find_uniform_batch_error(*decrypted_body))
+            final_status_code = *uniform_error;
 
     if (final_success)
         final_success = (final_status_code >= 200 && final_status_code <= 299);
