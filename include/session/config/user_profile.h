@@ -92,7 +92,8 @@ LIBSESSION_EXPORT int user_profile_set_name(config_object* conf, const char* nam
 ///
 /// Obtains the current profile pic.  The pointers in the returned struct will be NULL if a profile
 /// pic is not currently set, and otherwise should be copied right away (they will not be valid
-/// beyond other API calls on this config object).
+/// beyond other API calls on this config object).  The returned value will be the latest profile
+/// pic between when the user last set their profile and when it was last re-uploaded.
 ///
 /// Declaration:
 /// ```cpp
@@ -110,7 +111,7 @@ LIBSESSION_EXPORT user_profile_pic user_profile_get_pic(const config_object* con
 
 /// API: user_profile/user_profile_set_pic
 ///
-/// Sets a user profile
+/// Sets a user profile pic
 ///
 /// Declaration:
 /// ```cpp
@@ -127,6 +128,26 @@ LIBSESSION_EXPORT user_profile_pic user_profile_get_pic(const config_object* con
 /// Outputs:
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_EXPORT int user_profile_set_pic(config_object* conf, user_profile_pic pic);
+
+/// API: user_profile/user_profile_set_reupload_pic
+///
+/// Sets a user profile pic when reuploading
+///
+/// Declaration:
+/// ```cpp
+/// INT user_profile_set_reupload_pic(
+///     [in]    config_object*      conf,
+///     [in]    user_profile_pic    pic
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `pic` -- [in] Pointer to the pic
+///
+/// Outputs:
+/// - `int` -- Returns 0 on success, non-zero on error
+LIBSESSION_EXPORT int user_profile_set_reupload_pic(config_object* conf, user_profile_pic pic);
 
 /// API: user_profile/user_profile_get_nts_priority
 ///
@@ -244,6 +265,19 @@ LIBSESSION_EXPORT int user_profile_get_blinded_msgreqs(const config_object* conf
 /// Outputs:
 /// - `void` -- Returns Nothing
 LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int enabled);
+
+/// API: user_profile/user_profile_get_profile_updated
+///
+/// Returns the timestamp that the user last updated their profile information; or `0` if it's
+/// never been updated.  This value will return the latest timestamp between when the user last
+/// set their profile and when it was last re-uploaded.
+///
+/// Inputs: None
+///
+/// Outputs:
+/// - `int64_t` - timestamp (unix seconds) that the user last updated their public profile
+/// information.  Will be `0` if it's never been updated.
+LIBSESSION_EXPORT int64_t user_profile_get_profile_updated(config_object* conf);
 
 #ifdef __cplusplus
 }  // extern "C"

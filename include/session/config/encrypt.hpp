@@ -57,6 +57,8 @@ void encrypt_inplace(
 
 /// API: encrypt/ENCRYPT_DATA_OVERHEAD
 ///
+/// Member variable
+///
 /// This value contains the constant amount of extra bytes required for encryption as performed by
 /// `encrypt()`/`decrypt()`/`encrypt_inplace()`/`decrypt_inplace()`.
 ///

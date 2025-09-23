@@ -679,6 +679,7 @@ ConfigMessage::ConfigMessage(
     for (const auto& [seqno_hash, ptrs] : replay) {
         const auto& [data, diff] = ptrs;
         apply_diff(data_, *diff, *data);
+
         lagged_diffs_.emplace_hint(lagged_diffs_.end(), seqno_hash, *diff);
     }
 

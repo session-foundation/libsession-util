@@ -40,6 +40,7 @@ using namespace std::literals;
 ///         resent)
 ///       - 3 if a member has been marked for promotion but the promotion hasn't been sent yet.
 ///       - omitted once the promotion is accepted (i.e. once `A` gets set).
+///   t - The `profile_updated` unix timestamp (seconds) for this contacts profile information.
 
 constexpr int STATUS_SENT = 1, STATUS_FAILED = 2, STATUS_NOT_SENT = 3;
 constexpr int REMOVED_MEMBER = 1, REMOVED_MEMBER_AND_MESSAGES = 2;
@@ -99,6 +100,13 @@ struct member {
     /// members of the group to display a member's details before having seen a message from that
     /// member.
     profile_pic profile_picture;
+
+    /// API: groups/member::profile_updated
+    ///
+    /// Member variable
+    ///
+    /// The unix timestamp (seconds) that this profile information was last updated.
+    std::chrono::sys_seconds profile_updated{};
 
     /// API: groups/member::admin
     ///

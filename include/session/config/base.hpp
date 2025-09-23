@@ -612,6 +612,36 @@ class ConfigBase : public ConfigSig {
             return fallback;
         }
 
+        /// API: base/ConfigBase::DictFieldProxy::sys_time
+        ///
+        /// Returns the integer value loaded into a seconds-since-epoch std::chrono::sys_seconds
+        /// value if an integer value exists at the given location, std::nullopt otherwise.
+        ///
+        /// Inputs: None
+        ///
+        /// Outputs:
+        /// - `std::optional<std::chrono::sys_time>` -- nullopt if the value doesn't exist (or isn't
+        ///   an integer), otherwise the integer value loaded as a seconds-from-epoch.
+        std::optional<std::chrono::sys_seconds> sys_seconds() const {
+            if (const auto* i = integer())
+                return std::make_optional<std::chrono::sys_seconds>(std::chrono::seconds{*i});
+            return std::nullopt;
+        }
+
+        /// API: base/ConfigBase::DictFieldProxy::sys_time_or
+        ///
+        /// Returns the value as a std::chrono::sys_time or a fallback if the value doesn't exist
+        /// (or isn't an integer).
+        ///
+        /// Inputs:
+        /// - `fallback` -- this value will be returned if it the requested value doesn't exist
+        ///
+        /// Outputs:
+        /// - `int64_t` -- Returned Integer
+        std::chrono::sys_seconds sys_seconds_or(std::chrono::sys_seconds fallback) const {
+            return sys_seconds().value_or(fallback);
+        }
+
         /// API: base/ConfigBase::DictFieldProxy::set
         ///
         /// Returns a const pointer to the set if one exists at the given location, nullptr
@@ -655,7 +685,7 @@ class ConfigBase : public ConfigSig {
         /// - `value` -- replaces current value with given string view
         void operator=(std::string_view value) { *this = std::string{value}; }
 
-        /// API: base/ConfigBase::DictFieldProxy::operator=(std::span<const unsigned char>)
+        /// API: base/ConfigBase::DictFieldProxy::operator=(std::span)
         ///
         /// Replaces the current value with the given std::span<const unsigned char>.  This also
         /// auto-vivifies any intermediate dicts needed to reach the given key, including replacing
@@ -678,6 +708,19 @@ class ConfigBase : public ConfigSig {
         /// Inputs:
         /// - `value` -- replaces current value with given integer
         void operator=(int64_t value) { assign_if_changed(value); }
+
+        /// API: base/ConfigBase::DictFieldProxy::operator=(std::chrono::sys_seconds)
+        ///
+        /// Replaces the current value with an integer containing the seconds-since-epoch of the
+        /// given system time point.  This also auto-vivifies any intermediate dicts needed to reach
+        /// the given key, including replacing non-dict values if they currently exist along the
+        /// path.
+        ///
+        /// Inputs:
+        /// - `value` -- replaces current value with given sys_seconds's time_since_epoch() value.
+        void operator=(std::chrono::sys_seconds value) {
+            assign_if_changed(static_cast<int64_t>(value.time_since_epoch().count()));
+        }
 
         /// API: base/ConfigBase::DictFieldProxy::operator=(config::set)
         ///
@@ -1253,6 +1296,8 @@ class ConfigBase : public ConfigSig {
 
     /// API: base/ConfigBase::MULTIPART_MAX_WAIT
     ///
+    /// Member variable
+    ///
     /// This value controls how long we will store incomplete multipart messages since the last part
     /// of such a message that we received, in the hopes of getting the rest of the parts soon.  The
     /// default is a week: although long, this allows for extended downtime of a multidevice client
@@ -1266,6 +1311,8 @@ class ConfigBase : public ConfigSig {
     std::chrono::milliseconds MULTIPART_MAX_WAIT = 7 * 24h;
 
     /// API: base/ConfigBase::MULTIPART_MAX_REMEMBER
+    ///
+    /// Member variable
     ///
     /// This value controls how long we retain the hashes of *completed* multipart config sets (so
     /// that we can know to ignore duplicate message parts of messages we have already processed).
