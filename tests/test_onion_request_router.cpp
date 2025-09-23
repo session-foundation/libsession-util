@@ -135,30 +135,28 @@ namespace {
         void record_node_failure(const service_node& node, bool permanent = false) override {
             if (check_should_ignore_and_log_call("record_node_failure(node)"))
                 return;
-            return SnodePool::record_node_failure(node, permanent);
+            SnodePool::record_node_failure(node, permanent);
         }
 
         void record_node_failure(const ed25519_pubkey& key, bool permanent = false) override {
             if (check_should_ignore_and_log_call("record_node_failure(key)"))
                 return;
-            return SnodePool::record_node_failure(key, permanent);
+            SnodePool::record_node_failure(key, permanent);
         }
 
         void refresh_if_needed(
                 const std::vector<service_node>& in_use_nodes,
                 std::function<void()> on_refresh_complete = nullptr) override {
-            if (check_should_ignore_and_log_call("refresh_if_needed"))
-                return;
-            return SnodePool::refresh_if_needed(in_use_nodes, on_refresh_complete);
+            func_called("refresh_if_needed");
+            // Do nothing (don't want to trigger a cache refresh)
         }
 
         void get_swarm(
                 session::network::x25519_pubkey swarm_pubkey,
                 std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback)
                 override {
-            if (check_should_ignore_and_log_call("get_swarm"))
-                return;
-            return SnodePool::get_swarm(swarm_pubkey, callback);
+            func_called("get_swarm");
+            // Do nothing (don't want to trigger a cache refresh)
         }
 
         std::vector<service_node> get_unused_nodes(
@@ -255,7 +253,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     for (auto code : codes_with_no_changes) {
         snode_pool->clear_node_failure_counts();
         snode_pool->reset_calls();
-        snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
         path.emplace(OnionPath{"Test", {target2, target3, target4}});
         router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
         TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {*path});
@@ -293,7 +290,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     // Check general error handling (first failure)
     snode_pool->clear_node_failure_counts();
     snode_pool->reset_calls();
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {*path});
@@ -329,7 +325,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     snode_pool->clear_node_failure_counts();
     REQUIRE(snode_pool->node_failure_count(target2) == 0);
     snode_pool->reset_calls();
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(
@@ -367,7 +362,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     // Check general error handling with a path and specific node failure
     snode_pool->clear_node_failure_counts();
     snode_pool->reset_calls();
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
     snode_pool->mock_unused_nodes = {target};
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
@@ -405,7 +399,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     // Check a 421 doesn't impact the node failure counts
     snode_pool->clear_node_failure_counts();
     snode_pool->reset_calls();
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {*path});
@@ -454,7 +447,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
                     0ms};
     snode_pool->clear_node_failure_counts();
     snode_pool->reset_calls();
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {*path});
@@ -493,7 +485,6 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     for (auto code : server_codes_with_no_changes) {
         snode_pool->clear_node_failure_counts();
         snode_pool->reset_calls();
-        snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
         path.emplace(OnionPath{"Test", {target2, target3, target4}});
         router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
         TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {*path});
@@ -557,7 +548,6 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
 
     // Nothing should happen if the network is suspended
     snode_pool->reset_calls();
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_unused_nodes");
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     router->suspend();
     TestOnionRequestRouter::build_path(router, RequestCategory::standard);
@@ -565,7 +555,6 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
 
     // If the unused nodes are empty it refreshes them
     snode_pool->reset_calls();
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_unused_nodes");
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::build_path(router, RequestCategory::standard);
     CHECK(snode_pool->called("get_unused_nodes"));
@@ -613,19 +602,16 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
     std::shared_ptr<OnionRequestRouter> router;
 
     // It returns nothing when given no path options
-    snode_pool->ignore_calls_to("refresh_if_needed");
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {});
     CHECK(TestOnionRequestRouter::find_valid_path(router, request) == nullptr);
 
     // It excludes paths which include the IP of the target
-    snode_pool->ignore_calls_to("refresh_if_needed");
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {path1});
     CHECK(TestOnionRequestRouter::find_valid_path(router, request) == nullptr);
 
     // It returns a path when there is a valid one
-    snode_pool->ignore_calls_to("refresh_if_needed");
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {path2});
     CHECK(TestOnionRequestRouter::find_valid_path(router, request) != nullptr);
@@ -641,7 +627,6 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
             true,
             true,  // single path mode
             {{RequestCategory::standard, 1}}};
-    snode_pool->ignore_calls_to("refresh_if_needed");
     router = std::make_shared<OnionRequestRouter>(config, loop, snode_pool, transport);
     TestOnionRequestRouter::set_paths(router, RequestCategory::standard, {path1});
     CHECK(TestOnionRequestRouter::find_valid_path(router, request) != nullptr);
@@ -684,7 +669,6 @@ TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeou
     auto transport = std::make_shared<TestTransport>();
     auto queue = std::make_shared<detail::TestRequestQueue>(loop, 50ms);
     std::shared_ptr<OnionRequestRouter> router;
-    snode_pool->ignore_calls_to("refresh_if_needed", "get_swarm");
 
     // Test that it doesn't start checking for timeouts when the request doesn't have an overall
     // timeout

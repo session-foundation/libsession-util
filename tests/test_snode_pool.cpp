@@ -8,7 +8,7 @@ using namespace session::network;
 
 namespace session::network {
 
-class TestSnodePool : public SnodePool, public CallTracker {
+class TestSnodePool : public SnodePool {
   public:
     std::optional<std::vector<service_node>> mock_unused_nodes;
 
@@ -27,9 +27,7 @@ class TestSnodePool : public SnodePool, public CallTracker {
     void refresh_if_needed(
             const std::vector<service_node>& in_use_nodes,
             std::function<void()> on_refresh_complete = nullptr) override {
-        if (check_should_ignore_and_log_call("refresh_if_needed"))
-            return;
-        return SnodePool::refresh_if_needed(in_use_nodes, on_refresh_complete);
+        // Do nothing (don't want to trigger a cache refresh)
     }
 };
 }  // namespace session::network
@@ -89,7 +87,6 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     auto loop = std::make_shared<oxen::quic::Loop>();
     auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
     snode_pool->reset_state_with_cache(snode_cache);
-    snode_pool->ignore_calls_to("refresh_if_needed");
 
     // Should return a result in a different order
     snode_pool->reset_state_with_cache(snode_cache);
