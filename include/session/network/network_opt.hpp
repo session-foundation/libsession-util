@@ -161,7 +161,8 @@ namespace opt {
             quic,
             callbacks,
         };
-// TODO: Add in "HTTP" as an option
+        // TODO: Add in "HTTP" as an option
+
         using network_callback_t = std::function<void(
                 std::string url, std::string body, network_response_callback_t handle_response)>;
 

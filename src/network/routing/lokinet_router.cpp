@@ -24,7 +24,7 @@ namespace session::network {
 namespace {
     auto cat = oxen::log::Cat("network");
 
-    static constexpr std::string PROXIED_REQUESTS_KEY = "proxied_requests";
+    static constexpr std::string_view PROXIED_REQUESTS_KEY{"proxied_requests"};
 
     std::string pending_request_key(const network_destination& dest) {
         std::optional<std::string> key;
@@ -601,10 +601,10 @@ void LokinetRouter::_establish_tunnel(
             });
 }
 
-    // TODO: Is there a way to check that the 'tunnel_info' still active?
-    
 void LokinetRouter::_send_via_tunnel(
         lokinet::tunnel_info tunnel, Request request, network_response_callback_t callback) {
+    // TODO: Is there a way to check that the 'tunnel_info' still active?
+
     // If the request has already timedout at this point then just fail it immediately
     auto timeout = request.time_remaining();
     if (timeout <= std::chrono::milliseconds::zero())
