@@ -88,9 +88,22 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
     snode_pool->reset_state_with_cache(snode_cache);
 
-    // Should return a result in a different order
+    // Should return a result in a different order (since this is random, it's possible that it
+    // could return the same order so repeat up to 5 times to make the chance of this negligible)
     snode_pool->reset_state_with_cache(snode_cache);
-    CHECK(snode_pool->get_unused_nodes(20) != snode_pool->get_unused_nodes(20));
+    auto results_differed = false;
+    auto first_result = snode_pool->get_unused_nodes(20);
+
+    for (auto i = 0; i < 5; ++i) {
+        auto next_result = snode_pool->get_unused_nodes(20);
+
+        if (next_result != first_result) {
+            results_differed = true;
+            break;
+        }
+    }
+    INFO("get_unused_nodes() produced the same result 5 times in a row.");
+    CHECK(results_differed);
 
     // Should contain the entire snode cache initially
     snode_pool->reset_state_with_cache(snode_cache);
