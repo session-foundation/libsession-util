@@ -209,7 +209,7 @@ struct GetProProofRequest {
 };
 
 /// Retrieve the current list of revocations for currently active Session Pro proofs (because of
-/// refunds for example). The caller should maintain this list until the revocation has expired and
+/// refunds for example). The caller should maintain this list until the revocation has expiry and
 /// periodically retrieve this list from the backend every hour.
 struct GetProRevocationsRequest {
     /// Request version. The latest accepted version is 0
@@ -306,12 +306,13 @@ struct ProPaymentItem {
     /// Describes the current status of the consumption of the payment for Session Pro entitlement
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
 
-    /// Unix timestamp when the payment was activated for Session Pro.
-    /// 0 if not activated (e.g., another active subscription or refunded).
-    std::chrono::sys_time<std::chrono::milliseconds> activated_unix_ts;
+    /// Unix timestamp of when the payment was expiry. 0 if not activated
+    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts;
 
-    /// Unix timestamp of when the payment was expired. 0 if not activated
-    std::chrono::sys_time<std::chrono::milliseconds> expired_unix_ts;
+    /// Unix timestamp when the payment provider will start to attempt to renew the Session Pro
+    /// subscription. During the period between [grace_unix_ts, expiry_unix_ts] the user continues
+    /// to have entitlement to Session Pro. This is set to 0 if auto-renewal is not enabled.
+    std::chrono::sys_time<std::chrono::milliseconds> grace_unix_ts;
 
     /// Unix timestamp of when the payment was redeemed. 0 if not activated
     std::chrono::sys_time<std::chrono::milliseconds> redeemed_unix_ts;
@@ -347,6 +348,15 @@ struct GetProStatusResponse : public ResponseHeader {
 
     /// Current Session Pro entitlement status for the master public key
     SESSION_PRO_BACKEND_USER_PRO_STATUS user_status;
+
+    /// Unix timestamp of when the the latest payment will expire. 0 if no payments are available
+    /// for the requested Session Pro master public key.
+    std::chrono::sys_time<std::chrono::milliseconds> latest_expiry_unix_ts;
+
+    /// Unix timestamp when the payment provider will start to attempt to renew the Session Pro
+    /// subscription. During the period between [grace_unix_ts, expiry_unix_ts] the user continues
+    /// to have entitlement to Session Pro. This is set to 0 if auto-renewal is not enabled.
+    std::chrono::sys_time<std::chrono::milliseconds> latest_grace_unix_ts;
 
     /// API: pro/GetProPaymentsResponse::parse
     ///

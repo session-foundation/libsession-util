@@ -31,7 +31,6 @@ typedef enum SESSION_PRO_BACKEND_PAYMENT_STATUS {
     SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_UNREDEEMED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED,
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_ACTIVATED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_EXPIRED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_REFUNDED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_COUNT,
@@ -156,8 +155,8 @@ typedef struct session_pro_backend_get_pro_status_request {
 typedef struct session_pro_backend_pro_payment_item {
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
     uint64_t subscription_duration_s;
-    uint64_t activated_unix_ts_ms;
-    uint64_t expired_unix_ts_ms;
+    uint64_t grace_unix_ts_ms;
+    uint64_t expiry_unix_ts_ms;
     uint64_t refunded_unix_ts_ms;
     uint64_t redeemed_unix_ts_ms;
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
@@ -178,6 +177,8 @@ typedef struct session_pro_backend_get_pro_status_response {
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
     size_t items_count;
+    uint64_t latest_expiry_unix_ts_ms;
+    uint64_t latest_grace_unix_ts_ms;
     SESSION_PRO_BACKEND_USER_PRO_STATUS status;
 } session_pro_backend_get_pro_status_response;
 

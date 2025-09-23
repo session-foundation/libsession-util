@@ -452,6 +452,13 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
     }
     result.user_status = static_cast<SESSION_PRO_BACKEND_USER_PRO_STATUS>(user_status);
 
+    uint64_t latest_grace_ts = json_require<uint64_t>(result_obj, "latest_grace_unix_ts_ms", result.errors);
+    uint64_t latest_expiry_ts = json_require<uint64_t>(result_obj, "latest_expiry_unix_ts_ms", result.errors);
+    result.latest_grace_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(latest_grace_ts));
+    result.latest_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(latest_expiry_ts));
+
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
@@ -465,8 +472,8 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
         auto status = json_require<uint64_t>(obj, "status", result.errors);
-        auto activated_ts = json_require<uint64_t>(obj, "activated_unix_ts_ms", result.errors);
-        auto expired_ts = json_require<uint64_t>(obj, "expired_unix_ts_ms", result.errors);
+        auto grace_ts = json_require<uint64_t>(obj, "grace_unix_ts_ms", result.errors);
+        auto expiry_ts = json_require<uint64_t>(obj, "expiry_unix_ts_ms", result.errors);
         auto redeemed_ts = json_require<uint64_t>(obj, "redeemed_unix_ts_ms", result.errors);
         auto refunded_ts = json_require<uint64_t>(obj, "refunded_unix_ts_ms", result.errors);
         auto sub_duration_s = json_require<uint64_t>(obj, "subscription_duration_s", result.errors);
@@ -480,10 +487,10 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
             result.errors.push_back(fmt::format("Status value was out-of-bounds: {}", status));
         }
 
-        item.activated_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(activated_ts));
-        item.expired_unix_ts =
-                std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(expired_ts));
+        item.grace_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(grace_ts));
+        item.expiry_unix_ts =
+                std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(expiry_ts));
         item.redeemed_unix_ts =
                 std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(redeemed_ts));
         item.refunded_unix_ts =
@@ -929,6 +936,8 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
     result.items_count = cpp.items.size();
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
             &arena, result.items_count * sizeof(*result.items));
+    result.latest_expiry_unix_ts_ms = cpp.latest_expiry_unix_ts.time_since_epoch().count();
+    result.latest_grace_unix_ts_ms = cpp.latest_grace_unix_ts.time_since_epoch().count();
 
     for (size_t index = 0; index < result.items_count; ++index) {
         const ProPaymentItem& src = cpp.items[index];
@@ -936,12 +945,12 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
         dest.status = src.status;
         dest.subscription_duration_s =
                 std::chrono::duration_cast<std::chrono::seconds>(src.subscription_duration).count();
-        dest.activated_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                            src.activated_unix_ts.time_since_epoch())
+        dest.grace_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            src.grace_unix_ts.time_since_epoch())
                                             .count();
-        dest.expired_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          src.expired_unix_ts.time_since_epoch())
-                                          .count();
+        dest.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         src.expiry_unix_ts.time_since_epoch())
+                                         .count();
         dest.refunded_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                            src.refunded_unix_ts.time_since_epoch())
                                            .count();

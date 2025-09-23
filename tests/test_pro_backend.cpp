@@ -37,8 +37,8 @@ static bool string8_equals(string8 s8, std::string_view str) {
 
 [[maybe_unused]] static void dump_pro_payment_item(
         const session_pro_backend_pro_payment_item& item) {
-    fprintf(stderr, "item.activated_unix_ts_ms: %zu\n", item.activated_unix_ts_ms);
-    fprintf(stderr, "item.expired_unix_ts_ms: %zu\n", item.expired_unix_ts_ms);
+    fprintf(stderr, "item.expiry_unix_ts_ms: %zu\n", item.expiry_unix_ts_ms);
+    fprintf(stderr, "item.grace_unix_ts_ms: %zu\n", item.grace_unix_ts_ms);
     fprintf(stderr, "item.redeemed_unix_ts_ms: %zu\n", item.redeemed_unix_ts_ms);
     fprintf(stderr, "item.refunded_unix_ts_ms: %zu\n", item.refunded_unix_ts_ms);
     fprintf(stderr, "item.subscription_duration: %zu\n", item.subscription_duration_s);
@@ -548,12 +548,14 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
                     {"status", SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED},
+                    {"latest_grace_unix_ts_ms", unix_ts_ms + 1},
+                    {"latest_expiry_unix_ts_ms", unix_ts_ms + 2},
                     {"items",
                      nlohmann::json::array(
-                             {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_ACTIVATED},
+                             {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED},
                                {"subscription_duration_s", 86400},
-                               {"activated_unix_ts_ms", unix_ts_ms},
-                               {"expired_unix_ts_ms", unix_ts_ms},
+                               {"grace_unix_ts_ms", unix_ts_ms},
+                               {"expiry_unix_ts_ms", unix_ts_ms},
                                {"refunded_unix_ts_ms", unix_ts_ms + 3600},
                                {"redeemed_unix_ts_ms", unix_ts_ms - 3600},
                                {"payment_provider",
@@ -576,11 +578,13 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.header.errors == nullptr);
                 REQUIRE(result.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED);
                 REQUIRE(result.items_count == 1);
+                REQUIRE(result.latest_grace_unix_ts_ms == unix_ts_ms + 1);
+                REQUIRE(result.latest_expiry_unix_ts_ms == unix_ts_ms + 2);
                 REQUIRE(result.items != nullptr);
-                REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_ACTIVATED);
+                REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
                 REQUIRE(result.items[0].subscription_duration_s == 86400);
-                REQUIRE(result.items[0].activated_unix_ts_ms == unix_ts_ms);
-                REQUIRE(result.items[0].expired_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.items[0].grace_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
                 REQUIRE(result.items[0].refunded_unix_ts_ms == unix_ts_ms + 3600);
                 REQUIRE(result.items[0].redeemed_unix_ts_ms == unix_ts_ms - 3600);
                 REQUIRE(result.items[0].payment_provider ==
