@@ -2,10 +2,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <session/blinding.hpp>
-#include <session/config/groups/info.hpp>
-#include <session/config/groups/keys.hpp>
-#include <session/config/groups/members.hpp>
-#include <session/config/pro.hpp>
 #include <session/pro_backend.hpp>
 #include <session/random.hpp>
 #include <session/session_encrypt.hpp>
@@ -18,7 +14,7 @@
 using namespace session;
 
 struct SerialisedProtobufContentWithProForTesting {
-    config::ProProof proof;
+    ProProof proof;
     std::string plaintext;
     array_uc64 sig_over_plaintext_with_user_pro_key;
     array_uc32 pro_proof_hash;
@@ -222,7 +218,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_encrypt_for_destination_free(&encrypt_result);
 
         // Verify pro
-        config::ProProof nil_proof = {};
+        ProProof nil_proof = {};
         array_uc32 nil_hash = nil_proof.hash();
         bytes32 decrypt_result_pro_hash = pro_proof_hash(&decrypt_result.pro_proof);
         REQUIRE(decrypt_result.pro_status == PRO_STATUS_NIL);  // Pro was not attached

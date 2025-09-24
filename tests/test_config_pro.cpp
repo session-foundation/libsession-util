@@ -110,7 +110,7 @@ TEST_CASE("Pro", "[config][pro]") {
     session::config::dict good_dict;
     {
         // clang-format off
-        const session::config::ProProof& proof = pro_cpp.proof;
+        const session::ProProof& proof = pro_cpp.proof;
         good_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
             {"p", session::config::dict{
@@ -141,7 +141,7 @@ TEST_CASE("Pro", "[config][pro]") {
         broken_sig[0] = ~broken_sig[0];  // Break the sig
 
         // clang-format off
-        const session::config::ProProof& proof = pro_cpp.proof;
+        const session::ProProof& proof = pro_cpp.proof;
         bad_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
             {"p", session::config::dict{
