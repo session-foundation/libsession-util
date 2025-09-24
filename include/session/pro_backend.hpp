@@ -1,7 +1,8 @@
 #pragma once
 
-#include <session/config/pro.hpp>
+#include <chrono>
 #include <session/types.hpp>
+#include <string>
 
 namespace session::pro_backend {
 
