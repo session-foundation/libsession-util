@@ -29,8 +29,8 @@ void UserProfile::set_name(std::string_view new_name) {
         throw std::invalid_argument{"Invalid profile name: exceeds maximum length"};
     set_nonempty_str(data["n"], new_name);
 
-    // const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    // data[target_timestamp] = ts_now();
+    // const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" :
+    // "T"); data[target_timestamp] = ts_now();
 }
 void UserProfile::set_name_truncated(std::string new_name) {
     set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
@@ -100,8 +100,8 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
     else
         data["M"] = static_cast<int>(*value);
 
-    // const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    // data[target_timestamp] = ts_now();
+    // const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" :
+    // "T"); data[target_timestamp] = ts_now();
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
