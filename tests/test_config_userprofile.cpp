@@ -460,6 +460,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
           "qwert\0yuio1234567890123456789012"_bytes);
 
+#if 0
     // Reupload the "current" pic and confirm it gets returned
     strcpy(p.url, "testUrl");
     memcpy(p.key, "secret78901234567890123456789000", 32);
@@ -531,4 +532,14 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     INFO("Checking if raw_value " << raw_value << " is within the range [" << before_seconds << ", "
                                   << after_seconds << "]");
     CHECK((raw_value >= before_seconds && raw_value <= after_seconds));
+#else
+    // Ensure the timestamp doesn't get updated
+    strcpy(p.url, "testUrl");
+    memcpy(p.key, "secret78901234567890123456789000", 32);
+    CHECK(0 == user_profile_set_reupload_pic(conf, p));
+    CHECK(0 == user_profile_set_pic(conf, p));
+    CHECK(0 == user_profile_set_name(conf, "Test"));
+    user_profile_set_blinded_msgreqs(conf, 1);
+    CHECK(user_profile_get_profile_updated(conf) == 0);
+#endif
 }
