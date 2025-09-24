@@ -36,12 +36,12 @@ constexpr size_t ENCRYPT_KEY_SIZE = 32;
 // retrieved via oxen-storage-server onion requests, and its padded size is the maximum attachment
 // size allowed by the storage server.  (Technically this value was chosen as it is the largest
 // unencrypted data size that has the same padded+encrypted size as a 10'000'000B file).
-constexpr size_t ENCRYPT_MAX_SIZE =
+constexpr size_t MAX_REGULAR_SIZE =
         10218286;  // == 10223616 after stream mac+tag and (1-byte) padding
 
 // Returns the amount of padding to add to an attachment to obfuscate the true size, given
-// crypto_secretstream encryption with a 32kiB chunk size.  We determine the padded size as follows,
-// given an input size N:
+// crypto_secretstream encryption with a 32kiB chunk size.  We determine the padded size as
+// follows, given an input size N:
 //
 // - compute the total raw size M as N plus:
 // - 1 for the 'S' prefix (outside the encryption)
@@ -65,10 +65,23 @@ constexpr size_t ENCRYPT_MAX_SIZE =
 // + 31 × 17 -- embedded mac+tags after every 32kiB of file stream data
 // = 1015808 final output.
 //
-// (Note that we always including at least one padding byte, and there are some complications in the
-// calculation as padding values get large enough to start inducing additional mac+tags; see the
-// implementation for details).
+// (Note that we always including at least one padding byte, and there are some complications in
+// the calculation as padding values get large enough to start inducing additional mac+tags; see
+// the implementation for details).
 size_t encrypted_padding(size_t data_size);
+
+/// API: crypto/attachment::encrypted_size
+///
+/// Returns the exact final encrypted (including any overhead and padding) of an input of
+/// `plaintext_size`.
+size_t encrypted_size(size_t plaintext_size);
+
+/// API: crypto/attachment::decrypted_max_size
+///
+/// Returns the maximum possible decrypted size of encrypted data of length `encrypted_size`.  The
+/// actual size can be (and usually is) less than this depending on how much padding is in the data.
+/// Returns std::nullopt if the input is too small to be a valid encrypted attachment.
+std::optional<size_t> decrypted_max_size(size_t encrypted_size);
 
 /// API: crypto/attachment::encrypt
 ///
@@ -118,9 +131,105 @@ std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encry
         Domain domain,
         bool allow_large = false);
 
+/// API: crypto/attachment::encrypt
+///
+/// Similar to the above `encrypt` except that instead of allocating and returning a vector it
+/// writes the encrypted result directly into a given output span.  The output span *must* be
+/// exactly `encrypted_size()` bytes long (but this is checked via assertion in debug builds).
+///
+/// Inputs:
+/// - `seed` -- as above
+/// - `data` -- as above
+/// - `domain` -- as above
+/// - `out` -- writeable span into which the encrypted data will be written.  This span must be
+///   exactly `encrypted_size(data.size())` bytes long.
+/// - `allow_large` -- as above.
+///
+/// Outputs:
+/// - 32 byte decryption key
+///
+/// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
+/// MAX_REGULAR_SIZE (unless `allow_large` is true).
+std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+        std::span<const std::byte> seed,
+        std::span<const std::byte> data,
+        Domain domain,
+        std::span<std::byte> out,
+        bool allow_large = false);
+
+/// API: crypto/attachment::encrypt
+///
+/// Encrypts the contents of a file on disk into a buffer.  This requires reading the file twice
+/// (once in order to generate the deterministic encryption key and nonce, and then a second time
+/// for the actual encryption), but does not require holding the file contents in memory.
+///
+/// Inputs:
+/// - `seed`, `domain`, `allow_large` -- see above.
+/// - `file` -- path to the file to encrypt.
+///
+/// Outputs:
+/// - Pair of values: the padded+encrypted data, and the decryption key (32 bytes), both in raw
+/// bytes.
+///
+/// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if the file is larger than
+/// MAX_REGULAR_SIZE.
+std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encrypt(
+        std::span<const std::byte> seed,
+        const std::filesystem::path& file,
+        Domain domain,
+        bool allow_large = false);
+
+/// API: crypto/attachment::encrypt
+///
+/// Encrypts the contents of a file on disk into a buffer.  This method is a more general version of
+/// the above that allows allocation of the encrypted buffer via a callback once the size is
+/// determined from the file.
+///
+/// Inputs:
+/// - `seed`, `domain`, `allow_large` -- see above.
+/// - `file` -- path to the file to encrypt.
+/// - `make_buffer` -- callback that is invoked with the exact required encrypted size for the file
+///   that must return a byte span of that exact file where the encrypted data will be written.
+///
+/// Outputs:
+/// - The 32-byte decryption key, in raw bytes.
+///
+/// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if the file is larger than
+/// MAX_REGULAR_SIZE.
+/// Throws std::runtime_error if the file size changes between first and second passes.
+std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+        std::span<const std::byte> seed,
+        const std::filesystem::path& file,
+        Domain domain,
+        std::function<std::span<std::byte>(size_t enc_size)> make_buffer,
+        bool allow_large = false);
+
+/// API: crypto/attachment::encrypt
+///
+/// Encrypts the contents of a plaintext buffer, writing the encrypted data to a file.  The file
+/// will be overwritten.
+///
+/// Inputs:
+/// - `seed`, `domain`, `allow_large` -- see above.
+/// - `data` -- the buffer of data to encrypt.
+/// - `file` -- path to the file to write to.
+///
+/// Outputs:
+/// - The 32-byte decryption key, in raw bytes.
+///
+/// Throws std::invalid_argument if `seed` is shorter than 32 bytes, or if data is larger than
+/// MAX_REGULAR_SIZE (unless `allow_large` is given).  Throws on I/O error.  If decryption fails
+/// then any partially written output file will be removed.
+std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+        std::span<const std::byte> seed,
+        std::span<const std::byte> data,
+        Domain domain,
+        const std::filesystem::path& file,
+        bool allow_large = false);
+
 /// API: crypto/attachment::decrypt
 ///
-/// Decrypts an attachment allegedly produced by attachment::encrypt to a single in-memory buffer.
+/// Decrypts an attachment allegedly produced by attachment::encrypt to an in-memory byte vector.
 ///
 /// Inputs:
 /// - `data` -- in-memory buffer of data to decrypt.
@@ -132,6 +241,28 @@ std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encry
 /// Throws std::runtime_error if decryption fails.
 std::vector<std::byte> decrypt(
         std::span<const std::byte> encrypted, std::span<const std::byte, ENCRYPT_KEY_SIZE> key);
+
+/// API: crypto/attachment::decrypt
+///
+/// Decrypts an attachment allegedly produced by attachment::encrypt to a single in-memory,
+/// caller-provided buffer.  This version writes into a given output span rather than allocating a
+/// new vector.
+///
+/// Inputs:
+/// - `data` -- in-memory buffer of data to decrypt.
+/// - `key` -- the 32-byte decryption key
+/// - `out` -- writeable output span in which the decrypted value should be written.  The given span
+///   must be at least `decrypted_max_size(data.size())` bytes large.
+///
+/// Outputs:
+/// - size_t -- the actual decrypted data size written into `out` which could be (and often is, due
+///   to padding) less than `out.size()`.
+///
+/// Throws std::runtime_error if decryption fails.
+size_t decrypt(
+        std::span<const std::byte> encrypted,
+        std::span<const std::byte, ENCRYPT_KEY_SIZE> key,
+        std::span<std::byte> out);
 
 /// API: crypto/attachment::Decryptor
 ///
@@ -204,5 +335,68 @@ void decrypt(
         std::span<const std::byte> encrypted,
         std::span<const std::byte, ENCRYPT_KEY_SIZE> key,
         const std::filesystem::path& filename);
+
+/// API: crypto/attachment::decrypt
+///
+/// Decrypts an encrypted attachment stored in an input file into a byte vector.
+///
+/// Inputs:
+/// - `filename` -- path to encrypted file.
+/// - `key` -- the 32-byte decryption key.
+///
+/// Outputs:
+/// - vector of decrypted content.
+///
+/// Throws std::runtime_error if decryption fails; can throw I/O exceptions if reading the file
+/// fails.
+std::vector<std::byte> decrypt(
+        const std::filesystem::path& encrypted_file,
+        std::span<const std::byte, ENCRYPT_KEY_SIZE> key);
+
+/// API: crypto/attachment::decrypt
+///
+/// Decrypts an encrypted attachment stored in an input file into a provided memory buffer.
+///
+/// Inputs:
+/// - `filename` -- path to encrypted file.
+/// - `key` -- the 32-byte decryption key.
+/// - `make_buffer` -- callback that is invoked to allocate the buffer into which the content should
+///   be written.  This is passed the required buffer size.  Note that this buffer may not be
+///   completely filled: the return value of `decrypt()` indicates the actual amount of the buffer
+///   that was written.
+///
+/// Outputs:
+/// - size_t the actual decrypted size.  Can be less than the value passed to `decrypted.size()`
+///   because of padding.
+///
+/// Throws std::runtime_error if decryption fails; can throw I/O exceptions if reading the file
+/// fails.
+size_t decrypt(
+        const std::filesystem::path& encrypted_file,
+        std::span<const std::byte, ENCRYPT_KEY_SIZE> key,
+        std::function<std::span<std::byte>(size_t dec_size)> make_buffer);
+
+/// API: crypto/attachment::decrypt
+///
+/// Decrypts an attachment allegedly produced by attachment::encrypt stored in a file to another
+/// output file.  Overwrites the destination file if it already exists.
+///
+/// Unlike the various decrypt functions above, this version does not need to hold more than a few
+/// kB of the input/output file in memory at a time, regardless of the size of the input or output
+/// files.
+///
+/// Inputs:
+/// - `file_in` -- filename containing the data to decrypt.
+/// - `key` -- the 32-byte decryption key.
+/// - `file_out` -- where to write the output file.
+///
+/// Outputs: None.
+///
+/// Throws std::runtime_error if decryption fails or if writing to the file fails.  Upon exception a
+/// partially written file will be deleted.
+void decrypt(
+        const std::filesystem::path& file_in,
+        std::span<const std::byte, ENCRYPT_KEY_SIZE> key,
+        const std::filesystem::path& file_out);
 
 }  // namespace session::attachment

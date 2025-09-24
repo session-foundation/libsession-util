@@ -3,6 +3,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators_range.hpp>
 #include <catch2/matchers/catch_matchers_exception.hpp>
+#include <filesystem>
+#include <fstream>
 #include <session/attachments.hpp>
 
 #include "utils.hpp"
@@ -114,7 +116,10 @@ TEST_CASE("Attachment encryption/decryption -- key separation", "[attachments][k
     auto DATA_SIZE = GENERATE(0, 20, 100, 1000, 33333);
 
     auto seed = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
-    auto seed2 = "8123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+    auto seed2 = GENERATE(
+            "1123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b,
+            "0123456789abcdef0123456789abcdef1123456789abcdef0123456789abcdef"_hex_b,
+            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcde7"_hex_b);
 
     const auto data = make_data(DATA_SIZE);
 
@@ -132,7 +137,7 @@ TEST_CASE("Attachment encryption/decryption -- key separation", "[attachments][d
 
     auto DATA_SIZE = GENERATE(0, 20, 100, 1000, 33333);
 
-    auto seed = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+    auto seed = "2123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
 
     const auto data = make_data(DATA_SIZE);
 
@@ -148,7 +153,7 @@ TEST_CASE("Attachment encryption/decryption -- key separation", "[attachments][d
 
 TEST_CASE("Attachment encryption/decryption -- content separation", "[attachments][content-sep]") {
 
-    auto seed = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+    auto seed = "3123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
 
     const auto data = make_data(50000);
     auto data2 = data;
@@ -172,7 +177,7 @@ TEST_CASE("Attachment Decryptor", "[attachments][decryptor]") {
 
     auto FEED_SIZE = GENERATE(1, 2, 41, 4096, 10000000000);
 
-    auto seed = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+    auto seed = "4123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
 
     const auto data = make_data(DATA_SIZE);
 
@@ -192,4 +197,168 @@ TEST_CASE("Attachment Decryptor", "[attachments][decryptor]") {
 
     REQUIRE(d.finalize());
     CHECK(!!(decrypted == data));
+}
+
+struct temp_data_file {
+    inline static int i = 1;
+    std::filesystem::path path =
+            std::filesystem::temp_directory_path() /
+            std::filesystem::path{"libsession-util-attachment-test-{}"_format(i++)};
+
+    ~temp_data_file() {
+        if (std::filesystem::exists(path))
+            std::filesystem::remove(path);
+    }
+
+    // Constructs a temp filename without actually creating the file
+    temp_data_file() = default;
+
+    // Constructs a plaintext file with deterministic output based on its size:
+    explicit temp_data_file(int len) {
+        std::ofstream out;
+        out.exceptions(std::ios::failbit | std::ios::badbit);
+        out.open(path, std::ios::binary | std::ios::trunc);
+        for (int i = 0; i < len; i++) {
+            std::byte v{static_cast<std::byte>(i * 7 % 256)};
+            out.write(reinterpret_cast<const char*>(&v), 1);
+        }
+    }
+};
+
+TEST_CASE(
+        "Attachment encryption: plaintext file to encrypted buffer",
+        "[attachments][files][encrypt]") {
+
+    auto DATA_SIZE = GENERATE(0, 1, 2, 10, 100, 1000, 2000, 4000, 4053, 4054, 261983, 10218286);
+
+    auto expected_size = DATA_SIZE < 4054      ? 4096
+                       : DATA_SIZE == 4054     ? 8192
+                       : DATA_SIZE == 261983   ? 270336
+                       : DATA_SIZE == 10218286 ? 10223616
+                                               : -1;
+
+    auto seed = "5123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+
+    temp_data_file f{DATA_SIZE};
+
+    auto [enc, key] = attachment::encrypt(seed, f.path, attachment::Domain::ATTACHMENT);
+    CHECK(enc.size() == expected_size);
+    auto decr = attachment::decrypt(enc, key);
+    CHECK(!!(decr == make_data(DATA_SIZE)));
+}
+
+static std::vector<std::byte> slurp_file(const std::filesystem::path& filename) {
+    std::ifstream in;
+    in.exceptions(std::ios::failbit | std::ios::badbit);
+    in.open(filename, std::ios::binary | std::ios::ate);
+    auto endpos = in.tellg();
+    in.seekg(0, std::ios::beg);
+    auto size = endpos - in.tellg();
+
+    std::vector<std::byte> contents;
+    contents.resize(size);
+    in.read(reinterpret_cast<char*>(contents.data()), contents.size());
+
+    return contents;
+}
+
+TEST_CASE(
+        "Attachment encryption: plaintext buffer to encrypted file",
+        "[attachments][files][encrypt]") {
+
+    auto DATA_SIZE = GENERATE(0, 1, 2, 10, 100, 1000, 2000, 4000, 4053, 4054, 261983, 10218286);
+
+    auto expected_size = DATA_SIZE < 4054      ? 4096
+                       : DATA_SIZE == 4054     ? 8192
+                       : DATA_SIZE == 261983   ? 270336
+                       : DATA_SIZE == 10218286 ? 10223616
+                                               : -1;
+
+    auto seed = "6123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+
+    auto data = make_data(DATA_SIZE);
+    temp_data_file f;
+
+    auto key = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT, f.path);
+    auto enc = slurp_file(f.path);
+    CHECK(enc.size() == expected_size);
+    auto decr = attachment::decrypt(enc, key);
+    CHECK(!!(decr == data));
+}
+
+TEST_CASE(
+        "Attachment decryption: encrypted buffer to plaintext file",
+        "[attachments][files][decrypt]") {
+
+    auto DATA_SIZE = GENERATE(0, 1, 2, 10, 100, 1000, 2000, 4000, 4053, 4054, 261983, 10218286);
+
+    auto expected_size = DATA_SIZE < 4054      ? 4096
+                       : DATA_SIZE == 4054     ? 8192
+                       : DATA_SIZE == 261983   ? 270336
+                       : DATA_SIZE == 10218286 ? 10223616
+                                               : -1;
+
+    auto seed = "7123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+
+    const auto data = make_data(DATA_SIZE);
+    auto [enc, key] = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT);
+
+    temp_data_file out{};
+
+    attachment::decrypt(enc, key, out.path);
+
+    auto contents = slurp_file(out.path);
+    CHECK(contents.size() == data.size());
+    CHECK(!!(contents == data));
+}
+
+TEST_CASE(
+        "Attachment decryption: encrypted file to plaintext buffer",
+        "[attachments][files][decrypt]") {
+
+    auto DATA_SIZE = GENERATE(0, 1, 2, 10, 100, 1000, 2000, 4000, 4053, 4054, 261983, 10218286);
+
+    auto expected_size = DATA_SIZE < 4054      ? 4096
+                       : DATA_SIZE == 4054     ? 8192
+                       : DATA_SIZE == 261983   ? 270336
+                       : DATA_SIZE == 10218286 ? 10223616
+                                               : -1;
+
+    auto seed = "8123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+
+    const auto data = make_data(DATA_SIZE);
+
+    temp_data_file out;
+    auto key = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT, out.path);
+
+    auto decrypted = attachment::decrypt(out.path, key);
+
+    CHECK(decrypted.size() == data.size());
+    CHECK(!!(decrypted == data));
+}
+
+TEST_CASE(
+        "Attachment decryption: encrypted file to plaintext file",
+        "[attachments][files][decrypt]") {
+
+    auto DATA_SIZE = GENERATE(0, 1, 2, 10, 100, 1000, 2000, 4000, 4053, 4054, 261983, 10218286);
+
+    auto expected_size = DATA_SIZE < 4054      ? 4096
+                       : DATA_SIZE == 4054     ? 8192
+                       : DATA_SIZE == 261983   ? 270336
+                       : DATA_SIZE == 10218286 ? 10223616
+                                               : -1;
+
+    auto seed = "9123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+
+    const auto data = make_data(DATA_SIZE);
+
+    temp_data_file out_enc, out_dec;
+    auto key = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT, out_enc.path);
+
+    attachment::decrypt(out_enc.path, key, out_dec.path);
+
+    auto contents = slurp_file(out_dec.path);
+    CHECK(contents.size() == data.size());
+    CHECK(!!(contents == data));
 }
