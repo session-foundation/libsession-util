@@ -360,7 +360,7 @@ ProFeaturesForMsg pro_features_for_utf16(
 ///
 /// Inputs:
 /// - plaintext -- The protobuf serialized payload containing the Content to be encrypted. Must
-///   not be already encrypted.
+///   not be already encrypted and must not be padded.
 /// - ed25519_privkey -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
@@ -471,8 +471,7 @@ std::vector<uint8_t> encode_for_group(
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
 std::vector<uint8_t> encode_for_community(
-        std::span<const uint8_t> plaintext,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey);
+        std::span<const uint8_t> plaintext, std::span<const uint8_t> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encrypt_for_destination
 ///
@@ -492,7 +491,7 @@ std::vector<uint8_t> encode_for_community(
 ///
 /// Inputs:
 /// - `plaintext` -- the protobuf serialised payload containing the protobuf encoded stream,
-///   `Content`. It must not be already be encrypted.
+///   `Content`. It must not be already be encrypted and must not be padded.
 /// - `ed25519_privkey` -- the libsodium-style secret key of the sender, 64 bytes. Can also be
 ///   passed as a 32-byte seed. Used to encrypt the plaintext.
 /// - `dest` -- the extra metadata indicating the destination of the message and the necessary data

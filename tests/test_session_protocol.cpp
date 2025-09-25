@@ -155,8 +155,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Withhold the pro signature
         char error[256];
-        session_protocol_encrypted_for_destination encrypt_without_pro_sig =
-                session_protocol_encrypt_for_1o1(
+        session_protocol_encoded_for_destination encrypt_without_pro_sig =
+                session_protocol_encode_for_1o1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
@@ -171,8 +171,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Set the pro signature
         bytes64 pro_sig = {};
-        session_protocol_encrypted_for_destination encrypt_with_pro_sig =
-                session_protocol_encrypt_for_1o1(
+        session_protocol_encoded_for_destination encrypt_with_pro_sig =
+                session_protocol_encode_for_1o1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
@@ -186,8 +186,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Should have the same payload size
         REQUIRE(encrypt_without_pro_sig.ciphertext.size == encrypt_with_pro_sig.ciphertext.size);
-        session_protocol_encrypt_for_destination_free(&encrypt_without_pro_sig);
-        session_protocol_encrypt_for_destination_free(&encrypt_with_pro_sig);
+        session_protocol_encode_for_destination_free(&encrypt_without_pro_sig);
+        session_protocol_encode_for_destination_free(&encrypt_with_pro_sig);
     }
 
     // Setup a dummy "Session Pro Backend" key
@@ -209,13 +209,13 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         }
 
         // Encrypt
-        session_protocol_encrypted_for_destination encrypt_result = {};
+        session_protocol_encoded_for_destination encrypt_result = {};
         {
             bytes64* pro_sig = nullptr;
             bytes33 recipient_pubkey = {};
             std::memcpy(recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
 
-            encrypt_result = session_protocol_encrypt_for_1o1(
+            encrypt_result = session_protocol_encode_for_1o1(
                     plaintext.data(),
                     plaintext.size(),
                     keys.ed_sk0.data(),
@@ -230,10 +230,10 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
-        session_protocol_decrypt_envelope_keys decrypt_keys = {};
+        session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.ed25519_privkeys = &key;
         decrypt_keys.ed25519_privkeys_len = 1;
-        session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+        session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
@@ -244,7 +244,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 sizeof(error));
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-        session_protocol_encrypt_for_destination_free(&encrypt_result);
+        session_protocol_encode_for_destination_free(&encrypt_result);
 
         // Verify pro
         ProProof nil_proof = {};
@@ -264,7 +264,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_content.has_datamessage());
         const SessionProtos::DataMessage& data = decrypt_content.datamessage();
         REQUIRE(data.body() == data_body);
-        session_protocol_decrypt_envelope_free(&decrypt_result);
+        session_protocol_decode_envelope_free(&decrypt_result);
     }
 
     // Generate the user's Session Pro rotating key for testing encrypted payloads with Session
@@ -319,8 +319,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 std::memcpy(dest.recipient_pubkey.data + 1, blind15_pk.data(), blind15_pk.size());
             }
 
-            session_protocol_encrypted_for_destination encrypt_result =
-                    session_protocol_encrypt_for_destination(
+            session_protocol_encoded_for_destination encrypt_result =
+                    session_protocol_encode_for_destination(
                             protobuf_content_with_pro.plaintext.data(),
                             protobuf_content_with_pro.plaintext.size(),
                             keys.ed_sk0.data(),
@@ -331,31 +331,30 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
             REQUIRE(encrypt_result.ciphertext.size > 0);
             REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
-            session_protocol_encrypt_for_destination_free(&encrypt_result);
+            session_protocol_encode_for_destination_free(&encrypt_result);
         }
     }
 
     SECTION("Encrypt/decrypt for contact in default namespace with Pro") {
         // Encrypt content
-        session_protocol_encrypted_for_destination encrypt_result =
-                session_protocol_encrypt_for_1o1(
-                        protobuf_content_with_pro.plaintext.data(),
-                        protobuf_content_with_pro.plaintext.size(),
-                        keys.ed_sk0.data(),
-                        keys.ed_sk0.size(),
-                        base_dest.sent_timestamp_ms,
-                        &base_dest.recipient_pubkey,
-                        base_dest.pro_sig,
-                        error,
-                        sizeof(error));
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
+                protobuf_content_with_pro.plaintext.data(),
+                protobuf_content_with_pro.plaintext.size(),
+                keys.ed_sk0.data(),
+                keys.ed_sk0.size(),
+                base_dest.sent_timestamp_ms,
+                &base_dest.recipient_pubkey,
+                base_dest.pro_sig,
+                error,
+                sizeof(error));
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
-        session_protocol_decrypt_envelope_keys decrypt_keys = {};
+        session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.ed25519_privkeys = &key;
         decrypt_keys.ed25519_privkeys_len = 1;
-        session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+        session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
@@ -366,7 +365,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 sizeof(error));
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-        session_protocol_encrypt_for_destination_free(&encrypt_result);
+        session_protocol_encode_for_destination_free(&encrypt_result);
 
         // Verify pro
         REQUIRE(decrypt_result.pro_status == PRO_STATUS_VALID);  // Pro was attached
@@ -384,7 +383,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_content.has_datamessage());
         const SessionProtos::DataMessage& data = decrypt_content.datamessage();
         REQUIRE(data.body() == data_body);
-        session_protocol_decrypt_envelope_free(&decrypt_result);
+        session_protocol_decode_envelope_free(&decrypt_result);
     }
 
     SECTION("Encrypt/decrypt for contact in default namespace with Pro + features") {
@@ -405,26 +404,24 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         pro_msg.features);
 
         // Encrypt content
-        session_protocol_encrypted_for_destination encrypt_result =
-                session_protocol_encrypt_for_1o1(
-                        protobuf_content_with_pro_and_features.plaintext.data(),
-                        protobuf_content_with_pro_and_features.plaintext.size(),
-                        keys.ed_sk0.data(),
-                        keys.ed_sk0.size(),
-                        base_dest.sent_timestamp_ms,
-                        &base_dest.recipient_pubkey,
-                        &protobuf_content_with_pro_and_features
-                                 .sig_over_plaintext_with_user_pro_key_c,
-                        error,
-                        sizeof(error));
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
+                protobuf_content_with_pro_and_features.plaintext.data(),
+                protobuf_content_with_pro_and_features.plaintext.size(),
+                keys.ed_sk0.data(),
+                keys.ed_sk0.size(),
+                base_dest.sent_timestamp_ms,
+                &base_dest.recipient_pubkey,
+                &protobuf_content_with_pro_and_features.sig_over_plaintext_with_user_pro_key_c,
+                error,
+                sizeof(error));
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
-        session_protocol_decrypt_envelope_keys decrypt_keys = {};
+        session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.ed25519_privkeys = &key;
         decrypt_keys.ed25519_privkeys_len = 1;
-        session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+        session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
@@ -435,7 +432,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 sizeof(error));
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-        session_protocol_encrypt_for_destination_free(&encrypt_result);
+        session_protocol_encode_for_destination_free(&encrypt_result);
 
         // Verify pro
         REQUIRE(decrypt_result.pro_status == PRO_STATUS_VALID);  // Pro was attached
@@ -454,7 +451,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_content.has_datamessage());
         const SessionProtos::DataMessage& data = decrypt_content.datamessage();
         REQUIRE(data.body() == large_message);
-        session_protocol_decrypt_envelope_free(&decrypt_result);
+        session_protocol_decode_envelope_free(&decrypt_result);
     }
 
     SECTION("Encrypt/decrypt for legacy groups is rejected") {
@@ -462,8 +459,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         dest.type = DESTINATION_TYPE_GROUP;
         assert(dest.recipient_pubkey.data[0] == 0x05);
 
-        session_protocol_encrypted_for_destination encrypt_result =
-                session_protocol_encrypt_for_destination(
+        session_protocol_encoded_for_destination encrypt_result =
+                session_protocol_encode_for_destination(
                         protobuf_content_with_pro.plaintext.data(),
                         protobuf_content_with_pro.plaintext.size(),
                         keys.ed_sk0.data(),
@@ -474,7 +471,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(encrypt_result.error_len_incl_null_terminator > 0);
         REQUIRE(encrypt_result.error_len_incl_null_terminator <= sizeof(error));
         REQUIRE(!encrypt_result.success);
-        session_protocol_encrypt_for_destination_free(&encrypt_result);
+        session_protocol_encode_for_destination_free(&encrypt_result);
     }
 
     SECTION("Encrypt/decrypt for groups v2 (w/ encrypted envelope, plaintext content) with Pro") {
@@ -487,7 +484,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 group_v2_pk.data(), group_v2_sk.data(), group_v2_seed.data());
 
         // Encrypt
-        session_protocol_encrypted_for_destination encrypt_result = {};
+        session_protocol_encoded_for_destination encrypt_result = {};
         {
             bytes33 group_v2_session_pk = {};
             bytes32 group_v2_session_sk = {};
@@ -496,7 +493,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             std::memcpy(
                     group_v2_session_sk.data, group_v2_sk.data(), sizeof(group_v2_session_sk.data));
 
-            encrypt_result = session_protocol_encrypt_for_group(
+            encrypt_result = session_protocol_encode_for_group(
                     protobuf_content_with_pro.plaintext.data(),
                     protobuf_content_with_pro.plaintext.size(),
                     keys.ed_sk0.data(),
@@ -514,14 +511,14 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Decrypt envelope
         span_u8 key = {group_v2_sk.data(), group_v2_sk.size()};
-        session_protocol_decrypt_envelope_keys decrypt_keys = {};
+        session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.group_ed25519_pubkey = {group_v2_pk.data(), group_v2_pk.size()};
         decrypt_keys.ed25519_privkeys = &key;
         decrypt_keys.ed25519_privkeys_len = 1;
 
         // TODO: Finish setting up a group so we can check the decrypted result for now this will
         // throw because the keys aren't setup correctly.
-        session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+        session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
@@ -535,32 +532,31 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_result.pro_status == PRO_STATUS_VALID);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
 
-        session_protocol_encrypt_for_destination_free(&encrypt_result);
-        session_protocol_decrypt_envelope_free(&decrypt_result);
+        session_protocol_encode_for_destination_free(&encrypt_result);
+        session_protocol_decode_envelope_free(&decrypt_result);
     }
 
     SECTION("Encrypt/decrypt for sync messages with Pro") {
         // Encrypt
-        session_protocol_encrypted_for_destination encrypt_result =
-                session_protocol_encrypt_for_1o1(
-                        protobuf_content_with_pro.plaintext.data(),
-                        protobuf_content_with_pro.plaintext.size(),
-                        keys.ed_sk0.data(),
-                        keys.ed_sk0.size(),
-                        base_dest.sent_timestamp_ms,
-                        &base_dest.recipient_pubkey,
-                        base_dest.pro_sig,
-                        error,
-                        sizeof(error));
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
+                protobuf_content_with_pro.plaintext.data(),
+                protobuf_content_with_pro.plaintext.size(),
+                keys.ed_sk0.data(),
+                keys.ed_sk0.size(),
+                base_dest.sent_timestamp_ms,
+                &base_dest.recipient_pubkey,
+                base_dest.pro_sig,
+                error,
+                sizeof(error));
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
 
         // Decrypt
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
-        session_protocol_decrypt_envelope_keys decrypt_keys = {};
+        session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.ed25519_privkeys = &key;
         decrypt_keys.ed25519_privkeys_len = 1;
         {
-            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+            session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
@@ -588,12 +584,12 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             REQUIRE(decrypt_content.has_datamessage());
             const SessionProtos::DataMessage& data = decrypt_content.datamessage();
             REQUIRE(data.body() == data_body);
-            session_protocol_decrypt_envelope_free(&decrypt_result);
+            session_protocol_decode_envelope_free(&decrypt_result);
         }
 
         // Try decrypt with a timestamp past the pro proof expiry date
         {
-            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+            session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
@@ -605,14 +601,14 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             REQUIRE(decrypt_result.success);
             REQUIRE(decrypt_result.pro_status == PRO_STATUS_EXPIRED);
             REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-            session_protocol_decrypt_envelope_free(&decrypt_result);
+            session_protocol_decode_envelope_free(&decrypt_result);
         }
 
         // Try decrypt with a bad backend key
         {
             array_uc32 bad_pro_backend_ed_pk = pro_backend_ed_pk;
             bad_pro_backend_ed_pk[0] ^= 1;
-            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+            session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
@@ -624,16 +620,16 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             REQUIRE(decrypt_result.success);
             REQUIRE(decrypt_result.pro_status == PRO_STATUS_INVALID_PRO_BACKEND_SIG);
             REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-            session_protocol_decrypt_envelope_free(&decrypt_result);
+            session_protocol_decode_envelope_free(&decrypt_result);
         }
 
         // Try decrypt with bad key (ed_sk0 which was the sender; ed_sk1 the recipient)
         span_u8 bad_key = {keys.ed_sk0.data(), keys.ed_sk0.size()};
         {
-            session_protocol_decrypt_envelope_keys bad_decrypt_keys = {};
+            session_protocol_decode_envelope_keys bad_decrypt_keys = {};
             bad_decrypt_keys.ed25519_privkeys = &bad_key;
             bad_decrypt_keys.ed25519_privkeys_len = 1;
-            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+            session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &bad_decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
@@ -647,16 +643,16 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             REQUIRE(!decrypt_result.success);
             REQUIRE(decrypt_result.error_len_incl_null_terminator > 0);
             REQUIRE(decrypt_result.error_len_incl_null_terminator <= sizeof(error));
-            session_protocol_decrypt_envelope_free(&decrypt_result);
+            session_protocol_decode_envelope_free(&decrypt_result);
         }
 
         // Try decrypt with multiple keys, 1 bad, 1 good key
         {
             auto key_list = std::array{bad_key, key};
-            session_protocol_decrypt_envelope_keys multi_decrypt_keys = {};
+            session_protocol_decode_envelope_keys multi_decrypt_keys = {};
             multi_decrypt_keys.ed25519_privkeys = key_list.data();
             multi_decrypt_keys.ed25519_privkeys_len = key_list.size();
-            session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+            session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &multi_decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
@@ -670,18 +666,18 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             REQUIRE(decrypt_result.success);
             REQUIRE(decrypt_result.pro_status == PRO_STATUS_VALID);
             REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-            session_protocol_decrypt_envelope_free(&decrypt_result);
+            session_protocol_decode_envelope_free(&decrypt_result);
         }
-        session_protocol_encrypt_for_destination_free(&encrypt_result);
+        session_protocol_encode_for_destination_free(&encrypt_result);
     }
 
     SECTION("Encrypt/decrypt for sync messages with Pro and bad rotating signature") {
-        session_protocol_encrypted_for_destination encrypt_result = {};
+        session_protocol_encoded_for_destination encrypt_result = {};
         {
             bytes64 pro_sig = base_pro_sig;
             pro_sig.data[0] ^= 1;  // Break the sig by flipping a bit
 
-            encrypt_result = session_protocol_encrypt_for_1o1(
+            encrypt_result = session_protocol_encode_for_1o1(
                     protobuf_content_with_pro.plaintext.data(),
                     protobuf_content_with_pro.plaintext.size(),
                     keys.ed_sk0.data(),
@@ -695,10 +691,10 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         }
 
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
-        session_protocol_decrypt_envelope_keys decrypt_keys = {};
+        session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.ed25519_privkeys = &key;
         decrypt_keys.ed25519_privkeys_len = 1;
-        session_protocol_decrypted_envelope decrypt_result = session_protocol_decrypt_envelope(
+        session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
@@ -710,8 +706,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.pro_status == PRO_STATUS_INVALID_USER_SIG);
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
-        session_protocol_encrypt_for_destination_free(&encrypt_result);
-        session_protocol_decrypt_envelope_free(&decrypt_result);
+        session_protocol_encode_for_destination_free(&encrypt_result);
+        session_protocol_decode_envelope_free(&decrypt_result);
     }
 
     SECTION("Encode/decode for community (content message)") {
@@ -725,8 +721,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     }
 
     SECTION("Encode/decode for community (content message+pro)") {
-        std::vector<uint8_t> encoded = encode_for_community(
-                to_span(protobuf_content_with_pro.plaintext), user_pro_ed_sk);
+        std::vector<uint8_t> encoded =
+                encode_for_community(to_span(protobuf_content_with_pro.plaintext), user_pro_ed_sk);
 
         DecodedCommunityMessage decode_comm_msg =
                 decode_for_community(encoded, timestamp_s, pro_backend_ed_pk);

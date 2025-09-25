@@ -105,13 +105,13 @@ typedef struct session_protocol_envelope {
     bytes64 pro_sig;
 } session_protocol_envelope;
 
-typedef struct session_protocol_decrypt_envelope_keys {
+typedef struct session_protocol_decode_envelope_keys {
     span_u8 group_ed25519_pubkey;
     const span_u8* ed25519_privkeys;
     size_t ed25519_privkeys_len;
-} session_protocol_decrypt_envelope_keys;
+} session_protocol_decode_envelope_keys;
 
-typedef struct session_protocol_decrypted_envelope {
+typedef struct session_protocol_decode_envelope {
     // Indicates if the decryption was successful. If the decryption step failed and threw an
     // exception, this is false.
     bool success;
@@ -123,15 +123,15 @@ typedef struct session_protocol_decrypted_envelope {
     pro_proof pro_proof;
     PRO_FEATURES pro_features;
     size_t error_len_incl_null_terminator;
-} session_protocol_decrypted_envelope;
+} session_protocol_decoded_envelope;
 
-typedef struct session_protocol_encrypted_for_destination {
+typedef struct session_protocol_encoded_for_destination {
     // Indicates if the encryption was successful. If any step failed and threw an exception, this
     // is false.
     bool success;
     span_u8 ciphertext;
     size_t error_len_incl_null_terminator;
-} session_protocol_encrypted_for_destination;
+} session_protocol_encoded_for_destination;
 
 /// API: pro/pro_proof_hash
 ///
@@ -287,13 +287,13 @@ LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
         uint16_t const* utf16, size_t utf16_size, PRO_EXTRA_FEATURES extra) NON_NULL_ARG(1);
 
-/// API: session_protocol_encrypt_for_1o1
+/// API: session_protocol_encode_for_1o1
 ///
 /// Encrypt a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
 /// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
 /// transmission to a single recipient.
 ///
-/// See: session_protocol/encrypt_for_1o1 for more information
+/// See: session_protocol/encode_for_1o1 for more information
 ///
 /// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
 /// the caller is done with the result.
@@ -332,7 +332,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 ///   at minimum the requested length, including the null-terminator in order for the error message
 ///   to be preserved in full.
 LIBSESSION_EXPORT
-session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
+session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -343,13 +343,13 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
         OPTIONAL char* error,
         size_t error_len) NON_NULL_ARG(1, 3, 6);
 
-/// API: session_protocol_encrypt_for_community_inbox
+/// API: session_protocol_encode_for_community_inbox
 ///
 /// Encrypt a plaintext message for a community inbox in the Session Protocol. This function wraps
 /// the plaintext in the necessary structures and encrypts it for transmission to a community inbox
 /// server.
 ///
-/// See: session_protocol/encrypt_for_community_inbox for more information
+/// See: session_protocol/encode_for_community_inbox for more information
 ///
 /// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
 /// the caller is done with the result.
@@ -392,7 +392,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
 ///   to be preserved in full.
 
 LIBSESSION_EXPORT
-session_protocol_encrypted_for_destination session_protocol_encrypt_for_community_inbox(
+session_protocol_encoded_for_destination session_protocol_encode_for_community_inbox(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -404,14 +404,14 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_communit
         OPTIONAL char* error,
         size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
 
-/// API: session_protocol_encrypt_for_group
+/// API: session_protocol_encode_for_group
 ///
 /// Encrypt a plaintext message for a group in the Session Protocol. This function wraps the
 /// plaintext in the necessary structures and encrypts it for transmission to a group, using the
 /// group's encryption key. Only v2 groups, (0x03) prefixed keys are supported. Passing a legacy
 /// group (0x05) prefixed key will cause the function to return a failure with an error message.
 ///
-/// See: session_protocol/encrypt_for_group for more information
+/// See: session_protocol/encode_for_group for more information
 ///
 /// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
 /// the caller is done with the result.
@@ -453,7 +453,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_communit
 ///   at minimum the requested length, including the null-terminator in order for the error message
 ///   to be preserved in full.
 LIBSESSION_EXPORT
-session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
+session_protocol_encoded_for_destination session_protocol_encode_for_group(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -506,7 +506,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
 ///   at minimum the requested length, including the null-terminator in order for the error message
 ///   to be preserved in full.
 LIBSESSION_EXPORT
-session_protocol_encrypted_for_destination session_protocol_encrypt_for_destination(
+session_protocol_encoded_for_destination session_protocol_encode_for_destination(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -524,18 +524,18 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_destinat
 /// Inputs:
 /// - `encrypt` -- Encryption result to free. This object is zeroed out on free and should no longer
 ///   be used after it is freed.
-LIBSESSION_EXPORT void session_protocol_encrypt_for_destination_free(
-        session_protocol_encrypted_for_destination* encrypt);
+LIBSESSION_EXPORT void session_protocol_encode_for_destination_free(
+        session_protocol_encoded_for_destination* encrypt);
 
-/// API: session_protocol/session_protocol_decrypt_envelope
+/// API: session_protocol/session_protocol_decode_envelope
 ///
 /// Given an envelope payload (i.e.: protobuf encoded stream of `WebsocketRequestMessage` which
 /// wraps an `Envelope` for 1o1 messages/sync messages, or `Envelope` encrypted using a Groups v2
 /// key) parse (or decrypt) the envelope and return the envelope content decrypted if necessary.
 ///
-/// See: session_protocol/decrypt_envelope for more information
+/// See: session_protocol/decode_envelope for more information
 ///
-/// The encryption result must be freed with `session_protocol_decrypt_envelope_free` when the
+/// The encryption result must be freed with `session_protocol_decode_envelope_free` when the
 /// caller is done with the result.
 ///
 /// Inputs:
@@ -599,8 +599,8 @@ LIBSESSION_EXPORT void session_protocol_encrypt_for_destination_free(
 ///   at minimum the requested length, including the null-terminator in order for the error message
 ///   to be preserved in full.
 LIBSESSION_EXPORT
-session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
-        const session_protocol_decrypt_envelope_keys* keys,
+session_protocol_decoded_envelope session_protocol_decode_envelope(
+        const session_protocol_decode_envelope_keys* keys,
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
         uint64_t unix_ts,
@@ -619,8 +619,8 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
 /// - `envelope` -- Decryption result to free. This object is zeroed out on free and should no
 /// longer
 ///   be used after it is freed.
-LIBSESSION_EXPORT void session_protocol_decrypt_envelope_free(
-        session_protocol_decrypted_envelope* envelope);
+LIBSESSION_EXPORT void session_protocol_decode_envelope_free(
+        session_protocol_decoded_envelope* envelope);
 
 #ifdef __cplusplus
 }

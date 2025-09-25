@@ -229,9 +229,7 @@ std::vector<uint8_t> encode_for_group(
 }
 
 std::vector<uint8_t> encode_for_community(
-        std::span<const uint8_t> plaintext,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey)
-{
+        std::span<const uint8_t> plaintext, std::span<const uint8_t> pro_rotating_ed25519_privkey) {
     // TODO: In future once platforms adopt this function, then we can change to sending an envelope
     // and all platforms will uniformly agree on this convention. For backwards compat, the decode
     // for community function will continue to try and parse `Content` and `Envelope` for messages
@@ -295,8 +293,10 @@ struct EncryptedForDestinationInternal {
     span_u8 ciphertext_c;
 };
 
+constexpr char PADDING_TERMINATING_BYTE = 0x80;
+
 enum class UseMalloc { No, Yes };
-static EncryptedForDestinationInternal encrypt_for_destination_internal(
+static EncryptedForDestinationInternal encode_for_destination_internal(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         DestinationType dest_type,
@@ -333,8 +333,6 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
 
     struct EncodeContext {
         Mode mode;
-        // Parameters for BuildMode => Envelope
-        bool before_envelope_encrypt_for_recipient_deterministic;
 
         // Ciphertext storing the result of encrypt for recipient deterministic, if it was necessary
         // to encrypt before enveloping.
@@ -358,7 +356,6 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
                     dest_group_ed25519_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
             if (has_03_prefix) {
                 enc.mode = Mode::Envelope;
-                enc.before_envelope_encrypt_for_recipient_deterministic = false;
                 enc.after_envelope = AfterEnvelope::KeysEncryptMessage;
                 enc.envelope_type =
                         SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
@@ -372,7 +369,6 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
 
         case DestinationType::ContactOrSyncMessage: {
             enc.mode = Mode::Envelope;
-            enc.before_envelope_encrypt_for_recipient_deterministic = true;
             enc.envelope_type = SessionProtos::Envelope_Type::Envelope_Type_SESSION_MESSAGE;
             enc.after_envelope = AfterEnvelope::WrapInWSMessage;
         } break;
@@ -387,9 +383,26 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
         case Mode::Envelope: {
             assert(enc.envelope_type.has_value());
             std::span<const uint8_t> content = plaintext;
-            if (enc.before_envelope_encrypt_for_recipient_deterministic) {
-                enc.before_envelope_ciphertext = session::encrypt_for_recipient_deterministic(
-                        ed25519_privkey, dest_recipient_pubkey, content);
+            if (dest_type == DestinationType::ContactOrSyncMessage) {
+                // For Sync or 1o1 mesasges, we need to pad the contents to 160 bytes, see:
+                //   https://github.com/session-foundation/session-desktop/blob/a04e62427034a6b6fee39dcff7dbabf0d0131b13/ts/session/crypto/BufferPadding.ts#L49
+                const size_t MSG_PADDING = 160;
+
+                // Calculate amount of padding required
+                size_t padded_content_size = content.size() + 1 /*padding byte*/;
+                uint8_t const bytes_for_padding = MSG_PADDING - (padded_content_size % MSG_PADDING);
+                padded_content_size += bytes_for_padding;
+                assert(padded_content_size % MSG_PADDING == 0);
+
+                // Do the padding
+                std::vector<uint8_t> padded_content;
+                padded_content.resize(padded_content_size);
+                std::memcpy(padded_content.data(), content.data(), content.size());
+                padded_content[content.size()] = PADDING_TERMINATING_BYTE;
+
+                // Encrypt the padded output
+                enc.before_envelope_ciphertext = encrypt_for_recipient_deterministic(
+                        ed25519_privkey, dest_recipient_pubkey, padded_content);
                 content = enc.before_envelope_ciphertext;
             }
 
@@ -506,7 +519,7 @@ std::vector<uint8_t> encode_for_destination(
         std::span<const unsigned char> ed25519_privkey,
         const Destination& dest) {
 
-    EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
+    EncryptedForDestinationInternal result_internal = encode_for_destination_internal(
             /*plaintext=*/plaintext,
             /*ed25519_privkey=*/ed25519_privkey,
             /*dest_type=*/dest.type,
@@ -591,7 +604,7 @@ DecodedEnvelope decode_envelope(
     // Parse source (optional)
     if (envelope.has_source()) {
         // Libsession is now responsible for creating the envelope. The only data that we send in
-        // the source is a Session public key (see: encrypt_for_destination)
+        // the source is a Session public key (see: encode_for_destination)
         const std::string& source = envelope.source();
         if (source.size() != result.envelope.source.max_size())
             throw std::runtime_error(fmt::format(
@@ -645,6 +658,27 @@ DecodedEnvelope decode_envelope(
             throw std::runtime_error{fmt::format(
                     "Envelope content decryption failed, tried {} key(s)",
                     keys.ed25519_privkeys.size())};
+        }
+
+        // Strip padding from content
+        {
+            size_t size_without_padding = content_plaintext.size();
+            while (size_without_padding) {
+                char ch = content_plaintext[size_without_padding - 1];
+                if (ch != 0 && ch != PADDING_TERMINATING_BYTE) {
+                    // Non-zero padding encountered, terminate the loop and assume message is not
+                    // padded
+                    // TODO: We should enforce this but no client enforces it right now.
+                    break;
+                }
+
+                size_without_padding--;
+                if (ch == PADDING_TERMINATING_BYTE)
+                    break;
+            }
+
+            assert(size_without_padding <= content_plaintext.size());
+            content_plaintext.resize(size_without_padding);
         }
 
         result.content_plaintext = std::move(content_plaintext);
@@ -782,13 +816,12 @@ DecodedCommunityMessage decode_for_community(
             // Parse source (optional)
             if (pb_envelope.has_source()) {
                 // Libsession is now responsible for creating the envelope. The only data that we
-                // send in the source is a Session public key (see: encrypt_for_destination)
+                // send in the source is a Session public key (see: encode_for_destination)
                 const std::string& source = pb_envelope.source();
                 if (source.size() != envelope.source.max_size())
-                    throw std::runtime_error(
-                            fmt::format(
-                                    "Parse envelope failed, source had unexpected size ({} bytes)",
-                                    source.size()));
+                    throw std::runtime_error(fmt::format(
+                            "Parse envelope failed, source had unexpected size ({} bytes)",
+                            source.size()));
                 std::memcpy(envelope.source.data(), source.data(), source.size());
                 envelope.flags |= ENVELOPE_FLAGS_SOURCE;
             }
@@ -1031,7 +1064,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 }
 
 LIBSESSION_C_API
-session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
+session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -1048,7 +1081,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
     dest.recipient_pubkey = *recipient_pubkey;
     dest.sent_timestamp_ms = sent_timestamp_ms;
 
-    session_protocol_encrypted_for_destination result = session_protocol_encrypt_for_destination(
+    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
             plaintext,
             plaintext_len,
             ed25519_privkey,
@@ -1060,7 +1093,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_1o1(
 }
 
 LIBSESSION_C_API
-session_protocol_encrypted_for_destination session_protocol_encrypt_for_community_inbox(
+session_protocol_encoded_for_destination session_protocol_encode_for_community_inbox(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -1079,7 +1112,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_communit
     dest.recipient_pubkey = *recipient_pubkey;
     dest.community_inbox_server_pubkey = *community_pubkey;
 
-    session_protocol_encrypted_for_destination result = session_protocol_encrypt_for_destination(
+    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
             plaintext,
             plaintext_len,
             ed25519_privkey,
@@ -1091,7 +1124,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_communit
 }
 
 LIBSESSION_C_API
-session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
+session_protocol_encoded_for_destination session_protocol_encode_for_group(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -1110,7 +1143,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
     dest.group_ed25519_privkey = *group_ed25519_privkey;
     dest.sent_timestamp_ms = sent_timestamp_ms;
 
-    session_protocol_encrypted_for_destination result = session_protocol_encrypt_for_destination(
+    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
             plaintext,
             plaintext_len,
             ed25519_privkey,
@@ -1121,8 +1154,7 @@ session_protocol_encrypted_for_destination session_protocol_encrypt_for_group(
     return result;
 }
 
-LIBSESSION_C_API session_protocol_encrypted_for_destination
-session_protocol_encrypt_for_destination(
+LIBSESSION_C_API session_protocol_encoded_for_destination session_protocol_encode_for_destination(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -1130,9 +1162,9 @@ session_protocol_encrypt_for_destination(
         const session_protocol_destination* dest,
         char* error,
         size_t error_len) {
-    session_protocol_encrypted_for_destination result = {};
+    session_protocol_encoded_for_destination result = {};
     try {
-        EncryptedForDestinationInternal result_internal = encrypt_for_destination_internal(
+        EncryptedForDestinationInternal result_internal = encode_for_destination_internal(
                 /*plaintext=*/{static_cast<const uint8_t*>(plaintext), plaintext_len},
                 /*ed25519_privkey=*/
                 {static_cast<const uint8_t*>(ed25519_privkey), ed25519_privkey_len},
@@ -1163,8 +1195,8 @@ session_protocol_encrypt_for_destination(
     return result;
 }
 
-LIBSESSION_C_API void session_protocol_encrypt_for_destination_free(
-        session_protocol_encrypted_for_destination* encrypt) {
+LIBSESSION_C_API void session_protocol_encode_for_destination_free(
+        session_protocol_encoded_for_destination* encrypt) {
     if (encrypt) {
         free(encrypt->ciphertext.data);
         *encrypt = {};
@@ -1172,8 +1204,8 @@ LIBSESSION_C_API void session_protocol_encrypt_for_destination_free(
 }
 
 LIBSESSION_C_API
-session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
-        const session_protocol_decrypt_envelope_keys* keys,
+session_protocol_decoded_envelope session_protocol_decode_envelope(
+        const session_protocol_decode_envelope_keys* keys,
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
         uint64_t unix_ts,
@@ -1181,7 +1213,7 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         size_t pro_backend_pubkey_len,
         char* error,
         size_t error_len) {
-    session_protocol_decrypted_envelope result = {};
+    session_protocol_decoded_envelope result = {};
 
     // Setup the pro backend pubkey
     array_uc32 pro_backend_pubkey_cpp = {};
@@ -1306,7 +1338,7 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
 }
 
 LIBSESSION_C_API
-void session_protocol_decrypt_envelope_free(session_protocol_decrypted_envelope* envelope) {
+void session_protocol_decode_envelope_free(session_protocol_decoded_envelope* envelope) {
     if (envelope) {
         free(envelope->content_plaintext.data);
         *envelope = {};
