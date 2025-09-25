@@ -88,6 +88,7 @@ PROTOBUF_CONSTEXPR Content::Content(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.prosigforcommunitymessageonly_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.datamessage_)*/nullptr
   , /*decltype(_impl_.callmessage_)*/nullptr
   , /*decltype(_impl_.receiptmessage_)*/nullptr
@@ -2624,48 +2625,51 @@ class Content::_Internal {
   using HasBits = decltype(std::declval<Content>()._impl_._has_bits_);
   static const ::SessionProtos::DataMessage& datamessage(const Content* msg);
   static void set_has_datamessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 1u;
+    (*has_bits)[0] |= 2u;
   }
   static const ::SessionProtos::CallMessage& callmessage(const Content* msg);
   static void set_has_callmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
+    (*has_bits)[0] |= 4u;
   }
   static const ::SessionProtos::ReceiptMessage& receiptmessage(const Content* msg);
   static void set_has_receiptmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
+    (*has_bits)[0] |= 8u;
   }
   static const ::SessionProtos::TypingMessage& typingmessage(const Content* msg);
   static void set_has_typingmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 8u;
+    (*has_bits)[0] |= 16u;
   }
   static const ::SessionProtos::DataExtractionNotification& dataextractionnotification(const Content* msg);
   static void set_has_dataextractionnotification(HasBits* has_bits) {
-    (*has_bits)[0] |= 16u;
+    (*has_bits)[0] |= 32u;
   }
   static const ::SessionProtos::UnsendRequest& unsendrequest(const Content* msg);
   static void set_has_unsendrequest(HasBits* has_bits) {
-    (*has_bits)[0] |= 32u;
+    (*has_bits)[0] |= 64u;
   }
   static const ::SessionProtos::MessageRequestResponse& messagerequestresponse(const Content* msg);
   static void set_has_messagerequestresponse(HasBits* has_bits) {
-    (*has_bits)[0] |= 64u;
+    (*has_bits)[0] |= 128u;
   }
   static const ::SessionProtos::SharedConfigMessage& sharedconfigmessage(const Content* msg);
   static void set_has_sharedconfigmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 128u;
+    (*has_bits)[0] |= 256u;
   }
   static void set_has_expirationtype(HasBits* has_bits) {
-    (*has_bits)[0] |= 512u;
-  }
-  static void set_has_expirationtimer(HasBits* has_bits) {
     (*has_bits)[0] |= 1024u;
   }
-  static void set_has_sigtimestamp(HasBits* has_bits) {
+  static void set_has_expirationtimer(HasBits* has_bits) {
     (*has_bits)[0] |= 2048u;
+  }
+  static void set_has_sigtimestamp(HasBits* has_bits) {
+    (*has_bits)[0] |= 4096u;
   }
   static const ::SessionProtos::ProMessage& promessage(const Content* msg);
   static void set_has_promessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 256u;
+    (*has_bits)[0] |= 512u;
+  }
+  static void set_has_prosigforcommunitymessageonly(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
   }
 };
 
@@ -2717,6 +2721,7 @@ Content::Content(const Content& from)
   new (&_impl_) Impl_{
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.prosigforcommunitymessageonly_){}
     , decltype(_impl_.datamessage_){nullptr}
     , decltype(_impl_.callmessage_){nullptr}
     , decltype(_impl_.receiptmessage_){nullptr}
@@ -2731,6 +2736,14 @@ Content::Content(const Content& from)
     , decltype(_impl_.sigtimestamp_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.prosigforcommunitymessageonly_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosigforcommunitymessageonly_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_prosigforcommunitymessageonly()) {
+    _this->_impl_.prosigforcommunitymessageonly_.Set(from._internal_prosigforcommunitymessageonly(), 
+      _this->GetArenaForAllocation());
+  }
   if (from._internal_has_datamessage()) {
     _this->_impl_.datamessage_ = new ::SessionProtos::DataMessage(*from._impl_.datamessage_);
   }
@@ -2771,6 +2784,7 @@ inline void Content::SharedCtor(
   new (&_impl_) Impl_{
       decltype(_impl_._has_bits_){}
     , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.prosigforcommunitymessageonly_){}
     , decltype(_impl_.datamessage_){nullptr}
     , decltype(_impl_.callmessage_){nullptr}
     , decltype(_impl_.receiptmessage_){nullptr}
@@ -2784,6 +2798,10 @@ inline void Content::SharedCtor(
     , decltype(_impl_.expirationtimer_){0u}
     , decltype(_impl_.sigtimestamp_){uint64_t{0u}}
   };
+  _impl_.prosigforcommunitymessageonly_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosigforcommunitymessageonly_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
 Content::~Content() {
@@ -2797,6 +2815,7 @@ Content::~Content() {
 
 inline void Content::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.prosigforcommunitymessageonly_.Destroy();
   if (this != internal_default_instance()) delete _impl_.datamessage_;
   if (this != internal_default_instance()) delete _impl_.callmessage_;
   if (this != internal_default_instance()) delete _impl_.receiptmessage_;
@@ -2821,43 +2840,48 @@ void Content::Clear() {
   cached_has_bits = _impl_._has_bits_[0];
   if (cached_has_bits & 0x000000ffu) {
     if (cached_has_bits & 0x00000001u) {
+      _impl_.prosigforcommunitymessageonly_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
       GOOGLE_DCHECK(_impl_.datamessage_ != nullptr);
       _impl_.datamessage_->Clear();
     }
-    if (cached_has_bits & 0x00000002u) {
+    if (cached_has_bits & 0x00000004u) {
       GOOGLE_DCHECK(_impl_.callmessage_ != nullptr);
       _impl_.callmessage_->Clear();
     }
-    if (cached_has_bits & 0x00000004u) {
+    if (cached_has_bits & 0x00000008u) {
       GOOGLE_DCHECK(_impl_.receiptmessage_ != nullptr);
       _impl_.receiptmessage_->Clear();
     }
-    if (cached_has_bits & 0x00000008u) {
+    if (cached_has_bits & 0x00000010u) {
       GOOGLE_DCHECK(_impl_.typingmessage_ != nullptr);
       _impl_.typingmessage_->Clear();
     }
-    if (cached_has_bits & 0x00000010u) {
+    if (cached_has_bits & 0x00000020u) {
       GOOGLE_DCHECK(_impl_.dataextractionnotification_ != nullptr);
       _impl_.dataextractionnotification_->Clear();
     }
-    if (cached_has_bits & 0x00000020u) {
+    if (cached_has_bits & 0x00000040u) {
       GOOGLE_DCHECK(_impl_.unsendrequest_ != nullptr);
       _impl_.unsendrequest_->Clear();
     }
-    if (cached_has_bits & 0x00000040u) {
+    if (cached_has_bits & 0x00000080u) {
       GOOGLE_DCHECK(_impl_.messagerequestresponse_ != nullptr);
       _impl_.messagerequestresponse_->Clear();
     }
-    if (cached_has_bits & 0x00000080u) {
+  }
+  if (cached_has_bits & 0x00000300u) {
+    if (cached_has_bits & 0x00000100u) {
       GOOGLE_DCHECK(_impl_.sharedconfigmessage_ != nullptr);
       _impl_.sharedconfigmessage_->Clear();
     }
+    if (cached_has_bits & 0x00000200u) {
+      GOOGLE_DCHECK(_impl_.promessage_ != nullptr);
+      _impl_.promessage_->Clear();
+    }
   }
-  if (cached_has_bits & 0x00000100u) {
-    GOOGLE_DCHECK(_impl_.promessage_ != nullptr);
-    _impl_.promessage_->Clear();
-  }
-  if (cached_has_bits & 0x00000e00u) {
+  if (cached_has_bits & 0x00001c00u) {
     ::memset(&_impl_.expirationtype_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&_impl_.sigtimestamp_) -
         reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.sigtimestamp_));
@@ -2976,6 +3000,15 @@ const char* Content::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) 
         } else
           goto handle_unusual;
         continue;
+      // optional bytes proSigForCommunityMessageOnly = 17;
+      case 17:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 138)) {
+          auto str = _internal_mutable_prosigforcommunitymessageonly();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -3008,85 +3041,91 @@ uint8_t* Content::_InternalSerialize(
 
   cached_has_bits = _impl_._has_bits_[0];
   // optional .SessionProtos.DataMessage dataMessage = 1;
-  if (cached_has_bits & 0x00000001u) {
+  if (cached_has_bits & 0x00000002u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(1, _Internal::datamessage(this),
         _Internal::datamessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.CallMessage callMessage = 3;
-  if (cached_has_bits & 0x00000002u) {
+  if (cached_has_bits & 0x00000004u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(3, _Internal::callmessage(this),
         _Internal::callmessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.ReceiptMessage receiptMessage = 5;
-  if (cached_has_bits & 0x00000004u) {
+  if (cached_has_bits & 0x00000008u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(5, _Internal::receiptmessage(this),
         _Internal::receiptmessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.TypingMessage typingMessage = 6;
-  if (cached_has_bits & 0x00000008u) {
+  if (cached_has_bits & 0x00000010u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(6, _Internal::typingmessage(this),
         _Internal::typingmessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.DataExtractionNotification dataExtractionNotification = 8;
-  if (cached_has_bits & 0x00000010u) {
+  if (cached_has_bits & 0x00000020u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(8, _Internal::dataextractionnotification(this),
         _Internal::dataextractionnotification(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.UnsendRequest unsendRequest = 9;
-  if (cached_has_bits & 0x00000020u) {
+  if (cached_has_bits & 0x00000040u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(9, _Internal::unsendrequest(this),
         _Internal::unsendrequest(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.MessageRequestResponse messageRequestResponse = 10;
-  if (cached_has_bits & 0x00000040u) {
+  if (cached_has_bits & 0x00000080u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(10, _Internal::messagerequestresponse(this),
         _Internal::messagerequestresponse(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.SharedConfigMessage sharedConfigMessage = 11;
-  if (cached_has_bits & 0x00000080u) {
+  if (cached_has_bits & 0x00000100u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(11, _Internal::sharedconfigmessage(this),
         _Internal::sharedconfigmessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.Content.ExpirationType expirationType = 12;
-  if (cached_has_bits & 0x00000200u) {
+  if (cached_has_bits & 0x00000400u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
       12, this->_internal_expirationtype(), target);
   }
 
   // optional uint32 expirationTimer = 13;
-  if (cached_has_bits & 0x00000400u) {
+  if (cached_has_bits & 0x00000800u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(13, this->_internal_expirationtimer(), target);
   }
 
   // optional uint64 sigTimestamp = 15;
-  if (cached_has_bits & 0x00000800u) {
+  if (cached_has_bits & 0x00001000u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(15, this->_internal_sigtimestamp(), target);
   }
 
   // optional .SessionProtos.ProMessage proMessage = 16;
-  if (cached_has_bits & 0x00000100u) {
+  if (cached_has_bits & 0x00000200u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(16, _Internal::promessage(this),
         _Internal::promessage(this).GetCachedSize(), target, stream);
+  }
+
+  // optional bytes proSigForCommunityMessageOnly = 17;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        17, this->_internal_prosigforcommunitymessageonly(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -3107,84 +3146,91 @@ size_t Content::ByteSizeLong() const {
 
   cached_has_bits = _impl_._has_bits_[0];
   if (cached_has_bits & 0x000000ffu) {
-    // optional .SessionProtos.DataMessage dataMessage = 1;
+    // optional bytes proSigForCommunityMessageOnly = 17;
     if (cached_has_bits & 0x00000001u) {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_prosigforcommunitymessageonly());
+    }
+
+    // optional .SessionProtos.DataMessage dataMessage = 1;
+    if (cached_has_bits & 0x00000002u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.datamessage_);
     }
 
     // optional .SessionProtos.CallMessage callMessage = 3;
-    if (cached_has_bits & 0x00000002u) {
+    if (cached_has_bits & 0x00000004u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.callmessage_);
     }
 
     // optional .SessionProtos.ReceiptMessage receiptMessage = 5;
-    if (cached_has_bits & 0x00000004u) {
+    if (cached_has_bits & 0x00000008u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.receiptmessage_);
     }
 
     // optional .SessionProtos.TypingMessage typingMessage = 6;
-    if (cached_has_bits & 0x00000008u) {
+    if (cached_has_bits & 0x00000010u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.typingmessage_);
     }
 
     // optional .SessionProtos.DataExtractionNotification dataExtractionNotification = 8;
-    if (cached_has_bits & 0x00000010u) {
+    if (cached_has_bits & 0x00000020u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.dataextractionnotification_);
     }
 
     // optional .SessionProtos.UnsendRequest unsendRequest = 9;
-    if (cached_has_bits & 0x00000020u) {
+    if (cached_has_bits & 0x00000040u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.unsendrequest_);
     }
 
     // optional .SessionProtos.MessageRequestResponse messageRequestResponse = 10;
-    if (cached_has_bits & 0x00000040u) {
+    if (cached_has_bits & 0x00000080u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.messagerequestresponse_);
     }
 
+  }
+  if (cached_has_bits & 0x00001f00u) {
     // optional .SessionProtos.SharedConfigMessage sharedConfigMessage = 11;
-    if (cached_has_bits & 0x00000080u) {
+    if (cached_has_bits & 0x00000100u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.sharedconfigmessage_);
     }
 
-  }
-  if (cached_has_bits & 0x00000f00u) {
     // optional .SessionProtos.ProMessage proMessage = 16;
-    if (cached_has_bits & 0x00000100u) {
+    if (cached_has_bits & 0x00000200u) {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.promessage_);
     }
 
     // optional .SessionProtos.Content.ExpirationType expirationType = 12;
-    if (cached_has_bits & 0x00000200u) {
+    if (cached_has_bits & 0x00000400u) {
       total_size += 1 +
         ::_pbi::WireFormatLite::EnumSize(this->_internal_expirationtype());
     }
 
     // optional uint32 expirationTimer = 13;
-    if (cached_has_bits & 0x00000400u) {
+    if (cached_has_bits & 0x00000800u) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_expirationtimer());
     }
 
     // optional uint64 sigTimestamp = 15;
-    if (cached_has_bits & 0x00000800u) {
+    if (cached_has_bits & 0x00001000u) {
       total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_sigtimestamp());
     }
 
@@ -3213,50 +3259,53 @@ void Content::MergeFrom(const Content& from) {
   cached_has_bits = from._impl_._has_bits_[0];
   if (cached_has_bits & 0x000000ffu) {
     if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_prosigforcommunitymessageonly(from._internal_prosigforcommunitymessageonly());
+    }
+    if (cached_has_bits & 0x00000002u) {
       _this->_internal_mutable_datamessage()->::SessionProtos::DataMessage::MergeFrom(
           from._internal_datamessage());
     }
-    if (cached_has_bits & 0x00000002u) {
+    if (cached_has_bits & 0x00000004u) {
       _this->_internal_mutable_callmessage()->::SessionProtos::CallMessage::MergeFrom(
           from._internal_callmessage());
     }
-    if (cached_has_bits & 0x00000004u) {
+    if (cached_has_bits & 0x00000008u) {
       _this->_internal_mutable_receiptmessage()->::SessionProtos::ReceiptMessage::MergeFrom(
           from._internal_receiptmessage());
     }
-    if (cached_has_bits & 0x00000008u) {
+    if (cached_has_bits & 0x00000010u) {
       _this->_internal_mutable_typingmessage()->::SessionProtos::TypingMessage::MergeFrom(
           from._internal_typingmessage());
     }
-    if (cached_has_bits & 0x00000010u) {
+    if (cached_has_bits & 0x00000020u) {
       _this->_internal_mutable_dataextractionnotification()->::SessionProtos::DataExtractionNotification::MergeFrom(
           from._internal_dataextractionnotification());
     }
-    if (cached_has_bits & 0x00000020u) {
+    if (cached_has_bits & 0x00000040u) {
       _this->_internal_mutable_unsendrequest()->::SessionProtos::UnsendRequest::MergeFrom(
           from._internal_unsendrequest());
     }
-    if (cached_has_bits & 0x00000040u) {
+    if (cached_has_bits & 0x00000080u) {
       _this->_internal_mutable_messagerequestresponse()->::SessionProtos::MessageRequestResponse::MergeFrom(
           from._internal_messagerequestresponse());
     }
-    if (cached_has_bits & 0x00000080u) {
+  }
+  if (cached_has_bits & 0x00001f00u) {
+    if (cached_has_bits & 0x00000100u) {
       _this->_internal_mutable_sharedconfigmessage()->::SessionProtos::SharedConfigMessage::MergeFrom(
           from._internal_sharedconfigmessage());
     }
-  }
-  if (cached_has_bits & 0x00000f00u) {
-    if (cached_has_bits & 0x00000100u) {
+    if (cached_has_bits & 0x00000200u) {
       _this->_internal_mutable_promessage()->::SessionProtos::ProMessage::MergeFrom(
           from._internal_promessage());
     }
-    if (cached_has_bits & 0x00000200u) {
+    if (cached_has_bits & 0x00000400u) {
       _this->_impl_.expirationtype_ = from._impl_.expirationtype_;
     }
-    if (cached_has_bits & 0x00000400u) {
+    if (cached_has_bits & 0x00000800u) {
       _this->_impl_.expirationtimer_ = from._impl_.expirationtimer_;
     }
-    if (cached_has_bits & 0x00000800u) {
+    if (cached_has_bits & 0x00001000u) {
       _this->_impl_.sigtimestamp_ = from._impl_.sigtimestamp_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -3301,8 +3350,14 @@ bool Content::IsInitialized() const {
 
 void Content::InternalSwap(Content* other) {
   using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.prosigforcommunitymessageonly_, lhs_arena,
+      &other->_impl_.prosigforcommunitymessageonly_, rhs_arena
+  );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(Content, _impl_.sigtimestamp_)
       + sizeof(Content::_impl_.sigtimestamp_)

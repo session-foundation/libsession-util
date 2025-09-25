@@ -686,6 +686,176 @@ DecryptedEnvelope decrypt_envelope(
     }
     return result;
 }
+
+ParsedCommunityMessage parse_for_community_message(
+        std::span<const uint8_t> content_or_envelope_payload,
+        std::chrono::sys_seconds unix_ts,
+        const array_uc32& pro_backend_pubkey) {
+    // TODO: Community message parsing requires a custom code path for now as we are planning to
+    // migrate from sending plain `Content` to `Content` with a pro signature embedded in `Content`
+    // (added exclusively for communities usecase), then, transitioning to sending an `Envelope` to
+    // make it match how messages are sent for 1o1 and groups.
+    //
+    // We have intermediate steps to allow a timeframe for providing backwards compatibility with
+    // older clients before changing data structures and shutting them out from receiving messages.
+    // More detailed information on this transition is documented in the SessionProtos.proto file
+    //
+    // In the intermediary stages, handling community messages requires some custom code that's
+    // similar but different to the normal path that it's less friction to write some custom
+    // code to handle those bits than try and re-purpose the general purpose decrypt envelope
+    // function.
+    ParsedCommunityMessage result = {};
+
+    // Attempt to parse the blob as an envelope
+    std::optional<std::span<const uint8_t>> pro_sig;
+    {
+        SessionProtos::Envelope pb_envelope = {};
+        bool envelope_parsed = pb_envelope.ParseFromArray(
+                content_or_envelope_payload.data(), content_or_envelope_payload.size());
+
+        if (envelope_parsed) {
+            // Create the envelope
+            Envelope& envelope = result.envelope.emplace();
+            result.content_plaintext = to_span(pb_envelope.content());
+
+            // Extract the envelope into our type
+            // Parse source (optional)
+            if (pb_envelope.has_source()) {
+                // Libsession is now responsible for creating the envelope. The only data that we
+                // send in the source is a Session public key (see: encrypt_for_destination)
+                const std::string& source = pb_envelope.source();
+                if (source.size() != envelope.source.max_size())
+                    throw std::runtime_error(
+                            fmt::format(
+                                    "Parse envelope failed, source had unexpected size ({} bytes)",
+                                    source.size()));
+                std::memcpy(envelope.source.data(), source.data(), source.size());
+                envelope.flags |= ENVELOPE_FLAGS_SOURCE;
+            }
+
+            // Parse source device (optional)
+            if (pb_envelope.has_sourcedevice()) {
+                envelope.source_device = pb_envelope.sourcedevice();
+                envelope.flags |= ENVELOPE_FLAGS_SOURCE_DEVICE;
+            }
+
+            // Parse server timestamp (optional)
+            if (pb_envelope.has_servertimestamp()) {
+                envelope.server_timestamp = pb_envelope.servertimestamp();
+                envelope.flags |= ENVELOPE_FLAGS_SERVER_TIMESTAMP;
+            }
+
+            // Parse pro signature (optional)
+            if (pb_envelope.has_prosig()) {
+                envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
+                pro_sig = to_span(pb_envelope.prosig());
+            }
+        } else {
+            result.content_plaintext = content_or_envelope_payload;
+        }
+    }
+
+    // Parse the content blob
+    SessionProtos::Content content = {};
+    if (!content.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
+        throw std::runtime_error{"Parsing community message failed"};
+
+    // Extract the pro signature from content if it was present
+    if (content.has_prosigforcommunitymessageonly()) {
+        // Signature must be in the envelope if it existed or the content. Specifying both is
+        // not allowed.
+        if (result.envelope && result.envelope->flags & ENVELOPE_FLAGS_PRO_SIG) {
+            throw std::runtime_error(
+                    "Parse community message failed, envelope and content both had a pro signature "
+                    "specified");
+        }
+        assert(!pro_sig);
+        pro_sig = to_span(content.prosigforcommunitymessageonly());
+    }
+
+    // If there was a pro signature in one of the payloads, verify and copy it to our result struct
+    if (pro_sig) {
+        if (pro_sig->size() != crypto_sign_ed25519_BYTES)
+            throw std::runtime_error(
+                    "Parse community message failed, pro signature has wrong size");
+
+        // Signature was the correct size, copy it into the envelope if there was one and copy it
+        // into the root structure
+        if (result.envelope)
+            std::memcpy(result.envelope->pro_sig.data(), pro_sig->data(), pro_sig->size());
+
+        // Set it into the signature sitting in result
+        result.pro_sig.emplace();
+        std::memcpy(result.pro_sig->data(), pro_sig->data(), pro_sig->size());
+    }
+
+    if (result.pro_sig && content.has_promessage()) {
+        // Extract the pro message
+        DecryptedPro& pro = result.pro.emplace();
+        const SessionProtos::ProMessage& pro_msg = content.promessage();
+        if (!pro_msg.has_proof())
+            throw std::runtime_error("Parse community message failed, pro config missing proof");
+        if (!pro_msg.has_features())
+            throw std::runtime_error("Parse community message failed, pro config missing features");
+
+        // Parse the proof from protobufs
+        const SessionProtos::ProProof& proto_proof = pro_msg.proof();
+        session::config::ProProof& proof = pro.proof;
+        // clang-format off
+        size_t proof_errors = 0;
+        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
+        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
+        proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
+        proof_errors += !proto_proof.has_expiryunixts();
+        proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
+        // clang-format on
+        if (proof_errors)
+            throw std::runtime_error("Parse community message failed, pro metadata was malformed");
+
+        // Fill out the resulting proof structure, we have parsed successfully
+        pro.features = pro_msg.features();
+        std::memcpy(
+                proof.gen_index_hash.data(),
+                proto_proof.genindexhash().data(),
+                proto_proof.genindexhash().size());
+        std::memcpy(
+                proof.rotating_pubkey.data(),
+                proto_proof.rotatingpublickey().data(),
+                proto_proof.rotatingpublickey().size());
+        proof.expiry_unix_ts =
+                std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
+        std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+
+        // Evaluate the pro status given the extracted components (was it signed, is it expired,
+        // was the message signed validly?)
+        config::ProSignedMessage signed_msg = {};
+        signed_msg.sig = to_span(*result.pro_sig);
+
+        // IMPORTANT: We have to bit-manipulate the content because we're including the signature
+        // inside the payload itself that we had to sign. But we originally signed the payload
+        // without a signature set in it. This is only the case if we're dealing with a `Content`
+        // message that had the signature inside the content instead of the envelope.
+        if (result.envelope && result.envelope->flags & ENVELOPE_FLAGS_PRO_SIG) {
+            signed_msg.msg = result.content_plaintext;
+            pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+        } else {
+            SessionProtos::Content content_copy_without_sig = content;
+            assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
+
+            // Remove signature from the payload
+            content_copy_without_sig.clear_prosigforcommunitymessageonly();
+            assert(!content_copy_without_sig.has_prosigforcommunitymessageonly());
+
+            // Reserialise the payload without the signature
+            std::string content_copy_without_sig_payload =
+                    content_copy_without_sig.SerializeAsString();
+
+            signed_msg.msg = to_span(content_copy_without_sig_payload);
+            pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+        }
+    }
+    return result;
+}
 }  // namespace session
 
 using namespace session;

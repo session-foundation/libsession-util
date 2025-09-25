@@ -257,6 +257,28 @@ struct DecryptedEnvelope {
     std::optional<DecryptedPro> pro;
 };
 
+struct ParsedCommunityMessage {
+    // The envelope parsed from the plaintext. Set if the plaintext was originally an envelope blob.
+    // This is optional because the protocol is undergoing a migration period to start sending
+    // community messages as an `Envelope` instead of `Content` so we will receive one or the other
+    // kind of blob on the wire during that period.
+    std::optional<Envelope> envelope;
+
+    // Content blob
+    std::span<const uint8_t> content_plaintext;
+
+    // The signature if it was present in the payload. If the envelope is set and the envelope has
+    // the pro signature flag set, then this signature was extracted from the envelope. When the
+    // signature is sourced from the envelope, the envelope's `pro_sig` field is also set to the
+    // same signature as this instance for consistency. Otherwise the signature, if set was
+    // extracted from the community-exclusive pro signature field in the content message.
+    std::optional<array_uc64> pro_sig;
+
+    // Set if the envelope included a pro payload. The caller must check the status to determine if
+    // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
+    std::optional<DecryptedPro> pro;
+};
+
 struct DecryptEnvelopeKey {
     // Set the key to decrypt the envelope. If this key is set then it's assumed that the envelope
     // payload is encrypted (e.g. groups v2) and that the contents are unencrypted. If this key is
@@ -525,6 +547,11 @@ std::vector<uint8_t> encrypt_for_destination(
 DecryptedEnvelope decrypt_envelope(
         const DecryptEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
+        std::chrono::sys_seconds unix_ts,
+        const array_uc32& pro_backend_pubkey);
+
+ParsedCommunityMessage parse_for_community_message(
+        std::span<const uint8_t> content_or_envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey);
 }  // namespace session

@@ -36,7 +36,6 @@ template <typename T>
 const T json_require(
         const nlohmann::json& j, std::string_view key, std::vector<std::string>& errors) {
     T result = {};
-    ;
     auto it = j.find(key);
     if (it == j.end()) {
         errors.push_back(fmt::format("Key '{}' is missing", key));

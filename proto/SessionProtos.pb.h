@@ -1366,6 +1366,7 @@ class Content final :
   // accessors -------------------------------------------------------
 
   enum : int {
+    kProSigForCommunityMessageOnlyFieldNumber = 17,
     kDataMessageFieldNumber = 1,
     kCallMessageFieldNumber = 3,
     kReceiptMessageFieldNumber = 5,
@@ -1379,6 +1380,24 @@ class Content final :
     kExpirationTimerFieldNumber = 13,
     kSigTimestampFieldNumber = 15,
   };
+  // optional bytes proSigForCommunityMessageOnly = 17;
+  bool has_prosigforcommunitymessageonly() const;
+  private:
+  bool _internal_has_prosigforcommunitymessageonly() const;
+  public:
+  void clear_prosigforcommunitymessageonly();
+  const std::string& prosigforcommunitymessageonly() const;
+  template <typename ArgT0 = const std::string&, typename... ArgT>
+  void set_prosigforcommunitymessageonly(ArgT0&& arg0, ArgT... args);
+  std::string* mutable_prosigforcommunitymessageonly();
+  PROTOBUF_NODISCARD std::string* release_prosigforcommunitymessageonly();
+  void set_allocated_prosigforcommunitymessageonly(std::string* prosigforcommunitymessageonly);
+  private:
+  const std::string& _internal_prosigforcommunitymessageonly() const;
+  inline PROTOBUF_ALWAYS_INLINE void _internal_set_prosigforcommunitymessageonly(const std::string& value);
+  std::string* _internal_mutable_prosigforcommunitymessageonly();
+  public:
+
   // optional .SessionProtos.DataMessage dataMessage = 1;
   bool has_datamessage() const;
   private:
@@ -1590,6 +1609,7 @@ class Content final :
   struct Impl_ {
     ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
+    ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr prosigforcommunitymessageonly_;
     ::SessionProtos::DataMessage* datamessage_;
     ::SessionProtos::CallMessage* callmessage_;
     ::SessionProtos::ReceiptMessage* receiptmessage_;
@@ -7368,7 +7388,7 @@ inline void MessageRequestResponse::set_allocated_profile(::SessionProtos::LokiP
 
 // optional .SessionProtos.DataMessage dataMessage = 1;
 inline bool Content::_internal_has_datamessage() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.datamessage_ != nullptr);
   return value;
 }
@@ -7377,7 +7397,7 @@ inline bool Content::has_datamessage() const {
 }
 inline void Content::clear_datamessage() {
   if (_impl_.datamessage_ != nullptr) _impl_.datamessage_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000001u;
+  _impl_._has_bits_[0] &= ~0x00000002u;
 }
 inline const ::SessionProtos::DataMessage& Content::_internal_datamessage() const {
   const ::SessionProtos::DataMessage* p = _impl_.datamessage_;
@@ -7395,14 +7415,14 @@ inline void Content::unsafe_arena_set_allocated_datamessage(
   }
   _impl_.datamessage_ = datamessage;
   if (datamessage) {
-    _impl_._has_bits_[0] |= 0x00000001u;
+    _impl_._has_bits_[0] |= 0x00000002u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000001u;
+    _impl_._has_bits_[0] &= ~0x00000002u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.dataMessage)
 }
 inline ::SessionProtos::DataMessage* Content::release_datamessage() {
-  _impl_._has_bits_[0] &= ~0x00000001u;
+  _impl_._has_bits_[0] &= ~0x00000002u;
   ::SessionProtos::DataMessage* temp = _impl_.datamessage_;
   _impl_.datamessage_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -7418,13 +7438,13 @@ inline ::SessionProtos::DataMessage* Content::release_datamessage() {
 }
 inline ::SessionProtos::DataMessage* Content::unsafe_arena_release_datamessage() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.dataMessage)
-  _impl_._has_bits_[0] &= ~0x00000001u;
+  _impl_._has_bits_[0] &= ~0x00000002u;
   ::SessionProtos::DataMessage* temp = _impl_.datamessage_;
   _impl_.datamessage_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::DataMessage* Content::_internal_mutable_datamessage() {
-  _impl_._has_bits_[0] |= 0x00000001u;
+  _impl_._has_bits_[0] |= 0x00000002u;
   if (_impl_.datamessage_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::DataMessage>(GetArenaForAllocation());
     _impl_.datamessage_ = p;
@@ -7448,9 +7468,9 @@ inline void Content::set_allocated_datamessage(::SessionProtos::DataMessage* dat
       datamessage = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, datamessage, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000001u;
+    _impl_._has_bits_[0] |= 0x00000002u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000001u;
+    _impl_._has_bits_[0] &= ~0x00000002u;
   }
   _impl_.datamessage_ = datamessage;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.dataMessage)
@@ -7458,7 +7478,7 @@ inline void Content::set_allocated_datamessage(::SessionProtos::DataMessage* dat
 
 // optional .SessionProtos.CallMessage callMessage = 3;
 inline bool Content::_internal_has_callmessage() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.callmessage_ != nullptr);
   return value;
 }
@@ -7467,7 +7487,7 @@ inline bool Content::has_callmessage() const {
 }
 inline void Content::clear_callmessage() {
   if (_impl_.callmessage_ != nullptr) _impl_.callmessage_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000002u;
+  _impl_._has_bits_[0] &= ~0x00000004u;
 }
 inline const ::SessionProtos::CallMessage& Content::_internal_callmessage() const {
   const ::SessionProtos::CallMessage* p = _impl_.callmessage_;
@@ -7485,14 +7505,14 @@ inline void Content::unsafe_arena_set_allocated_callmessage(
   }
   _impl_.callmessage_ = callmessage;
   if (callmessage) {
-    _impl_._has_bits_[0] |= 0x00000002u;
+    _impl_._has_bits_[0] |= 0x00000004u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000002u;
+    _impl_._has_bits_[0] &= ~0x00000004u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.callMessage)
 }
 inline ::SessionProtos::CallMessage* Content::release_callmessage() {
-  _impl_._has_bits_[0] &= ~0x00000002u;
+  _impl_._has_bits_[0] &= ~0x00000004u;
   ::SessionProtos::CallMessage* temp = _impl_.callmessage_;
   _impl_.callmessage_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -7508,13 +7528,13 @@ inline ::SessionProtos::CallMessage* Content::release_callmessage() {
 }
 inline ::SessionProtos::CallMessage* Content::unsafe_arena_release_callmessage() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.callMessage)
-  _impl_._has_bits_[0] &= ~0x00000002u;
+  _impl_._has_bits_[0] &= ~0x00000004u;
   ::SessionProtos::CallMessage* temp = _impl_.callmessage_;
   _impl_.callmessage_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::CallMessage* Content::_internal_mutable_callmessage() {
-  _impl_._has_bits_[0] |= 0x00000002u;
+  _impl_._has_bits_[0] |= 0x00000004u;
   if (_impl_.callmessage_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::CallMessage>(GetArenaForAllocation());
     _impl_.callmessage_ = p;
@@ -7538,9 +7558,9 @@ inline void Content::set_allocated_callmessage(::SessionProtos::CallMessage* cal
       callmessage = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, callmessage, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000002u;
+    _impl_._has_bits_[0] |= 0x00000004u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000002u;
+    _impl_._has_bits_[0] &= ~0x00000004u;
   }
   _impl_.callmessage_ = callmessage;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.callMessage)
@@ -7548,7 +7568,7 @@ inline void Content::set_allocated_callmessage(::SessionProtos::CallMessage* cal
 
 // optional .SessionProtos.ReceiptMessage receiptMessage = 5;
 inline bool Content::_internal_has_receiptmessage() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.receiptmessage_ != nullptr);
   return value;
 }
@@ -7557,7 +7577,7 @@ inline bool Content::has_receiptmessage() const {
 }
 inline void Content::clear_receiptmessage() {
   if (_impl_.receiptmessage_ != nullptr) _impl_.receiptmessage_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000004u;
+  _impl_._has_bits_[0] &= ~0x00000008u;
 }
 inline const ::SessionProtos::ReceiptMessage& Content::_internal_receiptmessage() const {
   const ::SessionProtos::ReceiptMessage* p = _impl_.receiptmessage_;
@@ -7575,14 +7595,14 @@ inline void Content::unsafe_arena_set_allocated_receiptmessage(
   }
   _impl_.receiptmessage_ = receiptmessage;
   if (receiptmessage) {
-    _impl_._has_bits_[0] |= 0x00000004u;
+    _impl_._has_bits_[0] |= 0x00000008u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000004u;
+    _impl_._has_bits_[0] &= ~0x00000008u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.receiptMessage)
 }
 inline ::SessionProtos::ReceiptMessage* Content::release_receiptmessage() {
-  _impl_._has_bits_[0] &= ~0x00000004u;
+  _impl_._has_bits_[0] &= ~0x00000008u;
   ::SessionProtos::ReceiptMessage* temp = _impl_.receiptmessage_;
   _impl_.receiptmessage_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -7598,13 +7618,13 @@ inline ::SessionProtos::ReceiptMessage* Content::release_receiptmessage() {
 }
 inline ::SessionProtos::ReceiptMessage* Content::unsafe_arena_release_receiptmessage() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.receiptMessage)
-  _impl_._has_bits_[0] &= ~0x00000004u;
+  _impl_._has_bits_[0] &= ~0x00000008u;
   ::SessionProtos::ReceiptMessage* temp = _impl_.receiptmessage_;
   _impl_.receiptmessage_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::ReceiptMessage* Content::_internal_mutable_receiptmessage() {
-  _impl_._has_bits_[0] |= 0x00000004u;
+  _impl_._has_bits_[0] |= 0x00000008u;
   if (_impl_.receiptmessage_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::ReceiptMessage>(GetArenaForAllocation());
     _impl_.receiptmessage_ = p;
@@ -7628,9 +7648,9 @@ inline void Content::set_allocated_receiptmessage(::SessionProtos::ReceiptMessag
       receiptmessage = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, receiptmessage, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000004u;
+    _impl_._has_bits_[0] |= 0x00000008u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000004u;
+    _impl_._has_bits_[0] &= ~0x00000008u;
   }
   _impl_.receiptmessage_ = receiptmessage;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.receiptMessage)
@@ -7638,7 +7658,7 @@ inline void Content::set_allocated_receiptmessage(::SessionProtos::ReceiptMessag
 
 // optional .SessionProtos.TypingMessage typingMessage = 6;
 inline bool Content::_internal_has_typingmessage() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000008u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.typingmessage_ != nullptr);
   return value;
 }
@@ -7647,7 +7667,7 @@ inline bool Content::has_typingmessage() const {
 }
 inline void Content::clear_typingmessage() {
   if (_impl_.typingmessage_ != nullptr) _impl_.typingmessage_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000008u;
+  _impl_._has_bits_[0] &= ~0x00000010u;
 }
 inline const ::SessionProtos::TypingMessage& Content::_internal_typingmessage() const {
   const ::SessionProtos::TypingMessage* p = _impl_.typingmessage_;
@@ -7665,14 +7685,14 @@ inline void Content::unsafe_arena_set_allocated_typingmessage(
   }
   _impl_.typingmessage_ = typingmessage;
   if (typingmessage) {
-    _impl_._has_bits_[0] |= 0x00000008u;
+    _impl_._has_bits_[0] |= 0x00000010u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000008u;
+    _impl_._has_bits_[0] &= ~0x00000010u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.typingMessage)
 }
 inline ::SessionProtos::TypingMessage* Content::release_typingmessage() {
-  _impl_._has_bits_[0] &= ~0x00000008u;
+  _impl_._has_bits_[0] &= ~0x00000010u;
   ::SessionProtos::TypingMessage* temp = _impl_.typingmessage_;
   _impl_.typingmessage_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -7688,13 +7708,13 @@ inline ::SessionProtos::TypingMessage* Content::release_typingmessage() {
 }
 inline ::SessionProtos::TypingMessage* Content::unsafe_arena_release_typingmessage() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.typingMessage)
-  _impl_._has_bits_[0] &= ~0x00000008u;
+  _impl_._has_bits_[0] &= ~0x00000010u;
   ::SessionProtos::TypingMessage* temp = _impl_.typingmessage_;
   _impl_.typingmessage_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::TypingMessage* Content::_internal_mutable_typingmessage() {
-  _impl_._has_bits_[0] |= 0x00000008u;
+  _impl_._has_bits_[0] |= 0x00000010u;
   if (_impl_.typingmessage_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::TypingMessage>(GetArenaForAllocation());
     _impl_.typingmessage_ = p;
@@ -7718,9 +7738,9 @@ inline void Content::set_allocated_typingmessage(::SessionProtos::TypingMessage*
       typingmessage = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, typingmessage, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000008u;
+    _impl_._has_bits_[0] |= 0x00000010u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000008u;
+    _impl_._has_bits_[0] &= ~0x00000010u;
   }
   _impl_.typingmessage_ = typingmessage;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.typingMessage)
@@ -7728,7 +7748,7 @@ inline void Content::set_allocated_typingmessage(::SessionProtos::TypingMessage*
 
 // optional .SessionProtos.DataExtractionNotification dataExtractionNotification = 8;
 inline bool Content::_internal_has_dataextractionnotification() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000010u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000020u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.dataextractionnotification_ != nullptr);
   return value;
 }
@@ -7737,7 +7757,7 @@ inline bool Content::has_dataextractionnotification() const {
 }
 inline void Content::clear_dataextractionnotification() {
   if (_impl_.dataextractionnotification_ != nullptr) _impl_.dataextractionnotification_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000010u;
+  _impl_._has_bits_[0] &= ~0x00000020u;
 }
 inline const ::SessionProtos::DataExtractionNotification& Content::_internal_dataextractionnotification() const {
   const ::SessionProtos::DataExtractionNotification* p = _impl_.dataextractionnotification_;
@@ -7755,14 +7775,14 @@ inline void Content::unsafe_arena_set_allocated_dataextractionnotification(
   }
   _impl_.dataextractionnotification_ = dataextractionnotification;
   if (dataextractionnotification) {
-    _impl_._has_bits_[0] |= 0x00000010u;
+    _impl_._has_bits_[0] |= 0x00000020u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000010u;
+    _impl_._has_bits_[0] &= ~0x00000020u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.dataExtractionNotification)
 }
 inline ::SessionProtos::DataExtractionNotification* Content::release_dataextractionnotification() {
-  _impl_._has_bits_[0] &= ~0x00000010u;
+  _impl_._has_bits_[0] &= ~0x00000020u;
   ::SessionProtos::DataExtractionNotification* temp = _impl_.dataextractionnotification_;
   _impl_.dataextractionnotification_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -7778,13 +7798,13 @@ inline ::SessionProtos::DataExtractionNotification* Content::release_dataextract
 }
 inline ::SessionProtos::DataExtractionNotification* Content::unsafe_arena_release_dataextractionnotification() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.dataExtractionNotification)
-  _impl_._has_bits_[0] &= ~0x00000010u;
+  _impl_._has_bits_[0] &= ~0x00000020u;
   ::SessionProtos::DataExtractionNotification* temp = _impl_.dataextractionnotification_;
   _impl_.dataextractionnotification_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::DataExtractionNotification* Content::_internal_mutable_dataextractionnotification() {
-  _impl_._has_bits_[0] |= 0x00000010u;
+  _impl_._has_bits_[0] |= 0x00000020u;
   if (_impl_.dataextractionnotification_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::DataExtractionNotification>(GetArenaForAllocation());
     _impl_.dataextractionnotification_ = p;
@@ -7808,9 +7828,9 @@ inline void Content::set_allocated_dataextractionnotification(::SessionProtos::D
       dataextractionnotification = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, dataextractionnotification, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000010u;
+    _impl_._has_bits_[0] |= 0x00000020u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000010u;
+    _impl_._has_bits_[0] &= ~0x00000020u;
   }
   _impl_.dataextractionnotification_ = dataextractionnotification;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.dataExtractionNotification)
@@ -7818,7 +7838,7 @@ inline void Content::set_allocated_dataextractionnotification(::SessionProtos::D
 
 // optional .SessionProtos.UnsendRequest unsendRequest = 9;
 inline bool Content::_internal_has_unsendrequest() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000020u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000040u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.unsendrequest_ != nullptr);
   return value;
 }
@@ -7827,7 +7847,7 @@ inline bool Content::has_unsendrequest() const {
 }
 inline void Content::clear_unsendrequest() {
   if (_impl_.unsendrequest_ != nullptr) _impl_.unsendrequest_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000020u;
+  _impl_._has_bits_[0] &= ~0x00000040u;
 }
 inline const ::SessionProtos::UnsendRequest& Content::_internal_unsendrequest() const {
   const ::SessionProtos::UnsendRequest* p = _impl_.unsendrequest_;
@@ -7845,14 +7865,14 @@ inline void Content::unsafe_arena_set_allocated_unsendrequest(
   }
   _impl_.unsendrequest_ = unsendrequest;
   if (unsendrequest) {
-    _impl_._has_bits_[0] |= 0x00000020u;
+    _impl_._has_bits_[0] |= 0x00000040u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000020u;
+    _impl_._has_bits_[0] &= ~0x00000040u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.unsendRequest)
 }
 inline ::SessionProtos::UnsendRequest* Content::release_unsendrequest() {
-  _impl_._has_bits_[0] &= ~0x00000020u;
+  _impl_._has_bits_[0] &= ~0x00000040u;
   ::SessionProtos::UnsendRequest* temp = _impl_.unsendrequest_;
   _impl_.unsendrequest_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -7868,13 +7888,13 @@ inline ::SessionProtos::UnsendRequest* Content::release_unsendrequest() {
 }
 inline ::SessionProtos::UnsendRequest* Content::unsafe_arena_release_unsendrequest() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.unsendRequest)
-  _impl_._has_bits_[0] &= ~0x00000020u;
+  _impl_._has_bits_[0] &= ~0x00000040u;
   ::SessionProtos::UnsendRequest* temp = _impl_.unsendrequest_;
   _impl_.unsendrequest_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::UnsendRequest* Content::_internal_mutable_unsendrequest() {
-  _impl_._has_bits_[0] |= 0x00000020u;
+  _impl_._has_bits_[0] |= 0x00000040u;
   if (_impl_.unsendrequest_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::UnsendRequest>(GetArenaForAllocation());
     _impl_.unsendrequest_ = p;
@@ -7898,9 +7918,9 @@ inline void Content::set_allocated_unsendrequest(::SessionProtos::UnsendRequest*
       unsendrequest = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, unsendrequest, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000020u;
+    _impl_._has_bits_[0] |= 0x00000040u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000020u;
+    _impl_._has_bits_[0] &= ~0x00000040u;
   }
   _impl_.unsendrequest_ = unsendrequest;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.unsendRequest)
@@ -7908,7 +7928,7 @@ inline void Content::set_allocated_unsendrequest(::SessionProtos::UnsendRequest*
 
 // optional .SessionProtos.MessageRequestResponse messageRequestResponse = 10;
 inline bool Content::_internal_has_messagerequestresponse() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000040u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000080u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.messagerequestresponse_ != nullptr);
   return value;
 }
@@ -7917,7 +7937,7 @@ inline bool Content::has_messagerequestresponse() const {
 }
 inline void Content::clear_messagerequestresponse() {
   if (_impl_.messagerequestresponse_ != nullptr) _impl_.messagerequestresponse_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000040u;
+  _impl_._has_bits_[0] &= ~0x00000080u;
 }
 inline const ::SessionProtos::MessageRequestResponse& Content::_internal_messagerequestresponse() const {
   const ::SessionProtos::MessageRequestResponse* p = _impl_.messagerequestresponse_;
@@ -7935,14 +7955,14 @@ inline void Content::unsafe_arena_set_allocated_messagerequestresponse(
   }
   _impl_.messagerequestresponse_ = messagerequestresponse;
   if (messagerequestresponse) {
-    _impl_._has_bits_[0] |= 0x00000040u;
+    _impl_._has_bits_[0] |= 0x00000080u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000040u;
+    _impl_._has_bits_[0] &= ~0x00000080u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.messageRequestResponse)
 }
 inline ::SessionProtos::MessageRequestResponse* Content::release_messagerequestresponse() {
-  _impl_._has_bits_[0] &= ~0x00000040u;
+  _impl_._has_bits_[0] &= ~0x00000080u;
   ::SessionProtos::MessageRequestResponse* temp = _impl_.messagerequestresponse_;
   _impl_.messagerequestresponse_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -7958,13 +7978,13 @@ inline ::SessionProtos::MessageRequestResponse* Content::release_messagerequestr
 }
 inline ::SessionProtos::MessageRequestResponse* Content::unsafe_arena_release_messagerequestresponse() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.messageRequestResponse)
-  _impl_._has_bits_[0] &= ~0x00000040u;
+  _impl_._has_bits_[0] &= ~0x00000080u;
   ::SessionProtos::MessageRequestResponse* temp = _impl_.messagerequestresponse_;
   _impl_.messagerequestresponse_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::MessageRequestResponse* Content::_internal_mutable_messagerequestresponse() {
-  _impl_._has_bits_[0] |= 0x00000040u;
+  _impl_._has_bits_[0] |= 0x00000080u;
   if (_impl_.messagerequestresponse_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::MessageRequestResponse>(GetArenaForAllocation());
     _impl_.messagerequestresponse_ = p;
@@ -7988,9 +8008,9 @@ inline void Content::set_allocated_messagerequestresponse(::SessionProtos::Messa
       messagerequestresponse = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, messagerequestresponse, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000040u;
+    _impl_._has_bits_[0] |= 0x00000080u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000040u;
+    _impl_._has_bits_[0] &= ~0x00000080u;
   }
   _impl_.messagerequestresponse_ = messagerequestresponse;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.messageRequestResponse)
@@ -7998,7 +8018,7 @@ inline void Content::set_allocated_messagerequestresponse(::SessionProtos::Messa
 
 // optional .SessionProtos.SharedConfigMessage sharedConfigMessage = 11;
 inline bool Content::_internal_has_sharedconfigmessage() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000080u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000100u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.sharedconfigmessage_ != nullptr);
   return value;
 }
@@ -8007,7 +8027,7 @@ inline bool Content::has_sharedconfigmessage() const {
 }
 inline void Content::clear_sharedconfigmessage() {
   if (_impl_.sharedconfigmessage_ != nullptr) _impl_.sharedconfigmessage_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000080u;
+  _impl_._has_bits_[0] &= ~0x00000100u;
 }
 inline const ::SessionProtos::SharedConfigMessage& Content::_internal_sharedconfigmessage() const {
   const ::SessionProtos::SharedConfigMessage* p = _impl_.sharedconfigmessage_;
@@ -8025,14 +8045,14 @@ inline void Content::unsafe_arena_set_allocated_sharedconfigmessage(
   }
   _impl_.sharedconfigmessage_ = sharedconfigmessage;
   if (sharedconfigmessage) {
-    _impl_._has_bits_[0] |= 0x00000080u;
+    _impl_._has_bits_[0] |= 0x00000100u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000080u;
+    _impl_._has_bits_[0] &= ~0x00000100u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.sharedConfigMessage)
 }
 inline ::SessionProtos::SharedConfigMessage* Content::release_sharedconfigmessage() {
-  _impl_._has_bits_[0] &= ~0x00000080u;
+  _impl_._has_bits_[0] &= ~0x00000100u;
   ::SessionProtos::SharedConfigMessage* temp = _impl_.sharedconfigmessage_;
   _impl_.sharedconfigmessage_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -8048,13 +8068,13 @@ inline ::SessionProtos::SharedConfigMessage* Content::release_sharedconfigmessag
 }
 inline ::SessionProtos::SharedConfigMessage* Content::unsafe_arena_release_sharedconfigmessage() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.sharedConfigMessage)
-  _impl_._has_bits_[0] &= ~0x00000080u;
+  _impl_._has_bits_[0] &= ~0x00000100u;
   ::SessionProtos::SharedConfigMessage* temp = _impl_.sharedconfigmessage_;
   _impl_.sharedconfigmessage_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::SharedConfigMessage* Content::_internal_mutable_sharedconfigmessage() {
-  _impl_._has_bits_[0] |= 0x00000080u;
+  _impl_._has_bits_[0] |= 0x00000100u;
   if (_impl_.sharedconfigmessage_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::SharedConfigMessage>(GetArenaForAllocation());
     _impl_.sharedconfigmessage_ = p;
@@ -8078,9 +8098,9 @@ inline void Content::set_allocated_sharedconfigmessage(::SessionProtos::SharedCo
       sharedconfigmessage = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, sharedconfigmessage, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000080u;
+    _impl_._has_bits_[0] |= 0x00000100u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000080u;
+    _impl_._has_bits_[0] &= ~0x00000100u;
   }
   _impl_.sharedconfigmessage_ = sharedconfigmessage;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.sharedConfigMessage)
@@ -8088,7 +8108,7 @@ inline void Content::set_allocated_sharedconfigmessage(::SessionProtos::SharedCo
 
 // optional .SessionProtos.Content.ExpirationType expirationType = 12;
 inline bool Content::_internal_has_expirationtype() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000200u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000400u) != 0;
   return value;
 }
 inline bool Content::has_expirationtype() const {
@@ -8096,7 +8116,7 @@ inline bool Content::has_expirationtype() const {
 }
 inline void Content::clear_expirationtype() {
   _impl_.expirationtype_ = 0;
-  _impl_._has_bits_[0] &= ~0x00000200u;
+  _impl_._has_bits_[0] &= ~0x00000400u;
 }
 inline ::SessionProtos::Content_ExpirationType Content::_internal_expirationtype() const {
   return static_cast< ::SessionProtos::Content_ExpirationType >(_impl_.expirationtype_);
@@ -8107,7 +8127,7 @@ inline ::SessionProtos::Content_ExpirationType Content::expirationtype() const {
 }
 inline void Content::_internal_set_expirationtype(::SessionProtos::Content_ExpirationType value) {
   assert(::SessionProtos::Content_ExpirationType_IsValid(value));
-  _impl_._has_bits_[0] |= 0x00000200u;
+  _impl_._has_bits_[0] |= 0x00000400u;
   _impl_.expirationtype_ = value;
 }
 inline void Content::set_expirationtype(::SessionProtos::Content_ExpirationType value) {
@@ -8117,7 +8137,7 @@ inline void Content::set_expirationtype(::SessionProtos::Content_ExpirationType 
 
 // optional uint32 expirationTimer = 13;
 inline bool Content::_internal_has_expirationtimer() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000400u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000800u) != 0;
   return value;
 }
 inline bool Content::has_expirationtimer() const {
@@ -8125,7 +8145,7 @@ inline bool Content::has_expirationtimer() const {
 }
 inline void Content::clear_expirationtimer() {
   _impl_.expirationtimer_ = 0u;
-  _impl_._has_bits_[0] &= ~0x00000400u;
+  _impl_._has_bits_[0] &= ~0x00000800u;
 }
 inline uint32_t Content::_internal_expirationtimer() const {
   return _impl_.expirationtimer_;
@@ -8135,7 +8155,7 @@ inline uint32_t Content::expirationtimer() const {
   return _internal_expirationtimer();
 }
 inline void Content::_internal_set_expirationtimer(uint32_t value) {
-  _impl_._has_bits_[0] |= 0x00000400u;
+  _impl_._has_bits_[0] |= 0x00000800u;
   _impl_.expirationtimer_ = value;
 }
 inline void Content::set_expirationtimer(uint32_t value) {
@@ -8145,7 +8165,7 @@ inline void Content::set_expirationtimer(uint32_t value) {
 
 // optional uint64 sigTimestamp = 15;
 inline bool Content::_internal_has_sigtimestamp() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000800u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00001000u) != 0;
   return value;
 }
 inline bool Content::has_sigtimestamp() const {
@@ -8153,7 +8173,7 @@ inline bool Content::has_sigtimestamp() const {
 }
 inline void Content::clear_sigtimestamp() {
   _impl_.sigtimestamp_ = uint64_t{0u};
-  _impl_._has_bits_[0] &= ~0x00000800u;
+  _impl_._has_bits_[0] &= ~0x00001000u;
 }
 inline uint64_t Content::_internal_sigtimestamp() const {
   return _impl_.sigtimestamp_;
@@ -8163,7 +8183,7 @@ inline uint64_t Content::sigtimestamp() const {
   return _internal_sigtimestamp();
 }
 inline void Content::_internal_set_sigtimestamp(uint64_t value) {
-  _impl_._has_bits_[0] |= 0x00000800u;
+  _impl_._has_bits_[0] |= 0x00001000u;
   _impl_.sigtimestamp_ = value;
 }
 inline void Content::set_sigtimestamp(uint64_t value) {
@@ -8173,7 +8193,7 @@ inline void Content::set_sigtimestamp(uint64_t value) {
 
 // optional .SessionProtos.ProMessage proMessage = 16;
 inline bool Content::_internal_has_promessage() const {
-  bool value = (_impl_._has_bits_[0] & 0x00000100u) != 0;
+  bool value = (_impl_._has_bits_[0] & 0x00000200u) != 0;
   PROTOBUF_ASSUME(!value || _impl_.promessage_ != nullptr);
   return value;
 }
@@ -8182,7 +8202,7 @@ inline bool Content::has_promessage() const {
 }
 inline void Content::clear_promessage() {
   if (_impl_.promessage_ != nullptr) _impl_.promessage_->Clear();
-  _impl_._has_bits_[0] &= ~0x00000100u;
+  _impl_._has_bits_[0] &= ~0x00000200u;
 }
 inline const ::SessionProtos::ProMessage& Content::_internal_promessage() const {
   const ::SessionProtos::ProMessage* p = _impl_.promessage_;
@@ -8200,14 +8220,14 @@ inline void Content::unsafe_arena_set_allocated_promessage(
   }
   _impl_.promessage_ = promessage;
   if (promessage) {
-    _impl_._has_bits_[0] |= 0x00000100u;
+    _impl_._has_bits_[0] |= 0x00000200u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000100u;
+    _impl_._has_bits_[0] &= ~0x00000200u;
   }
   // @@protoc_insertion_point(field_unsafe_arena_set_allocated:SessionProtos.Content.proMessage)
 }
 inline ::SessionProtos::ProMessage* Content::release_promessage() {
-  _impl_._has_bits_[0] &= ~0x00000100u;
+  _impl_._has_bits_[0] &= ~0x00000200u;
   ::SessionProtos::ProMessage* temp = _impl_.promessage_;
   _impl_.promessage_ = nullptr;
 #ifdef PROTOBUF_FORCE_COPY_IN_RELEASE
@@ -8223,13 +8243,13 @@ inline ::SessionProtos::ProMessage* Content::release_promessage() {
 }
 inline ::SessionProtos::ProMessage* Content::unsafe_arena_release_promessage() {
   // @@protoc_insertion_point(field_release:SessionProtos.Content.proMessage)
-  _impl_._has_bits_[0] &= ~0x00000100u;
+  _impl_._has_bits_[0] &= ~0x00000200u;
   ::SessionProtos::ProMessage* temp = _impl_.promessage_;
   _impl_.promessage_ = nullptr;
   return temp;
 }
 inline ::SessionProtos::ProMessage* Content::_internal_mutable_promessage() {
-  _impl_._has_bits_[0] |= 0x00000100u;
+  _impl_._has_bits_[0] |= 0x00000200u;
   if (_impl_.promessage_ == nullptr) {
     auto* p = CreateMaybeMessage<::SessionProtos::ProMessage>(GetArenaForAllocation());
     _impl_.promessage_ = p;
@@ -8253,12 +8273,80 @@ inline void Content::set_allocated_promessage(::SessionProtos::ProMessage* prome
       promessage = ::PROTOBUF_NAMESPACE_ID::internal::GetOwnedMessage(
           message_arena, promessage, submessage_arena);
     }
-    _impl_._has_bits_[0] |= 0x00000100u;
+    _impl_._has_bits_[0] |= 0x00000200u;
   } else {
-    _impl_._has_bits_[0] &= ~0x00000100u;
+    _impl_._has_bits_[0] &= ~0x00000200u;
   }
   _impl_.promessage_ = promessage;
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.proMessage)
+}
+
+// optional bytes proSigForCommunityMessageOnly = 17;
+inline bool Content::_internal_has_prosigforcommunitymessageonly() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000001u) != 0;
+  return value;
+}
+inline bool Content::has_prosigforcommunitymessageonly() const {
+  return _internal_has_prosigforcommunitymessageonly();
+}
+inline void Content::clear_prosigforcommunitymessageonly() {
+  _impl_.prosigforcommunitymessageonly_.ClearToEmpty();
+  _impl_._has_bits_[0] &= ~0x00000001u;
+}
+inline const std::string& Content::prosigforcommunitymessageonly() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.Content.proSigForCommunityMessageOnly)
+  return _internal_prosigforcommunitymessageonly();
+}
+template <typename ArgT0, typename... ArgT>
+inline PROTOBUF_ALWAYS_INLINE
+void Content::set_prosigforcommunitymessageonly(ArgT0&& arg0, ArgT... args) {
+ _impl_._has_bits_[0] |= 0x00000001u;
+ _impl_.prosigforcommunitymessageonly_.SetBytes(static_cast<ArgT0 &&>(arg0), args..., GetArenaForAllocation());
+  // @@protoc_insertion_point(field_set:SessionProtos.Content.proSigForCommunityMessageOnly)
+}
+inline std::string* Content::mutable_prosigforcommunitymessageonly() {
+  std::string* _s = _internal_mutable_prosigforcommunitymessageonly();
+  // @@protoc_insertion_point(field_mutable:SessionProtos.Content.proSigForCommunityMessageOnly)
+  return _s;
+}
+inline const std::string& Content::_internal_prosigforcommunitymessageonly() const {
+  return _impl_.prosigforcommunitymessageonly_.Get();
+}
+inline void Content::_internal_set_prosigforcommunitymessageonly(const std::string& value) {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  _impl_.prosigforcommunitymessageonly_.Set(value, GetArenaForAllocation());
+}
+inline std::string* Content::_internal_mutable_prosigforcommunitymessageonly() {
+  _impl_._has_bits_[0] |= 0x00000001u;
+  return _impl_.prosigforcommunitymessageonly_.Mutable(GetArenaForAllocation());
+}
+inline std::string* Content::release_prosigforcommunitymessageonly() {
+  // @@protoc_insertion_point(field_release:SessionProtos.Content.proSigForCommunityMessageOnly)
+  if (!_internal_has_prosigforcommunitymessageonly()) {
+    return nullptr;
+  }
+  _impl_._has_bits_[0] &= ~0x00000001u;
+  auto* p = _impl_.prosigforcommunitymessageonly_.Release();
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.prosigforcommunitymessageonly_.IsDefault()) {
+    _impl_.prosigforcommunitymessageonly_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  return p;
+}
+inline void Content::set_allocated_prosigforcommunitymessageonly(std::string* prosigforcommunitymessageonly) {
+  if (prosigforcommunitymessageonly != nullptr) {
+    _impl_._has_bits_[0] |= 0x00000001u;
+  } else {
+    _impl_._has_bits_[0] &= ~0x00000001u;
+  }
+  _impl_.prosigforcommunitymessageonly_.SetAllocated(prosigforcommunitymessageonly, GetArenaForAllocation());
+#ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (_impl_.prosigforcommunitymessageonly_.IsDefault()) {
+    _impl_.prosigforcommunitymessageonly_.Set("", GetArenaForAllocation());
+  }
+#endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  // @@protoc_insertion_point(field_set_allocated:SessionProtos.Content.proSigForCommunityMessageOnly)
 }
 
 // -------------------------------------------------------------------
