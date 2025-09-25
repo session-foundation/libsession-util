@@ -21,10 +21,10 @@
 ///
 /// - Wrap and/or encrypt a plaintext content message into an Envelope or Websocket message
 ///   (depending on the configured namespace and destination) ready to be sent on the wire with
-///   `encrypt_for_destination`.
+///   `encode_for_destination`.
 ///
 /// - Decrypt an incoming message in its websocket wrapped, and or encrypted envelope form with
-///   `decrypt_envelope`
+///   `decode_envelope`
 ///
 /// TODO: In future the goal is to begin abstracting more protobuf types away from client
 /// implementations such that the only dependency clients need to encode and decode Session Protocol
@@ -228,7 +228,7 @@ struct Envelope {
     array_uc64 pro_sig;
 };
 
-struct DecryptedPro {
+struct DecodedPro {
     ProStatus status;  // Validity of the proof embedded in the envelope
     // Session Pro proof that was embedded in the envelope, this is always populated irrespective of
     // the status but the validity of the contents should be verified by checking `status`
@@ -236,11 +236,11 @@ struct DecryptedPro {
     PRO_FEATURES features;  // Bit flag features that were used in the embedded message
 };
 
-struct DecryptedEnvelope {
+struct DecodedEnvelope {
     // The envelope parsed from the plaintext
     Envelope envelope;
 
-    // Decrypted envelope content into plaintext
+    // Decoded envelope content into plaintext
     std::vector<uint8_t> content_plaintext;
 
     // Sender public key extracted from the encrypted content payload. This is not set if the
@@ -254,7 +254,7 @@ struct DecryptedEnvelope {
 
     // Set if the envelope included a pro payload. The caller must check the status to determine if
     // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
-    std::optional<DecryptedPro> pro;
+    std::optional<DecodedPro> pro;
 };
 
 struct DecodedCommunityMessage {
@@ -276,10 +276,10 @@ struct DecodedCommunityMessage {
 
     // Set if the envelope included a pro payload. The caller must check the status to determine if
     // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
-    std::optional<DecryptedPro> pro;
+    std::optional<DecodedPro> pro;
 };
 
-struct DecryptEnvelopeKey {
+struct DecodeEnvelopeKey {
     // Set the key to decrypt the envelope. If this key is set then it's assumed that the envelope
     // payload is encrypted (e.g. groups v2) and that the contents are unencrypted. If this key is
     // not set the it's assumed the envelope is not encrypted but the contents are encrypted (e.g.:
@@ -347,7 +347,7 @@ ProFeaturesForMsg pro_features_for_utf8(
 ProFeaturesForMsg pro_features_for_utf16(
         char16_t const* utf16, size_t utf8_size, PRO_EXTRA_FEATURES flags);
 
-/// API: session_protocol/encrypt_for_1o1
+/// API: session_protocol/encode_for_1o1
 ///
 /// Encrypt a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
 /// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
@@ -372,14 +372,14 @@ ProFeaturesForMsg pro_features_for_utf16(
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<uint8_t> encrypt_for_1o1(
+std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
         const std::optional<array_uc64>& pro_sig);
 
-/// API: session_protocol/encrypt_for_community_inbox
+/// API: session_protocol/encode_for_community_inbox
 ///
 /// Encrypt a plaintext message for a community inbox in the Session Protocol. This function wraps
 /// the plaintext in the necessary structures and encrypts it for transmission to a community inbox
@@ -406,7 +406,7 @@ std::vector<uint8_t> encrypt_for_1o1(
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<uint8_t> encrypt_for_community_inbox(
+std::vector<uint8_t> encode_for_community_inbox(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
@@ -414,7 +414,7 @@ std::vector<uint8_t> encrypt_for_community_inbox(
         const array_uc32& community_pubkey,
         const std::optional<array_uc64>& pro_sig);
 
-/// API: session_protocol/encrypt_for_group
+/// API: session_protocol/encode_for_group
 ///
 /// Encrypt a plaintext message for a group in the Session Protocol. This function wraps the
 /// plaintext in the necessary structures and encrypts it for transmission to a group, using the
@@ -442,7 +442,7 @@ std::vector<uint8_t> encrypt_for_community_inbox(
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<uint8_t> encrypt_for_group(
+std::vector<uint8_t> encode_for_group(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
@@ -450,7 +450,7 @@ std::vector<uint8_t> encrypt_for_group(
         const cleared_uc32& group_ed25519_privkey,
         const std::optional<array_uc64>& pro_sig);
 
-/// API: session_protocol/encrypt_for_group
+/// API: session_protocol/encode_for_community
 ///
 /// Encrypt a plaintext `Content` message for a community for the Session Protocol. This function
 /// encodes Session Pro metadata including generating and embedding the Session Pro signature, when
@@ -501,12 +501,12 @@ std::vector<uint8_t> encode_for_community(
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<uint8_t> encrypt_for_destination(
+std::vector<uint8_t> encode_for_destination(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         const Destination& dest);
 
-/// API: session_protocol/decrypt_envelope
+/// API: session_protocol/decode_envelope
 ///
 /// Given an envelope payload (i.e.: protobuf encoded stream of `WebsocketRequestMessage` which
 /// wraps an `Envelope` for 1o1 messages/sync messages, or `Envelope` encrypted using a Groups v2
@@ -559,8 +559,8 @@ std::vector<uint8_t> encrypt_for_destination(
 ///
 ///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
 ///   access to pro features if it's using any.
-DecryptedEnvelope decrypt_envelope(
-        const DecryptEnvelopeKey& keys,
+DecodedEnvelope decode_envelope(
+        const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey);

@@ -179,7 +179,7 @@ ProFeaturesForMsg pro_features_for_utf16(
     return result;
 }
 
-std::vector<uint8_t> encrypt_for_1o1(
+std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
@@ -190,11 +190,11 @@ std::vector<uint8_t> encrypt_for_1o1(
     dest.pro_sig = pro_sig;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
-    std::vector<uint8_t> result = encrypt_for_destination(plaintext, ed25519_privkey, dest);
+    std::vector<uint8_t> result = encode_for_destination(plaintext, ed25519_privkey, dest);
     return result;
 }
 
-std::vector<uint8_t> encrypt_for_community_inbox(
+std::vector<uint8_t> encode_for_community_inbox(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
@@ -207,11 +207,11 @@ std::vector<uint8_t> encrypt_for_community_inbox(
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     dest.community_inbox_server_pubkey = community_pubkey;
-    std::vector<uint8_t> result = encrypt_for_destination(plaintext, ed25519_privkey, dest);
+    std::vector<uint8_t> result = encode_for_destination(plaintext, ed25519_privkey, dest);
     return result;
 }
 
-std::vector<uint8_t> encrypt_for_group(
+std::vector<uint8_t> encode_for_group(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
@@ -224,7 +224,7 @@ std::vector<uint8_t> encrypt_for_group(
     dest.sent_timestamp_ms = sent_timestamp;
     dest.group_ed25519_pubkey = group_ed25519_pubkey;
     dest.group_ed25519_privkey = group_ed25519_privkey;
-    std::vector<uint8_t> result = encrypt_for_destination(plaintext, ed25519_privkey, dest);
+    std::vector<uint8_t> result = encode_for_destination(plaintext, ed25519_privkey, dest);
     return result;
 }
 
@@ -501,7 +501,7 @@ static EncryptedForDestinationInternal encrypt_for_destination_internal(
     return result;
 }
 
-std::vector<uint8_t> encrypt_for_destination(
+std::vector<uint8_t> encode_for_destination(
         std::span<const unsigned char> plaintext,
         std::span<const unsigned char> ed25519_privkey,
         const Destination& dest) {
@@ -522,12 +522,12 @@ std::vector<uint8_t> encrypt_for_destination(
     return result;
 }
 
-DecryptedEnvelope decrypt_envelope(
-        const DecryptEnvelopeKey& keys,
+DecodedEnvelope decode_envelope(
+        const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey) {
-    DecryptedEnvelope result = {};
+    DecodedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
     std::span<const uint8_t> envelope_plaintext = envelope_payload;
 
@@ -693,7 +693,7 @@ DecryptedEnvelope decrypt_envelope(
         if (content.has_promessage()) {
             // Mark the envelope as having a pro signature that the caller can use.
             result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
-            DecryptedPro& pro = result.pro.emplace();
+            DecodedPro& pro = result.pro.emplace();
 
             // Extract the pro message
             const SessionProtos::ProMessage& pro_msg = content.promessage();
@@ -855,7 +855,7 @@ DecodedCommunityMessage decode_for_community(
 
     if (result.pro_sig && content.has_promessage()) {
         // Extract the pro message
-        DecryptedPro& pro = result.pro.emplace();
+        DecodedPro& pro = result.pro.emplace();
         const SessionProtos::ProMessage& pro_msg = content.promessage();
         if (!pro_msg.has_proof())
             throw std::runtime_error("Decoding community message failed, pro config missing proof");
@@ -1200,19 +1200,19 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     }
 
     // Setup decryption keys and decrypt
-    DecryptEnvelopeKey keys_cpp = {};
+    DecodeEnvelopeKey keys_cpp = {};
     if (keys->group_ed25519_pubkey.size) {
         keys_cpp.group_ed25519_pubkey = std::span<const uint8_t>(
                 keys->group_ed25519_pubkey.data, keys->group_ed25519_pubkey.size);
     }
 
-    DecryptedEnvelope result_cpp = {};
+    DecodedEnvelope result_cpp = {};
     for (size_t index = 0; index < keys->ed25519_privkeys_len; index++) {
         std::span<const uint8_t> key = {
                 keys->ed25519_privkeys[index].data, keys->ed25519_privkeys[index].size};
         keys_cpp.ed25519_privkeys = {&key, 1};
         try {
-            result_cpp = decrypt_envelope(
+            result_cpp = decode_envelope(
                     keys_cpp,
                     {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
                     std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
@@ -1260,7 +1260,7 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
     result.envelope.server_timestamp = result_cpp.envelope.server_timestamp;
 
     if (result_cpp.pro) {
-        const DecryptedPro& pro = *result_cpp.pro;
+        const DecodedPro& pro = *result_cpp.pro;
         result.pro_status = static_cast<PRO_STATUS>(pro.status);
         result.pro_proof.version = pro.proof.version;
         result.pro_proof.expiry_unix_ts_ms =
