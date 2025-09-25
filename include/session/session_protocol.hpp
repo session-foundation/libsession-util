@@ -257,7 +257,7 @@ struct DecryptedEnvelope {
     std::optional<DecryptedPro> pro;
 };
 
-struct ParsedCommunityMessage {
+struct DecodedCommunityMessage {
     // The envelope parsed from the plaintext. Set if the plaintext was originally an envelope blob.
     // This is optional because the protocol is undergoing a migration period to start sending
     // community messages as an `Envelope` instead of `Content` so we will receive one or the other
@@ -265,7 +265,7 @@ struct ParsedCommunityMessage {
     std::optional<Envelope> envelope;
 
     // Content blob
-    std::span<const uint8_t> content_plaintext;
+    std::vector<uint8_t> content_plaintext;
 
     // The signature if it was present in the payload. If the envelope is set and the envelope has
     // the pro signature flag set, then this signature was extracted from the envelope. When the
@@ -450,6 +450,30 @@ std::vector<uint8_t> encrypt_for_group(
         const cleared_uc32& group_ed25519_privkey,
         const std::optional<array_uc64>& pro_sig);
 
+/// API: session_protocol/encrypt_for_group
+///
+/// Encrypt a plaintext `Content` message for a community for the Session Protocol. This function
+/// encodes Session Pro metadata including generating and embedding the Session Pro signature, when
+/// given a Session Pro rotating Ed25519 key into the final payload suitable for transmission on the
+/// wire.
+///
+/// This function throws if any input argument is invalid (e.g., incorrect key sizes). It also
+/// throws if the pro signature is already set in the plaintext `Content` or the `plaintext` cannot
+/// be interpreted as a `Content` message.
+///
+/// Inputs:
+/// - plaintext -- The protobuf serialized payload containing the Content to be encrypted. Must
+///   not be already encrypted.
+/// - pro_rotating_ed25519_privkey -- The sender's Session Pro rotating libsodium-style secret key
+///   (64 bytes). Can also be passed as a 32-byte seed. Used to sign the payload.
+///
+/// Outputs:
+/// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
+///   (i.e: it has been protobuf encoded/wrapped if necessary).
+std::vector<uint8_t> encode_for_community(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> pro_rotating_ed25519_privkey);
+
 /// API: session_protocol/encrypt_for_destination
 ///
 /// Given an unencrypted plaintext representation of the content (i.e.: protobuf encoded stream of
@@ -520,9 +544,6 @@ std::vector<uint8_t> encrypt_for_destination(
 ///   issuer
 ///
 /// Outputs:
-/// - `success` -- True if encryption was successful, if the underlying implementation threw
-///   an exception then this is caught internally and success is set to false. All remaining fields
-///   in the result are to be ignored on failure.
 /// - `envelope` -- Envelope structure that was decrypted/parsed from the `envelope_plaintext`
 /// - `content_plaintext` -- Decrypted contents of the envelope structure. This is the protobuf
 ///   encoded stream that can be parsed into a protobuf `Content` structure.
@@ -532,25 +553,48 @@ std::vector<uint8_t> encrypt_for_destination(
 /// - `sender_x25519_pubkey` -- The sender's x25519 public key. It's always set on successful
 ///   decryption either by extracting the key from the encrypted groups envelope, or, by deriving
 ///   the x25519 key from the sender's ed25519 key in the case of a session message envelope.
-/// - `pro_status` -- The pro status associated with the envelope, if any, that the sender has
-///   embedded into the envelope being parsed. This field is set to nil if there was no pro metadata
-///   associated with the envelope.
+/// - `pro` -- Optional object that is set if there was pro metadata associatd with the envelope, if
+///   any. The `status` field in the decrypted pro object should be used to determine whether or not
+///   the caller can respect the contents of the `proof` and `features`.
 ///
-///   This field should be used to determine the presence of pro and whether or not the caller
-///   can respect the contents of the pro proof and features. A valid pro proof that can be used
-///   effectively after parsing is indicated by this value being set to the Valid enum.
-/// - `pro_proof` -- The pro proof in the envelope. This field is set to all zeros if `pro_status`
-///   was nil, otherwise it's populated with proof data.
-/// - `pro_features` -- Pro features that were activated in this envelope by the sender. This field
-///   is only set if `pro_status` is not nil. It should only be enforced if the `pro_status` was
-///   the Valid enum.
+///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
+///   access to pro features if it's using any.
 DecryptedEnvelope decrypt_envelope(
         const DecryptEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey);
 
-ParsedCommunityMessage parse_for_community_message(
+/// API: session_protocol/decode_for_community
+///
+/// Given an unencrypted content or envelope payload extract the plaintext to the content and any
+/// associated pro metadata if there was any in the message.
+///
+/// Inputs:
+/// - `content_or_envelope_payload` -- the unencrypted content or envelope payload containing the
+///   community message
+/// - `unix_ts` -- pass in the current system time in seconds which is used to determine, whether or
+///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
+///   proof in the message.
+/// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
+///   the proof, validating whether or not the attached proof was indeed issued by an authorised
+///   issuer
+///
+/// Outputs:
+/// - `envelope` -- Envelope structure that was parsed from the `content_or_envelope_payload` if the
+///   payload was an envelope. Nil otherwise.
+/// - `content_plaintext` -- The protobuf encoded stream that can be parsed into a protobuf
+///   `Content` structure that was extracted from the `content_or_envelope_payload`
+/// - `pro_sig` -- Optional pro signature if there was one located in the
+///   `content_or_envelope_payload`. This is the same signature as the one located in the `envelope`
+///   object if the original payload was an envelope.
+/// - `pro` -- Optional object that is set if there was pro metadata associatd with the envelope, if
+///   any. The `status` field in the decrypted pro object should be used to determine whether or not
+///   the caller can respect the contents of the `proof` and `features`.
+///
+///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
+///   access to pro features if it's using any.
+DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey);

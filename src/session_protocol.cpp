@@ -228,6 +228,65 @@ std::vector<uint8_t> encrypt_for_group(
     return result;
 }
 
+std::vector<uint8_t> encode_for_community(
+        std::span<const uint8_t> plaintext,
+        std::span<const uint8_t> pro_rotating_ed25519_privkey)
+{
+    // TODO: In future once platforms adopt this function, then we can change to sending an envelope
+    // and all platforms will uniformly agree on this convention. For backwards compat, the decode
+    // for community function will continue to try and parse `Content` and `Envelope` for messages
+    // sent to the community.
+    std::vector<uint8_t> result;
+    if (pro_rotating_ed25519_privkey.size()) {
+        if (pro_rotating_ed25519_privkey.size() != 32 && pro_rotating_ed25519_privkey.size() != 64)
+            throw std::invalid_argument{
+                    "Invalid pro_rotating_ed25519_privkey: expected 32 or 64 bytes"};
+
+        // TODO: Sub-optimal, but we parse the content again to make sure it's valid. Sign the blob
+        // then, fill in the signature in-place as part of the transitioning of open groups messages
+        // to envelopes. As part of that, libsession is going to take responsibility of constructing
+        // community messages so that eventually all platforms switch over and we can change the
+        // implementation across all platforms in one swoop.
+        //
+        // Parse the content blob
+        SessionProtos::Content content = {};
+        if (!content.ParseFromArray(plaintext.data(), plaintext.size()))
+            throw std::runtime_error{"Parsing community message failed"};
+
+        if (content.has_prosigforcommunitymessageonly())
+            throw std::runtime_error{
+                    "Pro signature for community message must not be set. Libsession's responsible "
+                    "for generating the signature and setting it"};
+
+        // Generate and assign the pro signature
+        array_uc64 pro_sig;
+        crypto_sign_ed25519_detached(
+                pro_sig.data(),
+                nullptr,
+                plaintext.data(),
+                plaintext.size(),
+                pro_rotating_ed25519_privkey.data());
+        content.set_prosigforcommunitymessageonly(pro_sig.data(), pro_sig.size());
+
+        // Reserialize the content to return to the user
+        result.resize(content.ByteSizeLong());
+        bool serialized = content.SerializeToArray(result.data(), result.size());
+        assert(serialized);
+    } else {
+        // TODO: Very wasteful copy, but it's done to simplify the caller's interface. This is
+        // temporary until we transition away from plain content messages being sent for community
+        // messages. At that point, we should abstract away constructing content messages into
+        // libsession.
+        //
+        // Then the caller would just pass in the components, libsession constructs the payload to
+        // send on the wire. None of this back and forth situation we have here where they
+        // don't pass in a pro key with an already serialised `plaintext` (e.g. a no-op).
+        result = std::vector<uint8_t>(plaintext.begin(), plaintext.end());
+    }
+
+    return result;
+}
+
 // Interop between the C and CPP API. The C api will request malloc which writes to `ciphertext_c`.
 // This pointer is taken verbatim and avoids requiring a copy from the CPP vector. The CPP api will
 // steal the contents from `ciphertext_cpp`.
@@ -672,8 +731,8 @@ DecryptedEnvelope decrypt_envelope(
                     proof.rotating_pubkey.data(),
                     proto_proof.rotatingpublickey().data(),
                     proto_proof.rotatingpublickey().size());
-            proof.expiry_unix_ts =
-                    std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
+            proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                    std::chrono::milliseconds(proto_proof.expiryunixts()));
             std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
@@ -687,7 +746,7 @@ DecryptedEnvelope decrypt_envelope(
     return result;
 }
 
-ParsedCommunityMessage parse_for_community_message(
+DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
         std::chrono::sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey) {
@@ -704,19 +763,20 @@ ParsedCommunityMessage parse_for_community_message(
     // similar but different to the normal path that it's less friction to write some custom
     // code to handle those bits than try and re-purpose the general purpose decrypt envelope
     // function.
-    ParsedCommunityMessage result = {};
+    DecodedCommunityMessage result = {};
 
     // Attempt to parse the blob as an envelope
     std::optional<std::span<const uint8_t>> pro_sig;
+    SessionProtos::Envelope pb_envelope = {};
     {
-        SessionProtos::Envelope pb_envelope = {};
         bool envelope_parsed = pb_envelope.ParseFromArray(
                 content_or_envelope_payload.data(), content_or_envelope_payload.size());
 
         if (envelope_parsed) {
             // Create the envelope
             Envelope& envelope = result.envelope.emplace();
-            result.content_plaintext = to_span(pb_envelope.content());
+            result.content_plaintext = std::vector<uint8_t>(
+                    pb_envelope.content().begin(), pb_envelope.content().end());
 
             // Extract the envelope into our type
             // Parse source (optional)
@@ -751,14 +811,18 @@ ParsedCommunityMessage parse_for_community_message(
                 pro_sig = to_span(pb_envelope.prosig());
             }
         } else {
-            result.content_plaintext = content_or_envelope_payload;
+            // TODO: Do wasteful copy in the interim whilst transitioning protocol
+            result.content_plaintext = std::vector<uint8_t>(
+                    content_or_envelope_payload.begin(), content_or_envelope_payload.end());
         }
     }
 
     // Parse the content blob
     SessionProtos::Content content = {};
     if (!content.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
-        throw std::runtime_error{"Parsing community message failed"};
+        throw std::runtime_error{
+                "Decoding community message failed, could not interpret blob as content or "
+                "envelope"};
 
     // Extract the pro signature from content if it was present
     if (content.has_prosigforcommunitymessageonly()) {
@@ -766,8 +830,8 @@ ParsedCommunityMessage parse_for_community_message(
         // not allowed.
         if (result.envelope && result.envelope->flags & ENVELOPE_FLAGS_PRO_SIG) {
             throw std::runtime_error(
-                    "Parse community message failed, envelope and content both had a pro signature "
-                    "specified");
+                    "Decoding community message failed, envelope and content both had a pro "
+                    "signature specified");
         }
         assert(!pro_sig);
         pro_sig = to_span(content.prosigforcommunitymessageonly());
@@ -777,7 +841,7 @@ ParsedCommunityMessage parse_for_community_message(
     if (pro_sig) {
         if (pro_sig->size() != crypto_sign_ed25519_BYTES)
             throw std::runtime_error(
-                    "Parse community message failed, pro signature has wrong size");
+                    "Decoding community message failed, pro signature has wrong size");
 
         // Signature was the correct size, copy it into the envelope if there was one and copy it
         // into the root structure
@@ -794,23 +858,25 @@ ParsedCommunityMessage parse_for_community_message(
         DecryptedPro& pro = result.pro.emplace();
         const SessionProtos::ProMessage& pro_msg = content.promessage();
         if (!pro_msg.has_proof())
-            throw std::runtime_error("Parse community message failed, pro config missing proof");
+            throw std::runtime_error("Decoding community message failed, pro config missing proof");
         if (!pro_msg.has_features())
-            throw std::runtime_error("Parse community message failed, pro config missing features");
+            throw std::runtime_error(
+                    "Decoding community message failed, pro config missing features");
 
         // Parse the proof from protobufs
         const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-        session::config::ProProof& proof = pro.proof;
+        session::ProProof& proof = pro.proof;
         // clang-format off
         size_t proof_errors = 0;
-        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::config::ProProofVersion_v0);
+        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
         proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
         proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
         proof_errors += !proto_proof.has_expiryunixts();
         proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
         // clang-format on
         if (proof_errors)
-            throw std::runtime_error("Parse community message failed, pro metadata was malformed");
+            throw std::runtime_error(
+                    "Decoding community message failed, pro metadata was malformed");
 
         // Fill out the resulting proof structure, we have parsed successfully
         pro.features = pro_msg.features();
@@ -822,20 +888,23 @@ ParsedCommunityMessage parse_for_community_message(
                 proof.rotating_pubkey.data(),
                 proto_proof.rotatingpublickey().data(),
                 proto_proof.rotatingpublickey().size());
-        proof.expiry_unix_ts =
-                std::chrono::sys_seconds(std::chrono::seconds(proto_proof.expiryunixts()));
+        proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(proto_proof.expiryunixts()));
         std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
         // Evaluate the pro status given the extracted components (was it signed, is it expired,
         // was the message signed validly?)
-        config::ProSignedMessage signed_msg = {};
+        ProSignedMessage signed_msg = {};
         signed_msg.sig = to_span(*result.pro_sig);
 
         // IMPORTANT: We have to bit-manipulate the content because we're including the signature
         // inside the payload itself that we had to sign. But we originally signed the payload
         // without a signature set in it. This is only the case if we're dealing with a `Content`
         // message that had the signature inside the content instead of the envelope.
-        if (result.envelope && result.envelope->flags & ENVELOPE_FLAGS_PRO_SIG) {
+        if (result.envelope) {
+            // Entering the `pro_sig` and `result.envelope` branch means that the envelope must have
+            // a pro signature.
+            assert(result.envelope->flags & ENVELOPE_FLAGS_PRO_SIG);
             signed_msg.msg = result.content_plaintext;
             pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         } else {

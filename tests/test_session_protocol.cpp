@@ -59,7 +59,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             result.proof.gen_index_hash.data(), result.proof.gen_index_hash.size());
     proto_proof->set_rotatingpublickey(
             result.proof.rotating_pubkey.data(), result.proof.rotating_pubkey.size());
-    proto_proof->set_expiryunixts(std::chrono::duration_cast<std::chrono::seconds>(
+    proto_proof->set_expiryunixts(std::chrono::duration_cast<std::chrono::milliseconds>(
                                           result.proof.expiry_unix_ts.time_since_epoch())
                                           .count());
     proto_proof->set_sig(result.proof.sig.data(), result.proof.sig.size());
@@ -712,5 +712,56 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
         session_protocol_encrypt_for_destination_free(&encrypt_result);
         session_protocol_decrypt_envelope_free(&decrypt_result);
+    }
+
+    SECTION("Encode/decode for community (content message)") {
+        std::vector<uint8_t> encoded =
+                encode_for_community(to_span(protobuf_content_with_pro.plaintext), {});
+
+        DecodedCommunityMessage decode_comm_msg =
+                decode_for_community(encoded, timestamp_s, pro_backend_ed_pk);
+        REQUIRE(!decode_comm_msg.pro_sig);
+        REQUIRE(!decode_comm_msg.pro);
+    }
+
+    SECTION("Encode/decode for community (content message+pro)") {
+        std::vector<uint8_t> encoded = encode_for_community(
+                to_span(protobuf_content_with_pro.plaintext), user_pro_ed_sk);
+
+        DecodedCommunityMessage decode_comm_msg =
+                decode_for_community(encoded, timestamp_s, pro_backend_ed_pk);
+        REQUIRE(decode_comm_msg.pro_sig);
+        REQUIRE(decode_comm_msg.pro);
+        REQUIRE(decode_comm_msg.pro->status == ProStatus::Valid);
+    }
+
+    SECTION("Decode for community (envelope)") {
+        SessionProtos::Envelope envelope;
+        envelope.set_type(SessionProtos::Envelope_Type_SESSION_MESSAGE);
+        envelope.set_timestamp(timestamp_s.time_since_epoch().count());
+        envelope.set_content(protobuf_content_with_pro.plaintext);
+        std::string envelope_plaintext = envelope.SerializeAsString();
+
+        DecodedCommunityMessage decode_comm_msg =
+                decode_for_community(to_span(envelope_plaintext), timestamp_s, pro_backend_ed_pk);
+        REQUIRE(!decode_comm_msg.pro_sig);
+        REQUIRE(!decode_comm_msg.pro);
+    }
+
+    SECTION("Decode for community (envelope+pro)") {
+        SessionProtos::Envelope envelope;
+        envelope.set_type(SessionProtos::Envelope_Type_SESSION_MESSAGE);
+        envelope.set_timestamp(timestamp_s.time_since_epoch().count());
+        envelope.set_content(protobuf_content_with_pro.plaintext);
+        envelope.set_prosig(
+                protobuf_content_with_pro.sig_over_plaintext_with_user_pro_key.data(),
+                protobuf_content_with_pro.sig_over_plaintext_with_user_pro_key.size());
+        std::string envelope_plaintext = envelope.SerializeAsString();
+
+        DecodedCommunityMessage decode_comm_msg =
+                decode_for_community(to_span(envelope_plaintext), timestamp_s, pro_backend_ed_pk);
+        REQUIRE(decode_comm_msg.pro_sig);
+        REQUIRE(decode_comm_msg.pro);
+        REQUIRE(decode_comm_msg.pro->status == ProStatus::Valid);
     }
 }
