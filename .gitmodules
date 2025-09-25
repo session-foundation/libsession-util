@@ -24,4 +24,4 @@
 	url = https://github.com/oxen-io/oxen-logging.git
 [submodule "external/simdutf"]
 	path = external/simdutf
-	url = git@github.com:simdutf/simdutf.git
+	url = https://github.com/simdutf/simdutf.git
