@@ -93,7 +93,9 @@ LIBSESSION_C_API bool pro_config_verify_signature(
 
     session::config::ProConfig config = {};
     std::memcpy(
-            config.rotating_privkey.data(), pro->rotating_privkey.data, sizeof pro->rotating_privkey.data);
+            config.rotating_privkey.data(),
+            pro->rotating_privkey.data,
+            sizeof pro->rotating_privkey.data);
     config.proof.version = pro->proof.version;
     std::memcpy(
             config.proof.gen_index_hash.data(),

@@ -59,10 +59,9 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             result.proof.gen_index_hash.data(), result.proof.gen_index_hash.size());
     proto_proof->set_rotatingpublickey(
             result.proof.rotating_pubkey.data(), result.proof.rotating_pubkey.size());
-    proto_proof->set_expiryunixts(
-            std::chrono::duration_cast<std::chrono::seconds>(
-                    result.proof.expiry_unix_ts.time_since_epoch())
-                    .count());
+    proto_proof->set_expiryunixts(std::chrono::duration_cast<std::chrono::seconds>(
+                                          result.proof.expiry_unix_ts.time_since_epoch())
+                                          .count());
     proto_proof->set_sig(result.proof.sig.data(), result.proof.sig.size());
 
     // Generate the plaintext

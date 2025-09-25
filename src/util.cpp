@@ -3,7 +3,6 @@
 #include <charconv>
 #include <memory>
 #include <session/util.hpp>
-#include <zstd.h>
 
 namespace session {
 

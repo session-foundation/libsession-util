@@ -185,7 +185,8 @@ std::optional<std::chrono::sys_seconds> maybe_ts(const session::config::dict& d,
 // Digs into a config `dict` to get out an int64_t containing unix timestamp milliseconds, returns
 // it wrapped in a std::chrono::sys_time<std::chrono::milliseconds>.  Returns nullopt if not there
 // (or not int).
-std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_ts_ms(const session::config::dict& d, const char* key);
+std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_ts_ms(
+        const session::config::dict& d, const char* key);
 
 // Works like maybe_ts, except that if the value isn't present it returns a default-constructed
 // sys_seconds (i.e. unix timestamp 0).  Equivalent to `maybe_ts(d,

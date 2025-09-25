@@ -8,9 +8,10 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <session/pro_backend.hpp>
+#include <session/session_encrypt.hpp>
 #include <session/sodium_array.hpp>
 #include <session/types.hpp>
-#include <session/session_encrypt.hpp>
+
 #include "SessionProtos.pb.h"
 
 namespace {
@@ -447,13 +448,16 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
     // Parse payload
     uint32_t user_status = json_require<uint32_t>(result_obj, "status", result.errors);
     if (user_status >= SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT) {
-        result.errors.push_back(fmt::format("User pro status value was out-of-bounds: {}", user_status));
+        result.errors.push_back(
+                fmt::format("User pro status value was out-of-bounds: {}", user_status));
         return result;
     }
     result.user_status = static_cast<SESSION_PRO_BACKEND_USER_PRO_STATUS>(user_status);
 
-    uint64_t latest_grace_ts = json_require<uint64_t>(result_obj, "latest_grace_unix_ts_ms", result.errors);
-    uint64_t latest_expiry_ts = json_require<uint64_t>(result_obj, "latest_expiry_unix_ts_ms", result.errors);
+    uint64_t latest_grace_ts =
+            json_require<uint64_t>(result_obj, "latest_grace_unix_ts_ms", result.errors);
+    uint64_t latest_expiry_ts =
+            json_require<uint64_t>(result_obj, "latest_expiry_unix_ts_ms", result.errors);
     result.latest_grace_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
             std::chrono::milliseconds(latest_grace_ts));
     result.latest_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
@@ -489,12 +493,12 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
 
         item.grace_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
                 std::chrono::milliseconds(grace_ts));
-        item.expiry_unix_ts =
-                std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(expiry_ts));
-        item.redeemed_unix_ts =
-                std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(redeemed_ts));
-        item.refunded_unix_ts =
-                std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(refunded_ts));
+        item.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(expiry_ts));
+        item.redeemed_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(redeemed_ts));
+        item.refunded_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(refunded_ts));
         item.subscription_duration = std::chrono::seconds(sub_duration_s);
         if (payment_provider > SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL &&
             payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT) {
@@ -637,8 +641,7 @@ session_pro_backend_get_pro_proof_request_build_sigs(
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_signature
-session_pro_backend_get_pro_status_request_build_sig(
+LIBSESSION_C_API session_pro_backend_signature session_pro_backend_get_pro_status_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -946,8 +949,8 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
         dest.subscription_duration_s =
                 std::chrono::duration_cast<std::chrono::seconds>(src.subscription_duration).count();
         dest.grace_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                            src.grace_unix_ts.time_since_epoch())
-                                            .count();
+                                        src.grace_unix_ts.time_since_epoch())
+                                        .count();
         dest.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                          src.expiry_unix_ts.time_since_epoch())
                                          .count();

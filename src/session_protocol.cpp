@@ -1,14 +1,14 @@
 #include <fmt/core.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <session/config/groups/keys.h>
 #include <simdutf.h>
+#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
+#include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
-#include <session/pro_backend.hpp>
 #include <session/util.hpp>
 
 #include "SessionProtos.pb.h"
@@ -163,7 +163,7 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
     }
     return result;
 }
-};  // namespace
+};  // namespace session
 
 namespace session {
 
