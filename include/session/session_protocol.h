@@ -604,10 +604,10 @@ session_protocol_decrypted_envelope session_protocol_decrypt_envelope(
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
         uint64_t unix_ts,
-        const void* pro_backend_pubkey,
+        OPTIONAL const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         OPTIONAL char* error,
-        size_t error_len) NON_NULL_ARG(1, 2, 5);
+        size_t error_len) NON_NULL_ARG(1, 2);
 
 /// API: session_protocol/session_protocol_decrypt_envelope_free
 ///

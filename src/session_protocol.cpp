@@ -696,20 +696,18 @@ static_assert((sizeof((pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
 
 LIBSESSION_C_API bytes32 pro_proof_hash(pro_proof const* proof) {
     bytes32 result = {};
-    if (proof) {
-        session::array_uc32 hash = proof_hash_internal(
-                proof->version,
-                proof->gen_index_hash.data,
-                proof->rotating_pubkey.data,
-                proof->expiry_unix_ts_ms);
-        std::memcpy(result.data, hash.data(), hash.size());
-    }
+    session::array_uc32 hash = proof_hash_internal(
+            proof->version,
+            proof->gen_index_hash.data,
+            proof->rotating_pubkey.data,
+            proof->expiry_unix_ts_ms);
+    std::memcpy(result.data, hash.data(), hash.size());
     return result;
 }
 
 LIBSESSION_C_API bool pro_proof_verify_signature(
         pro_proof const* proof, uint8_t const* verify_pubkey, size_t verify_pubkey_len) {
-    if (!proof || verify_pubkey_len != crypto_sign_ed25519_PUBLICKEYBYTES)
+    if (verify_pubkey_len != crypto_sign_ed25519_PUBLICKEYBYTES)
         return false;
     auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
     session::array_uc32 hash = proof_hash_internal(
@@ -734,7 +732,7 @@ LIBSESSION_C_API bool pro_proof_verify_message(
 }
 
 LIBSESSION_C_API bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_ms) {
-    bool result = proof && proof_is_active_internal(proof->expiry_unix_ts_ms, unix_ts_ms);
+    bool result = proof_is_active_internal(proof->expiry_unix_ts_ms, unix_ts_ms);
     return result;
 }
 
