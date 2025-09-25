@@ -8,15 +8,17 @@ namespace session::config {
 
 /// keys used currently or in the past (so that we don't reuse):
 ///
-/// p + pro data
+/// s + session pro data
 ///   |
-///   +-- @ - version
-///   +-- g - gen_index_hash
+///   +-- p + proof
+///   |     |
+///   |     +-- @ - version
+///   |     +-- e - expiry unix timestamp (in milliseconds)
+///   |     +-- g - gen_index_hash
+///   |     +-- r - rotating ed25519 privkey
+///   |     +-- s - proof signature, signed by the Session Pro Backend's ed25519 key
+///   |
 ///   +-- r - rotating ed25519 pubkey
-///   +-- e - expiry unix timestamp (in seconds)
-///   +-- s - proof signature, signed by the Session Pro Backend's ed25519 key
-///   +-- r - rotating ed25519 privkey
-///   +-- p - proof
 class ProConfig {
   public:
     /// Private key for the public key key specified in the proof. This is synced between clients

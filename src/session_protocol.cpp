@@ -24,8 +24,8 @@ session::array_uc32 proof_hash_internal(
     // This must match the hashing routine at
     // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
     session::array_uc32 result = {};
-    crypto_generichash_blake2b_state state;
-    crypto_generichash_blake2b_init(&state, /*key*/ nullptr, 0, result.max_size());
+    crypto_generichash_blake2b_state state = {};
+    session::pro_backend::make_blake2b32_hasher(&state);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(&state, gen_index_hash.data(), gen_index_hash.size());
     crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());

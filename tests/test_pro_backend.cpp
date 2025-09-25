@@ -658,8 +658,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         REQUIRE(curl);
         scope_exit curl_free{[&]() { curl_easy_cleanup(curl); }};
 
-        struct curl_slist* curl_headers =
-                curl_slist_append(curl_headers, "Content-Type: application/json");
+        struct curl_slist* curl_headers = nullptr;
+        curl_headers = curl_slist_append(curl_headers, "Content-Type: application/json");
         REQUIRE(curl_headers);
         scope_exit curl_headers_free{[&]() { curl_slist_free_all(curl_headers); }};
 
@@ -727,7 +727,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             // Verify response
             first_pro_proof = response.proof;
             INFO("Signature: " << oxenc::to_hex(first_pro_proof.sig.data)
-                               << ", backend pubkey: " << oxenc::to_hex(DEV_BACKEND_PUBKEY));
+                               << ", backend pubkey: " << oxenc::to_hex(DEV_BACKEND_PUBKEY)
+                               << ", response: " << response_json);
             REQUIRE(pro_proof_verify_signature(
                     &first_pro_proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
             REQUIRE(std::memcmp(

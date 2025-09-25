@@ -29,7 +29,7 @@ bool ProConfig::verify_signature(const array_uc32& verify_pubkey) const {
 }
 
 bool ProConfig::load(const dict& root) {
-    // Get proof fields sitting in 'p' dictionary
+    // Get proof fields from session pro data sitting in the 'p' (proof) dictionary
     auto p_it = root.find("p");
     if (p_it == root.end())
         return false;
@@ -48,7 +48,8 @@ bool ProConfig::load(const dict& root) {
         std::optional<uint8_t> version = maybe_int(*p, "@");
         std::optional<std::vector<unsigned char>> maybe_gen_index_hash = maybe_vector(*p, "g");
         std::optional<std::vector<unsigned char>> maybe_rotating_pubkey = maybe_vector(*p, "r");
-        std::optional<std::chrono::sys_seconds> maybe_expiry_unix_ts = maybe_ts(*p, "e");
+        std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_expiry_unix_ts_ms =
+                maybe_ts_ms(*p, "e");
         std::optional<std::vector<unsigned char>> maybe_sig = maybe_vector(*p, "s");
 
         if (!version)
@@ -60,6 +61,8 @@ bool ProConfig::load(const dict& root) {
             return false;
         if (!maybe_sig || maybe_sig->size() != proof.sig.max_size())
             return false;
+        if (!maybe_expiry_unix_ts_ms)
+            return false;
 
         version = *version;
         std::memcpy(
@@ -70,7 +73,7 @@ bool ProConfig::load(const dict& root) {
                 proof.rotating_pubkey.data(),
                 maybe_rotating_pubkey->data(),
                 proof.rotating_pubkey.size());
-        proof.expiry_unix_ts = *maybe_expiry_unix_ts;
+        proof.expiry_unix_ts = *maybe_expiry_unix_ts_ms;
         std::memcpy(proof.sig.data(), maybe_sig->data(), proof.sig.size());
     }
 

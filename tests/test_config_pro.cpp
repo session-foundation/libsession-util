@@ -24,7 +24,7 @@ TEST_CASE("Pro", "[config][pro]") {
         pro_cpp.rotating_privkey = rotating_sk;
         pro_cpp.proof.version = 0;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
-        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_seconds(1s);
+        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
         constexpr auto gen_index_hash =
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
         static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());

@@ -127,6 +127,13 @@ std::optional<std::chrono::sys_seconds> maybe_ts(const session::config::dict& d,
     return result;
 }
 
+std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_ts_ms(const session::config::dict& d, const char* key) {
+    std::optional<std::chrono::sys_time<std::chrono::milliseconds>> result;
+    if (auto* i = maybe_scalar<int64_t>(d, key))
+        result.emplace(std::chrono::milliseconds{*i});
+    return result;
+}
+
 std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char* key) {
     if (auto* i = maybe_scalar<int64_t>(d, key))
         return std::chrono::sys_seconds{std::chrono::seconds{*i}};
