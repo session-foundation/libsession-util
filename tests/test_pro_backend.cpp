@@ -4,6 +4,7 @@
 #include <sodium.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <cinttypes>
 #include <nlohmann/json.hpp>
 #include <session/config/pro.hpp>
 #include <session/pro_backend.hpp>
@@ -31,17 +32,17 @@ static bool string8_equals(string8 s8, std::string_view str) {
     fprintf(stderr,
             "proof.rotating_pubkey: %s\n",
             oxenc::to_hex(proof.rotating_pubkey.data).c_str());
-    fprintf(stderr, "proof.expiry_unix_ts_ms: %zu\n", proof.expiry_unix_ts_ms);
+    fprintf(stderr, "proof.expiry_unix_ts_ms: %" PRIu64 "\n", proof.expiry_unix_ts_ms);
     fprintf(stderr, "proof.sig: %s\n", oxenc::to_hex(proof.sig.data).c_str());
 }
 
 [[maybe_unused]] static void dump_pro_payment_item(
         const session_pro_backend_pro_payment_item& item) {
-    fprintf(stderr, "item.expiry_unix_ts_ms: %zu\n", item.expiry_unix_ts_ms);
-    fprintf(stderr, "item.grace_unix_ts_ms: %zu\n", item.grace_unix_ts_ms);
-    fprintf(stderr, "item.redeemed_unix_ts_ms: %zu\n", item.redeemed_unix_ts_ms);
-    fprintf(stderr, "item.refunded_unix_ts_ms: %zu\n", item.refunded_unix_ts_ms);
-    fprintf(stderr, "item.subscription_duration: %zu\n", item.subscription_duration_s);
+    fprintf(stderr, "item.expiry_unix_ts_ms: %" PRIu64 "\n", item.expiry_unix_ts_ms);
+    fprintf(stderr, "item.grace_unix_ts_ms: %" PRIu64 "zu\n", item.grace_unix_ts_ms);
+    fprintf(stderr, "item.redeemed_unix_ts_ms: %" PRIu64 "zu\n", item.redeemed_unix_ts_ms);
+    fprintf(stderr, "item.refunded_unix_ts_ms: %" PRIu64 "zu\n", item.refunded_unix_ts_ms);
+    fprintf(stderr, "item.subscription_duration: %" PRIu64 "zu\n", item.subscription_duration_s);
     fprintf(stderr, "item.payment_provider: %u\n", item.payment_provider);
     fprintf(stderr,
             "item.google_payment_token: %.*s\n",
@@ -60,7 +61,7 @@ static bool string8_equals(string8 s8, std::string_view str) {
 
 [[maybe_unused]] static void dump_pro_revocation(
         const session_pro_backend_pro_revocation_item& item) {
-    fprintf(stderr, "item.expiry_unix_ts: %zu\n", item.expiry_unix_ts_ms);
+    fprintf(stderr, "item.expiry_unix_ts: %" PRIu64 "zu\n", item.expiry_unix_ts_ms);
     fprintf(stderr, "item.gen_index_hash: %s\n", oxenc::to_hex(item.gen_index_hash.data).c_str());
 }
 
