@@ -187,11 +187,8 @@ enum class DestinationType {
 struct Destination {
     DestinationType type;
 
-    // Signature over the unencrypted plaintext with the user's Session Pro rotating public key if
-    // they have Session Pro and opt into sending a message with pro features. If this is specified,
-    // the pro message component in `Content` must have been set with the corresponding proof for
-    // this signature.
-    std::optional<array_uc64> pro_sig;
+    // TODO: Update comment message
+    std::optional<cleared_uc32> pro_rotating_ed25519_privkey;
 
     // The timestamp to assign to the message envelope
     std::chrono::milliseconds sent_timestamp_ms;

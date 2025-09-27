@@ -72,7 +72,7 @@ span_u8 span_u8_copy_or_throw(const void* data, size_t size);
 /// _always_ calculates the actual number of bytes written (not including the null-terminator). If a
 /// NULL is passed in then this function returns the number of bytes actually needed to write the
 /// entire string (as per normal snprintf behaviour).
-int snprintf_bytes_written_clamped(char* buffer, size_t size, char const* fmt, ...);
+int snprintf_clamped(char* buffer, size_t size, char const* fmt, ...);
 
 /// Allocate the string with the specific size. Throws on allocation failure.
 string8 string8_alloc_or_throw(size_t size);

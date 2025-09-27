@@ -594,7 +594,7 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
-        result.error_count = snprintf_bytes_written_clamped(
+        result.error_count = snprintf_clamped(
                 result.error,
                 sizeof(result.error_count),
                 "%.*s",
@@ -630,7 +630,7 @@ session_pro_backend_get_pro_proof_request_build_sigs(
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
-        result.error_count = snprintf_bytes_written_clamped(
+        result.error_count = snprintf_clamped(
                 result.error,
                 sizeof(result.error_count),
                 "%.*s",
@@ -657,7 +657,7 @@ LIBSESSION_C_API session_pro_backend_signature session_pro_backend_get_pro_statu
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
-        result.error_count = snprintf_bytes_written_clamped(
+        result.error_count = snprintf_clamped(
                 result.error,
                 sizeof(result.error_count),
                 "%.*s",
@@ -965,20 +965,20 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
 
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
-                dest.google_payment_token_count = snprintf_bytes_written_clamped(
+                dest.google_payment_token_count = snprintf_clamped(
                         dest.google_payment_token,
                         sizeof(dest.google_payment_token),
                         src.google_payment_token.data());
             } break;
 
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
-                dest.apple_original_tx_id_count = snprintf_bytes_written_clamped(
+                dest.apple_original_tx_id_count = snprintf_clamped(
                         dest.apple_original_tx_id,
                         sizeof(dest.apple_original_tx_id),
                         src.apple_original_tx_id.data());
-                dest.apple_tx_id_count = snprintf_bytes_written_clamped(
+                dest.apple_tx_id_count = snprintf_clamped(
                         dest.apple_tx_id, sizeof(dest.apple_tx_id), src.apple_tx_id.data());
-                dest.apple_web_line_order_id_count = snprintf_bytes_written_clamped(
+                dest.apple_web_line_order_id_count = snprintf_clamped(
                         dest.apple_web_line_order_id,
                         sizeof(dest.apple_web_line_order_id),
                         src.apple_web_line_order_id.data());

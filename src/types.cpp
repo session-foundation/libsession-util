@@ -19,7 +19,7 @@ span_u8 span_u8_copy_or_throw(const void* data, size_t size) {
     return result;
 }
 
-int snprintf_bytes_written_clamped(char* buffer, size_t size, char const* fmt, ...) {
+int snprintf_clamped(char* buffer, size_t size, char const* fmt, ...) {
     va_list args;
     va_start(args, fmt);
     int bytes_required_not_incl_null = vsnprintf(buffer, size, fmt, args);

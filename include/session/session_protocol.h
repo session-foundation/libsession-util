@@ -76,10 +76,8 @@ typedef enum SESSION_PROTOCOL_DESTINATION_TYPE {  // See session::DestinationTyp
 
 typedef struct session_protocol_destination {  // See session::Destination
     SESSION_PROTOCOL_DESTINATION_TYPE type;
-
-    // The pro signature is optional, set the pointer to a 64 byte pro signature
-    // to include it into the encrypted message, ignored otherwise
-    const bytes64* pro_sig;
+    const void* pro_rotating_ed25519_privkey;
+    size_t pro_rotating_ed25519_privkey_len;
     bytes33 recipient_pubkey;
     uint64_t sent_timestamp_ms;
     bytes32 community_inbox_server_pubkey;
@@ -310,10 +308,11 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
 /// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
-/// - `recipient_pubkey` -- The recipient's Session public key (33 bytes).
-/// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
-///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
-///   be set in the Content protobuf. Pass NULL if not using Session Pro features.
+/// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
+///   32-byte seed) to sign the encoded content if you wish to entitle the message to Session Pro.
+///   If provided, the corresponding proof must be set in the `Content`. The signature must not be
+///   set in `Content`.
+/// - `pro_rotating_ed25519_privkey_len` -- The length of the Session Pro Ed25519 key
 /// - `error` -- Pointer to the character buffer to be populated with the error message if the
 ///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
 ///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
@@ -344,7 +343,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
         const bytes33* recipient_pubkey,
-        OPTIONAL const bytes64* pro_sig,
+        OPTIONAL const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
         size_t error_len) NON_NULL_ARG(1, 3, 6);
 
@@ -369,10 +369,12 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
 /// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
 /// - `recipient_pubkey` -- The recipient's Session public key (33 bytes).
 /// - `community_pubkey` -- The community inbox server's public key (32 bytes).
-/// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
-///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
-///   be set in the Content protobuf. Pass NULL if not using Session Pro features. TODO: Pro sig
-///   is not incorporated into community/inbox messages yet.
+/// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
+///   32-byte seed) to sign the encoded content if you wish to entitle the message to Session Pro.
+///   If provided, the corresponding proof must be set in the `Content`. The signature must not be
+///   set in `Content`.
+/// - `pro_rotating_ed25519_privkey_len` -- The length of the Session Pro Ed25519 key
+//    TODO: Pro sig is not incorporated into community/inbox messages yet.
 /// - `error` -- Pointer to the character buffer to be populated with the error message if the
 ///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
 ///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
@@ -405,7 +407,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         uint64_t sent_timestamp_ms,
         const bytes33* recipient_pubkey,
         const bytes32* community_pubkey,
-        OPTIONAL const bytes64* pro_sig,
+        OPTIONAL const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
         size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
 
@@ -432,9 +435,11 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
 /// - `group_ed25519_pubkey` -- The group's public key (33 bytes) for encryption with a 0x03 prefix.
 /// - `group_ed25519_privkey` -- The group's private key (32 bytes) for groups v2 messages,
 ///   typically the latest encryption key for the group (e.g., Keys::group_enc_key).
-/// - `pro_sig` -- Optional signature over the unencrypted plaintext with the user's Session Pro
-///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
-///   be set in the Content protobuf. Pass NULL if not using Session Pro features.
+/// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
+///   32-byte seed) to sign the encoded content if you wish to entitle the message to Session Pro.
+///   If provided, the corresponding proof must be set in the `Content`. The signature must not be
+///   set in `Content`.
+/// - `pro_rotating_ed25519_privkey_len` -- The length of the Session Pro Ed25519 key
 /// - `error` -- Pointer to the character buffer to be populated with the error message if the
 ///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
 ///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
@@ -466,9 +471,10 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         uint64_t sent_timestamp_ms,
         const bytes33* group_ed25519_pubkey,
         const bytes32* group_ed25519_privkey,
-        const bytes64* pro_sig,
+        OPTIONAL const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
-        size_t error_len) NON_NULL_ARG(1, 3, 6, 7, 8);
+        size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination
 ///

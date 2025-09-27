@@ -184,10 +184,10 @@ std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
-        const std::optional<array_uc64>& pro_sig) {
+        const std::optional<cleared_uc32>& pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::SyncOr1o1;
-    dest.pro_sig = pro_sig;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     std::vector<uint8_t> result = encode_for_destination(plaintext, ed25519_privkey, dest);
@@ -200,10 +200,10 @@ std::vector<uint8_t> encode_for_community_inbox(
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
         const array_uc32& community_pubkey,
-        const std::optional<array_uc64>& pro_sig) {
+        const std::optional<cleared_uc32>& pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::CommunityInbox;
-    dest.pro_sig = pro_sig;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     dest.community_inbox_server_pubkey = community_pubkey;
@@ -217,10 +217,10 @@ std::vector<uint8_t> encode_for_group(
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& group_ed25519_pubkey,
         const cleared_uc32& group_ed25519_privkey,
-        const std::optional<array_uc64>& pro_sig) {
+        const std::optional<cleared_uc32>& pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::Group;
-    dest.pro_sig = pro_sig;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.group_ed25519_pubkey = group_ed25519_pubkey;
     dest.group_ed25519_privkey = group_ed25519_privkey;
@@ -303,14 +303,15 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         DestinationType dest_type,
-        std::span<const uint8_t> dest_pro_sig,
+        std::span<const uint8_t> dest_pro_rotating_ed25519_privkey,
         std::span<const uint8_t> dest_recipient_pubkey,
         std::chrono::milliseconds dest_sent_timestamp_ms,
         std::span<const uint8_t> dest_community_inbox_server_pubkey,
         std::span<const uint8_t> dest_group_ed25519_pubkey,
         std::span<const uint8_t> dest_group_ed25519_privkey,
         UseMalloc use_malloc) {
-    assert(dest_pro_sig.empty() || dest_pro_sig.size() == crypto_sign_ed25519_BYTES);
+    assert(dest_pro_rotating_ed25519_privkey.empty() ||
+           dest_pro_rotating_ed25519_privkey.size() == crypto_sign_ed25519_SECRETKEYBYTES);
     assert(dest_recipient_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_community_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_group_ed25519_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
@@ -368,14 +369,20 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             envelope.set_timestamp(dest_sent_timestamp_ms.count());
             envelope.set_content(content.data(), content.size());
 
-            if (dest_pro_sig.empty()) {
-                // If there's no pro signature specified, we still fill out the pro signature with a
-                // dummy 64 byte stream. This is to make pro and non-pro messages indistinguishable.
-                std::string* pro_sig = envelope.mutable_prosig();
-                pro_sig->resize(sizeof(array_uc64));
+            // Generate the session pro signature. If there's no pro ed25519 key specified, we still
+            // fill out the pro signature with a dummy 64 byte stream. This is to make pro and
+            // non-pro messages indistinguishable.
+            std::string* pro_sig = envelope.mutable_prosig();
+            pro_sig->resize(crypto_sign_ed25519_BYTES);
+            if (dest_pro_rotating_ed25519_privkey.empty()) {
                 randombytes_buf(pro_sig->data(), pro_sig->size());
             } else {
-                envelope.set_prosig(dest_pro_sig.data(), dest_pro_sig.size());
+                crypto_sign_ed25519_detached(
+                        reinterpret_cast<uint8_t*>(pro_sig->data()),
+                        nullptr,
+                        content.data(),
+                        content.size(),
+                        dest_pro_rotating_ed25519_privkey.data());
             }
 
             if (is_group) {
@@ -447,7 +454,9 @@ std::vector<uint8_t> encode_for_destination(
             /*plaintext=*/plaintext,
             /*ed25519_privkey=*/ed25519_privkey,
             /*dest_type=*/dest.type,
-            /*dest_pro_sig=*/dest.pro_sig ? *dest.pro_sig : std::span<const uint8_t>(),
+            /*dest_pro_rotating_ed25519_privkey=*/dest.pro_rotating_ed25519_privkey
+                    ? *dest.pro_rotating_ed25519_privkey
+                    : std::span<const uint8_t>(),
             /*dest_recipient_pubkey=*/dest.recipient_pubkey,
             /*dest_sent_timestamp_ms=*/dest.sent_timestamp_ms,
             /*dest_community_inbox_server_pubkey=*/dest.community_inbox_server_pubkey,
@@ -697,7 +706,13 @@ DecodedEnvelope decode_envelope(
             // was the message signed validly?)
             ProSignedMessage signed_msg = {};
             signed_msg.sig = to_span(pro_sig);
-            signed_msg.msg = result.content_plaintext;
+
+            // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
+            // bytes, this means that we expected the user to have signed the padding as well.
+            signed_msg.msg = std::span<const uint8_t>(
+                    reinterpret_cast<const uint8_t*>(envelope.content().data()),
+                    envelope.content().size());
+
             pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         }
     }
@@ -1001,13 +1016,15 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
         const bytes33* recipient_pubkey,
-        const bytes64* pro_sig,
+        const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
         char* error,
         size_t error_len) {
 
     session_protocol_destination dest = {};
     dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1;
-    dest.pro_sig = pro_sig;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
     dest.recipient_pubkey = *recipient_pubkey;
     dest.sent_timestamp_ms = sent_timestamp_ms;
 
@@ -1031,13 +1048,15 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         uint64_t sent_timestamp_ms,
         const bytes33* recipient_pubkey,
         const bytes32* community_pubkey,
-        const bytes64* pro_sig,
+        const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
         char* error,
         size_t error_len) {
 
     session_protocol_destination dest = {};
     dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX;
-    dest.pro_sig = pro_sig;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
     dest.sent_timestamp_ms = sent_timestamp_ms;
     dest.recipient_pubkey = *recipient_pubkey;
     dest.community_inbox_server_pubkey = *community_pubkey;
@@ -1062,13 +1081,15 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         uint64_t sent_timestamp_ms,
         const bytes33* group_ed25519_pubkey,
         const bytes32* group_ed25519_privkey,
-        const bytes64* pro_sig,
+        const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
         char* error,
         size_t error_len) {
 
     session_protocol_destination dest = {};
     dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_GROUP;
-    dest.pro_sig = pro_sig;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
     dest.group_ed25519_pubkey = *group_ed25519_pubkey;
     dest.group_ed25519_privkey = *group_ed25519_privkey;
     dest.sent_timestamp_ms = sent_timestamp_ms;
@@ -1092,14 +1113,42 @@ LIBSESSION_C_API session_protocol_encoded_for_destination session_protocol_encod
         const session_protocol_destination* dest,
         char* error,
         size_t error_len) {
+
     session_protocol_encoded_for_destination result = {};
+
+    // Ensure the Session Pro rotating key is a 64 byte key if given
+    std::span<const uint8_t> pro_rotating_ed25519_privkey_span = {};
+    cleared_uc64 pro_rotating_ed25519_privkey;
+    if (dest->pro_rotating_ed25519_privkey) {
+        if (dest->pro_rotating_ed25519_privkey_len == 32) {
+            uc32 ignore_pk;
+            crypto_sign_ed25519_seed_keypair(
+                    ignore_pk.data(),
+                    pro_rotating_ed25519_privkey.data(),
+                    reinterpret_cast<const uint8_t*>(dest->pro_rotating_ed25519_privkey));
+            pro_rotating_ed25519_privkey_span = {
+                    pro_rotating_ed25519_privkey.data(), pro_rotating_ed25519_privkey.size()};
+        } else if (dest->pro_rotating_ed25519_privkey_len == 64) {
+            pro_rotating_ed25519_privkey_span = std::span<const uint8_t>(
+                    reinterpret_cast<const uint8_t*>(dest->pro_rotating_ed25519_privkey),
+                    reinterpret_cast<const uint8_t*>(dest->pro_rotating_ed25519_privkey) +
+                            dest->pro_rotating_ed25519_privkey_len);
+        } else {
+            result.error_len_incl_null_terminator =
+                    snprintf_clamped(
+                            error, error_len, "Invalid ed25519_privkey: expected 32 or 64 bytes") +
+                    1;
+            return result;
+        }
+    }
+
     try {
         EncryptedForDestinationInternal result_internal = encode_for_destination_internal(
                 /*plaintext=*/{static_cast<const uint8_t*>(plaintext), plaintext_len},
                 /*ed25519_privkey=*/
                 {static_cast<const uint8_t*>(ed25519_privkey), ed25519_privkey_len},
                 /*dest_type=*/static_cast<DestinationType>(dest->type),
-                /*dest_pro_sig=*/dest->pro_sig ? dest->pro_sig->data : std::span<const uint8_t>(),
+                /*dest_pro_rotating_ed25519_privkey=*/pro_rotating_ed25519_privkey_span,
                 /*dest_recipient_pubkey=*/dest->recipient_pubkey.data,
                 /*dest_sent_timestamp_ms=*/std::chrono::milliseconds(dest->sent_timestamp_ms),
                 /*dest_community_inbox_server_pubkey=*/dest->community_inbox_server_pubkey.data,
@@ -1113,7 +1162,7 @@ LIBSESSION_C_API session_protocol_encoded_for_destination session_protocol_encod
         };
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
-        result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
+        result.error_len_incl_null_terminator = snprintf_clamped(
                                                         error,
                                                         error_len,
                                                         "%.*s",
@@ -1149,7 +1198,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     array_uc32 pro_backend_pubkey_cpp = {};
     if (pro_backend_pubkey) {
         if (pro_backend_pubkey_len != sizeof(pro_backend_pubkey_cpp)) {
-            result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
+            result.error_len_incl_null_terminator = snprintf_clamped(
                                                             error,
                                                             error_len,
                                                             "Invalid pro_backend_pubkey: Key was "
@@ -1183,7 +1232,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
             break;
         } catch (const std::exception& e) {
             std::string error_cpp = e.what();
-            result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
+            result.error_len_incl_null_terminator = snprintf_clamped(
                                                             error,
                                                             error_len,
                                                             "%.*s",
@@ -1195,9 +1244,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
 
     if (keys->ed25519_privkeys_len == 0) {
         result.error_len_incl_null_terminator =
-                snprintf_bytes_written_clamped(
-                        error, error_len, "No keys ed25519_privkeys were provided") +
-                1;
+                snprintf_clamped(error, error_len, "No keys ed25519_privkeys were provided") + 1;
     }
 
     // Marshall into c type
@@ -1207,7 +1254,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
         result.success = false;
-        result.error_len_incl_null_terminator = snprintf_bytes_written_clamped(
+        result.error_len_incl_null_terminator = snprintf_clamped(
                                                         error,
                                                         error_len,
                                                         "%.*s",
