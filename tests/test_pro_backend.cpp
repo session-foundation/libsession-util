@@ -26,7 +26,7 @@ using namespace session::pro_backend;
 static bool string8_equals(string8 s8, std::string_view str) {
     return s8.size == str.size() && std::memcmp(s8.data, str.data(), s8.size) == 0;
 }
-[[maybe_unused]] static void dump_pro_proof_to_stderr(const pro_proof& proof) {
+[[maybe_unused]] static void dump_pro_proof_to_stderr(const session_protocol_pro_proof& proof) {
     fprintf(stderr, "proof.version: %u\n", proof.version);
     fprintf(stderr, "proof.gen_index_hash: %s\n", oxenc::to_hex(proof.gen_index_hash.data).c_str());
     fprintf(stderr,
@@ -665,7 +665,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         scope_exit curl_headers_free{[&]() { curl_slist_free_all(curl_headers); }};
 
         // Add pro payment
-        pro_proof first_pro_proof = {};
+        session_protocol_pro_proof first_pro_proof = {};
         {
             bytes32 fake_google_payment_token;
             randombytes_buf(fake_google_payment_token.data, sizeof(fake_google_payment_token.data));
@@ -730,7 +730,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             INFO("Signature: " << oxenc::to_hex(first_pro_proof.sig.data)
                                << ", backend pubkey: " << oxenc::to_hex(DEV_BACKEND_PUBKEY)
                                << ", response: " << response_json);
-            REQUIRE(pro_proof_verify_signature(
+            REQUIRE(session_protocol_pro_proof_verify_signature(
                     &first_pro_proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
             REQUIRE(std::memcmp(
                             response.proof.rotating_pubkey.data,
@@ -787,8 +787,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
 
             // Verify response
-            pro_proof proof = response.proof;
-            REQUIRE(pro_proof_verify_signature(
+            session_protocol_pro_proof proof = response.proof;
+            REQUIRE(session_protocol_pro_proof_verify_signature(
                     &proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
             REQUIRE(std::memcmp(
                             response.proof.rotating_pubkey.data,
@@ -956,8 +956,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             }};
 
             // Verify response
-            pro_proof proof = response.proof;
-            REQUIRE(pro_proof_verify_signature(
+            session_protocol_pro_proof proof = response.proof;
+            REQUIRE(session_protocol_pro_proof_verify_signature(
                     &proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
             REQUIRE(std::memcmp(
                             response.proof.rotating_pubkey.data,

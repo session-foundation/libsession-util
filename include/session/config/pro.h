@@ -13,7 +13,7 @@ extern "C" {
 
 typedef struct pro_config {
     bytes64 rotating_privkey;
-    pro_proof proof;
+    session_protocol_pro_proof proof;
 } pro_pro_config;
 
 /// Verify the proof was signed by the `verify_pubkey` and that the `rotating_privkey` in the `pro`

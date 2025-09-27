@@ -16,65 +16,66 @@ enum {
     /// Maximum number of UTF16 code points that a standard message can use. If the message exceeds
     /// this then the message must activate the higher character limit feature provided by Session
     /// Pro which allows messages up to 10k characters.
-    PRO_STANDARD_CHARACTER_LIMIT = 2'000,
+    SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT = 2'000,
 
     /// Maximum number of UTF16 code points that a Session Pro entitled user can send in a message.
     /// This is not used in the codebase, but is provided for convenience to centralise protocol
     /// definitions for users of the library to consume.
-    PRO_HIGHER_CHARACTER_LIMIT = 10'000,
+    SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT = 10'000,
 };
 
-typedef enum PRO_STATUS {  // See session::ProStatus
-    PRO_STATUS_NIL,
-    PRO_STATUS_INVALID_PRO_BACKEND_SIG,
-    PRO_STATUS_INVALID_USER_SIG,
-    PRO_STATUS_VALID,
-    PRO_STATUS_EXPIRED,
+typedef enum SESSION_PROTOCOL_PRO_STATUS {  // See session::ProStatus
+    SESSION_PROTOCOL_PRO_STATUS_NIL,
+    SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG,
+    SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
+    SESSION_PROTOCOL_PRO_STATUS_VALID,
+    SESSION_PROTOCOL_PRO_STATUS_EXPIRED,
 } PRO_STATUS;
 
-typedef struct pro_signed_message {
+typedef struct session_protocol_pro_signed_message {
     span_u8 sig;
     span_u8 msg;
-} pro_signed_message;
+} session_protocol_pro_signed_message;
 
-typedef struct pro_proof {
+typedef struct session_protocol_pro_proof {
     uint8_t version;
     bytes32 gen_index_hash;
     bytes32 rotating_pubkey;
     uint64_t expiry_unix_ts_ms;
     bytes64 sig;
-} pro_proof;
+} session_protocol_pro_proof;
 
 // Bit flags for features that are not currently able to be determined by the state stored in
 // Libsession. They are to be passed in by the client into `get_pro_msg_for_features` to return the
 // bitset of `PRO_FEATURES` that a message will use.
-typedef uint64_t PRO_EXTRA_FEATURES;
-enum PRO_EXTRA_FEATURES_ {
-    PRO_EXTRA_FEATURES_NIL = 0,
-    PRO_EXTRA_FEATURES_PRO_BADGE = 1 << 0,
-    PRO_EXTRA_FEATURES_ANIMATED_AVATAR = 1 << 1,
+typedef uint64_t SESSION_PROTOCOL_PRO_EXTRA_FEATURES;
+enum SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ {
+    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_NIL = 0,
+    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE = 1 << 0,
+    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR = 1 << 1,
 };
 
 // Bitset of Session Pro features that a message uses. This bitset is stored in the protobuf
 // `Content.proMessage` when a message is sent for other clients to consume.
-typedef uint64_t PRO_FEATURES;
-enum PRO_FEATURES_ {
-    PRO_FEATURES_NIL = 0,
-    PRO_FEATURES_10K_CHARACTER_LIMIT = 1 << 0,
-    PRO_FEATURES_PRO_BADGE = 1 << 1,
-    PRO_FEATURES_ANIMATED_AVATAR = 1 << 2,
-    PRO_FEATURES_ALL =
-            PRO_FEATURES_10K_CHARACTER_LIMIT | PRO_FEATURES_PRO_BADGE | PRO_FEATURES_ANIMATED_AVATAR
+typedef uint64_t SESSION_PROTOCOL_PRO_FEATURES;
+enum SESSION_PROTOCOL_PRO_FEATURES_ {
+    SESSION_PROTOCOL_PRO_FEATURES_NIL = 0,
+    SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT = 1 << 0,
+    SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE = 1 << 1,
+    SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR = 1 << 2,
+    SESSION_PROTOCOL_PRO_FEATURES_ALL = SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT |
+                                        SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE |
+                                        SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR
 };
 
-typedef enum DESTINATION_TYPE {  // See session::DestinationType
-    DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE,
-    DESTINATION_TYPE_GROUP,
-    DESTINATION_TYPE_COMMUNITY_INBOX,
-} DESTINATION_TYPE;
+typedef enum SESSION_PROTOCOL_DESTINATION_TYPE {  // See session::DestinationType
+    SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1,
+    SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
+    SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
+} SESSION_PROTOCOL_DESTINATION_TYPE;
 
 typedef struct session_protocol_destination {  // See session::Destination
-    DESTINATION_TYPE type;
+    SESSION_PROTOCOL_DESTINATION_TYPE type;
 
     // The pro signature is optional, set the pointer to a 64 byte pro signature
     // to include it into the encrypted message, ignored otherwise
@@ -88,16 +89,16 @@ typedef struct session_protocol_destination {  // See session::Destination
 
 // Indicates which optional fields in the envelope has been populated out of the optional fields in
 // an envelope after it has been parsed off the wire.
-typedef uint32_t ENVELOPE_FLAGS;
+typedef uint32_t SESSION_PROTOCOL_ENVELOPE_FLAGS;
 enum ENVELOPE_FLAGS_ {
-    ENVELOPE_FLAGS_SOURCE = 1 << 0,
-    ENVELOPE_FLAGS_SOURCE_DEVICE = 1 << 1,
-    ENVELOPE_FLAGS_SERVER_TIMESTAMP = 1 << 2,
-    ENVELOPE_FLAGS_PRO_SIG = 1 << 3,
+    SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE = 1 << 0,
+    SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE_DEVICE = 1 << 1,
+    SESSION_PROTOCOL_ENVELOPE_FLAGS_SERVER_TIMESTAMP = 1 << 2,
+    SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG = 1 << 3,
 };
 
 typedef struct session_protocol_envelope {
-    ENVELOPE_FLAGS flags;
+    SESSION_PROTOCOL_ENVELOPE_FLAGS flags;
     uint64_t timestamp_ms;
     bytes33 source;
     uint32_t source_device;
@@ -120,8 +121,8 @@ typedef struct session_protocol_decode_envelope {
     bytes32 sender_ed25519_pubkey;
     bytes32 sender_x25519_pubkey;
     PRO_STATUS pro_status;
-    pro_proof pro_proof;
-    PRO_FEATURES pro_features;
+    session_protocol_pro_proof pro_proof;
+    SESSION_PROTOCOL_PRO_FEATURES pro_features;
     size_t error_len_incl_null_terminator;
 } session_protocol_decoded_envelope;
 
@@ -133,7 +134,7 @@ typedef struct session_protocol_encoded_for_destination {
     size_t error_len_incl_null_terminator;
 } session_protocol_encoded_for_destination;
 
-/// API: pro/pro_proof_hash
+/// API: session_protocol/session_protocol_pro_proof_hash
 ///
 /// Generate the 32 byte hash that is to be signed by the rotating key or Session Pro Backend key to
 /// embed in the envelope or proof respectively which other clients use to authenticate the validity
@@ -144,9 +145,10 @@ typedef struct session_protocol_encoded_for_destination {
 ///
 /// Outputs:
 /// - `bytes32` -- The 32 byte hash calculated from the proof
-LIBSESSION_EXPORT bytes32 pro_proof_hash(pro_proof const* proof) NON_NULL_ARG(1);
+LIBSESSION_EXPORT bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof)
+        NON_NULL_ARG(1);
 
-/// API: pro/pro_proof_verify_signature
+/// API: session_protocol/session_protocol_pro_proof_verify_signature
 ///
 /// Verify the proof was signed by the `verify_pubkey`
 ///
@@ -159,11 +161,12 @@ LIBSESSION_EXPORT bytes32 pro_proof_hash(pro_proof const* proof) NON_NULL_ARG(1)
 ///
 /// Outputs:
 /// - `bool` -- True if verified, false otherwise
-LIBSESSION_EXPORT bool pro_proof_verify_signature(
-        pro_proof const* proof, uint8_t const* verify_pubkey, size_t verify_pubkey_len)
-        NON_NULL_ARG(1, 2);
+LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_signature(
+        session_protocol_pro_proof const* proof,
+        uint8_t const* verify_pubkey,
+        size_t verify_pubkey_len) NON_NULL_ARG(1, 2);
 
-/// API: pro/pro_proof_verify_message
+/// API: session_protocol/session_protocol_pro_proof_verify_message
 ///
 /// Check if the `rotating_pubkey` in the proof was the signatory of the message and signature
 /// passed in. This function throws if an signature is passed in that isn't 64 bytes.
@@ -179,14 +182,14 @@ LIBSESSION_EXPORT bool pro_proof_verify_signature(
 ///
 /// Outputs:
 /// - `bool` -- True if verified, false otherwise (bad signature, or, invalid arguments).
-LIBSESSION_EXPORT bool pro_proof_verify_message(
-        pro_proof const* proof,
+LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_message(
+        session_protocol_pro_proof const* proof,
         uint8_t const* sig,
         size_t sig_len,
         uint8_t const* msg,
         size_t msg_len) NON_NULL_ARG(1, 2, 4);
 
-/// API: pro/pro_proof_is_active
+/// API: session_protocol/session_protocol_pro_proof_is_active
 ///
 /// Check if the Pro proof is currently entitled to Pro given the `unix_ts` with respect to the
 /// proof's `expiry_unix_ts`
@@ -197,10 +200,10 @@ LIBSESSION_EXPORT bool pro_proof_verify_message(
 ///
 /// Outputs:
 /// - `bool` -- True if expired, false otherwise
-LIBSESSION_EXPORT bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_ms)
-        NON_NULL_ARG(1);
+LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
+        session_protocol_pro_proof const* proof, uint64_t unix_ts_ms) NON_NULL_ARG(1);
 
-/// API: pro/pro_proof_status
+/// API: session_protocol/session_protocol_pro_proof_status
 ///
 /// Evaluate the status of the pro proof by checking it is signed by the `verify_pubkey`, it has
 /// not expired via `unix_ts_s` and optionally verify that the `signed_msg` was signed by the
@@ -226,18 +229,18 @@ LIBSESSION_EXPORT bool pro_proof_is_active(pro_proof const* proof, uint64_t unix
 /// - `status` - The derived status given the components of the message. If `signed_msg` is
 ///   not set then this function can never return `PRO_STATUS_INVALID_USER_SIG` from the set of
 ///   possible enum values. Otherwise this funtion can return all possible values.
-LIBSESSION_EXPORT PRO_STATUS pro_proof_status(
-        pro_proof const* proof,
+LIBSESSION_EXPORT PRO_STATUS session_protocol_pro_proof_status(
+        session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
         uint64_t unix_ts_s,
-        OPTIONAL const pro_signed_message* signed_msg) NON_NULL_ARG(1, 2);
+        OPTIONAL const session_protocol_pro_signed_message* signed_msg) NON_NULL_ARG(1, 2);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
 typedef struct session_protocol_pro_features_for_msg {
     bool success;
     string8 error;
-    PRO_FEATURES features;
+    SESSION_PROTOCOL_PRO_FEATURES features;
     size_t codepoint_count;
 } session_protocol_pro_features_for_msg;
 
@@ -262,7 +265,8 @@ typedef struct session_protocol_pro_features_for_msg {
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        char const* utf8, size_t utf8_size, PRO_EXTRA_FEATURES extra) NON_NULL_ARG(1);
+        char const* utf8, size_t utf8_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
+        NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_utf16
 ///
@@ -285,7 +289,8 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        uint16_t const* utf16, size_t utf16_size, PRO_EXTRA_FEATURES extra) NON_NULL_ARG(1);
+        uint16_t const* utf16, size_t utf16_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
+        NON_NULL_ARG(1);
 
 /// API: session_protocol_encode_for_1o1
 ///

@@ -44,7 +44,7 @@ TEST_CASE("Pro", "[config][pro]") {
         // Generate the hashes
         static_assert(crypto_sign_ed25519_BYTES == pro_cpp.proof.sig.max_size());
         std::array<uint8_t, 32> hash_to_sign_cpp = pro_cpp.proof.hash();
-        bytes32 hash_to_sign = pro_proof_hash(&pro.proof);
+        bytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
 
         static_assert(hash_to_sign_cpp.size() == sizeof(hash_to_sign));
         CHECK(std::memcmp(hash_to_sign_cpp.data(), hash_to_sign.data, hash_to_sign_cpp.size()) ==
@@ -82,8 +82,9 @@ TEST_CASE("Pro", "[config][pro]") {
         CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts));
         CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1ms));
 
-        CHECK(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms));
-        CHECK_FALSE(pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms + 1));
+        CHECK(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms));
+        CHECK_FALSE(
+                session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms + 1));
     }
 
     // Verify it can verify messages signed with the rotating public key
@@ -98,7 +99,7 @@ TEST_CASE("Pro", "[config][pro]") {
                 rotating_sk.data());
         CHECK(sign_result == 0);
         CHECK(pro_cpp.proof.verify_message(sig, session::to_span(body)));
-        CHECK(pro_proof_verify_message(
+        CHECK(session_protocol_pro_proof_verify_message(
                 &pro.proof,
                 sig.data(),
                 sig.size(),

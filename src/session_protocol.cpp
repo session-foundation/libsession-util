@@ -137,7 +137,7 @@ array_uc32 ProProof::hash() const {
 }
 
 session::ProFeaturesForMsg pro_features_for_utf8_or_16(
-        const void* utf, size_t utf_size, PRO_EXTRA_FEATURES extra, bool is_utf8) {
+        const void* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra, bool is_utf8) {
     session::ProFeaturesForMsg result = {};
     simdutf::result validate = is_utf8 ? simdutf::validate_utf8_with_errors(
                                                  reinterpret_cast<const char*>(utf), utf_size)
@@ -148,16 +148,16 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
         result.codepoint_count =
                 is_utf8 ? simdutf::count_utf8(reinterpret_cast<const char*>(utf), utf_size)
                         : simdutf::count_utf16(reinterpret_cast<const char16_t*>(utf), utf_size);
-        if (result.codepoint_count > PRO_STANDARD_CHARACTER_LIMIT)
-            result.features |= PRO_FEATURES_10K_CHARACTER_LIMIT;
+        if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT)
+            result.features |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
 
-        if (extra & PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
-            result.features |= PRO_FEATURES_ANIMATED_AVATAR;
+        if (extra & SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
+            result.features |= SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR;
 
-        if (extra & PRO_EXTRA_FEATURES_PRO_BADGE)
-            result.features |= PRO_FEATURES_PRO_BADGE;
+        if (extra & SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE)
+            result.features |= SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE;
 
-        assert((result.features & ~PRO_FEATURES_ALL) == 0);
+        assert((result.features & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) == 0);
     } else {
         result.error = simdutf::error_to_string(validate.error);
     }
@@ -168,13 +168,13 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 namespace session {
 
 ProFeaturesForMsg pro_features_for_utf8(
-        const char* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
     ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ true);
     return result;
 }
 
 ProFeaturesForMsg pro_features_for_utf16(
-        const uint16_t* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+        const uint16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
     ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
     return result;
 }
@@ -186,7 +186,7 @@ std::vector<uint8_t> encode_for_1o1(
         const array_uc33& recipient_pubkey,
         const std::optional<array_uc64>& pro_sig) {
     Destination dest = {};
-    dest.type = DestinationType::ContactOrSyncMessage;
+    dest.type = DestinationType::SyncOr1o1;
     dest.pro_sig = pro_sig;
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
@@ -321,9 +321,9 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
     EncryptedForDestinationInternal result = {};
     switch (dest_type) {
         case DestinationType::Group: /*FALLTHRU*/
-        case DestinationType::ContactOrSyncMessage: {
+        case DestinationType::SyncOr1o1: {
             bool is_group = dest_type == DestinationType::Group;
-            bool is_1o1   = dest_type == DestinationType::ContactOrSyncMessage;
+            bool is_1o1 = dest_type == DestinationType::SyncOr1o1;
             if (is_group &&
                 dest_group_ed25519_pubkey[0] != static_cast<uint8_t>(SessionIDPrefix::group)) {
                 // Legacy groups which have a 05 prefixed key
@@ -534,19 +534,19 @@ DecodedEnvelope decode_envelope(
             throw std::runtime_error(fmt::format(
                     "Parse envelope failed, source had unexpected size ({} bytes)", source.size()));
         std::memcpy(result.envelope.source.data(), source.data(), source.size());
-        result.envelope.flags |= ENVELOPE_FLAGS_SOURCE;
+        result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE;
     }
 
     // Parse source device (optional)
     if (envelope.has_sourcedevice()) {
         result.envelope.source_device = envelope.sourcedevice();
-        result.envelope.flags |= ENVELOPE_FLAGS_SOURCE_DEVICE;
+        result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE_DEVICE;
     }
 
     // Parse server timestamp (optional)
     if (envelope.has_servertimestamp()) {
         result.envelope.server_timestamp = envelope.servertimestamp();
-        result.envelope.flags |= ENVELOPE_FLAGS_SERVER_TIMESTAMP;
+        result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SERVER_TIMESTAMP;
     }
 
     // Parse content
@@ -650,7 +650,7 @@ DecodedEnvelope decode_envelope(
 
         if (content.has_promessage()) {
             // Mark the envelope as having a pro signature that the caller can use.
-            result.envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
+            result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG;
             DecodedPro& pro = result.pro.emplace();
 
             // Extract the pro message
@@ -747,24 +747,24 @@ DecodedCommunityMessage decode_for_community(
                             "Parse envelope failed, source had unexpected size ({} bytes)",
                             source.size()));
                 std::memcpy(envelope.source.data(), source.data(), source.size());
-                envelope.flags |= ENVELOPE_FLAGS_SOURCE;
+                envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE;
             }
 
             // Parse source device (optional)
             if (pb_envelope.has_sourcedevice()) {
                 envelope.source_device = pb_envelope.sourcedevice();
-                envelope.flags |= ENVELOPE_FLAGS_SOURCE_DEVICE;
+                envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE_DEVICE;
             }
 
             // Parse server timestamp (optional)
             if (pb_envelope.has_servertimestamp()) {
                 envelope.server_timestamp = pb_envelope.servertimestamp();
-                envelope.flags |= ENVELOPE_FLAGS_SERVER_TIMESTAMP;
+                envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SERVER_TIMESTAMP;
             }
 
             // Parse pro signature (optional)
             if (pb_envelope.has_prosig()) {
-                envelope.flags |= ENVELOPE_FLAGS_PRO_SIG;
+                envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG;
                 pro_sig = to_span(pb_envelope.prosig());
             }
         } else {
@@ -785,7 +785,7 @@ DecodedCommunityMessage decode_for_community(
     if (content.has_prosigforcommunitymessageonly()) {
         // Signature must be in the envelope if it existed or the content. Specifying both is
         // not allowed.
-        if (result.envelope && result.envelope->flags & ENVELOPE_FLAGS_PRO_SIG) {
+        if (result.envelope && result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG) {
             throw std::runtime_error(
                     "Decoding community message failed, envelope and content both had a pro "
                     "signature specified");
@@ -861,7 +861,7 @@ DecodedCommunityMessage decode_for_community(
         if (result.envelope) {
             // Entering the `pro_sig` and `result.envelope` branch means that the envelope must have
             // a pro signature.
-            assert(result.envelope->flags & ENVELOPE_FLAGS_PRO_SIG);
+            assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
             signed_msg.msg = result.content_plaintext;
             pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         } else {
@@ -886,11 +886,13 @@ DecodedCommunityMessage decode_for_community(
 
 using namespace session;
 
-static_assert((sizeof((pro_proof*)0)->gen_index_hash) == 32);
-static_assert((sizeof((pro_proof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
-static_assert((sizeof((pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
+static_assert((sizeof((session_protocol_pro_proof*)0)->gen_index_hash) == 32);
+static_assert(
+        (sizeof((session_protocol_pro_proof*)0)->rotating_pubkey) ==
+        crypto_sign_ed25519_PUBLICKEYBYTES);
+static_assert((sizeof((session_protocol_pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
 
-LIBSESSION_C_API bytes32 pro_proof_hash(pro_proof const* proof) {
+LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
     bytes32 result = {};
     session::array_uc32 hash = proof_hash_internal(
             proof->version,
@@ -901,8 +903,10 @@ LIBSESSION_C_API bytes32 pro_proof_hash(pro_proof const* proof) {
     return result;
 }
 
-LIBSESSION_C_API bool pro_proof_verify_signature(
-        pro_proof const* proof, uint8_t const* verify_pubkey, size_t verify_pubkey_len) {
+LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
+        session_protocol_pro_proof const* proof,
+        uint8_t const* verify_pubkey,
+        size_t verify_pubkey_len) {
     if (verify_pubkey_len != crypto_sign_ed25519_PUBLICKEYBYTES)
         return false;
     auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
@@ -915,8 +919,8 @@ LIBSESSION_C_API bool pro_proof_verify_signature(
     return result;
 }
 
-LIBSESSION_C_API bool pro_proof_verify_message(
-        pro_proof const* proof,
+LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(
+        session_protocol_pro_proof const* proof,
         uint8_t const* sig,
         size_t sig_len,
         uint8_t const* msg,
@@ -927,41 +931,43 @@ LIBSESSION_C_API bool pro_proof_verify_message(
     return result;
 }
 
-LIBSESSION_C_API bool pro_proof_is_active(pro_proof const* proof, uint64_t unix_ts_ms) {
+LIBSESSION_C_API bool session_protocol_pro_proof_is_active(
+        session_protocol_pro_proof const* proof, uint64_t unix_ts_ms) {
     bool result = proof_is_active_internal(proof->expiry_unix_ts_ms, unix_ts_ms);
     return result;
 }
 
-LIBSESSION_C_API PRO_STATUS pro_proof_status(
-        pro_proof const* proof,
+LIBSESSION_C_API PRO_STATUS session_protocol_pro_proof_status(
+        session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
         uint64_t unix_ts_s,
-        const pro_signed_message* signed_msg) {
-    PRO_STATUS result = PRO_STATUS_VALID;
-    if (!pro_proof_verify_signature(proof, verify_pubkey, verify_pubkey_len))
-        result = PRO_STATUS_INVALID_PRO_BACKEND_SIG;
+        const session_protocol_pro_signed_message* signed_msg) {
+    PRO_STATUS result = SESSION_PROTOCOL_PRO_STATUS_VALID;
+    if (!session_protocol_pro_proof_verify_signature(proof, verify_pubkey, verify_pubkey_len))
+        result = SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG;
 
     // Check if the message was signed if the user passed one in to verify against
-    if (result == PRO_STATUS_VALID && signed_msg) {
-        if (!pro_proof_verify_message(
+    if (result == SESSION_PROTOCOL_PRO_STATUS_VALID && signed_msg) {
+        if (!session_protocol_pro_proof_verify_message(
                     proof,
                     signed_msg->sig.data,
                     signed_msg->sig.size,
                     signed_msg->msg.data,
                     signed_msg->msg.size))
-            result = PRO_STATUS_INVALID_USER_SIG;
+            result = SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG;
     }
 
     // Check if the proof has expired
-    if (result == PRO_STATUS_VALID && !pro_proof_is_active(proof, unix_ts_s))
-        result = PRO_STATUS_EXPIRED;
+    if (result == SESSION_PROTOCOL_PRO_STATUS_VALID &&
+        !session_protocol_pro_proof_is_active(proof, unix_ts_s))
+        result = SESSION_PROTOCOL_PRO_STATUS_EXPIRED;
     return result;
 }
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        const char* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
     ProFeaturesForMsg result_cpp =
             pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ true);
     session_protocol_pro_features_for_msg result = {
@@ -975,7 +981,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        const uint16_t* utf, size_t utf_size, PRO_EXTRA_FEATURES extra) {
+        const uint16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
     ProFeaturesForMsg result_cpp =
             pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
     session_protocol_pro_features_for_msg result = {
@@ -1000,7 +1006,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
         size_t error_len) {
 
     session_protocol_destination dest = {};
-    dest.type = DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE;
+    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1;
     dest.pro_sig = pro_sig;
     dest.recipient_pubkey = *recipient_pubkey;
     dest.sent_timestamp_ms = sent_timestamp_ms;
@@ -1030,7 +1036,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         size_t error_len) {
 
     session_protocol_destination dest = {};
-    dest.type = DESTINATION_TYPE_COMMUNITY_INBOX;
+    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX;
     dest.pro_sig = pro_sig;
     dest.sent_timestamp_ms = sent_timestamp_ms;
     dest.recipient_pubkey = *recipient_pubkey;
@@ -1061,7 +1067,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         size_t error_len) {
 
     session_protocol_destination dest = {};
-    dest.type = DESTINATION_TYPE_GROUP;
+    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_GROUP;
     dest.pro_sig = pro_sig;
     dest.group_ed25519_pubkey = *group_ed25519_pubkey;
     dest.group_ed25519_privkey = *group_ed25519_privkey;

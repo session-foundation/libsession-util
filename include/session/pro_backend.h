@@ -123,7 +123,7 @@ typedef struct session_pro_backend_get_pro_proof_request {
 
 typedef struct session_pro_backend_add_pro_payment_or_get_pro_proof_response {
     session_pro_backend_response_header header;
-    pro_proof proof;
+    session_protocol_pro_proof proof;
 } session_pro_backend_add_pro_payment_or_get_pro_proof_response;
 
 typedef struct session_pro_backend_get_pro_revocations_request {

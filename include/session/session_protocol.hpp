@@ -58,11 +58,11 @@ enum ProProofVersion { ProProofVersion_v0 };
 
 enum class ProStatus {
     // Pro proof sig was not signed by the Pro backend key
-    InvalidProBackendSig = PRO_STATUS_INVALID_PRO_BACKEND_SIG,
+    InvalidProBackendSig = SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG,
     // Pro sig in the envelope was not signed by the Rotating key
-    InvalidUserSig = PRO_STATUS_INVALID_USER_SIG,
-    Valid = PRO_STATUS_VALID,      // Proof is verified; has not expired
-    Expired = PRO_STATUS_EXPIRED,  // Proof is verified; has expired
+    InvalidUserSig = SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
+    Valid = SESSION_PROTOCOL_PRO_STATUS_VALID,      // Proof is verified; has not expired
+    Expired = SESSION_PROTOCOL_PRO_STATUS_EXPIRED,  // Proof is verified; has expired
 };
 
 struct ProSignedMessage {
@@ -171,17 +171,17 @@ class ProProof {
 struct ProFeaturesForMsg {
     bool success;
     std::string_view error;
-    PRO_FEATURES features;
+    SESSION_PROTOCOL_PRO_FEATURES features;
     size_t codepoint_count;
 };
 
 enum class DestinationType {
-    ContactOrSyncMessage = DESTINATION_TYPE_CONTACT_OR_SYNC_MESSAGE,
+    SyncOr1o1 = SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1,
     /// Both legacy and non-legacy groups are to be identified as `Group`. A non-legacy
     /// group is detected by the (0x03) prefix byte on the given `dest_group_pubkey` specified in
     /// Destination.
-    Group = DESTINATION_TYPE_GROUP,
-    CommunityInbox = DESTINATION_TYPE_COMMUNITY_INBOX,
+    Group = SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
+    CommunityInbox = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
 };
 
 struct Destination {
@@ -214,7 +214,7 @@ struct Destination {
 };
 
 struct Envelope {
-    ENVELOPE_FLAGS flags;
+    SESSION_PROTOCOL_ENVELOPE_FLAGS flags;
     std::chrono::milliseconds timestamp;
 
     // Optional fields. These fields are set if the appropriate flag has been set in `flags`
@@ -233,7 +233,8 @@ struct DecodedPro {
     // Session Pro proof that was embedded in the envelope, this is always populated irrespective of
     // the status but the validity of the contents should be verified by checking `status`
     ProProof proof;
-    PRO_FEATURES features;  // Bit flag features that were used in the embedded message
+    SESSION_PROTOCOL_PRO_FEATURES
+    features;  // Bit flag features that were used in the embedded message
 };
 
 struct DecodedEnvelope {
@@ -324,7 +325,7 @@ struct DecodeEnvelopeKey {
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf8(
-        char const* utf8, size_t utf8_size, PRO_EXTRA_FEATURES flags);
+        char const* utf8, size_t utf8_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/pro_features_for_utf16
 ///
@@ -345,7 +346,7 @@ ProFeaturesForMsg pro_features_for_utf8(
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf16(
-        char16_t const* utf16, size_t utf8_size, PRO_EXTRA_FEATURES flags);
+        char16_t const* utf16, size_t utf8_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/encode_for_1o1
 ///
