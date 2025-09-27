@@ -295,6 +295,9 @@ struct EncryptedForDestinationInternal {
 
 constexpr char PADDING_TERMINATING_BYTE = 0x80;
 
+// TODO: Implement pro signing on behalf of the clients by getting them to pass in the pro rotating
+// secret key
+
 enum class UseMalloc { No, Yes };
 static EncryptedForDestinationInternal encode_for_destination_internal(
         std::span<const uint8_t> plaintext,
@@ -307,7 +310,6 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
         std::span<const uint8_t> dest_group_ed25519_pubkey,
         std::span<const uint8_t> dest_group_ed25519_privkey,
         UseMalloc use_malloc) {
-
     assert(dest_pro_sig.empty() || dest_pro_sig.size() == crypto_sign_ed25519_BYTES);
     assert(dest_recipient_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_community_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
@@ -316,76 +318,25 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
 
     // All incoming arguments are passed in from typed, fixed-sized arrays so we do not need to
     // throw if these sizes are wrong. It being wrong would be a development error.
-
     EncryptedForDestinationInternal result = {};
-    enum class Mode {
-        Envelope,
-        EncryptForBlindedRecipient,
-    };
-
-    // The step to partake after enveloping the content payload
-    enum class AfterEnvelope {
-        Nil,
-        EnvelopeIsCipherText,  // No extra bit-mangling required after enveloping
-        WrapInWSMessage,       // Wrap in the protobuf websocket message after enveloping
-        KeysEncryptMessage,    // Encrypt with the group keys after ennveloping
-    };
-
-    struct EncodeContext {
-        Mode mode;
-
-        // Ciphertext storing the result of encrypt for recipient deterministic, if it was necessary
-        // to encrypt before enveloping.
-        std::vector<uint8_t> before_envelope_ciphertext;
-
-        // Payload to set the envelope source if necessary.
-        std::optional<std::span<const uint8_t>> envelope_src;
-
-        // Type of message to mark the enevelope as
-        std::optional<SessionProtos::Envelope_Type> envelope_type;
-
-        // Action to take after generating the envelope (e.g.: further encryption/wrapping)
-        AfterEnvelope after_envelope;
-    };
-
-    // Figure out how to encrypt the message based on the destination and setup the encoding context
-    EncodeContext enc = {};
     switch (dest_type) {
-        case DestinationType::Group: {
-            bool has_03_prefix =
-                    dest_group_ed25519_pubkey[0] == static_cast<uint8_t>(SessionIDPrefix::group);
-            if (has_03_prefix) {
-                enc.mode = Mode::Envelope;
-                enc.after_envelope = AfterEnvelope::KeysEncryptMessage;
-                enc.envelope_type =
-                        SessionProtos::Envelope_Type::Envelope_Type_CLOSED_GROUP_MESSAGE;
-            } else {
+        case DestinationType::Group: /*FALLTHRU*/
+        case DestinationType::ContactOrSyncMessage: {
+            bool is_group = dest_type == DestinationType::Group;
+            bool is_1o1   = dest_type == DestinationType::ContactOrSyncMessage;
+            if (is_group &&
+                dest_group_ed25519_pubkey[0] != static_cast<uint8_t>(SessionIDPrefix::group)) {
                 // Legacy groups which have a 05 prefixed key
                 throw std::runtime_error{
                         "Unsupported configuration, encrypting for a legacy group (0x05 prefix) is "
                         "no longer supported"};
             }
-        } break;
 
-        case DestinationType::ContactOrSyncMessage: {
-            enc.mode = Mode::Envelope;
-            enc.envelope_type = SessionProtos::Envelope_Type::Envelope_Type_SESSION_MESSAGE;
-            enc.after_envelope = AfterEnvelope::WrapInWSMessage;
-        } break;
-
-        case DestinationType::CommunityInbox: {
-            enc.mode = Mode::EncryptForBlindedRecipient;
-        } break;
-    }
-
-    // Do the encryption work
-    switch (enc.mode) {
-        case Mode::Envelope: {
-            assert(enc.envelope_type.has_value());
+            // For Sync or 1o1 mesasges, we need to pad the contents to 160 bytes, see:
+            //   https://github.com/session-foundation/session-desktop/blob/a04e62427034a6b6fee39dcff7dbabf0d0131b13/ts/session/crypto/BufferPadding.ts#L49
             std::span<const uint8_t> content = plaintext;
-            if (dest_type == DestinationType::ContactOrSyncMessage) {
-                // For Sync or 1o1 mesasges, we need to pad the contents to 160 bytes, see:
-                //   https://github.com/session-foundation/session-desktop/blob/a04e62427034a6b6fee39dcff7dbabf0d0131b13/ts/session/crypto/BufferPadding.ts#L49
+            std::vector<uint8_t> content_for_1o1;
+            if (is_1o1) {
                 const size_t MSG_PADDING = 160;
 
                 // Calculate amount of padding required
@@ -401,23 +352,21 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 padded_content[content.size()] = PADDING_TERMINATING_BYTE;
 
                 // Encrypt the padded output
-                enc.before_envelope_ciphertext = encrypt_for_recipient_deterministic(
+                content_for_1o1 = encrypt_for_recipient_deterministic(
                         ed25519_privkey, dest_recipient_pubkey, padded_content);
-                content = enc.before_envelope_ciphertext;
+                content = content_for_1o1;
             }
 
             // Create envelope
             // Set sourcedevice to 1 as per:
             // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Utilities/MessageWrapper.swift#L57
             SessionProtos::Envelope envelope = {};
-            envelope.set_type(*enc.envelope_type);
+            envelope.set_type(
+                    is_1o1 ? SessionProtos::Envelope_Type_SESSION_MESSAGE
+                           : SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE);
             envelope.set_sourcedevice(1);
             envelope.set_timestamp(dest_sent_timestamp_ms.count());
             envelope.set_content(content.data(), content.size());
-            if (enc.envelope_src)
-                envelope.set_source(
-                        reinterpret_cast<const char*>(enc.envelope_src->data()),
-                        enc.envelope_src->size());
 
             if (dest_pro_sig.empty()) {
                 // If there's no pro signature specified, we still fill out the pro signature with a
@@ -429,74 +378,50 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 envelope.set_prosig(dest_pro_sig.data(), dest_pro_sig.size());
             }
 
-            switch (enc.after_envelope) {
-                case AfterEnvelope::Nil:
-                    assert(false && "Dev error, after envelope action was not set");
-                    break;
+            if (is_group) {
+                std::string bytes = envelope.SerializeAsString();
+                if (dest_group_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES + 1)
+                    dest_group_ed25519_pubkey = dest_group_ed25519_pubkey.subspan(1);
 
-                case AfterEnvelope::KeysEncryptMessage: {
-                    std::string bytes = envelope.SerializeAsString();
-                    if (dest_group_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES + 1)
-                        dest_group_ed25519_pubkey = dest_group_ed25519_pubkey.subspan(1);
+                std::vector<uint8_t> ciphertext = encrypt_for_group(
+                        ed25519_privkey,
+                        dest_group_ed25519_pubkey,
+                        dest_group_ed25519_privkey,
+                        to_span(bytes),
+                        /*compress*/ true,
+                        /*padding*/ 256);
 
-                    std::vector<uint8_t> ciphertext = encrypt_for_group(
-                            ed25519_privkey,
-                            dest_group_ed25519_pubkey,
-                            dest_group_ed25519_privkey,
-                            to_span(bytes),
-                            /*compress*/ true,
-                            /*padding*/ 256);
+                if (use_malloc == UseMalloc::Yes) {
+                    result.ciphertext_c =
+                            span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
+                } else {
+                    result.ciphertext_cpp = std::move(ciphertext);
+                }
+            } else {
+                // 1o1, Wrap in websocket message
+                WebSocketProtos::WebSocketMessage msg = {};
+                msg.set_type(WebSocketProtos::WebSocketMessage_Type::WebSocketMessage_Type_REQUEST);
 
-                    if (use_malloc == UseMalloc::Yes) {
-                        result.ciphertext_c =
-                                span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
-                    } else {
-                        result.ciphertext_cpp = std::move(ciphertext);
-                    }
-                } break;
+                // Make request
+                WebSocketProtos::WebSocketRequestMessage* req_msg = msg.mutable_request();
+                req_msg->set_body(envelope.SerializeAsString());
 
-                case AfterEnvelope::WrapInWSMessage: {
-                    // Setup message
-                    WebSocketProtos::WebSocketMessage msg = {};
-                    msg.set_type(
-                            WebSocketProtos::WebSocketMessage_Type::WebSocketMessage_Type_REQUEST);
-
-                    // Make request
-                    WebSocketProtos::WebSocketRequestMessage* req_msg = msg.mutable_request();
-                    req_msg->set_body(envelope.SerializeAsString());
-
-                    // Write message as ciphertext
-                    [[maybe_unused]] bool serialized = false;
-                    if (use_malloc == UseMalloc::Yes) {
-                        result.ciphertext_c = span_u8_alloc_or_throw(msg.ByteSizeLong());
-                        serialized = msg.SerializeToArray(
-                                result.ciphertext_c.data, result.ciphertext_c.size);
-                    } else {
-                        result.ciphertext_cpp.resize(msg.ByteSizeLong());
-                        serialized = msg.SerializeToArray(
-                                result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
-                    }
-                    assert(serialized);
-                } break;
-
-                case AfterEnvelope::EnvelopeIsCipherText: {
-                    [[maybe_unused]] bool serialized = false;
-                    if (use_malloc == UseMalloc::Yes) {
-                        result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
-                        serialized = envelope.SerializeToArray(
-                                result.ciphertext_c.data, result.ciphertext_c.size);
-                    } else {
-                        result.ciphertext_cpp.resize(envelope.ByteSizeLong());
-                        serialized = envelope.SerializeToArray(
-                                result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
-                    }
-                    assert(serialized);
-                } break;
+                // Write message as ciphertext
+                [[maybe_unused]] bool serialized = false;
+                if (use_malloc == UseMalloc::Yes) {
+                    result.ciphertext_c = span_u8_alloc_or_throw(msg.ByteSizeLong());
+                    serialized = msg.SerializeToArray(
+                            result.ciphertext_c.data, result.ciphertext_c.size);
+                } else {
+                    result.ciphertext_cpp.resize(msg.ByteSizeLong());
+                    serialized = msg.SerializeToArray(
+                            result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
+                }
+                assert(serialized);
             }
-
         } break;
 
-        case Mode::EncryptForBlindedRecipient: {
+        case DestinationType::CommunityInbox: {
             std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
                     ed25519_privkey,
                     dest_community_inbox_server_pubkey,
@@ -510,7 +435,6 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             }
         } break;
     }
-
     return result;
 }
 
