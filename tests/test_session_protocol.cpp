@@ -15,7 +15,9 @@ using namespace session;
 struct SerialisedProtobufContentWithProForTesting {
     ProProof proof;
     std::string plaintext;
+    std::vector<uint8_t> plaintext_padded;
     array_uc64 sig_over_plaintext_with_user_pro_key;
+    array_uc64 sig_over_plaintext_padded_with_user_pro_key;
     array_uc32 pro_proof_hash;
     bytes64 sig_over_plaintext_with_user_pro_key_c;
     bytes32 pro_proof_hash_c;
@@ -65,7 +67,9 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Generate the plaintext
     result.plaintext = content.SerializeAsString();
+    result.plaintext_padded = session::pad_message(to_span(result.plaintext));
     REQUIRE(result.plaintext.size() > data_body.size());
+    REQUIRE(result.plaintext_padded.size() % SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING == 0);
 
     // Sign the plaintext with the user's pro key
     crypto_sign_ed25519_detached(
@@ -74,6 +78,14 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             reinterpret_cast<uint8_t*>(result.plaintext.data()),
             result.plaintext.size(),
             user_rotating_privkey.data());
+
+    crypto_sign_ed25519_detached(
+            result.sig_over_plaintext_padded_with_user_pro_key.data(),
+            nullptr,
+            reinterpret_cast<uint8_t*>(result.plaintext_padded.data()),
+            result.plaintext_padded.size(),
+            user_rotating_privkey.data());
+
 
     // Setup the C versions for convenience
     std::memcpy(
@@ -283,7 +295,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     // Build protobuf `Content` message, serialise to `plaintext` and get it signed by the user's
     // "Session Pro" key into `sig_over_plaintext_with_user_pro_key`
-    SerialisedProtobufContentWithProForTesting protobuf_content_with_pro =
+    SerialisedProtobufContentWithProForTesting protobuf_content =
             build_protobuf_content_with_session_pro(
                     /*data_body*/ data_body,
                     /*user_rotating_privkey*/ user_pro_ed_sk,
@@ -295,7 +307,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     bytes64 base_pro_sig = {};
     std::memcpy(
             base_pro_sig.data,
-            protobuf_content_with_pro.sig_over_plaintext_with_user_pro_key.data(),
+            protobuf_content.sig_over_plaintext_with_user_pro_key.data(),
             sizeof(base_pro_sig.data));
 
     session_protocol_destination base_dest = {};
@@ -328,8 +340,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
             session_protocol_encoded_for_destination encrypt_result =
                     session_protocol_encode_for_destination(
-                            protobuf_content_with_pro.plaintext.data(),
-                            protobuf_content_with_pro.plaintext.size(),
+                            protobuf_content.plaintext.data(),
+                            protobuf_content.plaintext.size(),
                             keys.ed_sk0.data(),
                             keys.ed_sk0.size(),
                             &dest,
@@ -345,8 +357,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt/decrypt for contact in default namespace with Pro") {
         // Encrypt content
         session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
-                protobuf_content_with_pro.plaintext.data(),
-                protobuf_content_with_pro.plaintext.size(),
+                protobuf_content.plaintext.data(),
+                protobuf_content.plaintext.size(),
                 keys.ed_sk0.data(),
                 keys.ed_sk0.size(),
                 base_dest.sent_timestamp_ms,
@@ -381,7 +393,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro_proof);
         REQUIRE(std::memcmp(
                         hash.data,
-                        protobuf_content_with_pro.pro_proof_hash.data(),
+                        protobuf_content.pro_proof_hash.data(),
                         sizeof(hash.data)) == 0);
         REQUIRE(decrypt_result.pro_features ==
                 SESSION_PROTOCOL_PRO_FEATURES_NIL);  // No features requested
@@ -454,7 +466,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro_proof);
         REQUIRE(std::memcmp(
                         hash.data,
-                        protobuf_content_with_pro.pro_proof_hash.data(),
+                        protobuf_content.pro_proof_hash.data(),
                         sizeof(hash.data)) == 0);
         REQUIRE(decrypt_result.pro_features == (SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT |
                                                 SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE));
@@ -476,8 +488,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         session_protocol_encoded_for_destination encrypt_result =
                 session_protocol_encode_for_destination(
-                        protobuf_content_with_pro.plaintext.data(),
-                        protobuf_content_with_pro.plaintext.size(),
+                        protobuf_content.plaintext.data(),
+                        protobuf_content.plaintext.size(),
                         keys.ed_sk0.data(),
                         keys.ed_sk0.size(),
                         &dest,
@@ -509,8 +521,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     group_v2_session_sk.data, group_v2_sk.data(), sizeof(group_v2_session_sk.data));
 
             encrypt_result = session_protocol_encode_for_group(
-                    protobuf_content_with_pro.plaintext.data(),
-                    protobuf_content_with_pro.plaintext.size(),
+                    protobuf_content.plaintext.data(),
+                    protobuf_content.plaintext.size(),
                     keys.ed_sk0.data(),
                     keys.ed_sk0.size(),
                     base_dest.sent_timestamp_ms,
@@ -555,8 +567,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt/decrypt for sync messages with Pro") {
         // Encrypt
         session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
-                protobuf_content_with_pro.plaintext.data(),
-                protobuf_content_with_pro.plaintext.size(),
+                protobuf_content.plaintext.data(),
+                protobuf_content.plaintext.size(),
                 keys.ed_sk0.data(),
                 keys.ed_sk0.size(),
                 base_dest.sent_timestamp_ms,
@@ -591,7 +603,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro_proof);
             REQUIRE(std::memcmp(
                             hash.data,
-                            protobuf_content_with_pro.pro_proof_hash.data(),
+                            protobuf_content.pro_proof_hash.data(),
                             sizeof(hash.data)) == 0);
             REQUIRE(decrypt_result.pro_features ==
                     SESSION_PROTOCOL_PRO_FEATURES_NIL);  // No features requested
@@ -612,7 +624,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
-                    protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch().count() + 1,
+                    protobuf_content.proof.expiry_unix_ts.time_since_epoch().count() + 1,
                     pro_backend_ed_pk.data(),
                     pro_backend_ed_pk.size(),
                     error,
@@ -631,7 +643,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
-                    protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch().count(),
+                    protobuf_content.proof.expiry_unix_ts.time_since_epoch().count(),
                     bad_pro_backend_ed_pk.data(),
                     bad_pro_backend_ed_pk.size(),
                     error,
@@ -653,7 +665,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &bad_decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
-                    protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch().count(),
+                    protobuf_content.proof.expiry_unix_ts.time_since_epoch().count(),
                     pro_backend_ed_pk.data(),
                     pro_backend_ed_pk.size(),
                     error,
@@ -677,7 +689,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
                     std::chrono::duration_cast<std::chrono::seconds>(
-                            protobuf_content_with_pro.proof.expiry_unix_ts.time_since_epoch())
+                            protobuf_content.proof.expiry_unix_ts.time_since_epoch())
                             .count(),
                     pro_backend_ed_pk.data(),
                     pro_backend_ed_pk.size(),
@@ -693,7 +705,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encode/decode for community (content message)") {
         std::vector<uint8_t> encoded =
-                encode_for_community(to_span(protobuf_content_with_pro.plaintext), {});
+                encode_for_community(to_span(protobuf_content.plaintext), {});
+        REQUIRE(encoded.size() % SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING == 0);
 
         DecodedCommunityMessage decode_comm_msg =
                 decode_for_community(encoded, timestamp_s, pro_backend_ed_pk);
@@ -703,7 +716,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encode/decode for community (content message+pro)") {
         std::vector<uint8_t> encoded =
-                encode_for_community(to_span(protobuf_content_with_pro.plaintext), user_pro_ed_sk);
+                encode_for_community(to_span(protobuf_content.plaintext), user_pro_ed_sk);
+        REQUIRE(encoded.size() % SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING == 0);
 
         DecodedCommunityMessage decode_comm_msg =
                 decode_for_community(encoded, timestamp_s, pro_backend_ed_pk);
@@ -716,7 +730,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         SessionProtos::Envelope envelope;
         envelope.set_type(SessionProtos::Envelope_Type_SESSION_MESSAGE);
         envelope.set_timestamp(timestamp_s.time_since_epoch().count());
-        envelope.set_content(protobuf_content_with_pro.plaintext);
+        envelope.set_content(
+                protobuf_content.plaintext_padded.data(), protobuf_content.plaintext_padded.size());
         std::string envelope_plaintext = envelope.SerializeAsString();
 
         DecodedCommunityMessage decode_comm_msg =
@@ -729,10 +744,11 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         SessionProtos::Envelope envelope;
         envelope.set_type(SessionProtos::Envelope_Type_SESSION_MESSAGE);
         envelope.set_timestamp(timestamp_s.time_since_epoch().count());
-        envelope.set_content(protobuf_content_with_pro.plaintext);
+        envelope.set_content(
+                protobuf_content.plaintext_padded.data(), protobuf_content.plaintext_padded.size());
         envelope.set_prosig(
-                protobuf_content_with_pro.sig_over_plaintext_with_user_pro_key.data(),
-                protobuf_content_with_pro.sig_over_plaintext_with_user_pro_key.size());
+                protobuf_content.sig_over_plaintext_padded_with_user_pro_key.data(),
+                protobuf_content.sig_over_plaintext_padded_with_user_pro_key.size());
         std::string envelope_plaintext = envelope.SerializeAsString();
 
         DecodedCommunityMessage decode_comm_msg =

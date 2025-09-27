@@ -22,6 +22,8 @@ enum {
     /// This is not used in the codebase, but is provided for convenience to centralise protocol
     /// definitions for users of the library to consume.
     SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT = 10'000,
+
+    SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING = 160,
 };
 
 typedef enum SESSION_PROTOCOL_PRO_STATUS {  // See session::ProStatus
@@ -72,6 +74,7 @@ typedef enum SESSION_PROTOCOL_DESTINATION_TYPE {  // See session::DestinationTyp
     SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1,
     SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
     SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
+    SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY,
 } SESSION_PROTOCOL_DESTINATION_TYPE;
 
 typedef struct session_protocol_destination {  // See session::Destination
