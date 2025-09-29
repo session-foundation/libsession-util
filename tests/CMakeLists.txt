@@ -60,7 +60,7 @@ target_link_libraries(testAll PRIVATE
     test_libs
     Catch2::Catch2)
 
-option(TEST_PRO_BACKEND_WITH_DEV_SERVER "Run the Pro Backend tests relying on a development server at 127.0.0.1:5000 and CURL" OFF)
+option(TEST_PRO_BACKEND_WITH_DEV_SERVER "Run the Pro Backend tests relying on a SESH_PRO_BACKEND_DEV=1 enabled server at the specified string with CURL" OFF)
 if (TEST_PRO_BACKEND_WITH_DEV_SERVER)
     find_package(CURL REQUIRED)
     target_link_libraries(testAll PRIVATE CURL::libcurl)

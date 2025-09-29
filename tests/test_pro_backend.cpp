@@ -23,6 +23,9 @@ struct scope_exit {
 
 using namespace session::pro_backend;
 
+// NOTE: This is defined in main.cpp because it accepts a value from the CLI
+extern std::string g_test_pro_backend_dev_server_url;
+
 static bool string8_equals(string8 s8, std::string_view str) {
     return s8.size == str.size() && std::memcmp(s8.data, str.data(), s8.size) == 0;
 }
@@ -76,17 +79,14 @@ size_t curl_perform_callback(void* contents, size_t size, size_t nmemb, void* us
 };
 
 std::string curl_do_basic_blocking_post_request(
-        CURL* curl, curl_slist* headers, std::string_view url, std::string_view post_body) {
-    std::string url_null_terminated = std::string(url);
-
+        CURL* curl, curl_slist* headers, const std::string& url, std::string_view post_body) {
     std::string result;
     curl_easy_reset(curl);
     curl_easy_setopt(curl, CURLOPT_POST, 1);
     curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_perform_callback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &result);
-    curl_easy_setopt(curl, CURLOPT_URL, url_null_terminated.c_str());
-    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 2);
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 
     if (post_body.size()) {
         curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_body.data());
@@ -647,7 +647,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
     }
 
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
-    SECTION("Send to local dev server") {
+    SECTION("Send to dev server") {
         const auto DEV_BACKEND_PUBKEY =
                 "fc947730f49eb01427a66e050733294d9e520e545c7a27125a780634e0860a27"_hexbytes;
 
@@ -709,7 +709,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             std::string response_json = curl_do_basic_blocking_post_request(
                     curl,
                     curl_headers,
-                    "http://127.0.0.1:5000/add_pro_payment",
+                    g_test_pro_backend_dev_server_url + "/add_pro_payment",
                     std::string_view(request_json.json.data, request_json.json.size));
 
             // Parse response
@@ -768,7 +768,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             std::string response_json = curl_do_basic_blocking_post_request(
                     curl,
                     curl_headers,
-                    "http://127.0.0.1:5000/get_pro_proof",
+                    g_test_pro_backend_dev_server_url + "/get_pro_proof",
                     std::string_view(request_json.json.data, request_json.json.size));
 
             // Parse response
@@ -827,7 +827,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             std::string response_json = curl_do_basic_blocking_post_request(
                     curl,
                     curl_headers,
-                    "http://127.0.0.1:5000/get_pro_status",
+                    g_test_pro_backend_dev_server_url + "/get_pro_status",
                     std::string_view(request_json.json.data, request_json.json.size));
 
             // Parse response
@@ -876,7 +876,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             std::string response_json = curl_do_basic_blocking_post_request(
                     curl,
                     curl_headers,
-                    "http://127.0.0.1:5000/get_pro_status",
+                    g_test_pro_backend_dev_server_url + "/get_pro_status",
                     std::string_view(request_json.json.data, request_json.json.size));
 
             // Parse response
@@ -944,7 +944,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             std::string response_json = curl_do_basic_blocking_post_request(
                     curl,
                     curl_headers,
-                    "http://127.0.0.1:5000/add_pro_payment",
+                    g_test_pro_backend_dev_server_url + "/add_pro_payment",
                     std::string_view(request_json.json.data, request_json.json.size));
 
             // Parse response
@@ -980,7 +980,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             std::string response_json = curl_do_basic_blocking_post_request(
                     curl,
                     curl_headers,
-                    "http://127.0.0.1:5000/get_pro_revocations",
+                    g_test_pro_backend_dev_server_url + "/get_pro_revocations",
                     std::string_view(request_json.json.data, request_json.json.size));
 
             // Parse response
@@ -995,6 +995,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 string8 error = response.header.errors[index];
                 fprintf(stderr, "ERROR: %s\n", error.data);
             }
+            INFO("RESPONSE: " << response_json);
 
             // Verify the response
             REQUIRE(response.header.errors_count == 0);
