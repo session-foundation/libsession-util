@@ -403,7 +403,7 @@ std::vector<uint8_t> encode_for_1o1(
 ///
 /// Inputs:
 /// - plaintext -- The protobuf serialized payload containing the Content to be encrypted. Must
-///   not be already encrypted.
+///   not be already encrypted and must not be padded.
 /// - ed25519_privkey -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
@@ -437,7 +437,7 @@ std::vector<uint8_t> encode_for_community_inbox(
 ///
 /// Inputs:
 /// - plaintext -- The protobuf serialized payload containing the Content to be encrypted. Must
-///   not be already encrypted.
+///   not be already encrypted and must not be padded.
 /// - pro_rotating_ed25519_privkey -- The sender's Session Pro rotating libsodium-style secret key
 ///   (64 bytes). Can also be passed as a 32-byte seed. Used to sign the payload.
 ///
@@ -461,7 +461,7 @@ std::vector<uint8_t> encode_for_community(
 ///
 /// Inputs:
 /// - plaintext -- The protobuf serialized payload containing the Content to be encrypted. Must
-///   not be already encrypted.
+///   not be already encrypted and must not be padded.
 /// - ed25519_privkey -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
@@ -580,8 +580,8 @@ DecodedEnvelope decode_envelope(
 /// associated pro metadata if there was any in the message.
 ///
 /// Inputs:
-/// - `content_or_envelope_payload` -- the unencrypted content or envelope payload containing the
-///   community message
+/// - `content_or_envelope_payload` -- the padded unencrypted content or envelope payload containing
+///   the community message
 /// - `unix_ts` -- pass in the current system time which is used to determine, whether or
 ///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
 ///   proof in the message.
