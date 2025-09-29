@@ -437,7 +437,8 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             //   https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L398
             if (dest_pro_rotating_ed25519_privkey.size()) {
                 // Key should be verified by the time we hit this branch
-                assert(dest_pro_rotating_ed25519_privkey.size() == crypto_sign_ed25519_SECRETKEYBYTES);
+                assert(dest_pro_rotating_ed25519_privkey.size() ==
+                       crypto_sign_ed25519_SECRETKEYBYTES);
 
                 // TODO: Sub-optimal, but we parse the content again to make sure it's valid. Sign
                 // the blob then, fill in the signature in-place as part of the transitioning of
@@ -460,11 +461,11 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 tmp_content_buffer = pad_message(content);
                 array_uc64 pro_sig;
                 bool was_signed = crypto_sign_ed25519_detached(
-                        pro_sig.data(),
-                        nullptr,
-                        tmp_content_buffer.data(),
-                        tmp_content_buffer.size(),
-                        dest_pro_rotating_ed25519_privkey.data()) == 0;
+                                          pro_sig.data(),
+                                          nullptr,
+                                          tmp_content_buffer.data(),
+                                          tmp_content_buffer.size(),
+                                          dest_pro_rotating_ed25519_privkey.data()) == 0;
                 assert(was_signed);
 
                 // Now assign the community specific pro signature field, reserialize it and we have
@@ -839,7 +840,8 @@ DecodedCommunityMessage decode_for_community(
 
     // Parse the content blob
     SessionProtos::Content content = {};
-    if (!content.ParseFromArray(result.content_plaintext.data(), result.content_plaintext_unpadded_size))
+    if (!content.ParseFromArray(
+                result.content_plaintext.data(), result.content_plaintext_unpadded_size))
         throw std::runtime_error{
                 "Decoding community message failed, could not interpret blob as content or "
                 "envelope"};

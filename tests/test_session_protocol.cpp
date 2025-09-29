@@ -86,7 +86,6 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             result.plaintext_padded.size(),
             user_rotating_privkey.data());
 
-
     // Setup the C versions for convenience
     std::memcpy(
             result.sig_over_plaintext_with_user_pro_key_c.data,
@@ -391,10 +390,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_result.pro_status ==
                 SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
         bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro_proof);
-        REQUIRE(std::memcmp(
-                        hash.data,
-                        protobuf_content.pro_proof_hash.data(),
-                        sizeof(hash.data)) == 0);
+        REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
+                0);
         REQUIRE(decrypt_result.pro_features ==
                 SESSION_PROTOCOL_PRO_FEATURES_NIL);  // No features requested
 
@@ -464,10 +461,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_result.pro_status ==
                 SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
         bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro_proof);
-        REQUIRE(std::memcmp(
-                        hash.data,
-                        protobuf_content.pro_proof_hash.data(),
-                        sizeof(hash.data)) == 0);
+        REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
+                0);
         REQUIRE(decrypt_result.pro_features == (SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT |
                                                 SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE));
 
@@ -602,9 +597,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
             bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro_proof);
             REQUIRE(std::memcmp(
-                            hash.data,
-                            protobuf_content.pro_proof_hash.data(),
-                            sizeof(hash.data)) == 0);
+                            hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
+                    0);
             REQUIRE(decrypt_result.pro_features ==
                     SESSION_PROTOCOL_PRO_FEATURES_NIL);  // No features requested
 
