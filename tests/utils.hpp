@@ -190,3 +190,12 @@ static inline TestKeys get_deterministic_test_keys() {
     // clang-format on
     return result;
 }
+
+struct scope_exit {
+    explicit scope_exit(std::function<void()> func) : cleanup(func) {}
+    std::function<void()> cleanup;
+    ~scope_exit() {
+        if (cleanup)
+            cleanup();
+    }
+};

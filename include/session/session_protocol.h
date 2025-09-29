@@ -32,7 +32,7 @@ typedef enum SESSION_PROTOCOL_PRO_STATUS {  // See session::ProStatus
     SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
     SESSION_PROTOCOL_PRO_STATUS_VALID,
     SESSION_PROTOCOL_PRO_STATUS_EXPIRED,
-} PRO_STATUS;
+} SESSION_PROTOCOL_PRO_STATUS;
 
 typedef struct session_protocol_pro_signed_message {
     span_u8 sig;
@@ -113,7 +113,13 @@ typedef struct session_protocol_decode_envelope_keys {
     size_t ed25519_privkeys_len;
 } session_protocol_decode_envelope_keys;
 
-typedef struct session_protocol_decode_envelope {
+struct session_protocol_decoded_pro {
+    SESSION_PROTOCOL_PRO_STATUS status;
+    session_protocol_pro_proof proof;
+    SESSION_PROTOCOL_PRO_FEATURES features;
+};
+
+typedef struct session_protocol_decoded_envelope {
     // Indicates if the decryption was successful. If the decryption step failed and threw an
     // exception, this is false.
     bool success;
@@ -121,9 +127,7 @@ typedef struct session_protocol_decode_envelope {
     span_u8 content_plaintext;
     bytes32 sender_ed25519_pubkey;
     bytes32 sender_x25519_pubkey;
-    PRO_STATUS pro_status;
-    session_protocol_pro_proof pro_proof;
-    SESSION_PROTOCOL_PRO_FEATURES pro_features;
+    session_protocol_decoded_pro pro;
     size_t error_len_incl_null_terminator;
 } session_protocol_decoded_envelope;
 
@@ -134,6 +138,18 @@ typedef struct session_protocol_encoded_for_destination {
     span_u8 ciphertext;
     size_t error_len_incl_null_terminator;
 } session_protocol_encoded_for_destination;
+
+struct session_protocol_decoded_community_message {
+    bool success;
+    bool has_envelope;
+    session_protocol_envelope envelope;
+    span_u8 content_plaintext;
+    size_t content_plaintext_unpadded_size;
+    bool has_pro;
+    bytes64 pro_sig;
+    session_protocol_decoded_pro pro;
+    size_t error_len_incl_null_terminator;
+};
 
 /// API: session_protocol/session_protocol_pro_proof_hash
 ///
@@ -192,12 +208,12 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_message(
 
 /// API: session_protocol/session_protocol_pro_proof_is_active
 ///
-/// Check if the Pro proof is currently entitled to Pro given the `unix_ts` with respect to the
+/// Check if the Pro proof is currently entitled to Pro given the `unix_ts_ms` with respect to the
 /// proof's `expiry_unix_ts`
 ///
 /// Inputs:
 /// - `proof` -- Proof to verify
-/// - `unix_ts_s` -- The unix timestamp in seconds to check the proof expiry time against
+/// - `unix_ts_ms` -- The unix timestamp to check the proof expiry time against
 ///
 /// Outputs:
 /// - `bool` -- True if expired, false otherwise
@@ -207,7 +223,7 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
 /// API: session_protocol/session_protocol_pro_proof_status
 ///
 /// Evaluate the status of the pro proof by checking it is signed by the `verify_pubkey`, it has
-/// not expired via `unix_ts_s` and optionally verify that the `signed_msg` was signed by the
+/// not expired via `unix_ts_ms` and optionally verify that the `signed_msg` was signed by the
 /// `rotating_pubkey` embedded in the proof.
 ///
 /// Internally this function calls `pro_proof_verify_signature`, `pro_proof_verify_message` and
@@ -221,7 +237,7 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
 ///   they are the original signatory of the proof.
 /// - `verify_pubkey_len` -- Length of the `verify_pubkey` should be 32 bytes
 ///   they are the original signatory of the proof.
-/// - `unix_ts` -- Unix timestamp in seconds to compared against the embedded `expiry_unix_ts`
+/// - `unix_ts_ms` -- Unix timestamp to compared against the embedded `expiry_unix_ts`
 ///   to determine if the proof has expired or not
 /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
 ///   the embedded `rotating_pubkey` in the proof signed the given message.
@@ -230,11 +246,11 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
 /// - `status` - The derived status given the components of the message. If `signed_msg` is
 ///   not set then this function can never return `PRO_STATUS_INVALID_USER_SIG` from the set of
 ///   possible enum values. Otherwise this funtion can return all possible values.
-LIBSESSION_EXPORT PRO_STATUS session_protocol_pro_proof_status(
+LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
         session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
-        uint64_t unix_ts_s,
+        uint64_t unix_ts_ms,
         OPTIONAL const session_protocol_pro_signed_message* signed_msg) NON_NULL_ARG(1, 2);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
@@ -295,13 +311,13 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 
 /// API: session_protocol_encode_for_1o1
 ///
-/// Encrypt a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
+/// Encode a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
 /// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
 /// transmission to a single recipient.
 ///
 /// See: session_protocol/encode_for_1o1 for more information
 ///
-/// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
+/// The encoded result must be freed with session_protocol_encrypt_for_destination_free when
 /// the caller is done with the result.
 ///
 /// Inputs:
@@ -327,7 +343,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 ///   character reserved for the null-terminator.
 ///
 /// Outputs:
-/// - `success` -- True if encryption was successful, if the underlying implementation threw
+/// - `success` -- True if encoding was successful, if the underlying implementation threw
 ///   an exception then this is caught internally and success is set to false. All remaining fields
 ///   are to be ignored in the result on failure.
 /// - `ciphertext` -- Encryption result for the plaintext. The returned payload is suitable for
@@ -336,8 +352,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 ///   the user passes in a non-NULL error buffer this is the amount of characters written to the
 ///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
 ///   required to write the error. Both counts include the null-terminator. The user must allocate
-///   at minimum the requested length, including the null-terminator in order for the error message
-///   to be preserved in full.
+///   at minimum the requested length for the error message to be preserved in full.
 LIBSESSION_EXPORT
 session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
         const void* plaintext,
@@ -353,13 +368,13 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
 
 /// API: session_protocol_encode_for_community_inbox
 ///
-/// Encrypt a plaintext message for a community inbox in the Session Protocol. This function wraps
+/// Encode a plaintext message for a community inbox in the Session Protocol. This function wraps
 /// the plaintext in the necessary structures and encrypts it for transmission to a community inbox
 /// server.
 ///
 /// See: session_protocol/encode_for_community_inbox for more information
 ///
-/// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
+/// The encoded result must be freed with session_protocol_encrypt_for_destination_free when
 /// the caller is done with the result.
 ///
 /// Inputs:
@@ -377,7 +392,6 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
 ///   If provided, the corresponding proof must be set in the `Content`. The signature must not be
 ///   set in `Content`.
 /// - `pro_rotating_ed25519_privkey_len` -- The length of the Session Pro Ed25519 key
-//    TODO: Pro sig is not incorporated into community/inbox messages yet.
 /// - `error` -- Pointer to the character buffer to be populated with the error message if the
 ///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
 ///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
@@ -389,7 +403,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
 ///   last character reserved for the null-terminator.
 ///
 /// Outputs:
-/// - `success` -- True if encryption was successful, if the underlying implementation threw
+/// - `success` -- True if encoding was successful, if the underlying implementation threw
 ///   an exception then this is caught internally and success is set to false. All remaining fields
 ///   are to be ignored in the result on failure.
 /// - `ciphertext` -- Encryption result for the plaintext. The returned payload is suitable for
@@ -398,8 +412,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
 ///   the user passes in a non-NULL error buffer this is the amount of characters written to the
 ///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
 ///   required to write the error. Both counts include the null-terminator. The user must allocate
-///   at minimum the requested length, including the null-terminator in order for the error message
-///   to be preserved in full.
+///   at minimum the requested length in order for the error message to be preserved in full.
 
 LIBSESSION_EXPORT
 session_protocol_encoded_for_destination session_protocol_encode_for_community_inbox(
@@ -415,16 +428,67 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         OPTIONAL char* error,
         size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
 
+/// API: session_protocol_encode_for_community
+///
+/// Encode a plaintext `Content` message for a community in the Session Protocol. This function
+/// encodes Session Pro metadata including generating and embedding the Session Pro signature, when
+/// given a Session Pro rotating Ed25519 key into the final payload suitable for transmission on the
+/// wire.
+///
+/// See: session_protocol/encode_for_community for more information
+///
+/// The encoded result must be freed with session_protocol_encrypt_for_destination_free when
+/// the caller is done with the result.
+///
+/// Inputs:
+/// - `plaintext `-- The protobuf serialized payload containing the Content to be encrypted. Must
+///   not be already encrypted.
+/// - `plaintext_len` -- The length of the plaintext buffer in bytes.
+/// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
+///   32-byte seed) to sign the encoded content if you wish to entitle the message to Session Pro.
+///   If provided, the corresponding proof must be set in the `Content`. The signature must not be
+///   set in `Content`.
+/// - `pro_rotating_ed25519_privkey_len` -- The length of the Session Pro Ed25519 key
+/// - `error` -- Pointer to the character buffer to be populated with the error message if the
+///   returned success was false, untouched otherwise. If this is set to NULL, then on failure,
+///   the returned error_len_incl_null_terminator is the number of bytes required by the user to
+///   receive the error. The message may be truncated if the buffer is too small, but it's always
+///   guaranteed that error is null-terminated on failure when a buffer is passed in even if the
+///   error must be truncated to fit in the buffer.
+/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
+///   error is NULL. This function will fill the buffer up to error_len - 1 characters with the
+///   last character reserved for the null-terminator.
+///
+/// Outputs:
+/// - `success` -- True if encoding was successful, if the underlying implementation threw
+///   an exception then this is caught internally and success is set to false. All remaining fields
+///   are to be ignored in the result on failure.
+/// - `ciphertext` -- Encryption result for the plaintext. The returned payload is suitable for
+///   sending on the wire (i.e: it has been protobuf encoded/wrapped if necessary).
+/// - `error_len_incl_null_terminator` -- The length of the error message if success was false. If
+///   the user passes in a non-NULL error buffer this is the amount of characters written to the
+///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested length in order for the error message to be preserved in full.
+LIBSESSION_EXPORT
+session_protocol_encoded_for_destination session_protocol_encode_for_community(
+        const void* plaintext,
+        size_t plaintext_len,
+        OPTIONAL const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
+        OPTIONAL char* err,
+        size_t error_len) NON_NULL_ARG(1);
+
 /// API: session_protocol_encode_for_group
 ///
-/// Encrypt a plaintext message for a group in the Session Protocol. This function wraps the
+/// Encode a plaintext message for a group in the Session Protocol. This function wraps the
 /// plaintext in the necessary structures and encrypts it for transmission to a group, using the
 /// group's encryption key. Only v2 groups, (0x03) prefixed keys are supported. Passing a legacy
 /// group (0x05) prefixed key will cause the function to return a failure with an error message.
 ///
 /// See: session_protocol/encode_for_group for more information
 ///
-/// The encryption result must be freed with session_protocol_encrypt_for_destination_free when
+/// The encoded result must be freed with session_protocol_encrypt_for_destination_free when
 /// the caller is done with the result.
 ///
 /// Inputs:
@@ -454,7 +518,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
 ///   last character reserved for the null-terminator.
 ///
 /// Outputs:
-/// - `success` -- True if encryption was successful, if the underlying implementation threw
+/// - `success` -- True if encoding was successful, if the underlying implementation threw
 ///   an exception then this is caught internally and success is set to false. All remaining fields
 ///   are to be ignored in the result on failure.
 /// - `ciphertext` -- Encryption result for the plaintext. The returned payload is suitable for
@@ -463,8 +527,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
 ///   the user passes in a non-NULL error buffer this is the amount of characters written to the
 ///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
 ///   required to write the error. Both counts include the null-terminator. The user must allocate
-///   at minimum the requested length, including the null-terminator in order for the error message
-///   to be preserved in full.
+///   at minimum the requested length in order for the error message to be preserved in full.
 LIBSESSION_EXPORT
 session_protocol_encoded_for_destination session_protocol_encode_for_group(
         const void* plaintext,
@@ -487,7 +550,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
 ///
 /// See: session_protocol/encrypt_for_destination for more information
 ///
-/// The encryption result must be freed with `session_protocol_encrypt_for_destination_free` when
+/// The encoded result must be freed with `session_protocol_encrypt_for_destination_free` when
 /// the caller is done with the result.
 ///
 /// Inputs:
@@ -508,7 +571,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
 ///   last character reserved for the null-terminator.
 ///
 /// Outputs:
-/// - `success` -- True if encryption was successful, if the underlying implementation threw
+/// - `success` -- True if encoding was successful, if the underlying implementation threw
 ///   an exception then this is caught internally and success is set to false. All remaining fields
 ///   are to be ignored in the result on failure.
 /// - `ciphertext` -- Encryption result for the plaintext. The retured payload is suitable for
@@ -517,17 +580,16 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
 ///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
 ///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
 ///   required to write the error. Both counts include the null-terminator. The user must allocate
-///   at minimum the requested length, including the null-terminator in order for the error message
-///   to be preserved in full.
+///   at minimum the requested length for the error message to be preserved in full.
 LIBSESSION_EXPORT
 session_protocol_encoded_for_destination session_protocol_encode_for_destination(
         const void* plaintext,
         size_t plaintext_len,
-        const void* ed25519_privkey,
+        OPTIONAL const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         const session_protocol_destination* dest,
         OPTIONAL char* error,
-        size_t error_len) NON_NULL_ARG(1, 3, 5);
+        size_t error_len) NON_NULL_ARG(1, 5);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination_free
 ///
@@ -549,21 +611,11 @@ LIBSESSION_EXPORT void session_protocol_encode_for_destination_free(
 ///
 /// See: session_protocol/decode_envelope for more information
 ///
-/// The encryption result must be freed with `session_protocol_decode_envelope_free` when the
+/// The decoded result must be freed with `session_protocol_decode_for_community_free` when the
 /// caller is done with the result.
 ///
 /// Inputs:
-/// - `keys` -- the keys to decrypt either the envelope or the envelope contents. Groups v2
-///   envelopes where the envelope is encrypted must set the group key. Envelopes with an encrypted
-///   content must set the the libsodium-style secret key of the receiver, 64 bytes. Can also be
-///   passed as a 32-byte seed.
-///
-///   If a group decryption key is specified, the recipient key is ignored and vice versa. Only one
-///   of the keys should be set depending on the type of envelope.
-///
-/// - `envelope_payload` -- the envelope payload either encrypted (groups v2 style) or unencrypted
-///   (1o1 or legacy groups).
-/// - `unix_ts` -- pass in the current system time in seconds which is used to determine, whether or
+/// - `unix_ts_ms` -- pass in the current system time which is used to determine, whether or
 ///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
 ///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
@@ -580,7 +632,7 @@ LIBSESSION_EXPORT void session_protocol_encode_for_destination_free(
 ///   last character reserved for the null-terminator.
 ///
 /// Outputs:
-/// - `success` -- True if encryption was successful, if the underlying implementation threw
+/// - `success` -- True if encoding was successful, if the underlying implementation threw
 ///   an exception then this is caught internally and success is set to false. All remaining fields
 ///   in the result are to be ignored on failure.
 /// - `envelope` -- Envelope structure that was decrypted/parsed from the `envelope_plaintext`
@@ -610,31 +662,85 @@ LIBSESSION_EXPORT void session_protocol_encode_for_destination_free(
 ///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
 ///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
 ///   required to write the error. Both counts include the null-terminator. The user must allocate
-///   at minimum the requested length, including the null-terminator in order for the error message
-///   to be preserved in full.
+///   at minimum the requested length for the error message to be preserved in full.
 LIBSESSION_EXPORT
 session_protocol_decoded_envelope session_protocol_decode_envelope(
         const session_protocol_decode_envelope_keys* keys,
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
-        uint64_t unix_ts,
+        uint64_t unix_ts_ms,
         OPTIONAL const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         OPTIONAL char* error,
         size_t error_len) NON_NULL_ARG(1, 2);
 
-/// API: session_protocol/session_protocol_decrypt_envelope_free
+/// API: session_protocol/session_protocol_decode_envelope_free
 ///
-/// Free the decryption result produced by `session_protocol_decrypt_envelope`. It is safe to pass a
-/// `NULL` or any result returned by the decrypt function irrespective of if the function succeeded
+/// Free the decoded result produced by `session_protocol_decode_envelope`. It is safe to pass a
+/// `NULL` or any result returned by the decode function irrespective of if the function succeeded
 /// or failed.
 ///
 /// Inputs:
-/// - `envelope` -- Decryption result to free. This object is zeroed out on free and should no
-/// longer
-///   be used after it is freed.
+/// - `envelope` -- decoded result to free. This object is zeroed out on free and should no
+///   longer be used after it is freed.
 LIBSESSION_EXPORT void session_protocol_decode_envelope_free(
         session_protocol_decoded_envelope* envelope);
+
+/// API: session_protocol/session_protocol_decode_for_community
+///
+/// Given an unencrypted content or envelope payload extract the plaintext to the content and any
+/// associated pro metadata if there was any in the message.
+///
+/// Inputs:
+/// - `content_or_envelope_payload` -- the unencrypted content or envelope payload containing the
+///   community message
+/// - `unix_ts_ms` -- pass in the current system time which is used to determine, whether or
+///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
+///   proof in the message.
+/// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
+///   the proof, validating whether or not the attached proof was indeed issued by an authorised
+///   issuer
+///
+/// Outputs:
+/// - `envelope` -- Envelope structure that was parsed from the `content_or_envelope_payload` if the
+///   payload was an envelope. Nil otherwise.
+/// - `content_plaintext` -- The protobuf encoded stream that can be parsed into a protobuf
+///   `Content` structure that was extracted from the `content_or_envelope_payload`
+/// - `has_pro` -- Flag that indicates if the `pro` struct was populated or not.
+/// - `pro_sig` -- Optional pro signature if there was one located in the
+///   `content_or_envelope_payload`. This is the same signature as the one located in the `envelope`
+///   object if the original payload was an envelope.
+/// - `pro` -- Optional object that is set if there was pro metadata associatd with the envelope, if
+///   any. The `status` field in the decrypted pro object should be used to determine whether or not
+///   the caller can respect the contents of the `proof` and `features`.
+/// - `error_len_incl_null_terminator` -- The length of the error message if success was false. If
+///   the user passes in a non-NULL error buffer this is the amount of characters written to the
+///   error buffer. If the user passes in a NULL error buffer, this is the amount of characters
+///   required to write the error. Both counts include the null-terminator. The user must allocate
+///   at minimum the requested lengthin order for the error message to be preserved in full.
+///
+///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
+///   access to pro features if it's using any.
+session_protocol_decoded_community_message session_protocol_decode_for_community(
+        const void* content_or_envelope_payload,
+        size_t content_or_envelope_payload_len,
+        uint64_t unix_ts_ms,
+        OPTIONAL const void* pro_backend_pubkey,
+        size_t pro_backend_pubkey_len,
+        OPTIONAL char* error,
+        size_t error_len) NON_NULL_ARG(1);
+
+/// API: session_protocol/session_protocol_decode_for_community_free
+///
+/// Free the decoded result produced by `session_protocol_decode_for_community`. It is safe to pass
+/// a `NULL` or any result returned by the decode function irrespective of if the function
+/// succeeded or failed.
+///
+/// Inputs:
+/// - `community_msg` -- decoded result to free. This object is zeroed out on free and should no
+///   longer be used after it is freed.
+LIBSESSION_EXPORT void session_protocol_decode_for_community_free(
+        session_protocol_decoded_community_message* community_msg);
 
 #ifdef __cplusplus
 }

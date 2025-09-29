@@ -360,7 +360,7 @@ std::vector<uint8_t> pad_message(std::span<const uint8_t> payload);
 
 /// API: session_protocol/encode_for_1o1
 ///
-/// Encrypt a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
+/// Encode a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
 /// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
 /// transmission to a single recipient.
 ///
@@ -392,7 +392,7 @@ std::vector<uint8_t> encode_for_1o1(
 
 /// API: session_protocol/encode_for_community_inbox
 ///
-/// Encrypt a plaintext message for a community inbox in the Session Protocol. This function wraps
+/// Encode a plaintext message for a community inbox in the Session Protocol. This function wraps
 /// the plaintext in the necessary structures and encrypts it for transmission to a community inbox
 /// server.
 ///
@@ -426,7 +426,7 @@ std::vector<uint8_t> encode_for_community_inbox(
 
 /// API: session_protocol/encode_for_community
 ///
-/// Encrypt a plaintext `Content` message for a community for the Session Protocol. This function
+/// Encode a plaintext `Content` message for a community in the Session Protocol. This function
 /// encodes Session Pro metadata including generating and embedding the Session Pro signature, when
 /// given a Session Pro rotating Ed25519 key into the final payload suitable for transmission on the
 /// wire.
@@ -449,7 +449,7 @@ std::vector<uint8_t> encode_for_community(
 
 /// API: session_protocol/encode_for_group
 ///
-/// Encrypt a plaintext message for a group in the Session Protocol. This function wraps the
+/// Encode a plaintext message for a group in the Session Protocol. This function wraps the
 /// plaintext in the necessary structures and encrypts it for transmission to a group, using the
 /// group's encryption key. Only v2 groups, (0x03) prefixed keys are supported. Passing a legacy
 /// group (0x05) prefixed key will cause the function to throw.
@@ -545,7 +545,7 @@ std::vector<uint8_t> encode_for_destination(
 ///
 /// - `envelope_payload` -- the envelope payload either encrypted (groups v2 style) or unencrypted
 ///   (1o1 or legacy groups).
-/// - `unix_ts` -- pass in the current system time in seconds which is used to determine, whether or
+/// - `unix_ts` -- pass in the current system time which is used to determine, whether or
 ///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
 ///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
@@ -571,7 +571,7 @@ std::vector<uint8_t> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
-        std::chrono::sys_seconds unix_ts,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey);
 
 /// API: session_protocol/decode_for_community
@@ -582,7 +582,7 @@ DecodedEnvelope decode_envelope(
 /// Inputs:
 /// - `content_or_envelope_payload` -- the unencrypted content or envelope payload containing the
 ///   community message
-/// - `unix_ts` -- pass in the current system time in seconds which is used to determine, whether or
+/// - `unix_ts` -- pass in the current system time which is used to determine, whether or
 ///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
 ///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
@@ -605,6 +605,6 @@ DecodedEnvelope decode_envelope(
 ///   access to pro features if it's using any.
 DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
-        std::chrono::sys_seconds unix_ts,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey);
 }  // namespace session

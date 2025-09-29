@@ -12,15 +12,6 @@
 
 #include "utils.hpp"
 
-struct scope_exit {
-    explicit scope_exit(std::function<void()> func) : cleanup(func) {}
-    std::function<void()> cleanup;
-    ~scope_exit() {
-        if (cleanup)
-            cleanup();
-    }
-};
-
 using namespace session::pro_backend;
 
 // NOTE: This is defined in main.cpp because it accepts a value from the CLI

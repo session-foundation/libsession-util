@@ -20,7 +20,7 @@ session::array_uc32 proof_hash_internal(
         std::uint8_t version,
         std::span<const std::uint8_t> gen_index_hash,
         std::span<const std::uint8_t> rotating_pubkey,
-        std::uint64_t expiry_unix_ts) {
+        std::uint64_t expiry_unix_ts_ms) {
     // This must match the hashing routine at
     // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
     session::array_uc32 result = {};
@@ -30,7 +30,7 @@ session::array_uc32 proof_hash_internal(
     crypto_generichash_blake2b_update(&state, gen_index_hash.data(), gen_index_hash.size());
     crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
     crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<uint8_t*>(&expiry_unix_ts), sizeof(expiry_unix_ts));
+            &state, reinterpret_cast<uint8_t*>(&expiry_unix_ts_ms), sizeof(expiry_unix_ts_ms));
     crypto_generichash_blake2b_final(&state, result.data(), result.size());
     return result;
 }
@@ -71,6 +71,53 @@ bool proof_verify_message_internal(
 
 bool proof_is_active_internal(uint64_t expiry_unix_ts_ms, uint64_t unix_ts_ms) {
     bool result = unix_ts_ms <= expiry_unix_ts_ms;
+    return result;
+}
+
+struct array_uc32_from_ptr_result {
+    bool success;
+    session::array_uc32 data;
+};
+
+static array_uc32_from_ptr_result array_uc32_from_ptr(const void* ptr, size_t len) {
+    array_uc32_from_ptr_result result = {};
+    if (ptr) {
+        if (len != result.data.max_size())
+            return result;
+        std::memcpy(result.data.data(), ptr, len);
+    }
+    result.success = true;
+    return result;
+}
+
+static session_protocol_envelope envelope_from_cpp(const session::Envelope& cpp) {
+    session_protocol_envelope result = {};
+    result.flags = cpp.flags;
+    result.timestamp_ms = static_cast<uint64_t>(cpp.timestamp.count());
+    std::memcpy(result.source.data, cpp.source.data(), sizeof(result.source.data));
+    result.server_timestamp = cpp.server_timestamp;
+    result.source_device = cpp.source_device;
+    std::memcpy(result.pro_sig.data, cpp.pro_sig.data(), sizeof(result.pro_sig.data));
+    return result;
+}
+
+static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedPro& cpp) {
+    session_protocol_decoded_pro result = {};
+    result.status = static_cast<SESSION_PROTOCOL_PRO_STATUS>(cpp.status);
+    result.proof.version = cpp.proof.version;
+    std::memcpy(
+            result.proof.gen_index_hash.data,
+            cpp.proof.gen_index_hash.data(),
+            cpp.proof.gen_index_hash.max_size());
+    std::memcpy(
+            result.proof.rotating_pubkey.data,
+            cpp.proof.rotating_pubkey.data(),
+            cpp.proof.rotating_pubkey.max_size());
+    result.proof.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             cpp.proof.expiry_unix_ts.time_since_epoch())
+                                             .count();
+    std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
+    result.features = cpp.features;
     return result;
 }
 }  // namespace
@@ -309,6 +356,15 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
     assert(dest_group_ed25519_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_group_ed25519_privkey.size() == 32 || dest_group_ed25519_privkey.size() == 64);
 
+    bool is_group = dest_type == DestinationType::Group;
+    bool is_1o1 = dest_type == DestinationType::SyncOr1o1;
+    bool is_community_inbox = dest_type == DestinationType::CommunityInbox;
+    bool is_community = dest_type == DestinationType::Community;
+    if (!is_community) {
+        assert(ed25519_privkey.size() == crypto_sign_ed25519_SECRETKEYBYTES ||
+               ed25519_privkey.size() == crypto_sign_ed25519_SEEDBYTES);
+    }
+
     // Ensure the Session Pro rotating key is a 64 byte key if given
     cleared_uc64 pro_ed_sk_from_seed;
     if (dest_pro_rotating_ed25519_privkey.size()) {
@@ -329,10 +385,6 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
         }
     }
 
-    bool is_group = dest_type == DestinationType::Group;
-    bool is_1o1 = dest_type == DestinationType::SyncOr1o1;
-    bool is_community_inbox = dest_type == DestinationType::CommunityInbox;
-    bool is_community = dest_type == DestinationType::Community;
     std::span<const uint8_t> content = plaintext;
 
     EncryptedForDestinationInternal result = {};
@@ -537,7 +589,7 @@ std::vector<uint8_t> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
-        std::chrono::sys_seconds unix_ts,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey) {
     DecodedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
@@ -767,7 +819,7 @@ DecodedEnvelope decode_envelope(
 
 DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
-        std::chrono::sys_seconds unix_ts,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey) {
     // TODO: Community message parsing requires a custom code path for now as we are planning to
     // migrate from sending plain `Content` to `Content` with a pro signature embedded in `Content`
@@ -1002,13 +1054,13 @@ LIBSESSION_C_API bool session_protocol_pro_proof_is_active(
     return result;
 }
 
-LIBSESSION_C_API PRO_STATUS session_protocol_pro_proof_status(
+LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
         session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
-        uint64_t unix_ts_s,
+        uint64_t unix_ts_ms,
         const session_protocol_pro_signed_message* signed_msg) {
-    PRO_STATUS result = SESSION_PROTOCOL_PRO_STATUS_VALID;
+    SESSION_PROTOCOL_PRO_STATUS result = SESSION_PROTOCOL_PRO_STATUS_VALID;
     if (!session_protocol_pro_proof_verify_signature(proof, verify_pubkey, verify_pubkey_len))
         result = SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG;
 
@@ -1025,7 +1077,7 @@ LIBSESSION_C_API PRO_STATUS session_protocol_pro_proof_status(
 
     // Check if the proof has expired
     if (result == SESSION_PROTOCOL_PRO_STATUS_VALID &&
-        !session_protocol_pro_proof_is_active(proof, unix_ts_s))
+        !session_protocol_pro_proof_is_active(proof, unix_ts_ms))
         result = SESSION_PROTOCOL_PRO_STATUS_EXPIRED;
     return result;
 }
@@ -1119,6 +1171,25 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
             &dest,
             error,
             error_len);
+    return result;
+}
+
+LIBSESSION_C_API
+session_protocol_encoded_for_destination session_protocol_encode_for_community(
+        const void* plaintext,
+        size_t plaintext_len,
+        const void* pro_rotating_ed25519_privkey,
+        size_t pro_rotating_ed25519_privkey_len,
+        char* error,
+        size_t error_len) {
+
+    session_protocol_destination dest = {};
+    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
+
+    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
+            plaintext, plaintext_len, nullptr, 0, &dest, error, error_len);
     return result;
 }
 
@@ -1218,7 +1289,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
         const session_protocol_decode_envelope_keys* keys,
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
-        uint64_t unix_ts,
+        uint64_t unix_ts_ms,
         const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         char* error,
@@ -1226,19 +1297,17 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     session_protocol_decoded_envelope result = {};
 
     // Setup the pro backend pubkey
-    array_uc32 pro_backend_pubkey_cpp = {};
-    if (pro_backend_pubkey) {
-        if (pro_backend_pubkey_len != sizeof(pro_backend_pubkey_cpp)) {
-            result.error_len_incl_null_terminator = snprintf_clamped(
-                                                            error,
-                                                            error_len,
-                                                            "Invalid pro_backend_pubkey: Key was "
-                                                            "set but was not 32 bytes, was: %zu",
-                                                            pro_backend_pubkey_len) +
-                                                    1;
-            return result;
-        }
-        std::memcpy(pro_backend_pubkey_cpp.data(), pro_backend_pubkey, pro_backend_pubkey_len);
+    array_uc32_from_ptr_result pro_backend_pubkey_cpp =
+            array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    if (!pro_backend_pubkey_cpp.success) {
+        result.error_len_incl_null_terminator = snprintf_clamped(
+                                                        error,
+                                                        error_len,
+                                                        "Invalid pro_backend_pubkey: Key was "
+                                                        "set but was not 32 bytes, was: %zu",
+                                                        pro_backend_pubkey_len) +
+                                                1;
+        return result;
     }
 
     // Setup decryption keys and decrypt
@@ -1257,8 +1326,9 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
             result_cpp = decode_envelope(
                     keys_cpp,
                     {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
-                    std::chrono::sys_seconds(std::chrono::seconds(unix_ts)),
-                    pro_backend_pubkey_cpp);
+                    std::chrono::sys_time<std::chrono::milliseconds>(
+                            std::chrono::milliseconds(unix_ts_ms)),
+                    pro_backend_pubkey_cpp.data);
             result.success = true;
             break;
         } catch (const std::exception& e) {
@@ -1294,28 +1364,9 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
                                                 1;
     }
 
-    result.envelope.flags = result_cpp.envelope.flags;
-    result.envelope.timestamp_ms = static_cast<uint64_t>(result_cpp.envelope.timestamp.count());
-    result.envelope.source_device = result_cpp.envelope.source_device;
-    result.envelope.server_timestamp = result_cpp.envelope.server_timestamp;
-
+    result.envelope = envelope_from_cpp(result_cpp.envelope);
     if (result_cpp.pro) {
-        const DecodedPro& pro = *result_cpp.pro;
-        result.pro_status = static_cast<PRO_STATUS>(pro.status);
-        result.pro_proof.version = pro.proof.version;
-        result.pro_proof.expiry_unix_ts_ms =
-                static_cast<uint64_t>(pro.proof.expiry_unix_ts.time_since_epoch().count());
-        result.pro_features = pro.features;
-
-        std::memcpy(
-                result.pro_proof.gen_index_hash.data,
-                pro.proof.gen_index_hash.data(),
-                sizeof(result.pro_proof.gen_index_hash));
-        std::memcpy(
-                result.pro_proof.rotating_pubkey.data,
-                pro.proof.rotating_pubkey.data(),
-                sizeof(result.pro_proof.rotating_pubkey));
-        std::memcpy(result.pro_proof.sig.data, pro.proof.sig.data(), sizeof(pro.proof.sig));
+        result.pro = decoded_pro_from_cpp(*result_cpp.pro);
     }
 
     // Since we support multiple keys, if some of the keys failed but one of them succeeded, we will
@@ -1323,15 +1374,6 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     // succeeded.
     if (result.success)
         result.error_len_incl_null_terminator = 0;
-
-    std::memcpy(
-            result.envelope.source.data,
-            result_cpp.envelope.source.data(),
-            sizeof(result.envelope.source.data));
-    std::memcpy(
-            result.envelope.pro_sig.data,
-            result_cpp.envelope.pro_sig.data(),
-            sizeof(result.envelope.pro_sig.data));
 
     std::memcpy(
             result.sender_ed25519_pubkey.data,
@@ -1350,5 +1392,72 @@ void session_protocol_decode_envelope_free(session_protocol_decoded_envelope* en
     if (envelope) {
         free(envelope->content_plaintext.data);
         *envelope = {};
+    }
+}
+
+LIBSESSION_C_API
+session_protocol_decoded_community_message session_protocol_decode_for_community(
+        const void* content_or_envelope_payload,
+        size_t content_or_envelope_payload_len,
+        uint64_t unix_ts_ms,
+        OPTIONAL const void* pro_backend_pubkey,
+        size_t pro_backend_pubkey_len,
+        OPTIONAL char* error,
+        size_t error_len) {
+    session_protocol_decoded_community_message result = {};
+    auto content_or_envelope_payload_span = std::span<const uint8_t>(
+            reinterpret_cast<const uint8_t*>(content_or_envelope_payload),
+            content_or_envelope_payload_len);
+    auto unix_ts =
+            std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(unix_ts_ms));
+    array_uc32_from_ptr_result pro_backend_pubkey_cpp =
+            array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    if (!pro_backend_pubkey_cpp.success) {
+        result.error_len_incl_null_terminator = snprintf_clamped(
+                                                        error,
+                                                        error_len,
+                                                        "Invalid pro_backend_pubkey: Key was "
+                                                        "set but was not 32 bytes, was: %zu",
+                                                        pro_backend_pubkey_len) +
+                                                1;
+        return result;
+    }
+
+    try {
+        DecodedCommunityMessage decoded = decode_for_community(
+                content_or_envelope_payload_span, unix_ts, pro_backend_pubkey_cpp.data);
+        result.has_envelope = decoded.envelope.has_value();
+        if (result.has_envelope)
+            result.envelope = envelope_from_cpp(*decoded.envelope);
+
+        result.content_plaintext = span_u8_copy_or_throw(
+                decoded.content_plaintext.data(), decoded.content_plaintext.size());
+        result.content_plaintext_unpadded_size = decoded.content_plaintext_unpadded_size;
+        result.has_pro = decoded.pro.has_value();
+        if (decoded.pro_sig)
+            std::memcpy(result.pro_sig.data, decoded.pro_sig->data(), decoded.pro_sig->max_size());
+        if (decoded.pro)
+            result.pro = decoded_pro_from_cpp(*decoded.pro);
+        result.success = true;
+    } catch (const std::exception& e) {
+        std::string error_cpp = e.what();
+        result.success = false;
+        result.error_len_incl_null_terminator = snprintf_clamped(
+                                                        error,
+                                                        error_len,
+                                                        "%.*s",
+                                                        static_cast<int>(error_cpp.size()),
+                                                        error_cpp.data()) +
+                                                1;
+    }
+
+    return result;
+}
+
+LIBSESSION_EXPORT void session_protocol_decode_for_community_free(
+        session_protocol_decoded_community_message* community_msg) {
+    if (community_msg) {
+        free(community_msg->content_plaintext.data);
+        *community_msg = {};
     }
 }
