@@ -364,7 +364,7 @@ std::vector<uint8_t> pad_message(std::span<const uint8_t> payload);
 /// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
 /// transmission to a single recipient.
 ///
-/// This is a high-level convenience function that internally calls encrypt_for_destination with
+/// This is a high-level convenience function that internally calls encode_for_destination with
 /// the appropriate Destination configuration for a 1o1 or sync message.
 ///
 /// This function throws if any input argument is invalid (e.g., incorrect key sizes).
@@ -376,9 +376,10 @@ std::vector<uint8_t> pad_message(std::span<const uint8_t> payload);
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
 /// - recipient_pubkey -- The recipient's Session public key (33 bytes).
-/// - pro_sig -- Optional signature over the unencrypted plaintext with the user's Session Pro
-///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
-///   be set in the Content protobuf.
+/// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
+///   secret component of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to
+///   entitle the message with Pro features by signing it. Can also be passed as a 32-byte seed.
+///   Pass in the empty span to opt-out of Pro feature entitlement.
 ///
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
@@ -388,7 +389,7 @@ std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
-        const std::optional<array_uc64>& pro_sig);
+        std::span<const uint8_t> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_community_inbox
 ///
@@ -396,7 +397,7 @@ std::vector<uint8_t> encode_for_1o1(
 /// the plaintext in the necessary structures and encrypts it for transmission to a community inbox
 /// server.
 ///
-/// This is a high-level convenience function that internally calls encrypt_for_destination with
+/// This is a high-level convenience function that internally calls encode_for_destination with
 /// the appropriate Destination configuration for a community inbox message.
 ///
 /// This function throws if any input argument is invalid (e.g., incorrect key sizes).
@@ -409,9 +410,10 @@ std::vector<uint8_t> encode_for_1o1(
 /// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
 /// - recipient_pubkey -- The recipient's Session public key (33 bytes).
 /// - community_pubkey -- The community inbox server's public key (32 bytes).
-/// - pro_sig -- Optional signature over the unencrypted plaintext with the user's Session Pro
-///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
-///   be set in the Content protobuf.
+/// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
+///   secret component of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to
+///   entitle the message with Pro features by signing it. Can also be passed as a 32-byte seed.
+///   Pass in the empty span to opt-out of Pro feature entitlement.
 ///
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
@@ -438,8 +440,10 @@ std::vector<uint8_t> encode_for_community_inbox(
 /// Inputs:
 /// - plaintext -- The protobuf serialized payload containing the Content to be encrypted. Must
 ///   not be already encrypted and must not be padded.
-/// - pro_rotating_ed25519_privkey -- The sender's Session Pro rotating libsodium-style secret key
-///   (64 bytes). Can also be passed as a 32-byte seed. Used to sign the payload.
+/// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
+///   secret component of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to
+///   entitle the message with Pro features by signing it. Can also be passed as a 32-byte seed.
+///   Pass in the empty span to opt-out of Pro feature entitlement.
 ///
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
@@ -454,7 +458,7 @@ std::vector<uint8_t> encode_for_community(
 /// group's encryption key. Only v2 groups, (0x03) prefixed keys are supported. Passing a legacy
 /// group (0x05) prefixed key will cause the function to throw.
 ///
-/// This is a high-level convenience function that internally calls encrypt_for_destination with
+/// This is a high-level convenience function that internally calls encode_for_destination with
 /// the appropriate Destination configuration for a group message.
 ///
 /// This function throws if any input argument is invalid (e.g., incorrect key sizes).
@@ -468,9 +472,10 @@ std::vector<uint8_t> encode_for_community(
 /// - group_ed25519_pubkey -- The group's public key (33 bytes) for encryption with a 0x03 prefix
 /// - group_ed25519_privkey -- The group's private key (32 bytes) for groups v2 messages, typically
 ///   the latest encryption key for the group (e.g., Keys::group_enc_key).
-/// - pro_sig -- Optional signature over the unencrypted plaintext with the user's Session Pro
-///   rotating public key, if using Session Pro features. If provided, the corresponding proof must
-///   be set in the Content protobuf.
+/// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
+///   secret component of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to
+///   entitle the message with Pro features by signing it. Can also be passed as a 32-byte seed.
+///   Pass in the empty span to opt-out of Pro feature entitlement.
 ///
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
@@ -483,7 +488,7 @@ std::vector<uint8_t> encode_for_group(
         const cleared_uc32& group_ed25519_privkey,
         std::span<const uint8_t> pro_rotating_ed25519_privkey);
 
-/// API: session_protocol/encrypt_for_destination
+/// API: session_protocol/encode_for_destination
 ///
 /// Given an unencrypted plaintext representation of the content (i.e.: protobuf encoded stream of
 /// `Content`), encrypt and/or wrap the plaintext in the necessary structures for transmission on
