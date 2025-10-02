@@ -458,6 +458,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         INFO("ERROR: " << error);
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
+        REQUIRE(decrypt_result.envelope.timestamp_ms == base_dest.sent_timestamp_ms);
         session_protocol_encode_for_destination_free(&encrypt_result);
 
         // Verify pro
