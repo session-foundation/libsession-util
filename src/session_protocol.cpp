@@ -652,16 +652,39 @@ DecodedEnvelope decode_envelope(
     // When the type is removed, we can remove this TODO. This is just a reminder as to why we skip
     // over that field but it's still in the schema and still being set on the sending side.
 
+    // Parse timestamp
+    if (envelope.has_timestamp()) {
+        result.envelope.timestamp = std::chrono::milliseconds(envelope.timestamp());
+        result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_TIMESTAMP;
+    }
+
     // Parse source (optional)
     if (envelope.has_source()) {
         // Libsession is now responsible for creating the envelope. The only data that we send in
         // the source is a Session public key (see: encode_for_destination)
+
+        // TODO: For backwards compatibility, iOS and Android does not set the source sender's
+        // public key for 1o1s but marks the field as present. So we accept either a 0 sized string
+        // or a 32 byte public key.
+        //
+        //  iOS
+        //    https://github.com/session-foundation/session-ios/blob/7dc430ed548ce844f10f9a28c69fb8ccac13d8c3/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L472
+        //    https://github.com/session-foundation/session-ios/blob/7dc430ed548ce844f10f9a28c69fb8ccac13d8c3/SessionMessagingKit/Utilities/MessageWrapper.swift#L56
+        //
+        //  Android
+        //    https://github.com/session-foundation/session-android/blob/403c5f6b0e402279f25d55c0d492bdcf006608e5/app/src/main/java/org/session/libsession/messaging/sending_receiving/MessageSender.kt#L147
+        //    https://github.com/session-foundation/session-android/blob/403c5f6b0e402279f25d55c0d492bdcf006608e5/app/src/main/java/org/session/libsession/messaging/utilities/MessageWrapper.kt#L40
+        //
+        // This can be removed after a while once we want to stop supporting old clients.
         const std::string& source = envelope.source();
-        if (source.size() != result.envelope.source.max_size())
+        if (source.size() != 0 && source.size() != (result.envelope.source.max_size() * 2) /*hex*/)
             throw std::runtime_error(fmt::format(
                     "Parse envelope failed, source had unexpected size ({} bytes)", source.size()));
-        std::memcpy(result.envelope.source.data(), source.data(), source.size());
-        result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE;
+
+        if (source.size()) {
+            oxenc::from_hex(source.begin(), source.end(), result.envelope.source.data());
+            result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE;
+        }
     }
 
     // Parse source device (optional)
