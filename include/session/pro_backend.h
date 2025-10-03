@@ -45,9 +45,17 @@ typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
     SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT,
 } SESSION_PRO_BACKEND_USER_PRO_STATUS;
 
+/// Bundle of hard-coded strings that are associated with each platform for clients to use for
+/// string substitution typically. This structure is stored in a global table
+/// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA` that is can be indexed into using the
+/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER value directly.
 typedef struct session_pro_backend_payment_provider_metadata {
-    string8 request_refund_support_url;
-    string8 subscription_page_url;
+    string8 device;
+    string8 store;
+    string8 platform;
+    string8 platformAccount;
+    string8 refund_url;
+    string8 subscription_url;
 } session_pro_backend_payment_provider_metadata;
 
 /// The centralised list of common URLs and properties for handling payment provider specific
@@ -55,16 +63,28 @@ typedef struct session_pro_backend_payment_provider_metadata {
 // clang-format off
 const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT] = {
     /*SESSION_PRO_PAYMENT_PROVIDER_NIL*/ {
-        .request_refund_support_url = string8_literal(""),
-        .subscription_page_url      = string8_literal(""),
+        .device           = string8_literal(""),
+        .store            = string8_literal(""),
+        .platform         = string8_literal(""),
+        .platformAccount  = string8_literal(""),
+        .refund_url       = string8_literal(""),
+        .subscription_url = string8_literal(""),
     },
     /*SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE*/ {
-        .request_refund_support_url = string8_literal("https://support.google.com/googleplay/workflow/9813244"),
-        .subscription_page_url      = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
+        .device           = string8_literal("Android"),
+        .store            = string8_literal("Google Play Store"),
+        .platform         = string8_literal("Google"),
+        .platformAccount  = string8_literal("Google account"),
+        .refund_url       = string8_literal("https://getsession.org/android-refund"),
+        .subscription_url = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger&sku=SESSION_PRO_MONTHLY"),
     },
     /*SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE*/ {
-        .request_refund_support_url = string8_literal("https://support.apple.com/118223"),
-        .subscription_page_url      = string8_literal("https://account.apple.com/account/manage/section/subscriptions")
+        .device           = string8_literal("iOS"),
+        .store            = string8_literal("Apple App Store"),
+        .platform         = string8_literal("Apple"),
+        .platformAccount  = string8_literal("Apple account"),
+        .refund_url       = string8_literal("https://support.apple.com/118223"),
+        .subscription_url = string8_literal("https://account.apple.com/account/manage/section/subscriptions")
     }
 };
 // clang-format on
@@ -160,6 +180,11 @@ typedef struct session_pro_backend_pro_payment_item {
     uint64_t refunded_unix_ts_ms;
     uint64_t redeemed_unix_ts_ms;
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
+
+    /// Pointer to payment provider metadata. This pointer is always defined to be pointing to valid
+    /// memory when the structure is received through the pro_backend APIs.
+    const session_pro_backend_payment_provider_metadata* payment_provider_metadata;
+
     char google_payment_token[128];
     size_t google_payment_token_count;
     char google_order_id[128];

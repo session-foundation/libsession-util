@@ -503,6 +503,8 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
             payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT) {
             item.payment_provider =
                     static_cast<SESSION_PRO_BACKEND_PAYMENT_PROVIDER>(payment_provider);
+            item.payment_provider_metadata =
+                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA + payment_provider;
         } else {
             result.errors.push_back(
                     fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
@@ -960,6 +962,7 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
                                            src.redeemed_unix_ts.time_since_epoch())
                                            .count();
         dest.payment_provider = src.payment_provider;
+        dest.payment_provider_metadata = src.payment_provider_metadata;
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
