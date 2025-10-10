@@ -298,7 +298,7 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
         bool allow_large) {
 
     std::ifstream in;
-    in.exceptions(std::ios::failbit | std::ios::badbit);
+    in.exceptions(std::ios::badbit);
     in.open(file, std::ios::binary | std::ios::ate);
     size_t size = in.tellg();
     in.seekg(0, std::ios::beg);
@@ -315,18 +315,25 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
 
     size_t in_size = 0;
     std::array<std::byte, 4096> chunk;
-    while (auto sz = in.readsome(reinterpret_cast<char*>(chunk.data()), chunk.size())) {
+    while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size())) {
         crypto_generichash_blake2b_update(
-                &b_st, reinterpret_cast<const unsigned char*>(chunk.data()), sz);
-        in_size += sz;
+                &b_st, reinterpret_cast<const unsigned char*>(chunk.data()), chunk.size());
+        in_size += chunk.size();
     }
+    if (in.gcount() > 0) {
+        crypto_generichash_blake2b_update(
+                &b_st, reinterpret_cast<const unsigned char*>(chunk.data()), in.gcount());
+        in_size += in.gcount();
+    }
+
     crypto_generichash_blake2b_final(&b_st, nonce_key.data(), nonce_key.size());
 
     std::array<std::byte, ENCRYPT_KEY_SIZE> key;
     std::memcpy(key.data(), nonce_key.data() + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE);
 
-    in.seekg(0, std::ios::beg);
     in.clear();
+    in.exceptions(std::ios::badbit | std::ios::failbit);
+    in.seekg(0, std::ios::beg);
 
     auto encrypted = make_buffer(size);
     if (encrypted.size() != size)
@@ -799,7 +806,7 @@ size_t decrypt(
         std::function<std::span<std::byte>(size_t dec_size)> make_buffer) {
 
     std::ifstream in;
-    in.exceptions(std::ios::failbit | std::ios::badbit);
+    in.exceptions(std::ios::badbit);
     in.open(encrypted_file, std::ios::binary | std::ios::ate);
     size_t size = in.tellg();
     in.seekg(0, std::ios::beg);
@@ -825,8 +832,11 @@ size_t decrypt(
                 }};
 
     std::array<std::byte, 4096> chunk;
-    while (auto sz = in.readsome(reinterpret_cast<char*>(chunk.data()), chunk.size()))
-        d.update(std::span{chunk}.first(sz));
+    while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size()))
+        d.update(chunk);
+    if (in.gcount() > 0)
+        d.update(std::span{chunk}.first(in.gcount()));
+
     d.finalize();
 
     return decrypted - out.begin();
@@ -852,7 +862,7 @@ void decrypt(
 
     try {
         std::ifstream in;
-        in.exceptions(std::ios::failbit | std::ios::badbit);
+        in.exceptions(std::ios::badbit);
         in.open(file_in, std::ios::binary | std::ios::ate);
         size_t size = in.tellg();
         in.seekg(0, std::ios::beg);
@@ -871,8 +881,10 @@ void decrypt(
                     }};
 
         std::array<std::byte, 4096> chunk;
-        while (auto sz = in.readsome(reinterpret_cast<char*>(chunk.data()), chunk.size()))
-            d.update(std::span{chunk}.first(sz));
+        while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size()))
+            d.update(chunk);
+        if (in.gcount() > 0)
+            d.update(std::span{chunk}.first(in.gcount()));
         d.finalize();
     } catch (const std::exception& e) {
         std::error_code ec;
