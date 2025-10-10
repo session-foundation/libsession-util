@@ -21,9 +21,13 @@ namespace session {
 using namespace oxenc;
 
 // Helper functions to convert to/from spans
-template <typename OutChar = unsigned char, typename InChar>
-inline std::span<const OutChar> as_span(const std::span<const InChar>& sp) {
-    return {reinterpret_cast<const OutChar*>(sp.data()), sp.size()};
+template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+inline std::span<const OutChar, Extent> as_span(std::span<const InChar, Extent> sp) {
+    return std::span<const OutChar, Extent>{reinterpret_cast<const OutChar*>(sp.data()), sp.size()};
+}
+template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+inline std::span<OutChar, Extent> as_span(std::span<InChar, Extent> sp) {
+    return std::span<OutChar, Extent>{reinterpret_cast<OutChar*>(sp.data()), sp.size()};
 }
 
 template <typename OutChar = unsigned char, oxenc::bt_input_string T>

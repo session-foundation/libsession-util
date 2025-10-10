@@ -5,6 +5,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
+    test_attachment_encrypt.cpp
     test_blinding.cpp
     test_bt_merge.cpp
     test_bugs.cpp

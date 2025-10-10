@@ -20,6 +20,7 @@
 #include <string_view>
 #include <thread>
 
+#include "internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/ed25519.hpp"
 #include "session/export.h"
@@ -2822,17 +2823,6 @@ namespace {
 inline session::network::Network& unbox(network_object* network_) {
     assert(network_ && network_->internals);
     return *static_cast<session::network::Network*>(network_->internals);
-}
-
-inline bool set_error(char* error, const std::exception& e) {
-    if (!error)
-        return false;
-
-    std::string msg = e.what();
-    if (msg.size() > 255)
-        msg.resize(255);
-    std::memcpy(error, msg.c_str(), msg.size() + 1);
-    return false;
 }
 
 }  // namespace
