@@ -821,6 +821,10 @@ size_t Network::min_snode_cache_size() const {
     // having issues) then the minimum size should be the full cache size (minus enough to build a
     // path) or at least the size of a path
     auto min_path_size = static_cast<size_t>(path_size);
+
+    if (use_testnet)
+        return min_path_size;
+
     return std::min(
             std::max(min_path_size, *seed_node_cache_size - min_path_size), min_snode_cache_count);
 }
