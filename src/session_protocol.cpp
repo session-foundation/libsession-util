@@ -277,7 +277,7 @@ std::vector<uint8_t> encode_for_group(
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& group_ed25519_pubkey,
-        const cleared_uc32& group_ed25519_privkey,
+        const cleared_uc32& group_ed25519_enc_privkey,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::Group;
@@ -285,7 +285,7 @@ std::vector<uint8_t> encode_for_group(
                                                                      : std::span<const uint8_t>{};
     dest.sent_timestamp_ms = sent_timestamp;
     dest.group_ed25519_pubkey = group_ed25519_pubkey;
-    dest.group_ed25519_privkey = group_ed25519_privkey;
+    dest.group_ed25519_enc_privkey = group_ed25519_enc_privkey;
     std::vector<uint8_t> result = encode_for_destination(plaintext, ed25519_privkey, dest);
     return result;
 }
@@ -349,7 +349,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
         std::chrono::milliseconds dest_sent_timestamp_ms,
         std::span<const uint8_t> dest_community_inbox_server_pubkey,
         std::span<const uint8_t> dest_group_ed25519_pubkey,
-        std::span<const uint8_t> dest_group_ed25519_privkey,
+        std::span<const uint8_t> dest_group_ed25519_enc_privkey,
         UseMalloc use_malloc) {
     // The following arguments are passed in from structs with fixed-sized arrays so we expect the
     // sizes to be correct. It being wrong would be a development error
@@ -359,7 +359,8 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
     assert(dest_recipient_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_community_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_group_ed25519_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
-    assert(dest_group_ed25519_privkey.size() == 32 || dest_group_ed25519_privkey.size() == 64);
+    assert(dest_group_ed25519_enc_privkey.size() == 32 ||
+           dest_group_ed25519_enc_privkey.size() == 64);
 
     bool is_group = dest_type == DestinationType::Group;
     bool is_1o1 = dest_type == DestinationType::SyncOr1o1;
@@ -449,7 +450,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 std::vector<uint8_t> ciphertext = encrypt_for_group(
                         ed25519_privkey,
                         dest_group_ed25519_pubkey,
-                        dest_group_ed25519_privkey,
+                        dest_group_ed25519_enc_privkey,
                         to_span(bytes),
                         /*compress*/ true,
                         /*padding*/ 256);
@@ -587,7 +588,7 @@ std::vector<uint8_t> encode_for_destination(
             /*dest_sent_timestamp_ms=*/dest.sent_timestamp_ms,
             /*dest_community_inbox_server_pubkey=*/dest.community_inbox_server_pubkey,
             /*dest_group_ed25519_pubkey=*/dest.group_ed25519_pubkey,
-            /*dest_group_ed25519_privkey=*/dest.group_ed25519_privkey,
+            /*dest_group_ed25519_enc_privkey=*/dest.group_ed25519_enc_privkey,
             /*use_malloc=*/UseMalloc::No);
 
     std::vector<uint8_t> result = std::move(result_internal.ciphertext_cpp);
@@ -1232,7 +1233,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
         const bytes33* group_ed25519_pubkey,
-        const bytes32* group_ed25519_privkey,
+        const bytes32* group_ed25519_enc_privkey,
         const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         char* error,
@@ -1243,7 +1244,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
     dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
     dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
     dest.group_ed25519_pubkey = *group_ed25519_pubkey;
-    dest.group_ed25519_privkey = *group_ed25519_privkey;
+    dest.group_ed25519_enc_privkey = *group_ed25519_enc_privkey;
     dest.sent_timestamp_ms = sent_timestamp_ms;
 
     session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
@@ -1286,7 +1287,7 @@ LIBSESSION_C_API session_protocol_encoded_for_destination session_protocol_encod
                 /*dest_community_inbox_server_pubkey=*/
                 dest->community_inbox_server_pubkey.data,
                 /*dest_group_ed25519_pubkey=*/dest->group_ed25519_pubkey.data,
-                /*dest_group_ed25519_privkey=*/dest->group_ed25519_privkey.data,
+                /*dest_group_ed25519_enc_privkey=*/dest->group_ed25519_enc_privkey.data,
                 /*use_malloc=*/UseMalloc::Yes);
 
         result = {

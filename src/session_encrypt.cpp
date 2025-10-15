@@ -369,7 +369,7 @@ static constexpr size_t GROUPS_ENCRYPT_OVERHEAD =
 std::vector<unsigned char> encrypt_for_group(
         std::span<const unsigned char> user_ed25519_privkey,
         std::span<const unsigned char> group_ed25519_pubkey,
-        std::span<const unsigned char> group_ed25519_privkey,
+        std::span<const unsigned char> group_ed25519_enc_privkey,
         std::span<const unsigned char> plaintext,
         bool compress,
         size_t padding) {
@@ -391,8 +391,8 @@ std::vector<unsigned char> encrypt_for_group(
         throw std::invalid_argument{"Invalid user_ed25519_privkey: expected 32 or 64 bytes"};
     }
 
-    if (group_ed25519_privkey.size() != 32 && group_ed25519_privkey.size() != 64)
-        throw std::invalid_argument{"Invalid group_ed25519_privkey: expected 32 or 64 bytes"};
+    if (group_ed25519_enc_privkey.size() != 32 && group_ed25519_enc_privkey.size() != 64)
+        throw std::invalid_argument{"Invalid group_ed25519_enc_privkey: expected 32 or 64 bytes"};
     if (group_ed25519_pubkey.size() != crypto_sign_ed25519_PUBLICKEYBYTES)
         throw std::invalid_argument{"Invalid group_ed25519_pubkey: expected 32 bytes"};
 
@@ -470,7 +470,7 @@ std::vector<unsigned char> encrypt_for_group(
                      0,
                      nullptr,
                      nonce.data(),
-                     group_ed25519_privkey.data()))
+                     group_ed25519_enc_privkey.data()))
         throw std::runtime_error{"Encryption failed"};
 
     return ciphertext;
@@ -1119,8 +1119,8 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
         size_t user_ed25519_privkey_len,
         const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
-        const unsigned char* group_ed25519_privkey,
-        size_t group_ed25519_privkey_len,
+        const unsigned char* group_ed25519_enc_privkey,
+        size_t group_ed25519_enc_privkey_len,
         const unsigned char* plaintext,
         size_t plaintext_len,
         bool compress,
@@ -1132,7 +1132,7 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
         std::vector<unsigned char> result_cpp = encrypt_for_group(
                 {user_ed25519_privkey, user_ed25519_privkey_len},
                 {group_ed25519_pubkey, group_ed25519_pubkey_len},
-                {group_ed25519_privkey, group_ed25519_privkey_len},
+                {group_ed25519_enc_privkey, group_ed25519_enc_privkey_len},
                 {plaintext, plaintext_len},
                 compress,
                 padding);

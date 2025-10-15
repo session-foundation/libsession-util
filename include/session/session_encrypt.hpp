@@ -165,9 +165,10 @@ static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 /// Inputs:
 /// - `user_ed25519_privkey` -- the private key of the user. Can be a 32-byte seed, or a 64-byte
 ///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
-/// - `group_ed25519_pubkey` -- the 32 byte public key of the group
-/// - `group_ed25519_privkey` -- the private key of the user. Can be a 32-byte seed, or a 64-byte
-///   libsodium secret key
+/// - `group_ed25519_pubkey` -- The 32 byte public key of the group
+/// - group_ed25519_enc_privkey -- The group's private key (32 bytes or 64-byte libsodium key) for
+///   groups v2 messages, typically the latest encryption key for the group (e.g.,
+///   Keys::group_enc_key).
 /// - `plaintext` -- the binary message to encrypt.
 /// - `compress` -- can be specified as `false` to forcibly disable compression.  Normally
 ///   omitted, to use compression if and only if it reduces the size.
@@ -180,7 +181,7 @@ static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 std::vector<unsigned char> encrypt_for_group(
         std::span<const unsigned char> user_ed25519_privkey,
         std::span<const unsigned char> group_ed25519_pubkey,
-        std::span<const unsigned char> group_ed25519_privkey,
+        std::span<const unsigned char> group_ed25519_enc_privkey,
         std::span<const unsigned char> plaintext,
         bool compress,
         size_t padding);
