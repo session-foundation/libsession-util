@@ -16,12 +16,12 @@ enum {
     /// Maximum number of UTF16 code points that a standard message can use. If the message exceeds
     /// this then the message must activate the higher character limit feature provided by Session
     /// Pro which allows messages up to 10k characters.
-    SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT = 2'000,
+    SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT = 2000,
 
     /// Maximum number of UTF16 code points that a Session Pro entitled user can send in a message.
     /// This is not used in the codebase, but is provided for convenience to centralise protocol
     /// definitions for users of the library to consume.
-    SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT = 10'000,
+    SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT = 10000,
 
     SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING = 160,
 };
@@ -34,10 +34,11 @@ typedef enum SESSION_PROTOCOL_PRO_STATUS {  // See session::ProStatus
     SESSION_PROTOCOL_PRO_STATUS_EXPIRED,
 } SESSION_PROTOCOL_PRO_STATUS;
 
-typedef struct session_protocol_pro_signed_message {
+typedef struct session_protocol_pro_signed_message session_protocol_pro_signed_message;
+struct session_protocol_pro_signed_message {
     span_u8 sig;
     span_u8 msg;
-} session_protocol_pro_signed_message;
+};
 
 typedef struct session_protocol_pro_proof {
     uint8_t version;
@@ -77,7 +78,8 @@ typedef enum SESSION_PROTOCOL_DESTINATION_TYPE {  // See session::DestinationTyp
     SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY,
 } SESSION_PROTOCOL_DESTINATION_TYPE;
 
-typedef struct session_protocol_destination {  // See session::Destination
+typedef struct session_protocol_destination session_protocol_destination;
+struct session_protocol_destination {  // See session::Destination
     SESSION_PROTOCOL_DESTINATION_TYPE type;
     const void* pro_rotating_ed25519_privkey;
     size_t pro_rotating_ed25519_privkey_len;
@@ -86,7 +88,7 @@ typedef struct session_protocol_destination {  // See session::Destination
     bytes32 community_inbox_server_pubkey;
     bytes33 group_ed25519_pubkey;
     bytes32 group_ed25519_privkey;
-} session_protocol_destination;
+};
 
 // Indicates which optional fields in the envelope has been populated out of the optional fields in
 // an envelope after it has been parsed off the wire.
@@ -99,28 +101,32 @@ enum ENVELOPE_FLAGS_ {
     SESSION_PROTOCOL_ENVELOPE_FLAGS_TIMESTAMP = 1 << 4,
 };
 
-typedef struct session_protocol_envelope {
+typedef struct session_protocol_envelope session_protocol_envelope;
+struct session_protocol_envelope {
     SESSION_PROTOCOL_ENVELOPE_FLAGS flags;
     uint64_t timestamp_ms;
     bytes33 source;
     uint32_t source_device;
     uint64_t server_timestamp;
     bytes64 pro_sig;
-} session_protocol_envelope;
+};
 
-typedef struct session_protocol_decode_envelope_keys {
+typedef struct session_protocol_decode_envelope_keys session_protocol_decode_envelope_keys;
+struct session_protocol_decode_envelope_keys {
     span_u8 group_ed25519_pubkey;
     const span_u8* ed25519_privkeys;
     size_t ed25519_privkeys_len;
-} session_protocol_decode_envelope_keys;
+};
 
+typedef struct session_protocol_decoded_pro session_protocol_decoded_pro;
 struct session_protocol_decoded_pro {
     SESSION_PROTOCOL_PRO_STATUS status;
     session_protocol_pro_proof proof;
     SESSION_PROTOCOL_PRO_FEATURES features;
 };
 
-typedef struct session_protocol_decoded_envelope {
+typedef struct session_protocol_decoded_envelope session_protocol_decoded_envelope;
+struct session_protocol_decoded_envelope {
     // Indicates if the decryption was successful. If the decryption step failed and threw an
     // exception, this is false.
     bool success;
@@ -130,16 +136,19 @@ typedef struct session_protocol_decoded_envelope {
     bytes32 sender_x25519_pubkey;
     session_protocol_decoded_pro pro;
     size_t error_len_incl_null_terminator;
-} session_protocol_decoded_envelope;
+};
 
-typedef struct session_protocol_encoded_for_destination {
+typedef struct session_protocol_encoded_for_destination session_protocol_encoded_for_destination;
+struct session_protocol_encoded_for_destination {
     // Indicates if the encryption was successful. If any step failed and threw an exception, this
     // is false.
     bool success;
     span_u8 ciphertext;
     size_t error_len_incl_null_terminator;
-} session_protocol_encoded_for_destination;
+};
 
+typedef struct session_protocol_decoded_community_message
+        session_protocol_decoded_community_message;
 struct session_protocol_decoded_community_message {
     bool success;
     bool has_envelope;

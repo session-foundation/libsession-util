@@ -329,7 +329,7 @@ struct ProPaymentItem {
     /// Strings associated with platform's payment provider from
     /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA`, provided for convenience. This pointer is
     /// always pointing to valid memory.
-    const session_pro_backend_payment_provider_metadata *payment_provider_metadata =
+    const session_pro_backend_payment_provider_metadata* payment_provider_metadata =
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA;
 
     /// When payment provider is set to Google Play Store, this is the platform-specific purchase
@@ -346,7 +346,6 @@ struct ProPaymentItem {
     /// When payment provider is set to iOS App Store, this is the platform-specific web line order
     /// ID
     std::string apple_web_line_order_id;
-
 };
 
 struct GetProStatusResponse : public ResponseHeader {

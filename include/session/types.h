@@ -15,11 +15,13 @@ extern "C" {
 #endif
 
 /// C friendly buffer structure that is a pointer and length to a span of bytes.
+typedef struct span_u8 span_u8;
 struct span_u8 {
     uint8_t* data;
     size_t size;
 };
 
+typedef struct string8 string8;
 struct string8 {
     char* data;
     size_t size;
@@ -27,19 +29,23 @@ struct string8 {
 
 #define string8_literal(literal) {(char*)literal, sizeof(literal) - 1}
 
+typedef struct bytes32 bytes32;
 struct bytes32 {
     uint8_t data[32];
 };
 
+typedef struct bytes33 bytes33;
 struct bytes33 {
     uint8_t data[33];
 };
 
+typedef struct bytes64 bytes64;
 struct bytes64 {
     uint8_t data[64];
 };
 
 /// Basic bump allocating arena
+typedef struct arena_t arena_t;
 struct arena_t {
     uint8_t* data;
     size_t size;

@@ -462,6 +462,9 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
 
                 // Make request
                 WebSocketProtos::WebSocketRequestMessage* req_msg = msg.mutable_request();
+                req_msg->set_verb("");      // Required but unused on iOS
+                req_msg->set_path("");      // Required but unused on iOS
+                req_msg->set_requestid(0);  // Required but unused on iOS
                 req_msg->set_body(envelope.SerializeAsString());
 
                 // Write message as ciphertext
