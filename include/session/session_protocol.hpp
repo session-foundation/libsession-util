@@ -389,7 +389,7 @@ std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey);
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_community_inbox
 ///
@@ -424,7 +424,7 @@ std::vector<uint8_t> encode_for_community_inbox(
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
         const array_uc32& community_pubkey,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey);
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_community
 ///
@@ -449,7 +449,8 @@ std::vector<uint8_t> encode_for_community_inbox(
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
 std::vector<uint8_t> encode_for_community(
-        std::span<const uint8_t> plaintext, std::span<const uint8_t> pro_rotating_ed25519_privkey);
+        std::span<const uint8_t> plaintext,
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_group
 ///
@@ -486,7 +487,7 @@ std::vector<uint8_t> encode_for_group(
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& group_ed25519_pubkey,
         const cleared_uc32& group_ed25519_privkey,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey);
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_destination
 ///

@@ -231,10 +231,11 @@ std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey) {
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::SyncOr1o1;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
+                                                                     : std::span<const uint8_t>{};
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     std::vector<uint8_t> result = encode_for_destination(plaintext, ed25519_privkey, dest);
@@ -247,10 +248,11 @@ std::vector<uint8_t> encode_for_community_inbox(
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
         const array_uc32& community_pubkey,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey) {
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::CommunityInbox;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
+                                                                     : std::span<const uint8_t>{};
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     dest.community_inbox_server_pubkey = community_pubkey;
@@ -259,10 +261,12 @@ std::vector<uint8_t> encode_for_community_inbox(
 }
 
 std::vector<uint8_t> encode_for_community(
-        std::span<const uint8_t> plaintext, std::span<const uint8_t> pro_rotating_ed25519_privkey) {
+        std::span<const uint8_t> plaintext,
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::Community;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
+                                                                     : std::span<const uint8_t>{};
     std::span<const uint8_t> nil_ed25519_privkey;
     std::vector<uint8_t> result = encode_for_destination(plaintext, nil_ed25519_privkey, dest);
     return result;
@@ -274,10 +278,11 @@ std::vector<uint8_t> encode_for_group(
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& group_ed25519_pubkey,
         const cleared_uc32& group_ed25519_privkey,
-        std::span<const uint8_t> pro_rotating_ed25519_privkey) {
+        std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::Group;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
+                                                                     : std::span<const uint8_t>{};
     dest.sent_timestamp_ms = sent_timestamp;
     dest.group_ed25519_pubkey = group_ed25519_pubkey;
     dest.group_ed25519_privkey = group_ed25519_privkey;
