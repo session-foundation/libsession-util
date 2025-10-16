@@ -1364,6 +1364,22 @@ LIBSESSION_C_API const unsigned char* groups_keys_get_key(const config_group_key
     return keys[N].data();
 }
 
+LIBSESSION_C_API size_t groups_keys_group_get_keys(
+        const config_group_keys* conf, size_t offset, span_u8* dest, size_t dest_size) {
+    size_t result = 0;
+    if (dest) {
+        auto keys = unbox(conf).group_keys();
+        size_t clamped_offset = std::min(keys.size(), offset);
+        for (size_t index = clamped_offset; index < keys.size() && result < dest_size; index++) {
+            const std::span<const uint8_t>& src_key = keys[index];
+            span_u8* dest_key = dest + result++;
+            dest_key->data = const_cast<uint8_t*>(src_key.data());
+            dest_key->size = src_key.size();
+        }
+    }
+    return result;
+}
+
 LIBSESSION_C_API const span_u8 groups_keys_group_enc_key(const config_group_keys* conf) {
     span_u8 result = {};
     try {

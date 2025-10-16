@@ -823,6 +823,28 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
         REQUIRE(groups_members_size(a.members) == 5);
     }
 
+    {
+        // Test get keys bulk API
+        {
+            size_t keys_size = groups_keys_size(admins[0].keys);
+            std::vector<span_u8> keys_list;
+            keys_list.resize(keys_size);
+            size_t keys_read = groups_keys_group_get_keys(
+                    admins[0].keys, 0, keys_list.data(), keys_list.size());
+            REQUIRE(keys_read == keys_size);
+        }
+
+        // Test get keys OOB
+        {
+            size_t keys_size = groups_keys_size(admins[0].keys);
+            std::vector<span_u8> keys_list;
+            keys_list.resize(keys_size);
+            size_t keys_read = groups_keys_group_get_keys(
+                    admins[0].keys, keys_size, keys_list.data(), keys_list.size());
+            REQUIRE(keys_read == 0);
+        }
+    }
+
     free(new_info_config2);
     free(new_mem_config2);
 }
