@@ -1364,7 +1364,7 @@ LIBSESSION_C_API const unsigned char* groups_keys_get_key(const config_group_key
     return keys[N].data();
 }
 
-LIBSESSION_C_API size_t groups_keys_group_get_keys(
+LIBSESSION_C_API size_t groups_keys_get_keys(
         const config_group_keys* conf, size_t offset, span_u8* dest, size_t dest_size) {
     size_t result = 0;
     if (dest) {

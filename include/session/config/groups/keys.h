@@ -153,8 +153,8 @@ LIBSESSION_EXPORT const unsigned char* groups_keys_get_key(const config_group_ke
 /// Outputs:
 /// - `size_t` the number of keys that were written to the buffer. This can be less than the
 /// `dest_size` if the user requested a range of keys that is smaller than the given buffer.
-LIBSESSION_EXPORT size_t groups_keys_group_get_keys(
-        const config_group_keys* conf, size_t offset, span_u8* dest, size_t dest_size);
+LIBSESSION_EXPORT size_t
+groups_keys_get_keys(const config_group_keys* conf, size_t offset, span_u8* dest, size_t dest_size);
 
 /// API: groups/groups_keys_group_enc_key
 ///

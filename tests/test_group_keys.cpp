@@ -829,8 +829,8 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
             size_t keys_size = groups_keys_size(admins[0].keys);
             std::vector<span_u8> keys_list;
             keys_list.resize(keys_size);
-            size_t keys_read = groups_keys_group_get_keys(
-                    admins[0].keys, 0, keys_list.data(), keys_list.size());
+            size_t keys_read =
+                    groups_keys_get_keys(admins[0].keys, 0, keys_list.data(), keys_list.size());
             REQUIRE(keys_read == keys_size);
         }
 
@@ -839,7 +839,7 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
             size_t keys_size = groups_keys_size(admins[0].keys);
             std::vector<span_u8> keys_list;
             keys_list.resize(keys_size);
-            size_t keys_read = groups_keys_group_get_keys(
+            size_t keys_read = groups_keys_get_keys(
                     admins[0].keys, keys_size, keys_list.data(), keys_list.size());
             REQUIRE(keys_read == 0);
         }
