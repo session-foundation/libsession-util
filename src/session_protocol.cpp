@@ -611,7 +611,7 @@ DecodedEnvelope decode_envelope(
     if (keys.group_ed25519_pubkey) {
         // Decrypt using the keys
         DecryptGroupMessage decrypt = decrypt_group_message(
-                keys.ed25519_privkeys, *keys.group_ed25519_pubkey, envelope_plaintext);
+                keys.decrypt_keys, *keys.group_ed25519_pubkey, envelope_plaintext);
 
         if (decrypt.session_id.size() != ((crypto_sign_ed25519_PUBLICKEYBYTES + 1) * 2))
             throw std::runtime_error{fmt::format(
@@ -725,7 +725,7 @@ DecodedEnvelope decode_envelope(
         bool decrypt_success = false;
         std::vector<uint8_t> content_plaintext;
         std::vector<uint8_t> sender_ed25519_pubkey;
-        for (const auto& privkey_it : keys.ed25519_privkeys) {
+        for (const auto& privkey_it : keys.decrypt_keys) {
             try {
                 std::tie(content_plaintext, sender_ed25519_pubkey) =
                         session::decrypt_incoming(privkey_it, to_span(content));
@@ -739,7 +739,7 @@ DecodedEnvelope decode_envelope(
         if (!decrypt_success) {
             throw std::runtime_error{fmt::format(
                     "Envelope content decryption failed, tried {} key(s)",
-                    keys.ed25519_privkeys.size())};
+                    keys.decrypt_keys.size())};
         }
 
         // Strip padding from content
@@ -1349,10 +1349,10 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     }
 
     DecodedEnvelope result_cpp = {};
-    for (size_t index = 0; index < keys->ed25519_privkeys_len; index++) {
+    for (size_t index = 0; index < keys->decrypt_keys_len; index++) {
         std::span<const uint8_t> key = {
-                keys->ed25519_privkeys[index].data, keys->ed25519_privkeys[index].size};
-        keys_cpp.ed25519_privkeys = {&key, 1};
+                keys->decrypt_keys[index].data, keys->decrypt_keys[index].size};
+        keys_cpp.decrypt_keys = {&key, 1};
         try {
             result_cpp = decode_envelope(
                     keys_cpp,
@@ -1374,7 +1374,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
         }
     }
 
-    if (keys->ed25519_privkeys_len == 0) {
+    if (keys->decrypt_keys_len == 0) {
         result.error_len_incl_null_terminator =
                 snprintf_clamped(error, error_len, "No keys ed25519_privkeys were provided") + 1;
     }

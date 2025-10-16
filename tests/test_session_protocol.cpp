@@ -255,8 +255,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
         session_protocol_decode_envelope_keys decrypt_keys = {};
-        decrypt_keys.ed25519_privkeys = &key;
-        decrypt_keys.ed25519_privkeys_len = 1;
+        decrypt_keys.decrypt_keys = &key;
+        decrypt_keys.decrypt_keys_len = 1;
         session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
@@ -373,8 +373,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
         session_protocol_decode_envelope_keys decrypt_keys = {};
-        decrypt_keys.ed25519_privkeys = &key;
-        decrypt_keys.ed25519_privkeys_len = 1;
+        decrypt_keys.decrypt_keys = &key;
+        decrypt_keys.decrypt_keys_len = 1;
         session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
@@ -444,8 +444,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Decrypt envelope
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
         session_protocol_decode_envelope_keys decrypt_keys = {};
-        decrypt_keys.ed25519_privkeys = &key;
-        decrypt_keys.ed25519_privkeys_len = 1;
+        decrypt_keys.decrypt_keys = &key;
+        decrypt_keys.decrypt_keys_len = 1;
         session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
@@ -540,8 +540,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         span_u8 key = {group_v2_sk.data(), group_v2_sk.size()};
         session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.group_ed25519_pubkey = {group_v2_pk.data(), group_v2_pk.size()};
-        decrypt_keys.ed25519_privkeys = &key;
-        decrypt_keys.ed25519_privkeys_len = 1;
+        decrypt_keys.decrypt_keys = &key;
+        decrypt_keys.decrypt_keys_len = 1;
 
         // TODO: Finish setting up a group so we can check the decrypted result for now this will
         // throw because the keys aren't setup correctly.
@@ -581,8 +581,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Decrypt
         span_u8 key = {keys.ed_sk1.data(), keys.ed_sk1.size()};
         session_protocol_decode_envelope_keys decrypt_keys = {};
-        decrypt_keys.ed25519_privkeys = &key;
-        decrypt_keys.ed25519_privkeys_len = 1;
+        decrypt_keys.decrypt_keys = &key;
+        decrypt_keys.decrypt_keys_len = 1;
         {
             session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &decrypt_keys,
@@ -657,8 +657,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         span_u8 bad_key = {keys.ed_sk0.data(), keys.ed_sk0.size()};
         {
             session_protocol_decode_envelope_keys bad_decrypt_keys = {};
-            bad_decrypt_keys.ed25519_privkeys = &bad_key;
-            bad_decrypt_keys.ed25519_privkeys_len = 1;
+            bad_decrypt_keys.decrypt_keys = &bad_key;
+            bad_decrypt_keys.decrypt_keys_len = 1;
             session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &bad_decrypt_keys,
                     encrypt_result.ciphertext.data,
@@ -680,8 +680,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         {
             auto key_list = std::array{bad_key, key};
             session_protocol_decode_envelope_keys multi_decrypt_keys = {};
-            multi_decrypt_keys.ed25519_privkeys = key_list.data();
-            multi_decrypt_keys.ed25519_privkeys_len = key_list.size();
+            multi_decrypt_keys.decrypt_keys = key_list.data();
+            multi_decrypt_keys.decrypt_keys_len = key_list.size();
             session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &multi_decrypt_keys,
                     encrypt_result.ciphertext.data,

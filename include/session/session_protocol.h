@@ -114,8 +114,8 @@ struct session_protocol_envelope {
 typedef struct session_protocol_decode_envelope_keys session_protocol_decode_envelope_keys;
 struct session_protocol_decode_envelope_keys {
     span_u8 group_ed25519_pubkey;
-    const span_u8* ed25519_privkeys;
-    size_t ed25519_privkeys_len;
+    const span_u8* decrypt_keys;
+    size_t decrypt_keys_len;
 };
 
 typedef struct session_protocol_decoded_pro session_protocol_decoded_pro;

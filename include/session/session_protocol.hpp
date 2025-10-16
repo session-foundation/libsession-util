@@ -298,15 +298,15 @@ struct DecodeEnvelopeKey {
     // encrypted and must be decrypted by the group keys associated with it (of which there may be
     // many candidate keys depending on how many times the group has been rekeyed). It's recommended
     // to pass `Keys::group_keys()` or in the C API use the `groups_keys_size` and
-    // `group_keys_get_key` combo to retrieve the keys to attempt to use to decrypt this message.
+    // `group_keys_get_keys` combo to retrieve the keys to attempt to use to decrypt this message.
     //
     // If `group_ed25519_pubkey` is _not_ set then this function assumes the envelope is unencrypted
     // but the content is encrypted (e.g.: 1o1 and legacy group messages). The function will attempt
     // to decrypt the envelope's contents with the given keys. Typically in these cases you will
-    // pass exactly 1 key for decryption but this function makes no pre-existing assumptions on the
-    // number of keys and will attempt all given keys specified regardless until it finds one that
-    // successfully decrypts the envelope contents.
-    std::span<std::span<const uint8_t>> ed25519_privkeys;
+    // pass exactly 1 ed25519 private key for decryption but this function makes no pre
+    // existing assumptions on the number of keys and will attempt all given keys specified
+    // regardless until it finds one that successfully decrypts the envelope contents.
+    std::span<std::span<const uint8_t>> decrypt_keys;
 };
 
 /// API: session_protocol/pro_features_for_utf8
