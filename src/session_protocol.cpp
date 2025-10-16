@@ -627,7 +627,7 @@ DecodedEnvelope decode_envelope(
         assert(decrypt.session_id.starts_with("05"));
         oxenc::from_hex(
                 decrypt.session_id.begin() + 2,
-                decrypt.session_id.end() - 2,
+                decrypt.session_id.end(),
                 result.sender_x25519_pubkey.begin());
     } else {
         // Assumed to be a 1o1/sync message which is wrapped in a websocket message

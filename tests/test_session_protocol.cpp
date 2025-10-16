@@ -558,6 +558,11 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.pro.status == SESSION_PROTOCOL_PRO_STATUS_VALID);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
+        static_assert(
+                sizeof(decrypt_result.sender_x25519_pubkey.data) == keys.curve_pk0.max_size());
+        REQUIRE(memcmp(decrypt_result.sender_x25519_pubkey.data,
+                       keys.curve_pk0.data(),
+                       keys.curve_pk0.size()) == 0);
 
         session_protocol_encode_for_destination_free(&encrypt_result);
         session_protocol_decode_envelope_free(&decrypt_result);
