@@ -93,8 +93,8 @@ typedef struct session_encrypt_group_message {
 /// - `user_ed25519_privkey` -- the private key of the user. Can be a 32-byte seed, or a 64-byte
 ///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
 /// - `group_ed25519_pubkey` -- the 32 byte public key of the group
-/// - `group_ed25519_enc_privkey` -- The group's private key (32 bytes) for groups v2 messages,
-///   typically the latest encryption key for the group (e.g., groups_keys_group_enc_key).
+/// - `group_enc_key` -- The group's encryption key (32 bytes) for groups v2 messages, typically the
+///   latest key for the group (e.g., groups_keys_group_enc_key).
 ///   libsodium secret key
 /// - `plaintext` -- the binary message to encrypt.
 /// - `compress` -- can be specified as `false` to forcibly disable compression.  Normally
@@ -127,8 +127,8 @@ LIBSESSION_EXPORT session_encrypt_group_message session_encrypt_for_group(
         size_t user_ed25519_privkey_len,
         const unsigned char* group_ed25519_pubkey,
         size_t group_ed25519_pubkey_len,
-        const unsigned char* group_ed25519_enc_privkey,
-        size_t group_ed25519_enc_privkey_len,
+        const unsigned char* group_enc_key,
+        size_t group_enc_key_len,
         const unsigned char* plaintext,
         size_t plaintext_len,
         bool compress,

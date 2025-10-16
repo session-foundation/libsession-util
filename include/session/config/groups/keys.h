@@ -140,9 +140,6 @@ LIBSESSION_EXPORT const unsigned char* groups_keys_get_key(const config_group_ke
 ///
 /// Inputs:
 /// - `conf` -- the groups config object
-///
-/// Outputs:
-/// - `true` if we have admin keys, `false` otherwise.
 LIBSESSION_EXPORT const span_u8 groups_keys_group_enc_key(const config_group_keys* conf);
 
 /// API: groups/groups_keys_is_admin

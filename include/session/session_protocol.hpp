@@ -207,10 +207,9 @@ struct Destination {
     // `group_pubkey` to encrypt the message for.
     array_uc33 group_ed25519_pubkey;
 
-    // When type => Group: Set the private key of the group for groups v2 messages. Typically
-    // the latest encryption key for the group, e.g: `Keys::group_enc_key` or
-    // `groups_keys_group_enc_key`
-    cleared_uc32 group_ed25519_enc_privkey;
+    // When type => Group: Set the encryption key of the group for groups v2 messages. Typically
+    // the latest key for the group, e.g: `Keys::group_enc_key` or `groups_keys_group_enc_key`
+    cleared_uc32 group_enc_key;
 };
 
 struct Envelope {
@@ -471,8 +470,8 @@ std::vector<uint8_t> encode_for_community(
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
 /// - group_ed25519_pubkey -- The group's public key (33 bytes) for encryption with a 0x03 prefix
-/// - group_ed25519_enc_privkey -- The group's private key (32 bytes) for groups v2 messages,
-///   typically the latest encryption key for the group (e.g., Keys::group_enc_key).
+/// - group_enc_key -- The group's encryption key (32 bytes) for groups v2 messages, typically the
+///   latest key for the group (e.g., Keys::group_enc_key).
 /// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
 ///   secret component of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to
 ///   entitle the message with Pro features by signing it. Can also be passed as a 32-byte seed.
@@ -486,7 +485,7 @@ std::vector<uint8_t> encode_for_group(
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
         const array_uc33& group_ed25519_pubkey,
-        const cleared_uc32& group_ed25519_enc_privkey,
+        const cleared_uc32& group_enc_key,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_destination

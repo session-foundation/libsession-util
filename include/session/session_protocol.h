@@ -87,7 +87,7 @@ struct session_protocol_destination {  // See session::Destination
     uint64_t sent_timestamp_ms;
     bytes32 community_inbox_server_pubkey;
     bytes33 group_ed25519_pubkey;
-    bytes32 group_ed25519_enc_privkey;
+    bytes32 group_enc_key;
 };
 
 // Indicates which optional fields in the envelope has been populated out of the optional fields in
@@ -510,8 +510,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community(
 /// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
 /// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
 /// - `group_ed25519_pubkey` -- The group's public key (33 bytes) for encryption with a 0x03 prefix.
-/// - `group_ed25519_enc_privkey` -- The group's private key (32 bytes) for groups v2 messages,
-///   typically the latest encryption key for the group (e.g., Keys::group_enc_key).
+/// - `group_enc_key` -- The group's encryption key (32 bytes) for groups v2 messages, typically the
+//    latest key for the group (e.g., Keys::group_enc_key).
 /// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
 ///   32-byte seed) to sign the encoded content if you wish to entitle the message to Session Pro.
 ///   If provided, the corresponding proof must be set in the `Content`. The signature must not be
@@ -546,7 +546,7 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
         const bytes33* group_ed25519_pubkey,
-        const bytes32* group_ed25519_enc_privkey,
+        const bytes32* group_enc_key,
         OPTIONAL const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
