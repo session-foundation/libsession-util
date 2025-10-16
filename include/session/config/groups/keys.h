@@ -133,7 +133,7 @@ LIBSESSION_EXPORT size_t groups_keys_size(const config_group_keys* conf);
 /// - `const unsigned char*` -- pointer to the 32-byte key, or nullptr if there
 LIBSESSION_EXPORT const unsigned char* groups_keys_get_key(const config_group_keys* conf, size_t N);
 
-/// API: groups/groups_keys_group_get_keys
+/// API: groups/groups_keys_get_keys
 ///
 /// Retrieve multiple keys for the group consisting of [offset, offset + dest_size). This function
 /// clamps the `offset` and `dest_size` such that no out-of-bounds reads are executed. See
