@@ -32,12 +32,20 @@ static bool string8_equals(string8 s8, std::string_view str) {
 
 [[maybe_unused]] static void dump_pro_payment_item(
         const session_pro_backend_pro_payment_item& item) {
-    fprintf(stderr, "item.expiry_unix_ts_ms: %" PRIu64 "\n", item.expiry_unix_ts_ms);
-    fprintf(stderr, "item.grace_unix_ts_ms: %" PRIu64 "zu\n", item.grace_unix_ts_ms);
+    fprintf(stderr, "item.status: %d\n", item.status);
+    fprintf(stderr, "item.plan: %d\n", item.plan);
+    fprintf(stderr, "item.payment_provider: %d\n", item.payment_provider);
+    fprintf(stderr, "item.auto_renewing: %d\n", item.auto_renewing);
+    fprintf(stderr, "item.unredeemed_unix_ts_ms: %" PRIu64 "zu\n", item.unredeemed_unix_ts_ms);
     fprintf(stderr, "item.redeemed_unix_ts_ms: %" PRIu64 "zu\n", item.redeemed_unix_ts_ms);
-    fprintf(stderr, "item.refunded_unix_ts_ms: %" PRIu64 "zu\n", item.refunded_unix_ts_ms);
-    fprintf(stderr, "item.subscription_duration: %" PRIu64 "zu\n", item.subscription_duration_s);
-    fprintf(stderr, "item.payment_provider: %u\n", item.payment_provider);
+    fprintf(stderr, "item.expiry_unix_ts_ms: %" PRIu64 "\n", item.expiry_unix_ts_ms);
+    fprintf(stderr,
+            "item.grace_period_duration_ms: %" PRIu64 "zu\n",
+            item.grace_period_duration_ms);
+    fprintf(stderr,
+            "item.platform_refund_expiry_unix_ts_ms: %" PRIu64 "zu\n",
+            item.platform_refund_expiry_unix_ts_ms);
+    fprintf(stderr, "item.revoked_unix_ts_ms: %" PRIu64 "zu\n", item.revoked_unix_ts_ms);
     fprintf(stderr,
             "item.google_payment_token: %.*s\n",
             (int)item.google_payment_token_count,
@@ -540,18 +548,22 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
                     {"status", SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED},
-                    {"latest_grace_unix_ts_ms", unix_ts_ms + 1},
-                    {"latest_expiry_unix_ts_ms", unix_ts_ms + 2},
+                    {"auto_renewing", true},
+                    {"expiry_unix_ts_ms", unix_ts_ms + 2},
+                    {"grace_period_duration_ms", 1000},
                     {"items",
                      nlohmann::json::array(
                              {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED},
-                               {"subscription_duration_s", 86400},
-                               {"grace_unix_ts_ms", unix_ts_ms},
-                               {"expiry_unix_ts_ms", unix_ts_ms},
-                               {"refunded_unix_ts_ms", unix_ts_ms + 3600},
-                               {"redeemed_unix_ts_ms", unix_ts_ms - 3600},
+                               {"plan", SESSION_PRO_BACKEND_PLAN_ONE_MONTH},
                                {"payment_provider",
                                 SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
+                               {"auto_renewing", false},
+                               {"unredeemed_unix_ts_ms", unix_ts_ms - 3600},
+                               {"redeemed_unix_ts_ms", unix_ts_ms - 3600},
+                               {"expiry_unix_ts_ms", unix_ts_ms},
+                               {"grace_period_duration_ms", 1001},
+                               {"platform_refund_expiry_unix_ts_ms", unix_ts_ms + 1},
+                               {"revoked_unix_ts_ms", unix_ts_ms + 3600},
                                {"google_payment_token",
                                 std::string(
                                         payment_tx.payment_id, payment_tx.payment_id_count)}}})}};
@@ -565,22 +577,26 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                         [&]() { session_pro_backend_get_pro_status_response_free(&result); }};
                 for (size_t index = 0; index < result.header.errors_count; index++)
                     INFO(result.header.errors[index].data);
+
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
                 REQUIRE(result.header.errors_count == 0);
                 REQUIRE(result.header.errors == nullptr);
                 REQUIRE(result.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED);
                 REQUIRE(result.items_count == 1);
-                REQUIRE(result.latest_grace_unix_ts_ms == unix_ts_ms + 1);
-                REQUIRE(result.latest_expiry_unix_ts_ms == unix_ts_ms + 2);
+                REQUIRE(result.auto_renewing == true);
+                REQUIRE(result.grace_period_duration_ms == 1000);
+                REQUIRE(result.expiry_unix_ts_ms == unix_ts_ms + 2);
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
-                REQUIRE(result.items[0].subscription_duration_s == 86400);
-                REQUIRE(result.items[0].grace_unix_ts_ms == unix_ts_ms);
-                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
-                REQUIRE(result.items[0].refunded_unix_ts_ms == unix_ts_ms + 3600);
-                REQUIRE(result.items[0].redeemed_unix_ts_ms == unix_ts_ms - 3600);
+                REQUIRE(result.items[0].plan == SESSION_PRO_BACKEND_PLAN_ONE_MONTH);
                 REQUIRE(result.items[0].payment_provider ==
                         SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE);
+                REQUIRE(result.items[0].unredeemed_unix_ts_ms == unix_ts_ms - 3600);
+                REQUIRE(result.items[0].redeemed_unix_ts_ms == unix_ts_ms - 3600);
+                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.items[0].grace_period_duration_ms == 1001);
+                REQUIRE(result.items[0].platform_refund_expiry_unix_ts_ms == unix_ts_ms + 1);
+                REQUIRE(result.items[0].revoked_unix_ts_ms == unix_ts_ms + 3600);
                 REQUIRE(result.items[0].google_payment_token_count == payment_tx.payment_id_count);
                 REQUIRE(std::memcmp(
                                 result.items[0].google_payment_token,
@@ -771,6 +787,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             });
 
             for (size_t index = 0; index < response.header.errors_count; index++) {
+                if (index == 0)
+                    fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
                 string8 error = response.header.errors[index];
                 fprintf(stderr, "ERROR: %s\n", error.data);
             }
@@ -828,12 +846,13 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             scope_exit response_free{
                     [&]() { session_pro_backend_get_pro_status_response_free(&response); }};
 
+            // Verify the response
             for (size_t index = 0; index < response.header.errors_count; index++) {
+                if (index == 0)
+                    fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
                 string8 error = response.header.errors[index];
                 fprintf(stderr, "ERROR: %s\n", error.data);
             }
-
-            // Verify the response
             REQUIRE(response.header.errors_count == 0);
             REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
             REQUIRE(response.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_ACTIVE);
@@ -878,6 +897,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     [&]() { session_pro_backend_get_pro_status_response_free(&response); }};
 
             for (size_t index = 0; index < response.header.errors_count; index++) {
+                if (index == 0)
+                    fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
                 string8 error = response.header.errors[index];
                 fprintf(stderr, "ERROR: %s\n", error.data);
             }
@@ -982,11 +1003,11 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     [&]() { session_pro_backend_get_pro_revocations_response_free(&response); }};
 
             // Verify response
+            INFO("ERROR: JSON response: " << response_json.c_str());
             for (size_t index = 0; index < response.header.errors_count; index++) {
                 string8 error = response.header.errors[index];
                 fprintf(stderr, "ERROR: %s\n", error.data);
             }
-            INFO("RESPONSE: " << response_json);
 
             // Verify the response
             REQUIRE(response.header.errors_count == 0);
@@ -1000,9 +1021,6 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             response.items[response.items_count - 1].gen_index_hash.data,
                             first_pro_proof.gen_index_hash.data,
                             sizeof(first_pro_proof.gen_index_hash)) == 0);
-
-            REQUIRE(response.items[response.items_count - 1].expiry_unix_ts_ms ==
-                    first_pro_proof.expiry_unix_ts_ms);
         }
     }
 #endif

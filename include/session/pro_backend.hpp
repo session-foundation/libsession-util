@@ -304,24 +304,15 @@ struct GetProStatusRequest {
 
 struct ProPaymentItem {
     /// Describes the current status of the consumption of the payment for Session Pro entitlement
+    /// The status should be used to determine which timestamps should be used.
+    ///
+    /// For example, a payment can be in a redeemed state whilst also have a refunded timestamp set
+    /// if the payment was refunded and then the refund was reversed. We preserve all timestamps for
+    /// book-keeping purposes.
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
 
-    /// Unix timestamp of when the payment was expiry. 0 if not activated
-    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts;
-
-    /// Unix timestamp when the payment provider will start to attempt to renew the Session Pro
-    /// subscription. During the period between [grace_unix_ts, expiry_unix_ts] the user continues
-    /// to have entitlement to Session Pro. This is set to 0 if auto-renewal is not enabled.
-    std::chrono::sys_time<std::chrono::milliseconds> grace_unix_ts;
-
-    /// Unix timestamp of when the payment was redeemed. 0 if not activated
-    std::chrono::sys_time<std::chrono::milliseconds> redeemed_unix_ts;
-
-    /// Unix timestamp of when the payment was refunded. 0 if not activated
-    std::chrono::sys_time<std::chrono::milliseconds> refunded_unix_ts;
-
-    /// Subscription duration in seconds
-    std::chrono::seconds subscription_duration;
+    /// Session Pro product/plan item that was purchased
+    SESSION_PRO_BACKEND_PLAN plan;
 
     /// Store front that this particular payment came from
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
@@ -332,19 +323,47 @@ struct ProPaymentItem {
     const session_pro_backend_payment_provider_metadata* payment_provider_metadata =
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA;
 
+    /// Flag indicating whether or not this payment will automatically bill itself at the end of the
+    /// billing cycle.
+    bool auto_renewing;
+
+    /// Unix timestamp of when the payment was witnessed by the Pro Backend. Always set
+    std::chrono::sys_time<std::chrono::milliseconds> unredeemed_unix_ts;
+
+    /// Unix timestamp of when the payment was redeemed. 0 if not activated
+    std::chrono::sys_time<std::chrono::milliseconds> redeemed_unix_ts;
+
+    /// Unix timestamp of when the payment was expiry. 0 if not activated
+    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts;
+
+    /// Duration of the grace period, e.g. when the payment provider will start to attempt to renew
+    /// the Session Pro subscription. During the period between
+    /// [expiry_unix_ts, expiry_unix_ts + grace_period_duration_ms] the user continues to have
+    /// entitlement to Session Pro. This value is only applicable if `auto_renewing` is `true`.
+    std::chrono::milliseconds grace_period_duration_ms;
+
+    /// Unix deadline timestamp of when the user is able to refund the subscription via the payment
+    /// provider. Thereafter the user must initiate a refund manually via Session support.
+    std::chrono::sys_time<std::chrono::milliseconds> platform_refund_expiry_unix_ts;
+
+    /// Unix timestamp of when the payment was revoked or refunded. 0 if not applicable.
+    std::chrono::sys_time<std::chrono::milliseconds> revoked_unix_ts;
+
     /// When payment provider is set to Google Play Store, this is the platform-specific purchase
-    /// token
+    /// token. This information should be considered as confidential and stored appropriately.
     std::string google_payment_token;
 
     /// When payment provider is set to iOS App Store, this is the platform-specific original
-    /// transaction ID
+    /// transaction ID. This information should be considered as confidential and stored
+    /// appropriately.
     std::string apple_original_tx_id;
 
     /// When payment provider is set to iOS App Store, this is the platform-specific transaction ID
+    /// This information should be considered as confidential and stored appropriately.
     std::string apple_tx_id;
 
     /// When payment provider is set to iOS App Store, this is the platform-specific web line order
-    /// ID
+    /// ID. This information should be considered as confidential and stored appropriately.
     std::string apple_web_line_order_id;
 };
 
@@ -355,14 +374,40 @@ struct GetProStatusResponse : public ResponseHeader {
     /// Current Session Pro entitlement status for the master public key
     SESSION_PRO_BACKEND_USER_PRO_STATUS user_status;
 
-    /// Unix timestamp of when the the latest payment will expire. 0 if no payments are available
-    /// for the requested Session Pro master public key.
-    std::chrono::sys_time<std::chrono::milliseconds> latest_expiry_unix_ts;
+    /// Flag to indicate if the user will automatically renew their subscription.
+    bool auto_renewing;
 
-    /// Unix timestamp when the payment provider will start to attempt to renew the Session Pro
-    /// subscription. During the period between [grace_unix_ts, expiry_unix_ts] the user continues
-    /// to have entitlement to Session Pro. This is set to 0 if auto-renewal is not enabled.
-    std::chrono::sys_time<std::chrono::milliseconds> latest_grace_unix_ts;
+    /// Deadline UNIX timestamp that a user is entitled to Session Pro Proofs. The user is allowed
+    /// to request a Session Pro Proof from the Pro Backend up until this timestamp. Thereafter
+    /// the user is no longer entitled to Session Pro. This deadline includes the grace period if
+    /// applicable.
+    ///
+    /// The grace period is enabled when `auto_renewing` is `true` and is the extra period after a
+    /// user's subscription has elapsed that the payment provider allocates to continue entitlement
+    /// to Session Pro whilst attempting to execute the billing of a Session Pro subscription.
+    ///
+    /// This allows a user to maintain entitlement to Session Pro across billing cycles by giving
+    /// some leeway as to the time required for the payment provider to successfully bill the user.
+    /// This expiry timestamp is hence calculated as:
+    ///
+    ///   expiry_unix_ts_ms = (subscription_expiry_unix_ts + grace_period_duration_ms)
+    ///
+    /// E.g. The subscription expiry timestamp can be calculated by subtracting
+    /// `grace_period_duration_ms` to determine if the user is currently in a grace period. Some
+    /// platforms do not support a grace period so this value can be 0.
+    ///
+    /// Finally, a reminder that the grace period is not activated or included in this deadline
+    /// timestamp if they have configured subscription `auto_renewing` to be off.
+    ///
+    /// This timestamp may be in the past if the user no longer has active payments. Overtime the
+    /// Pro Backend may prune user history and so after long lapses of activity, a user's
+    /// subscription history may be deleted.
+    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts_ms;
+
+    /// Duration that a user is entitled to for their grace period. This value is to be ignored if
+    /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
+    /// subtracting `expiry_unix_ts_ms` from this value.
+    std::chrono::milliseconds grace_period_duration_ms;
 
     /// API: pro/GetProPaymentsResponse::parse
     ///

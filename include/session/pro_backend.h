@@ -37,6 +37,16 @@ typedef enum SESSION_PRO_BACKEND_PAYMENT_STATUS {
 } SESSION_PRO_BACKEND_PAYMENT_STATUS;
 
 /// Must match:
+///   https://github.com/Doy-lee/session-pro-backend/blob/b9fb4301fecbd82e4631536fa378d4c1220b1a4d/base.py#L53
+typedef enum SESSION_PRO_BACKEND_PLAN {
+    SESSION_PRO_BACKEND_PLAN_NIL,
+    SESSION_PRO_BACKEND_PLAN_ONE_MONTH,
+    SESSION_PRO_BACKEND_PLAN_THREE_MONTHS,
+    SESSION_PRO_BACKEND_PLAN_TWELVE_MONTHS,
+    SESSION_PRO_BACKEND_PLAN_COUNT,
+} SESSION_PRO_BACKEND_PLAN;
+
+/// Must match:
 ///   https://github.com/Doy-lee/session-pro-backend/blob/a0e0ba24bc4ab3a062465d861aa57df2269b6dde/server.py#L373
 typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
     SESSION_PRO_BACKEND_USER_PRO_STATUS_NEVER_BEEN_PRO,
@@ -174,16 +184,19 @@ typedef struct session_pro_backend_get_pro_status_request {
 
 typedef struct session_pro_backend_pro_payment_item {
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
-    uint64_t subscription_duration_s;
-    uint64_t grace_unix_ts_ms;
-    uint64_t expiry_unix_ts_ms;
-    uint64_t refunded_unix_ts_ms;
-    uint64_t redeemed_unix_ts_ms;
+    SESSION_PRO_BACKEND_PLAN plan;
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
-
     /// Pointer to payment provider metadata. This pointer is always defined to be pointing to valid
     /// memory when the structure is received through the pro_backend APIs.
     const session_pro_backend_payment_provider_metadata* payment_provider_metadata;
+
+    bool auto_renewing;
+    uint64_t unredeemed_unix_ts_ms;
+    uint64_t redeemed_unix_ts_ms;
+    uint64_t expiry_unix_ts_ms;
+    uint64_t grace_period_duration_ms;
+    uint64_t platform_refund_expiry_unix_ts_ms;
+    uint64_t revoked_unix_ts_ms;
 
     char google_payment_token[128];
     size_t google_payment_token_count;
@@ -202,9 +215,10 @@ typedef struct session_pro_backend_get_pro_status_response {
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
     size_t items_count;
-    uint64_t latest_expiry_unix_ts_ms;
-    uint64_t latest_grace_unix_ts_ms;
     SESSION_PRO_BACKEND_USER_PRO_STATUS status;
+    bool auto_renewing;
+    uint64_t expiry_unix_ts_ms;
+    uint64_t grace_period_duration_ms;
 } session_pro_backend_get_pro_status_response;
 
 /// API: session_pro_backend/add_pro_payment_request_build_sigs

@@ -54,6 +54,9 @@ const T json_require(
         } else if constexpr (session::is_one_of<T, nlohmann::json::array_t>) {
             type = "an array";
             success = it->is_array();
+        } else if constexpr (session::is_one_of<T, bool>) {
+            type = "a boolean";
+            success = it->is_boolean();
         } else {
             static_assert(session::is_one_of<T, nlohmann::json::object_t>);
             type = "an object";
@@ -452,15 +455,15 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
         return result;
     }
     result.user_status = static_cast<SESSION_PRO_BACKEND_USER_PRO_STATUS>(user_status);
+    result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", result.errors);
 
-    uint64_t latest_grace_ts =
-            json_require<uint64_t>(result_obj, "latest_grace_unix_ts_ms", result.errors);
-    uint64_t latest_expiry_ts =
-            json_require<uint64_t>(result_obj, "latest_expiry_unix_ts_ms", result.errors);
-    result.latest_grace_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(latest_grace_ts));
-    result.latest_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(latest_expiry_ts));
+    uint64_t expiry_unix_ts_ms =
+            json_require<uint64_t>(result_obj, "expiry_unix_ts_ms", result.errors);
+    uint64_t grace_period_duration_ms =
+            json_require<uint64_t>(result_obj, "grace_period_duration_ms", result.errors);
+    result.expiry_unix_ts_ms = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(expiry_unix_ts_ms));
+    result.grace_period_duration_ms = std::chrono::milliseconds(grace_period_duration_ms);
 
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
@@ -475,12 +478,17 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
         auto status = json_require<uint64_t>(obj, "status", result.errors);
-        auto grace_ts = json_require<uint64_t>(obj, "grace_unix_ts_ms", result.errors);
-        auto expiry_ts = json_require<uint64_t>(obj, "expiry_unix_ts_ms", result.errors);
-        auto redeemed_ts = json_require<uint64_t>(obj, "redeemed_unix_ts_ms", result.errors);
-        auto refunded_ts = json_require<uint64_t>(obj, "refunded_unix_ts_ms", result.errors);
-        auto sub_duration_s = json_require<uint64_t>(obj, "subscription_duration_s", result.errors);
+        auto plan = json_require<uint64_t>(obj, "plan", result.errors);
         auto payment_provider = json_require<uint32_t>(obj, "payment_provider", result.errors);
+        auto auto_renewing = json_require<bool>(obj, "auto_renewing", result.errors);
+        auto unredeemed_ts = json_require<uint64_t>(obj, "unredeemed_unix_ts_ms", result.errors);
+        auto redeemed_ts = json_require<uint64_t>(obj, "redeemed_unix_ts_ms", result.errors);
+        auto expiry_ts = json_require<uint64_t>(obj, "expiry_unix_ts_ms", result.errors);
+        auto grace_period_duration_ms =
+                json_require<uint64_t>(obj, "grace_period_duration_ms", result.errors);
+        auto platform_refund_expiry_ts =
+                json_require<uint64_t>(obj, "platform_refund_expiry_unix_ts_ms", result.errors);
+        auto revoked_ts = json_require<uint64_t>(obj, "revoked_unix_ts_ms", result.errors);
 
         ProPaymentItem item = {};
         if (status > SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL &&
@@ -490,15 +498,12 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
             result.errors.push_back(fmt::format("Status value was out-of-bounds: {}", status));
         }
 
-        item.grace_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(grace_ts));
-        item.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(expiry_ts));
-        item.redeemed_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(redeemed_ts));
-        item.refunded_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(refunded_ts));
-        item.subscription_duration = std::chrono::seconds(sub_duration_s);
+        if (plan > SESSION_PRO_BACKEND_PLAN_NIL && plan < SESSION_PRO_BACKEND_PLAN_COUNT) {
+            item.plan = static_cast<SESSION_PRO_BACKEND_PLAN>(plan);
+        } else {
+            result.errors.push_back(fmt::format("Plan value was out-of-bounds: {}", plan));
+        }
+
         if (payment_provider > SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL &&
             payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT) {
             item.payment_provider =
@@ -510,6 +515,18 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
                     fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
         }
 
+        item.auto_renewing = auto_renewing;
+        item.unredeemed_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(unredeemed_ts));
+        item.redeemed_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(redeemed_ts));
+        item.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(expiry_ts));
+        item.grace_period_duration_ms = std::chrono::milliseconds(grace_period_duration_ms);
+        item.platform_refund_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(platform_refund_expiry_ts));
+        item.revoked_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(revoked_ts));
         switch (item.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
@@ -940,29 +957,36 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
     result.items_count = cpp.items.size();
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
             &arena, result.items_count * sizeof(*result.items));
-    result.latest_expiry_unix_ts_ms = cpp.latest_expiry_unix_ts.time_since_epoch().count();
-    result.latest_grace_unix_ts_ms = cpp.latest_grace_unix_ts.time_since_epoch().count();
+    result.auto_renewing = cpp.auto_renewing;
+    result.expiry_unix_ts_ms = cpp.expiry_unix_ts_ms.time_since_epoch().count();
+    result.grace_period_duration_ms = cpp.grace_period_duration_ms.count();
 
     for (size_t index = 0; index < result.items_count; ++index) {
         const ProPaymentItem& src = cpp.items[index];
         session_pro_backend_pro_payment_item& dest = result.items[index];
         dest.status = src.status;
-        dest.subscription_duration_s =
-                std::chrono::duration_cast<std::chrono::seconds>(src.subscription_duration).count();
-        dest.grace_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                        src.grace_unix_ts.time_since_epoch())
-                                        .count();
-        dest.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                         src.expiry_unix_ts.time_since_epoch())
-                                         .count();
-        dest.refunded_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                           src.refunded_unix_ts.time_since_epoch())
-                                           .count();
+        dest.plan = src.plan;
+        dest.payment_provider = src.payment_provider;
+        dest.payment_provider_metadata = src.payment_provider_metadata;
+        dest.unredeemed_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             src.unredeemed_unix_ts.time_since_epoch())
+                                             .count();
         dest.redeemed_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                            src.redeemed_unix_ts.time_since_epoch())
                                            .count();
-        dest.payment_provider = src.payment_provider;
-        dest.payment_provider_metadata = src.payment_provider_metadata;
+        dest.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         src.expiry_unix_ts.time_since_epoch())
+                                         .count();
+        dest.grace_period_duration_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(src.grace_period_duration_ms)
+                        .count();
+        dest.platform_refund_expiry_unix_ts_ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                        src.platform_refund_expiry_unix_ts.time_since_epoch())
+                        .count();
+        dest.revoked_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          src.revoked_unix_ts.time_since_epoch())
+                                          .count();
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
