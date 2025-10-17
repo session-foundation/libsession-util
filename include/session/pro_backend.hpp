@@ -18,10 +18,10 @@
 /// 1. Build a request with `AddProPaymentRequest::to_json` from a Session Pro payment and submit it
 ///    to the backend to register the specified Ed25519 keys for Session Pro.
 ///
-///    Server responds JSON to be parsed with `GetProPaymentRequest::parse`. Clients should
-///    validate the response and update their `UserProfile` by constructing a `ProConfig` with the
-///    `proof` from the response and filling in the relevant rotating private key that the proof was
-///    authorised for.
+///    Server responds JSON to be parsed with `AddProPaymentOrGetProProofResponse::parse`. Clients
+///    should validate the response and update their `UserProfile` by constructing a `ProConfig`
+///    with the `proof` from the response and filling in the relevant rotating private key that the
+///    proof was authorised for.
 ///
 ///    The server will only respond successfully if it can also independently verify the purchase
 ///    otherwise an error is returned and can be read from the `ResponseHeader` after parsing the
