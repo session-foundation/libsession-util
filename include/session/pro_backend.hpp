@@ -11,17 +11,17 @@
 /// Helper functions to construct payloads to communicate with the Session Pro Backend. The data
 /// structures here are largely bindings to the endpoints exposed on the Session Pro Backend:
 ///
-///   github.com/Doy-lee/session-pro-backend/blob/2afe310adad52f211e3b2cfcbdfc9eda6ff1778e/server.py#L24
+///   https://github.com/Doy-lee/session-pro-backend/blob/06e82c9d5b5a0a881d12d0182358219a4081acf5/server.py#L2
 ///
 /// The high level summary of the functionality in this file. Clients can:
 ///
 /// 1. Build a request with `AddProPaymentRequest::to_json` from a Session Pro payment and submit it
 ///    to the backend to register the specified Ed25519 keys for Session Pro.
 ///
-///    Server responds JSON to be parsed with `GetProPaymentsRequest::parse`. Clients should
+///    Server responds JSON to be parsed with `GetProPaymentRequest::parse`. Clients should
 ///    validate the response and update their `UserProfile` by constructing a `ProConfig` with the
-///    proof from the response by using `ProProof::from_pro_backend_response()` and filling in the
-///    relevant private key that the proof was authorised for.
+///    `proof` from the response and filling in the relevant rotating private key that the proof was
+///    authorised for.
 ///
 ///    The server will only respond successfully if it can also independently verify the purchase
 ///    otherwise an error is returned and can be read from the `ResponseHeader` after parsing the
@@ -29,7 +29,14 @@
 ///
 /// 2. Attach the `ProProof` constructed from (1) into their messages. Libsession has helper
 ///    functions to embed the proof into their messages via the helper functions in the Session
-///    Protocol header file.
+///    Protocol header file. This is done by assigning the `ProProof` into the
+///    `Content.proMessage.proof` protobuf structure. Additionally the caller will use
+///    `pro_features_for_utf8/16` to determine the correct flags to assign the `features` to
+///    `Content.proMessage.flags` in the protobuf structure.
+///
+///    Lastly the high-level libsession encoding functions accept the rotating private key to which
+///    the protobuf encoded plaintext content will be signed and the payload augmented as necessary
+///    to enable pro features for that message.
 ///
 /// 3. Periodically poll the global revocation list which overrides the validity of current
 ///    circulating proofs. This is done by constructing the request via
@@ -409,7 +416,7 @@ struct GetProStatusResponse : public ResponseHeader {
     /// subtracting `expiry_unix_ts_ms` from this value.
     std::chrono::milliseconds grace_period_duration_ms;
 
-    /// API: pro/GetProPaymentsResponse::parse
+    /// API: pro/GetProStatusResponse::parse
     ///
     /// Parses a JSON string into the response struct.
     ///
