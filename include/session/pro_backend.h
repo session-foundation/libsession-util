@@ -55,6 +55,12 @@ typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
     SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT,
 } SESSION_PRO_BACKEND_USER_PRO_STATUS;
 
+typedef enum SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT {
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_SUCCESS,
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR,
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_COUNT,
+} SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT;
+
 /// Bundle of hard-coded URLs that an application may want to redirect users to in various
 /// scenarios.
 typedef struct session_pro_urls session_pro_urls;
@@ -277,6 +283,7 @@ struct session_pro_backend_get_pro_status_response {
     session_pro_backend_pro_payment_item* items;
     size_t items_count;
     SESSION_PRO_BACKEND_USER_PRO_STATUS status;
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
     bool auto_renewing;
     uint64_t expiry_unix_ts_ms;
     uint64_t grace_period_duration_ms;

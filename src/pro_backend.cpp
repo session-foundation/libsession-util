@@ -455,6 +455,16 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
         return result;
     }
     result.user_status = static_cast<SESSION_PRO_BACKEND_USER_PRO_STATUS>(user_status);
+
+    uint32_t error_report = json_require<uint32_t>(result_obj, "error_report", result.errors);
+    if (error_report >= SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_COUNT) {
+        result.errors.push_back(
+                fmt::format("Error report value was out-of-bounds: {}", user_status));
+        return result;
+    }
+    result.error_report =
+            static_cast<SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT>(error_report);
+
     result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", result.errors);
 
     uint64_t expiry_unix_ts_ms =
@@ -954,6 +964,7 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
     result.header.status = cpp.status;
     result.status = cpp.user_status;
+    result.error_report = cpp.error_report;
     result.items_count = cpp.items.size();
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
             &arena, result.items_count * sizeof(*result.items));

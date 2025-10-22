@@ -548,6 +548,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
                     {"status", SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED},
+                    {"error_report", SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR},
                     {"auto_renewing", true},
                     {"expiry_unix_ts_ms", unix_ts_ms + 2},
                     {"grace_period_duration_ms", 1000},
@@ -582,6 +583,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.header.errors_count == 0);
                 REQUIRE(result.header.errors == nullptr);
                 REQUIRE(result.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED);
+                REQUIRE(result.error_report ==
+                        SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR);
                 REQUIRE(result.items_count == 1);
                 REQUIRE(result.auto_renewing == true);
                 REQUIRE(result.grace_period_duration_ms == 1000);
