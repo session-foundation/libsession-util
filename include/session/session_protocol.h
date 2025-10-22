@@ -40,13 +40,14 @@ struct session_protocol_pro_signed_message {
     span_u8 msg;
 };
 
-typedef struct session_protocol_pro_proof {
+typedef struct session_protocol_pro_proof session_protocol_pro_proof;
+struct session_protocol_pro_proof {
     uint8_t version;
     bytes32 gen_index_hash;
     bytes32 rotating_pubkey;
     uint64_t expiry_unix_ts_ms;
     bytes64 sig;
-} session_protocol_pro_proof;
+};
 
 // Bit flags for features that are not currently able to be determined by the state stored in
 // Libsession. They are to be passed in by the client into `get_pro_msg_for_features` to return the

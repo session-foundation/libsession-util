@@ -57,13 +57,14 @@ typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
 
 /// Bundle of hard-coded URLs that an application may want to redirect users to in various
 /// scenarios.
-typedef struct session_pro_urls {
+typedef struct session_pro_urls session_pro_urls;
+struct session_pro_urls {
     string8 roadmap;
     string8 privacy_policy;
     string8 terms_of_conditions;
     string8 pro_access_not_found;
     string8 support_url;
-} session_pro_urls;
+};
 
 // clang-format off
 const session_pro_urls SESSION_PRO_URLS = {
@@ -79,7 +80,9 @@ const session_pro_urls SESSION_PRO_URLS = {
 /// string substitution typically. This structure is stored in a global table
 /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA` that is can be indexed into using the
 /// SESSION_PRO_BACKEND_PAYMENT_PROVIDER value directly.
-typedef struct session_pro_backend_payment_provider_metadata {
+typedef struct session_pro_backend_payment_provider_metadata
+        session_pro_backend_payment_provider_metadata;
+struct session_pro_backend_payment_provider_metadata {
     string8 device;
     string8 store;
     string8 platform;
@@ -95,7 +98,7 @@ typedef struct session_pro_backend_payment_provider_metadata {
     string8 refund_support_url;
     string8 update_subscription_url;
     string8 cancel_subscription_url;
-} session_pro_backend_payment_provider_metadata;
+};
 
 /// The centralised list of common URLs and properties for handling payment provider specific
 /// integrations. Especially useful for cross-device management of Session Pro subscriptions.
@@ -135,90 +138,110 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
 };
 // clang-format on
 
-typedef struct session_pro_backend_response_header {
+typedef struct session_pro_backend_response_header session_pro_backend_response_header;
+struct session_pro_backend_response_header {
     uint32_t status;
     /// Array of error messages (NULL if no errors), with errors_count elements
     string8* errors;
     size_t errors_count;
     uint8_t* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
-} session_pro_backend_response_header;
+};
 
-typedef struct {
+typedef struct session_pro_backend_to_json session_pro_backend_to_json;
+struct session_pro_backend_to_json {
     bool success;  /// True if conversion to JSON was successful, false if out-of-memory
     string8 json;
-} session_pro_backend_to_json;
+};
 
-typedef struct session_pro_backend_master_rotating_signatures {
+typedef struct session_pro_backend_master_rotating_signatures
+        session_pro_backend_master_rotating_signatures;
+struct session_pro_backend_master_rotating_signatures {
     bool success;
     char error[256];
     size_t error_count;
     bytes64 master_sig;
     bytes64 rotating_sig;
-} session_pro_backend_master_rotating_signatures;
+};
 
-typedef struct session_pro_backend_signature {
+typedef struct session_pro_backend_signature session_pro_backend_signature;
+struct session_pro_backend_signature {
     bool success;
     char error[256];
     size_t error_count;
     bytes64 sig;
-} session_pro_backend_signature;
+};
 
-typedef struct session_pro_backend_add_pro_payment_user_transaction {
+typedef struct session_pro_backend_add_pro_payment_user_transaction
+        session_pro_backend_add_pro_payment_user_transaction;
+struct session_pro_backend_add_pro_payment_user_transaction {
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
     char payment_id[128];
     size_t payment_id_count;
-} session_pro_backend_add_pro_payment_user_transaction;
+};
 
-typedef struct session_pro_backend_add_pro_payment_request {
+typedef struct session_pro_backend_add_pro_payment_request
+        session_pro_backend_add_pro_payment_request;
+struct session_pro_backend_add_pro_payment_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes32 rotating_pkey;
     session_pro_backend_add_pro_payment_user_transaction payment_tx;
     bytes64 master_sig;
     bytes64 rotating_sig;
-} session_pro_backend_add_pro_payment_request;
+};
 
-typedef struct session_pro_backend_get_pro_proof_request {
+typedef struct session_pro_backend_get_pro_proof_request session_pro_backend_get_pro_proof_request;
+struct session_pro_backend_get_pro_proof_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes32 rotating_pkey;
     uint64_t unix_ts_ms;
     bytes64 master_sig;
     bytes64 rotating_sig;
-} session_pro_backend_get_pro_proof_request;
+};
 
-typedef struct session_pro_backend_add_pro_payment_or_get_pro_proof_response {
+typedef struct session_pro_backend_add_pro_payment_or_get_pro_proof_response
+        session_pro_backend_add_pro_payment_or_get_pro_proof_response;
+struct session_pro_backend_add_pro_payment_or_get_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
-} session_pro_backend_add_pro_payment_or_get_pro_proof_response;
+};
 
-typedef struct session_pro_backend_get_pro_revocations_request {
+typedef struct session_pro_backend_get_pro_revocations_request
+        session_pro_backend_get_pro_revocations_request;
+struct session_pro_backend_get_pro_revocations_request {
     uint8_t version;
     uint32_t ticket;
-} session_pro_backend_get_pro_revocations_request;
+};
 
-typedef struct session_pro_backend_pro_revocation_item {
+typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
+struct session_pro_backend_pro_revocation_item {
     bytes32 gen_index_hash;
     uint64_t expiry_unix_ts_ms;
-} session_pro_backend_pro_revocation_item;
+};
 
-typedef struct session_pro_backend_get_pro_revocations_response {
+typedef struct session_pro_backend_get_pro_revocations_response
+        session_pro_backend_get_pro_revocations_response;
+struct session_pro_backend_get_pro_revocations_response {
     session_pro_backend_response_header header;
     uint32_t ticket;
     /// Array of items, with items_count elements
     session_pro_backend_pro_revocation_item* items;
     size_t items_count;
-} session_pro_backend_get_pro_revocations_response;
+};
 
-typedef struct session_pro_backend_get_pro_status_request {
+typedef struct session_pro_backend_get_pro_status_request
+        session_pro_backend_get_pro_status_request;
+struct session_pro_backend_get_pro_status_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes64 master_sig;
     uint64_t unix_ts_ms;
     bool history;
-} session_pro_backend_get_pro_status_request;
+};
 
-typedef struct session_pro_backend_pro_payment_item {
+typedef struct session_pro_backend_pro_payment_item session_pro_backend_pro_payment_item;
+struct session_pro_backend_pro_payment_item {
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
     SESSION_PRO_BACKEND_PLAN plan;
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
@@ -244,9 +267,11 @@ typedef struct session_pro_backend_pro_payment_item {
     size_t apple_tx_id_count;
     char apple_web_line_order_id[128];
     size_t apple_web_line_order_id_count;
-} session_pro_backend_pro_payment_item;
+};
 
-typedef struct session_pro_backend_get_pro_status_response {
+typedef struct session_pro_backend_get_pro_status_response
+        session_pro_backend_get_pro_status_response;
+struct session_pro_backend_get_pro_status_response {
     session_pro_backend_response_header header;
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
@@ -255,7 +280,7 @@ typedef struct session_pro_backend_get_pro_status_response {
     bool auto_renewing;
     uint64_t expiry_unix_ts_ms;
     uint64_t grace_period_duration_ms;
-} session_pro_backend_get_pro_status_response;
+};
 
 /// API: session_pro_backend/add_pro_payment_request_build_sigs
 ///

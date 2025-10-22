@@ -18,7 +18,7 @@ TEST_CASE("Pro", "[config][pro]") {
 
     // Setup the Pro data structure
     session::config::ProConfig pro_cpp = {};
-    pro_config pro = {};
+    pro_pro_config pro = {};
     {
         // CPP
         pro_cpp.rotating_privkey = rotating_sk;

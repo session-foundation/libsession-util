@@ -11,10 +11,11 @@ extern "C" {
 #include "../export.h"
 #include "session/session_protocol.h"
 
-typedef struct pro_config {
+typedef struct pro_pro_config pro_pro_config;
+struct pro_pro_config {
     bytes64 rotating_privkey;
     session_protocol_pro_proof proof;
-} pro_pro_config;
+};
 
 /// Verify the proof was signed by the `verify_pubkey` and that the `rotating_privkey` in the `pro`
 /// config rederives to the `rotating_pubkey` embedded in the proof.
