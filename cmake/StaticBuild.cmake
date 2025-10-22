@@ -234,32 +234,36 @@ endif()
 # SQLCipher configuration
 if(ENABLE_DATABASE)
     set(sqlcipher_extra_configure)
-    set(sqlcipher_extra_cflags)
+    set(sqlcipher_extra_cflags "-DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5")
+    set(sqlcipher_extra_cxxflags)
     set(sqlcipher_extra_ldflags)
-    
     if(APPLE)
         # On macOS, use CommonCrypto (installed by default).
         set(sqlcipher_extra_configure "--with-crypto-lib=commoncrypto")
-        set(sqlcipher_extra_cflags " -DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5 -DSQLCIPHER_CRYPTO_COMMONCRYPTO")
-        set(sqlcipher_extra_ldflags " -framework Security -framework Foundation -framework CoreFoundation")
+        set(sqlcipher_extra_cflags    "${sqlcipher_extra_cflags} ${apple_cflags_arch} -DSQLCIPHER_CRYPTO_COMMONCRYPTO")
+        set(sqlcipher_extra_cxxflags  "${apple_cxxflags_arch}")
+        set(sqlcipher_extra_ldflags   "${apple_ldflags_arch} -framework Security -framework Foundation -framework CoreFoundation")
     else()
         # On Linux, Windows, etc., use OpenSSL.
         find_package(OpenSSL REQUIRED)
-        set(sqlcipher_extra_cflags " -DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5 -DSQLCIPHER_CRYPTO_OPENSSL")
+        set(sqlcipher_extra_cflags "-DSQLCIPHER_CRYPTO_OPENSSL")
     endif()
 
     build_external(sqlcipher
-        CONFIGURE_COMMAND ./configure ${build_host} --disable-shared --prefix=${DEPS_DESTDIR} --with-pic --enable-fts5 --enable-static ${sqlcipher_extra_configure}
-            "CC=${deps_cc}" "CXX=${deps_cxx}" "CFLAGS=${deps_CFLAGS}${apple_cflags_arch}${sqlcipher_extra_cflags}" "CXXFLAGS=${deps_CXXFLAGS}${apple_cxxflags_arch}"
-            "LDFLAGS=-L${DEPS_DESTDIR}/lib${apple_ldflags_arch}${sqlcipher_extra_ldflags}" ${cross_rc} CC_FOR_BUILD=cc CPP_FOR_BUILD=cpp
-            "--disable-tcl" "--disable-readline"
+        CONFIGURE_COMMAND ./configure ${build_host} --disable-shared --prefix=${DEPS_DESTDIR}
+        --with-pic --enable-fts5 --enable-static --disable-tcl --disable-readline ${sqlcipher_extra_configure}
+        "CC=${deps_cc}"
+        "CXX=${deps_cxx}"
+        "CFLAGS=${deps_CFLAGS} ${sqlcipher_extra_cflags} -DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5"
+        "CXXFLAGS=${deps_CXXFLAGS} ${sqlcipher_extra_cxxflags}"
+        "LDFLAGS=-L${DEPS_DESTDIR}/lib ${sqlcipher_extra_ldflags}"
+        ${cross_rc}
     )
     add_static_target(sqlcipher::sqlcipher sqlcipher_external libsqlcipher.a)
 
     if(APPLE)
-        add_library(sqlcipher_frameworks INTERFACE)
-        target_link_libraries(sqlcipher_frameworks INTERFACE "-framework CoreFoundation" "-framework Security" "-framework Foundation")
-        add_dependencies(sqlcipher::sqlcipher sqlcipher_frameworks)
-        target_link_libraries(sqlcipher::sqlcipher INTERFACE sqlcipher_frameworks)
+        target_link_libraries(sqlcipher::sqlcipher INTERFACE "-framework CoreFoundation" "-framework Security" "-framework Foundation")
+    else()
+        target_link_libraries(sqlcipher::sqlcipher INTERFACE OpenSSL::SSL)
     endif()
 endif()

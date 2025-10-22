@@ -3,6 +3,9 @@
 ## Build
 
 ```
+# Pre-requisites
+apt install cmake build-essential git tcl libssl-dev m4
+
 # Configure the build
 #
 # Options
