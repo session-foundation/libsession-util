@@ -55,6 +55,26 @@ typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
     SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT,
 } SESSION_PRO_BACKEND_USER_PRO_STATUS;
 
+/// Bundle of hard-coded URLs that an application may want to redirect users to in various
+/// scenarios.
+typedef struct session_pro_urls {
+    string8 roadmap;
+    string8 privacy_policy;
+    string8 terms_of_conditions;
+    string8 pro_access_not_found;
+    string8 support_url;
+} session_pro_urls;
+
+// clang-format off
+const session_pro_urls SESSION_PRO_URLS = {
+    .roadmap              = string8_literal("https://getsession.org/pro-roadmap"),
+    .privacy_policy       = string8_literal("https://getsession.org/pro/privacy"),
+    .terms_of_conditions  = string8_literal("https://getsession.org/pro/terms"),
+    .pro_access_not_found = string8_literal("https://sessionapp.zendesk.com/hc/sections/4416517450649-Support"),
+    .support_url          = string8_literal("https://getsession.org/pro-form"),
+};
+// clang-format on
+
 /// Bundle of hard-coded strings that are associated with each platform for clients to use for
 /// string substitution typically. This structure is stored in a global table
 /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA` that is can be indexed into using the
@@ -63,9 +83,18 @@ typedef struct session_pro_backend_payment_provider_metadata {
     string8 device;
     string8 store;
     string8 platform;
-    string8 platformAccount;
+    string8 platform_account;
     string8 refund_url;
-    string8 subscription_url;
+
+    /// Some platforms disallow a refund via their native support channels after some time period
+    /// (e.g. 48 hours after a purchase on Google, refunds must be dealt by the developers
+    /// themselves). If a platform does not have this restriction, this URL is typically the same as
+    /// the `refund_url`.
+    string8 refund_after_platform_deadline_url;
+
+    string8 refund_support_url;
+    string8 update_subscription_url;
+    string8 cancel_subscription_url;
 } session_pro_backend_payment_provider_metadata;
 
 /// The centralised list of common URLs and properties for handling payment provider specific
@@ -73,28 +102,35 @@ typedef struct session_pro_backend_payment_provider_metadata {
 // clang-format off
 const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT] = {
     /*SESSION_PRO_PAYMENT_PROVIDER_NIL*/ {
-        .device           = string8_literal(""),
-        .store            = string8_literal(""),
-        .platform         = string8_literal(""),
-        .platformAccount  = string8_literal(""),
-        .refund_url       = string8_literal(""),
-        .subscription_url = string8_literal(""),
+        .device                             = string8_literal(""),
+        .store                              = string8_literal(""),
+        .platform                           = string8_literal(""),
+        .platform_account                   = string8_literal(""),
+        .refund_url                         = string8_literal(""),
+        .update_subscription_url            = string8_literal(""),
+        .cancel_subscription_url            = string8_literal(""),
     },
     /*SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE*/ {
-        .device           = string8_literal("Android"),
-        .store            = string8_literal("Google Play Store"),
-        .platform         = string8_literal("Google"),
-        .platformAccount  = string8_literal("Google account"),
-        .refund_url       = string8_literal("https://getsession.org/android-refund"),
-        .subscription_url = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger&sku=SESSION_PRO_MONTHLY"),
+        .device                             = string8_literal("Android"),
+        .store                              = string8_literal("Google Play Store"),
+        .platform                           = string8_literal("Google"),
+        .platform_account                   = string8_literal("Google account"),
+        .refund_url                         = string8_literal("https://support.google.com/googleplay/workflow/9813244?"),
+        .refund_after_platform_deadline_url = string8_literal("https://getsession.org/android-refund"),
+        .refund_support_url                 = string8_literal("https://getsession.org/android-refund"),
+        .update_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
+        .cancel_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
     },
     /*SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE*/ {
-        .device           = string8_literal("iOS"),
-        .store            = string8_literal("Apple App Store"),
-        .platform         = string8_literal("Apple"),
-        .platformAccount  = string8_literal("Apple account"),
-        .refund_url       = string8_literal("https://support.apple.com/118223"),
-        .subscription_url = string8_literal("https://account.apple.com/account/manage/section/subscriptions")
+        .device                             = string8_literal("iOS"),
+        .store                              = string8_literal("Apple App Store"),
+        .platform                           = string8_literal("Apple"),
+        .platform_account                   = string8_literal("Apple account"),
+        .refund_url                         = string8_literal("https://support.apple.com/118223"),
+        .refund_after_platform_deadline_url = string8_literal("https://support.apple.com/118223"),
+        .refund_support_url                 = string8_literal("https://support.apple.com/118224"),
+        .update_subscription_url            = string8_literal("https://apps.apple.com/account/subscriptions"),
+        .cancel_subscription_url            = string8_literal("https://account.apple.com/account/manage/section/subscriptions"),
     }
 };
 // clang-format on
