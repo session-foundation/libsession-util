@@ -4,7 +4,7 @@
 
 ```
 # Pre-requisites
-apt install cmake build-essential git tcl libssl-dev m4
+apt install cmake build-essential git tcl libssl-dev m4 pkg-config
 
 # Configure the build
 #
