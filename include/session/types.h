@@ -44,6 +44,11 @@ struct bytes64 {
     uint8_t data[64];
 };
 
+typedef struct bytes48 bytes48;
+struct bytes48 {
+    uint8_t data[48];
+};
+
 /// Basic bump allocating arena
 typedef struct arena_t arena_t;
 struct arena_t {

@@ -1,22 +1,85 @@
 #include <oxenc/hex.h>
+#include <sodium.h>
+#include <sqlcipher/sqlite3.h>
 
 #include <catch2/catch_test_macros.hpp>
-#include <session/util.hpp>
-#include <sqlcipher/sqlite3.h>
 #include <iostream>
+#include <session/util.hpp>
 
 #include "session/database/connection.hpp"
+#include "session/pro_backend.hpp"
 #include "utils.hpp"
 
-const std::string test_db_path = "";
-const std::string test_db_key = "";
-
 TEST_CASE("Database", "[database][open]") {
-    auto db = session::database::Connection(test_db_path, test_db_key);
+    session::cleared_array<48> raw_key = {};
+    randombytes_buf(raw_key.data(), raw_key.size());
+    auto db = session::database::Connection(":memory:", raw_key);
+}
 
-    db.query("SELECT id, name FROM profile", [&](sqlite3_stmt* stmt) {
-        std::string id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-        std::string name = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        std::cout << "RAWR " + id + ", " + name << std::endl;
-    });
+TEST_CASE("Database", "[database][pro][revocations]") {
+    session::cleared_array<48> raw_key = {};
+    randombytes_buf(raw_key.data(), raw_key.size());
+    auto db = session::database::Connection(":memory:", raw_key);
+
+    // Check that the DB has no revocations in it
+    size_t db_item_count = db.get_pro_revocations_buffer(nullptr, 0, 0);
+    REQUIRE(db_item_count == 0);
+
+    // Create the revocations we will put into the DB
+    uint64_t unix_ts_ms = 1698765432ULL * 1000;  // Arbitrary timestamp
+    auto unix_ts =
+            std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(unix_ts_ms));
+
+    session::pro_backend::ProRevocationItem src_items[] = {
+            {
+                    .gen_index_hash = {0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+                                       0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef,
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                                       0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
+                    .expiry_unix_ts = unix_ts,
+            },
+            {
+                    .gen_index_hash = {0x33, 0xa1, 0xc4, 0x4e, 0x60, 0x94, 0x48, 0x8f,
+                                       0x5c, 0xeb, 0xe2, 0x4b, 0xfc, 0xf9, 0x89, 0xda,
+                                       0x07, 0xdd, 0xc4, 0x8d, 0xe2, 0xae, 0x86, 0x6c,
+                                       0x8c, 0x78, 0xb9, 0x16, 0x60, 0xc8, 0x49, 0xf1},
+                    .expiry_unix_ts = unix_ts,
+            },
+    };
+
+    // Add the items
+    session::database::AddResult add = db.add_pro_revocations(src_items);
+    INFO("Add failed: " << sqlite3_errstr(add.return_code));
+    REQUIRE(add.success);
+    REQUIRE(add.return_code == SQLITE_OK);
+
+    // Count the number of revocations in the DB (should be 2 as we've inserted them)
+    db_item_count = db.get_pro_revocations_buffer(nullptr, 0, 0);
+    REQUIRE(db_item_count == 2);
+
+    // Check that the revocations was in the DB
+    std::vector<session::pro_backend::ProRevocationItem> db_items = db.get_pro_revocations();
+    REQUIRE(src_items[0].gen_index_hash == db_items[0].gen_index_hash);
+    REQUIRE(src_items[0].expiry_unix_ts == db_items[0].expiry_unix_ts);
+    REQUIRE(src_items[1].gen_index_hash == db_items[1].gen_index_hash);
+    REQUIRE(src_items[1].expiry_unix_ts == db_items[1].expiry_unix_ts);
+
+    // Delete the first item (src[0]) from the DB
+    session::pro_backend::ProRevocationItem delete_item = src_items[0];
+    session::database::DeleteResult delete_result =
+            db.delete_pro_revocations(std::span(&delete_item, 1));
+    INFO("Delete failed: " << sqlite3_errstr(delete_result.return_code));
+    REQUIRE(delete_result.success);
+    REQUIRE(delete_result.return_code == SQLITE_OK);
+    REQUIRE(delete_result.count == 1);
+
+    // Count the number of revocations in the DB (should be 1 as we've deleted one of them)
+    db_item_count = db.get_pro_revocations_buffer(nullptr, 0, 0);
+    REQUIRE(db_item_count == 1);
+
+    // Verify that the DB now has just the item at src[1]
+    std::vector<session::pro_backend::ProRevocationItem> db_items_after_delete = db.get_pro_revocations();
+    REQUIRE(db_items_after_delete.size() == 1);
+    REQUIRE(src_items[1].gen_index_hash == db_items_after_delete[0].gen_index_hash);
+    REQUIRE(src_items[1].expiry_unix_ts == db_items_after_delete[0].expiry_unix_ts);
 }
