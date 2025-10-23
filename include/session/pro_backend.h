@@ -116,6 +116,8 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
         .platform                           = string8_literal(""),
         .platform_account                   = string8_literal(""),
         .refund_url                         = string8_literal(""),
+        .refund_after_platform_deadline_url = string8_literal(""),
+        .refund_support_url                 = string8_literal(""),
         .update_subscription_url            = string8_literal(""),
         .cancel_subscription_url            = string8_literal(""),
     },
