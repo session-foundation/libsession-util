@@ -67,7 +67,7 @@ typedef struct session_pro_urls session_pro_urls;
 struct session_pro_urls {
     string8 roadmap;
     string8 privacy_policy;
-    string8 terms_of_conditions;
+    string8 terms_of_service;
     string8 pro_access_not_found;
     string8 support_url;
 };
@@ -76,7 +76,7 @@ struct session_pro_urls {
 const session_pro_urls SESSION_PRO_URLS = {
     .roadmap              = string8_literal("https://getsession.org/pro-roadmap"),
     .privacy_policy       = string8_literal("https://getsession.org/pro/privacy"),
-    .terms_of_conditions  = string8_literal("https://getsession.org/pro/terms"),
+    .terms_of_service     = string8_literal("https://getsession.org/pro/terms"),
     .pro_access_not_found = string8_literal("https://sessionapp.zendesk.com/hc/sections/4416517450649-Support"),
     .support_url          = string8_literal("https://getsession.org/pro-form"),
 };
