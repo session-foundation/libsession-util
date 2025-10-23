@@ -64,7 +64,7 @@ bool ProConfig::load(const dict& root) {
         if (!maybe_expiry_unix_ts_ms)
             return false;
 
-        version = *version;
+        proof.version = *version;
         std::memcpy(
                 proof.gen_index_hash.data(),
                 maybe_gen_index_hash->data(),
