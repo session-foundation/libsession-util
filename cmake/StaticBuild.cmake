@@ -231,38 +231,57 @@ if(MINGW)
     link_libraries(-Wl,-Bstatic -lpthread)
 endif()
 
-# SQLCipher configuration
 if(ENABLE_DATABASE)
     set(sqlcipher_extra_configure)
-    set(sqlcipher_extra_cflags "-DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5")
+    set(sqlcipher_extra_cflags)
     set(sqlcipher_extra_cxxflags)
     set(sqlcipher_extra_ldflags)
+    set(sqlcipher_compile_definitions)
+    list(APPEND sqlcipher_compile_definitions
+        SQLITE_HAS_CODEC
+        SQLITE_TEMP_STORE=3
+        SQLITE_ENABLE_FTS5
+    )
+
     if(APPLE)
-        # On macOS, use CommonCrypto (installed by default).
-        set(sqlcipher_extra_configure "--with-crypto-lib=commoncrypto")
-        set(sqlcipher_extra_cflags    "${sqlcipher_extra_cflags} ${apple_cflags_arch} -DSQLCIPHER_CRYPTO_COMMONCRYPTO")
-        set(sqlcipher_extra_cxxflags  "${apple_cxxflags_arch}")
-        set(sqlcipher_extra_ldflags   "${apple_ldflags_arch} -framework Security -framework Foundation -framework CoreFoundation")
+        # On macOS, use CommonCrypto (comes with the OS)
+        list(APPEND sqlcipher_extra_configure --with-crypto-lib=commoncrypto)
+        list(APPEND sqlcipher_extra_cflags ${apple_cflags_arch})
+        list(APPEND sqlcipher_extra_cxxflags ${apple_cxxflags_arch})
+        list(APPEND sqlcipher_extra_ldflags ${apple_ldflags_arch} -framework Security -framework Foundation -framework CoreFoundation)
+        list(APPEND sqlcipher_compile_definitions SQLCIPHER_CRYPTO_COMMONCRYPTO)
     else()
-        # On Linux, Windows, etc., use OpenSSL.
+        # On Linux, Windows, etc., use OpenSSL
         find_package(OpenSSL REQUIRED)
-        set(sqlcipher_extra_cflags "-DSQLCIPHER_CRYPTO_OPENSSL")
+        list(APPEND sqlcipher_compile_definitions SQLCIPHER_CRYPTO_OPENSSL)
     endif()
 
+    set(sqlcipher_cflags "${deps_CFLAGS} ${sqlcipher_extra_cflags}")
+    set(sqlcipher_cxxflags "${deps_CXXFLAGS} ${sqlcipher_extra_cxxflags}")
+    set(sqlcipher_ldflags "-L${DEPS_DESTDIR}/lib ${sqlcipher_extra_ldflags}")
+
+    # Append compile definitions static build of sqlcipher via CFLAGS
+    foreach(def ${sqlcipher_compile_definitions})
+        set(sqlcipher_cflags "${sqlcipher_cflags} -D${def}")
+    endforeach()
+
+    # Configure and build SQLCipher
     build_external(sqlcipher
         CONFIGURE_COMMAND ./configure ${build_host} --disable-shared --prefix=${DEPS_DESTDIR}
         --with-pic --enable-fts5 --enable-static --disable-tcl --disable-readline ${sqlcipher_extra_configure}
         "CC=${deps_cc}"
         "CXX=${deps_cxx}"
-        "CFLAGS=${deps_CFLAGS} ${sqlcipher_extra_cflags} -DSQLITE_HAS_CODEC -DSQLITE_TEMP_STORE=3 -DSQLITE_ENABLE_FTS5"
-        "CXXFLAGS=${deps_CXXFLAGS} ${sqlcipher_extra_cxxflags}"
-        "LDFLAGS=-L${DEPS_DESTDIR}/lib ${sqlcipher_extra_ldflags}"
+        "CFLAGS=${sqlcipher_cflags}"
+        "CXXFLAGS=${sqlcipher_cxxflags}"
+        "LDFLAGS=${sqlcipher_ldflags}"
         ${cross_rc}
     )
-    add_static_target(sqlcipher::sqlcipher sqlcipher_external libsqlcipher.a)
 
+    # Setup CMake target for the rest of libsession to use
+    add_static_target(sqlcipher::sqlcipher sqlcipher_external libsqlcipher.a)
+    target_compile_definitions(sqlcipher::sqlcipher INTERFACE ${sqlcipher_compile_definitions})
     if(APPLE)
-        target_link_libraries(sqlcipher::sqlcipher INTERFACE "-framework CoreFoundation" "-framework Security" "-framework Foundation")
+        target_link_libraries(sqlcipher::sqlcipher INTERFACE ${sqlcipher_extra_ldflags})
     else()
         target_link_libraries(sqlcipher::sqlcipher INTERFACE OpenSSL::SSL)
     endif()

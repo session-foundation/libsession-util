@@ -2,15 +2,9 @@
 #include <oxen/log.hpp>
 #include <oxenc/hex.h>
 #include <stdexcept>
-
-#define SQLITE_HAS_CODEC
-#if(APPLE)
-#define SQLCIPHER_CRYPTO_COMMONCRYPTO
-#endif
 #include <sqlcipher/sqlite3.h>
 
 namespace session::database {
-
 Connection::Connection(const std::string& path, const std::string& key) : key_(key) {
     int rc = sqlite3_open(path.c_str(), &db_);
     
