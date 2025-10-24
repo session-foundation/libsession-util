@@ -330,7 +330,7 @@ struct DecodeEnvelopeKey {
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf8(
-        char const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
+        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/pro_features_for_utf16
 ///
@@ -353,7 +353,7 @@ ProFeaturesForMsg pro_features_for_utf8(
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf16(
-        char16_t const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
+        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/pad_message
 ///

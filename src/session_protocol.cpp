@@ -221,7 +221,7 @@ ProFeaturesForMsg pro_features_for_utf8(
 }
 
 ProFeaturesForMsg pro_features_for_utf16(
-        const uint16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
+        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
     ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
     return result;
 }
