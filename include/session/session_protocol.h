@@ -277,9 +277,9 @@ typedef struct session_protocol_pro_features_for_msg {
 /// Determine the Pro features that are used in a given UTF8 message.
 ///
 /// Inputs:
-/// - `utf8` -- the utf8 string to count the number of codepoints in to determine if it needs the
+/// - `utf` -- the UTF8 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
-/// - `utf8_size` -- the number of code units (aka. bytes) the string has
+/// - `utf_size` -- the number of code units (aka. bytes) the string has
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
 ///
@@ -293,7 +293,7 @@ typedef struct session_protocol_pro_features_for_msg {
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        char const* utf8, size_t utf8_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
+        char const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
         NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_utf16
@@ -301,9 +301,9 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// Determine the Pro features that are used in a given UTF16 message.
 ///
 /// Inputs:
-/// - `utf8` -- the utf16 string to count the number of codepoints in to determine if it needs the
+/// - `utf` -- the UTF16 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
-/// - `utf16_size` -- the number of code units (aka. bytes) the string has
+/// - `utf_size` -- the number of code units (aka. bytes) the string has
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
 ///
@@ -317,7 +317,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        uint16_t const* utf16, size_t utf16_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
+        uint16_t const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
         NON_NULL_ARG(1);
 
 /// API: session_protocol_encode_for_1o1

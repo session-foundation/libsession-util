@@ -314,7 +314,9 @@ struct DecodeEnvelopeKey {
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `msg_size` -- the size of the message in UTF8 code units to determine if the message requires
+/// - `utf` -- the UTF8 string to count the number of codepoints in to determine if it needs the
+///   higher character limit available in Session Pro
+/// - `utf_size` -- the size of the message in UTF8 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
@@ -328,14 +330,16 @@ struct DecodeEnvelopeKey {
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf8(
-        char const* utf8, size_t utf8_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
+        char const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/pro_features_for_utf16
 ///
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `msg_size` -- the size of the message in UTF16 code units to determine if the message requires
+/// - `utf` -- the UTF16 string to count the number of codepoints in to determine if it needs the
+///   higher character limit available in Session Pro
+/// - `utf_size` -- the size of the message in UTF16 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
 /// - `flags` -- extra pro features that are known by clients that they wish to be activated on
 ///   this message
@@ -349,7 +353,7 @@ ProFeaturesForMsg pro_features_for_utf8(
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf16(
-        char16_t const* utf16, size_t utf8_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
+        char16_t const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
 
 /// API: session_protocol/pad_message
 ///
