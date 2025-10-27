@@ -60,11 +60,8 @@ profile_pic UserProfile::get_profile_pic() const {
 void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
     auto current_url = data["p"].string_view_or("");
     auto current_key_str = data["q"].string_view_or("");
-    std::span<const unsigned char> current_key{
-            reinterpret_cast<const unsigned char*>(current_key_str.data()), current_key_str.size()};
-
-    bool changed = (current_url != url) || (current_key.size() != key.size()) ||
-                   !std::equal(current_key.begin(), current_key.end(), key.begin());
+    std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
+    bool changed = (current_url != url) || (current_key_str != new_key_str);
 
     if (!changed)
         return;
@@ -86,11 +83,8 @@ void UserProfile::set_reupload_profile_pic(
         std::string_view url, std::span<const unsigned char> key) {
     auto current_url = data["P"].string_view_or("");
     auto current_key_str = data["Q"].string_view_or("");
-    std::span<const unsigned char> current_key{
-            reinterpret_cast<const unsigned char*>(current_key_str.data()), current_key_str.size()};
-
-    bool changed = (current_url != url) || (current_key.size() != key.size()) ||
-                   !std::equal(current_key.begin(), current_key.end(), key.begin());
+    std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
+    bool changed = (current_url != url) || (current_key_str != new_key_str);
 
     if (!changed)
         return;
@@ -122,9 +116,9 @@ std::optional<std::chrono::seconds> UserProfile::get_nts_expiry() const {
 }
 
 void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
-    auto current_value = data["M"].exists()
-                               ? std::optional<bool>{static_cast<bool>(data["M"].integer_or(0))}
-                               : std::nullopt;
+    std::optional<bool> current_value;
+    if (data["M"].exists())
+        current_value = static_cast<bool>(data["M"].integer_or(0));
 
     if (current_value == value)
         return;
