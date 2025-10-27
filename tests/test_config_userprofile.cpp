@@ -504,20 +504,22 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
     UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{0s});
 
+    strcpy(p.url, "http://example.org/omg-pic-124.bmp");  // NB: length must be < sizeof(p.url)!
     CHECK(0 == user_profile_set_pic(conf, p));
     UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
-    user_profile_set_blinded_msgreqs(conf, 1);
+    user_profile_set_blinded_msgreqs(conf, 0);
     CHECK(UserProfileTester::get_profile_updated_value(conf).time_since_epoch().count() != 123);
     UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
 
     UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{124s});
     CHECK(0 == user_profile_set_reupload_pic(conf, p));
-    user_profile_set_blinded_msgreqs(conf, 2);
+    user_profile_set_blinded_msgreqs(conf, 1);
     CHECK(UserProfileTester::get_reupload_profile_updated_value(conf).time_since_epoch().count() !=
           124);
 
     // Ensure the timestamp is stored in seconds seconds (was incorrectly stored as microseconds)
     auto time_before_call = std::chrono::system_clock::now();
+    strcpy(p.url, "http://example.org/omg-pic-125.bmp");  // NB: length must be < sizeof(p.url)!
     CHECK(0 == user_profile_set_pic(conf, p));
     auto time_after_call = std::chrono::system_clock::now();
     auto before_seconds =
@@ -531,4 +533,30 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     INFO("Checking if raw_value " << raw_value << " is within the range [" << before_seconds << ", "
                                   << after_seconds << "]");
     CHECK((raw_value >= before_seconds && raw_value <= after_seconds));
+}
+
+TEST_CASE("user profile timestamp update bug", "[config][user_profile]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+
+    // Initially the code would update `profile_updated` even if the data hadn't changed, this test
+    // verifies that no longer happens
+    std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
+    std::string url = "http://example.com/huge.bmp";
+    profile.set_name("Nibbler");
+    profile.set_blinded_msgreqs(true);
+    profile.set_profile_pic(url, key);
+    auto seconds_before_call = profile.get_profile_updated();
+    std::this_thread::sleep_for(2s);
+    profile.set_name("Nibbler");
+    profile.set_blinded_msgreqs(true);
+    profile.set_profile_pic(url, key);
+    auto seconds_after_call = profile.get_profile_updated();
+    CHECK(profile.get_profile_updated() == seconds_before_call);
+
+    // Also make sure it does change
+    profile.set_name("Nibbler1");
+    CHECK(profile.get_profile_updated() != seconds_before_call);
 }
