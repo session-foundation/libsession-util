@@ -77,11 +77,23 @@ Connection::Connection(const std::string& path, const cleared_array<48> &raw_key
 CREATE TABLE IF NOT EXISTS pro_revocations (
     gen_index_hash    BLOB PRIMARY KEY NOT NULL,
     expiry_unix_ts_ms INTEGER NOT NULL
-))";
+);
+
+CREATE TABLE IF NOT EXISTS runtime (
+    id                     INTEGER PRIMARY KEY NOT NULL,
+    pro_revocations_ticket INTEGER NOT NULL
+);)";
         // Create the initial DB tables
         rc = sqlite3_exec(db_, bootstrap_sql.data(), nullptr, nullptr, nullptr);
         if (rc != SQLITE_OK)
             close_db_and_throw_error(&db_, rc, "Failed to bootstrap tables");
+
+        // Seed the runtime table
+        std::string_view seed_runtime_sql =
+                R"(INSERT INTO runtime (pro_revocations_ticket) VALUES (0))";
+        rc = sqlite3_exec(db_, seed_runtime_sql.data(), nullptr, nullptr, nullptr);
+        if (rc != SQLITE_OK)
+            close_db_and_throw_error(&db_, rc, "Failed to seed the runtime table");
 
         // Teleport to the target version
         rc = set_db_version_or_throw(db_, ++curr_db_version);
@@ -129,99 +141,84 @@ void Connection::query(std::string_view sql, std::function<void(sqlite3_stmt*)> 
         throw std::runtime_error(fmt::format("Error executing query: {}", sqlite3_errmsg(db_)));
 }
 
-AddResult Connection::add_pro_revocations(
-        std::span<const pro_backend::ProRevocationItem> revocations) noexcept {
+
+Runtime Connection::get_runtime() {
+    Runtime result = {};
+    std::string_view sql = R"(SELECT id, pro_revocations_ticket FROM runtime LIMIT 1)";
+    query(sql, [&result](sqlite3_stmt* stmt) {
+        result.id = sqlite3_column_int(stmt, 0);
+        result.pro_revocations_ticket = sqlite3_column_int(stmt, 1);
+    });
+    return result;
+}
+
+SetResult Connection::set_pro_revocations(
+        uint32_t ticket, std::span<const pro_backend::ProRevocationItem> revocations) noexcept {
 
     // The following consists of exception safe code so we do not need try catch and can trivially
     // commit or rollback the at the end of the function.
     exec("BEGIN DEFERRED TRANSACTION;");
+    exec("DELETE FROM pro_revocations"); // Clear the table
 
-    sqlite3_stmt* stmt = nullptr;
-    std::string_view sql = R"(
+    // Assign the pro-revocations
+    int rc = SQLITE_OK;
+    if (rc == SQLITE_OK || rc == SQLITE_DONE) {
+        sqlite3_stmt* stmt = nullptr;
+        std::string_view sql = R"(
 INSERT INTO pro_revocations (gen_index_hash, expiry_unix_ts_ms)
 VALUES (?, ?)
 )";
 
-    int rc = sqlite3_prepare_v2(db_, sql.data(), sql.size() + 1, &stmt, nullptr);
-    for (size_t index = 0; (rc == SQLITE_OK || rc == SQLITE_DONE) && index < revocations.size();
-         index++) {
-        const auto& it = revocations[index];
-        int bind = 0;
-        int64_t expiry = static_cast<int64_t>(it.expiry_unix_ts.time_since_epoch().count());
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_bind_blob(
-                                       stmt,
-                                       ++bind,
-                                       it.gen_index_hash.data(),
-                                       static_cast<int>(it.gen_index_hash.size()),
-                                       nullptr)
-                             : rc;
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_bind_int64(stmt, ++bind, expiry) : rc;
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_step(stmt) : rc;
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_reset(stmt) : rc;
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_clear_bindings(stmt) : rc;
+        rc = sqlite3_prepare_v2(db_, sql.data(), sql.size() + 1, &stmt, nullptr);
+        for (size_t index = 0; (rc == SQLITE_OK || rc == SQLITE_DONE) && index < revocations.size();
+             index++) {
+            const auto& it = revocations[index];
+            int bind = 0;
+            int64_t expiry = static_cast<int64_t>(it.expiry_unix_ts.time_since_epoch().count());
+            rc = (rc == SQLITE_OK || rc == SQLITE_DONE)
+                       ? sqlite3_bind_blob(
+                                 stmt,
+                                 ++bind,
+                                 it.gen_index_hash.data(),
+                                 static_cast<int>(it.gen_index_hash.size()),
+                                 nullptr)
+                       : rc;
+            rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_bind_int64(stmt, ++bind, expiry)
+                                                        : rc;
+            rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_step(stmt) : rc;
+            rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_reset(stmt) : rc;
+            rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_clear_bindings(stmt) : rc;
+        }
+        int finalize_rc = sqlite3_finalize(stmt);
+        if (rc == SQLITE_OK || rc == SQLITE_DONE)
+            rc = finalize_rc;
     }
-    int finalize_rc = sqlite3_finalize(stmt);
-    if (rc == SQLITE_OK || rc == SQLITE_DONE)
-        rc = finalize_rc;
 
-    AddResult result = {};
+    // Update the ticket
+    if (rc == SQLITE_OK || rc == SQLITE_DONE) {
+        sqlite3_stmt* stmt = nullptr;
+        std::string_view sql = R"(UPDATE runtime SET pro_revocations_ticket = ?)";
+
+        int rc = sqlite3_prepare_v2(db_, sql.data(), sql.size() + 1, &stmt, nullptr);
+        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_bind_int(stmt, 1, ticket) : rc;
+        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_step(stmt) : rc;
+
+        int finalize_rc = sqlite3_finalize(stmt);
+        if (rc == SQLITE_OK || rc == SQLITE_DONE)
+            rc = finalize_rc;
+    }
+
+    SetResult result = {};
     result.return_code = rc;
     result.success = result.return_code == SQLITE_OK || result.return_code == SQLITE_DONE;
     exec(result.success ? "COMMIT;" : "ROLLBACK;");
     return result;
 }
 
-DeleteResult Connection::delete_pro_revocations(
-        std::span<const pro_backend::ProRevocationItem> revocations) noexcept {
-
-    // The following consists of exception safe code so we do not need try catch and can trivially
-    // commit or rollback the at the end of the function.
-    exec("BEGIN DEFERRED TRANSACTION;");
-
-    std::string_view sql = R"(
-DELETE FROM pro_revocations
-WHERE gen_index_hash = ?
-)";
-
-    size_t row_count = 0;
-    sqlite3_stmt* stmt = nullptr;
-    int rc = sqlite3_prepare_v2(db_, sql.data(), sql.size() + 1, &stmt, nullptr);
-    for (size_t index = 0; (rc == SQLITE_OK || rc == SQLITE_DONE) && index < revocations.size();
-         index++) {
-        const auto& it = revocations[index];
-        int64_t expiry = static_cast<int64_t>(it.expiry_unix_ts.time_since_epoch().count());
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE)
-                   ? sqlite3_bind_blob(
-                             stmt,
-                             1,
-                             it.gen_index_hash.data(),
-                             static_cast<int>(it.gen_index_hash.size()),
-                             nullptr)
-                   : rc;
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_step(stmt) : rc;
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_reset(stmt) : rc;
-        rc = (rc == SQLITE_OK || rc == SQLITE_DONE) ? sqlite3_clear_bindings(stmt) : rc;
-        row_count += sqlite3_changes(db_);
-    }
-    int finalize_rc = sqlite3_finalize(stmt);
-    if (rc == SQLITE_OK || rc == SQLITE_DONE)
-        rc = finalize_rc;
-
-    DeleteResult result = {};
-    result.return_code = rc;
-    result.success = result.return_code == SQLITE_OK || result.return_code == SQLITE_DONE;
-    if (result.success) {
-        exec("COMMIT;");
-        result.count = row_count;
-    } else {
-        exec("ROLLBACK;");
-        result.count = 0;
-    }
-    return result;
-}
-
 size_t Connection::get_pro_revocations_buffer(
-        pro_backend::ProRevocationItem* buf, size_t buf_count, size_t offset) {
+        pro_backend::ProRevocationItem* buf, size_t buf_count, size_t offset, uint32_t* ticket) {
+
+    // Count the number of rows
     size_t result = 0;
     query("SELECT COUNT(*) FROM pro_revocations",
           [&](sqlite3_stmt* stmt) { result = sqlite3_column_int(stmt, 0); });
@@ -241,6 +238,7 @@ OFFSET %zu
                 offset);
         assert(sql_size < sizeof(sql));
 
+        // Retrieve the rows
         result = 0;
         query(std::string_view(sql, sql_size), [&buf, buf_count, &result](sqlite3_stmt* stmt) {
             pro_backend::ProRevocationItem& item = buf[result++];
@@ -258,15 +256,23 @@ OFFSET %zu
             auto expiry = std::chrono::milliseconds(sqlite3_column_int64(stmt, 1));
             item.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(expiry);
         });
+
+    }
+
+    // Retrieve the ticket
+    if (ticket) {
+        query("SELECT pro_revocations_ticket FROM runtime LIMIT 1", [&ticket](sqlite3_stmt* stmt) {
+            *ticket = static_cast<uint32_t>(sqlite3_column_int(stmt, 0));
+        });
     }
     return result;
 }
 
-std::vector<pro_backend::ProRevocationItem> Connection::get_pro_revocations() {
+std::vector<pro_backend::ProRevocationItem> Connection::get_pro_revocations(uint32_t *ticket) {
     std::vector<pro_backend::ProRevocationItem> result;
-    size_t size_req = get_pro_revocations_buffer(nullptr, 0, 0);
+    size_t size_req = get_pro_revocations_buffer(nullptr, 0, 0, ticket);
     result.resize(size_req);
-    size_t items_read = get_pro_revocations_buffer(result.data(), result.size(), 0);
+    size_t items_read = get_pro_revocations_buffer(result.data(), result.size(), 0, ticket);
     assert(items_read == size_req);
     return result;
 }
