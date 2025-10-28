@@ -99,9 +99,9 @@ TEST_CASE("Ed25519 pro key pair generation seed", "[ed25519][keypair]") {
     constexpr auto seed2 = "743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84"_hex_u;
     constexpr auto seed_invalid = "010203040506070809"_hex_u;
 
-    auto sk1 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(seed1);
-    auto sk2 = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(seed2);
-    CHECK_THROWS(session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(seed_invalid));
+    auto sk1 = session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed1);
+    auto sk2 = session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed2);
+    CHECK_THROWS(session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed_invalid));
 
     CHECK(sk1.size() == 64);
     CHECK(sk1 != sk2);

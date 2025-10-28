@@ -56,7 +56,7 @@ bool verify(
         std::span<const unsigned char> pubkey,
         std::span<const unsigned char> msg);
 
-/// API: ed25519/ed25519_pro_key_pair_for_ed25519_seed
+/// API: ed25519/ed25519_pro_privkey_for_ed25519_seed
 ///
 /// Generate the deterministic Master Session Pro key for signing requests to interact with the
 /// Session Pro features of the protocol.
@@ -67,7 +67,7 @@ bool verify(
 ///
 /// Outputs:
 /// - The libsodium-style Master Session Pro Ed25519 secret key, 64 bytes.
-std::array<unsigned char, 64> ed25519_pro_key_pair_for_ed25519_seed(
+std::array<unsigned char, 64> ed25519_pro_privkey_for_ed25519_seed(
         std::span<const unsigned char> ed25519_seed);
 
 }  // namespace session::ed25519

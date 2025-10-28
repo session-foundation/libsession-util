@@ -95,7 +95,7 @@ LIBSESSION_EXPORT bool session_ed25519_verify(
         const unsigned char* msg,
         size_t msg_len);
 
-/// API: crypto/session_ed25519_pro_key_pair_for_ed25519_seed
+/// API: crypto/session_ed25519_pro_privkey_for_ed25519_seed
 ///
 /// Generate the deterministic Master Session Pro key for signing requests to interact with the
 /// Session Pro features of the protocol.
@@ -108,7 +108,7 @@ LIBSESSION_EXPORT bool session_ed25519_verify(
 ///
 /// Outputs:
 /// - `bool` -- True if the key pair was successfully derived, false if failed.
-LIBSESSION_EXPORT bool session_ed25519_pro_key_pair_for_ed25519_seed(
+LIBSESSION_EXPORT bool session_ed25519_pro_privkey_for_ed25519_seed(
         const unsigned char* ed25519_seed, /* 32 bytes */
         unsigned char* ed25519_sk_out /*64 byte output buffer*/);
 

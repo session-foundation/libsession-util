@@ -14,7 +14,7 @@ using uc32 = std::array<unsigned char, 32>;
 using uc64 = std::array<unsigned char, 64>;
 
 namespace {
-uc64 derived_ed25519_keypair(std::span<const unsigned char> ed25519_seed, std::string_view key) {
+uc64 derived_ed25519_privkey(std::span<const unsigned char> ed25519_seed, std::string_view key) {
     if (ed25519_seed.size() != 32 && ed25519_seed.size() != 64)
         throw std::invalid_argument{
                 "Invalid ed25519_seed: expected 32 bytes or libsodium style 64 bytes seed"};
@@ -109,9 +109,9 @@ bool verify(
             crypto_sign_ed25519_verify_detached(sig.data(), msg.data(), msg.size(), pubkey.data()));
 }
 
-std::array<unsigned char, 64> ed25519_pro_key_pair_for_ed25519_seed(
+std::array<unsigned char, 64> ed25519_pro_privkey_for_ed25519_seed(
         std::span<const unsigned char> ed25519_seed) {
-    auto result = derived_ed25519_keypair(ed25519_seed, "SessionProRandom");
+    auto result = derived_ed25519_privkey(ed25519_seed, "SessionProRandom");
     return result;
 }
 }  // namespace session::ed25519
@@ -186,11 +186,11 @@ LIBSESSION_C_API bool session_ed25519_verify(
             std::span<const unsigned char>{msg, msg_len});
 }
 
-LIBSESSION_C_API bool session_ed25519_pro_key_pair_for_ed25519_seed(
+LIBSESSION_C_API bool session_ed25519_pro_privkey_for_ed25519_seed(
         const unsigned char* ed25519_seed, unsigned char* ed25519_sk_out) {
     try {
         auto seed = std::span<const unsigned char>(ed25519_seed, 32);
-        uc64 sk = session::ed25519::ed25519_pro_key_pair_for_ed25519_seed(seed);
+        uc64 sk = session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed);
         std::memcpy(ed25519_sk_out, sk.data(), sk.size());
         return true;
     } catch (...) {
