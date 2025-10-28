@@ -157,6 +157,8 @@ struct session_pro_backend_response_header {
 
 typedef struct session_pro_backend_to_json session_pro_backend_to_json;
 struct session_pro_backend_to_json {
+    char error[256];
+    size_t error_count;
     bool success;  /// True if conversion to JSON was successful, false if out-of-memory
     string8 json;
 };
@@ -293,7 +295,7 @@ struct session_pro_backend_get_pro_status_response {
 
 /// API: session_pro_backend/add_pro_payment_request_build_sigs
 ///
-/// Builds master and rotating signatures for an AddProPaymentRequest.
+/// Builds master and rotating signatures for an `add_pro_payment_request`.
 /// Returns false if the keys (32-byte or 64-byte libsodium format) or payment token hash are
 /// incorrectly sized. Using 64-byte libsodium keys is more efficient.
 ///
@@ -310,8 +312,8 @@ struct session_pro_backend_get_pro_status_response {
 /// - `success` - True if signatures are built successfully, false otherwise.
 /// - `error` - Backing error buffer for the signatures if `success` is false
 /// - `errors_count` - length of the error if `success` is false
-/// - `master_sig` - Master signature
-/// - `rotating_sig` - Rotating signature
+/// - `master_sig` - Generated master signature
+/// - `rotating_sig` - Generated rotating signature
 LIBSESSION_EXPORT
 session_pro_backend_master_rotating_signatures
 session_pro_backend_add_pro_payment_request_build_sigs(
@@ -324,9 +326,27 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         const uint8_t* payment_tx_payment_id,
         size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 4, 7);
 
+/// API: session_pro_backend/add_pro_payment_request_build_to_json
+///
+/// Builds the JSON for a `add_pro_payment_request`. This function is the same as filling in the
+/// struct and calling the corresponding `to_json` function.
+/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+///
+/// See: session_pro_backend_add_pro_payment_request_build_sigs
+LIBSESSION_EXPORT
+session_pro_backend_to_json session_pro_backend_add_pro_payment_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        const uint8_t* rotating_privkey,
+        size_t rotating_privkey_len,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 4, 7);
+
 /// API: session_pro_backend/get_pro_proof_request_build_sigs
 ///
-/// Builds master and rotating signatures for a GetProProofRequest.
+/// Builds master and rotating signatures for a `get_pro_proof_request`.
 /// Returns false if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
 /// Using 64-byte libsodium keys is more efficient.
 ///
@@ -353,35 +373,65 @@ session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) NON_NULL_ARG(2, 4);
 
+/// API: session_pro_backend/get_pro_proof_request_build_to_json
+///
+/// Builds the JSON for a `get_pro_proof_request`. This function is the same as filling in the
+/// struct and calling the corresponding `to_json` function.
+/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+///
+/// See: `session_pro_backend_get_pro_proof_request_build_sigs`
+LIBSESSION_EXPORT
+session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        const uint8_t* rotating_privkey,
+        size_t rotating_privkey_len,
+        uint64_t unix_ts_ms) NON_NULL_ARG(2, 4);
+
 /// API: session_pro_backend/get_pro_status_request_build_sig
 ///
-/// Builds the signature for GetProPaymentsRequest
-/// Returns false if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
-/// Using 64-byte libsodium keys is more efficient.
+/// Builds the JSON for a `get_pro_status_request`. Returns false if the keys (32-byte or
+/// 64-byte libsodium format) are incorrectly sized. Using 64-byte libsodium keys is more efficient.
 ///
 /// Inputs:
 /// - `request_version` -- Version of the request.
 /// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
 /// - `master_privkey_len` -- Length of master_privkey.
 /// - `unix_ts_ms` -- Unix timestamp for the request.
-/// - `page` -- The page in the paginated list of historical payments to request
+/// - `history` -- Flag to request payment history from the backend
 ///
 /// Outputs:
-/// - `bool` - True if signature was built successfully, false otherwise.
-/// - `error` - Backing error buffer for the signatures if `success` is false
-/// - `errors_count` - length of the error if `success` is false
-/// - `sig` - 64 byte signature
+/// - `bool` -- True if signatures are built successfully, false otherwise.
+/// - `error` -- Backing error buffer for the signatures if `success` is false
+/// - `errors_count` -- length of the error if `success` is false
+/// - `sig` -- The generated signature
 LIBSESSION_EXPORT
 session_pro_backend_signature session_pro_backend_get_pro_status_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
-        uint32_t page) NON_NULL_ARG(2);
+        bool history) NON_NULL_ARG(2);
+
+/// API: session_pro_backend/get_pro_status_request_build_to_json
+///
+/// Builds the JSON for a `get_pro_status_request`. This function is the same as filling in the
+/// struct and calling the corresponding `to_json` function.
+/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+///
+/// See: `session_pro_backend_get_pro_status_request_build_sig`
+LIBSESSION_EXPORT
+session_pro_backend_to_json session_pro_backend_get_pro_status_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_ms,
+        bool history) NON_NULL_ARG(2);
 
 /// API: session_pro_backend/add_pro_payment_request_to_json
 ///
-/// Serializes an `AddProPaymentRequest` to a JSON string.
+/// Serializes an `add_pro_payment_request` to a JSON string.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 ///
 /// Inputs:
@@ -392,7 +442,7 @@ session_pro_backend_to_json session_pro_backend_add_pro_payment_request_to_json(
 
 /// API: session_pro_backend/get_pro_proof_request_to_json
 ///
-/// Serializes a `GetProProofRequest` to a JSON string.
+/// Serializes a `get_pro_proof_request` to a JSON string.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 ///
 /// Inputs:
@@ -403,7 +453,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_proof_request_to_json(
 
 /// API: session_pro_backend/get_pro_revocations_request_to_json
 ///
-/// Serializes a `GetProRevocationsRequest` to a JSON string.
+/// Serializes a `get_pro_revocations_request` to a JSON string.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_get_pro_revocations_request_to_json(
@@ -411,7 +461,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_revocations_request_to_j
 
 /// API: session_pro_backend/get_pro_status_request_to_json
 ///
-/// Serializes a `GetProPaymentsRequest` to a JSON string.
+/// Serializes a `get_pro_status_request` to a JSON string.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_get_pro_status_request_to_json(
@@ -419,7 +469,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_status_request_to_json(
 
 /// API: session_pro_backend/add_pro_payment_or_get_pro_proof_response_parse
 ///
-/// Parses a JSON string into an `AddProPaymentOrGetProProofResponse` struct.
+/// Parses a JSON string into an `add_pro_payment_or_get_pro_proof_response` struct.
 /// The caller must free the response using
 /// `session_pro_backend_add_pro_payment_or_get_pro_proof_response_free`.
 ///

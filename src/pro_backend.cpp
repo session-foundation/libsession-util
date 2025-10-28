@@ -207,6 +207,56 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
     return result;
 }
 
+std::string AddProPaymentRequest::build_to_json(
+        std::uint8_t version,
+        std::span<const uint8_t> master_privkey,
+        std::span<const uint8_t> rotating_privkey,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        std::span<const uint8_t> payment_tx_payment_id) {
+    cleared_uc64 master_from_seed;
+    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
+        array_uc32 master_pubkey;
+        crypto_sign_ed25519_seed_keypair(
+                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
+        master_privkey = master_from_seed;
+    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
+        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
+    }
+
+    cleared_uc64 rotating_from_seed;
+    if (rotating_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
+        array_uc32 rotating_pubkey;
+        crypto_sign_ed25519_seed_keypair(
+                rotating_pubkey.data(), rotating_from_seed.data(), rotating_privkey.data());
+        rotating_privkey = rotating_from_seed;
+    } else if (rotating_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
+        throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
+    }
+
+    MasterRotatingSignatures sigs = AddProPaymentRequest::build_sigs(
+            version, master_privkey, rotating_privkey, payment_tx_provider, payment_tx_payment_id);
+
+    AddProPaymentRequest request = {};
+    request.version = version;
+    std::memcpy(
+            request.master_pkey.data(),
+            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
+    std::memcpy(
+            request.rotating_pkey.data(),
+            rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
+    request.payment_tx.provider = payment_tx_provider;
+    request.payment_tx.payment_id = std::string(
+            reinterpret_cast<const char*>(payment_tx_payment_id.data()),
+            payment_tx_payment_id.size());
+    request.master_sig = sigs.master_sig;
+    request.rotating_sig = sigs.rotating_sig;
+
+    std::string result = request.to_json();
+    return result;
+}
+
 AddProPaymentOrGetProProofResponse AddProPaymentOrGetProProofResponse::parse(
         std::string_view json) {
     // Parse basics
@@ -309,6 +359,53 @@ MasterRotatingSignatures GetProProofRequest::build_sigs(
             hash_to_sign.data(),
             hash_to_sign.size(),
             rotating_privkey.data());
+    return result;
+}
+
+std::string GetProProofRequest::build_to_json(
+        std::uint8_t request_version,
+        std::span<const uint8_t> master_privkey,
+        std::span<const uint8_t> rotating_privkey,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
+    // Rederive keys from 32 byte seed if given
+    cleared_uc64 master_from_seed;
+    if (master_privkey.size() == 32) {
+        array_uc32 master_pubkey;
+        crypto_sign_ed25519_seed_keypair(
+                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
+        master_privkey = master_from_seed;
+    } else if (master_privkey.size() != 64) {
+        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
+    }
+
+    cleared_uc64 rotating_from_seed;
+    if (rotating_privkey.size() == 32) {
+        array_uc32 rotating_pubkey;
+        crypto_sign_ed25519_seed_keypair(
+                rotating_pubkey.data(), rotating_from_seed.data(), rotating_privkey.data());
+        rotating_privkey = rotating_from_seed;
+    } else if (rotating_privkey.size() != 64) {
+        throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
+    }
+
+    MasterRotatingSignatures sigs = GetProProofRequest::build_sigs(
+            request_version, master_privkey, rotating_privkey, unix_ts);
+
+    GetProProofRequest request = {};
+    request.version = request_version;
+    std::memcpy(
+            request.master_pkey.data(),
+            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
+    std::memcpy(
+            request.rotating_pkey.data(),
+            rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
+    request.unix_ts = unix_ts;
+    request.master_sig = sigs.master_sig;
+    request.rotating_sig = sigs.rotating_sig;
+
+    std::string result = request.to_json();
     return result;
 }
 
@@ -424,6 +521,34 @@ array_uc64 GetProStatusRequest::build_sig(
             hash_to_sign.data(),
             hash_to_sign.size(),
             master_privkey.data());
+    return result;
+}
+
+std::string GetProStatusRequest::build_to_json(
+        uint8_t version,
+        std::span<const uint8_t> master_privkey,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        bool history) {
+    cleared_uc64 master_from_seed;
+    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
+        array_uc32 master_pubkey;
+        crypto_sign_ed25519_seed_keypair(
+                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
+        master_privkey = master_from_seed;
+    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
+        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
+    }
+
+    GetProStatusRequest request = {};
+    request.version = version;
+    memcpy(request.master_pkey.data(),
+           master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+           crypto_sign_ed25519_PUBLICKEYBYTES);
+    request.master_sig = GetProStatusRequest::build_sig(version, master_privkey, unix_ts, history);
+    request.unix_ts = unix_ts;
+    request.history = history;
+
+    std::string result = request.to_json();
     return result;
 }
 
@@ -633,6 +758,46 @@ session_pro_backend_add_pro_payment_request_build_sigs(
     return result;
 }
 
+LIBSESSION_C_API session_pro_backend_to_json
+session_pro_backend_add_pro_payment_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        const uint8_t* rotating_privkey,
+        size_t rotating_privkey_len,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len) {
+    session_pro_backend_to_json result = {};
+
+    // Convert C inputs to C++ types
+    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
+    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
+    std::span<const uint8_t> payment_tx_payment_id_span(
+            payment_tx_payment_id, payment_tx_payment_id_len);
+
+    try {
+        std::string json = AddProPaymentRequest::build_to_json(
+                request_version,
+                master_span,
+                rotating_span,
+                payment_tx_provider,
+                payment_tx_payment_id_span);
+        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+
+    return result;
+}
+
 LIBSESSION_C_API session_pro_backend_master_rotating_signatures
 session_pro_backend_get_pro_proof_request_build_sigs(
         uint8_t request_version,
@@ -669,20 +834,82 @@ session_pro_backend_get_pro_proof_request_build_sigs(
     return result;
 }
 
+LIBSESSION_EXPORT
+session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        const uint8_t* rotating_privkey,
+        size_t rotating_privkey_len,
+        uint64_t unix_ts_ms) {
+    // Convert C inputs to C++ types
+    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
+    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
+    std::chrono::milliseconds ts{unix_ts_ms};
+
+    session_pro_backend_to_json result = {};
+    try {
+        auto json = GetProProofRequest::build_to_json(
+                request_version,
+                master_span,
+                rotating_span,
+                std::chrono::sys_time<std::chrono::milliseconds>(ts));
+        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+    return result;
+}
+
 LIBSESSION_C_API session_pro_backend_signature session_pro_backend_get_pro_status_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
-        uint32_t page) {
+        bool history) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
 
     session_pro_backend_signature result = {};
     try {
-        auto sig = GetProStatusRequest::build_sig(request_version, master_span, ts, page);
+        auto sig = GetProStatusRequest::build_sig(request_version, master_span, ts, history);
         std::memcpy(result.sig.data, sig.data(), sig.size());
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+    return result;
+}
+
+LIBSESSION_C_API session_pro_backend_to_json
+session_pro_backend_get_pro_status_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_ms,
+        bool history) {
+    // Convert C inputs to C++ types
+    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
+
+    session_pro_backend_to_json result = {};
+    try {
+        auto json = GetProStatusRequest::build_to_json(request_version, master_span, ts, history);
+        result.json = string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
@@ -717,7 +944,14 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
         std::string json = cpp.to_json();
         result.json = string8_copy_or_throw(json.data(), json.size());
         result.success = true;
-    } catch (...) {
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
     }
 
     return result;
@@ -743,7 +977,14 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_proof_r
         std::string json = cpp.to_json();
         result.json = string8_copy_or_throw(json.data(), json.size());
         result.success = true;
-    } catch (...) {
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
     }
 
     return result;
@@ -765,7 +1006,14 @@ session_pro_backend_get_pro_revocations_request_to_json(
         std::string json = cpp.to_json();
         result.json = string8_copy_or_throw(json.data(), json.size());
         result.success = true;
-    } catch (...) {
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
     }
 
     return result;
@@ -791,8 +1039,16 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_status_
         std::string json = cpp.to_json();
         result.json = string8_copy_or_throw(json.data(), json.size());
         result.success = true;
-    } catch (...) {
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
     }
+
     return result;
 }
 

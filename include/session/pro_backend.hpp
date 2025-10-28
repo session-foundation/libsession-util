@@ -15,8 +15,8 @@
 ///
 /// The high level summary of the functionality in this file. Clients can:
 ///
-/// 1. Build a request with `AddProPaymentRequest::to_json` from a Session Pro payment and submit it
-///    to the backend to register the specified Ed25519 keys for Session Pro.
+/// 1. Build a request with `AddProPaymentRequest::build_to_json` from a Session Pro payment and
+///    submit it to the backend to register the specified Ed25519 keys for Session Pro.
 ///
 ///    Server responds JSON to be parsed with `AddProPaymentOrGetProProofResponse::parse`. Clients
 ///    should validate the response and update their `UserProfile` by constructing a `ProConfig`
@@ -47,7 +47,7 @@
 ///    revoked proofs will not be entitled to Pro features.
 ///
 /// 4. Query the status (and optionally payment history) of a user's Session Pro Master Ed25519 key
-///    has registered by building a `GetProStatusRequest::to_json` query and submitting it.
+///    has registered by building a `GetProStatusRequest::build_to_json` query and submitting it.
 ///
 ///    Server responds JSON to be parsed with `GetProStatusResponse::parse` which they can use to
 ///    populate their client's payment history.
@@ -131,11 +131,37 @@ struct AddProPaymentRequest {
     /// - `request_version` -- Version of the request to build a hash for
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `payment_token_hash` -- 32-byte hash of the payment token.
+    /// - `payment_tx_provider` -- Provider that the payment to register is coming from
+    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
+    ///   provider (e.g. for Google this is the transaction order ID in string format, for Apple
+    ///   this is the transaction ID in string format).
     ///
     /// Outputs:
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
     static MasterRotatingSignatures build_sigs(
+            std::uint8_t request_version,
+            std::span<const uint8_t> master_privkey,
+            std::span<const uint8_t> rotating_privkey,
+            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+            std::span<const uint8_t> payment_tx_payment_id);
+
+    /// API: pro/AddProPaymentRequest::build_to_json
+    ///
+    /// Builds a AddProPaymentRequest and serialize it to JSON. This function is the same as filling
+    /// the struct fields and calling `to_json`.
+    ///
+    /// Inputs:
+    /// - `request_version` -- Version of the request to build a hash for
+    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
+    /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
+    /// - `payment_tx_provider` -- Provider that the payment to register is coming from
+    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
+    ///   provider (e.g. for Google this is the transaction order ID in string format, for Apple
+    ///   this is the transaction ID in string format).
+    ///
+    /// Outputs:
+    /// - `std::string` -- Request serialised to JSON
+    static std::string build_to_json(
             std::uint8_t request_version,
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
@@ -186,7 +212,7 @@ struct GetProProofRequest {
     /// 64-byte signature proving knowledge of the rotating key's secret component
     array_uc64 rotating_sig;
 
-    /// API: pro/MasterRotatingSignatures::build_sigs
+    /// API: pro/GetProProofRequest::build_sigs
     ///
     /// Builds master and rotating signatures using the provided private keys and timestamp.
     /// Throws if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
@@ -201,6 +227,25 @@ struct GetProProofRequest {
     /// Outputs:
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
     static MasterRotatingSignatures build_sigs(
+            std::uint8_t request_version,
+            std::span<const uint8_t> master_privkey,
+            std::span<const uint8_t> rotating_privkey,
+            std::chrono::sys_time<std::chrono::milliseconds> unix_ts);
+
+    /// API: pro/GetProProofRequest::build_to_json
+    ///
+    /// Builds a GetProProofRequest and serialize it to JSON. This function is the same as filling
+    /// the struct fields and calling `to_json`.
+    ///
+    /// Inputs:
+    /// - `request_version` -- Version of the request to build a request for
+    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
+    /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
+    /// - `unix_ts` -- Unix timestamp for the request.
+    ///
+    /// Outputs:
+    /// - `std::string` -- Request serialised to JSON
+    static std::string build_to_json(
             std::uint8_t request_version,
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
@@ -296,6 +341,25 @@ struct GetProStatusRequest {
     /// - `array_uc64` - the 64-byte signature
     static array_uc64 build_sig(
             uint8_t version,
+            std::span<const uint8_t> master_privkey,
+            std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+            bool history);
+
+    /// API: pro/GetProStatusRequest::build_to_json
+    ///
+    /// Builds a GetProStatusRequest and serialize it to JSON. This function is the same as filling
+    /// the struct fields and calling `to_json`.
+    ///
+    /// Inputs:
+    /// - `version` -- Version of the request to build a request from
+    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
+    /// - `unix_ts` -- Unix timestamp for the request.
+    /// - `history` -- Flag to request payment history from the backend
+    ///
+    /// Outputs:
+    /// - `std::string` -- Request serialised to JSON
+    static std::string build_to_json(
+            std::uint8_t version,
             std::span<const uint8_t> master_privkey,
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
             bool history);

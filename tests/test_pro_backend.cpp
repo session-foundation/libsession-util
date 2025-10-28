@@ -223,9 +223,19 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             request.rotating_pkey = rotating_pubkey;
             request.payment_tx = payment_tx;
 
-            // Note just write some junk to the request
-            request.master_sig = master_privkey;
-            request.rotating_sig = rotating_privkey;
+            session_pro_backend_master_rotating_signatures sigs =
+                    session_pro_backend_add_pro_payment_request_build_sigs(
+                            request.version,
+                            master_privkey.data,
+                            sizeof(master_privkey.data),
+                            rotating_privkey.data,
+                            sizeof(rotating_privkey.data),
+                            payment_tx.provider,
+                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                            payment_tx.payment_id_count);
+
+            request.master_sig = sigs.master_sig;
+            request.rotating_sig = sigs.rotating_sig;
 
             // Valid request
             auto result = session_pro_backend_add_pro_payment_request_to_json(&request);
@@ -244,11 +254,26 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 cpp.payment_tx.provider = payment_tx.provider;
                 cpp.payment_tx.payment_id =
                         std::string(payment_tx.payment_id, payment_tx.payment_id_count);
-                std::memcpy(cpp.master_sig.data(), master_privkey.data, sizeof(master_privkey));
+                std::memcpy(cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig));
                 std::memcpy(
-                        cpp.rotating_sig.data(), rotating_privkey.data, sizeof(rotating_privkey));
+                        cpp.rotating_sig.data(), sigs.rotating_sig.data, sizeof(sigs.rotating_sig));
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
+
+                // Verify that the helper one-shot-to-json function generates the same payload
+                auto one_shot = session_pro_backend_add_pro_payment_request_build_to_json(
+                        request.version,
+                        master_privkey.data,
+                        sizeof(master_privkey.data),
+                        rotating_privkey.data,
+                        sizeof(rotating_privkey.data),
+                        request.payment_tx.provider,
+                        reinterpret_cast<const unsigned char*>(request.payment_tx.payment_id),
+                        request.payment_tx.payment_id_count);
+                REQUIRE(one_shot.success);
+                REQUIRE(one_shot.json.size == result.json.size);
+                INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
+                REQUIRE(memcmp(one_shot.json.data, result.json.data, result.json.size) == 0);
             }
 
             // After freeing
@@ -269,9 +294,17 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             request.rotating_pkey = rotating_pubkey;
             request.unix_ts_ms = unix_ts_ms;
 
-            // Note just write some junk to the request
-            request.master_sig = master_privkey;
-            request.rotating_sig = rotating_privkey;
+            session_pro_backend_master_rotating_signatures sigs =
+                    session_pro_backend_get_pro_proof_request_build_sigs(
+                            request.version,
+                            master_privkey.data,
+                            sizeof(master_privkey.data),
+                            rotating_privkey.data,
+                            sizeof(rotating_privkey.data),
+                            request.unix_ts_ms);
+
+            request.master_sig = sigs.master_sig;
+            request.rotating_sig = sigs.rotating_sig;
 
             // Valid request
             auto result = session_pro_backend_get_pro_proof_request_to_json(&request);
@@ -289,11 +322,24 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                         cpp.rotating_pkey.data(), rotating_pubkey.data, sizeof(rotating_pubkey));
                 cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
                         std::chrono::milliseconds{unix_ts_ms});
-                std::memcpy(cpp.master_sig.data(), master_privkey.data, sizeof(master_privkey));
+                std::memcpy(cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig));
                 std::memcpy(
-                        cpp.rotating_sig.data(), rotating_privkey.data, sizeof(rotating_privkey));
+                        cpp.rotating_sig.data(), sigs.rotating_sig.data, sizeof(sigs.rotating_sig));
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
+
+                // Verify that the helper one-shot-to-json function generates the same payload
+                auto one_shot = session_pro_backend_get_pro_proof_request_build_to_json(
+                        request.version,
+                        master_privkey.data,
+                        sizeof(master_privkey.data),
+                        rotating_privkey.data,
+                        sizeof(rotating_privkey.data),
+                        request.unix_ts_ms);
+                REQUIRE(one_shot.success);
+                REQUIRE(one_shot.json.size == result.json.size);
+                INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
+                REQUIRE(memcmp(one_shot.json.data, result.json.data, result.json.size) == 0);
             }
 
             // After freeing
@@ -343,9 +389,18 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             session_pro_backend_get_pro_status_request request = {};
             request.version = 0;
             request.master_pkey = master_pubkey;
-            request.master_sig = master_privkey;  // Write some junk
             request.unix_ts_ms = unix_ts_ms;
             request.history = true;
+
+            session_pro_backend_signature sig =
+                    session_pro_backend_get_pro_status_request_build_sig(
+                            request.version,
+                            master_privkey.data,
+                            sizeof(master_privkey.data),
+                            request.unix_ts_ms,
+                            request.history);
+
+            request.master_sig = sig.sig;
 
             // Valid request
             auto result = session_pro_backend_get_pro_status_request_to_json(&request);
@@ -359,12 +414,24 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 GetProStatusRequest cpp = {};
                 cpp.version = 0;
                 std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey));
-                std::memcpy(cpp.master_sig.data(), master_privkey.data, sizeof(master_privkey));
+                std::memcpy(cpp.master_sig.data(), sig.sig.data, sizeof(sig.sig));
                 cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
                         std::chrono::milliseconds{unix_ts_ms}};
                 cpp.history = request.history;
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
+
+                // Verify that the helper one-shot-to-json function generates the same payload
+                auto one_shot = session_pro_backend_get_pro_status_request_build_to_json(
+                        request.version,
+                        master_privkey.data,
+                        sizeof(master_privkey.data),
+                        request.unix_ts_ms,
+                        request.history);
+                REQUIRE(one_shot.success);
+                REQUIRE(one_shot.json.size == result.json.size);
+                INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
+                REQUIRE(memcmp(one_shot.json.data, result.json.data, result.json.size) == 0);
             }
 
             // After freeing
