@@ -46,6 +46,7 @@ add_libsession_util_library(crypto
     attachments.cpp
     blinding.cpp
     curve25519.cpp
+    core.cpp
     ed25519.cpp
     hash.cpp
     multi_encrypt.cpp
@@ -136,12 +137,9 @@ if(ENABLE_DATABASE)
         database/connection.cpp
     )
 
-    target_link_libraries(database
-        PUBLIC
-        util
-        PRIVATE
-        sqlcipher::sqlcipher
-    )
+    target_link_libraries(database PUBLIC util PRIVATE sqlcipher::sqlcipher)
+else()
+    target_compile_definitions(database INTERFACE DISABLE_SQLCIPHER_DATABASE)
 endif()
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")

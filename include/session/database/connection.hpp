@@ -1,6 +1,7 @@
 #pragma once
 
 #include <session/types.h>
+#include <memory>
 
 #include <functional>
 #include <session/pro_backend.hpp>
@@ -14,25 +15,41 @@ namespace session::database {
 
 struct SetResult {
     bool success;
-    int return_code;
+    int sql_return_code;
+    /// SQL's string-ified `sql_return_code` pointing to memory in the data segment. Should not be
+    /// modified and is valid for program lifetime.
+    const char* sql_error;
 };
 
+/// The row from the runtime table which is the table housing global settings of the Session
+/// database. There's only 1 row in the runtime table which gets extracted and filled out into this
+/// struct.
 struct Runtime {
-    size_t id;
-    size_t pro_revocations_ticket;
+    int32_t id;
+    int32_t pro_revocations_ticket;
+};
+
+struct sqlite3_deleter {
+    void operator()(sqlite3* db) const noexcept;
 };
 
 struct Connection {
-    sqlite3* db_;
+    std::unique_ptr<sqlite3, sqlite3_deleter> db_;
 
-    Connection(const std::string& path, const cleared_array<48>& raw_key);
-    ~Connection();
-
-    // Prevent copying and moving
-    Connection(const Connection&) = delete;
-    Connection& operator=(const Connection&) = delete;
-    Connection(Connection&& other) = delete;
-    Connection& operator=(Connection&& other) = delete;
+    /// API: database/open
+    ///
+    /// Open a connection to the DB specified at `path`. If this connection previously has an open
+    /// DB that connection is gracefully closed before opening up the newly requested one. If this
+    /// function fails to open the DB, the previous DB connection is untouched.
+    ///
+    /// This function throws an error if the DB was not openable, if the `raw_key` was the incorrect
+    /// key to decrypt the DB or the contents of the DB were malformed.
+    ///
+    /// Inputs:
+    /// - `path` -- Path to the DB to open, this can be a URI or path on disk
+    /// - `raw_key` -- Encryption key to use to open the specified DB. If the DB does not exist then
+    ///   the database will be created, encrypted with this key.
+    void open(const std::string& path, const cleared_array<48>& raw_key);
 
     /// API: database/exec
     ///

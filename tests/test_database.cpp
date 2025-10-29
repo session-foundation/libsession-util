@@ -11,13 +11,15 @@
 TEST_CASE("Database", "[database][open]") {
     session::cleared_array<48> raw_key = {};
     randombytes_buf(raw_key.data(), raw_key.size());
-    auto db = session::database::Connection(":memory:", raw_key);
+    session::database::Connection db = {};
+    db.open(":memory:", raw_key);
 }
 
 TEST_CASE("Database", "[database][pro][revocations]") {
     session::cleared_array<48> raw_key = {};
     randombytes_buf(raw_key.data(), raw_key.size());
-    auto db = session::database::Connection(":memory:", raw_key);
+    session::database::Connection db = {};
+    db.open(":memory:", raw_key);
 
     // Check runtime was seeded to ticket 0
     session::database::Runtime runtime = db.get_runtime();
@@ -53,9 +55,9 @@ TEST_CASE("Database", "[database][pro][revocations]") {
 
     // Set the items
     session::database::SetResult set_result = db.set_pro_revocations(1, src_items);
-    INFO("Set w/ 2 items failed: " << sqlite3_errstr(set_result.return_code));
+    INFO("Set w/ 2 items failed: " << sqlite3_errstr(set_result.sql_return_code));
     REQUIRE(set_result.success);
-    REQUIRE(set_result.return_code == SQLITE_OK);
+    REQUIRE(set_result.sql_return_code == SQLITE_OK);
 
     // Check runtime ticket was changed to 1
     runtime = db.get_runtime();
@@ -78,9 +80,9 @@ TEST_CASE("Database", "[database][pro][revocations]") {
     // Delete the first item (src[0]) from the DB
     session::pro_backend::ProRevocationItem set_item = src_items[1];
     set_result = db.set_pro_revocations(2, std::span(&set_item, 1));
-    INFO("Set w/ 1 item failed: " << sqlite3_errstr(set_result.return_code));
+    INFO("Set w/ 1 item failed: " << sqlite3_errstr(set_result.sql_return_code));
     REQUIRE(set_result.success);
-    REQUIRE(set_result.return_code == SQLITE_OK);
+    REQUIRE(set_result.sql_return_code == SQLITE_OK);
 
     // Count the number of revocations in the DB (should be 1 as we've deleted one of them)
     db_item_count = db.get_pro_revocations_buffer(nullptr, 0, 0, &ticket);
