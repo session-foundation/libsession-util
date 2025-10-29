@@ -668,4 +668,7 @@ struct SetPaymentRefundRequestedResponse : public ResponseHeader {
     ///   `errors`
     static SetPaymentRefundRequestedResponse parse(std::string_view json);
 };
+session_pro_backend_pro_revocation_item revocation_c_from_cpp(ProRevocationItem const &src);
+
+ProRevocationItem revocation_cpp_from_c(session_pro_backend_pro_revocation_item const &src);
 }  // namespace session::pro_backend

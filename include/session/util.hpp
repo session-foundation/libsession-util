@@ -7,13 +7,12 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iterator>
 #include <optional>
 #include <span>
 #include <type_traits>
 #include <vector>
-
-#include "types.hpp"
 
 namespace session {
 
@@ -299,4 +298,13 @@ std::vector<unsigned char> zstd_compress(
 /// then this returns nullopt if the decompressed size would exceed that limit.
 std::optional<std::vector<unsigned char>> zstd_decompress(
         std::span<const unsigned char> data, size_t max_size = 0);
+
+struct scope_exit {
+    explicit scope_exit(std::function<void()> func) : cleanup(func) {}
+    std::function<void()> cleanup;
+    ~scope_exit() {
+        if (cleanup)
+            cleanup();
+    }
+};
 }  // namespace session

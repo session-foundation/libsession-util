@@ -776,6 +776,25 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
     return result;
 }
 
+session_pro_backend_pro_revocation_item revocation_c_from_cpp(ProRevocationItem const &src)
+{
+    session_pro_backend_pro_revocation_item result = {};
+    std::memcpy(result.gen_index_hash.data, src.gen_index_hash.data(), src.gen_index_hash.size());
+    result.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                       src.expiry_unix_ts.time_since_epoch())
+                                       .count();
+    return result;
+}
+
+ProRevocationItem revocation_cpp_from_c(session_pro_backend_pro_revocation_item const &src)
+{
+    pro_backend::ProRevocationItem result = {};
+    memcpy(result.gen_index_hash.data(), src.gen_index_hash.data, sizeof(src.gen_index_hash.data));
+    result.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(src.expiry_unix_ts_ms));
+    return result;
+}
+
 array_uc64 SetPaymentRefundRequestedRequest::build_sig(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
@@ -1407,11 +1426,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
 
     for (size_t index = 0; index < result.items_count; ++index) {
         const ProRevocationItem& src = cpp.items[index];
-        session_pro_backend_pro_revocation_item& dest = result.items[index];
-        std::memcpy(dest.gen_index_hash.data, src.gen_index_hash.data(), src.gen_index_hash.size());
-        dest.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                         src.expiry_unix_ts.time_since_epoch())
-                                         .count();
+        result.items[index] = revocation_c_from_cpp(src);
     }
     return result;
 }

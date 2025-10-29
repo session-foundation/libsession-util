@@ -80,13 +80,16 @@ struct Connection {
     ///   synced from the Session Pro Backend.
     Runtime get_runtime();
 
-    /// API: database/add_pro_revocations
+    /// API: database/set_pro_revocations
     ///
-    /// Add a list of Session Pro revocations into the database associated with this connection.
-    /// This function is transactional, on failure changes to the database are rolled back.
+    /// Set the list of Session Pro revocations into the database associated with this connection
+    /// replacing the old revocations. This function is transactional, on failure changes to the
+    /// database are rolled back.
     ///
     /// Inputs:
-    /// - `revocations` -- The list of revocations to add
+    /// - `ticket` -- Monotonic integer which is the version of the list, received by the Session
+    ///   Pro Backend when syncing the revocation list.
+    /// - `revocations` -- The list of revocations to set
     ///
     /// Outputs:
     /// - `success` -- True if the add was successful, false otherwise.

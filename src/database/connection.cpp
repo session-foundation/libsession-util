@@ -4,13 +4,13 @@
 #include <sqlcipher/sqlite3.h>
 
 #include <chrono>
-#include <chrono>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <stdexcept>
 
-auto logcat = oxen::log::Cat("database");
+#include "session/database/connection.h"
 
+auto logcat = oxen::log::Cat("database");
 namespace {
 void throw_sql_error(int sql_result, std::string_view error_prefix) {
     std::string msg = fmt::format("{}: {}", error_prefix, sqlite3_errstr(sql_result));
@@ -32,9 +32,10 @@ void sqlite3_deleter::operator()(sqlite3* db) const noexcept {
     sqlite3_close(db);
 }
 
-void Connection::open(const std::string& path, const cleared_array<48> &raw_key) {
+void Connection::open(const std::string& path, const cleared_array<48>& raw_key) {
     cleared_array<48> ZERO_RAW_KEY = {};
-    assert(memcmp(raw_key.data(), ZERO_RAW_KEY.data(), raw_key.size()) != 0 && "Raw key was not set");
+    assert(memcmp(raw_key.data(), ZERO_RAW_KEY.data(), raw_key.size()) != 0 &&
+           "Raw key was not set");
 
     // Open DB
     sqlite3* db_ptr = nullptr;
@@ -55,13 +56,14 @@ void Connection::open(const std::string& path, const cleared_array<48> &raw_key)
     //
     // For more info, see:
     //   https://www.zetetic.net/sqlcipher/sqlcipher-api/#cipher_plaintext_header_size
-    rc = sqlite3_exec(db_.get(), "PRAGMA cipher_plaintext_header_size = 32", nullptr, nullptr, nullptr);
+    rc = sqlite3_exec(
+            db_.get(), "PRAGMA cipher_plaintext_header_size = 32", nullptr, nullptr, nullptr);
     if (rc != SQLITE_OK)
         throw_sql_error(rc, "Failed to configure database");
 
     // Set encryption key, this is the underlying function that "PRAGMA key = .." calls
     std::string fmt_key = fmt::format("x'{}'", oxenc::to_hex(raw_key));
-    rc                  = sqlite3_key(db_.get(), fmt_key.c_str(), fmt_key.size());
+    rc = sqlite3_key(db_.get(), fmt_key.c_str(), fmt_key.size());
     sodium_zero_buffer(fmt_key.data(), fmt_key.size());
     if (rc != SQLITE_OK)
         throw_sql_error(rc, "Failed to set encryption key");
@@ -141,7 +143,6 @@ void Connection::query(std::string_view sql, std::function<void(sqlite3_stmt*)> 
                 fmt::format("Error executing query: {}", sqlite3_errmsg(db_.get())));
 }
 
-
 Runtime Connection::get_runtime() {
     Runtime result = {};
     std::string_view sql = R"(SELECT id, pro_revocations_ticket FROM runtime LIMIT 1)";
@@ -158,7 +159,7 @@ SetResult Connection::set_pro_revocations(
     // The following consists of exception safe code so we do not need try catch and can trivially
     // commit or rollback the at the end of the function.
     exec("BEGIN DEFERRED TRANSACTION;");
-    exec("DELETE FROM pro_revocations"); // Clear the table
+    exec("DELETE FROM pro_revocations");  // Clear the table
 
     // Assign the pro-revocations
     int rc = SQLITE_OK;
@@ -261,7 +262,6 @@ OFFSET %zu
             auto expiry = std::chrono::milliseconds(sqlite3_column_int64(stmt, 1));
             item.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(expiry);
         });
-
     }
 
     // Retrieve the ticket
@@ -273,7 +273,7 @@ OFFSET %zu
     return result;
 }
 
-std::vector<pro_backend::ProRevocationItem> Connection::get_pro_revocations(uint32_t *ticket) {
+std::vector<pro_backend::ProRevocationItem> Connection::get_pro_revocations(uint32_t* ticket) {
     std::vector<pro_backend::ProRevocationItem> result;
     size_t size_req = get_pro_revocations_buffer(nullptr, 0, 0, ticket);
     result.resize(size_req);
@@ -282,3 +282,126 @@ std::vector<pro_backend::ProRevocationItem> Connection::get_pro_revocations(uint
     return result;
 }
 }  // namespace session::database
+
+using namespace session::database;
+
+LIBSESSION_C_API session_database_result session_database_connection_open(
+        session_database_connection* conn, string8 path, span_u8 raw_key) {
+    session_database_result result = {};
+
+    static_assert(
+            sizeof(((session_database_connection*)0)->opaque) >= sizeof(Connection),
+            "C struct instantiates the C++ instance with an `opaque` buffer via placement new so "
+            "the capacity must be large enough to hold the `Connection` instance");
+
+    session_database_connection_close(conn);
+    Connection* conn_cpp = new (conn->opaque) Connection();
+
+    session::cleared_array<48> raw_key_cpp;
+    if (raw_key.size != raw_key_cpp.max_size()) {
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error),
+                "Raw key must be 48 bytes, received %zu",
+                raw_key.size);
+        return result;
+    }
+
+    // Must be string because we need to guarantee that `path` was null-terminated for the SQL API.
+    std::string path_cpp = std::string(path.data, path.data + path.size);
+    memcpy(raw_key_cpp.data(), raw_key.data, raw_key.size);
+
+    try {
+        conn_cpp->open(path_cpp, raw_key_cpp);
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+
+    return result;
+}
+
+LIBSESSION_C_API void session_database_connection_close(session_database_connection* conn) {
+    auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+    if (conn_cpp) {
+        conn_cpp->~Connection();
+        memset(conn->opaque, 0, sizeof(conn->opaque));
+    }
+}
+
+LIBSESSION_C_API session_database_set_result session_database_connection_set_pro_revocations(
+        session_database_connection* conn,
+        uint32_t ticket,
+        session_pro_backend_pro_revocation_item* revocations,
+        size_t revocations_len) {
+    session_database_set_result result = {};
+    auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+    try {
+        // Convert revocations to CPP instance
+        std::vector<session::pro_backend::ProRevocationItem> revocations_cpp;
+        revocations_cpp.reserve(revocations_len);
+        for (size_t index = 0; index < revocations_len; index++) {
+            const session_pro_backend_pro_revocation_item& src = revocations[index];
+            session::pro_backend::ProRevocationItem& dest = revocations_cpp.emplace_back();
+            dest = session::pro_backend::revocation_cpp_from_c(src);
+        }
+
+        // Do the operation
+        SetResult result_cpp = conn_cpp->set_pro_revocations(ticket, revocations_cpp);
+        result.db.success = result_cpp.success;
+        result.sql_return_code = result_cpp.sql_return_code;
+        result.sql_error = result_cpp.sql_error;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.db.error_count = snprintf_clamped(
+                result.db.error,
+                sizeof(result.db.error),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+
+    return result;
+}
+
+LIBSESSION_C_API session_database_get_pro_revocation_result session_database_connection_get_pro_revocations_buffer(
+        session_database_connection* conn,
+        OPTIONAL session_pro_backend_pro_revocation_item* buf,
+        size_t buf_count,
+        size_t offset,
+        OPTIONAL uint32_t* ticket) {
+    auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+    session_database_get_pro_revocation_result result = {};
+    try {
+        std::vector<session::pro_backend::ProRevocationItem> buf_cpp;
+        if (buf && buf_count)
+            buf_cpp.resize(buf_count);
+
+        result.count =
+                conn_cpp->get_pro_revocations_buffer(buf_cpp.data(), buf_count, offset, ticket);
+        buf_cpp.resize(result.count);
+
+        if (buf) {
+            for (size_t index = 0; index < result.count; index++)
+                buf[index] = session::pro_backend::revocation_c_from_cpp(buf_cpp[index]);
+        }
+
+        result.db.success = true;
+    } catch (std::exception& e) {
+        const std::string& error = e.what();
+        result.db.error_count = snprintf_clamped(
+                result.db.error,
+                sizeof(result.db.error),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+
+    return result;
+}
