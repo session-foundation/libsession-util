@@ -2,9 +2,8 @@
 
 #include <span>
 #include <stdexcept>
+#include <string_view>
 #include <vector>
-
-#include "../types.hpp"
 
 namespace session::config {
 
