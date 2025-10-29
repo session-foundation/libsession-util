@@ -1485,7 +1485,7 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
     return result;
 }
 
-LIBSESSION_EXPORT void session_protocol_decode_for_community_free(
+LIBSESSION_C_API void session_protocol_decode_for_community_free(
         session_protocol_decoded_community_message* community_msg) {
     if (community_msg) {
         free(community_msg->content_plaintext.data);

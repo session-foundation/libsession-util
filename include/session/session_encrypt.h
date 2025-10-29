@@ -281,7 +281,7 @@ typedef struct session_decrypt_group_message_result {
 ///   required to write the error. Both counts include the null-terminator. The user must allocate
 ///   at minimum the requested length, including the null-terminator in order for the error message
 ///   to be preserved in full.
-session_decrypt_group_message_result session_decrypt_group_message(
+LIBSESSION_EXPORT session_decrypt_group_message_result session_decrypt_group_message(
         const span_u8* decrypt_ed25519_privkey_list,
         size_t decrypt_ed25519_privkey_len,
         const unsigned char* group_ed25519_pubkey,

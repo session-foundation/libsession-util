@@ -732,7 +732,7 @@ LIBSESSION_EXPORT void session_protocol_decode_envelope_free(
 ///
 ///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
 ///   access to pro features if it's using any.
-session_protocol_decoded_community_message session_protocol_decode_for_community(
+LIBSESSION_EXPORT session_protocol_decoded_community_message session_protocol_decode_for_community(
         const void* content_or_envelope_payload,
         size_t content_or_envelope_payload_len,
         uint64_t unix_ts_ms,
