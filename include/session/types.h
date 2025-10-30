@@ -27,6 +27,14 @@ struct string8 {
     size_t size;
 };
 
+/// Generic function result structure
+typedef struct session_result session_result;
+struct session_c_result {
+    bool success;
+    char error[256];
+    size_t error_count;
+};
+
 #define string8_literal(literal) {(char*)literal, sizeof(literal) - 1}
 
 typedef struct bytes32 bytes32;

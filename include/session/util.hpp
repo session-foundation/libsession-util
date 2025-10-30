@@ -307,4 +307,8 @@ struct scope_exit {
             cleanup();
     }
 };
+
+// Write the e.what() result into `result.error`
+void write_exception_to_session_c_result(struct session_c_result* result, const std::string& what);
+
 }  // namespace session

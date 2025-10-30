@@ -776,8 +776,7 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
     return result;
 }
 
-session_pro_backend_pro_revocation_item revocation_c_from_cpp(ProRevocationItem const &src)
-{
+session_pro_backend_pro_revocation_item revocation_c_from_cpp(ProRevocationItem const& src) {
     session_pro_backend_pro_revocation_item result = {};
     std::memcpy(result.gen_index_hash.data, src.gen_index_hash.data(), src.gen_index_hash.size());
     result.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -786,8 +785,7 @@ session_pro_backend_pro_revocation_item revocation_c_from_cpp(ProRevocationItem 
     return result;
 }
 
-ProRevocationItem revocation_cpp_from_c(session_pro_backend_pro_revocation_item const &src)
-{
+ProRevocationItem revocation_cpp_from_c(session_pro_backend_pro_revocation_item const& src) {
     pro_backend::ProRevocationItem result = {};
     memcpy(result.gen_index_hash.data(), src.gen_index_hash.data, sizeof(src.gen_index_hash.data));
     result.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(

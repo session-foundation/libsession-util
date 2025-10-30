@@ -1,7 +1,11 @@
+#include <session/core.h>
+#include <session/database/connection.h>
+#include <session/pro_backend.h>
+
 #include <oxen/log.hpp>
 #include <session/core.hpp>
 
-auto logcat = oxen::log::Cat("core");
+static auto logcat = oxen::log::Cat("core");
 
 namespace session::core {
 bool ProRevocationItemComparer::operator()(
@@ -24,7 +28,7 @@ bool Core::pro_proof_is_revoked(
 }
 
 void Core::pro_update_revocations(
-        int32_t revocations_ticket,
+        uint32_t revocations_ticket,
         std::span<const session::pro_backend::ProRevocationItem> revocations) {
     if (revocations_ticket_ == revocations_ticket)
         return;
@@ -35,26 +39,90 @@ void Core::pro_update_revocations(
     revocations_ticket_ = revocations_ticket;
 
 #if !defined(DISABLED_SQLCIPHER_DATABASE)
-    session::database::SetResult set_result =
-            db_conn.set_pro_revocations(revocations_ticket, revocations);
+    if (db_conn.db_) {
+        session::database::SetResult set_result =
+                db_conn.set_pro_revocations(revocations_ticket, revocations);
 
-    // There's not much we can do here for whatever reason it failed. The runtime cache is updated
-    // but not the DB. The DB is only for permanence of the list across restarts of libsession at
-    // which point, it will load from the DB, query the backend and notice the ticket is out of sync
-    // and try again.
-    if (!set_result.success) {
-        oxen::log::warning(
-                logcat,
-                "Failed to update SQL revocations from (items {}; ticket {}) -> (items {}; ticket "
-                "{}): ({}) {}",
-                revocations_.size(),
-                revocations_ticket_,
-                revocations.size(),
-                revocations_ticket,
-                set_result.sql_return_code,
-                set_result.sql_error);
+        // There's not much we can do here for whatever reason it failed. The runtime cache is
+        // updated but not the DB. The DB is only for permanence of the list across restarts of
+        // libsession at which point, it will load from the DB, query the backend and notice the
+        // ticket is out of sync and try again.
+        if (!set_result.success) {
+            oxen::log::warning(
+                    logcat,
+                    "Failed to update SQL revocations from (items {}; ticket {}) -> (items {}; "
+                    "ticket "
+                    "{}): ({}) {}",
+                    revocations_.size(),
+                    revocations_ticket_,
+                    revocations.size(),
+                    revocations_ticket,
+                    set_result.sql_return_code,
+                    set_result.sql_error);
+        }
     }
 #endif
 }
-
 };  // namespace session::core
+
+using namespace session::core;
+
+LIBSESSION_C_API void session_core_core_init(session_core_core* core) {
+    static_assert(sizeof(core->opaque) >= sizeof(Core));
+    if (core) {
+        new (core->opaque) Core();
+    }
+}
+
+LIBSESSION_C_API void session_core_core_deinit(session_core_core* core) {
+    if (core) {
+        auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
+        if (core_cpp) {
+            core_cpp->~Core();
+            memset(core->opaque, 0, sizeof(core->opaque));
+        }
+    }
+}
+
+LIBSESSION_C_API session_database_connection session_core_core_db_conn(session_core_core* core) {
+    auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
+    session_database_connection result = {};
+    uintptr_t ptr_address = reinterpret_cast<uintptr_t>(&core_cpp->db_conn);
+    memcpy(result.opaque, &ptr_address, sizeof(ptr_address));
+    return result;
+}
+
+LIBSESSION_C_API bool session_core_core_pro_proof_is_revoked(
+        session_core_core* core, const bytes32* gen_index_hash, uint64_t unix_ts_ms) {
+    bool result = false;
+    auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
+    session::array_uc32 gen_index_hash_cpp = {};
+    memcpy(gen_index_hash_cpp.data(), gen_index_hash->data, gen_index_hash_cpp.max_size());
+    auto unix_ts =
+            std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(unix_ts_ms));
+    result = core_cpp->pro_proof_is_revoked(gen_index_hash_cpp, unix_ts);
+    return result;
+}
+
+LIBSESSION_C_API session_c_result session_core_core_pro_update_revocations(
+        session_core_core* core,
+        uint32_t revocations_ticket,
+        session_pro_backend_pro_revocation_item* revocations,
+        size_t revocations_count) {
+    session_c_result result = {};
+    auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
+    try {
+        if (revocations_count && revocations) {
+            std::vector<session::pro_backend::ProRevocationItem> revocations_cpp;
+            revocations_cpp.resize(revocations_count);
+            for (size_t index = 0; index < revocations_count; index++)
+                revocations_cpp[index] =
+                        session::pro_backend::revocation_cpp_from_c(revocations[index]);
+            core_cpp->pro_update_revocations(revocations_ticket, revocations_cpp);
+        }
+        result.success = true;
+    } catch (const std::exception& e) {
+        session::write_exception_to_session_c_result(&result, e.what());
+    }
+    return result;
+}

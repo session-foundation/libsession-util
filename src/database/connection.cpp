@@ -10,7 +10,8 @@
 
 #include "session/database/connection.h"
 
-auto logcat = oxen::log::Cat("database");
+static auto logcat = oxen::log::Cat("database");
+
 namespace {
 void throw_sql_error(int sql_result, std::string_view error_prefix) {
     std::string msg = fmt::format("{}: {}", error_prefix, sqlite3_errstr(sql_result));
@@ -119,6 +120,7 @@ CREATE TABLE IF NOT EXISTS runtime (
 }
 
 void Connection::exec(const std::string& sql) {
+    assert(db_);
     char* error_msg = nullptr;
     int rc = sqlite3_exec(db_.get(), sql.c_str(), nullptr, nullptr, &error_msg);
     if (rc != SQLITE_OK) {
@@ -129,6 +131,7 @@ void Connection::exec(const std::string& sql) {
 }
 
 void Connection::query(std::string_view sql, std::function<void(sqlite3_stmt*)> callback) {
+    assert(db_);
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(db_.get(), sql.data(), sql.size(), &stmt, nullptr);
     if (rc != SQLITE_OK) {
@@ -144,6 +147,7 @@ void Connection::query(std::string_view sql, std::function<void(sqlite3_stmt*)> 
 }
 
 Runtime Connection::get_runtime() {
+    assert(db_);
     Runtime result = {};
     std::string_view sql = R"(SELECT id, pro_revocations_ticket FROM runtime LIMIT 1)";
     query(sql, [&result](sqlite3_stmt* stmt) {
@@ -155,7 +159,7 @@ Runtime Connection::get_runtime() {
 
 SetResult Connection::set_pro_revocations(
         uint32_t ticket, std::span<const pro_backend::ProRevocationItem> revocations) noexcept {
-
+    assert(db_);
     // The following consists of exception safe code so we do not need try catch and can trivially
     // commit or rollback the at the end of the function.
     exec("BEGIN DEFERRED TRANSACTION;");
@@ -219,6 +223,7 @@ VALUES (?, ?)
 
 size_t Connection::get_pro_revocations_buffer(
         pro_backend::ProRevocationItem* buf, size_t buf_count, size_t offset, uint32_t* ticket) {
+    assert(db_);
     // Note this operation is not atomic, the collecting of revocations and the querying of the
     // ticket happens in 2 separate read steps. This is probably not an issue as I expect the
     // getting of revocations to only happen on startup where it'll get cached into runtime memory.
@@ -274,6 +279,7 @@ OFFSET %zu
 }
 
 std::vector<pro_backend::ProRevocationItem> Connection::get_pro_revocations(uint32_t* ticket) {
+    assert(db_);
     std::vector<pro_backend::ProRevocationItem> result;
     size_t size_req = get_pro_revocations_buffer(nullptr, 0, 0, ticket);
     result.resize(size_req);
@@ -285,9 +291,9 @@ std::vector<pro_backend::ProRevocationItem> Connection::get_pro_revocations(uint
 
 using namespace session::database;
 
-LIBSESSION_C_API session_database_result session_database_connection_open(
-        session_database_connection* conn, string8 path, span_u8 raw_key) {
-    session_database_result result = {};
+LIBSESSION_C_API session_c_result
+session_database_connection_open(session_database_connection* conn, string8 path, span_u8 raw_key) {
+    session_c_result result = {};
 
     static_assert(
             sizeof(((session_database_connection*)0)->opaque) >= sizeof(Connection),
@@ -315,23 +321,19 @@ LIBSESSION_C_API session_database_result session_database_connection_open(
         conn_cpp->open(path_cpp, raw_key_cpp);
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        session::write_exception_to_session_c_result(&result, e.what());
     }
 
     return result;
 }
 
 LIBSESSION_C_API void session_database_connection_close(session_database_connection* conn) {
-    auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
-    if (conn_cpp) {
-        conn_cpp->~Connection();
-        memset(conn->opaque, 0, sizeof(conn->opaque));
+    if (conn) {
+        auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+        if (conn_cpp) {
+            conn_cpp->~Connection();
+            memset(conn->opaque, 0, sizeof(conn->opaque));
+        }
     }
 }
 
@@ -358,19 +360,14 @@ LIBSESSION_C_API session_database_set_result session_database_connection_set_pro
         result.sql_return_code = result_cpp.sql_return_code;
         result.sql_error = result_cpp.sql_error;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.db.error_count = snprintf_clamped(
-                result.db.error,
-                sizeof(result.db.error),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        session::write_exception_to_session_c_result(&result.db, e.what());
     }
 
     return result;
 }
 
-LIBSESSION_C_API session_database_get_pro_revocation_result session_database_connection_get_pro_revocations_buffer(
+LIBSESSION_C_API session_database_get_pro_revocation_result
+session_database_connection_get_pro_revocations_buffer(
         session_database_connection* conn,
         OPTIONAL session_pro_backend_pro_revocation_item* buf,
         size_t buf_count,
@@ -394,13 +391,7 @@ LIBSESSION_C_API session_database_get_pro_revocation_result session_database_con
 
         result.db.success = true;
     } catch (std::exception& e) {
-        const std::string& error = e.what();
-        result.db.error_count = snprintf_clamped(
-                result.db.error,
-                sizeof(result.db.error),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        session::write_exception_to_session_c_result(&result.db, e.what());
     }
 
     return result;

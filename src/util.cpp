@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <session/types.h>
 #include <session/util.h>
 #include <simdutf.h>
 #include <zstd.h>
@@ -223,6 +224,14 @@ size_t utf16_count(std::span<const char16_t> utf16_string) {
     return simdutf::count_utf16(utf16_string.data(), utf16_string.size());
 }
 
+void write_exception_to_session_c_result(struct session_c_result* result, const std::string& what) {
+    result->error_count = snprintf_clamped(
+            result->error,
+            sizeof(result->error),
+            "%.*s",
+            static_cast<int>(what.size()),
+            what.data());
+}
 }  // namespace session
 
 LIBSESSION_C_API size_t utf16_count_truncated_to_codepoints(

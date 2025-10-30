@@ -190,4 +190,3 @@ static inline TestKeys get_deterministic_test_keys() {
     // clang-format on
     return result;
 }
-

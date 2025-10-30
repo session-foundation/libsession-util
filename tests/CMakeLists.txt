@@ -9,6 +9,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_blinding.cpp
     test_bt_merge.cpp
     test_bugs.cpp
+    test_core.cpp
     test_compression.cpp
     test_config_userprofile.cpp
     test_config_user_groups.cpp
@@ -40,10 +41,6 @@ set(LIB_SESSION_UTESTS_SOURCES
 if (ENABLE_ONIONREQ)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_session_network.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
-endif()
-
-if (ENABLE_DATABASE)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_database.cpp)
 endif()
 
 add_library(test_libs INTERFACE)

@@ -1,36 +1,62 @@
-#include <oxenc/hex.h>
+#include <session/core.h>
+#include <session/database/connection.h>
+
+#include <catch2/catch_test_macros.hpp>
+#include <session/sodium_array.hpp>
+#include <session/util.hpp>
+
+#if !defined(DISABLE_SQLCIPHER_DATABASE)
 #include <sodium.h>
 #include <sqlcipher/sqlite3.h>
 
-#include <catch2/catch_test_macros.hpp>
-#include <session/util.hpp>
+#include <session/database/connection.hpp>
+#endif
 
-#include "session/database/connection.h"
-#include "session/database/connection.hpp"
-#include "session/pro_backend.hpp"
+TEST_CASE("Core", "[core][database][open]") {
+    session_core_core core = {};
+    session_core_core_init(&core);
+    auto on_exit = session::scope_exit([&]() { session_core_core_deinit(&core); });
 
-TEST_CASE("Database", "[database][open]") {
+    // Check that the core opaque handle is not zero
+    session_core_core zero_core = {};
+    REQUIRE(memcmp(core.opaque, zero_core.opaque, sizeof(core.opaque)) != 0);
+
+#if !defined(DISABLE_SQLCIPHER_DATABASE)
+    // Setup the encryption key
     session::cleared_array<48> raw_key = {};
     randombytes_buf(raw_key.data(), raw_key.size());
     span_u8 raw_key_span = {raw_key.data(), raw_key.size()};
 
+    // Get the DB connection from core, and check that the handle is not zero
+    session_database_connection db = session_core_core_db_conn(&core);
     session_database_connection zero_db = {};
-    session_database_connection db = {};
-    session_database_connection_open(&db, string8_literal(":memory:"), raw_key_span);
     REQUIRE(memcmp(db.opaque, zero_db.opaque, sizeof(db.opaque)) != 0);
 
+    // Open a DB connection
+    session_c_result open_result =
+            session_database_connection_open(&db, string8_literal(":memory:"), raw_key_span);
+    REQUIRE(open_result.success);
+
+    // Close the DB connection
     session_database_connection_close(&db);
     REQUIRE(memcmp(db.opaque, zero_db.opaque, sizeof(db.opaque)) == 0);
+#endif
 }
 
-TEST_CASE("Database", "[database][pro][revocations]") {
+#if !defined(DISABLE_SQLCIPHER_DATABASE)
+TEST_CASE("Core", "[core][database][pro][revocations]") {
+    session_core_core core = {};
+    session_core_core_init(&core);
+    auto on_exit = session::scope_exit([&]() { session_core_core_deinit(&core); });
+
+    // Setup the encryption key
     session::cleared_array<48> raw_key = {};
     randombytes_buf(raw_key.data(), raw_key.size());
     span_u8 raw_key_span = {raw_key.data(), raw_key.size()};
 
-    session_database_connection db = {};
+    // Open the DB
+    session_database_connection db = session_core_core_db_conn(&core);
     session_database_connection_open(&db, string8_literal(":memory:"), raw_key_span);
-
     auto* db_cpp = reinterpret_cast<session::database::Connection*>(db.opaque);
 
     // Check runtime was seeded to ticket 0
@@ -136,3 +162,4 @@ TEST_CASE("Database", "[database][pro][revocations]") {
     REQUIRE(src_items[1].expiry_unix_ts_ms == db_items_after_delete[0].expiry_unix_ts_ms);
     REQUIRE(ticket == 2);
 }
+#endif  // !defined(DISABLE_SQLCIPHER_DATABASE)

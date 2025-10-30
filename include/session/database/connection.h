@@ -13,28 +13,22 @@ struct session_pro_backend_pro_revocation_item;
 
 typedef struct session_database_connection session_database_connection;
 struct session_database_connection {
-    char opaque[16];
-};
-
-typedef struct session_database_result session_database_result;
-struct session_database_result {
-    bool success;
-    char error[256];
-    size_t error_count;
+    uint64_t opaque[2];
 };
 
 typedef struct session_database_set_result session_database_set_result;
 struct session_database_set_result {
-    session_database_result db;
+    session_c_result db;
     int sql_return_code;
     /// SQL's string-ified `sql_return_code` pointing to memory in the data segment. Should not be
     /// modified and is valid for program lifetime.
     const char* sql_error;
 };
 
-typedef struct session_database_get_pro_revocation_result session_database_get_pro_revocation_result;
+typedef struct session_database_get_pro_revocation_result
+        session_database_get_pro_revocation_result;
 struct session_database_get_pro_revocation_result {
-    session_database_result db;
+    session_c_result db;
     size_t count;
 };
 
@@ -51,7 +45,7 @@ struct session_database_get_pro_revocation_result {
 /// - `path` -- Path to the DB to open, this can be a URI or path on disk
 /// - `raw_key` -- Encryption key to use to open the specified DB. If the DB does not exist then
 ///   the database will be created, encrypted with this key.
-LIBSESSION_EXPORT session_database_result session_database_connection_open(
+LIBSESSION_EXPORT session_c_result session_database_connection_open(
         session_database_connection* conn, string8 path, span_u8 raw_key) NON_NULL_ARG(1);
 
 /// API: session_database_connection_close
@@ -60,8 +54,7 @@ LIBSESSION_EXPORT session_database_result session_database_connection_open(
 ///
 /// Inputs:
 /// - `conn` -- DB connection object to close
-LIBSESSION_EXPORT void session_database_connection_close(session_database_connection* conn)
-        NON_NULL_ARG(1);
+LIBSESSION_EXPORT void session_database_connection_close(session_database_connection* conn);
 
 /// API: session_database_connection_set_pro_revocations
 ///
@@ -100,7 +93,8 @@ LIBSESSION_EXPORT session_database_set_result session_database_connection_set_pr
 ///   insufficient sized to receive the rows, the return value is always capped to the size of
 ///   the buffer. If `buf` and `buf_count` are nullptr or 0 respectively, then value returned
 ///   is the amount of revocation items in the DB at the time of execution.
-LIBSESSION_EXPORT session_database_get_pro_revocation_result session_database_connection_get_pro_revocations_buffer(
+LIBSESSION_EXPORT session_database_get_pro_revocation_result
+session_database_connection_get_pro_revocations_buffer(
         session_database_connection* conn,
         OPTIONAL session_pro_backend_pro_revocation_item* buf,
         size_t buf_count,

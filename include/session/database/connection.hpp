@@ -1,9 +1,9 @@
 #pragma once
 
 #include <session/types.h>
-#include <memory>
 
 #include <functional>
+#include <memory>
 #include <session/pro_backend.hpp>
 #include <session/sodium_array.hpp>
 #include <string>
@@ -36,7 +36,7 @@ struct sqlite3_deleter {
 struct Connection {
     std::unique_ptr<sqlite3, sqlite3_deleter> db_;
 
-    /// API: database/open
+    /// API: database/Connection::open
     ///
     /// Open a connection to the DB specified at `path`. If this connection previously has an open
     /// DB that connection is gracefully closed before opening up the newly requested one. If this
@@ -51,7 +51,7 @@ struct Connection {
     ///   the database will be created, encrypted with this key.
     void open(const std::string& path, const cleared_array<48>& raw_key);
 
-    /// API: database/exec
+    /// API: database/Connection::exec
     ///
     /// Prepares a statement and executes it. Throws if SQLite returned an error
     ///
@@ -59,7 +59,7 @@ struct Connection {
     /// - `sql` -- SQL statement to prepare and execute
     void exec(const std::string& sql);
 
-    /// API: database/query
+    /// API: database/Connection::query
     ///
     /// Prepares a statement, steps the statement, calls the provided `callback` and then finalizes
     /// the statement once stepping no longer returns rows. Throws if SQLite returned an error
@@ -69,7 +69,7 @@ struct Connection {
     /// - `callback` -- User defined function to execute when a row is returned
     void query(std::string_view sql, std::function<void(sqlite3_stmt*)> callback);
 
-    /// API: database/get_runtime
+    /// API: database/Connection::get_runtime
     ///
     /// Get the runtime row of the table which contains global metadata for the entire table.
     /// There's only one runtime row per database.
@@ -97,7 +97,7 @@ struct Connection {
     SetResult set_pro_revocations(
             uint32_t ticket, std::span<const pro_backend::ProRevocationItem> revocations) noexcept;
 
-    /// API: database/get_pro_revocations_buffer
+    /// API: database/Connection::get_pro_revocations_buffer
     ///
     /// Retrieve the Session Pro Backend revocation list given and output the rows into the given
     /// `buf`. This function throws if SQLite returned an error
@@ -124,7 +124,7 @@ struct Connection {
             size_t offset,
             OPTIONAL uint32_t* ticket);
 
-    /// API: database/get_pro_revocations
+    /// API: database/Connection::get_pro_revocations
     ///
     /// Retrieve the Session Pro Backend revocation list from the database. This function throws if
     /// there was an allocation or SQLite returned an error
