@@ -27,6 +27,7 @@
 
 #include "session/blinding.hpp"
 #include "session/sodium_array.hpp"
+#include "session/types.hpp"
 
 using namespace std::literals;
 
@@ -1138,7 +1139,7 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
                 padding);
         result = {
                 .success = true,
-                .ciphertext = span_u8_copy_or_throw(result_cpp.data(), result_cpp.size()),
+                .ciphertext = session::span_u8_copy_or_throw(result_cpp.data(), result_cpp.size()),
         };
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
@@ -1250,8 +1251,8 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
             result = {
                     .success = true,
                     .index = index,
-                    .plaintext =
-                            span_u8_copy_or_throw(result.plaintext.data, result.plaintext.size),
+                    .plaintext = session::span_u8_copy_or_throw(
+                            result.plaintext.data, result.plaintext.size),
             };
             assert(result_cpp.session_id.size() == sizeof(result.session_id));
             std::memcpy(result.session_id, result_cpp.session_id.data(), sizeof(result.session_id));

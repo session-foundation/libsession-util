@@ -10,6 +10,7 @@
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
 #include <session/util.hpp>
+#include <session/types.hpp>
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
@@ -464,7 +465,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
 
                 if (use_malloc == UseMalloc::Yes) {
                     result.ciphertext_c =
-                            span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
+                            session::span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
                 } else {
                     result.ciphertext_cpp = std::move(ciphertext);
                 }
@@ -1389,7 +1390,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
 
     // Marshall into c type
     try {
-        result.content_plaintext = span_u8_copy_or_throw(
+        result.content_plaintext = session::span_u8_copy_or_throw(
                 result_cpp.content_plaintext.data(), result_cpp.content_plaintext.size());
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
@@ -1469,7 +1470,7 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
         if (result.has_envelope)
             result.envelope = envelope_from_cpp(*decoded.envelope);
 
-        result.content_plaintext = span_u8_copy_or_throw(
+        result.content_plaintext = session::span_u8_copy_or_throw(
                 decoded.content_plaintext.data(), decoded.content_plaintext.size());
         result.content_plaintext_unpadded_size = decoded.content_plaintext_unpadded_size;
         result.has_pro = decoded.pro.has_value();

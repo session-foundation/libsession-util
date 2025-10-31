@@ -783,7 +783,7 @@ session_pro_backend_add_pro_payment_request_build_to_json(
                 rotating_span,
                 payment_tx_provider,
                 payment_tx_payment_id_span);
-        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
@@ -854,7 +854,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_j
                 master_span,
                 rotating_span,
                 std::chrono::sys_time<std::chrono::milliseconds>(ts));
-        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
@@ -909,7 +909,7 @@ session_pro_backend_get_pro_status_request_build_to_json(
     session_pro_backend_to_json result = {};
     try {
         auto json = GetProStatusRequest::build_to_json(request_version, master_span, ts, history);
-        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
@@ -942,7 +942,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
 
     try {
         std::string json = cpp.to_json();
-        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
@@ -975,7 +975,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_proof_r
 
     try {
         std::string json = cpp.to_json();
-        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
@@ -1004,7 +1004,7 @@ session_pro_backend_get_pro_revocations_request_to_json(
 
     try {
         std::string json = cpp.to_json();
-        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();
@@ -1037,7 +1037,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_status_
 
     try {
         std::string json = cpp.to_json();
-        result.json = string8_copy_or_throw(json.data(), json.size());
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         const std::string& error = e.what();

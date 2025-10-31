@@ -52,16 +52,6 @@ struct arena_t {
     size_t max;
 };
 
-/// Create a span of bytes that owns the `size` bytes of memory requested. If allocation fails, this
-/// function throws a runtime exception. The `data` pointer is span must be freed once the span
-/// is no longer needed.
-span_u8 span_u8_alloc_or_throw(size_t size);
-
-/// Create a span of bytes that copies the payload at `data` for `size` bytes. If allocation fails
-/// this function throws a runtime exception. The `data` pointer is span must be freed once the span
-/// is no longer needed.
-span_u8 span_u8_copy_or_throw(const void* data, size_t size);
-
 /// A wrapper around snprintf that fixes a common bug in the value the printing function returns
 /// when a buffer is passed in. Irrespective of whether a buffer is passed in, snprintf is defined
 /// to return:
@@ -79,12 +69,6 @@ span_u8 span_u8_copy_or_throw(const void* data, size_t size);
 /// NULL is passed in then this function returns the number of bytes actually needed to write the
 /// entire string (as per normal snprintf behaviour).
 int snprintf_clamped(char* buffer, size_t size, char const* fmt, ...);
-
-/// Allocate the string with the specific size. Throws on allocation failure.
-string8 string8_alloc_or_throw(size_t size);
-
-/// Create a string by copying the given pointer and size. Throws on allocation failure
-string8 string8_copy_or_throw(const void* data, size_t size);
 
 /// Allocate memory from the basic bump allocating arena. Returns a null pointer on failure.
 void* arena_alloc(arena_t* arena, size_t bytes);
