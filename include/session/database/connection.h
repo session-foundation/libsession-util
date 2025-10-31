@@ -2,6 +2,7 @@
 
 #include <session/types.h>
 #include <stddef.h>
+#include <stdint.h>
 
 #include "../export.h"
 
@@ -39,6 +40,8 @@ struct session_database_get_pro_revocation_result {
 ///
 /// This function returns an if the DB was not openable, if the `raw_key` was the incorrect key to
 /// decrypt the DB or the contents of the DB were malformed.
+///
+/// If the DB has never been initialised before, the DB is initialised with the required schema.
 ///
 /// Inputs:
 /// - `conn` -- DB connection object that was zero-initialised or used previously

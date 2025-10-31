@@ -8,9 +8,24 @@
 #include <session/types.hpp>
 #include <set>
 
-namespace session { namespace pro_backend {
-    struct ProRevocationItem;
-}};  // namespace session::pro_backend
+/// The fundamental library context that an application should instantiate at the start of their
+/// libsession integrated application. Its goal is to maintain libsession data structures for
+/// communicating on the protocol at runtime but also persist it to disk if/where necessary to
+/// maintain state across application restarts.
+///
+/// A typical application will instantiate the Core context, open a DB connection at the desired
+/// path where libsession will persist state. Periodically the integrating application will invoke
+/// the Core context to feed it data that it will managed. In future, the Core context will be
+/// runnable in a background thread for it to maintain itself and automatically subscribe to the
+/// Session Pro Backend, the swarms of the Session Account it manages to send and receive messages
+/// in a way that abstracts that functionality from the implementing application.
+///
+/// Currently the integrating application must update the Core context when it receives the
+/// appropriate data from the network.
+
+namespace session::pro_backend {
+struct ProRevocationItem;
+};  // namespace session::pro_backend
 
 namespace session::core {
 struct ProRevocationItemComparer {
@@ -20,8 +35,11 @@ struct ProRevocationItemComparer {
 };
 
 struct Core {
+    /// List of Session Pro revocations that the core will reject proofs from
     std::set<session::pro_backend::ProRevocationItem, ProRevocationItemComparer> revocations_;
 
+    /// Version of the revocation list that is currently stored in this core context. It is received
+    /// from the Session Pro Backend when the revocation list is queried.
     uint32_t revocations_ticket_;
 
     /// After initialisation you must call `db_conn.open()` if you wish to use

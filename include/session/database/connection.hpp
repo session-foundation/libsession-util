@@ -8,6 +8,9 @@
 #include <session/sodium_array.hpp>
 #include <string>
 
+/// Functions to interact with a SQLCipher database that maintains Libsession persistent state such
+/// as the Session Pro revocation list.
+
 struct sqlite3;
 struct sqlite3_stmt;
 
@@ -44,6 +47,8 @@ struct Connection {
     ///
     /// This function throws an error if the DB was not openable, if the `raw_key` was the incorrect
     /// key to decrypt the DB or the contents of the DB were malformed.
+    ///
+    /// If the DB has never been initialised before, the DB is initialised with the required schema.
     ///
     /// Inputs:
     /// - `path` -- Path to the DB to open, this can be a URI or path on disk
