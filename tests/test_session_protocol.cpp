@@ -111,7 +111,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     msg.size(),
                     SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE |
                             SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
-            REQUIRE(pro_msg.success);
+            REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE(pro_msg.features == (SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE |
                                          SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR));
             REQUIRE(pro_msg.codepoint_count == msg.size());
@@ -122,11 +122,12 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             std::string_view msg = "\xFF";
             session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
                     msg.data(), msg.size(), SESSION_PROTOCOL_PRO_FEATURES_NIL);
-            REQUIRE(!pro_msg.success);
+            REQUIRE(pro_msg.status ==
+                    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR);
             REQUIRE(pro_msg.error.size);
         }
 
-        // Try a message exceeding the size threshold
+        // Try a message exceeding the standard size threshold
         {
             auto msg = std::string(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT + 1, 'a');
             session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
@@ -134,9 +135,39 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     msg.size(),
                     SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE |
                             SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
-            REQUIRE(pro_msg.success);
+            REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE(pro_msg.features == (SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT |
                                          SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE |
+                                         SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR));
+            REQUIRE(pro_msg.codepoint_count == msg.size());
+        }
+
+        // Try a message at the max size threshold
+        {
+            auto msg = std::string(SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT, 'a');
+            session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                    msg.data(),
+                    msg.size(),
+                    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE |
+                            SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
+            REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
+            REQUIRE(pro_msg.features == (SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT |
+                                         SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE |
+                                         SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR));
+            REQUIRE(pro_msg.codepoint_count == msg.size());
+        }
+
+        // Try a message at the (max size + 1) threshold
+        {
+            auto msg = std::string(SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT + 1, 'a');
+            session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                    msg.data(),
+                    msg.size(),
+                    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE |
+                            SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR);
+            REQUIRE(pro_msg.status ==
+                    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT);
+            REQUIRE(pro_msg.features == (SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE |
                                          SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR));
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
@@ -146,7 +177,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             auto msg = std::string(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT, 'a');
             session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
                     msg.data(), msg.size(), SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE);
-            REQUIRE(pro_msg.success);
+            REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE(pro_msg.features == SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }

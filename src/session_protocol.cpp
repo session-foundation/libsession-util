@@ -191,12 +191,19 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
                                        : simdutf::validate_utf16_with_errors(
                                                  reinterpret_cast<const char16_t*>(utf), utf_size);
     if (validate.is_ok()) {
-        result.success = true;
+        result.status = session::ProFeaturesForMsgStatus::Success;
         result.codepoint_count =
                 is_utf8 ? simdutf::count_utf8(reinterpret_cast<const char*>(utf), utf_size)
                         : simdutf::count_utf16(reinterpret_cast<const char16_t*>(utf), utf_size);
-        if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT)
-            result.features |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
+
+        if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
+            if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
+                result.features |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
+            } else {
+                result.error = "Message exceeds the maximum character limit allowed";
+                result.status = session::ProFeaturesForMsgStatus::ExceedsCharacterLimit;
+            }
+        }
 
         if (extra & SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
             result.features |= SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR;
@@ -206,6 +213,7 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 
         assert((result.features & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) == 0);
     } else {
+        result.status = session::ProFeaturesForMsgStatus::UTFDecodingError;
         result.error = simdutf::error_to_string(validate.error);
     }
     return result;
@@ -1119,7 +1127,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
     ProFeaturesForMsg result_cpp =
             pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ true);
     session_protocol_pro_features_for_msg result = {
-            .success = result_cpp.success,
+            .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
             .features = result_cpp.features,
             .codepoint_count = result_cpp.codepoint_count,
@@ -1133,7 +1141,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
     ProFeaturesForMsg result_cpp =
             pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
     session_protocol_pro_features_for_msg result = {
-            .success = result_cpp.success,
+            .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
             .features = result_cpp.features,
             .codepoint_count = result_cpp.codepoint_count,

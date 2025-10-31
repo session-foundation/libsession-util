@@ -72,6 +72,12 @@ enum SESSION_PROTOCOL_PRO_FEATURES_ {
                                         SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR
 };
 
+typedef enum SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS {  // See session::ProFeaturesForMsgStatus
+    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
+    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR,
+    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
+} SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS;
+
 typedef enum SESSION_PROTOCOL_DESTINATION_TYPE {  // See session::DestinationType
     SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1,
     SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
@@ -266,7 +272,7 @@ LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
 typedef struct session_protocol_pro_features_for_msg {
-    bool success;
+    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS status;
     string8 error;
     SESSION_PROTOCOL_PRO_FEATURES features;
     size_t codepoint_count;

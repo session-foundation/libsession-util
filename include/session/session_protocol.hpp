@@ -168,8 +168,18 @@ class ProProof {
     array_uc32 hash() const;
 };
 
+enum class ProFeaturesForMsgStatus {
+    Success = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
+
+    /// Message byte stream to classify could not be decoded into a valid UTF8/16 string
+    UTFDecodingError = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR,
+
+    /// Decoded UTF8/16 string exceeded the maximum character limit allowed for Session Pro
+    ExceedsCharacterLimit = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
+};
+
 struct ProFeaturesForMsg {
-    bool success;
+    ProFeaturesForMsgStatus status;
     std::string_view error;
     SESSION_PROTOCOL_PRO_FEATURES features;
     size_t codepoint_count;
