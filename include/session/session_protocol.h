@@ -23,6 +23,11 @@ enum {
     /// definitions for users of the library to consume.
     SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT = 10000,
 
+    /// Amount of conversations that a user without Session Pro can pin
+    SESSION_PROTOCOL_PRO_STANDARD_PINNED_CONVERSATION_LIMIT = 5,
+
+    /// Amount of bytes that a community or 1o1 message `Content` must be padded by before wrapping
+    /// in an envelope.
     SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING = 160,
 };
 
