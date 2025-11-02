@@ -15,13 +15,35 @@
 ///
 /// A typical application will instantiate the Core context, open a DB connection at the desired
 /// path where libsession will persist state. Periodically the integrating application will invoke
-/// the Core context to feed it data that it will managed. In future, the Core context will be
+/// the Core context to feed it data that it will manage. In future, the Core context will be
 /// runnable in a background thread for it to maintain itself and automatically subscribe to the
 /// Session Pro Backend, the swarms of the Session Account it manages to send and receive messages
-/// in a way that abstracts that functionality from the implementing application.
+/// in a way that abstracts that book-keeping from the implementing application.
 ///
 /// Currently the integrating application must update the Core context when it receives the
-/// appropriate data from the network.
+/// appropriate data from the network and you can opt out of using a database by either,
+///
+///  - Compiling without database support
+///  - Not opening the database or ensuring the database is closed if it was open
+///
+/// The typical intended flow for using the Core is as follows:
+///
+/// ```
+///  #include <sodium/randombytes.h>
+///  #include <session/core.hpp>
+///
+///  session::cleared_array<48> db_enc_key = {};
+///  randombytes_buf(db_enc_key.data(), db_enc_key.size());
+///
+///  try {
+///    session::core::Core core = {};
+///    core.db_conn.open(":memory:", db_enc_key);
+///
+///    // Then use the Core API ...
+///    if (core.pro_proof_is_revoked(...)) { ... }
+///  } catch (const std::exception& e) {
+///  }
+/// ```
 
 namespace session::pro_backend {
 struct ProRevocationItem;

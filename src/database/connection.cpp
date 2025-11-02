@@ -119,6 +119,10 @@ CREATE TABLE IF NOT EXISTS runtime (
     assert(final_version_in_db == TARGET_DB_VERSION);
 }
 
+void Connection::close() {
+    db_.reset();
+}
+
 void Connection::exec(const std::string& sql) {
     assert(db_);
     char* error_msg = nullptr;
@@ -331,7 +335,7 @@ LIBSESSION_C_API void session_database_connection_close(session_database_connect
     if (conn) {
         auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
         if (conn_cpp) {
-            conn_cpp->~Connection();
+            conn_cpp->close();
             memset(conn->opaque, 0, sizeof(conn->opaque));
         }
     }

@@ -56,6 +56,13 @@ struct Connection {
     ///   the database will be created, encrypted with this key.
     void open(const std::string& path, const cleared_array<48>& raw_key);
 
+    /// API: database/Connection::close
+    ///
+    /// Close the database connection if it is open, no-op if the database is not open. This does
+    /// not need to be called unless you explicitly want to close the connection. On connection
+    /// destruction, the database closes itself.
+    void close();
+
     /// API: database/Connection::exec
     ///
     /// Prepares a statement and executes it. Throws if SQLite returned an error
