@@ -475,7 +475,7 @@ std::string GetProStatusRequest::to_json() const {
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["master_sig"] = oxenc::to_hex(master_sig);
     j["unix_ts_ms"] = unix_ts.time_since_epoch().count();
-    j["history"] = history;
+    j["count"] = count;
     std::string result = j.dump();
     return result;
 }
@@ -484,7 +484,7 @@ array_uc64 GetProStatusRequest::build_sig(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-        bool history) {
+        uint32_t count) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -508,9 +508,8 @@ array_uc64 GetProStatusRequest::build_sig(
             crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<unsigned char*>(&unix_ts_ms), sizeof(unix_ts_ms));
-    uint8_t history_u8 = history;
     crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<unsigned char*>(&history_u8), sizeof(history_u8));
+            &state, reinterpret_cast<unsigned char*>(&count), sizeof(count));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash
@@ -528,7 +527,7 @@ std::string GetProStatusRequest::build_to_json(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-        bool history) {
+        uint32_t count) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -544,9 +543,9 @@ std::string GetProStatusRequest::build_to_json(
     memcpy(request.master_pkey.data(),
            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
            crypto_sign_ed25519_PUBLICKEYBYTES);
-    request.master_sig = GetProStatusRequest::build_sig(version, master_privkey, unix_ts, history);
+    request.master_sig = GetProStatusRequest::build_sig(version, master_privkey, unix_ts, count);
     request.unix_ts = unix_ts;
-    request.history = history;
+    request.count = count;
 
     std::string result = request.to_json();
     return result;
@@ -591,6 +590,8 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
             static_cast<SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT>(error_report);
 
     result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", result.errors);
+
+    result.payments_total = json_require<uint32_t>(result_obj, "payments_total", result.errors);
 
     uint64_t expiry_unix_ts_ms =
             json_require<uint64_t>(result_obj, "expiry_unix_ts_ms", result.errors);
@@ -873,14 +874,14 @@ LIBSESSION_C_API session_pro_backend_signature session_pro_backend_get_pro_statu
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
-        bool history) {
+        uint32_t count) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
 
     session_pro_backend_signature result = {};
     try {
-        auto sig = GetProStatusRequest::build_sig(request_version, master_span, ts, history);
+        auto sig = GetProStatusRequest::build_sig(request_version, master_span, ts, count);
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -901,14 +902,14 @@ session_pro_backend_get_pro_status_request_build_to_json(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
-        bool history) {
+        uint32_t count) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
 
     session_pro_backend_to_json result = {};
     try {
-        auto json = GetProStatusRequest::build_to_json(request_version, master_span, ts, history);
+        auto json = GetProStatusRequest::build_to_json(request_version, master_span, ts, count);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1033,7 +1034,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_status_
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
     cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
             std::chrono::milliseconds{request->unix_ts_ms}};
-    cpp.history = request->history;
+    cpp.count = request->count;
 
     try {
         std::string json = cpp.to_json();
@@ -1227,6 +1228,7 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
     result.auto_renewing = cpp.auto_renewing;
     result.expiry_unix_ts_ms = cpp.expiry_unix_ts_ms.time_since_epoch().count();
     result.grace_period_duration_ms = cpp.grace_period_duration_ms.count();
+    result.payments_total = cpp.payments_total;
 
     for (size_t index = 0; index < result.items_count; ++index) {
         const ProPaymentItem& src = cpp.items[index];

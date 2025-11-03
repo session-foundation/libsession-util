@@ -9,8 +9,8 @@
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
-#include <session/util.hpp>
 #include <session/types.hpp>
+#include <session/util.hpp>
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"

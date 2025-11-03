@@ -247,7 +247,7 @@ struct session_pro_backend_get_pro_status_request {
     bytes32 master_pkey;
     bytes64 master_sig;
     uint64_t unix_ts_ms;
-    bool history;
+    uint32_t count;
 };
 
 typedef struct session_pro_backend_pro_payment_item session_pro_backend_pro_payment_item;
@@ -291,6 +291,7 @@ struct session_pro_backend_get_pro_status_response {
     bool auto_renewing;
     uint64_t expiry_unix_ts_ms;
     uint64_t grace_period_duration_ms;
+    uint32_t payments_total;
 };
 
 /// API: session_pro_backend/add_pro_payment_request_build_sigs
@@ -399,7 +400,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_j
 /// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
 /// - `master_privkey_len` -- Length of master_privkey.
 /// - `unix_ts_ms` -- Unix timestamp for the request.
-/// - `history` -- Flag to request payment history from the backend
+/// - `count` -- Amount of historical payments to request
 ///
 /// Outputs:
 /// - `bool` -- True if signatures are built successfully, false otherwise.
@@ -412,7 +413,7 @@ session_pro_backend_signature session_pro_backend_get_pro_status_request_build_s
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
-        bool history) NON_NULL_ARG(2);
+        uint32_t count) NON_NULL_ARG(2);
 
 /// API: session_pro_backend/get_pro_status_request_build_to_json
 ///
@@ -427,7 +428,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_status_request_build_to_
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
-        bool history) NON_NULL_ARG(2);
+        uint32_t count) NON_NULL_ARG(2);
 
 /// API: session_pro_backend/add_pro_payment_request_to_json
 ///

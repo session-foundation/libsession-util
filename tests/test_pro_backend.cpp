@@ -390,7 +390,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             request.version = 0;
             request.master_pkey = master_pubkey;
             request.unix_ts_ms = unix_ts_ms;
-            request.history = true;
+            request.count = 10'000;
 
             session_pro_backend_signature sig =
                     session_pro_backend_get_pro_status_request_build_sig(
@@ -398,7 +398,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             master_privkey.data,
                             sizeof(master_privkey.data),
                             request.unix_ts_ms,
-                            request.history);
+                            request.count);
 
             request.master_sig = sig.sig;
 
@@ -417,7 +417,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 std::memcpy(cpp.master_sig.data(), sig.sig.data, sizeof(sig.sig));
                 cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
                         std::chrono::milliseconds{unix_ts_ms}};
-                cpp.history = request.history;
+                cpp.count = request.count;
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
 
@@ -427,7 +427,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                         master_privkey.data,
                         sizeof(master_privkey.data),
                         request.unix_ts_ms,
-                        request.history);
+                        request.count);
                 REQUIRE(one_shot.success);
                 REQUIRE(one_shot.json.size == result.json.size);
                 INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
@@ -619,6 +619,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     {"auto_renewing", true},
                     {"expiry_unix_ts_ms", unix_ts_ms + 2},
                     {"grace_period_duration_ms", 1000},
+                    {"payments_total", 3},
                     {"items",
                      nlohmann::json::array(
                              {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED},
@@ -656,6 +657,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.auto_renewing == true);
                 REQUIRE(result.grace_period_duration_ms == 1000);
                 REQUIRE(result.expiry_unix_ts_ms == unix_ts_ms + 2);
+                REQUIRE(result.payments_total == 3);
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
                 REQUIRE(result.items[0].plan == SESSION_PRO_BACKEND_PLAN_ONE_MONTH);
@@ -885,7 +887,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             request.version = 0;
             request.master_pkey = master_pubkey;
             request.unix_ts_ms = time(nullptr) * 1000;
-            request.history = true;
+            request.count = 10'000;
 
             session_pro_backend_signature sig =
                     session_pro_backend_get_pro_status_request_build_sig(
@@ -893,7 +895,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             master_privkey.data,
                             sizeof(master_privkey.data),
                             request.unix_ts_ms,
-                            request.history);
+                            request.count);
             REQUIRE(sig.success);
             request.master_sig = sig.sig;
 
@@ -943,7 +945,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             master_privkey.data,
                             sizeof(master_privkey.data),
                             request.unix_ts_ms,
-                            request.history);
+                            request.count);
             REQUIRE(sig.success);
             request.master_sig = sig.sig;
 

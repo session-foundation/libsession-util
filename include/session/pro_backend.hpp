@@ -322,8 +322,8 @@ struct GetProStatusRequest {
     /// Unix timestamp of the request
     std::chrono::sys_time<std::chrono::milliseconds> unix_ts;
 
-    /// Flag to request payment history from the backend
-    bool history;
+    /// Max amount of historical payments to request from the backend
+    uint32_t count;
 
     /// API: pro/AddProPaymentRequest::build_sigs
     ///
@@ -335,7 +335,7 @@ struct GetProStatusRequest {
     /// - `request_version` -- Version of the request to build a hash for
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `unix_ts` -- Unix timestamp for the request.
-    /// - `history` -- Flag to request payment history from the backend
+    /// - `count` -- Amount of historical payments to request
     ///
     /// Outputs:
     /// - `array_uc64` - the 64-byte signature
@@ -343,7 +343,7 @@ struct GetProStatusRequest {
             uint8_t version,
             std::span<const uint8_t> master_privkey,
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-            bool history);
+            uint32_t count);
 
     /// API: pro/GetProStatusRequest::build_to_json
     ///
@@ -354,7 +354,7 @@ struct GetProStatusRequest {
     /// - `version` -- Version of the request to build a request from
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `unix_ts` -- Unix timestamp for the request.
-    /// - `history` -- Flag to request payment history from the backend
+    /// - `count` -- Amount of historical payments to request
     ///
     /// Outputs:
     /// - `std::string` -- Request serialised to JSON
@@ -362,7 +362,7 @@ struct GetProStatusRequest {
             std::uint8_t version,
             std::span<const uint8_t> master_privkey,
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-            bool history);
+            uint32_t count);
 
     /// API: pro/GetProProofRequest::to_json
     ///
@@ -484,6 +484,10 @@ struct GetProStatusResponse : public ResponseHeader {
     /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
     /// subtracting `expiry_unix_ts_ms` from this value.
     std::chrono::milliseconds grace_period_duration_ms;
+
+    /// Total number of payments known by the backend for the user. This may be greater than the
+    /// length of items if the request, requested less than the number of payments the user has.
+    uint32_t payments_total;
 
     /// API: pro/GetProStatusResponse::parse
     ///
