@@ -754,8 +754,8 @@ DecodedEnvelope decode_envelope(
         // Strip padding from content
         std::span<const uint8_t> unpadded_content = unpad_message(content_plaintext);
         content_plaintext.resize(unpadded_content.size());
-
         result.content_plaintext = std::move(content_plaintext);
+
         std::memcpy(
                 result.sender_ed25519_pubkey.data(),
                 sender_ed25519_pubkey.data(),
@@ -925,15 +925,12 @@ DecodedCommunityMessage decode_for_community(
             result.content_plaintext = std::vector<uint8_t>(
                     content_or_envelope_payload.begin(), content_or_envelope_payload.end());
         }
-
-        // Get the unpadded size of the content
-        result.content_plaintext_unpadded_size = unpad_message(result.content_plaintext).size();
     }
 
     // Parse the content blob
+    std::span<const uint8_t> unpadded_content = unpad_message(result.content_plaintext);
     SessionProtos::Content content = {};
-    if (!content.ParseFromArray(
-                result.content_plaintext.data(), result.content_plaintext_unpadded_size))
+    if (!content.ParseFromArray(unpadded_content.data(), unpadded_content.size()))
         throw std::runtime_error{
                 "Decoding community message failed, could not interpret blob as content or "
                 "envelope"};
@@ -1037,6 +1034,15 @@ DecodedCommunityMessage decode_for_community(
             pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         }
     }
+
+    // Strip padding from content, we only strip at the very end once we're done using the padded
+    // content. A Session Pro proof, if provided will contain a signature that signs over the content
+    // including its padding- that is verified in this function above.
+    //
+    // After that verification is complete then we can remove the padding here and return it to the
+    // caller without padding as we no longer have a need for it.
+    result.content_plaintext.resize(unpadded_content.size());
+
     return result;
 }
 }  // namespace session
@@ -1469,10 +1475,8 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
         result.has_envelope = decoded.envelope.has_value();
         if (result.has_envelope)
             result.envelope = envelope_from_cpp(*decoded.envelope);
-
         result.content_plaintext = session::span_u8_copy_or_throw(
                 decoded.content_plaintext.data(), decoded.content_plaintext.size());
-        result.content_plaintext_unpadded_size = decoded.content_plaintext_unpadded_size;
         result.has_pro = decoded.pro.has_value();
         if (decoded.pro_sig)
             std::memcpy(result.pro_sig.data, decoded.pro_sig->data(), decoded.pro_sig->max_size());

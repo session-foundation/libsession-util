@@ -250,7 +250,7 @@ struct DecodedEnvelope {
     // The envelope parsed from the plaintext
     Envelope envelope;
 
-    // Decoded envelope content into plaintext
+    // Decoded envelope content into plaintext with padding stripped
     std::vector<uint8_t> content_plaintext;
 
     // Sender public key extracted from the encrypted content payload. This is not set if the
@@ -274,12 +274,8 @@ struct DecodedCommunityMessage {
     // kind of blob on the wire during that period.
     std::optional<Envelope> envelope;
 
-    // The protobuf encoded `Content` including padding.
+    // The protobuf encoded `Content` with padding stripped
     std::vector<uint8_t> content_plaintext;
-
-    // The size of the payload from [content_plaintext.data(), content_plaintext_unpadded_size) that
-    // contains the protobuf encoded `Content` without padding.
-    size_t content_plaintext_unpadded_size;
 
     // The signature if it was present in the payload. If the envelope is set and the envelope has
     // the pro signature flag set, then this signature was extracted from the envelope. When the

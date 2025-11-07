@@ -166,7 +166,6 @@ struct session_protocol_decoded_community_message {
     bool has_envelope;
     session_protocol_envelope envelope;
     span_u8 content_plaintext;
-    size_t content_plaintext_unpadded_size;
     bool has_pro;
     bytes64 pro_sig;
     session_protocol_decoded_pro pro;
