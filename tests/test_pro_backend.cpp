@@ -1,12 +1,10 @@
 #include <oxenc/hex.h>
-#include <session/config/pro.h>
 #include <session/pro_backend.h>
 #include <sodium.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cinttypes>
 #include <nlohmann/json.hpp>
-#include <session/config/pro.hpp>
 #include <session/pro_backend.hpp>
 #include <string>
 
