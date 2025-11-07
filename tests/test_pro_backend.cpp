@@ -655,11 +655,9 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                                {"platform_refund_expiry_unix_ts_ms", unix_ts_ms + 1},
                                {"revoked_unix_ts_ms", unix_ts_ms + 3600},
                                {"google_payment_token",
-                                std::string(
-                                        payment_tx.payment_id, payment_tx.payment_id_count)},
+                                std::string(payment_tx.payment_id, payment_tx.payment_id_count)},
                                {"google_order_id",
-                                std::string(
-                                        payment_tx.order_id, payment_tx.order_id_count)}}})}};
+                                std::string(payment_tx.order_id, payment_tx.order_id_count)}}})}};
             std::string json = j.dump();
 
             // Valid JSON

@@ -769,8 +769,7 @@ session_pro_backend_add_pro_payment_request_build_sigs(
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(
-            payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
@@ -815,8 +814,7 @@ session_pro_backend_add_pro_payment_request_build_to_json(
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(
-            payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     try {
         std::string json = AddProPaymentRequest::build_to_json(

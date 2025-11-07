@@ -1036,8 +1036,8 @@ DecodedCommunityMessage decode_for_community(
     }
 
     // Strip padding from content, we only strip at the very end once we're done using the padded
-    // content. A Session Pro proof, if provided will contain a signature that signs over the content
-    // including its padding- that is verified in this function above.
+    // content. A Session Pro proof, if provided will contain a signature that signs over the
+    // content including its padding- that is verified in this function above.
     //
     // After that verification is complete then we can remove the padding here and return it to the
     // caller without padding as we no longer have a need for it.
