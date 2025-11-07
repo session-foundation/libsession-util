@@ -66,14 +66,15 @@ constexpr array_uc32 PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0
                                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 static_assert(sizeof(PUBKEY) == array_uc32{}.size());
 
-/// NOTE: Must match
-/// https://github.com/Doy-lee/session-pro-backend/blob/eed715c8ff7bc513486ca6c6ce88a93c988f67dd/server.py#L457
 enum struct AddProPaymentResponseStatus {
     /// Payment was claimed and the pro proof was successfully generated
     Success = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_SUCCESS,
 
     /// Backend encountered an error when attempting to claim the payment
     Error = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ERROR,
+
+    /// Request JSON failed to be parsed correctly, payload was malformed or missing values
+    ParseError = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_PARSE_ERROR,
 
     /// Payment is already claimed
     AlreadyRedeemed = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ALREADY_REDEEMED,
