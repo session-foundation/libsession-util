@@ -187,6 +187,8 @@ struct session_pro_backend_add_pro_payment_user_transaction {
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
     char payment_id[128];
     size_t payment_id_count;
+    char order_id[128];
+    size_t order_id_count;
 };
 
 typedef struct session_pro_backend_add_pro_payment_request
@@ -306,8 +308,13 @@ struct session_pro_backend_get_pro_status_response {
 /// - `master_privkey_len` -- Length of master_privkey.
 /// - `rotating_privkey` -- Ed25519 rotating private key (32-byte or 64-byte libsodium format).
 /// - `rotating_privkey_len` -- Length of rotating_privkey.
-/// - `payment_token_hash` -- 32-byte hash of the payment token.
-/// - `payment_token_hash_len` -- Length of payment_token_hash.
+/// - `payment_tx_provider` -- Provider that the payment to register is coming from
+/// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment provider.
+///   See `AddProPaymentUserTransaction`
+/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
+/// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+///   `AddProPaymentUserTransaction`
+/// - `payment_tx_order_id_len` -- Length of the `payment_tx_order_id` payload
 ///
 /// Outputs:
 /// - `success` - True if signatures are built successfully, false otherwise.
@@ -325,7 +332,9 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 4, 7);
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 4, 7, 9);
 
 /// API: session_pro_backend/add_pro_payment_request_build_to_json
 ///
@@ -343,7 +352,9 @@ session_pro_backend_to_json session_pro_backend_add_pro_payment_request_build_to
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 4, 7);
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 4, 7, 9);
 
 /// API: session_pro_backend/get_pro_proof_request_build_sigs
 ///

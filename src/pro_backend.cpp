@@ -130,6 +130,7 @@ std::string AddProPaymentRequest::to_json() const {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
+            j["payment_tx"]["google_order_id"] = payment_tx.order_id;
         } break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
             j["payment_tx"]["apple_tx_id"] = payment_tx.payment_id;
@@ -146,7 +147,8 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id) {
+        std::span<const uint8_t> payment_tx_payment_id,
+        std::span<const uint8_t> payment_tx_order_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -165,6 +167,18 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         rotating_privkey = rotating_from_seed;
     } else if (rotating_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
         throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
+    }
+
+    if (payment_tx_provider == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE) {
+        if (payment_tx_order_id.empty())
+            throw std::invalid_argument{
+                    "Invalid payment_tx_order_id: order ID must be set for a Google Play store "
+                    "payment"};
+    } else {
+        if (payment_tx_order_id.size())
+            throw std::invalid_argument{
+                    "Invalid payment_tx_order_id: order ID must not be set for an iOS App store "
+                    "payment"};
     }
 
     // Hash components to 32 bytes, must match:
@@ -188,6 +202,12 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
             &state,
             reinterpret_cast<const uint8_t*>(payment_tx_payment_id.data()),
             payment_tx_payment_id.size());
+    if (payment_tx_order_id.size()) {
+        crypto_generichash_blake2b_update(
+                &state,
+                reinterpret_cast<const uint8_t*>(payment_tx_order_id.data()),
+                payment_tx_order_id.size());
+    }
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash with both keys
@@ -212,7 +232,8 @@ std::string AddProPaymentRequest::build_to_json(
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id) {
+        std::span<const uint8_t> payment_tx_payment_id,
+        std::span<const uint8_t> payment_tx_order_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -234,7 +255,12 @@ std::string AddProPaymentRequest::build_to_json(
     }
 
     MasterRotatingSignatures sigs = AddProPaymentRequest::build_sigs(
-            version, master_privkey, rotating_privkey, payment_tx_provider, payment_tx_payment_id);
+            version,
+            master_privkey,
+            rotating_privkey,
+            payment_tx_provider,
+            payment_tx_payment_id,
+            payment_tx_order_id);
 
     AddProPaymentRequest request = {};
     request.version = version;
@@ -250,6 +276,8 @@ std::string AddProPaymentRequest::build_to_json(
     request.payment_tx.payment_id = std::string(
             reinterpret_cast<const char*>(payment_tx_payment_id.data()),
             payment_tx_payment_id.size());
+    request.payment_tx.order_id = std::string(
+            reinterpret_cast<const char*>(payment_tx_order_id.data()), payment_tx_order_id.size());
     request.master_sig = sigs.master_sig;
     request.rotating_sig = sigs.rotating_sig;
 
@@ -673,6 +701,10 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
                         json_require<std::string>(obj, "google_payment_token", result.errors);
                 assert(item.google_payment_token.size() <
                        sizeof(((session_pro_backend_pro_payment_item*)0)->google_payment_token));
+                item.google_order_id =
+                        json_require<std::string>(obj, "google_order_id", result.errors);
+                assert(item.google_order_id.size() <
+                       sizeof(((session_pro_backend_pro_payment_item*)0)->google_order_id));
             } break;
 
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
@@ -728,13 +760,17 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) {
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) {
 
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
+    std::span<const uint8_t> payment_tx_order_id_span(
+            payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
@@ -743,7 +779,8 @@ session_pro_backend_add_pro_payment_request_build_sigs(
                 master_span,
                 rotating_span,
                 payment_tx_provider,
-                payment_tx_payment_id_span);
+                payment_tx_payment_id_span,
+                payment_tx_order_id_span);
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
@@ -768,7 +805,9 @@ session_pro_backend_add_pro_payment_request_build_to_json(
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) {
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) {
     session_pro_backend_to_json result = {};
 
     // Convert C inputs to C++ types
@@ -776,6 +815,8 @@ session_pro_backend_add_pro_payment_request_build_to_json(
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
+    std::span<const uint8_t> payment_tx_order_id_span(
+            payment_tx_order_id, payment_tx_order_id_len);
 
     try {
         std::string json = AddProPaymentRequest::build_to_json(
@@ -783,7 +824,8 @@ session_pro_backend_add_pro_payment_request_build_to_json(
                 master_span,
                 rotating_span,
                 payment_tx_provider,
-                payment_tx_payment_id_span);
+                payment_tx_payment_id_span,
+                payment_tx_order_id_span);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -938,6 +980,8 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
     cpp.payment_tx.provider = request->payment_tx.provider;
     cpp.payment_tx.payment_id =
             std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);
+    cpp.payment_tx.order_id =
+            std::string(request->payment_tx.order_id, request->payment_tx.order_id_count);
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
     std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
 
@@ -1265,6 +1309,10 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
                         dest.google_payment_token,
                         sizeof(dest.google_payment_token),
                         src.google_payment_token.data());
+                dest.google_order_id_count = snprintf_clamped(
+                        dest.google_order_id,
+                        sizeof(dest.google_order_id),
+                        src.google_order_id.data());
             } break;
 
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {

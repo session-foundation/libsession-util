@@ -82,7 +82,16 @@ struct MasterRotatingSignatures {
 
 struct AddProPaymentUserTransaction {
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
+
+    /// The payment ID to claim which is different per platform.
+    ///
+    ///   Google Play Store => purchase token
+    ///   iOS App Store     => transaction ID (note, not the original transaction id)
     std::string payment_id;
+
+    /// Only for Google Play Store, set this to the purchase's order ID. Ignored for other payment
+    /// providers
+    std::string order_id;
 };
 
 /// Register a new Session Pro proof to the backend. The payment is registered under the
@@ -125,7 +134,8 @@ struct AddProPaymentRequest {
     ///
     /// Builds the master and rotating signatures using the provided private keys and payment token
     /// hash. Throws if the keys (32-byte or 64-byte libsodium format) or 32-byte payment token hash
-    /// are passed with an incorrect size. Using 64-byte libsodium keys is more efficient.
+    /// are passed with an incorrect size or the payment IDs are invalid. Using 64-byte libsodium
+    /// keys is more efficient.
     ///
     /// Inputs:
     /// - `request_version` -- Version of the request to build a hash for
@@ -133,8 +143,10 @@ struct AddProPaymentRequest {
     /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
     /// - `payment_tx_provider` -- Provider that the payment to register is coming from
     /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider (e.g. for Google this is the transaction order ID in string format, for Apple
-    ///   this is the transaction ID in string format).
+    ///   provider. See `AddProPaymentUserTransaction`
+    ///   this is the transaction ID).
+    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
@@ -143,7 +155,8 @@ struct AddProPaymentRequest {
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id);
+            std::span<const uint8_t> payment_tx_payment_id,
+            std::span<const uint8_t> payment_tx_order_id);
 
     /// API: pro/AddProPaymentRequest::build_to_json
     ///
@@ -156,8 +169,10 @@ struct AddProPaymentRequest {
     /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
     /// - `payment_tx_provider` -- Provider that the payment to register is coming from
     /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider (e.g. for Google this is the transaction order ID in string format, for Apple
-    ///   this is the transaction ID in string format).
+    ///   provider. See `AddProPaymentUserTransaction`
+    ///   this is the transaction ID).
+    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
     /// - `std::string` -- Request serialised to JSON
@@ -166,7 +181,8 @@ struct AddProPaymentRequest {
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id);
+            std::span<const uint8_t> payment_tx_payment_id,
+            std::span<const uint8_t> payment_tx_order_id);
 };
 
 /// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
@@ -423,6 +439,10 @@ struct ProPaymentItem {
     /// When payment provider is set to Google Play Store, this is the platform-specific purchase
     /// token. This information should be considered as confidential and stored appropriately.
     std::string google_payment_token;
+
+    /// When payment provider is set to Google Play Store, this is the platform-specific order
+    /// id. This information should be considered as confidential and stored appropriately.
+    std::string google_order_id;
 
     /// When payment provider is set to iOS App Store, this is the platform-specific original
     /// transaction ID. This information should be considered as confidential and stored

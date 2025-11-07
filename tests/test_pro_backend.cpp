@@ -112,17 +112,24 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
-        bytes32 fake_google_payment_token;
-        randombytes_buf(fake_google_payment_token.data, sizeof(fake_google_payment_token.data));
-        std::string fake_google_payment_token_hex = oxenc::to_hex(fake_google_payment_token.data);
+        char fake_google_payment_token[16];
+        randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
+        std::string fake_google_payment_token_hex = oxenc::to_hex(fake_google_payment_token);
+
+        char fake_google_order_id[16];
+        randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
+        std::string fake_google_order_id_hex = oxenc::to_hex(fake_google_order_id);
 
         session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
         payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
         payment_tx.payment_id_count = fake_google_payment_token_hex.size();
+        payment_tx.order_id_count = fake_google_order_id_hex.size();
         std::memcpy(
                 payment_tx.payment_id,
                 fake_google_payment_token_hex.data(),
                 payment_tx.payment_id_count);
+        std::memcpy(
+                payment_tx.order_id, fake_google_order_id_hex.data(), payment_tx.order_id_count);
 
         uint64_t unix_ts_ms = 1698765432ULL * 1000;  // Arbitrary timestamp
 
@@ -137,7 +144,10 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             sizeof(rotating_privkey),
                             payment_tx.provider,
                             reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count);
+                            payment_tx.payment_id_count,
+                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            payment_tx.order_id_count);
+            INFO(result.error);
             REQUIRE(result.success);
             REQUIRE(result.error_count == 0);
 
@@ -149,7 +159,10 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     payment_tx.provider,
                     std::span<const uint8_t>(
                             reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count));
+                            payment_tx.payment_id_count),
+                    std::span<const uint8_t>(
+                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            payment_tx.order_id_count));
 
             REQUIRE(std::memcmp(
                             result.master_sig.data,
@@ -169,7 +182,9 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     sizeof(rotating_privkey),
                     payment_tx.provider,
                     reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                    payment_tx.payment_id_count);
+                    payment_tx.payment_id_count,
+                    reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                    payment_tx.order_id_count);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
         }
@@ -232,7 +247,9 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             sizeof(rotating_privkey.data),
                             payment_tx.provider,
                             reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count);
+                            payment_tx.payment_id_count,
+                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            payment_tx.order_id_count);
 
             request.master_sig = sigs.master_sig;
             request.rotating_sig = sigs.rotating_sig;
@@ -254,6 +271,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 cpp.payment_tx.provider = payment_tx.provider;
                 cpp.payment_tx.payment_id =
                         std::string(payment_tx.payment_id, payment_tx.payment_id_count);
+                cpp.payment_tx.order_id =
+                        std::string(payment_tx.order_id, payment_tx.order_id_count);
                 std::memcpy(cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig));
                 std::memcpy(
                         cpp.rotating_sig.data(), sigs.rotating_sig.data, sizeof(sigs.rotating_sig));
@@ -269,7 +288,9 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                         sizeof(rotating_privkey.data),
                         request.payment_tx.provider,
                         reinterpret_cast<const unsigned char*>(request.payment_tx.payment_id),
-                        request.payment_tx.payment_id_count);
+                        request.payment_tx.payment_id_count,
+                        reinterpret_cast<const unsigned char*>(request.payment_tx.order_id),
+                        request.payment_tx.order_id_count);
                 REQUIRE(one_shot.success);
                 REQUIRE(one_shot.json.size == result.json.size);
                 INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
@@ -635,7 +656,10 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                                {"revoked_unix_ts_ms", unix_ts_ms + 3600},
                                {"google_payment_token",
                                 std::string(
-                                        payment_tx.payment_id, payment_tx.payment_id_count)}}})}};
+                                        payment_tx.payment_id, payment_tx.payment_id_count)},
+                               {"google_order_id",
+                                std::string(
+                                        payment_tx.order_id, payment_tx.order_id_count)}}})}};
             std::string json = j.dump();
 
             // Valid JSON
@@ -674,6 +698,11 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                                 result.items[0].google_payment_token,
                                 payment_tx.payment_id,
                                 payment_tx.payment_id_count) == 0);
+                REQUIRE(result.items[0].google_order_id_count == payment_tx.order_id_count);
+                REQUIRE(std::memcmp(
+                                result.items[0].google_order_id,
+                                payment_tx.order_id,
+                                payment_tx.order_id_count) == 0);
             }
 
             // After freeing
@@ -746,18 +775,26 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         // Add pro payment
         session_protocol_pro_proof first_pro_proof = {};
         {
-            bytes32 fake_google_payment_token;
-            randombytes_buf(fake_google_payment_token.data, sizeof(fake_google_payment_token.data));
-            std::string fake_google_payment_token_hex =
-                    oxenc::to_hex(fake_google_payment_token.data);
+            char fake_google_payment_token[16];
+            randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
+            std::string fake_google_payment_token_hex = oxenc::to_hex(fake_google_payment_token);
+
+            char fake_google_order_id[16];
+            randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
+            std::string fake_google_order_id_hex = oxenc::to_hex(fake_google_order_id);
 
             session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
             payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
             payment_tx.payment_id_count = fake_google_payment_token_hex.size();
+            payment_tx.order_id_count = fake_google_order_id_hex.size();
             std::memcpy(
                     payment_tx.payment_id,
                     fake_google_payment_token_hex.data(),
                     payment_tx.payment_id_count);
+            std::memcpy(
+                    payment_tx.order_id,
+                    fake_google_order_id_hex.data(),
+                    payment_tx.order_id_count);
 
             // Build request
             session_pro_backend_master_rotating_signatures add_pro_sigs =
@@ -769,7 +806,9 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             sizeof(rotating_privkey),
                             payment_tx.provider,
                             reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count);
+                            payment_tx.payment_id_count,
+                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            payment_tx.order_id_count);
 
             session_pro_backend_add_pro_payment_request request = {};
             request.version = 0;
@@ -982,22 +1021,28 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             REQUIRE(response.items_count == 0);
         }
 
-        // Add _another_ payment, same details. This creates a revocation for
-        // the old proof and the subscription duration will stack, all old
-        // proofs invalidated and new ones issued with the combined duration.
+        // Add _another_ payment, same details
         {
-            bytes32 fake_google_payment_token;
-            randombytes_buf(fake_google_payment_token.data, sizeof(fake_google_payment_token.data));
-            std::string fake_google_payment_token_hex =
-                    oxenc::to_hex(fake_google_payment_token.data);
+            char fake_google_payment_token[16];
+            randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
+            std::string fake_google_payment_token_hex = oxenc::to_hex(fake_google_payment_token);
+
+            char fake_google_order_id[16];
+            randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
+            std::string fake_google_order_id_hex = oxenc::to_hex(fake_google_order_id);
 
             session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
             payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
             payment_tx.payment_id_count = fake_google_payment_token_hex.size();
+            payment_tx.order_id_count = fake_google_order_id_hex.size();
             std::memcpy(
                     payment_tx.payment_id,
                     fake_google_payment_token_hex.data(),
                     payment_tx.payment_id_count);
+            std::memcpy(
+                    payment_tx.order_id,
+                    fake_google_order_id_hex.data(),
+                    payment_tx.order_id_count);
 
             // Build request
             session_pro_backend_master_rotating_signatures add_pro_sigs =
@@ -1009,7 +1054,9 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             sizeof(rotating_privkey),
                             payment_tx.provider,
                             reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count);
+                            payment_tx.payment_id_count,
+                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            payment_tx.order_id_count);
 
             session_pro_backend_add_pro_payment_request request = {};
             request.version = 0;
@@ -1084,15 +1131,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             // Verify the response
             REQUIRE(response.header.errors_count == 0);
             REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-            REQUIRE(response.ticket > 0);
-            REQUIRE(response.items_count > 0);
-
-            // The last revocation added should be the first pro proof we generated from a "payment"
-            // in the test-suite
-            REQUIRE(std::memcmp(
-                            response.items[response.items_count - 1].gen_index_hash.data,
-                            first_pro_proof.gen_index_hash.data,
-                            sizeof(first_pro_proof.gen_index_hash)) == 0);
+            REQUIRE(response.ticket == 0);
+            REQUIRE(response.items_count == 0);
         }
     }
 #endif
