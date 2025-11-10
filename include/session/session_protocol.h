@@ -54,16 +54,6 @@ struct session_protocol_pro_proof {
     bytes64 sig;
 };
 
-// Bit flags for features that are not currently able to be determined by the state stored in
-// Libsession. They are to be passed in by the client into `get_pro_msg_for_features` to return the
-// bitset of `PRO_FEATURES` that a message will use.
-typedef uint64_t SESSION_PROTOCOL_PRO_EXTRA_FEATURES;
-enum SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ {
-    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_NIL = 0,
-    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE = 1 << 0,
-    SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR = 1 << 1,
-};
-
 // Bitset of Session Pro features that a message uses. This bitset is stored in the protobuf
 // `Content.proMessage` when a message is sent for other clients to consume.
 typedef uint64_t SESSION_PROTOCOL_PRO_FEATURES;
@@ -290,8 +280,11 @@ typedef struct session_protocol_pro_features_for_msg {
 /// - `utf` -- the UTF8 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the number of code units (aka. bytes) the string has
-/// - `flags` -- extra pro features that are known by clients that they wish to be activated on
-///   this message
+/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
+///   this function if they overlap with the feature flags that will derive itself. This function
+///   hence ignores if it is specified:
+///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
+///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
@@ -303,8 +296,7 @@ typedef struct session_protocol_pro_features_for_msg {
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        char const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
-        NON_NULL_ARG(1);
+        char const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_utf16
 ///
@@ -314,8 +306,11 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// - `utf` -- the UTF16 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the number of code units (aka. bytes) the string has
-/// - `flags` -- extra pro features that are known by clients that they wish to be activated on
-///   this message
+/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
+///   this function if they overlap with the feature flags that will derive itself. This function
+///   hence ignores if it is specified:
+///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
+///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
@@ -327,7 +322,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        uint16_t const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra)
+        uint16_t const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features)
         NON_NULL_ARG(1);
 
 /// API: session_protocol_encode_for_1o1

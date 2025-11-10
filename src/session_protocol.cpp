@@ -6,6 +6,7 @@
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
+#include <oxen/log.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
@@ -185,7 +186,18 @@ array_uc32 ProProof::hash() const {
 }
 
 session::ProFeaturesForMsg pro_features_for_utf8_or_16(
-        const void* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra, bool is_utf8) {
+        const void* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES flags, bool is_utf8) {
+    assert((flags & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) == 0 &&
+           "A bit is set in 'flags' which does not correspond to a feature flag known by "
+           "libsession");
+
+    if (flags & SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
+        oxen::log::warning(
+                oxen::log::Cat("protocol"),
+                "10k character limit flag was specified but will be ignored");
+        flags &= ~SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT;
+    }
+
     session::ProFeaturesForMsg result = {};
     simdutf::result validate = is_utf8 ? simdutf::validate_utf8_with_errors(
                                                  reinterpret_cast<const char*>(utf), utf_size)
@@ -199,19 +211,14 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 
         if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
             if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
-                result.features |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
+                flags |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
             } else {
                 result.error = "Message exceeds the maximum character limit allowed";
                 result.status = session::ProFeaturesForMsgStatus::ExceedsCharacterLimit;
             }
         }
 
-        if (extra & SESSION_PROTOCOL_PRO_EXTRA_FEATURES_ANIMATED_AVATAR)
-            result.features |= SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR;
-
-        if (extra & SESSION_PROTOCOL_PRO_EXTRA_FEATURES_PRO_BADGE)
-            result.features |= SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE;
-
+        result.features = flags;
         assert((result.features & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) == 0);
     } else {
         result.status = session::ProFeaturesForMsgStatus::UTFDecodingError;
@@ -224,14 +231,16 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 namespace session {
 
 ProFeaturesForMsg pro_features_for_utf8(
-        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ true);
+        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
+    ProFeaturesForMsg result =
+            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ true);
     return result;
 }
 
 ProFeaturesForMsg pro_features_for_utf16(
-        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
+        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
+    ProFeaturesForMsg result =
+            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ false);
     return result;
 }
 
@@ -1130,9 +1139,9 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
+        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
     ProFeaturesForMsg result_cpp =
-            pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ true);
+            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ true);
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
@@ -1144,9 +1153,9 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        const uint16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES extra) {
+        const uint16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
     ProFeaturesForMsg result_cpp =
-            pro_features_for_utf8_or_16(utf, utf_size, extra, /*is_utf8*/ false);
+            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ false);
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},

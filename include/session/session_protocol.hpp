@@ -324,8 +324,11 @@ struct DecodeEnvelopeKey {
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the size of the message in UTF8 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
-/// - `flags` -- extra pro features that are known by clients that they wish to be activated on
-///   this message
+/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
+///   this function if they overlap with the feature flags that will derive itself. This function
+///   hence ignores if it is specified:
+///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
+///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
@@ -336,7 +339,7 @@ struct DecodeEnvelopeKey {
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf8(
-        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
+        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features);
 
 /// API: session_protocol/pro_features_for_utf16
 ///
@@ -347,8 +350,11 @@ ProFeaturesForMsg pro_features_for_utf8(
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the size of the message in UTF16 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
-/// - `flags` -- extra pro features that are known by clients that they wish to be activated on
-///   this message
+/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
+///   this function if they overlap with the feature flags that will derive itself. This function
+///   hence ignores if it is specified:
+///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
+///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
@@ -359,7 +365,7 @@ ProFeaturesForMsg pro_features_for_utf8(
 ///   `ProMessage` in `Content`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf16(
-        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_EXTRA_FEATURES flags);
+        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features);
 
 /// API: session_protocol/pad_message
 ///
