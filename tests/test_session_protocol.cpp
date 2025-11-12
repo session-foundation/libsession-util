@@ -172,6 +172,16 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
+        // Try asking for the 10k limit but passing a smaller message
+        {
+            auto msg = std::string(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT, 'a');
+            session_protocol_pro_features_for_msg pro_msg = session_protocol_pro_features_for_utf8(
+                    msg.data(), msg.size(), SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+            REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
+            REQUIRE(pro_msg.features == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+            REQUIRE(pro_msg.codepoint_count == msg.size());
+        }
+
         // Try asking for just one extra feature
         {
             auto msg = std::string(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT, 'a');

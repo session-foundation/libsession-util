@@ -187,15 +187,18 @@ array_uc32 ProProof::hash() const {
 
 session::ProFeaturesForMsg pro_features_for_utf8_or_16(
         const void* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES flags, bool is_utf8) {
-    assert((flags & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) == 0 &&
-           "A bit is set in 'flags' which does not correspond to a feature flag known by "
-           "libsession");
+    if (flags & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) {
+        oxen::log::warning(
+                oxen::log::Cat("protocol"),
+                "A bit is set in 'flags' which does not correspond to a feature flag known by "
+                "libsession");
+    }
 
-    if (flags & SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
+    if (flags & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT) {
         oxen::log::warning(
                 oxen::log::Cat("protocol"),
                 "10k character limit flag was specified but will be ignored");
-        flags &= ~SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT;
+        flags &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
     }
 
     session::ProFeaturesForMsg result = {};
@@ -219,7 +222,6 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
         }
 
         result.features = flags;
-        assert((result.features & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) == 0);
     } else {
         result.status = session::ProFeaturesForMsgStatus::UTFDecodingError;
         result.error = simdutf::error_to_string(validate.error);
