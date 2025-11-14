@@ -285,10 +285,10 @@ std::string AddProPaymentRequest::build_to_json(
     return result;
 }
 
-AddProPaymentOrGetProProofResponse AddProPaymentOrGetProProofResponse::parse(
+AddProPaymentOrGenerateProProofResponse AddProPaymentOrGenerateProProofResponse::parse(
         std::string_view json) {
     // Parse basics
-    AddProPaymentOrGetProProofResponse result = {};
+    AddProPaymentOrGenerateProProofResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
     result.status = json_require<uint8_t>(j, "status", result.errors);
     if (result.errors.size()) {
@@ -319,7 +319,7 @@ AddProPaymentOrGetProProofResponse AddProPaymentOrGetProProofResponse::parse(
     return result;
 }
 
-std::string GetProProofRequest::to_json() const {
+std::string GenerateProProofRequest::to_json() const {
     nlohmann::json j;
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
@@ -331,7 +331,7 @@ std::string GetProProofRequest::to_json() const {
     return result;
 }
 
-MasterRotatingSignatures GetProProofRequest::build_sigs(
+MasterRotatingSignatures GenerateProProofRequest::build_sigs(
         std::uint8_t request_version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
@@ -390,7 +390,7 @@ MasterRotatingSignatures GetProProofRequest::build_sigs(
     return result;
 }
 
-std::string GetProProofRequest::build_to_json(
+std::string GenerateProProofRequest::build_to_json(
         std::uint8_t request_version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
@@ -416,10 +416,10 @@ std::string GetProProofRequest::build_to_json(
         throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
     }
 
-    MasterRotatingSignatures sigs = GetProProofRequest::build_sigs(
+    MasterRotatingSignatures sigs = GenerateProProofRequest::build_sigs(
             request_version, master_privkey, rotating_privkey, unix_ts);
 
-    GetProProofRequest request = {};
+    GenerateProProofRequest request = {};
     request.version = request_version;
     std::memcpy(
             request.master_pkey.data(),
@@ -497,7 +497,7 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
     return result;
 }
 
-std::string GetProStatusRequest::to_json() const {
+std::string GetProDetailsRequest::to_json() const {
     nlohmann::json j;
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
@@ -508,7 +508,7 @@ std::string GetProStatusRequest::to_json() const {
     return result;
 }
 
-array_uc64 GetProStatusRequest::build_sig(
+array_uc64 GetProDetailsRequest::build_sig(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
@@ -551,7 +551,7 @@ array_uc64 GetProStatusRequest::build_sig(
     return result;
 }
 
-std::string GetProStatusRequest::build_to_json(
+std::string GetProDetailsRequest::build_to_json(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
@@ -566,12 +566,12 @@ std::string GetProStatusRequest::build_to_json(
         throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
     }
 
-    GetProStatusRequest request = {};
+    GetProDetailsRequest request = {};
     request.version = version;
     memcpy(request.master_pkey.data(),
            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
            crypto_sign_ed25519_PUBLICKEYBYTES);
-    request.master_sig = GetProStatusRequest::build_sig(version, master_privkey, unix_ts, count);
+    request.master_sig = GetProDetailsRequest::build_sig(version, master_privkey, unix_ts, count);
     request.unix_ts = unix_ts;
     request.count = count;
 
@@ -579,9 +579,9 @@ std::string GetProStatusRequest::build_to_json(
     return result;
 }
 
-GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
+GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
     // Parse basics
-    GetProStatusResponse result = {};
+    GetProDetailsResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
     result.status = json_require<uint8_t>(j, "status", result.errors);
     if (result.errors.size()) {
@@ -609,13 +609,13 @@ GetProStatusResponse GetProStatusResponse::parse(std::string_view json) {
     result.user_status = static_cast<SESSION_PRO_BACKEND_USER_PRO_STATUS>(user_status);
 
     uint32_t error_report = json_require<uint32_t>(result_obj, "error_report", result.errors);
-    if (error_report >= SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_COUNT) {
+    if (error_report >= SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT) {
         result.errors.push_back(
                 fmt::format("Error report value was out-of-bounds: {}", user_status));
         return result;
     }
     result.error_report =
-            static_cast<SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT>(error_report);
+            static_cast<SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT>(error_report);
 
     result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", result.errors);
 
@@ -840,7 +840,7 @@ session_pro_backend_add_pro_payment_request_build_to_json(
 }
 
 LIBSESSION_C_API session_pro_backend_master_rotating_signatures
-session_pro_backend_get_pro_proof_request_build_sigs(
+session_pro_backend_generate_pro_proof_request_build_sigs(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -855,7 +855,7 @@ session_pro_backend_get_pro_proof_request_build_sigs(
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
-        auto sigs = GetProProofRequest::build_sigs(
+        auto sigs = GenerateProProofRequest::build_sigs(
                 request_version,
                 master_span,
                 rotating_span,
@@ -876,7 +876,7 @@ session_pro_backend_get_pro_proof_request_build_sigs(
 }
 
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_json(
+session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build_to_json(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -890,7 +890,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_j
 
     session_pro_backend_to_json result = {};
     try {
-        auto json = GetProProofRequest::build_to_json(
+        auto json = GenerateProProofRequest::build_to_json(
                 request_version,
                 master_span,
                 rotating_span,
@@ -909,7 +909,8 @@ session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_j
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_signature session_pro_backend_get_pro_status_request_build_sig(
+LIBSESSION_C_API session_pro_backend_signature
+session_pro_backend_get_pro_details_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -921,7 +922,7 @@ LIBSESSION_C_API session_pro_backend_signature session_pro_backend_get_pro_statu
 
     session_pro_backend_signature result = {};
     try {
-        auto sig = GetProStatusRequest::build_sig(request_version, master_span, ts, count);
+        auto sig = GetProDetailsRequest::build_sig(request_version, master_span, ts, count);
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -937,7 +938,7 @@ LIBSESSION_C_API session_pro_backend_signature session_pro_backend_get_pro_statu
 }
 
 LIBSESSION_C_API session_pro_backend_to_json
-session_pro_backend_get_pro_status_request_build_to_json(
+session_pro_backend_get_pro_details_request_build_to_json(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -949,7 +950,7 @@ session_pro_backend_get_pro_status_request_build_to_json(
 
     session_pro_backend_to_json result = {};
     try {
-        auto json = GetProStatusRequest::build_to_json(request_version, master_span, ts, count);
+        auto json = GetProDetailsRequest::build_to_json(request_version, master_span, ts, count);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1000,14 +1001,14 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_proof_request_to_json(
-        const session_pro_backend_get_pro_proof_request* request) {
+LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_to_json(
+        const session_pro_backend_generate_pro_proof_request* request) {
     session_pro_backend_to_json result = {};
     if (!request)
         return result;
 
     // Construct C++ struct
-    GetProProofRequest cpp;
+    GenerateProProofRequest cpp;
     cpp.version = request->version;
     std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
     std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
@@ -1062,14 +1063,14 @@ session_pro_backend_get_pro_revocations_request_to_json(
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_status_request_to_json(
-        const session_pro_backend_get_pro_status_request* request) {
+LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_details_request_to_json(
+        const session_pro_backend_get_pro_details_request* request) {
     session_pro_backend_to_json result = {};
     if (!request)
         return result;
 
     // Construct C++ struct
-    GetProStatusRequest cpp = {};
+    GetProDetailsRequest cpp = {};
     cpp.version = request->version;
     std::memcpy(
             cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
@@ -1095,11 +1096,11 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_status_
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_add_pro_payment_or_get_pro_proof_response
-session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
+LIBSESSION_C_API session_pro_backend_add_pro_payment_or_generate_pro_proof_response
+session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
         const char* json, size_t json_len) {
 
-    session_pro_backend_add_pro_payment_or_get_pro_proof_response result = {};
+    session_pro_backend_add_pro_payment_or_generate_pro_proof_response result = {};
     if (!json) {
         result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
@@ -1108,7 +1109,7 @@ session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = AddProPaymentOrGetProProofResponse::parse({json, json_len});
+    auto cpp = AddProPaymentOrGenerateProProofResponse::parse({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -1226,9 +1227,9 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_get_pro_status_response
-session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_len) {
-    session_pro_backend_get_pro_status_response result = {};
+LIBSESSION_C_API session_pro_backend_get_pro_details_response
+session_pro_backend_get_pro_details_response_parse(const char* json, size_t json_len) {
+    session_pro_backend_get_pro_details_response result = {};
     if (!json) {
         result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
@@ -1237,7 +1238,7 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = GetProStatusResponse::parse({json, json_len});
+    auto cpp = GetProDetailsResponse::parse({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -1347,8 +1348,8 @@ LIBSESSION_C_API void session_pro_backend_to_json_free(session_pro_backend_to_js
     }
 }
 
-LIBSESSION_C_API void session_pro_backend_add_pro_payment_or_get_pro_proof_response_free(
-        session_pro_backend_add_pro_payment_or_get_pro_proof_response* response) {
+LIBSESSION_C_API void session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(
+        session_pro_backend_add_pro_payment_or_generate_pro_proof_response* response) {
     if (response) {
         free(response->header.internal_arena_buf_);
         *response = {};
@@ -1363,8 +1364,8 @@ LIBSESSION_C_API void session_pro_backend_get_pro_revocations_response_free(
     }
 }
 
-LIBSESSION_C_API void session_pro_backend_get_pro_status_response_free(
-        session_pro_backend_get_pro_status_response* response) {
+LIBSESSION_C_API void session_pro_backend_get_pro_details_response_free(
+        session_pro_backend_get_pro_details_response* response) {
     if (response) {
         free(response->header.internal_arena_buf_);
         *response = {};

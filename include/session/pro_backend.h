@@ -58,11 +58,11 @@ typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
     SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT,
 } SESSION_PRO_BACKEND_USER_PRO_STATUS;
 
-typedef enum SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT {
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_SUCCESS,
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR,
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_COUNT,
-} SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT;
+typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_SUCCESS,
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR,
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT,
+} SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT;
 
 /// Must match:
 ///   https://github.com/Doy-lee/session-pro-backend/blob/41a794e2998b528566d0c27d34c4faeed5602e26/server.py#L461
@@ -219,8 +219,9 @@ struct session_pro_backend_add_pro_payment_request {
     bytes64 rotating_sig;
 };
 
-typedef struct session_pro_backend_get_pro_proof_request session_pro_backend_get_pro_proof_request;
-struct session_pro_backend_get_pro_proof_request {
+typedef struct session_pro_backend_generate_pro_proof_request
+        session_pro_backend_generate_pro_proof_request;
+struct session_pro_backend_generate_pro_proof_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes32 rotating_pkey;
@@ -229,9 +230,9 @@ struct session_pro_backend_get_pro_proof_request {
     bytes64 rotating_sig;
 };
 
-typedef struct session_pro_backend_add_pro_payment_or_get_pro_proof_response
-        session_pro_backend_add_pro_payment_or_get_pro_proof_response;
-struct session_pro_backend_add_pro_payment_or_get_pro_proof_response {
+typedef struct session_pro_backend_add_pro_payment_or_generate_pro_proof_response
+        session_pro_backend_add_pro_payment_or_generate_pro_proof_response;
+struct session_pro_backend_add_pro_payment_or_generate_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
 };
@@ -259,9 +260,9 @@ struct session_pro_backend_get_pro_revocations_response {
     size_t items_count;
 };
 
-typedef struct session_pro_backend_get_pro_status_request
-        session_pro_backend_get_pro_status_request;
-struct session_pro_backend_get_pro_status_request {
+typedef struct session_pro_backend_get_pro_details_request
+        session_pro_backend_get_pro_details_request;
+struct session_pro_backend_get_pro_details_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes64 master_sig;
@@ -298,15 +299,15 @@ struct session_pro_backend_pro_payment_item {
     size_t apple_web_line_order_id_count;
 };
 
-typedef struct session_pro_backend_get_pro_status_response
-        session_pro_backend_get_pro_status_response;
-struct session_pro_backend_get_pro_status_response {
+typedef struct session_pro_backend_get_pro_details_response
+        session_pro_backend_get_pro_details_response;
+struct session_pro_backend_get_pro_details_response {
     session_pro_backend_response_header header;
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
     size_t items_count;
     SESSION_PRO_BACKEND_USER_PRO_STATUS status;
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
     bool auto_renewing;
     uint64_t expiry_unix_ts_ms;
     uint64_t grace_period_duration_ms;
@@ -373,9 +374,9 @@ session_pro_backend_to_json session_pro_backend_add_pro_payment_request_build_to
         const uint8_t* payment_tx_order_id,
         size_t payment_tx_order_id_len) NON_NULL_ARG(2, 4, 7, 9);
 
-/// API: session_pro_backend/get_pro_proof_request_build_sigs
+/// API: session_pro_backend/generate_pro_proof_request_build_sigs
 ///
-/// Builds master and rotating signatures for a `get_pro_proof_request`.
+/// Builds master and rotating signatures for a `generate_pro_proof_request`.
 /// Returns false if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
 /// Using 64-byte libsodium keys is more efficient.
 ///
@@ -394,7 +395,8 @@ session_pro_backend_to_json session_pro_backend_add_pro_payment_request_build_to
 /// - `master_sig` - Master signature
 /// - `rotating_sig` - Rotating signature
 LIBSESSION_EXPORT
-session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof_request_build_sigs(
+session_pro_backend_master_rotating_signatures
+session_pro_backend_generate_pro_proof_request_build_sigs(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -402,15 +404,15 @@ session_pro_backend_master_rotating_signatures session_pro_backend_get_pro_proof
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) NON_NULL_ARG(2, 4);
 
-/// API: session_pro_backend/get_pro_proof_request_build_to_json
+/// API: session_pro_backend/generate_pro_proof_request_build_to_json
 ///
-/// Builds the JSON for a `get_pro_proof_request`. This function is the same as filling in the
+/// Builds the JSON for a `generate_pro_proof_request`. This function is the same as filling in the
 /// struct and calling the corresponding `to_json` function.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 ///
-/// See: `session_pro_backend_get_pro_proof_request_build_sigs`
+/// See: `session_pro_backend_generate_pro_proof_request_build_sigs`
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_json(
+session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build_to_json(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -418,9 +420,9 @@ session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_j
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) NON_NULL_ARG(2, 4);
 
-/// API: session_pro_backend/get_pro_status_request_build_sig
+/// API: session_pro_backend/get_pro_details_request_build_sig
 ///
-/// Builds the JSON for a `get_pro_status_request`. Returns false if the keys (32-byte or
+/// Builds the JSON for a `get_pro_details_request`. Returns false if the keys (32-byte or
 /// 64-byte libsodium format) are incorrectly sized. Using 64-byte libsodium keys is more efficient.
 ///
 /// Inputs:
@@ -436,22 +438,22 @@ session_pro_backend_to_json session_pro_backend_get_pro_proof_request_build_to_j
 /// - `errors_count` -- length of the error if `success` is false
 /// - `sig` -- The generated signature
 LIBSESSION_EXPORT
-session_pro_backend_signature session_pro_backend_get_pro_status_request_build_sig(
+session_pro_backend_signature session_pro_backend_get_pro_details_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint32_t count) NON_NULL_ARG(2);
 
-/// API: session_pro_backend/get_pro_status_request_build_to_json
+/// API: session_pro_backend/get_pro_details_request_build_to_json
 ///
-/// Builds the JSON for a `get_pro_status_request`. This function is the same as filling in the
+/// Builds the JSON for a `get_pro_details_request`. This function is the same as filling in the
 /// struct and calling the corresponding `to_json` function.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 ///
-/// See: `session_pro_backend_get_pro_status_request_build_sig`
+/// See: `session_pro_backend_get_pro_details_request_build_sig`
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_status_request_build_to_json(
+session_pro_backend_to_json session_pro_backend_get_pro_details_request_build_to_json(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
@@ -469,16 +471,16 @@ LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_add_pro_payment_request_to_json(
         const session_pro_backend_add_pro_payment_request* request);
 
-/// API: session_pro_backend/get_pro_proof_request_to_json
+/// API: session_pro_backend/generate_pro_proof_request_to_json
 ///
-/// Serializes a `get_pro_proof_request` to a JSON string.
+/// Serializes a `generate_pro_proof_request` to a JSON string.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 ///
 /// Inputs:
 /// - `request` -- Pointer to the request struct.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_proof_request_to_json(
-        const session_pro_backend_get_pro_proof_request* request);
+session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_to_json(
+        const session_pro_backend_generate_pro_proof_request* request);
 
 /// API: session_pro_backend/get_pro_revocations_request_to_json
 ///
@@ -488,26 +490,26 @@ LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_get_pro_revocations_request_to_json(
         const session_pro_backend_get_pro_revocations_request* request);
 
-/// API: session_pro_backend/get_pro_status_request_to_json
+/// API: session_pro_backend/get_pro_details_request_to_json
 ///
-/// Serializes a `get_pro_status_request` to a JSON string.
+/// Serializes a `get_pro_details_request` to a JSON string.
 /// The caller must free the returned string using `session_pro_backend_to_json_free`.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_status_request_to_json(
-        const session_pro_backend_get_pro_status_request* request);
+session_pro_backend_to_json session_pro_backend_get_pro_details_request_to_json(
+        const session_pro_backend_get_pro_details_request* request);
 
-/// API: session_pro_backend/add_pro_payment_or_get_pro_proof_response_parse
+/// API: session_pro_backend/add_pro_payment_or_generate_pro_proof_response_parse
 ///
-/// Parses a JSON string into an `add_pro_payment_or_get_pro_proof_response` struct.
+/// Parses a JSON string into an `add_pro_payment_or_generate_pro_proof_response` struct.
 /// The caller must free the response using
-/// `session_pro_backend_add_pro_payment_or_get_pro_proof_response_free`.
+/// `session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free`.
 ///
 /// Inputs:
 /// - `json` -- JSON string to parse.
 /// - `json_len` -- Length of the JSON string.
 LIBSESSION_EXPORT
-session_pro_backend_add_pro_payment_or_get_pro_proof_response
-session_pro_backend_add_pro_payment_or_get_pro_proof_response_parse(
+session_pro_backend_add_pro_payment_or_generate_pro_proof_response
+session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
         const char* json, size_t json_len);
 
 /// API: session_pro_backend/get_pro_revocations_response_parse
@@ -522,16 +524,16 @@ LIBSESSION_EXPORT
 session_pro_backend_get_pro_revocations_response
 session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t json_len);
 
-/// API: session_pro_backend/get_pro_status_response_parse
+/// API: session_pro_backend/get_pro_details_response_parse
 ///
 /// Parses a JSON string into a GetProPaymentsResponse struct.
-/// The caller must free the response using session_pro_backend_get_pro_status_response_free.
+/// The caller must free the response using session_pro_backend_get_pro_details_response_free.
 ///
 /// Inputs:
 /// - `json` -- JSON string to parse.
 /// - `json_len` -- Length of the JSON string.
 LIBSESSION_EXPORT
-session_pro_backend_get_pro_status_response session_pro_backend_get_pro_status_response_parse(
+session_pro_backend_get_pro_details_response session_pro_backend_get_pro_details_response_parse(
         const char* json, size_t json_len);
 
 /// API: session_pro_backend/to_json_free
@@ -540,12 +542,12 @@ session_pro_backend_get_pro_status_response session_pro_backend_get_pro_status_r
 LIBSESSION_EXPORT
 void session_pro_backend_to_json_free(session_pro_backend_to_json* to_json);
 
-/// API: session_pro_backend/add_pro_payment_or_get_pro_proof_response_free
+/// API: session_pro_backend/add_pro_payment_or_generate_pro_proof_response_free
 ///
 /// Frees the response
 LIBSESSION_EXPORT
-void session_pro_backend_add_pro_payment_or_get_pro_proof_response_free(
-        session_pro_backend_add_pro_payment_or_get_pro_proof_response* response);
+void session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(
+        session_pro_backend_add_pro_payment_or_generate_pro_proof_response* response);
 
 /// API: session_pro_backend/get_pro_revocations_response_free
 ///
@@ -554,12 +556,12 @@ LIBSESSION_EXPORT
 void session_pro_backend_get_pro_revocations_response_free(
         session_pro_backend_get_pro_revocations_response* response);
 
-/// API: session_pro_backend/get_pro_status_response_free
+/// API: session_pro_backend/get_pro_details_response_free
 ///
 /// Frees the respone
 LIBSESSION_EXPORT
-void session_pro_backend_get_pro_status_response_free(
-        session_pro_backend_get_pro_status_response* response);
+void session_pro_backend_get_pro_details_response_free(
+        session_pro_backend_get_pro_details_response* response);
 
 #ifdef __cplusplus
 }  // extern "C"

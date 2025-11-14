@@ -18,10 +18,10 @@
 /// 1. Build a request with `AddProPaymentRequest::build_to_json` from a Session Pro payment and
 ///    submit it to the backend to register the specified Ed25519 keys for Session Pro.
 ///
-///    Server responds JSON to be parsed with `AddProPaymentOrGetProProofResponse::parse`. Clients
-///    should validate the response and update their `UserProfile` by constructing a `ProConfig`
-///    with the `proof` from the response and filling in the relevant rotating private key that the
-///    proof was authorised for.
+///    Server responds JSON to be parsed with `AddProPaymentOrGenerateProProofResponse::parse`.
+///    Clients should validate the response and update their `UserProfile` by constructing a
+///    `ProConfig` with the `proof` from the response and filling in the relevant rotating private
+///    key that the proof was authorised for.
 ///
 ///    The server will only respond successfully if it can also independently verify the purchase
 ///    otherwise an error is returned and can be read from the `ResponseHeader` after parsing the
@@ -47,9 +47,9 @@
 ///    revoked proofs will not be entitled to Pro features.
 ///
 /// 4. Query the status (and optionally payment history) of a user's Session Pro Master Ed25519 key
-///    has registered by building a `GetProStatusRequest::build_to_json` query and submitting it.
+///    has registered by building a `GetProDetailsRequest::build_to_json` query and submitting it.
 ///
-///    Server responds JSON to be parsed with `GetProStatusResponse::parse` which they can use to
+///    Server responds JSON to be parsed with `GetProDetailsResponse::parse` which they can use to
 ///    populate their client's payment history.
 ///
 /// 5. Get a list of per-payment provider URLs, such as links to the support page for refunds and
@@ -213,10 +213,10 @@ struct AddProPaymentRequest {
 /// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
 /// is the raw parse result that can then be converted into the config::ProProof or equivalent
 /// structure.
-struct AddProPaymentOrGetProProofResponse : public ResponseHeader {
+struct AddProPaymentOrGenerateProProofResponse : public ResponseHeader {
     ProProof proof;
 
-    /// API: pro/AddProPaymentOrGetProProofResponse::parse
+    /// API: pro/AddProPaymentOrGenerateProProofResponse::parse
     ///
     /// Parses a JSON string into the response struct.
     ///
@@ -225,14 +225,14 @@ struct AddProPaymentOrGetProProofResponse : public ResponseHeader {
     ///
     /// Outputs:
     /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
-    static AddProPaymentOrGetProProofResponse parse(std::string_view json);
+    static AddProPaymentOrGenerateProProofResponse parse(std::string_view json);
 };
 
 /// Request a new Session Pro proof from the backend. The specified `master_pkey` must have
 /// previously already registered a payment to the backend that is still active and hence entitled
 /// to Session Pro features. This endpoint can then be used to pair a new Ed25519 key to be
 /// authorised to use a the Session Pro proof.
-struct GetProProofRequest {
+struct GenerateProProofRequest {
     /// Request version. The latest accepted version is 0
     std::uint8_t version;
 
@@ -253,7 +253,7 @@ struct GetProProofRequest {
     /// 64-byte signature proving knowledge of the rotating key's secret component
     array_uc64 rotating_sig;
 
-    /// API: pro/GetProProofRequest::build_sigs
+    /// API: pro/GenerateProProofRequest::build_sigs
     ///
     /// Builds master and rotating signatures using the provided private keys and timestamp.
     /// Throws if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
@@ -273,10 +273,10 @@ struct GetProProofRequest {
             std::span<const uint8_t> rotating_privkey,
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts);
 
-    /// API: pro/GetProProofRequest::build_to_json
+    /// API: pro/GenerateProProofRequest::build_to_json
     ///
-    /// Builds a GetProProofRequest and serialize it to JSON. This function is the same as filling
-    /// the struct fields and calling `to_json`.
+    /// Builds a GenerateProProofRequest and serialize it to JSON. This function is the same as
+    /// filling the struct fields and calling `to_json`.
     ///
     /// Inputs:
     /// - `request_version` -- Version of the request to build a request for
@@ -292,7 +292,7 @@ struct GetProProofRequest {
             std::span<const uint8_t> rotating_privkey,
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts);
 
-    /// API: pro/GetProProofRequest::to_json
+    /// API: pro/GenerateProProofRequest::to_json
     ///
     /// Serializes the request to a JSON string.
     ///
@@ -313,7 +313,7 @@ struct GetProRevocationsRequest {
     /// the Session Pro Backend to omit the revocation list if it has not changed.
     std::uint32_t ticket;
 
-    /// API: pro/GetProProofRequest::to_json
+    /// API: pro/GenerateProProofRequest::to_json
     ///
     /// Serializes the request to a JSON string.
     ///
@@ -350,7 +350,7 @@ struct GetProRevocationsResponse : public ResponseHeader {
     static GetProRevocationsResponse parse(std::string_view json);
 };
 
-struct GetProStatusRequest {
+struct GetProDetailsRequest {
     /// Request version for the API
     std::uint8_t version;
 
@@ -386,9 +386,9 @@ struct GetProStatusRequest {
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
             uint32_t count);
 
-    /// API: pro/GetProStatusRequest::build_to_json
+    /// API: pro/GetProDetailsRequest::build_to_json
     ///
-    /// Builds a GetProStatusRequest and serialize it to JSON. This function is the same as filling
+    /// Builds a GetProDetailsRequest and serialize it to JSON. This function is the same as filling
     /// the struct fields and calling `to_json`.
     ///
     /// Inputs:
@@ -405,7 +405,7 @@ struct GetProStatusRequest {
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
             uint32_t count);
 
-    /// API: pro/GetProProofRequest::to_json
+    /// API: pro/GenerateProProofRequest::to_json
     ///
     /// Serializes the request to a JSON string.
     ///
@@ -483,7 +483,7 @@ struct ProPaymentItem {
     std::string apple_web_line_order_id;
 };
 
-struct GetProStatusResponse : public ResponseHeader {
+struct GetProDetailsResponse : public ResponseHeader {
     /// List of payment items for the master public key
     std::vector<ProPaymentItem> items;
 
@@ -493,7 +493,7 @@ struct GetProStatusResponse : public ResponseHeader {
     /// Error code that indicates that the Session Pro Backend encountered an error book-keeping
     /// Session Pro entitlement for the user. If this value is not `SUCCESS` implementing clients
     /// can optionally prompt the user that they should contact support for investigation.
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
 
     /// Flag to indicate if the user will automatically renew their subscription.
     bool auto_renewing;
@@ -534,7 +534,7 @@ struct GetProStatusResponse : public ResponseHeader {
     /// length of items if the request, requested less than the number of payments the user has.
     uint32_t payments_total;
 
-    /// API: pro/GetProStatusResponse::parse
+    /// API: pro/GetProDetailsResponse::parse
     ///
     /// Parses a JSON string into the response struct.
     ///
@@ -543,7 +543,7 @@ struct GetProStatusResponse : public ResponseHeader {
     ///
     /// Outputs:
     /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
-    static GetProStatusResponse parse(std::string_view json);
+    static GetProDetailsResponse parse(std::string_view json);
 };
 
 void make_blake2b32_hasher(struct crypto_generichash_blake2b_state* hasher);
