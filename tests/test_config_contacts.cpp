@@ -1116,3 +1116,38 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     CHECK_THROWS(contacts.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, invalid_id_1));
     CHECK_THROWS(contacts.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, invalid_id_2));
 }
+
+TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+
+    auto c = contacts.get_or_construct(
+            "050000000000000000000000000000000000000000000000000000000000000000"sv);
+    CHECK(c.pro_features == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+
+    c.pro_features = SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE;
+    contacts.set(c);
+
+    c = contacts.get_or_construct(
+            "050000000000000000000000000000000000000000000000000000000000000000"sv);
+    CHECK(c.pro_features == SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
+
+    // Check that it strips the `10K_CHARACTER_LIMIT` feature when setting
+    c.pro_features = c.pro_features |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
+    CHECK(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+
+    contacts.set(c);
+    c = contacts.get_or_construct(
+            "050000000000000000000000000000000000000000000000000000000000000000"sv);
+    CHECK_FALSE(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+
+    c.pro_features = c.pro_features |= SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR;
+    contacts.set(c);
+    c = contacts.get_or_construct(
+            "050000000000000000000000000000000000000000000000000000000000000000"sv);
+
+    CHECK(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
+    CHECK(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+}

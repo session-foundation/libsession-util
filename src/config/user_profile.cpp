@@ -5,8 +5,11 @@
 #include "internal.hpp"
 #include "session/config/contacts.hpp"
 #include "session/config/error.h"
+#include "session/config/pro.h"
+#include "session/config/pro.hpp"
 #include "session/config/user_profile.hpp"
 #include "session/export.h"
+#include "session/types.hpp"
 
 using namespace session::config;
 
@@ -15,6 +18,33 @@ UserProfile::UserProfile(
         std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
+}
+
+void UserProfile::extra_data(oxenc::bt_dict_producer&& extra) const {
+    if (pro_config) {
+        auto root = extra.append_dict("pro_config");
+
+        const ProProof& pro_proof = pro_config->proof;
+        {
+            auto proof_dict = root.append_dict("p");
+            proof_dict.append("@", pro_proof.version);
+            proof_dict.append("e", pro_proof.expiry_unix_ts.time_since_epoch().count());
+            proof_dict.append("g", pro_proof.gen_index_hash);
+            proof_dict.append("r", pro_proof.rotating_pubkey);
+            proof_dict.append("s", pro_proof.sig);
+        }
+
+        root.append("r", pro_config->rotating_privkey);
+    }
+}
+
+void UserProfile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
+    if (extra.skip_until("pro_config")) {
+        auto pd = extra.consume_dict_consumer();
+        ProConfig pro = {};
+        if (pro.load(pd))
+            pro_config = std::move(pro);
+    }
 }
 
 std::optional<std::string_view> UserProfile::get_name() const {
@@ -146,6 +176,75 @@ std::chrono::sys_seconds UserProfile::get_profile_updated() const {
     return std::chrono::sys_seconds{};
 }
 
+std::optional<ProConfig> UserProfile::get_pro_config() const {
+    return pro_config;
+}
+
+void UserProfile::set_pro_config(ProConfig const& pro) {
+    if (pro_config != pro) {
+        pro_config = pro;
+        _needs_dump = true;
+    }
+}
+
+bool UserProfile::remove_pro_config() {
+    if (pro_config) {
+        pro_config = std::nullopt;
+        _needs_dump = true;
+        return true;
+    }
+
+    return false;
+}
+
+SESSION_PROTOCOL_PRO_FEATURES UserProfile::get_pro_features() const {
+    if (auto f = data["f"].integer())
+        return static_cast<SESSION_PROTOCOL_PRO_FEATURES>(*f);
+    return SESSION_PROTOCOL_PRO_FEATURES_NIL;
+}
+
+void UserProfile::set_pro_badge(bool enabled) {
+    SESSION_PROTOCOL_PRO_FEATURES current_value = SESSION_PROTOCOL_PRO_FEATURES_NIL;
+    if (auto f = data["f"].integer())
+        current_value = static_cast<SESSION_PROTOCOL_PRO_FEATURES>(*f);
+
+    auto updated_value =
+            (enabled ? (current_value | SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE)     // Add
+                     : (current_value & ~SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE));  // Remove
+
+    if (current_value == updated_value)
+        return;
+
+    if (updated_value == SESSION_PROTOCOL_PRO_FEATURES_NIL)
+        data["f"].erase();
+    else
+        data["f"] = static_cast<uint64_t>(updated_value);
+
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] = ts_now();
+}
+
+void UserProfile::set_animated_avatar(bool enabled) {
+    SESSION_PROTOCOL_PRO_FEATURES current_value = SESSION_PROTOCOL_PRO_FEATURES_NIL;
+    if (auto f = data["f"].integer())
+        current_value = static_cast<SESSION_PROTOCOL_PRO_FEATURES>(*f);
+
+    auto updated_value =
+            (enabled ? (current_value | SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR)     // Add
+                     : (current_value & ~SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR));  // Remove
+
+    if (current_value == updated_value)
+        return;
+
+    if (updated_value == SESSION_PROTOCOL_PRO_FEATURES_NIL)
+        data["f"].erase();
+    else
+        data["f"] = static_cast<uint64_t>(updated_value);
+
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] = ts_now();
+}
+
 extern "C" {
 
 using namespace session;
@@ -251,4 +350,60 @@ LIBSESSION_C_API void user_profile_set_blinded_msgreqs(config_object* conf, int 
 LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
     return unbox<UserProfile>(conf)->get_profile_updated().time_since_epoch().count();
 }
+
+LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro_pro_config* pro) {
+    if (auto val = unbox<UserProfile>(conf)->get_pro_config(); val) {
+        static_assert(sizeof pro->proof.gen_index_hash == sizeof(val->proof.gen_index_hash));
+        static_assert(sizeof pro->proof.rotating_pubkey == sizeof(val->proof.rotating_pubkey));
+        static_assert(sizeof pro->proof.sig == sizeof(val->proof.sig));
+        pro->proof.version = val->proof.version;
+        std::memcpy(
+                pro->proof.gen_index_hash.data,
+                val->proof.gen_index_hash.data(),
+                val->proof.gen_index_hash.size());
+        std::memcpy(
+                pro->proof.rotating_pubkey.data,
+                val->proof.rotating_pubkey.data(),
+                val->proof.rotating_pubkey.size());
+        pro->proof.expiry_unix_ts_ms = val->proof.expiry_unix_ts.time_since_epoch().count();
+        std::memcpy(pro->proof.sig.data, val->proof.sig.data(), val->proof.sig.size());
+        return true;
+    }
+    return false;
+}
+
+LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro_pro_config* pro) {
+    ProConfig val = {};
+    val.proof.version = pro->proof.version;
+    std::memcpy(
+            val.proof.gen_index_hash.data(),
+            pro->proof.gen_index_hash.data,
+            val.proof.gen_index_hash.size());
+    std::memcpy(
+            val.proof.rotating_pubkey.data(),
+            pro->proof.rotating_pubkey.data,
+            val.proof.rotating_pubkey.size());
+    val.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(pro->proof.expiry_unix_ts_ms));
+    std::memcpy(val.proof.sig.data(), pro->proof.sig.data, val.proof.sig.size());
+    unbox<UserProfile>(conf)->set_pro_config(val);
+}
+
+LIBSESSION_C_API bool user_profile_remove_pro_config(config_object* conf) {
+    return unbox<UserProfile>(conf)->remove_pro_config();
+}
+
+LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_FEATURES
+user_profile_get_pro_features(const config_object* conf) {
+    return unbox<UserProfile>(conf)->get_pro_features();
+}
+
+LIBSESSION_EXPORT void user_profile_set_pro_badge(config_object* conf, bool enabled) {
+    unbox<UserProfile>(conf)->set_pro_badge(enabled);
+}
+
+LIBSESSION_EXPORT void user_profile_set_animated_avatar(config_object* conf, bool enabled) {
+    unbox<UserProfile>(conf)->set_animated_avatar(enabled);
+}
+
 }  // extern "C"

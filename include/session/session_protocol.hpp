@@ -166,6 +166,12 @@ class ProProof {
     ///
     /// Create a 32-byte hash from the proof. This hash is the payload that is signed in the proof.
     array_uc32 hash() const;
+
+    bool operator==(const ProProof& other) const {
+        return version == other.version && gen_index_hash == other.gen_index_hash &&
+               rotating_pubkey == other.rotating_pubkey && expiry_unix_ts == other.expiry_unix_ts &&
+               sig == other.sig;
+    }
 };
 
 enum class ProFeaturesForMsgStatus {

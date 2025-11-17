@@ -6,6 +6,7 @@
 
 #include "base.hpp"
 #include "namespaces.hpp"
+#include "pro.hpp"
 #include "profile_pic.hpp"
 
 namespace session::config {
@@ -23,6 +24,7 @@ using namespace std::literals;
 /// M - set to 1 if blinded message request retrieval is enabled, 0 if retrieval is *disabled*, and
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
+/// f - session pro features bitset
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
@@ -31,6 +33,9 @@ using namespace std::literals;
 /// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
 ///    (automatically updates when calling `set_reupload_profile_pic`).
 class UserProfile : public ConfigBase {
+
+  private:
+    std::optional<ProConfig> pro_config;
 
   public:
     friend class UserProfileTester;
@@ -240,6 +245,71 @@ class UserProfile : public ConfigBase {
     std::chrono::sys_seconds get_profile_updated() const;
 
     bool accepts_protobuf() const override { return true; }
+
+    /// API: user_profile/UserProfile::get_pro_config
+    ///
+    /// Get the Session Pro data if any, for the current user profile. This may be missing if the
+    /// user does not have any entitlement to Session Pro config.
+    ///
+    /// Inputs: None
+    std::optional<ProConfig> get_pro_config() const;
+
+    /// API: user_profile/UserProfile::set_pro_config
+    ///
+    /// Attach the Session Pro components to the user profile including the proof entitling the user
+    /// to use Session Pro features as well as the Ed25519 key pair known as the Rotating Session
+    /// Pro key authorised to use the proof.
+    ///
+    /// Inputs:
+    /// - `pro` -- The Session Pro components to assign to the current user profile. This will
+    ///   overwrite any existing Session Pro config if it exists. No verification of `pro` is done.
+    void set_pro_config(const ProConfig& pro);
+
+    /// API: user_profile/UserProfile::remove_pro_config
+    ///
+    /// Remove the Session Pro components from the user profile.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `bool` - A flag indicating whether the config had Session Pro components which were
+    /// removed.
+    bool remove_pro_config();
+
+    /// API: user_profile/UserProfile::get_pro_features
+    ///
+    /// Retrieves the bitset indicating which pro features the user currently has enabled.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `SESSION_PROTOCOL_PRO_FEATURES` - bitset indicating which pro features are enabled.
+    SESSION_PROTOCOL_PRO_FEATURES get_pro_features() const;
+
+    /// API: user_profile/UserProfile::set_pro_badge
+    ///
+    /// Updates the bitset to specify whether the user wants their profile to show the pro badge.
+    ///
+    /// Inputs:
+    /// - `enabled` -- Flag which specifies whether the user wants the pro badge to appear on their
+    /// profile or not.
+    void set_pro_badge(bool enabled);
+
+    /// API: user_profile/UserProfile::set_animated_avatar
+    ///
+    /// Updates the bitset to specify whether the user has an animated profile picture, should be
+    /// set when uploading a profile picture. Note: This doesn't prevent a users profile picture
+    /// from animating, it's just a way to more easily synchronise the state between devices when
+    /// sending messages so we don't need the device to have successfully download the current
+    /// display picture in order to be able to determine this.
+    ///
+    /// Inputs:
+    /// - `enabled` -- Flag which specifies whether the users display picture is animated or not.
+    void set_animated_avatar(bool enabled);
+
+  protected:
+    void extra_data(oxenc::bt_dict_producer&& extra) const override;
+    void load_extra_data(oxenc::bt_dict_consumer&& extra) override;
 };
 
 }  // namespace session::config
