@@ -21,9 +21,7 @@ namespace session::config {
 ///   +-- r - rotating ed25519 pubkey
 class ProConfig {
   public:
-    /// Private key for the public key key specified in the proof. This is synced between clients
-    /// to allow multiple clients to synchronise the Session Pro Proof and also the keys necessary
-    /// to use the proof.
+    /// Private key for the public key key specified in the proof.
     cleared_uc64 rotating_privkey;
 
     /// A cryptographic proof for entitling an Ed25519 key to Session Pro
