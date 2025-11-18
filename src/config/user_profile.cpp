@@ -15,8 +15,8 @@ using namespace session::config;
 
 UserProfile::UserProfile(
         std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped} {
+        std::optional<std::span<const unsigned char>> dumped) {
+    init(dumped, std::nullopt, ed25519_secretkey);
     load_key(ed25519_secretkey);
 }
 
@@ -367,6 +367,10 @@ LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro
                 val->proof.rotating_pubkey.size());
         pro->proof.expiry_unix_ts_ms = val->proof.expiry_unix_ts.time_since_epoch().count();
         std::memcpy(pro->proof.sig.data, val->proof.sig.data(), val->proof.sig.size());
+        std::memcpy(
+                pro->rotating_privkey.data,
+                val->rotating_privkey.data(),
+                val->rotating_privkey.size());
         return true;
     }
     return false;
@@ -386,6 +390,8 @@ LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro
     val.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
             std::chrono::milliseconds(pro->proof.expiry_unix_ts_ms));
     std::memcpy(val.proof.sig.data(), pro->proof.sig.data, val.proof.sig.size());
+    std::memcpy(
+            val.rotating_privkey.data(), pro->rotating_privkey.data, val.rotating_privkey.size());
     unbox<UserProfile>(conf)->set_pro_config(val);
 }
 
