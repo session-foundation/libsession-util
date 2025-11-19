@@ -67,8 +67,8 @@ void contact_info::set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features) {
 
 Contacts::Contacts(
         std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped} {
+        std::optional<std::span<const unsigned char>> dumped) {
+    init(dumped, std::nullopt, ed25519_secretkey);
     load_key(ed25519_secretkey);
 }
 

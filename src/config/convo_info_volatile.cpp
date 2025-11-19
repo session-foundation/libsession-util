@@ -36,9 +36,9 @@ namespace convo {
                     pro_gen_index_hash->data(),
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->size());
+            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                    std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
         }
-        pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
     }
 
     void one_to_one::into(convo_info_volatile_1to1& c) const {
@@ -52,10 +52,12 @@ namespace convo {
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->data(),
                     pro_gen_index_hash->size());
+
+            c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
         } else {
             c.has_pro_gen_index_hash = false;
+            c.pro_expiry_unix_ts_ms = 0;
         }
-        c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
     }
 
     community::community(const convo_info_volatile_community& c) :
@@ -130,9 +132,9 @@ namespace convo {
                     pro_gen_index_hash->data(),
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->size());
+            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                    std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
         }
-        pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
     }
 
     void blinded_one_to_one::into(convo_info_volatile_blinded_1to1& c) const {
@@ -147,10 +149,11 @@ namespace convo {
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->data(),
                     pro_gen_index_hash->size());
+            c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
         } else {
             c.has_pro_gen_index_hash = false;
+            c.pro_expiry_unix_ts_ms = 0;
         }
-        c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
     }
 
     void base::load(const dict& info_dict) {
@@ -162,8 +165,8 @@ namespace convo {
 
 ConvoInfoVolatile::ConvoInfoVolatile(
         std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped} {
+        std::optional<std::span<const unsigned char>> dumped) {
+    init(dumped, std::nullopt, ed25519_secretkey);
     load_key(ed25519_secretkey);
 }
 
@@ -177,12 +180,12 @@ std::optional<convo::one_to_one> ConvoInfoVolatile::get_1to1(std::string_view pu
     auto result = std::make_optional<convo::one_to_one>(std::string{pubkey_hex});
     result->load(*info_dict);
 
-    result->pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(int_or_0(*info_dict, "e")));
-
+    auto pro_expiry = int_or_0(*info_dict, "e");
     std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
             maybe_vector(*info_dict, "g");
-    if (maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
+    if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
+        result->pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(pro_expiry));
         result->pro_gen_index_hash.emplace();
         std::memcpy(
                 result->pro_gen_index_hash->data(),
@@ -192,8 +195,7 @@ std::optional<convo::one_to_one> ConvoInfoVolatile::get_1to1(std::string_view pu
 
     return result;
 }
-// TODO: The 'has_gen_index_hash' value is incorrectly returning true (is the above 'maybe_vector'
-// resolving incorrectly?)
+
 convo::one_to_one ConvoInfoVolatile::get_or_construct_1to1(std::string_view pubkey_hex) const {
     if (auto maybe = get_1to1(pubkey_hex))
         return *std::move(maybe);
@@ -317,12 +319,12 @@ std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(
     auto result = std::make_optional<convo::blinded_one_to_one>(std::string{pubkey_hex});
     result->load(*info_dict);
 
-    result->pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(int_or_0(*info_dict, "e")));
-
+    auto pro_expiry = int_or_0(*info_dict, "e");
     std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
             maybe_vector(*info_dict, "g");
-    if (maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
+    if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
+        result->pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(pro_expiry));
         result->pro_gen_index_hash.emplace();
         std::memcpy(
                 result->pro_gen_index_hash->data(),
@@ -350,9 +352,11 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     if (auto* d = info.dict(); !d || d->empty())
         return;
 
-    set_nonzero_int(info["e"], c.pro_expiry_unix_ts.time_since_epoch().count());
-    if (c.pro_gen_index_hash)
+    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+    if (pro_expiry > 0 && c.pro_gen_index_hash) {
+        set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_gen_index_hash;
+    }
 }
 
 void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
@@ -436,9 +440,11 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
 
     set_nonzero_int(info["y"], c.legacy_blinding);
 
-    set_nonzero_int(info["e"], c.pro_expiry_unix_ts.time_since_epoch().count());
-    if (c.pro_gen_index_hash)
+    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+    if (pro_expiry > 0 && c.pro_gen_index_hash) {
+        set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_gen_index_hash;
+    }
 }
 
 template <typename Field>
