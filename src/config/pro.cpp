@@ -42,21 +42,21 @@ bool ProConfig::load(bt_dict_consumer& root) {
         if (!pd.skip_until("g"))
             return false;
 
-        auto gen_index_hash = to_vector(pd.consume_string_view());
+        auto gen_index_hash = pd.consume_string_view();
         if (gen_index_hash.size() != proof.gen_index_hash.size())
             return false;
 
         if (!pd.skip_until("r"))
             return false;
 
-        auto rotating_pubkey = to_vector(pd.consume_string_view());
+        auto rotating_pubkey = pd.consume_string_view();
         if (rotating_pubkey.size() != proof.rotating_pubkey.max_size())
             return false;
 
         if (!pd.skip_until("s"))
             return false;
 
-        auto sig = to_vector(pd.consume_string_view());
+        auto sig = pd.consume_string_view();
         if (sig.size() != proof.sig.max_size())
             return false;
 

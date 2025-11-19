@@ -59,10 +59,7 @@ void contact_info::set_nickname_truncated(std::string n) {
 }
 
 void contact_info::set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features) {
-    if (features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT)
-        features &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-
-    pro_features = features;
+    pro_features = (features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
 
 Contacts::Contacts(
@@ -174,11 +171,7 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     created = to_epoch_seconds(c.created);
 
     // Strip features which aren't profile related
-    auto features = c.pro_features;
-    if (features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT)
-        features &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-
-    pro_features = features;
+    pro_features = (c.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
 
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
@@ -240,10 +233,7 @@ void Contacts::set(const contact_info& contact) {
     set_positive_int(info["j"], to_epoch_seconds(contact.created));
 
     // Strip features which aren't profile related
-    auto features = contact.pro_features;
-    if (features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT)
-        features &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-
+    auto features = (contact.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
     set_positive_int(info["f"], features);
 }
 
@@ -317,12 +307,8 @@ void Contacts::set_created(std::string_view session_id, int64_t timestamp) {
 
 void Contacts::set_pro_features(
         std::string_view session_id, SESSION_PROTOCOL_PRO_FEATURES features) {
-    if (features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT) {
-        features &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-    }
-
     auto c = get_or_construct(session_id);
-    c.pro_features = features;
+    c.pro_features = (features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
     set(c);
 }
 
@@ -409,11 +395,7 @@ blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
     created = to_sys_seconds(c.created);
 
     // Strip features which aren't profile related
-    auto features = c.pro_features;
-    if (features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT)
-        features &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-
-    pro_features = features;
+    pro_features = (c.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
 
 const std::string blinded_contact_info::session_id() const {
@@ -448,10 +430,7 @@ void blinded_contact_info::set_pubkey(std::string_view pubkey) {
 }
 
 void blinded_contact_info::set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features) {
-    if (features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT)
-        features &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-
-    pro_features = features;
+    pro_features = (features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
 
 ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
@@ -536,10 +515,7 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
     set_ts(info["j"], bc.created);
 
     // Strip features which aren't profile related
-    auto features = bc.pro_features;
-    if (features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT)
-        features &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-
+    auto features = (bc.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
     set_positive_int(info["f"], features);
 }
 
