@@ -281,8 +281,8 @@ void community_info::load(const dict& info_dict) {
 
 UserGroups::UserGroups(
         std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped} {
+        std::optional<std::span<const unsigned char>> dumped) {
+    init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
 

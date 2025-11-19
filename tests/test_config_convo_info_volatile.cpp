@@ -5,6 +5,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
 #include <session/config/convo_info_volatile.hpp>
+#include <session/types.hpp>
 #include <string_view>
 #include <variant>
 
@@ -619,6 +620,14 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
             c.last_read = unix_timestamp(i);
             if (i % 5 == 0)
                 c.unread = true;
+
+            c.pro_expiry_unix_ts =
+                    std::chrono::time_point_cast<std::chrono::milliseconds>(now + 24h);
+
+            session::array_uc32 hash{};
+            std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(i % 256));
+            c.pro_gen_index_hash = hash;
+
             convos.set(c);
         } else if (i % 3 == 1) {
             auto c = convos.get_or_construct_legacy_group(some_session_id(i));
@@ -783,4 +792,71 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
     config_dump(conf2, &dump, &dumplen);
     free(dump);
     CHECK_FALSE(config_needs_dump(conf2));
+}
+
+TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> ed_pk, curve_pk;
+    std::array<unsigned char, 64> ed_sk;
+    crypto_sign_ed25519_seed_keypair(
+            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
+    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
+    REQUIRE(rc == 0);
+
+    REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
+            "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+    CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
+          oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
+
+    config_object* conf;
+    REQUIRE(0 == convo_info_volatile_init(&conf, ed_sk.data(), NULL, 0, NULL));
+
+    convo_info_volatile_1to1 c;
+    CHECK(convo_info_volatile_get_or_construct_1to1(
+            conf, &c, "051111111111111111111111111111111111111111111111111111111111111111"));
+    c.last_read = std::chrono::duration_cast<std::chrono::milliseconds>(
+                          std::chrono::system_clock::now().time_since_epoch())
+                          .count();
+    c.pro_expiry_unix_ts_ms = 10000;
+
+    session::array_uc32 hash{};
+    std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(3));
+    std::memcpy(c.pro_gen_index_hash.data, hash.data(), hash.size());
+    c.has_pro_gen_index_hash = true;
+    convo_info_volatile_set_1to1(conf, &c);
+
+    // Fake push:
+    config_push_data* to_push = config_push(conf);
+    seqno_t seqno = to_push->seqno;
+    REQUIRE(to_push->n_configs == 1);
+    free(to_push);
+    CHECK(seqno == 1);
+
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
+
+    config_confirm_pushed(conf, seqno, &(tmphash = "somehash"), 1);
+    CHECK(config_needs_dump(conf));
+
+    // Dump:
+    unsigned char* dump;
+    size_t dumplen;
+    config_dump(conf, &dump, &dumplen);
+
+    // Load the dump:
+    config_object* conf2;
+    REQUIRE(0 == convo_info_volatile_init(&conf2, ed_sk.data(), dump, dumplen, NULL));
+
+    free(dump);
+
+    convo_info_volatile_1to1 c2;
+    CHECK(convo_info_volatile_get_or_construct_1to1(
+            conf2, &c2, "051111111111111111111111111111111111111111111111111111111111111111"));
+
+    CHECK(c2.pro_expiry_unix_ts_ms == c.pro_expiry_unix_ts_ms);
+    CHECK(c.has_pro_gen_index_hash);
+    CHECK(c2.has_pro_gen_index_hash);
+    CHECK(oxenc::to_hex(c2.pro_gen_index_hash.data) == oxenc::to_hex(c.pro_gen_index_hash.data));
 }

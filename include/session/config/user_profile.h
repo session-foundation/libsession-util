@@ -5,6 +5,7 @@ extern "C" {
 #endif
 
 #include "base.h"
+#include "pro.h"
 #include "profile_pic.h"
 
 /// API: user_profile/user_profile_init
@@ -278,6 +279,101 @@ LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int
 /// - `int64_t` - timestamp (unix seconds) that the user last updated their public profile
 /// information.  Will be `0` if it's never been updated.
 LIBSESSION_EXPORT int64_t user_profile_get_profile_updated(config_object* conf);
+
+/// API: user_profile/user_profile_get_pro_config
+///
+/// Get the Pro data for the user profile if it exists which includes the users rotating private key
+/// and their last authorised proof.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL user_profile_get_pro_config(
+///     [in]    const config_object* conf
+///     [out]   pro_pro*             pro
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `pro` -- [out] Pointer to the pro object where the retrieved details are written
+///
+/// Outputs:
+/// - `bool` -- True if the user profile had Pro data associated with it. Otherwise false and the
+///   pro structure will remain untouched.
+LIBSESSION_EXPORT bool user_profile_get_pro_config(const config_object* conf, pro_pro_config* pro);
+
+/// API: user_profile/user_profile_set_pro_config
+///
+/// Update the pro data associated with the user profile.
+///
+/// Declaration:
+/// ```cpp
+/// VOID user_profile_set_pro_config(
+///     [in]    config_object* conf,
+///     [in]    pro_pro*       pro
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `pro` -- [in] Pointer to the Pro data to write to the user profile
+///
+/// Outputs:
+/// - `void` -- Returns nothing
+LIBSESSION_EXPORT void user_profile_set_pro_config(config_object* conf, const pro_pro_config* pro);
+
+/// API: user_profile/user_profile_remove_pro_config
+///
+/// Remove the Session Pro components from the user profile.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL user_profile_remove_pro_config(
+///     [in]    config_object* conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `bool` - A flag indicating whether the config had Session Pro components which were removed.
+bool user_profile_remove_pro_config(config_object* conf);
+
+/// API: user_profile/user_profile_get_pro_features
+///
+/// Retrieves the bitset indicating which pro features the user currently has enabled.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `SESSION_PROTOCOL_PRO_FEATURES` - bitset indicating which pro features are enabled.
+LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_FEATURES
+user_profile_get_pro_features(const config_object* conf);
+
+/// API: user_profile/user_profile_set_pro_badge
+///
+/// Updates the bitset to specify whether the user wants their profile to show the pro badge.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `enabled` -- Flag which specifies whether the user wants the pro badge to appear on their
+/// profile or not.
+LIBSESSION_EXPORT void user_profile_set_pro_badge(config_object* conf, bool enabled);
+
+/// API: user_profile/user_profile_set_animated_avatar
+///
+/// Updates the bitset to specify whether the user has an animated profile picture, should be
+/// set when uploading a profile picture. Note: This doesn't prevent a users profile picture
+/// from animating, it's just a way to more easily synchronise the state between devices when
+/// sending messages so we don't need the device to have successfully download the current
+/// display picture in order to be able to determine this.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `enabled` -- Flag which specifies whether the users display picture is animated or not.
+LIBSESSION_EXPORT void user_profile_set_animated_avatar(config_object* conf, bool enabled);
 
 #ifdef __cplusplus
 }  // extern "C"

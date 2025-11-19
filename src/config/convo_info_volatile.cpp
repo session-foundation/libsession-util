@@ -16,7 +16,6 @@
 #include "session/export.h"
 #include "session/types.hpp"
 #include "session/util.hpp"
-
 using namespace std::literals;
 
 namespace session::config {
@@ -30,12 +29,35 @@ namespace convo {
         check_session_id(session_id);
     }
     one_to_one::one_to_one(const convo_info_volatile_1to1& c) :
-            base{c.last_read, c.unread}, session_id{c.session_id, 66} {}
+            base{c.last_read, c.unread}, session_id{c.session_id, 66} {
+        if (c.has_pro_gen_index_hash) {
+            pro_gen_index_hash.emplace();
+            std::memcpy(
+                    pro_gen_index_hash->data(),
+                    c.pro_gen_index_hash.data,
+                    pro_gen_index_hash->size());
+            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                    std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
+        }
+    }
 
     void one_to_one::into(convo_info_volatile_1to1& c) const {
         std::memcpy(c.session_id, session_id.data(), 67);
         c.last_read = last_read;
         c.unread = unread;
+
+        if (pro_gen_index_hash) {
+            c.has_pro_gen_index_hash = true;
+            std::memcpy(
+                    c.pro_gen_index_hash.data,
+                    pro_gen_index_hash->data(),
+                    pro_gen_index_hash->size());
+
+            c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
+        } else {
+            c.has_pro_gen_index_hash = false;
+            c.pro_expiry_unix_ts_ms = 0;
+        }
     }
 
     community::community(const convo_info_volatile_community& c) :
@@ -103,13 +125,35 @@ namespace convo {
     blinded_one_to_one::blinded_one_to_one(const convo_info_volatile_blinded_1to1& c) :
             base{c.last_read, c.unread},
             blinded_session_id{c.blinded_session_id, 66},
-            legacy_blinding{c.legacy_blinding} {}
+            legacy_blinding{c.legacy_blinding} {
+        if (c.has_pro_gen_index_hash) {
+            pro_gen_index_hash.emplace();
+            std::memcpy(
+                    pro_gen_index_hash->data(),
+                    c.pro_gen_index_hash.data,
+                    pro_gen_index_hash->size());
+            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                    std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
+        }
+    }
 
     void blinded_one_to_one::into(convo_info_volatile_blinded_1to1& c) const {
         std::memcpy(c.blinded_session_id, blinded_session_id.data(), 67);
         c.last_read = last_read;
         c.unread = unread;
         c.legacy_blinding = legacy_blinding;
+
+        if (pro_gen_index_hash) {
+            c.has_pro_gen_index_hash = true;
+            std::memcpy(
+                    c.pro_gen_index_hash.data,
+                    pro_gen_index_hash->data(),
+                    pro_gen_index_hash->size());
+            c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
+        } else {
+            c.has_pro_gen_index_hash = false;
+            c.pro_expiry_unix_ts_ms = 0;
+        }
     }
 
     void base::load(const dict& info_dict) {
@@ -121,8 +165,8 @@ namespace convo {
 
 ConvoInfoVolatile::ConvoInfoVolatile(
         std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped} {
+        std::optional<std::span<const unsigned char>> dumped) {
+    init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
 
@@ -135,6 +179,20 @@ std::optional<convo::one_to_one> ConvoInfoVolatile::get_1to1(std::string_view pu
 
     auto result = std::make_optional<convo::one_to_one>(std::string{pubkey_hex});
     result->load(*info_dict);
+
+    auto pro_expiry = int_or_0(*info_dict, "e");
+    std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
+            maybe_vector(*info_dict, "g");
+    if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
+        result->pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(pro_expiry));
+        result->pro_gen_index_hash.emplace();
+        std::memcpy(
+                result->pro_gen_index_hash->data(),
+                maybe_pro_gen_index_hash->data(),
+                result->pro_gen_index_hash->size());
+    }
+
     return result;
 }
 
@@ -260,6 +318,20 @@ std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(
 
     auto result = std::make_optional<convo::blinded_one_to_one>(std::string{pubkey_hex});
     result->load(*info_dict);
+
+    auto pro_expiry = int_or_0(*info_dict, "e");
+    std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
+            maybe_vector(*info_dict, "g");
+    if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
+        result->pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(pro_expiry));
+        result->pro_gen_index_hash.emplace();
+        std::memcpy(
+                result->pro_gen_index_hash->data(),
+                maybe_pro_gen_index_hash->data(),
+                result->pro_gen_index_hash->size());
+    }
+
     return result;
 }
 
@@ -274,6 +346,17 @@ convo::blinded_one_to_one ConvoInfoVolatile::get_or_construct_blinded_1to1(
 void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     auto info = data["1"][session_id_to_bytes(c.session_id)];
     set_base(c, info);
+
+    // If the base values weren't stored it means the data was too old so the record shouldn't be
+    // added
+    if (auto* d = info.dict(); !d || d->empty())
+        return;
+
+    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+    if (pro_expiry > 0 && c.pro_gen_index_hash) {
+        set_nonzero_int(info["e"], pro_expiry);
+        info["g"] = *c.pro_gen_index_hash;
+    }
 }
 
 void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
@@ -348,8 +431,20 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
     std::string pubkey = session_id_to_bytes(c.blinded_session_id, c.legacy_blinding ? "15" : "25");
 
     auto info = data["b"][pubkey];
-    set_nonzero_int(info["y"], c.legacy_blinding);
     set_base(c, info);
+
+    // If the base values weren't stored it means the data was too old so the record shouldn't be
+    // added
+    if (auto* d = info.dict(); !d || d->empty())
+        return;
+
+    set_nonzero_int(info["y"], c.legacy_blinding);
+
+    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+    if (pro_expiry > 0 && c.pro_gen_index_hash) {
+        set_nonzero_int(info["e"], pro_expiry);
+        info["g"] = *c.pro_gen_index_hash;
+    }
 }
 
 template <typename Field>

@@ -11,6 +11,7 @@
 #include "expiring.hpp"
 #include "namespaces.hpp"
 #include "notify.hpp"
+#include "pro.hpp"
 #include "profile_pic.hpp"
 
 extern "C" struct contacts_contact;
@@ -47,6 +48,7 @@ namespace session::config {
 ///     j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
 ///         equivalent "j"oined field). Omitted if 0.
 ///     t - The `profile_updated` unix timestamp (seconds) for this contacts profile information.
+///     f - session pro features bitset for this contact
 ///
 /// b - dict of blinded contacts.  This is a nested dict where the outer keys are the BASE_URL of
 ///     the community the blinded contact originated from and the outer value is a dict containing:
@@ -68,6 +70,7 @@ namespace session::config {
 ///       j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
 ///           equivalent "j"oined field). Omitted if 0.
 ///       y - flag indicating whether the blinded message request is using legac"y" blinding.
+///       f - session pro features bitset for this blinded contact
 
 struct contact_info {
     static constexpr size_t MAX_NAME_LENGTH = 100;
@@ -93,6 +96,8 @@ struct contact_info {
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
+    SESSION_PROTOCOL_PRO_FEATURES pro_features = SESSION_PROTOCOL_PRO_FEATURES_NIL;
+
     explicit contact_info(std::string sid);
 
     // Internal ctor/method for C API implementations:
@@ -117,6 +122,25 @@ struct contact_info {
     void set_nickname(std::string nickname);
     void set_nickname_truncated(std::string nickname);
 
+    /// API: contacts/contact_info::get_pro_features
+    ///
+    /// Retrieves the bitset indicating which pro features the user currently has enabled.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `SESSION_PROTOCOL_PRO_FEATURES` - bitset indicating which pro features are enabled.
+    SESSION_PROTOCOL_PRO_FEATURES get_pro_features() const;
+
+    /// API: contacts/contact_info::set_pro_features
+    ///
+    /// Updates the pro features bitset for this contact. Note: If the bitset provided contains the
+    /// '10K_CHARACTER_LIMIT' feature then it will be removed.
+    ///
+    /// Inputs:
+    /// - `features` -- The updated pro features bitset to use.
+    void set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features);
+
   private:
     friend class Contacts;
     void load(const dict& info_dict);
@@ -135,6 +159,8 @@ struct blinded_contact_info {
 
     bool legacy_blinding;
     std::chrono::sys_seconds created{};  // Unix timestamp (seconds) when this contact was added
+
+    SESSION_PROTOCOL_PRO_FEATURES pro_features = SESSION_PROTOCOL_PRO_FEATURES_NIL;
 
     blinded_contact_info() = default;
     explicit blinded_contact_info(
@@ -192,6 +218,25 @@ struct blinded_contact_info {
     /// Outputs:
     /// - `std::string` -- Returns the pubkey
     std::string community_pubkey_hex() const { return comm.pubkey_hex(); }
+
+    /// API: contacts/blinded_contact_info::get_pro_features
+    ///
+    /// Retrieves the bitset indicating which pro features the user currently has enabled.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `SESSION_PROTOCOL_PRO_FEATURES` - bitset indicating which pro features are enabled.
+    SESSION_PROTOCOL_PRO_FEATURES get_pro_features() const;
+
+    /// API: contacts/blinded_contact_info::set_pro_features
+    ///
+    /// Updates the pro features bitset for this contact. Note: If the bitset provided contains the
+    /// '10K_CHARACTER_LIMIT' feature then it will be removed.
+    ///
+    /// Inputs:
+    /// - `features` -- The updated pro features bitset to use.
+    void set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features);
 
   private:
     friend class Contacts;
@@ -427,6 +472,17 @@ class Contacts : public ConfigBase {
     /// - `session_id` -- hex string of the session id
     /// - `timestamp` -- standard unix timestamp of the time contact was created
     void set_created(std::string_view session_id, int64_t timestamp);
+
+    /// API: contacts/contacts::set_pro_features
+    ///
+    /// Alternative to `set()` for setting a single field.  (If setting multiple fields at once you
+    /// should use `set()` instead).
+    ///
+    /// Inputs:
+    /// - `session_id` -- hex string of the session id
+    /// - `features` -- The updated pro features bitset to use. Note: If the bitset provided
+    /// contains the '10K_CHARACTER_LIMIT' feature then it will be removed.
+    void set_pro_features(std::string_view session_id, SESSION_PROTOCOL_PRO_FEATURES features);
 
     /// API: contacts/contacts::erase
     ///

@@ -58,10 +58,14 @@ void contact_info::set_nickname_truncated(std::string n) {
     set_nickname(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
 }
 
+void contact_info::set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features) {
+    pro_features = (features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+}
+
 Contacts::Contacts(
         std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped} {
+        std::optional<std::span<const unsigned char>> dumped) {
+    init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
 
@@ -115,6 +119,7 @@ void contact_info::load(const dict& info_dict) {
     }
 
     created = to_epoch_seconds(int_or_0(info_dict, "j"));
+    pro_features = int_or_0(info_dict, "f");
 }
 
 void contact_info::into(contacts_contact& c) const {
@@ -139,6 +144,7 @@ void contact_info::into(contacts_contact& c) const {
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
         c.exp_mode = CONVO_EXPIRATION_NONE;
     c.created = to_epoch_seconds(created);
+    c.pro_features = pro_features;
 }
 
 contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id, 66} {
@@ -163,6 +169,9 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
         exp_mode = expiration_mode::none;
     created = to_epoch_seconds(c.created);
+
+    // Strip features which aren't profile related
+    pro_features = (c.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
 
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
@@ -222,6 +231,10 @@ void Contacts::set(const contact_info& contact) {
             contact.exp_timer.count());
 
     set_positive_int(info["j"], to_epoch_seconds(contact.created));
+
+    // Strip features which aren't profile related
+    auto features = (contact.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+    set_positive_int(info["f"], features);
 }
 
 void Contacts::set_name(std::string_view session_id, std::string name) {
@@ -292,6 +305,13 @@ void Contacts::set_created(std::string_view session_id, int64_t timestamp) {
     set(c);
 }
 
+void Contacts::set_pro_features(
+        std::string_view session_id, SESSION_PROTOCOL_PRO_FEATURES features) {
+    auto c = get_or_construct(session_id);
+    c.pro_features = (features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+    set(c);
+}
+
 bool Contacts::erase(std::string_view session_id) {
     std::string pk = session_id_to_bytes(session_id);
     auto info = data["c"][pk];
@@ -336,6 +356,7 @@ void blinded_contact_info::load(const dict& info_dict) {
     priority = int_or_0(info_dict, "+");
     legacy_blinding = int_or_0(info_dict, "y");
     created = ts_or_epoch(info_dict, "j");
+    pro_features = int_or_0(info_dict, "f");
 }
 
 void blinded_contact_info::into(contacts_blinded_contact& c) const {
@@ -356,6 +377,7 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     c.priority = priority;
     c.legacy_blinding = legacy_blinding;
     c.created = created.time_since_epoch().count();
+    c.pro_features = pro_features;
 }
 
 blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
@@ -371,6 +393,9 @@ blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
     priority = c.priority;
     legacy_blinding = c.legacy_blinding;
     created = to_sys_seconds(c.created);
+
+    // Strip features which aren't profile related
+    pro_features = (c.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
 
 const std::string blinded_contact_info::session_id() const {
@@ -402,6 +427,10 @@ void blinded_contact_info::set_pubkey(std::span<const unsigned char> pubkey) {
 
 void blinded_contact_info::set_pubkey(std::string_view pubkey) {
     comm.set_pubkey(pubkey);
+}
+
+void blinded_contact_info::set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features) {
+    pro_features = (features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
 
 ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
@@ -484,6 +513,10 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
     set_nonzero_int(info["+"], bc.priority);
     set_positive_int(info["y"], bc.legacy_blinding);
     set_ts(info["j"], bc.created);
+
+    // Strip features which aren't profile related
+    auto features = (bc.pro_features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+    set_positive_int(info["f"], features);
 }
 
 bool Contacts::erase_blinded(std::string_view base_url_, std::string_view blinded_id) {
