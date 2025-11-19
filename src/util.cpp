@@ -1,3 +1,4 @@
+#include <simdutf.h>
 #include <zstd.h>
 
 #include <charconv>
@@ -150,4 +151,73 @@ std::optional<std::vector<unsigned char>> zstd_decompress(
 
     return decompressed;
 }
+
+inline bool is_utf16_low_surrogate(char16_t c) {
+    return c >= 0xDC00 && c <= 0xDFFF;
+}
+
+inline bool is_utf16_high_surrogate(char16_t c) {
+    return c >= 0xD800 && c <= 0xDBFF;
+}
+
+size_t utf16_len_for_codepoints(
+        const std::span<const char16_t> utf16_string, const size_t codepoint_len) {
+    // If the requested codepoint length is longer than the UTF-16 string length,
+    // we can safely assume the entire string is needed.
+    if (utf16_string.size() <= codepoint_len) {
+        return utf16_string.size();
+    }
+
+    if (codepoint_len == 0) {
+        return 0;
+    }
+
+    // Take a gamble that the UTF-16 string is all BMP characters (1 code unit per codepoint),
+    // this will be true for the cases for ASCII strings. This way we can use the faster
+    // simdutf implementation to count codepoints. If we gamble wrong, we fall back to the slower
+    // method below.
+    auto current_codepoint_len = simdutf::count_utf16(utf16_string.data(), utf16_string.size());
+    if (current_codepoint_len <= codepoint_len) {
+        return utf16_string.size();
+    }
+
+    // Fallback: iterate through the UTF-16 string and count codepoints properly,
+    size_t counted_codepoints = 0;
+    bool expecting_low_surrogate = false;
+    for (size_t i = 0; i < utf16_string.size(); ++i) {
+        if (const char16_t c = utf16_string[i]; is_utf16_high_surrogate(c)) {
+            if (expecting_low_surrogate) {
+                throw std::runtime_error("Invalid UTF-16 string");
+            }
+
+            // Start of a surrogate pair. Only count the codepoint when we see the low surrogate.
+            expecting_low_surrogate = true;
+        }
+        else if (is_utf16_low_surrogate(c)) {
+            if (!expecting_low_surrogate) {
+                throw std::runtime_error("Invalid UTF-16 string");
+            }
+
+            counted_codepoints++;
+            expecting_low_surrogate = false;
+        }
+        else {
+            // Regular BMP character
+            if (expecting_low_surrogate) {
+                throw std::runtime_error("Invalid UTF-16 string");
+            }
+            counted_codepoints++;
+        }
+
+        if (counted_codepoints == codepoint_len) {
+            return i + 1;
+        }
+    }
+
+    // Should not be here, as the case of codepoint_len > actual codepoint count should have
+    // been handled at the start of the function.
+    throw std::runtime_error("Invalid UTF-16 string");
+}
+
+
 }  // namespace session

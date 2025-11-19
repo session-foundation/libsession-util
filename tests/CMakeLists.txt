@@ -31,6 +31,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_session_encrypt.cpp
     test_session_protocol.cpp
     test_xed25519.cpp
+    test_unicode_operations.cpp
 
     case_logger.cpp
 )

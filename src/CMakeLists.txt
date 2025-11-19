@@ -85,6 +85,7 @@ target_link_libraries(util
     common
     oxen::logging
     libzstd::static
+    simdutf
 )
 
 target_link_libraries(crypto
