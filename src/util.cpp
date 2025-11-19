@@ -4,6 +4,7 @@
 #include <charconv>
 #include <memory>
 #include <session/util.hpp>
+#include <session/util.h>
 
 namespace session {
 
@@ -221,3 +222,14 @@ size_t utf16_len_for_codepoints(
 
 
 }  // namespace session
+
+size_t utf16_len_for_codepoints(
+    const char16_t *utf16_string,
+    size_t utf16_string_len,
+    size_t codepoint_len
+) {
+    return session::utf16_len_for_codepoints(
+        std::span{utf16_string, utf16_string_len},
+        codepoint_len
+    );
+}
