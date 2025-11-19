@@ -166,7 +166,7 @@ namespace convo {
 ConvoInfoVolatile::ConvoInfoVolatile(
         std::span<const unsigned char> ed25519_secretkey,
         std::optional<std::span<const unsigned char>> dumped) {
-    init(dumped, std::nullopt, ed25519_secretkey);
+    init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
 
