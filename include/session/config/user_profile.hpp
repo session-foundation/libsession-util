@@ -27,8 +27,10 @@ using namespace std::literals;
 /// f - session pro features bitset
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
-/// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
-/// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
+/// E - user pro access expiry unix timestamp (in milliseconds). Note: This can be different from
+/// the pro proof expiry which can be sooner. P - user profile url after re-uploading (should take
+/// precedence over `p` when `T > t`). Q - user profile decryption key (binary) after re-uploading
+/// (should take precedence over `q`
 ///     when `T > t`).
 /// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
 ///    (automatically updates when calling `set_reupload_profile_pic`).
@@ -306,6 +308,28 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `enabled` -- Flag which specifies whether the users display picture is animated or not.
     void set_animated_avatar(bool enabled);
+
+    /// API: user_profile/UserProfile::get_pro_access_expiry
+    ///
+    /// Retrieves the Session Pro access expiry unix timestamp if it has been set, this should
+    /// generally be the expiry value returned from /get_pro_details.
+    ///
+    /// Inputs:  None
+    ///
+    /// Outputs:
+    /// - `std::optional<std::chrono::sys_time<std::chrono::milliseconds>>` - The unix timestamp in
+    /// milliseconds that the users pro access will expire, or nullopt if unset.
+    std::optional<std::chrono::sys_time<std::chrono::milliseconds>> get_pro_access_expiry() const;
+
+    /// API: user_profile/UserProfile::set_pro_access_expiry
+    ///
+    /// Updates the Session Pro access expiry unix timestamp.
+    ///
+    /// Inputs:
+    /// - `access_expiry_ts_ms` -- The timestamp that the users Session Pro access will expire, or
+    /// nullopt to remove the value.
+    void set_pro_access_expiry(
+            std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms);
 
   protected:
     void extra_data(oxenc::bt_dict_producer&& extra) const override;
