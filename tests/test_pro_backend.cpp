@@ -112,7 +112,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
     {
         char fake_google_payment_token[8];
         randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
-        std::string fake_google_payment_token_hex = "DEV." + oxenc::to_hex(fake_google_payment_token);
+        std::string fake_google_payment_token_hex =
+                "DEV." + oxenc::to_hex(fake_google_payment_token);
 
         char fake_google_order_id[8];
         randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
@@ -777,7 +778,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         {
             char fake_google_payment_token[8];
             randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
-            std::string fake_google_payment_token_hex = "DEV." + oxenc::to_hex(fake_google_payment_token);
+            std::string fake_google_payment_token_hex =
+                    "DEV." + oxenc::to_hex(fake_google_payment_token);
 
             char fake_google_order_id[8];
             randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
@@ -1025,7 +1027,8 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         {
             char fake_google_payment_token[8];
             randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
-            std::string fake_google_payment_token_hex = "DEV." + oxenc::to_hex(fake_google_payment_token);
+            std::string fake_google_payment_token_hex =
+                    "DEV." + oxenc::to_hex(fake_google_payment_token);
 
             char fake_google_order_id[8];
             randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));

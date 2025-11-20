@@ -245,6 +245,21 @@ void UserProfile::set_animated_avatar(bool enabled) {
     data[target_timestamp] = ts_now();
 }
 
+std::optional<std::chrono::sys_time<std::chrono::milliseconds>> UserProfile::get_pro_access_expiry()
+        const {
+    if (auto* E = data["E"].integer(); E)
+        return std::chrono::sys_time{std::chrono::milliseconds{*E}};
+    return std::nullopt;
+}
+
+void UserProfile::set_pro_access_expiry(
+        std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms) {
+    if (access_expiry_ts_ms)
+        data["E"] = static_cast<uint64_t>(access_expiry_ts_ms->time_since_epoch().count());
+    else
+        data["E"].erase();
+}
+
 extern "C" {
 
 using namespace session;
@@ -399,17 +414,32 @@ LIBSESSION_C_API bool user_profile_remove_pro_config(config_object* conf) {
     return unbox<UserProfile>(conf)->remove_pro_config();
 }
 
-LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_FEATURES
+LIBSESSION_C_API SESSION_PROTOCOL_PRO_FEATURES
 user_profile_get_pro_features(const config_object* conf) {
     return unbox<UserProfile>(conf)->get_pro_features();
 }
 
-LIBSESSION_EXPORT void user_profile_set_pro_badge(config_object* conf, bool enabled) {
+LIBSESSION_C_API void user_profile_set_pro_badge(config_object* conf, bool enabled) {
     unbox<UserProfile>(conf)->set_pro_badge(enabled);
 }
 
-LIBSESSION_EXPORT void user_profile_set_animated_avatar(config_object* conf, bool enabled) {
+LIBSESSION_C_API void user_profile_set_animated_avatar(config_object* conf, bool enabled) {
     unbox<UserProfile>(conf)->set_animated_avatar(enabled);
+}
+
+LIBSESSION_C_API uint64_t user_profile_get_pro_access_expiry_ms(const config_object* conf) {
+    if (auto expiry = unbox<UserProfile>(conf)->get_pro_access_expiry(); expiry)
+        return expiry->time_since_epoch().count();
+    return 0;
+}
+
+LIBSESSION_C_API void user_profile_set_pro_access_expiry_ms(
+        config_object* conf, uint64_t access_expiry_ts_ms) {
+    if (access_expiry_ts_ms <= 0)
+        unbox<UserProfile>(conf)->set_pro_access_expiry(std::nullopt);
+    else
+        unbox<UserProfile>(conf)->set_pro_access_expiry(
+                std::chrono::sys_time{std::chrono::milliseconds{access_expiry_ts_ms}});
 }
 
 }  // extern "C"
