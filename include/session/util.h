@@ -16,6 +16,7 @@ LIBSESSION_EXPORT size_t utf16_count_truncated_to_codepoints(
     size_t codepoint_len
 );
 
+/// Returns the number of unicode codepoints in a utf-16 encoded string.
 LIBSESSION_EXPORT size_t utf16_count(
     const char16_t *utf16_string,
     size_t utf16_string_len
