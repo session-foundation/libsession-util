@@ -86,6 +86,7 @@ target_link_libraries(util
     common
     oxen::logging
     libzstd::static
+    simdutf
 )
 
 target_link_libraries(crypto
@@ -95,7 +96,6 @@ target_link_libraries(crypto
     libsodium::sodium-internal
     nlohmann_json::nlohmann_json
     libsession::protos
-    simdutf
 )
 
 target_link_libraries(config
