@@ -110,13 +110,13 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
-        char fake_google_payment_token[16];
+        char fake_google_payment_token[8];
         randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
-        std::string fake_google_payment_token_hex = oxenc::to_hex(fake_google_payment_token);
+        std::string fake_google_payment_token_hex = "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-        char fake_google_order_id[16];
+        char fake_google_order_id[8];
         randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
-        std::string fake_google_order_id_hex = oxenc::to_hex(fake_google_order_id);
+        std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
         session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
         payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
@@ -775,13 +775,13 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         // Add pro payment
         session_protocol_pro_proof first_pro_proof = {};
         {
-            char fake_google_payment_token[16];
+            char fake_google_payment_token[8];
             randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
-            std::string fake_google_payment_token_hex = oxenc::to_hex(fake_google_payment_token);
+            std::string fake_google_payment_token_hex = "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-            char fake_google_order_id[16];
+            char fake_google_order_id[8];
             randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
-            std::string fake_google_order_id_hex = oxenc::to_hex(fake_google_order_id);
+            std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
             session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
             payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
@@ -1023,13 +1023,13 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
 
         // Add _another_ payment, same details
         {
-            char fake_google_payment_token[16];
+            char fake_google_payment_token[8];
             randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
-            std::string fake_google_payment_token_hex = oxenc::to_hex(fake_google_payment_token);
+            std::string fake_google_payment_token_hex = "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-            char fake_google_order_id[16];
+            char fake_google_order_id[8];
             randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
-            std::string fake_google_order_id_hex = oxenc::to_hex(fake_google_order_id);
+            std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
             session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
             payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
