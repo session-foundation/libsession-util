@@ -556,3 +556,82 @@ TEST_CASE("user profile timestamp update bug", "[config][user_profile]") {
     profile.set_name("Nibbler1");
     CHECK(profile.get_profile_updated() != seconds_before_call);
 }
+
+TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+
+    // Ensure the bitset is being updated correctly
+    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+
+    profile.set_pro_badge(true);
+    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
+
+    profile.set_pro_badge(false);
+    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+
+    profile.set_animated_avatar(true);
+    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+
+    profile.set_animated_avatar(false);
+    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+
+    profile.set_pro_badge(true);
+    profile.set_animated_avatar(true);
+    CHECK(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
+    CHECK(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+
+    profile.set_animated_avatar(false);
+    CHECK(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
+    CHECK_FALSE(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+
+    {
+        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        CHECK(profile2.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
+        CHECK_FALSE(profile2.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+    }
+
+    // Ensure the pro config is being stored correctly
+    std::array<uint8_t, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
+    session::cleared_uc64 rotating_sk, signing_sk;
+    {
+        crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
+        crypto_sign_ed25519_keypair(signing_pk.data(), signing_sk.data());
+    }
+
+    session::config::ProConfig pro_cpp = {};
+    pro_pro_config pro = {};
+    {
+        // CPP
+        pro_cpp.rotating_privkey = rotating_sk;
+        pro_cpp.proof.version = 2;
+        pro_cpp.proof.rotating_pubkey = rotating_pk;
+        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
+        constexpr auto gen_index_hash =
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
+        static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
+        std::memcpy(
+                pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
+
+        // C
+        std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
+        pro.proof.version = pro_cpp.proof.version;
+        std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
+        pro.proof.expiry_unix_ts_ms = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
+        std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
+    }
+
+    CHECK_FALSE(profile.get_pro_config().has_value());
+    profile.set_pro_config(pro_cpp);
+    CHECK(profile.get_pro_config() == pro_cpp);
+
+    {
+        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        CHECK(profile.get_pro_config() == pro_cpp);
+    }
+
+    profile.remove_pro_config();
+    CHECK_FALSE(profile.get_pro_config().has_value());
+}

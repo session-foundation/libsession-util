@@ -110,15 +110,15 @@ struct session_pro_backend_payment_provider_metadata {
     string8 store;
     string8 platform;
     string8 platform_account;
-    string8 refund_url;
+    string8 refund_platform_url;
 
     /// Some platforms disallow a refund via their native support channels after some time period
     /// (e.g. 48 hours after a purchase on Google, refunds must be dealt by the developers
     /// themselves). If a platform does not have this restriction, this URL is typically the same as
-    /// the `refund_url`.
-    string8 refund_after_platform_deadline_url;
-
+    /// the `refund_platform_url`.
     string8 refund_support_url;
+
+    string8 refund_status_url;
     string8 update_subscription_url;
     string8 cancel_subscription_url;
 };
@@ -132,9 +132,9 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
         .store                              = string8_literal(""),
         .platform                           = string8_literal(""),
         .platform_account                   = string8_literal(""),
-        .refund_url                         = string8_literal(""),
-        .refund_after_platform_deadline_url = string8_literal(""),
+        .refund_platform_url                = string8_literal(""),
         .refund_support_url                 = string8_literal(""),
+        .refund_status_url                  = string8_literal(""),
         .update_subscription_url            = string8_literal(""),
         .cancel_subscription_url            = string8_literal(""),
     },
@@ -143,9 +143,9 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
         .store                              = string8_literal("Google Play Store"),
         .platform                           = string8_literal("Google"),
         .platform_account                   = string8_literal("Google account"),
-        .refund_url                         = string8_literal("https://support.google.com/googleplay/workflow/9813244?"),
-        .refund_after_platform_deadline_url = string8_literal("https://getsession.org/android-refund"),
+        .refund_platform_url                = string8_literal("https://support.google.com/googleplay/workflow/9813244?"),
         .refund_support_url                 = string8_literal("https://getsession.org/android-refund"),
+        .refund_status_url                  = string8_literal("https://getsession.org/android-refund"),
         .update_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
         .cancel_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
     },
@@ -154,9 +154,9 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
         .store                              = string8_literal("Apple App Store"),
         .platform                           = string8_literal("Apple"),
         .platform_account                   = string8_literal("Apple account"),
-        .refund_url                         = string8_literal("https://support.apple.com/118223"),
-        .refund_after_platform_deadline_url = string8_literal("https://support.apple.com/118223"),
-        .refund_support_url                 = string8_literal("https://support.apple.com/118224"),
+        .refund_platform_url                = string8_literal("https://support.apple.com/118223"),
+        .refund_support_url                 = string8_literal("https://support.apple.com/118223"),
+        .refund_status_url                  = string8_literal("https://support.apple.com/118224"),
         .update_subscription_url            = string8_literal("https://apps.apple.com/account/subscriptions"),
         .cancel_subscription_url            = string8_literal("https://account.apple.com/account/manage/section/subscriptions"),
     }

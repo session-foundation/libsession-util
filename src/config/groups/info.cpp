@@ -20,8 +20,9 @@ Info::Info(
         std::span<const unsigned char> ed25519_pubkey,
         std::optional<std::span<const unsigned char>> ed25519_secretkey,
         std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped, ed25519_pubkey, ed25519_secretkey},
-        id{"03" + oxenc::to_hex(ed25519_pubkey.begin(), ed25519_pubkey.end())} {}
+        id{"03" + oxenc::to_hex(ed25519_pubkey.begin(), ed25519_pubkey.end())} {
+    init(dumped, ed25519_pubkey, ed25519_secretkey);
+}
 
 std::optional<std::string_view> Info::get_name() const {
     if (auto* s = data["n"].string(); s && !s->empty())
