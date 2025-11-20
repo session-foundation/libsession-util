@@ -163,8 +163,8 @@ inline bool is_utf16_high_surrogate(char16_t c) {
     return c >= 0xD800 && c <= 0xDBFF;
 }
 
-size_t utf16_len_for_codepoints(
-        const std::span<const char16_t> utf16_string, const size_t codepoint_len) {
+size_t utf16_count_truncated_to_codepoints(
+        std::span<const char16_t> utf16_string, size_t codepoint_len) {
     // If the requested codepoint length is longer than the UTF-16 string length,
     // we can safely assume the entire string is needed.
     if (utf16_string.size() <= codepoint_len) {
@@ -216,22 +216,34 @@ size_t utf16_len_for_codepoints(
         }
     }
 
-    // Should not be here, as the case of codepoint_len > actual codepoint count should have
+    // Should not be here, as the case of codepoint_len >= actual codepoint count should have
     // been handled at the start of the function. As this indicates an invalid UTF-16 string,
     // we will treat it as UB and return the whole string length.
     return utf16_string.size();
 }
 
+size_t utf16_count(std::span<const char16_t> utf16_string) {
+    return simdutf::count_utf16(utf16_string.data(), utf16_string.size());
+}
 
 }  // namespace session
 
-LIBSESSION_EXPORT size_t utf16_len_for_codepoints(
+LIBSESSION_C_API size_t utf16_count_truncated_to_codepoints(
     const char16_t *utf16_string,
     size_t utf16_string_len,
     size_t codepoint_len
 ) {
-    return session::utf16_len_for_codepoints(
-        std::span{utf16_string, utf16_string_len},
-        codepoint_len
+    return session::utf16_count_truncated_to_codepoints(
+            std::span{utf16_string, utf16_string_len},
+            codepoint_len
+    );
+}
+
+LIBSESSION_C_API size_t utf16_count(
+        const char16_t *utf16_string,
+        size_t utf16_string_len
+) {
+    return session::utf16_count(
+        std::span{utf16_string, utf16_string_len}
     );
 }

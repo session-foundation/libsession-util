@@ -255,7 +255,10 @@ inline std::string utf8_truncate(std::string val, size_t n) {
 /// Truncates an utf-16 encoded string to at most `codepoint_len` codepoints long, taking care to not
 /// truncate in the middle of a surrogate pair. Notes that if the input string contains invalid
 /// UTF-16 sequences (e.g. unpaired surrogates) the behavior here is undefined.
-size_t utf16_len_for_codepoints(std::span<const char16_t> utf16_string, size_t codepoint_len);
+size_t utf16_count_truncated_to_codepoints(std::span<const char16_t> utf16_string, size_t codepoint_len);
+
+/// Returns the number of unicode codepoints in a utf-16 encoded string.
+size_t utf16_count(std::span<const char16_t> utf16_string);
 
 // Helper function to transform a timestamp provided in seconds, milliseconds or microseconds to
 // seconds
