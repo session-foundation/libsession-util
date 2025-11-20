@@ -253,7 +253,8 @@ inline std::string utf8_truncate(std::string val, size_t n) {
 }
 
 /// Truncates an utf-16 encoded string to at most `codepoint_len` codepoints long, taking care to not
-/// truncate in the middle of a surrogate pair.
+/// truncate in the middle of a surrogate pair. Notes that if the input string contains invalid
+/// UTF-16 sequences (e.g. unpaired surrogates) the behavior here is undefined.
 size_t utf16_len_for_codepoints(std::span<const char16_t> utf16_string, size_t codepoint_len);
 
 // Helper function to transform a timestamp provided in seconds, milliseconds or microseconds to
