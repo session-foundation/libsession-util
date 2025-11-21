@@ -229,21 +229,12 @@ size_t utf16_count(std::span<const char16_t> utf16_string) {
 }  // namespace session
 
 LIBSESSION_C_API size_t utf16_count_truncated_to_codepoints(
-    const char16_t *utf16_string,
-    size_t utf16_string_len,
-    size_t codepoint_len
-) {
+        const uint16_t* utf16_string, size_t utf16_string_len, size_t codepoint_len) {
     return session::utf16_count_truncated_to_codepoints(
-            std::span{utf16_string, utf16_string_len},
-            codepoint_len
-    );
+            {reinterpret_cast<const char16_t*>(utf16_string), utf16_string_len}, codepoint_len);
 }
 
-LIBSESSION_C_API size_t utf16_count(
-        const char16_t *utf16_string,
-        size_t utf16_string_len
-) {
+LIBSESSION_C_API size_t utf16_count(const uint16_t* utf16_string, size_t utf16_string_len) {
     return session::utf16_count(
-        std::span{utf16_string, utf16_string_len}
-    );
+            {reinterpret_cast<const char16_t*>(utf16_string), utf16_string_len});
 }
