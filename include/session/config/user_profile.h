@@ -338,7 +338,7 @@ LIBSESSION_EXPORT void user_profile_set_pro_config(config_object* conf, const pr
 ///
 /// Outputs:
 /// - `bool` - A flag indicating whether the config had Session Pro components which were removed.
-bool user_profile_remove_pro_config(config_object* conf);
+LIBSESSION_EXPORT bool user_profile_remove_pro_config(config_object* conf);
 
 /// API: user_profile/user_profile_get_pro_features
 ///
