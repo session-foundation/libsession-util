@@ -248,7 +248,7 @@ void UserProfile::set_animated_avatar(bool enabled) {
 std::optional<std::chrono::sys_time<std::chrono::milliseconds>> UserProfile::get_pro_access_expiry()
         const {
     if (auto* E = data["E"].integer(); E)
-        return std::chrono::sys_time{std::chrono::milliseconds{*E}};
+        return std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{*E}};
     return std::nullopt;
 }
 
@@ -439,7 +439,7 @@ LIBSESSION_C_API void user_profile_set_pro_access_expiry_ms(
         unbox<UserProfile>(conf)->set_pro_access_expiry(std::nullopt);
     else
         unbox<UserProfile>(conf)->set_pro_access_expiry(
-                std::chrono::sys_time{std::chrono::milliseconds{access_expiry_ts_ms}});
+                std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{access_expiry_ts_ms}});
 }
 
 }  // extern "C"
