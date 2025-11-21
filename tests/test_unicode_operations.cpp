@@ -1,15 +1,13 @@
-#include <session/util.hpp>
+#include <simdutf.h>
 
 #include <catch2/catch_test_macros.hpp>
-
-#include <simdutf.h>
+#include <session/util.hpp>
 
 static std::vector<char16_t> operator""_utf16(const char* str, size_t len) {
     std::vector<char16_t> out(simdutf::utf16_length_from_utf8(str, len));
     out.resize(simdutf::convert_utf8_to_utf16(str, len, out.data()));
     return out;
 }
-
 
 TEST_CASE("utf16_count_truncated_to_codepoints works", "[util]") {
     // Given simple ASCII string, should return length equal to codepoints requested

@@ -1,12 +1,11 @@
+#include <assert.h>
+#include <session/util.h>
 #include <simdutf.h>
 #include <zstd.h>
 
 #include <charconv>
 #include <memory>
 #include <session/util.hpp>
-#include <session/util.h>
-
-#include <assert.h>
 
 namespace session {
 
@@ -198,14 +197,12 @@ size_t utf16_count_truncated_to_codepoints(
 
             // Start of a surrogate pair. Only count the codepoint when we see the low surrogate.
             expecting_low_surrogate = true;
-        }
-        else if (is_utf16_low_surrogate(c)) {
+        } else if (is_utf16_low_surrogate(c)) {
             assert(expecting_low_surrogate);
 
             counted_codepoints++;
             expecting_low_surrogate = false;
-        }
-        else {
+        } else {
             // Regular BMP character
             assert(!expecting_low_surrogate);
             counted_codepoints++;

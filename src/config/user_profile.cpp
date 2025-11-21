@@ -439,7 +439,8 @@ LIBSESSION_C_API void user_profile_set_pro_access_expiry_ms(
         unbox<UserProfile>(conf)->set_pro_access_expiry(std::nullopt);
     else
         unbox<UserProfile>(conf)->set_pro_access_expiry(
-                std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{access_expiry_ts_ms}});
+                std::chrono::sys_time<std::chrono::milliseconds>{
+                        std::chrono::milliseconds{access_expiry_ts_ms}});
 }
 
 }  // extern "C"
