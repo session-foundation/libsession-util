@@ -58,6 +58,10 @@ void contact_info::set_nickname_truncated(std::string n) {
     set_nickname(utf8_truncate(std::move(n), MAX_NAME_LENGTH));
 }
 
+SESSION_PROTOCOL_PRO_FEATURES contact_info::get_pro_features() const {
+    return pro_features;
+}
+
 void contact_info::set_pro_features(SESSION_PROTOCOL_PRO_FEATURES features) {
     pro_features = (features & ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
 }
