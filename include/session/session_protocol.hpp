@@ -634,4 +634,8 @@ DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey);
+
+/// Initialiser the blake2b hashing context to generate 32 byte hashes for Session Pro features.
+void make_blake2b32_hasher(
+        struct crypto_generichash_blake2b_state* hasher, std::string_view personalization);
 }  // namespace session

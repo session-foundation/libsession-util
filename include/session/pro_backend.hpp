@@ -668,7 +668,4 @@ struct SetPaymentRefundRequestedResponse : public ResponseHeader {
     ///   `errors`
     static SetPaymentRefundRequestedResponse parse(std::string_view json);
 };
-
-void make_blake2b32_hasher(
-        struct crypto_generichash_blake2b_state* hasher, std::string_view personalisation);
 }  // namespace session::pro_backend

@@ -17,6 +17,26 @@
 #include "WebSocketResources.pb.h"
 #include "session/export.h"
 
+static_assert(
+        sizeof(SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION) - 1 ==
+        crypto_generichash_blake2b_PERSONALBYTES);
+
+static_assert(
+        sizeof(SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION) - 1 ==
+        crypto_generichash_blake2b_PERSONALBYTES);
+
+static_assert(
+        sizeof(SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION) - 1 ==
+        crypto_generichash_blake2b_PERSONALBYTES);
+
+static_assert(
+        sizeof(SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION) - 1 ==
+        crypto_generichash_blake2b_PERSONALBYTES);
+
+static_assert(
+        sizeof(SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION) - 1 ==
+        crypto_generichash_blake2b_PERSONALBYTES);
+
 namespace {
 session::array_uc32 proof_hash_internal(
         std::uint8_t version,
@@ -24,14 +44,15 @@ session::array_uc32 proof_hash_internal(
         std::span<const std::uint8_t> rotating_pubkey,
         std::uint64_t expiry_unix_ts_ms) {
 
-    // TODO: Personalise this for each use-case instead of a generic catch-all
     constexpr std::string_view PRO_BACKEND_BLAKE2B_PERSONALISATION = "SeshProBackend__";
-
     // This must match the hashing routine at
     // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
     session::array_uc32 result = {};
     crypto_generichash_blake2b_state state = {};
-    session::pro_backend::make_blake2b32_hasher(&state, PRO_BACKEND_BLAKE2B_PERSONALISATION);
+    session::make_blake2b32_hasher(
+            &state,
+            {SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION,
+             sizeof(SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION) - 1});
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(&state, gen_index_hash.data(), gen_index_hash.size());
     crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
@@ -1059,6 +1080,20 @@ DecodedCommunityMessage decode_for_community(
     result.content_plaintext.resize(unpadded_content.size());
 
     return result;
+}
+
+void make_blake2b32_hasher(
+        crypto_generichash_blake2b_state* hasher, std::string_view personalization) {
+    assert(personalization.data() == nullptr ||
+           (personalization.data() &&
+            personalization.size() == crypto_generichash_blake2b_PERSONALBYTES));
+    crypto_generichash_blake2b_init_salt_personal(
+            hasher,
+            /*key*/ nullptr,
+            0,
+            32,
+            /*salt*/ nullptr,
+            reinterpret_cast<const unsigned char*>(personalization.data()));
 }
 }  // namespace session
 
