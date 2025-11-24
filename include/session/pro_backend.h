@@ -286,6 +286,7 @@ struct session_pro_backend_pro_payment_item {
     uint64_t grace_period_duration_ms;
     uint64_t platform_refund_expiry_unix_ts_ms;
     uint64_t revoked_unix_ts_ms;
+    uint64_t refund_requested_unix_ts_ms;
 
     char google_payment_token[128];
     size_t google_payment_token_count;
@@ -311,7 +312,27 @@ struct session_pro_backend_get_pro_details_response {
     bool auto_renewing;
     uint64_t expiry_unix_ts_ms;
     uint64_t grace_period_duration_ms;
+    uint64_t refund_requested_unix_ts_ms;
     uint32_t payments_total;
+};
+
+typedef struct session_pro_backend_set_payment_refund_requested_request
+        session_pro_backend_set_payment_refund_requested_request;
+struct session_pro_backend_set_payment_refund_requested_request {
+    uint8_t version;
+    bytes32 master_pkey;
+    bytes64 master_sig;
+    uint64_t unix_ts_ms;
+    uint64_t refund_requested_unix_ts_ms;
+    session_pro_backend_add_pro_payment_user_transaction payment_tx;
+};
+
+typedef struct session_pro_backend_set_payment_refund_requested_response
+        session_pro_backend_set_payment_refund_requested_response;
+struct session_pro_backend_set_payment_refund_requested_response {
+    session_pro_backend_response_header header;
+    uint8_t version;
+    bool updated;
 };
 
 /// API: session_pro_backend/add_pro_payment_request_build_sigs
@@ -514,8 +535,8 @@ session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
 
 /// API: session_pro_backend/get_pro_revocations_response_parse
 ///
-/// Parses a JSON string into a GetProRevocationsResponse struct.
-/// The caller must free the response using session_pro_backend_get_pro_revocations_response_free.
+/// Parses a JSON string into a `session_pro_backend_get_pro_revocations_response` struct.
+/// The caller must free the response using `session_pro_backend_get_pro_revocations_response_free`.
 ///
 /// Inputs:
 /// - `json` -- JSON string to parse.
@@ -535,6 +556,85 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
 LIBSESSION_EXPORT
 session_pro_backend_get_pro_details_response session_pro_backend_get_pro_details_response_parse(
         const char* json, size_t json_len);
+
+/// API: session_pro_backend/set_payment_refund_requested_request_build_sigs
+///
+/// Builds master and rotating signatures for an `set_payment_refund_requested_request`.
+/// Returns false if the keys (32-byte or 64-byte libsodium format) or payment token hash are
+/// incorrectly sized. Using 64-byte libsodium keys is more efficient.
+///
+/// Inputs:
+/// - `request_version` -- Version of the request.
+/// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
+/// - `master_privkey_len` -- Length of master_privkey.
+/// - `unix_ts_ms` -- Unix timestamp for the request
+/// - `refund_requested_unix_ts_ms` -- Unix timestamp to set as the timestamp that a refund was
+///   requested on this payment
+/// - `payment_tx_provider` -- Provider that the payment to register is coming from
+/// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment provider.
+///   See `AddProPaymentUserTransaction`
+/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
+/// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+///   `AddProPaymentUserTransaction`
+/// - `payment_tx_order_id_len` -- Length of the `payment_tx_order_id` payload
+///
+/// Outputs:
+/// - `bool` -- True if signatures are built successfully, false otherwise.
+/// - `error` -- Backing error buffer for the signatures if `success` is false
+/// - `errors_count` -- length of the error if `success` is false
+/// - `sig` -- The generated signature
+LIBSESSION_EXPORT
+session_pro_backend_signature session_pro_backend_set_payment_refund_requested_request_build_sigs(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_ms,
+        uint64_t refund_requested_unix_ts_ms,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 7, 9);
+
+/// API: session_pro_backend/set_payment_refund_requested_request_build_to_json
+///
+/// Builds the JSON for a `set_payment_refund_requested_request`. This function is the same as
+/// filling in the struct and calling the corresponding `to_json` function. The caller must free the
+/// returned string using `session_pro_backend_to_json_free`.
+///
+/// See: session_pro_backend_set_payment_refund_requested_request_build_sigs
+LIBSESSION_EXPORT
+session_pro_backend_to_json session_pro_backend_set_payment_refund_requested_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_ms,
+        uint64_t refund_requested_unix_ts_ms,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 7, 9);
+
+/// API: session_pro_backend/set_payment_refund_requested_request_to_json
+///
+/// Serializes a `set_payment_refund_requested_request` to a JSON string.
+/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+LIBSESSION_EXPORT
+session_pro_backend_to_json session_pro_backend_set_payment_refund_requested_request_to_json(
+        const session_pro_backend_set_payment_refund_requested_request* request);
+
+/// API: session_pro_backend/set_payment_refund_requested_response_parse
+///
+/// Parses a JSON string into a GetProPaymentsResponse struct.
+/// The caller must free the response using
+/// `session_pro_backend_set_payment_refund_requested_response_free`.
+///
+/// Inputs:
+/// - `json` -- JSON string to parse.
+/// - `json_len` -- Length of the JSON string.
+LIBSESSION_EXPORT session_pro_backend_set_payment_refund_requested_response
+session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len);
 
 /// API: session_pro_backend/to_json_free
 ///
@@ -563,6 +663,12 @@ LIBSESSION_EXPORT
 void session_pro_backend_get_pro_details_response_free(
         session_pro_backend_get_pro_details_response* response);
 
+/// API: session_pro_backend/session_pro_backend_set_payment_refund_requested_response_free
+///
+/// Frees the respone
+LIBSESSION_EXPORT
+void session_pro_backend_set_payment_refund_requested_response_free(
+        session_pro_backend_set_payment_refund_requested_response* response);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

@@ -158,9 +158,8 @@ struct AddProPaymentRequest {
     /// API: pro/AddProPaymentRequest::build_sigs
     ///
     /// Builds the master and rotating signatures using the provided private keys and payment token
-    /// hash. Throws if the keys (32-byte or 64-byte libsodium format) or 32-byte payment token hash
-    /// are passed with an incorrect size or the payment IDs are invalid. Using 64-byte libsodium
-    /// keys is more efficient.
+    /// hash. Throws if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
+    /// Using 64-byte libsodium keys is more efficient.
     ///
     /// Inputs:
     /// - `request_version` -- Version of the request to build a hash for
@@ -224,7 +223,8 @@ struct AddProPaymentOrGenerateProProofResponse : public ResponseHeader {
     /// - `json` -- JSON string to parse.
     ///
     /// Outputs:
-    /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
+    /// - The response struct with `status` set to an error state on failure. Errors are stored in
+    ///   `errors`
     static AddProPaymentOrGenerateProProofResponse parse(std::string_view json);
 };
 
@@ -346,7 +346,8 @@ struct GetProRevocationsResponse : public ResponseHeader {
     /// - `json` -- JSON string to parse.
     ///
     /// Outputs:
-    /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
+    /// - The response struct with `status` set to an error state on failure. Errors are stored in
+    ///   `errors`
     static GetProRevocationsResponse parse(std::string_view json);
 };
 
@@ -461,6 +462,10 @@ struct ProPaymentItem {
     /// Unix timestamp of when the payment was revoked or refunded. 0 if not applicable.
     std::chrono::sys_time<std::chrono::milliseconds> revoked_unix_ts;
 
+    /// UNIX timestamp at which a refund request was requested for this payment. This is set to 0
+    /// if no refund has been requested for this payment yet.
+    std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts;
+
     /// When payment provider is set to Google Play Store, this is the platform-specific purchase
     /// token. This information should be considered as confidential and stored appropriately.
     std::string google_payment_token;
@@ -523,12 +528,18 @@ struct GetProDetailsResponse : public ResponseHeader {
     /// This timestamp may be in the past if the user no longer has active payments. Overtime the
     /// Pro Backend may prune user history and so after long lapses of activity, a user's
     /// subscription history may be deleted.
-    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts_ms;
+    std::chrono::sys_time<std::chrono::milliseconds> expiry_unix_ts;
 
     /// Duration that a user is entitled to for their grace period. This value is to be ignored if
     /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
     /// subtracting `expiry_unix_ts_ms` from this value.
-    std::chrono::milliseconds grace_period_duration_ms;
+    std::chrono::milliseconds grace_period_duration;
+
+    /// UNIX timestamp at which a refund request was requested by this user. This timestamp comes
+    /// from the latest payment that the backend has deemed to be active for the user (e.g. the
+    /// payment associated with the `expiry_unix_ts_ms`). This value is 0 if no refund has been
+    /// requested on the active payment.
+    std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts;
 
     /// Total number of payments known by the backend for the user. This may be greater than the
     /// length of items if the request, requested less than the number of payments the user has.
@@ -542,9 +553,122 @@ struct GetProDetailsResponse : public ResponseHeader {
     /// - `json` -- JSON string to parse.
     ///
     /// Outputs:
-    /// - `bool` - True if parsing succeeds, false otherwise. Errors are stored in `errors`.
+    /// - The response struct with `status` set to an error state on failure. Errors are stored in
+    ///   `errors`
     static GetProDetailsResponse parse(std::string_view json);
 };
 
-void make_blake2b32_hasher(struct crypto_generichash_blake2b_state* hasher);
+struct SetPaymentRefundRequestedRequest {
+    /// Request version for the API
+    std::uint8_t version;
+
+    /// 32-byte Ed25519 master public key to retrieve payments for
+    array_uc32 master_pkey;
+
+    /// 64-byte signature proving knowledge of the master public key's secret component
+    array_uc64 master_sig;
+
+    /// Unix timestamp of the current time
+    std::chrono::sys_time<std::chrono::milliseconds> unix_ts;
+
+    /// Unix timestamp to set as the timestamp that a refund was requested on this payment.
+    std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts;
+
+    /// Payment details to set the refund request on
+    AddProPaymentUserTransaction payment_tx;
+
+    /// API: pro/SetPaymentRefundRequested::build_sigs
+    ///
+    /// Builds the signature that must be included in the request to authenticate and permit
+    /// updating the refund requested status of a payment. Throws if the keys (32-byte or
+    /// 64-byte libsodium format) are incorrectly sized. Using 64-byte libsodium keys is more
+    /// efficient.
+    ///
+    /// Inputs:
+    /// - `request_version` -- Version of the request to build a hash for
+    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
+    /// - `unix_ts` -- Unix timestamp for the request.
+    /// - `refund_requested_unix_ts` -- Unix timestamp to set as the timestamp that a refund was
+    ///   requested on this payment
+    /// - `payment_tx_provider` -- Provider that the payment to set a refund request on is coming
+    ///   from
+    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
+    ///   provider. See `AddProPaymentUserTransaction`
+    ///   this is the transaction ID).
+    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    ///   `AddProPaymentUserTransaction`
+    ///
+    /// Outputs:
+    /// - `array_uc64` - the 64-byte signature
+    static array_uc64 build_sig(
+            uint8_t version,
+            std::span<const uint8_t> master_privkey,
+            std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+            std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
+            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+            std::span<const uint8_t> payment_tx_payment_id,
+            std::span<const uint8_t> payment_tx_order_id);
+
+    /// API: pro/SetPaymentRefundRequested::build_to_json
+    ///
+    /// Builds a SetPaymentRefundRequested and serialize it to JSON. This function is the same as
+    /// filling the struct fields and calling `to_json`.
+    ///
+    /// Inputs:
+    /// - `version` -- Version of the request to build a request from
+    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
+    /// - `unix_ts` -- Unix timestamp for the request.
+    /// - `refund_requested_unix_ts` -- Unix timestamp to set as the timestamp that a refund was
+    ///   requested on this payment
+    /// - `payment_tx_provider` -- Provider that the payment to set a refund request on is coming
+    ///   from
+    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
+    ///   provider. See `AddProPaymentUserTransaction`
+    ///   this is the transaction ID).
+    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    ///   `AddProPaymentUserTransaction`
+    ///
+    /// Outputs:
+    /// - `std::string` -- Request serialised to JSON
+    static std::string build_to_json(
+            std::uint8_t version,
+            std::span<const uint8_t> master_privkey,
+            std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+            std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
+            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+            std::span<const uint8_t> payment_tx_payment_id,
+            std::span<const uint8_t> payment_tx_order_id);
+
+    /// API: pro/SetPaymentRefundRequested::to_json
+    ///
+    /// Serializes the request to a JSON string.
+    ///
+    /// Outputs:
+    /// - `std::string` - JSON representation of the request.
+    std::string to_json() const;
+};
+
+struct SetPaymentRefundRequestedResponse : public ResponseHeader {
+    /// Version from the request
+    std::uint8_t version;
+
+    /// True if a payment was found matching the given payment information and that the refund
+    /// request unix timestamp was set
+    bool updated;
+
+    /// API: pro/SetPaymentRefundRequestedResponse::parse
+    ///
+    /// Parses a JSON string into the response struct.
+    ///
+    /// Inputs:
+    /// - `json` -- JSON string to parse.
+    ///
+    /// Outputs:
+    /// - The response struct with `status` set to an error state on failure. Errors are stored in
+    ///   `errors`
+    static SetPaymentRefundRequestedResponse parse(std::string_view json);
+};
+
+void make_blake2b32_hasher(
+        struct crypto_generichash_blake2b_state* hasher, std::string_view personalisation);
 }  // namespace session::pro_backend

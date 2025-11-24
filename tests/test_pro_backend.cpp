@@ -642,6 +642,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                     {"auto_renewing", true},
                     {"expiry_unix_ts_ms", unix_ts_ms + 2},
                     {"grace_period_duration_ms", 1000},
+                    {"refund_requested_unix_ts_ms", unix_ts_ms + 3602},
                     {"payments_total", 3},
                     {"items",
                      nlohmann::json::array(
@@ -656,6 +657,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                                {"grace_period_duration_ms", 1001},
                                {"platform_refund_expiry_unix_ts_ms", unix_ts_ms + 1},
                                {"revoked_unix_ts_ms", unix_ts_ms + 3600},
+                               {"refund_requested_unix_ts_ms", unix_ts_ms + 3601},
                                {"google_payment_token",
                                 std::string(payment_tx.payment_id, payment_tx.payment_id_count)},
                                {"google_order_id",
@@ -681,6 +683,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.auto_renewing == true);
                 REQUIRE(result.grace_period_duration_ms == 1000);
                 REQUIRE(result.expiry_unix_ts_ms == unix_ts_ms + 2);
+                REQUIRE(result.refund_requested_unix_ts_ms == unix_ts_ms + 3602);
                 REQUIRE(result.payments_total == 3);
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
@@ -693,6 +696,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                 REQUIRE(result.items[0].grace_period_duration_ms == 1001);
                 REQUIRE(result.items[0].platform_refund_expiry_unix_ts_ms == unix_ts_ms + 1);
                 REQUIRE(result.items[0].revoked_unix_ts_ms == unix_ts_ms + 3600);
+                REQUIRE(result.items[0].refund_requested_unix_ts_ms == unix_ts_ms + 3601);
                 REQUIRE(result.items[0].google_payment_token_count == payment_tx.payment_id_count);
                 REQUIRE(std::memcmp(
                                 result.items[0].google_payment_token,
@@ -752,6 +756,117 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             session_pro_backend_get_pro_details_response pay_response = {};
             session_pro_backend_get_pro_details_response_free(&pay_response);
             REQUIRE(pay_response.header.internal_arena_buf_ == nullptr);
+        }
+
+        SECTION("session_pro_backend_set_payment_refund_requested_request_to_json") {
+            session_pro_backend_set_payment_refund_requested_request request = {};
+            request.version = 0;
+            request.master_pkey = master_pubkey;
+            request.unix_ts_ms = unix_ts_ms;
+            request.refund_requested_unix_ts_ms = unix_ts_ms + 1;
+
+            session_pro_backend_signature sig =
+                    session_pro_backend_set_payment_refund_requested_request_build_sigs(
+                            request.version,
+                            master_privkey.data,
+                            sizeof(master_privkey.data),
+                            request.unix_ts_ms,
+                            request.refund_requested_unix_ts_ms,
+                            payment_tx.provider,
+                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                            payment_tx.payment_id_count,
+                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            payment_tx.order_id_count);
+            request.master_sig = sig.sig;
+            REQUIRE(sig.success);
+
+            // Valid request
+            auto result =
+                    session_pro_backend_set_payment_refund_requested_request_to_json(&request);
+            {
+                scope_exit result_free{[&]() { session_pro_backend_to_json_free(&result); }};
+                REQUIRE(result.success);
+                REQUIRE(result.json.data != nullptr);
+                REQUIRE(result.json.size > 0);
+
+                // Verify JSON matches C++ implementation
+                SetPaymentRefundRequestedRequest cpp = {};
+                cpp.version = request.version;
+                std::memcpy(
+                        cpp.master_pkey.data(),
+                        request.master_pkey.data,
+                        sizeof(request.master_pkey.data));
+                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                        std::chrono::milliseconds{unix_ts_ms});
+                cpp.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                        std::chrono::milliseconds{request.refund_requested_unix_ts_ms});
+                std::memcpy(
+                        cpp.master_sig.data(),
+                        request.master_sig.data,
+                        sizeof(request.master_sig.data));
+
+                std::string cpp_json = cpp.to_json();
+                REQUIRE(string8_equals(result.json, cpp_json));
+            }
+
+            // After freeing
+            REQUIRE(result.json.data == nullptr);
+            REQUIRE(result.json.size == 0);
+
+            // Null request
+            result = session_pro_backend_set_payment_refund_requested_request_to_json(nullptr);
+            REQUIRE(!result.success);
+            REQUIRE(result.json.data == nullptr);
+            REQUIRE(result.json.size == 0);
+        }
+
+        SECTION("session_pro_backend_set_payment_refund_requested_response_parse") {
+            nlohmann::json j;
+            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["result"] = {{"updated", true}, {"version", 0}};
+            std::string json = j.dump();
+
+            // Valid JSON
+            auto result = session_pro_backend_set_payment_refund_requested_response_parse(
+                    json.data(), json.size());
+            {
+                scope_exit result_free{[&]() {
+                    session_pro_backend_set_payment_refund_requested_response_free(&result);
+                }};
+                for (size_t index = 0; index < result.header.errors_count; index++)
+                    INFO(result.header.errors[index].data);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
+                REQUIRE(result.header.errors_count == 0);
+                REQUIRE(result.header.errors == nullptr);
+                REQUIRE(result.updated);
+                REQUIRE(result.version == 0);
+            }
+
+            // After freeing
+            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+
+            // Invalid JSON
+            json = "{invalid}";
+            {
+                result = session_pro_backend_set_payment_refund_requested_response_parse(
+                        json.data(), json.size());
+                scope_exit result_free{[&]() {
+                    session_pro_backend_set_payment_refund_requested_response_free(&result);
+                }};
+                for (size_t index = 0; index < result.header.errors_count; index++)
+                    REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
+                REQUIRE(result.header.errors_count > 0);
+                REQUIRE(result.header.errors != nullptr);
+            }
+
+            // After freeing
+            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+
+            // Null JSON
+            result = session_pro_backend_set_payment_refund_requested_response_parse(nullptr, 0);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
+            REQUIRE(result.header.errors_count == 1);
+            REQUIRE(result.header.errors != nullptr);
         }
     }
 
@@ -1024,6 +1139,7 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
         }
 
         // Add _another_ payment, same details
+        session_pro_backend_add_pro_payment_user_transaction another_payment_tx = {};
         {
             char fake_google_payment_token[8];
             randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
@@ -1034,18 +1150,17 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
             std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
-            session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
-            payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
-            payment_tx.payment_id_count = fake_google_payment_token_hex.size();
-            payment_tx.order_id_count = fake_google_order_id_hex.size();
+            another_payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
+            another_payment_tx.payment_id_count = fake_google_payment_token_hex.size();
+            another_payment_tx.order_id_count = fake_google_order_id_hex.size();
             std::memcpy(
-                    payment_tx.payment_id,
+                    another_payment_tx.payment_id,
                     fake_google_payment_token_hex.data(),
-                    payment_tx.payment_id_count);
+                    another_payment_tx.payment_id_count);
             std::memcpy(
-                    payment_tx.order_id,
+                    another_payment_tx.order_id,
                     fake_google_order_id_hex.data(),
-                    payment_tx.order_id_count);
+                    another_payment_tx.order_id_count);
 
             // Build request
             session_pro_backend_master_rotating_signatures add_pro_sigs =
@@ -1055,17 +1170,17 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
                             sizeof(master_privkey),
                             rotating_privkey.data,
                             sizeof(rotating_privkey),
-                            payment_tx.provider,
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count,
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
-                            payment_tx.order_id_count);
+                            another_payment_tx.provider,
+                            reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
+                            another_payment_tx.payment_id_count,
+                            reinterpret_cast<const uint8_t*>(another_payment_tx.order_id),
+                            another_payment_tx.order_id_count);
 
             session_pro_backend_add_pro_payment_request request = {};
             request.version = 0;
             request.master_pkey = master_pubkey;
             request.rotating_pkey = rotating_pubkey;
-            request.payment_tx = payment_tx;
+            request.payment_tx = another_payment_tx;
             request.master_sig = add_pro_sigs.master_sig;
             request.rotating_sig = add_pro_sigs.rotating_sig;
 
@@ -1136,6 +1251,55 @@ TEST_CASE("Session Pro Backend C API", "[session_pro_backend]") {
             REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
             REQUIRE(response.ticket == 0);
             REQUIRE(response.items_count == 0);
+        }
+
+        // Set payment refund requested
+        {
+            // Build request
+            uint64_t now_unix_ts_ms = time(nullptr) * 1000;
+            session_pro_backend_to_json request_json =
+                    session_pro_backend_set_payment_refund_requested_request_build_to_json(
+                            /*version*/ 0,
+                            master_privkey.data,
+                            sizeof(master_privkey.data),
+                            /*unix_ts_ms*/ now_unix_ts_ms,
+                            /*refund_requested_unix_ts_ms*/ now_unix_ts_ms,
+                            another_payment_tx.provider,
+                            reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
+                            another_payment_tx.payment_id_count,
+                            reinterpret_cast<const uint8_t*>(another_payment_tx.order_id),
+                            another_payment_tx.order_id_count);
+
+            scope_exit request_json_free{
+                    [&]() { session_pro_backend_to_json_free(&request_json); }};
+
+            // Do curl request
+            std::string response_json = curl_do_basic_blocking_post_request(
+                    curl,
+                    curl_headers,
+                    g_test_pro_backend_dev_server_url + "/set_payment_refund_requested",
+                    std::string_view(request_json.json.data, request_json.json.size));
+
+            // Parse response
+            session_pro_backend_set_payment_refund_requested_response response =
+                    session_pro_backend_set_payment_refund_requested_response_parse(
+                            response_json.data(), response_json.size());
+            scope_exit response_free{[&]() {
+                session_pro_backend_set_payment_refund_requested_response_free(&response);
+            }};
+
+            // Verify response
+            INFO("ERROR: JSON response: " << response_json.c_str());
+            for (size_t index = 0; index < response.header.errors_count; index++) {
+                string8 error = response.header.errors[index];
+                fprintf(stderr, "ERROR: %s\n", error.data);
+            }
+
+            // Verify the response
+            REQUIRE(response.header.errors_count == 0);
+            REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
+            REQUIRE(response.version == 0);
+            REQUIRE(response.updated);
         }
     }
 #endif

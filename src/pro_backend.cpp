@@ -16,11 +16,19 @@
 
 namespace {
 
+// TODO: Personalise this for each use-case instead of a generic catch-all
 // NOTE: Personalization data must match
 // https://github.com/Doy-lee/session-pro-backend/blob/2afe310adad52f211e3b2cfcbdfc9eda6ff1778e/backend.py#L156
-constexpr std::string_view PRO_BACKEND_BLAKE2B_PERSONALIZATION = "SeshProBackend__";
+// https://github.com/Doy-lee/session-pro-backend/blob/a9cdc0920f5ad3506962e7a0c36be769ab61baee/server.py#L573
+constexpr std::string_view PRO_BACKEND_BLAKE2B_PERSONALISATION = "SeshProBackend__";
+constexpr std::string_view PRO_BACKEND_BLAKE2B_SET_PAYMENT_REFUND_REQUESTED_PERSONALISATION =
+        "ProSetRefundReq_";
+
 static_assert(
-        PRO_BACKEND_BLAKE2B_PERSONALIZATION.size() == crypto_generichash_blake2b_PERSONALBYTES);
+        PRO_BACKEND_BLAKE2B_PERSONALISATION.size() == crypto_generichash_blake2b_PERSONALBYTES);
+static_assert(
+        PRO_BACKEND_BLAKE2B_SET_PAYMENT_REFUND_REQUESTED_PERSONALISATION.size() ==
+        crypto_generichash_blake2b_PERSONALBYTES);
 
 const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
     nlohmann::json result;
@@ -185,7 +193,7 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L171
     array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state = {};
-    make_blake2b32_hasher(&state);
+    make_blake2b32_hasher(&state, PRO_BACKEND_BLAKE2B_PERSONALISATION);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state,
@@ -363,7 +371,7 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     uint64_t unix_ts_ms = unix_ts.time_since_epoch().count();
     array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state = {};
-    make_blake2b32_hasher(&state);
+    make_blake2b32_hasher(&state, PRO_BACKEND_BLAKE2B_PERSONALISATION);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state, master_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
@@ -528,7 +536,7 @@ array_uc64 GetProDetailsRequest::build_sig(
     array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state = {};
     uint64_t unix_ts_ms = unix_ts.time_since_epoch().count();
-    make_blake2b32_hasher(&state);
+    make_blake2b32_hasher(&state, PRO_BACKEND_BLAKE2B_PERSONALISATION);
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state,
@@ -625,9 +633,13 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
             json_require<uint64_t>(result_obj, "expiry_unix_ts_ms", result.errors);
     uint64_t grace_period_duration_ms =
             json_require<uint64_t>(result_obj, "grace_period_duration_ms", result.errors);
-    result.expiry_unix_ts_ms = std::chrono::sys_time<std::chrono::milliseconds>(
+    uint64_t refund_requested_unix_ts_ms =
+            json_require<uint64_t>(result_obj, "refund_requested_unix_ts_ms", result.errors);
+    result.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
             std::chrono::milliseconds(expiry_unix_ts_ms));
-    result.grace_period_duration_ms = std::chrono::milliseconds(grace_period_duration_ms);
+    result.grace_period_duration = std::chrono::milliseconds(grace_period_duration_ms);
+    result.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(refund_requested_unix_ts_ms));
 
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
@@ -653,6 +665,8 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
         auto platform_refund_expiry_ts =
                 json_require<uint64_t>(obj, "platform_refund_expiry_unix_ts_ms", result.errors);
         auto revoked_ts = json_require<uint64_t>(obj, "revoked_unix_ts_ms", result.errors);
+        auto refund_requested_ts =
+                json_require<uint64_t>(obj, "refund_requested_unix_ts_ms", result.errors);
 
         ProPaymentItem item = {};
         if (status > SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL &&
@@ -691,6 +705,8 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
                 std::chrono::milliseconds(platform_refund_expiry_ts));
         item.revoked_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
                 std::chrono::milliseconds(revoked_ts));
+        item.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                std::chrono::milliseconds(refund_requested_ts));
         switch (item.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
@@ -731,14 +747,169 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
     return result;
 }
 
-void make_blake2b32_hasher(crypto_generichash_blake2b_state* hasher) {
+array_uc64 SetPaymentRefundRequestedRequest::build_sig(
+        uint8_t version,
+        std::span<const uint8_t> master_privkey,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        std::span<const uint8_t> payment_tx_payment_id,
+        std::span<const uint8_t> payment_tx_order_id) {
+    cleared_uc64 master_from_seed;
+    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
+        array_uc32 master_pubkey;
+        crypto_sign_ed25519_seed_keypair(
+                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
+        master_privkey = master_from_seed;
+    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
+        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
+    }
+
+    // Hash components to 32 bytes, must match:
+    //   https://github.com/Doy-lee/session-pro-backend/blob/5962925d7f18f83a3ff5774885495e5dd55ecb0a/server.py#L634
+    array_uc32 hash_to_sign = {};
+    crypto_generichash_blake2b_state state = {};
+    make_blake2b32_hasher(&state, PRO_BACKEND_BLAKE2B_SET_PAYMENT_REFUND_REQUESTED_PERSONALISATION);
+    crypto_generichash_blake2b_update(&state, &version, sizeof(version));
+    crypto_generichash_blake2b_update(
+            &state,
+            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
+
+    // Timestamps
+    uint64_t unix_ts_ms = unix_ts.time_since_epoch().count();
+    uint64_t refund_requested_unix_ts_ms = refund_requested_unix_ts.time_since_epoch().count();
+    crypto_generichash_blake2b_update(
+            &state, reinterpret_cast<const uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms));
+    crypto_generichash_blake2b_update(
+            &state,
+            reinterpret_cast<const uint8_t*>(&refund_requested_unix_ts_ms),
+            sizeof(refund_requested_unix_ts_ms));
+
+    // Payment provider
+    uint8_t provider_u8 = payment_tx_provider;
+    crypto_generichash_blake2b_update(&state, &provider_u8, sizeof(provider_u8));
+    crypto_generichash_blake2b_update(
+            &state,
+            reinterpret_cast<const uint8_t*>(payment_tx_payment_id.data()),
+            payment_tx_payment_id.size());
+    if (payment_tx_order_id.size()) {
+        crypto_generichash_blake2b_update(
+                &state,
+                reinterpret_cast<const uint8_t*>(payment_tx_order_id.data()),
+                payment_tx_order_id.size());
+    }
+    crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
+
+    // Sign the hash
+    array_uc64 result = {};
+    crypto_sign_ed25519_detached(
+            result.data(),
+            nullptr,
+            hash_to_sign.data(),
+            hash_to_sign.size(),
+            master_privkey.data());
+    return result;
+}
+
+std::string SetPaymentRefundRequestedRequest::build_to_json(
+        uint8_t version,
+        std::span<const uint8_t> master_privkey,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        std::span<const uint8_t> payment_tx_payment_id,
+        std::span<const uint8_t> payment_tx_order_id) {
+    array_uc64 sig = SetPaymentRefundRequestedRequest::build_sig(
+            version,
+            master_privkey,
+            unix_ts,
+            refund_requested_unix_ts,
+            payment_tx_provider,
+            payment_tx_payment_id,
+            payment_tx_order_id);
+
+    SetPaymentRefundRequestedRequest request = {};
+    request.version = version;
+    std::memcpy(
+            request.master_pkey.data(),
+            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
+            crypto_sign_ed25519_PUBLICKEYBYTES);
+    request.payment_tx.provider = payment_tx_provider;
+    request.payment_tx.payment_id = std::string(
+            reinterpret_cast<const char*>(payment_tx_payment_id.data()),
+            payment_tx_payment_id.size());
+    request.payment_tx.order_id = std::string(
+            reinterpret_cast<const char*>(payment_tx_order_id.data()), payment_tx_order_id.size());
+    request.master_sig = sig;
+    request.unix_ts = unix_ts;
+    request.refund_requested_unix_ts = refund_requested_unix_ts;
+
+    std::string result = request.to_json();
+    return result;
+}
+
+std::string SetPaymentRefundRequestedRequest::to_json() const {
+    nlohmann::json j;
+    j["version"] = version;
+    j["master_pkey"] = oxenc::to_hex(master_pkey);
+    j["unix_ts_ms"] = unix_ts.time_since_epoch().count();
+    j["refund_requested_unix_ts_ms"] = refund_requested_unix_ts.time_since_epoch().count();
+    j["payment_tx"]["provider"] = payment_tx.provider;
+    switch (payment_tx.provider) {
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
+            j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
+            j["payment_tx"]["google_order_id"] = payment_tx.order_id;
+        } break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
+            j["payment_tx"]["apple_tx_id"] = payment_tx.payment_id;
+        } break;
+    }
+    j["master_sig"] = oxenc::to_hex(master_sig);
+    std::string result = j.dump();
+    return result;
+}
+
+SetPaymentRefundRequestedResponse SetPaymentRefundRequestedResponse::parse(std::string_view json) {
+    // Parse basics
+    SetPaymentRefundRequestedResponse result = {};
+    nlohmann::json j = json_parse(json, result.errors);
+    result.status = json_require<uint8_t>(j, "status", result.errors);
+    if (result.errors.size()) {
+        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+        return result;
+    }
+
+    // Parse errors
+    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+        parse_json_response_errors(j, result.errors);
+        return result;
+    }
+
+    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
+    if (result.errors.size())
+        return result;
+
+    // Parse payload
+    result.version = json_require<uint8_t>(result_obj, "version", result.errors);
+    result.updated = json_require<bool>(result_obj, "updated", result.errors);
+    return result;
+}
+
+void make_blake2b32_hasher(
+        crypto_generichash_blake2b_state* hasher, std::string_view personalization) {
+    assert(personalization.data() == nullptr ||
+           (personalization.data() &&
+            personalization.size() == crypto_generichash_blake2b_PERSONALBYTES));
     crypto_generichash_blake2b_init_salt_personal(
             hasher,
             /*key*/ nullptr,
             0,
             32,
             /*salt*/ nullptr,
-            reinterpret_cast<const unsigned char*>(PRO_BACKEND_BLAKE2B_PERSONALIZATION.data()));
+            reinterpret_cast<const unsigned char*>(personalization.data()));
 }
 }  // namespace session::pro_backend
 
@@ -1269,8 +1440,9 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
             &arena, result.items_count * sizeof(*result.items));
     result.auto_renewing = cpp.auto_renewing;
-    result.expiry_unix_ts_ms = cpp.expiry_unix_ts_ms.time_since_epoch().count();
-    result.grace_period_duration_ms = cpp.grace_period_duration_ms.count();
+    result.expiry_unix_ts_ms = cpp.expiry_unix_ts.time_since_epoch().count();
+    result.grace_period_duration_ms = cpp.grace_period_duration.count();
+    result.refund_requested_unix_ts_ms = cpp.refund_requested_unix_ts.time_since_epoch().count();
     result.payments_total = cpp.payments_total;
 
     for (size_t index = 0; index < result.items_count; ++index) {
@@ -1299,6 +1471,9 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         dest.revoked_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
                                           src.revoked_unix_ts.time_since_epoch())
                                           .count();
+        dest.refund_requested_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                   src.refund_requested_unix_ts.time_since_epoch())
+                                                   .count();
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
@@ -1341,6 +1516,187 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     return result;
 }
 
+LIBSESSION_C_API
+session_pro_backend_signature session_pro_backend_set_payment_refund_requested_request_build_sigs(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_ms,
+        uint64_t refund_requested_unix_ts_ms,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) {
+    // Convert C inputs to C++ types
+    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
+    std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
+            std::chrono::milliseconds(refund_requested_unix_ts_ms)};
+    std::span<const uint8_t> payment_tx_payment_id_span(
+            payment_tx_payment_id, payment_tx_payment_id_len);
+    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+
+    session_pro_backend_signature result = {};
+    try {
+        auto sig = SetPaymentRefundRequestedRequest::build_sig(
+                request_version,
+                master_span,
+                unix_ts,
+                refund_requested_unix_ts,
+                payment_tx_provider,
+                payment_tx_payment_id_span,
+                payment_tx_order_id_span);
+        std::memcpy(result.sig.data, sig.data(), sig.size());
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+    return result;
+}
+
+LIBSESSION_C_API session_pro_backend_to_json
+session_pro_backend_set_payment_refund_requested_request_build_to_json(
+        uint8_t request_version,
+        const uint8_t* master_privkey,
+        size_t master_privkey_len,
+        uint64_t unix_ts_ms,
+        uint64_t refund_requested_unix_ts_ms,
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const uint8_t* payment_tx_payment_id,
+        size_t payment_tx_payment_id_len,
+        const uint8_t* payment_tx_order_id,
+        size_t payment_tx_order_id_len) {
+
+    // Convert C inputs to C++ types
+    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
+    std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
+            std::chrono::milliseconds(refund_requested_unix_ts_ms)};
+    std::span<const uint8_t> payment_tx_payment_id_span(
+            payment_tx_payment_id, payment_tx_payment_id_len);
+    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+
+    session_pro_backend_to_json result = {};
+    try {
+        auto json = SetPaymentRefundRequestedRequest::build_to_json(
+                request_version,
+                master_span,
+                unix_ts,
+                refund_requested_unix_ts,
+                payment_tx_provider,
+                payment_tx_payment_id_span,
+                payment_tx_order_id_span);
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+    return result;
+}
+
+LIBSESSION_C_API session_pro_backend_to_json
+session_pro_backend_set_payment_refund_requested_request_to_json(
+        const session_pro_backend_set_payment_refund_requested_request* request) {
+    session_pro_backend_to_json result = {};
+    if (!request)
+        return result;
+
+    // Construct C++ struct
+    SetPaymentRefundRequestedRequest cpp = {};
+    cpp.version = request->version;
+    std::memcpy(
+            cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
+    std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
+    cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
+            std::chrono::milliseconds{request->unix_ts_ms}};
+    cpp.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds{request->refund_requested_unix_ts_ms});
+    cpp.payment_tx.provider = request->payment_tx.provider;
+    cpp.payment_tx.payment_id =
+            std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);
+    cpp.payment_tx.order_id =
+            std::string(request->payment_tx.order_id, request->payment_tx.order_id_count);
+
+    try {
+        std::string json = cpp.to_json();
+        result.json = session::string8_copy_or_throw(json.data(), json.size());
+        result.success = true;
+    } catch (const std::exception& e) {
+        const std::string& error = e.what();
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error_count),
+                "%.*s",
+                static_cast<int>(error.size()),
+                error.data());
+    }
+
+    return result;
+}
+
+LIBSESSION_C_API session_pro_backend_set_payment_refund_requested_response
+session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len) {
+    session_pro_backend_set_payment_refund_requested_response result = {};
+    if (!json) {
+        result.header.status = 1;
+        result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
+        result.header.errors_count = 1;
+        return result;
+    }
+
+    // Note, parse is written to not throw so we can safely read without try-catch crap
+    auto cpp = SetPaymentRefundRequestedResponse::parse({json, json_len});
+
+    // Calculate how much memory we need and create an arena
+    arena_t arena = {};
+    {
+        for (auto it : cpp.errors)
+            arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
+
+        if (arena.max)
+            arena.data = static_cast<uint8_t*>(malloc(arena.max));
+
+        if (arena.max && !arena.data) {
+            result.header.status = 1;
+            result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
+            result.header.errors_count = 1;
+            return result;
+        }
+
+        // Store the pointer to the backing memory. Upon freeing, we release this one pointer
+        result.header.internal_arena_buf_ = arena.data;
+    }
+
+    // Copy to C struct
+    result.header.status = cpp.status;
+    result.version = cpp.version;
+    result.updated = cpp.updated;
+
+    // Copy errors
+    result.header.errors_count = cpp.errors.size();
+    result.header.errors = (string8*)arena_alloc(
+            &arena, result.header.errors_count * sizeof(*result.header.errors));
+    for (size_t index = 0; index < cpp.errors.size(); index++) {
+        const std::string& it = cpp.errors[index];
+        result.header.errors[index] = arena_alloc_to_string8(&arena, it.data(), it.size());
+    }
+
+    return result;
+}
+
 LIBSESSION_C_API void session_pro_backend_to_json_free(session_pro_backend_to_json* to_json) {
     if (to_json) {
         free(to_json->json.data);
@@ -1366,6 +1722,14 @@ LIBSESSION_C_API void session_pro_backend_get_pro_revocations_response_free(
 
 LIBSESSION_C_API void session_pro_backend_get_pro_details_response_free(
         session_pro_backend_get_pro_details_response* response) {
+    if (response) {
+        free(response->header.internal_arena_buf_);
+        *response = {};
+    }
+}
+
+LIBSESSION_C_API void session_pro_backend_set_payment_refund_requested_response_free(
+        session_pro_backend_set_payment_refund_requested_response* response) {
     if (response) {
         free(response->header.internal_arena_buf_);
         *response = {};
