@@ -635,7 +635,8 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     profile.remove_pro_config();
     CHECK_FALSE(profile.get_pro_config().has_value());
 
-    auto access_expiry_ms = std::chrono::sys_time{std::chrono::milliseconds{500}};
+    auto access_expiry_ms =
+            std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{500}};
     profile.set_pro_access_expiry(access_expiry_ms);
     CHECK(profile.get_pro_access_expiry() == access_expiry_ms);
 }
