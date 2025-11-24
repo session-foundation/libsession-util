@@ -1289,7 +1289,7 @@ session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(malloc(arena.max));
+            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;
@@ -1356,7 +1356,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(malloc(arena.max));
+            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;
@@ -1419,7 +1419,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(malloc(arena.max));
+            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;
@@ -1667,7 +1667,7 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(malloc(arena.max));
+            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;
