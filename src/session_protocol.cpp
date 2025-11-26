@@ -219,8 +219,7 @@ void ProProfileBitset::unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
     data &= ~(1 << static_cast<uint64_t>(features));
 }
 
-bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const
-{
+bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const {
     bool result = data & (1 << static_cast<uint64_t>(features));
     return result;
 }
@@ -233,8 +232,7 @@ void ProMessageBitset::unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
     data &= ~(1 << static_cast<uint64_t>(features));
 }
 
-bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const
-{
+bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const {
     bool result = data & (1 << static_cast<uint64_t>(features));
     return result;
 }
@@ -273,14 +271,12 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 namespace session {
 
 ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size) {
-    ProFeaturesForMsg result =
-            pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
     return result;
 }
 
 ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size) {
-    ProFeaturesForMsg result =
-            pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
     return result;
 }
 
@@ -1113,6 +1109,48 @@ static_assert(
         (sizeof((session_protocol_pro_proof*)0)->rotating_pubkey) ==
         crypto_sign_ed25519_PUBLICKEYBYTES);
 static_assert((sizeof((session_protocol_pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
+
+static_assert(
+        SESSION_PROTOCOL_PRO_PROFILE_FEATURES_COUNT <=
+                sizeof(((session_protocol_pro_profile_bitset*)0)->data) * 8 /*bits per byte*/,
+        "There are more feature flags than is available in the bitset, the bitset needs to be "
+        "upgraded into an array of bytes");
+
+LIBSESSION_C_API bool session_protocol_pro_profile_bitset_is_set(
+        session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    bool result = value.data & (1 << features);
+    return result;
+}
+
+LIBSESSION_C_API void session_protocol_pro_profile_bitset_set(
+        session_protocol_pro_profile_bitset* value,
+        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    value->data |= (1 << features);
+}
+
+LIBSESSION_C_API void session_protocol_pro_profile_bitset_unset(
+        session_protocol_pro_profile_bitset* value,
+        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    value->data &= ~(1 << features);
+}
+
+LIBSESSION_C_API bool session_protocol_pro_message_bitset_is_set(
+        session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    bool result = value.data & (1 << features);
+    return result;
+}
+
+LIBSESSION_C_API void session_protocol_pro_message_bitset_set(
+        session_protocol_pro_message_bitset* value,
+        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    value->data |= (1 << features);
+}
+
+LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
+        session_protocol_pro_message_bitset* value,
+        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    value->data &= ~(1 << features);
+}
 
 LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
     bytes32 result = {};

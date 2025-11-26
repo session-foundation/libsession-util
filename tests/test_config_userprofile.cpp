@@ -573,7 +573,8 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     CHECK(profile.get_profile_bitset().data == 0);
 
     profile.set_animated_avatar(true);
-    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
     profile.set_animated_avatar(false);
     CHECK(profile.get_profile_bitset().data == 0);
@@ -581,15 +582,18 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     profile.set_pro_badge(true);
     profile.set_animated_avatar(true);
     CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
     profile.set_animated_avatar(false);
     CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-    CHECK_FALSE(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK_FALSE(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
     {
         session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
-        CHECK(profile2.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(profile2.get_profile_bitset().is_set(
+                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
         CHECK_FALSE(profile2.get_profile_bitset().is_set(
                 SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
     }

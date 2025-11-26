@@ -195,41 +195,41 @@ struct session_protocol_decoded_community_message {
     size_t error_len_incl_null_terminator;
 };
 
-inline bool session_protocol_pro_profile_bitset_is_set(
-        session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    bool result = value.data & (1 << features);
-    return result;
-}
+/// API: session_protocol/session_protocol_pro_profile_bitset_is_set
+///
+/// Check if the feature flag is set on the bitset
+LIBSESSION_EXPORT bool session_protocol_pro_profile_bitset_is_set(
+        session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
 
-inline void session_protocol_pro_profile_bitset_set(
-        session_protocol_pro_profile_bitset* value,
-        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    value->data |= (1 << features);
-}
+/// API: session_protocol/session_protocol_pro_profile_bitset_set
+///
+/// Set the feature flag on the bitset
+LIBSESSION_EXPORT void session_protocol_pro_profile_bitset_set(
+        session_protocol_pro_profile_bitset* value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
 
-inline void session_protocol_pro_profile_bitset_unset(
-        session_protocol_pro_profile_bitset* value,
-        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    value->data &= ~(1 << features);
-}
+/// API: session_protocol/session_protocol_pro_profile_bitset_unset
+///
+/// Unset the feature flag on the bitset
+LIBSESSION_EXPORT void session_protocol_pro_profile_bitset_unset(
+        session_protocol_pro_profile_bitset* value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
 
-inline bool session_protocol_pro_message_bitset_is_set(
-        session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    bool result = value.data & (1 << features);
-    return result;
-}
+/// API: session_protocol/session_protocol_pro_profile_bitset_is_set
+///
+/// Check if the feature flag is set on the bitset
+LIBSESSION_EXPORT bool session_protocol_pro_message_bitset_is_set(
+        session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
 
-inline void session_protocol_pro_message_bitset_set(
-        session_protocol_pro_message_bitset* value,
-        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    value->data |= (1 << features);
-}
+/// API: session_protocol/session_protocol_pro_profile_bitset_set
+///
+/// Set the feature flag on the bitset
+LIBSESSION_EXPORT void session_protocol_pro_message_bitset_set(
+        session_protocol_pro_message_bitset* value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
 
-inline void session_protocol_pro_message_bitset_unset(
-        session_protocol_pro_message_bitset* value,
-        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    value->data &= ~(1 << features);
-}
+/// API: session_protocol/session_protocol_pro_profile_bitset_unset
+///
+/// Unset the feature flag on the bitset
+LIBSESSION_EXPORT void session_protocol_pro_message_bitset_unset(
+        session_protocol_pro_message_bitset* value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
 
 /// API: session_protocol/session_protocol_pro_proof_hash
 ///

@@ -116,7 +116,7 @@ void contact_info::load(const dict& info_dict) {
 
     created = to_epoch_seconds(int_or_0(info_dict, "j"));
 
-    const session::config::set *profile_features_set = maybe_set(info_dict, "f");
+    const session::config::set* profile_features_set = maybe_set(info_dict, "f");
     if (profile_features_set) {
         const size_t bits_available = sizeof(profile_bitset) * 8;
         profile_bitset = {};
@@ -308,8 +308,7 @@ void Contacts::set_created(std::string_view session_id, int64_t timestamp) {
     set(c);
 }
 
-void Contacts::set_pro_features(
-        std::string_view session_id, ProProfileBitset features) {
+void Contacts::set_pro_features(std::string_view session_id, ProProfileBitset features) {
     auto c = get_or_construct(session_id);
     c.profile_bitset = features;
     set(c);
