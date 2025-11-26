@@ -370,7 +370,7 @@ ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size);
 ///   When false, all fields except for `error` should be ignored from the result object.
 /// - `error` -- If `success` is false, this is populated with an error code describing the error,
 ///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
+/// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size);
