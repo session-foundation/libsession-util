@@ -212,28 +212,28 @@ array_uc32 ProProof::hash() const {
 }
 
 void ProProfileBitset::set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    data |= (1 << static_cast<uint64_t>(features));
+    data |= (1ULL << static_cast<uint64_t>(features));
 }
 
 void ProProfileBitset::unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    data &= ~(1 << static_cast<uint64_t>(features));
+    data &= ~(1ULL << static_cast<uint64_t>(features));
 }
 
 bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const {
-    bool result = data & (1 << static_cast<uint64_t>(features));
+    bool result = data & (1ULL << static_cast<uint64_t>(features));
     return result;
 }
 
 void ProMessageBitset::set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    data |= (1 << static_cast<uint64_t>(features));
+    data |= (1ULL << static_cast<uint64_t>(features));
 }
 
 void ProMessageBitset::unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    data &= ~(1 << static_cast<uint64_t>(features));
+    data &= ~(1ULL << static_cast<uint64_t>(features));
 }
 
 bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const {
-    bool result = data & (1 << static_cast<uint64_t>(features));
+    bool result = data & (1ULL << static_cast<uint64_t>(features));
     return result;
 }
 
@@ -1116,38 +1116,38 @@ static_assert(
 
 LIBSESSION_C_API bool session_protocol_pro_profile_bitset_is_set(
         session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    bool result = value.data & (1 << features);
+    bool result = value.data & (1ULL << features);
     return result;
 }
 
 LIBSESSION_C_API void session_protocol_pro_profile_bitset_set(
         session_protocol_pro_profile_bitset* value,
         SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    value->data |= (1 << features);
+    value->data |= (1ULL << features);
 }
 
 LIBSESSION_C_API void session_protocol_pro_profile_bitset_unset(
         session_protocol_pro_profile_bitset* value,
         SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    value->data &= ~(1 << features);
+    value->data &= ~(1ULL << features);
 }
 
 LIBSESSION_C_API bool session_protocol_pro_message_bitset_is_set(
         session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    bool result = value.data & (1 << features);
+    bool result = value.data & (1ULL << features);
     return result;
 }
 
 LIBSESSION_C_API void session_protocol_pro_message_bitset_set(
         session_protocol_pro_message_bitset* value,
         SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    value->data |= (1 << features);
+    value->data |= (1ULL << features);
 }
 
 LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
         session_protocol_pro_message_bitset* value,
         SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    value->data &= ~(1 << features);
+    value->data &= ~(1ULL << features);
 }
 
 LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {

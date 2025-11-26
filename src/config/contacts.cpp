@@ -117,17 +117,8 @@ void contact_info::load(const dict& info_dict) {
     created = to_epoch_seconds(int_or_0(info_dict, "j"));
 
     const session::config::set* profile_bitset_set = maybe_set(info_dict, "f");
-    if (profile_bitset_set) {
-        const size_t bits_available = sizeof(profile_bitset) * 8;
-        profile_bitset = {};
-        for (auto it : *profile_bitset_set) {
-            auto* val = std::get_if<int64_t>(&it);
-            if (!val)
-                continue;
-            if (*val >= 0 && *val < bits_available)
-                profile_bitset.set(static_cast<SESSION_PROTOCOL_PRO_PROFILE_FEATURES>(*val));
-        }
-    }
+    if (profile_bitset_set)
+        profile_bitset.data = bitset_from_set_of_int64_or_0(*profile_bitset_set);
 }
 
 void contact_info::into(contacts_contact& c) const {
