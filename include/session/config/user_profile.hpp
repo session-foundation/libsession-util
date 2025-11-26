@@ -289,7 +289,7 @@ class UserProfile : public ConfigBase {
     /// SESSION_PROTOCOL_PRO_PROFILE_FEATURES_BITSET. It is possible to receive bits set that don't
     /// have a corresponding enum value if you are receiving a bitset from a newer client with newer
     /// features enabled. These flags should be ignored by clients that do not recognise them.
-    ProProfileBitset get_pro_features() const;
+    ProProfileBitset get_profile_bitset() const;
 
     /// API: user_profile/UserProfile::set_pro_badge
     ///

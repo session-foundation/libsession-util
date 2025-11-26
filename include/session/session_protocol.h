@@ -156,8 +156,8 @@ typedef struct session_protocol_decoded_pro session_protocol_decoded_pro;
 struct session_protocol_decoded_pro {
     SESSION_PROTOCOL_PRO_STATUS status;
     session_protocol_pro_proof proof;
-    session_protocol_pro_message_bitset msg_features;
-    session_protocol_pro_profile_bitset profile_features;
+    session_protocol_pro_message_bitset msg_bitset;
+    session_protocol_pro_profile_bitset profile_bitset;
 };
 
 typedef struct session_protocol_decoded_envelope session_protocol_decoded_envelope;

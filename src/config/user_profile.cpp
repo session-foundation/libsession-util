@@ -197,7 +197,7 @@ bool UserProfile::remove_pro_config() {
     return false;
 }
 
-session::ProProfileBitset UserProfile::get_pro_features() const {
+session::ProProfileBitset UserProfile::get_profile_bitset() const {
     ProProfileBitset result = {};
     if (const config::set* set = data["f"].set())
         result.data = bitset_from_set_of_int64_or_0(*set);
@@ -396,7 +396,7 @@ LIBSESSION_C_API bool user_profile_remove_pro_config(config_object* conf) {
 LIBSESSION_C_API session_protocol_pro_profile_bitset
 user_profile_get_pro_features(const config_object* conf) {
     session_protocol_pro_profile_bitset result = {};
-    result.data = unbox<UserProfile>(conf)->get_pro_features().data;
+    result.data = unbox<UserProfile>(conf)->get_profile_bitset().data;
     return result;
 }
 

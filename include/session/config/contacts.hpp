@@ -96,7 +96,7 @@ struct contact_info {
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
-    ProProfileBitset profile_features = {};
+    ProProfileBitset profile_bitset = {};
 
     explicit contact_info(std::string sid);
 

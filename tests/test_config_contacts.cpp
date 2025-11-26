@@ -1126,25 +1126,25 @@ TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
 
     auto c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
-    CHECK(c.profile_features.data == 0);
+    CHECK(c.profile_bitset.data == 0);
 
-    c.profile_features.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+    c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
     contacts.set(c);
 
     c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
-    CHECK(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
 
     contacts.set(c);
     c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
-    CHECK_FALSE(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK_FALSE(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
-    c.profile_features.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR);
+    c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR);
     contacts.set(c);
     c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
 
-    CHECK(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-    CHECK(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 }

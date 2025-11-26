@@ -144,8 +144,8 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
                                              cpp.proof.expiry_unix_ts.time_since_epoch())
                                              .count();
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
-    result.msg_features.data = cpp.msg_features.data;
-    result.profile_features.data = cpp.profile_features.data;
+    result.msg_bitset.data = cpp.msg_bitset.data;
+    result.profile_bitset.data = cpp.profile_bitset.data;
     return result;
 }
 }  // namespace
@@ -219,7 +219,8 @@ void ProProfileBitset::unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
     data &= ~(1 << static_cast<uint64_t>(features));
 }
 
-bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const {
+bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const
+{
     bool result = data & (1 << static_cast<uint64_t>(features));
     return result;
 }
@@ -232,7 +233,8 @@ void ProMessageBitset::unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
     data &= ~(1 << static_cast<uint64_t>(features));
 }
 
-bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const {
+bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const
+{
     bool result = data & (1 << static_cast<uint64_t>(features));
     return result;
 }
@@ -271,12 +273,14 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 namespace session {
 
 ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
+    ProFeaturesForMsg result =
+            pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
     return result;
 }
 
 ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
+    ProFeaturesForMsg result =
+            pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
     return result;
 }
 
@@ -870,8 +874,8 @@ DecodedEnvelope decode_envelope(
                         "Parse decrypted message failed, pro metadata was malformed");
 
             // Fill out the resulting proof structure, we have parsed successfully
-            pro.msg_features.data = pro_msg.msg_features();
-            pro.profile_features.data = pro_msg.profile_features();
+            pro.msg_bitset.data = pro_msg.msg_bitset();
+            pro.profile_bitset.data = pro_msg.profile_bitset();
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
             std::memcpy(
@@ -1030,8 +1034,8 @@ DecodedCommunityMessage decode_for_community(
                     "Decoding community message failed, pro metadata was malformed");
 
         // Fill out the resulting proof structure, we have parsed successfully
-        pro.msg_features.data = pro_msg.msg_features();
-        pro.profile_features.data = pro_msg.profile_features();
+        pro.msg_bitset.data = pro_msg.msg_bitset();
+        pro.profile_bitset.data = pro_msg.profile_bitset();
         std::memcpy(
                 proof.gen_index_hash.data(),
                 proto_proof.genindexhash().data(),

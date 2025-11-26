@@ -262,8 +262,8 @@ struct DecodedPro {
     // Session Pro proof that was embedded in the envelope, this is always populated irrespective of
     // the status but the validity of the contents should be verified by checking `status`
     ProProof proof;
-    ProMessageBitset msg_features;
-    ProProfileBitset profile_features;
+    ProMessageBitset msg_bitset;
+    ProProfileBitset profile_bitset;
 };
 
 struct DecodedEnvelope {
