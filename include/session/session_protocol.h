@@ -67,11 +67,11 @@ struct session_protocol_pro_proof {
 
 // Feature flags for profile features where each enum value indicates the bit position in the
 // corresponding bitset, e.g. (1 << ENUM_VAL)
-enum SESSION_PROTOCOL_PRO_PROFILE_FEATURES {
+typedef enum SESSION_PROTOCOL_PRO_PROFILE_FEATURES {
     SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE,
     SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR,
     SESSION_PROTOCOL_PRO_PROFILE_FEATURES_COUNT,
-};
+} SESSION_PROTOCOL_PRO_PROFILE_FEATURES;
 
 // Strongly typed bitset for profile features. Each profile enum value corresponds to the bit
 // position to set on the bitset (e.g. 1 << ENUM_VALUE). This bitset is wrapped in a struct and has
@@ -83,18 +83,20 @@ enum SESSION_PROTOCOL_PRO_PROFILE_FEATURES {
 // bitsets are stored as sets which allows us to do diffs and deltas on the set of values. The
 // syncing scheme does not allow bit-level deltas which makes handling conflicts between competing
 // synced configurations, awkward.
+typedef struct session_protocol_pro_profile_bitset session_protocol_pro_profile_bitset;
 struct session_protocol_pro_profile_bitset {
     uint64_t data;
 };
 
 // Feature flags for message features where each enum value indicates the bit position in the
 // corresponding bitset.
-enum SESSION_PROTOCOL_PRO_MESSAGE_FEATURES {
+typedef enum SESSION_PROTOCOL_PRO_MESSAGE_FEATURES {
     SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT,
-};
+} SESSION_PROTOCOL_PRO_MESSAGE_FEATURES;
 
 // Strongly typed bitset for Session Pro message features (see
 // `session_protocol_pro_profile_bitset`)
+typedef struct session_protocol_pro_message_bitset session_protocol_pro_message_bitset;
 struct session_protocol_pro_message_bitset {
     uint64_t data;
 };
