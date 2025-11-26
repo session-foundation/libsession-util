@@ -116,11 +116,11 @@ void contact_info::load(const dict& info_dict) {
 
     created = to_epoch_seconds(int_or_0(info_dict, "j"));
 
-    const session::config::set* profile_features_set = maybe_set(info_dict, "f");
-    if (profile_features_set) {
+    const session::config::set* profile_bitset_set = maybe_set(info_dict, "f");
+    if (profile_bitset_set) {
         const size_t bits_available = sizeof(profile_bitset) * 8;
         profile_bitset = {};
-        for (auto it : *profile_features_set) {
+        for (auto it : *profile_bitset_set) {
             auto* val = std::get_if<int64_t>(&it);
             if (!val)
                 continue;
@@ -361,7 +361,7 @@ void blinded_contact_info::load(const dict& info_dict) {
     auto it = info_dict.find("f");
     if (it != info_dict.end()) {
         if (auto* set = std::get_if<session::config::set>(&it->second))
-            profile_features.data = bitset_from_set_of_int64_or_0(*set);
+            profile_bitset.data = bitset_from_set_of_int64_or_0(*set);
     }
 }
 
@@ -383,7 +383,7 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     c.priority = priority;
     c.legacy_blinding = legacy_blinding;
     c.created = created.time_since_epoch().count();
-    c.profile_bitset.data = profile_features.data;
+    c.profile_bitset.data = profile_bitset.data;
 }
 
 blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
@@ -399,7 +399,7 @@ blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
     priority = c.priority;
     legacy_blinding = c.legacy_blinding;
     created = to_sys_seconds(c.created);
-    profile_features.data = c.profile_bitset.data;
+    profile_bitset.data = c.profile_bitset.data;
 }
 
 const std::string blinded_contact_info::session_id() const {
@@ -513,7 +513,7 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
     set_nonzero_int(info["+"], bc.priority);
     set_positive_int(info["y"], bc.legacy_blinding);
     set_ts(info["j"], bc.created);
-    set_int64_set_from_bitset(info["f"], bc.profile_features.data);
+    set_int64_set_from_bitset(info["f"], bc.profile_bitset.data);
 }
 
 bool Contacts::erase_blinded(std::string_view base_url_, std::string_view blinded_id) {

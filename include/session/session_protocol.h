@@ -337,7 +337,7 @@ LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 typedef struct session_protocol_pro_features_for_msg {
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS status;
     string8 error;
-    session_protocol_pro_message_bitset features;
+    session_protocol_pro_message_bitset bitset;
     size_t codepoint_count;
 } session_protocol_pro_features_for_msg;
 

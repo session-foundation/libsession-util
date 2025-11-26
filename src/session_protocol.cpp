@@ -252,9 +252,7 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 
         if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
             if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
-                session_protocol_pro_message_bitset_set(
-                        &result.features,
-                        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT);
+                result.bitset.set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT);
             } else {
                 result.error = "Message exceeds the maximum character limit allowed";
                 result.status = session::ProFeaturesForMsgStatus::ExceedsCharacterLimit;
@@ -1232,7 +1230,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
-            .features = result_cpp.features,
+            .bitset = {result_cpp.bitset.data},
             .codepoint_count = result_cpp.codepoint_count,
     };
     return result;
@@ -1245,7 +1243,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
-            .features = result_cpp.features,
+            .bitset = {result_cpp.bitset.data},
             .codepoint_count = result_cpp.codepoint_count,
     };
     return result;

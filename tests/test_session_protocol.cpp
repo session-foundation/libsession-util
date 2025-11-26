@@ -29,8 +29,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
         const array_uc64& user_rotating_privkey,
         const array_uc64& pro_backend_privkey,
         std::chrono::sys_seconds pro_expiry_unix_ts,
-        session_protocol_pro_message_bitset msg_features,
-        session_protocol_pro_profile_bitset profile_features) {
+        session_protocol_pro_message_bitset msg_bitset,
+        session_protocol_pro_profile_bitset profile_bitset) {
     SerialisedProtobufContentWithProForTesting result = {};
 
     // Create protobuf `Content.dataMessage`
@@ -53,8 +53,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Create protobuf `Content.proMessage`
     SessionProtos::ProMessage* pro = content.mutable_promessage();
-    pro->set_profile_bitset(profile_features.data);
-    pro->set_msg_bitset(msg_features.data);
+    pro->set_profile_bitset(profile_bitset.data);
+    pro->set_msg_bitset(msg_bitset.data);
 
     // Create protobuf `Content.proMessage.proof`
     SessionProtos::ProProof* proto_proof = pro->mutable_proof();
@@ -111,7 +111,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             session_protocol_pro_features_for_msg pro_msg =
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
-            REQUIRE(pro_msg.features.data == 0);
+            REQUIRE(pro_msg.bitset.data == 0);
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
@@ -132,7 +132,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE(session_protocol_pro_message_bitset_is_set(
-                    pro_msg.features, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
+                    pro_msg.bitset, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
@@ -143,7 +143,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE(session_protocol_pro_message_bitset_is_set(
-                    pro_msg.features, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
+                    pro_msg.bitset, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
@@ -154,7 +154,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status ==
                     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT);
-            REQUIRE(pro_msg.features.data == 0);
+            REQUIRE(pro_msg.bitset.data == 0);
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
     }
@@ -310,8 +310,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     /*user_rotating_privkey*/ user_pro_ed_sk,
                     /*pro_backend_privkey*/ pro_backend_ed_sk,
                     /*pro_expiry_unix_ts*/ timestamp_s,
-                    /*msg_features*/ {},
-                    /*profile_features*/ {});
+                    /*msg_bitset*/ {},
+                    /*profile_bitset*/ {});
 
     // Setup base destination object with the pro signature w/ Session pubkey 1 as the recipient
     bytes64 base_pro_sig = {};
@@ -423,11 +423,11 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_pro_features_for_msg pro_msg =
                 session_protocol_pro_features_for_utf8(large_message.data(), large_message.size());
         REQUIRE(session_protocol_pro_message_bitset_is_set(
-                pro_msg.features, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
+                pro_msg.bitset, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
 
-        session_protocol_pro_profile_bitset profile_features = {};
+        session_protocol_pro_profile_bitset profile_bitset = {};
         session_protocol_pro_profile_bitset_set(
-                &profile_features, SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+                &profile_bitset, SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
 
         SerialisedProtobufContentWithProForTesting protobuf_content_with_pro_and_features =
                 build_protobuf_content_with_session_pro(
@@ -435,8 +435,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         /*user_rotating_privkey*/ user_pro_ed_sk,
                         /*pro_backend_privkey*/ pro_backend_ed_sk,
                         /*pro_expiry_unix_ts*/ timestamp_s,
-                        /*msg_features*/ pro_msg.features,
-                        /*profile_features*/ profile_features);
+                        /*msg_bitset*/ pro_msg.bitset,
+                        /*proilfe_bitset*/ profile_bitset);
 
         // Encrypt content
         session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(

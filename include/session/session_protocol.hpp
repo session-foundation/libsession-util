@@ -201,7 +201,7 @@ struct ProMessageBitset {
 struct ProFeaturesForMsg {
     ProFeaturesForMsgStatus status;
     std::string_view error;
-    session_protocol_pro_message_bitset features;
+    ProMessageBitset bitset;
     size_t codepoint_count;
 };
 

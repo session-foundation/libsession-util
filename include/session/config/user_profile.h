@@ -348,7 +348,7 @@ LIBSESSION_EXPORT bool user_profile_remove_pro_config(config_object* conf);
 /// - `conf` -- [in] Pointer to the config object
 ///
 /// Outputs:
-/// - `SESSION_PROTOCOL_PRO_PROFILE_FEATURES` - bitset indicating which message features are
+/// - `session_protocol_pro_profile_bitset` - bitset indicating which message features are
 /// enabled.
 LIBSESSION_EXPORT session_protocol_pro_profile_bitset
 user_profile_get_pro_features(const config_object* conf);

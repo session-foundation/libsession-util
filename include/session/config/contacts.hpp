@@ -141,7 +141,7 @@ struct blinded_contact_info {
     bool legacy_blinding;
     std::chrono::sys_seconds created{};  // Unix timestamp (seconds) when this contact was added
 
-    ProProfileBitset profile_features = {};
+    ProProfileBitset profile_bitset = {};
 
     blinded_contact_info() = default;
     explicit blinded_contact_info(
