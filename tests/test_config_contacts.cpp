@@ -1,6 +1,7 @@
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/config/contacts.h>
+#include <session/session_protocol.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -1125,29 +1126,25 @@ TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
 
     auto c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
-    CHECK(c.pro_features == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+    CHECK(c.profile_features.data == 0);
 
-    c.pro_features = SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE;
+    c.profile_features.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
     contacts.set(c);
 
     c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
-    CHECK(c.pro_features == SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
-
-    // Check that it strips the `10K_CHARACTER_LIMIT` feature when setting
-    c.pro_features = c.pro_features |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-    CHECK(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+    CHECK(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
 
     contacts.set(c);
     c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
-    CHECK_FALSE(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT);
+    CHECK_FALSE(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
-    c.pro_features = c.pro_features |= SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR;
+    c.profile_features.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR);
     contacts.set(c);
     c = contacts.get_or_construct(
             "050000000000000000000000000000000000000000000000000000000000000000"sv);
 
-    CHECK(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
-    CHECK(c.pro_features & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+    CHECK(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK(c.profile_features.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 }

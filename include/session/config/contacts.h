@@ -36,7 +36,7 @@ typedef struct contacts_contact {
 
     int64_t created;  // unix timestamp (seconds)
 
-    SESSION_PROTOCOL_PRO_FEATURES pro_features;
+    session_protocol_pro_profile_bitset profile_features = {};
 
 } contacts_contact;
 
@@ -55,7 +55,7 @@ typedef struct contacts_blinded_contact {
     bool legacy_blinding;
     int64_t created;  // unix timestamp (seconds)
 
-    SESSION_PROTOCOL_PRO_FEATURES pro_features;
+    session_protocol_pro_profile_bitset profile_features = {};
 
 } contacts_blinded_contact;
 

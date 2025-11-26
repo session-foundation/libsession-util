@@ -196,6 +196,12 @@ std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char*
 // Digs into a config `dict` to get out a string; nullopt if not there (or not string)
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key);
 
+// Extract a U64 bitset from a set of i64's
+uint64_t bitset_from_set_of_int64_or_0(const session::config::set& s);
+
+// Individually write each bit from bitset into a set consisting of int64's
+void set_int64_set_from_bitset(ConfigBase::DictFieldProxy&& field, uint64_t bitset);
+
 // Digs into a config `dict` to get out a string; ""s if not there (or not string)
 std::string string_or_empty(const session::config::dict& d, const char* key);
 

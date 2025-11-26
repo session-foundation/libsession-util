@@ -25,6 +25,9 @@
 #
 cmake -G Ninja -S . -B Build
 
+# Regenerate protobuf files
+cmake --build Build --target regen-protobuf --parallel --verbose
+
 # Build
 cmake --build Build --parallel --verbose
 ```

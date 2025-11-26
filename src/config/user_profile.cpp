@@ -197,52 +197,31 @@ bool UserProfile::remove_pro_config() {
     return false;
 }
 
-SESSION_PROTOCOL_PRO_FEATURES UserProfile::get_pro_features() const {
-    if (auto f = data["f"].integer())
-        return static_cast<SESSION_PROTOCOL_PRO_FEATURES>(*f);
-    return SESSION_PROTOCOL_PRO_FEATURES_NIL;
+session::ProProfileBitset UserProfile::get_pro_features() const {
+    ProProfileBitset result = {};
+    if (const config::set* set = data["f"].set())
+        result.data = bitset_from_set_of_int64_or_0(*set);
+    return result;
 }
 
 void UserProfile::set_pro_badge(bool enabled) {
-    SESSION_PROTOCOL_PRO_FEATURES current_value = SESSION_PROTOCOL_PRO_FEATURES_NIL;
-    if (auto f = data["f"].integer())
-        current_value = static_cast<SESSION_PROTOCOL_PRO_FEATURES>(*f);
-
-    auto updated_value =
-            (enabled ? (current_value | SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE)     // Add
-                     : (current_value & ~SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE));  // Remove
-
-    if (current_value == updated_value)
-        return;
-
-    if (updated_value == SESSION_PROTOCOL_PRO_FEATURES_NIL)
-        data["f"].erase();
-    else
-        data["f"] = static_cast<uint64_t>(updated_value);
-
-    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] = ts_now();
+    auto feature = SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE;
+    bool dirtied = enabled ? data["f"].set_insert(feature) : data["f"].set_erase(feature);
+    if (dirtied) {
+        const auto target_timestamp =
+                (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+        data[target_timestamp] = ts_now();
+    }
 }
 
 void UserProfile::set_animated_avatar(bool enabled) {
-    SESSION_PROTOCOL_PRO_FEATURES current_value = SESSION_PROTOCOL_PRO_FEATURES_NIL;
-    if (auto f = data["f"].integer())
-        current_value = static_cast<SESSION_PROTOCOL_PRO_FEATURES>(*f);
-
-    auto updated_value =
-            (enabled ? (current_value | SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR)     // Add
-                     : (current_value & ~SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR));  // Remove
-
-    if (current_value == updated_value)
-        return;
-
-    if (updated_value == SESSION_PROTOCOL_PRO_FEATURES_NIL)
-        data["f"].erase();
-    else
-        data["f"] = static_cast<uint64_t>(updated_value);
-
-    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] = ts_now();
+    auto feature = SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR;
+    bool dirtied = enabled ? data["f"].set_insert(feature) : data["f"].set_erase(feature);
+    if (dirtied) {
+        const auto target_timestamp =
+                (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+        data[target_timestamp] = ts_now();
+    }
 }
 
 std::optional<std::chrono::sys_time<std::chrono::milliseconds>> UserProfile::get_pro_access_expiry()
@@ -414,9 +393,11 @@ LIBSESSION_C_API bool user_profile_remove_pro_config(config_object* conf) {
     return unbox<UserProfile>(conf)->remove_pro_config();
 }
 
-LIBSESSION_C_API SESSION_PROTOCOL_PRO_FEATURES
+LIBSESSION_C_API session_protocol_pro_profile_bitset
 user_profile_get_pro_features(const config_object* conf) {
-    return unbox<UserProfile>(conf)->get_pro_features();
+    session_protocol_pro_profile_bitset result = {};
+    result.data = unbox<UserProfile>(conf)->get_pro_features().data;
+    return result;
 }
 
 LIBSESSION_C_API void user_profile_set_pro_badge(config_object* conf, bool enabled) {

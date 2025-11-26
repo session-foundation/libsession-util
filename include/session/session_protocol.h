@@ -65,17 +65,38 @@ struct session_protocol_pro_proof {
     bytes64 sig;
 };
 
-// Bitset of Session Pro features that a message uses. This bitset is stored in the protobuf
-// `Content.proMessage` when a message is sent for other clients to consume.
-typedef uint64_t SESSION_PROTOCOL_PRO_FEATURES;
-enum SESSION_PROTOCOL_PRO_FEATURES_ {
-    SESSION_PROTOCOL_PRO_FEATURES_NIL = 0,
-    SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT = 1 << 0,
-    SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE = 1 << 1,
-    SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR = 1 << 2,
-    SESSION_PROTOCOL_PRO_FEATURES_ALL = SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT |
-                                        SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE |
-                                        SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR
+// Feature flags for profile features where each enum value indicates the bit position in the
+// corresponding bitset, e.g. (1 << ENUM_VAL)
+enum SESSION_PROTOCOL_PRO_PROFILE_FEATURES {
+    SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE,
+    SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR,
+    SESSION_PROTOCOL_PRO_PROFILE_FEATURES_COUNT,
+};
+
+// Strongly typed bitset for profile features. Each profile enum value corresponds to the bit
+// position to set on the bitset (e.g. 1 << ENUM_VALUE). This bitset is wrapped in a struct and has
+// helper functions (`session_protocol_pro_profile_bitset_*` family of functions) that accepts the
+// typed-enum to mitigate against mixing up the profile features with the message features.
+//
+// The enums are kept as bit positions (ENUM_VAL = 1 << N) instead of bit values (ENUM_VAL = 1)
+// for ergonomic usage in the way we sync and store these bitsets on the protocol swarms. These
+// bitsets are stored as sets which allows us to do diffs and deltas on the set of values. The
+// syncing scheme does not allow bit-level deltas which makes handling conflicts between competing
+// synced configurations, awkward.
+struct session_protocol_pro_profile_bitset {
+    uint64_t data;
+};
+
+// Feature flags for message features where each enum value indicates the bit position in the
+// corresponding bitset.
+enum SESSION_PROTOCOL_PRO_MESSAGE_FEATURES {
+    SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT,
+};
+
+// Strongly typed bitset for Session Pro message features (see
+// `session_protocol_pro_profile_bitset`)
+struct session_protocol_pro_message_bitset {
+    uint64_t data;
 };
 
 typedef enum SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS {  // See session::ProFeaturesForMsgStatus
@@ -135,7 +156,8 @@ typedef struct session_protocol_decoded_pro session_protocol_decoded_pro;
 struct session_protocol_decoded_pro {
     SESSION_PROTOCOL_PRO_STATUS status;
     session_protocol_pro_proof proof;
-    SESSION_PROTOCOL_PRO_FEATURES features;
+    session_protocol_pro_message_bitset msg_features;
+    session_protocol_pro_profile_bitset profile_features;
 };
 
 typedef struct session_protocol_decoded_envelope session_protocol_decoded_envelope;
@@ -172,6 +194,42 @@ struct session_protocol_decoded_community_message {
     session_protocol_decoded_pro pro;
     size_t error_len_incl_null_terminator;
 };
+
+inline bool session_protocol_pro_profile_bitset_is_set(
+        session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    bool result = value.data & (1 << features);
+    return result;
+}
+
+inline void session_protocol_pro_profile_bitset_set(
+        session_protocol_pro_profile_bitset* value,
+        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    value->data |= (1 << features);
+}
+
+inline void session_protocol_pro_profile_bitset_unset(
+        session_protocol_pro_profile_bitset* value,
+        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    value->data &= ~(1 << features);
+}
+
+inline bool session_protocol_pro_message_bitset_is_set(
+        session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    bool result = value.data & (1 << features);
+    return result;
+}
+
+inline void session_protocol_pro_message_bitset_set(
+        session_protocol_pro_message_bitset* value,
+        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    value->data |= (1 << features);
+}
+
+inline void session_protocol_pro_message_bitset_unset(
+        session_protocol_pro_message_bitset* value,
+        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    value->data &= ~(1 << features);
+}
 
 /// API: session_protocol/session_protocol_pro_proof_hash
 ///
@@ -279,7 +337,7 @@ LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 typedef struct session_protocol_pro_features_for_msg {
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS status;
     string8 error;
-    SESSION_PROTOCOL_PRO_FEATURES features;
+    session_protocol_pro_message_bitset features;
     size_t codepoint_count;
 } session_protocol_pro_features_for_msg;
 
@@ -291,23 +349,18 @@ typedef struct session_protocol_pro_features_for_msg {
 /// - `utf` -- the UTF8 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the number of code units (aka. bytes) the string has
-/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
-///   this function if they overlap with the feature flags that will derive itself. This function
-///   hence ignores if it is specified:
-///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
-///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
 ///   When false, all fields except for `error` should be ignored from the result object.
 /// - `error` -- If `success` is false, this is populated with an error code describing the error,
 ///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
-///   `ProMessage` in `Content`
+/// - `features` -- Feature flags suitable for writing directly into the protobuf
+///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        char const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) NON_NULL_ARG(1);
+        char const* utf, size_t utf_size) NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_utf16
 ///
@@ -317,24 +370,18 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 /// - `utf` -- the UTF16 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the number of code units (aka. bytes) the string has
-/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
-///   this function if they overlap with the feature flags that will derive itself. This function
-///   hence ignores if it is specified:
-///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
-///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
 ///   When false, all fields except for `error` should be ignored from the result object.
 /// - `error` -- If `success` is false, this is populated with an error code describing the error,
 ///   otherwise it's empty.
-/// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
-///   `ProMessage` in `Content`
+/// - `features` -- Feature flags suitable for writing directly into the protobuf
+///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        uint16_t const* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features)
-        NON_NULL_ARG(1);
+        uint16_t const* utf, size_t utf_size) NON_NULL_ARG(1);
 
 /// API: session_protocol_encode_for_1o1
 ///

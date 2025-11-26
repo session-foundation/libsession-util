@@ -434,12 +434,16 @@ class ConfigBase : public ConfigSig {
         ///
         /// Inputs:
         /// - `value` -- This will be assigned to the dict if it is missing
-        void insert_if_missing(config::scalar&& value) {
+        //
+        /// Ouputs:
+        /// - `bool` -- True if the value was inserted, false otherwise
+        bool insert_if_missing(config::scalar&& value) {
             if (!_conf.is_dirty())
                 if (auto current = get_clean<config::set>(); current && current->count(value))
-                    return;
+                    return false;
 
             get_dirty<config::set>().insert(std::move(value));
+            return true;
         }
 
         /// API: base/ConfigBase::DictFieldProxy::set_erase_impl
@@ -448,10 +452,13 @@ class ConfigBase : public ConfigSig {
         ///
         /// Inputs:
         /// - `value` -- This will be deleted from the dict
-        void set_erase_impl(const config::scalar& value) {
+        ///
+        /// Outputs:
+        /// - `bool` -- True if an element was erased, false otherwise
+        bool set_erase_impl(const config::scalar& value) {
             if (!_conf.is_dirty())
                 if (auto current = get_clean<config::set>(); current && !current->count(value))
-                    return;
+                    return false;
 
             config::dict* data = &_conf.dirty().data();
 
@@ -459,17 +466,21 @@ class ConfigBase : public ConfigSig {
                 auto it = data->find(key);
                 data = it != data->end() ? std::get_if<config::dict>(&it->second) : nullptr;
                 if (!data)
-                    return;
+                    return false;
             }
 
             auto it = data->find(_last_key);
             if (it == data->end())
-                return;
+                return false;
             auto& val = it->second;
-            if (auto* current = std::get_if<config::set>(&val))
+            bool result = false;
+            if (auto* current = std::get_if<config::set>(&val)) {
                 current->erase(value);
-            else
+                result = true;
+            } else {
                 val.emplace<config::set>();
+            }
+            return result;
         }
 
       public:
@@ -795,8 +806,8 @@ class ConfigBase : public ConfigSig {
         ///
         /// Inputs:
         /// - `value` -- The value to be set
-        void set_insert(std::string_view value) {
-            insert_if_missing(config::scalar{std::string{value}});
+        bool set_insert(std::string_view value) {
+            return insert_if_missing(config::scalar{std::string{value}});
         }
 
         /// API: base/ConfigBase::DictFieldProxy::set_insert(int64_t)
@@ -806,7 +817,7 @@ class ConfigBase : public ConfigSig {
         ///
         /// Inputs:
         /// - `value` -- The value to be set
-        void set_insert(int64_t value) { insert_if_missing(config::scalar{value}); }
+        bool set_insert(int64_t value) { return insert_if_missing(config::scalar{value}); }
 
         /// API: base/ConfigBase::DictFieldProxy::set_erase(std::string_view)
         ///
@@ -816,8 +827,11 @@ class ConfigBase : public ConfigSig {
         ///
         /// Inputs:
         /// - `value` -- The value to be set
-        void set_erase(std::string_view value) {
-            set_erase_impl(config::scalar{std::string{value}});
+        ///
+        /// Outputs:
+        /// - `bool` -- True if an element was erased, false otherwise
+        bool set_erase(std::string_view value) {
+            return set_erase_impl(config::scalar{std::string{value}});
         }
 
         /// API: base/ConfigBase::DictFieldProxy::set_erase(int64_t)
@@ -828,7 +842,10 @@ class ConfigBase : public ConfigSig {
         ///
         /// Inputs:
         /// - `value` -- The value to be set
-        void set_erase(int64_t value) { set_erase_impl(scalar{value}); }
+        ///
+        /// Outputs:
+        /// - `bool` -- True if an element was erased, false otherwise
+        bool set_erase(int64_t value) { return set_erase_impl(scalar{value}); }
 
         /// API: base/ConfigBase::DictFieldProxy::emplace
         ///

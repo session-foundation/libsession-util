@@ -144,7 +144,8 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
                                              cpp.proof.expiry_unix_ts.time_since_epoch())
                                              .count();
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
-    result.features = cpp.features;
+    result.msg_features.data = cpp.msg_features.data;
+    result.profile_features.data = cpp.profile_features.data;
     return result;
 }
 }  // namespace
@@ -210,22 +211,34 @@ array_uc32 ProProof::hash() const {
     return result;
 }
 
+void ProProfileBitset::set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    data |= (1 << static_cast<uint64_t>(features));
+}
+
+void ProProfileBitset::unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
+    data &= ~(1 << static_cast<uint64_t>(features));
+}
+
+bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const {
+    bool result = data & (1 << static_cast<uint64_t>(features));
+    return result;
+}
+
+void ProMessageBitset::set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    data |= (1 << static_cast<uint64_t>(features));
+}
+
+void ProMessageBitset::unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
+    data &= ~(1 << static_cast<uint64_t>(features));
+}
+
+bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const {
+    bool result = data & (1 << static_cast<uint64_t>(features));
+    return result;
+}
+
 session::ProFeaturesForMsg pro_features_for_utf8_or_16(
-        const void* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES flags, bool is_utf8) {
-    if (flags & ~SESSION_PROTOCOL_PRO_FEATURES_ALL) {
-        oxen::log::warning(
-                oxen::log::Cat("protocol"),
-                "A bit is set in 'flags' which does not correspond to a feature flag known by "
-                "libsession");
-    }
-
-    if (flags & SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT) {
-        oxen::log::warning(
-                oxen::log::Cat("protocol"),
-                "10k character limit flag was specified but will be ignored");
-        flags &= ~SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
-    }
-
+        const void* utf, size_t utf_size, bool is_utf8) {
     session::ProFeaturesForMsg result = {};
     simdutf::result validate = is_utf8 ? simdutf::validate_utf8_with_errors(
                                                  reinterpret_cast<const char*>(utf), utf_size)
@@ -239,14 +252,14 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 
         if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
             if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
-                flags |= SESSION_PROTOCOL_PRO_FEATURES_10K_CHARACTER_LIMIT;
+                session_protocol_pro_message_bitset_set(
+                        &result.features,
+                        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT);
             } else {
                 result.error = "Message exceeds the maximum character limit allowed";
                 result.status = session::ProFeaturesForMsgStatus::ExceedsCharacterLimit;
             }
         }
-
-        result.features = flags;
     } else {
         result.status = session::ProFeaturesForMsgStatus::UTFDecodingError;
         result.error = simdutf::error_to_string(validate.error);
@@ -257,17 +270,13 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 
 namespace session {
 
-ProFeaturesForMsg pro_features_for_utf8(
-        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
-    ProFeaturesForMsg result =
-            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ true);
+ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size) {
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
     return result;
 }
 
-ProFeaturesForMsg pro_features_for_utf16(
-        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
-    ProFeaturesForMsg result =
-            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ false);
+ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size) {
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
     return result;
 }
 
@@ -844,9 +853,6 @@ DecodedEnvelope decode_envelope(
             if (!pro_msg.has_proof())
                 throw std::runtime_error(
                         "Parse decrypted message failed, pro config missing proof");
-            if (!pro_msg.has_features())
-                throw std::runtime_error(
-                        "Parse decrypted message failed, pro config missing features");
 
             // Parse the proof from protobufs
             const SessionProtos::ProProof& proto_proof = pro_msg.proof();
@@ -864,7 +870,8 @@ DecodedEnvelope decode_envelope(
                         "Parse decrypted message failed, pro metadata was malformed");
 
             // Fill out the resulting proof structure, we have parsed successfully
-            pro.features = pro_msg.features();
+            pro.msg_features.data = pro_msg.msg_features();
+            pro.profile_features.data = pro_msg.profile_features();
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
             std::memcpy(
@@ -1006,9 +1013,6 @@ DecodedCommunityMessage decode_for_community(
         const SessionProtos::ProMessage& pro_msg = content.promessage();
         if (!pro_msg.has_proof())
             throw std::runtime_error("Decoding community message failed, pro config missing proof");
-        if (!pro_msg.has_features())
-            throw std::runtime_error(
-                    "Decoding community message failed, pro config missing features");
 
         // Parse the proof from protobufs
         const SessionProtos::ProProof& proto_proof = pro_msg.proof();
@@ -1026,7 +1030,8 @@ DecodedCommunityMessage decode_for_community(
                     "Decoding community message failed, pro metadata was malformed");
 
         // Fill out the resulting proof structure, we have parsed successfully
-        pro.features = pro_msg.features();
+        pro.msg_features.data = pro_msg.msg_features();
+        pro.profile_features.data = pro_msg.profile_features();
         std::memcpy(
                 proof.gen_index_hash.data(),
                 proto_proof.genindexhash().data(),
@@ -1180,9 +1185,8 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
-    ProFeaturesForMsg result_cpp =
-            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ true);
+        const char* utf, size_t utf_size) {
+    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
@@ -1194,9 +1198,8 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        const uint16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features) {
-    ProFeaturesForMsg result_cpp =
-            pro_features_for_utf8_or_16(utf, utf_size, features, /*is_utf8*/ false);
+        const uint16_t* utf, size_t utf_size) {
+    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},

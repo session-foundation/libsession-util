@@ -184,10 +184,24 @@ enum class ProFeaturesForMsgStatus {
     ExceedsCharacterLimit = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
 };
 
+struct ProProfileBitset {
+    uint64_t data;
+    void set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
+    void unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
+    bool is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const;
+};
+
+struct ProMessageBitset {
+    uint64_t data;
+    void set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
+    void unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
+    bool is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const;
+};
+
 struct ProFeaturesForMsg {
     ProFeaturesForMsgStatus status;
     std::string_view error;
-    SESSION_PROTOCOL_PRO_FEATURES features;
+    session_protocol_pro_message_bitset features;
     size_t codepoint_count;
 };
 
@@ -248,8 +262,8 @@ struct DecodedPro {
     // Session Pro proof that was embedded in the envelope, this is always populated irrespective of
     // the status but the validity of the contents should be verified by checking `status`
     ProProof proof;
-    SESSION_PROTOCOL_PRO_FEATURES
-    features;  // Bit flag features that were used in the embedded message
+    ProMessageBitset msg_features;
+    ProProfileBitset profile_features;
 };
 
 struct DecodedEnvelope {
@@ -330,22 +344,16 @@ struct DecodeEnvelopeKey {
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the size of the message in UTF8 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
-/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
-///   this function if they overlap with the feature flags that will derive itself. This function
-///   hence ignores if it is specified:
-///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
-///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
 ///   When false, all fields except for `error` should be ignored from the result object.
 /// - `error` -- If `success` is false, this is populated with an error code describing the error,
 ///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
-///   `ProMessage` in `Content`
+/// - `features` -- Feature flags suitable for writing directly into the protobuf
+///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf8(
-        const char* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features);
+ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size);
 
 /// API: session_protocol/pro_features_for_utf16
 ///
@@ -356,22 +364,16 @@ ProFeaturesForMsg pro_features_for_utf8(
 ///   higher character limit available in Session Pro
 /// - `utf_size` -- the size of the message in UTF16 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
-/// - `features` -- Pro features to augment the message with, some feature flags may be ignored in
-///   this function if they overlap with the feature flags that will derive itself. This function
-///   hence ignores if it is specified:
-///     1. 10K_CHARACTER_LIMIT (because this function counts the UTF message to determine if this
-///     feature should be applied).
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
 ///   When false, all fields except for `error` should be ignored from the result object.
 /// - `error` -- If `success` is false, this is populated with an error code describing the error,
 ///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Session Pro feature flags suitable for writing directly into the protobuf
-///   `ProMessage` in `Content`
+/// - `features` -- Feature flags suitable for writing directly into the protobuf
+///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf16(
-        const char16_t* utf, size_t utf_size, SESSION_PROTOCOL_PRO_FEATURES features);
+ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size);
 
 /// API: session_protocol/pad_message
 ///

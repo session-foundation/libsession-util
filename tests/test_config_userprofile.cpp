@@ -564,33 +564,35 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
 
     // Ensure the bitset is being updated correctly
-    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+    CHECK(profile.get_pro_features().data == 0);
 
     profile.set_pro_badge(true);
-    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
+    CHECK(profile.get_pro_features().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
 
     profile.set_pro_badge(false);
-    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+    CHECK(profile.get_pro_features().data == 0);
 
     profile.set_animated_avatar(true);
-    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+    CHECK(profile.get_pro_features().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
     profile.set_animated_avatar(false);
-    CHECK(profile.get_pro_features() == SESSION_PROTOCOL_PRO_FEATURES_NIL);
+    CHECK(profile.get_pro_features().data == 0);
 
     profile.set_pro_badge(true);
     profile.set_animated_avatar(true);
-    CHECK(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
-    CHECK(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+    CHECK(profile.get_pro_features().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK(profile.get_pro_features().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
     profile.set_animated_avatar(false);
-    CHECK(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
-    CHECK_FALSE(profile.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+    CHECK(profile.get_pro_features().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK_FALSE(profile.get_pro_features().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
     {
         session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
-        CHECK(profile2.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_PRO_BADGE);
-        CHECK_FALSE(profile2.get_pro_features() & SESSION_PROTOCOL_PRO_FEATURES_ANIMATED_AVATAR);
+        CHECK(profile2.get_pro_features().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK_FALSE(profile2.get_pro_features().is_set(
+                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
     }
 
     // Ensure the pro config is being stored correctly
