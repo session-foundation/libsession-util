@@ -78,27 +78,6 @@ typedef enum SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS {
     SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_UNKNOWN_PAYMENT = 101,
 } SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS;
 
-/// Bundle of hard-coded URLs that an application may want to redirect users to in various
-/// scenarios.
-typedef struct session_pro_urls session_pro_urls;
-struct session_pro_urls {
-    string8 roadmap;
-    string8 privacy_policy;
-    string8 terms_of_service;
-    string8 pro_access_not_found;
-    string8 support_url;
-};
-
-// clang-format off
-const session_pro_urls SESSION_PRO_URLS = {
-    .roadmap              = string8_literal("https://getsession.org/pro-roadmap"),
-    .privacy_policy       = string8_literal("https://getsession.org/pro/privacy"),
-    .terms_of_service     = string8_literal("https://getsession.org/pro/terms"),
-    .pro_access_not_found = string8_literal("https://sessionapp.zendesk.com/hc/sections/4416517450649-Support"),
-    .support_url          = string8_literal("https://getsession.org/pro-form"),
-};
-// clang-format on
-
 /// Bundle of hard-coded strings that are associated with each platform for clients to use for
 /// string substitution typically. This structure is stored in a global table
 /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA` that is can be indexed into using the

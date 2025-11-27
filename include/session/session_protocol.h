@@ -31,15 +31,53 @@ enum {
     SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING = 160,
 };
 
-// NOTE: Must match
-//  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/backend.py#L21
-//  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/server.py#L571
 // clang-format off
+/// Session Pro personalisation bytes for hashing. Must match
+///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/backend.py#L21
+///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/server.py#L571
 static const char SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION[]               = "ProGenerateProof";
 static const char SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION[]                  = "ProProof________";
 static const char SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION[]              = "ProAddPayment___";
 static const char SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION[] = "ProSetRefundReq_";
 static const char SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION[]              = "ProGetProDetReq_";
+// clang-format on
+
+/// Bundle of hard-coded strings that an implementing application may use for various scenarios.
+typedef struct session_protocol_strings session_protocol_strings;
+struct session_protocol_strings {
+    string8 url_pro_roadmap;
+    string8 url_pro_privacy_policy;
+    string8 url_pro_terms_of_service;
+    string8 url_pro_access_not_found;
+    string8 url_support;
+    string8 url_network;
+    string8 url_staking;
+    string8 url_token;
+    string8 url_donations;
+    string8 url_feedback;
+    string8 build_variant_apk;
+    string8 build_variant_fdroid;
+    string8 build_variant_huawei;
+    string8 build_variant_ipa;
+};
+
+// clang-format off
+const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
+    .url_pro_roadmap          = string8_literal("https://getsession.org/pro-roadmap"),
+    .url_pro_privacy_policy   = string8_literal("https://getsession.org/pro/privacy"),
+    .url_pro_terms_of_service = string8_literal("https://getsession.org/pro/terms"),
+    .url_pro_access_not_found = string8_literal("https://sessionapp.zendesk.com/hc/sections/4416517450649-Support"),
+    .url_support              = string8_literal("https://getsession.org/pro-form"),
+    .url_network              = string8_literal("https://docs.getsession.org/session-network"),
+    .url_staking              = string8_literal("https://docs.getsession.org/session-network/staking"),
+    .url_token                = string8_literal("https://token.getsession.org"),
+    .url_donations            = string8_literal("https://getsession.org/donate#app"),
+    .url_feedback             = string8_literal("https://getsession.org/feedback"),
+    .build_variant_apk        = string8_literal("APK"),
+    .build_variant_fdroid     = string8_literal("F-Droid Store"),
+    .build_variant_huawei     = string8_literal("Huawei App Gallery"),
+    .build_variant_ipa        = string8_literal("IPA"),
+};
 // clang-format on
 
 typedef enum SESSION_PROTOCOL_PRO_STATUS {  // See session::ProStatus
