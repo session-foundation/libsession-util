@@ -54,6 +54,7 @@ struct session_protocol_strings {
     string8 url_staking;
     string8 url_token;
     string8 url_donations;
+    string8 url_donations_app;
     string8 url_feedback;
     string8 build_variant_apk;
     string8 build_variant_fdroid;
@@ -71,7 +72,8 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
     .url_network              = string8_literal("https://docs.getsession.org/session-network"),
     .url_staking              = string8_literal("https://docs.getsession.org/session-network/staking"),
     .url_token                = string8_literal("https://token.getsession.org"),
-    .url_donations            = string8_literal("https://getsession.org/donate#app"),
+    .url_donations            = string8_literal("https://getsession.org/donate"),
+    .url_donations_app        = string8_literal("https://getsession.org/donate#app"),
     .url_feedback             = string8_literal("https://getsession.org/feedback"),
     .build_variant_apk        = string8_literal("APK"),
     .build_variant_fdroid     = string8_literal("F-Droid Store"),
