@@ -4,7 +4,7 @@ syntax = "proto2";
 // iOS - package name determines class prefix
 package SessionProtos;
 
-option optimize_for = LITE_RUNTIME;
+option java_package = "org.session.protos";
 
 message Envelope {
 
@@ -178,6 +178,7 @@ message DataExtractionNotification {
 message LokiProfile {
   optional string displayName = 1;
   optional string profilePicture = 2;
+  optional uint64 lastProfileUpdateSeconds = 3;
 }
 
 message DataMessage {
