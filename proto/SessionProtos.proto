@@ -21,7 +21,6 @@ message Envelope {
   required uint64 timestamp       = 5;
   optional bytes  content         = 8;
   optional uint64 serverTimestamp = 10;
-  optional bytes  proSig          = 11;
 }
 
 message TypingMessage {
@@ -52,13 +51,13 @@ message MessageRequestResponse {
 }
 
 message Content {
-  
+
   enum ExpirationType {
     UNKNOWN           = 0;
     DELETE_AFTER_READ = 1;
     DELETE_AFTER_SEND = 2;
   }
-    
+
   // reserved 7, 11, 15;
   // reserved "configurationMessage", "sharedConfigMessage", "lastDisappearingMessageChangeTimestamp";
 
@@ -69,7 +68,6 @@ message Content {
   optional DataExtractionNotification dataExtractionNotification             = 8;
   optional UnsendRequest              unsendRequest                          = 9;
   optional MessageRequestResponse     messageRequestResponse                 = 10;
-  optional SharedConfigMessage        sharedConfigMessage                    = 11;
   optional ExpirationType             expirationType                         = 12;
   optional uint32                     expirationTimer                        = 13;
 
@@ -178,7 +176,7 @@ message DataExtractionNotification {
 message LokiProfile {
   optional string displayName = 1;
   optional string profilePicture = 2;
-  optional uint64 lastProfileUpdateSeconds = 3;
+  optional uint64 lastUpdateSeconds = 3; // Timestamp of the last profile update
 }
 
 message DataMessage {
@@ -236,8 +234,8 @@ message DataMessage {
     // @required
     required string name = 3;
   }
-    
-    
+
+
   //  reserved 3;
   //  reserved "group";
   // reserved 104;
@@ -290,22 +288,6 @@ message AttachmentPointer {
   optional uint32  height      = 10;
   optional string  caption     = 11;
   optional string  url         = 101;
-}
-
-message SharedConfigMessage {
-    enum Kind {
-        USER_PROFILE            = 1;
-        CONTACTS                = 2;
-        CONVO_INFO_VOLATILE     = 3;
-        USER_GROUPS             = 4;
-    }
-
-    // @required
-    required Kind   kind        = 1;
-    // @required
-    required int64  seqno       = 2;
-    // @required
-    required bytes  data        = 3;
 }
 
 // Group Update Messages
@@ -370,11 +352,11 @@ message GroupUpdateMemberChangeMessage {
 }
 
 message GroupUpdateMemberLeftMessage {
-  // the pubkey of the member left is included as part of the group encryption logic (senderIdentity on desktop)
+  // the pubkey of the member left is included as part of the closed group encryption logic (senderIdentity on desktop)
 }
 
 message GroupUpdateMemberLeftNotificationMessage {
-  // the pubkey of the member left is included as part of the group encryption logic (senderIdentity on desktop)
+  // the pubkey of the member left is included as part of the closed group encryption logic (senderIdentity on desktop)
 }
 
 message GroupUpdateInviteResponseMessage {
@@ -398,6 +380,6 @@ message ProProof {
 
 message ProMessage {
   optional ProProof proof          = 1;
-  optional uint64   profile_bitset = 2;
-  optional uint64   msg_bitset     = 3;
+  optional uint64   profileBitset  = 2;
+  optional uint64   msgBitset      = 3;
 }
