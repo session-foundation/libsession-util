@@ -397,7 +397,8 @@ std::vector<uint8_t> pad_message(std::span<const uint8_t> payload);
 ///   not be already encrypted and must not be padded.
 /// - ed25519_privkey -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
-/// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
+/// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds. This
+///   should match the protobuf encoded Content's `sigtimestamp` in the given `plaintext`.
 /// - recipient_pubkey -- The recipient's Session public key (33 bytes).
 /// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
 ///   secret component of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to
@@ -558,6 +559,12 @@ std::vector<uint8_t> encode_for_destination(
 /// the pro fields will be populated with data about the Session Pro proof embedded in the envelope
 /// including the features used and if the proof was valid/expired e.t.c.
 ///
+/// The sent timestamp of the protobuf encoded content is the timestamp that the Session Pro proof
+/// is checked against to ensure that it was not expired at the time the message was constructed.
+/// Once a proof is decoded successfully and was not deemed expired (e.g. pro status returned
+/// success) any additional timestamp can be checked against the proof by comparing the timestamp on
+/// the proof itself directly (since the proof has been cryptographically verified at that point).
+///
 /// This function will throw if parsing failed such as a required field is missing, the field is
 /// smaller or larger than expected, decryption failed, or an invariant failed. Notably this
 /// function does not throw if the Session Pro proof failed to verify. Always check the pro status
@@ -574,9 +581,6 @@ std::vector<uint8_t> encode_for_destination(
 ///
 /// - `envelope_payload` -- the envelope payload either encrypted (groups v2 style) or unencrypted
 ///   (1o1 or legacy groups).
-/// - `unix_ts` -- pass in the current system time which is used to determine, whether or
-///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
-///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
 ///   the proof, validating whether or not the attached proof was indeed issued by an authorised
 ///   issuer
@@ -600,7 +604,6 @@ std::vector<uint8_t> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey);
 
 /// API: session_protocol/decode_for_community

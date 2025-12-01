@@ -458,7 +458,8 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 /// - `ed25519_privkey` -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
-/// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
+/// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds. This
+///   should match the protobuf encoded Content's `sigtimestamp` in the given `plaintext`.
 /// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
 ///   32-byte seed) to sign the encoded content if you wish to entitle the message to Session Pro.
 ///   If provided, the corresponding proof must be set in the `Content`. The signature must not be
@@ -747,9 +748,6 @@ LIBSESSION_EXPORT void session_protocol_encode_for_destination_free(
 /// caller is done with the result.
 ///
 /// Inputs:
-/// - `unix_ts_ms` -- pass in the current system time which is used to determine, whether or
-///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
-///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
 ///   the proof, validating whether or not the attached proof was indeed issued by an authorised
 ///   issuer. Ignored if there's no proof in the message.
@@ -800,7 +798,6 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
         const session_protocol_decode_envelope_keys* keys,
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
-        uint64_t unix_ts_ms,
         OPTIONAL const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         OPTIONAL char* error,

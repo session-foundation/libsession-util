@@ -649,7 +649,6 @@ std::vector<uint8_t> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey) {
     DecodedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
@@ -819,7 +818,7 @@ DecodedEnvelope decode_envelope(
     SessionProtos::Content content = {};
     if (!content.ParseFromArray(result.content_plaintext.data(), result.content_plaintext.size()))
         throw std::runtime_error{fmt::format(
-                "Parse content from envelope failed: {}", result.content_plaintext.size())};
+                "Parse content from envelope failed: {}b", result.content_plaintext.size())};
 
     // A signature must always be present on the envelope. This is to make a pro and non-pro
     // envelope indistinguishable. If the message does not have pro then this signature must still
@@ -842,6 +841,12 @@ DecodedEnvelope decode_envelope(
         std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
         if (content.has_promessage()) {
+            if (!content.sigtimestamp())
+                throw std::runtime_error{fmt::format(
+                        "Content does not have signature timestamp set, pro proof expiry is "
+                        "unverifiable (content was {}b)",
+                        result.content_plaintext.size())};
+
             // Mark the envelope as having a pro signature that the caller can use.
             result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG;
             DecodedPro& pro = result.pro.emplace();
@@ -891,6 +896,8 @@ DecodedEnvelope decode_envelope(
 
             // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
             // bytes, this means that we expected the user to have signed the padding as well.
+            auto unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                    std::chrono::milliseconds(content.sigtimestamp()));
             signed_msg.msg = to_span(envelope.content());
             pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         }
@@ -1428,7 +1435,6 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
         const session_protocol_decode_envelope_keys* keys,
         const void* envelope_plaintext,
         size_t envelope_plaintext_len,
-        uint64_t unix_ts_ms,
         const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         char* error,
@@ -1465,8 +1471,6 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
             result_cpp = decode_envelope(
                     keys_cpp,
                     {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
-                    std::chrono::sys_time<std::chrono::milliseconds>(
-                            std::chrono::milliseconds(unix_ts_ms)),
                     pro_backend_pubkey_cpp.data);
             result.success = true;
             break;

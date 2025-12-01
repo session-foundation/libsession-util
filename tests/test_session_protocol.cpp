@@ -28,6 +28,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
         std::string_view data_body,
         const array_uc64& user_rotating_privkey,
         const array_uc64& pro_backend_privkey,
+        std::chrono::sys_seconds content_unix_ts,
         std::chrono::sys_seconds pro_expiry_unix_ts,
         session_protocol_pro_message_bitset msg_bitset,
         session_protocol_pro_profile_bitset profile_bitset) {
@@ -35,6 +36,10 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Create protobuf `Content.dataMessage`
     SessionProtos::Content content = {};
+    content.set_sigtimestamp(std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     content_unix_ts.time_since_epoch())
+                                     .count());
+
     SessionProtos::DataMessage* data = content.mutable_datamessage();
     data->set_body(std::string(data_body));
 
@@ -234,6 +239,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         std::string plaintext;
         {
             SessionProtos::Content content = {};
+            content.set_sigtimestamp(timestamp_ms.time_since_epoch().count());
+
             SessionProtos::DataMessage* data = content.mutable_datamessage();
             data->set_body(std::string(data_body));
             plaintext = content.SerializeAsString();
@@ -268,7 +275,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
-                timestamp_ms.time_since_epoch().count(),
                 pro_backend_ed_pk.data(),
                 pro_backend_ed_pk.size(),
                 error,
@@ -309,6 +315,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     /*data_body*/ data_body,
                     /*user_rotating_privkey*/ user_pro_ed_sk,
                     /*pro_backend_privkey*/ pro_backend_ed_sk,
+                    /*content_unix_ts=*/timestamp_s,
                     /*pro_expiry_unix_ts*/ timestamp_s,
                     /*msg_bitset*/ {},
                     /*profile_bitset*/ {});
@@ -388,7 +395,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
-                timestamp_ms.time_since_epoch().count(),
                 pro_backend_ed_pk.data(),
                 pro_backend_ed_pk.size(),
                 error,
@@ -434,6 +440,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         /*data_body*/ large_message,
                         /*user_rotating_privkey*/ user_pro_ed_sk,
                         /*pro_backend_privkey*/ pro_backend_ed_sk,
+                        /*content_unix_ts*/ timestamp_s,
                         /*pro_expiry_unix_ts*/ timestamp_s,
                         /*msg_bitset*/ pro_msg.bitset,
                         /*proilfe_bitset*/ profile_bitset);
@@ -462,7 +469,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
-                timestamp_ms.time_since_epoch().count(),
                 pro_backend_ed_pk.data(),
                 pro_backend_ed_pk.size(),
                 error,
@@ -565,7 +571,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 &decrypt_keys,
                 encrypt_result.ciphertext.data,
                 encrypt_result.ciphertext.size,
-                timestamp_ms.time_since_epoch().count(),
                 pro_backend_ed_pk.data(),
                 pro_backend_ed_pk.size(),
                 error,
@@ -609,7 +614,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
-                    timestamp_ms.time_since_epoch().count(),
                     pro_backend_ed_pk.data(),
                     pro_backend_ed_pk.size(),
                     error,
@@ -639,11 +643,44 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Try decrypt with a timestamp past the pro proof expiry date
         {
+            // Build protobuf `Content` message, serialise to `plaintext` and get it signed by the
+            // user's "Session Pro" key into `sig_over_plaintext_with_user_pro_key`
+            std::chrono::milliseconds bad_timestamp_ms =
+                    std::chrono::duration_cast<std::chrono::milliseconds>(
+                            protobuf_content.proof.expiry_unix_ts.time_since_epoch()) +
+                    std::chrono::seconds(1);
+
+            SerialisedProtobufContentWithProForTesting bad_protobuf_content =
+                    build_protobuf_content_with_session_pro(
+                            /*data_body*/ data_body,
+                            /*user_rotating_privkey*/ user_pro_ed_sk,
+                            /*pro_backend_privkey*/ pro_backend_ed_sk,
+                            /*content_unix_ts=*/
+                            std::chrono::sys_seconds(
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                            bad_timestamp_ms)),
+                            /*pro_expiry_unix_ts*/ timestamp_s,
+                            /*msg_bitset*/ {},
+                            /*profile_bitset*/ {});
+
+            session_protocol_encoded_for_destination encrypt_bad_result =
+                    session_protocol_encode_for_1o1(
+                            bad_protobuf_content.plaintext.data(),
+                            bad_protobuf_content.plaintext.size(),
+                            keys.ed_sk0.data(),
+                            keys.ed_sk0.size(),
+                            bad_timestamp_ms.count(),
+                            &base_dest.recipient_pubkey,
+                            user_pro_ed_sk.data(),
+                            user_pro_ed_sk.size(),
+                            error,
+                            sizeof(error));
+            REQUIRE(encrypt_bad_result.error_len_incl_null_terminator == 0);
+
             session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &decrypt_keys,
-                    encrypt_result.ciphertext.data,
-                    encrypt_result.ciphertext.size,
-                    protobuf_content.proof.expiry_unix_ts.time_since_epoch().count() + 1,
+                    encrypt_bad_result.ciphertext.data,
+                    encrypt_bad_result.ciphertext.size,
                     pro_backend_ed_pk.data(),
                     pro_backend_ed_pk.size(),
                     error,
@@ -662,7 +699,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
-                    protobuf_content.proof.expiry_unix_ts.time_since_epoch().count(),
                     bad_pro_backend_ed_pk.data(),
                     bad_pro_backend_ed_pk.size(),
                     error,
@@ -684,7 +720,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &bad_decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
-                    protobuf_content.proof.expiry_unix_ts.time_since_epoch().count(),
                     pro_backend_ed_pk.data(),
                     pro_backend_ed_pk.size(),
                     error,
@@ -707,9 +742,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     &multi_decrypt_keys,
                     encrypt_result.ciphertext.data,
                     encrypt_result.ciphertext.size,
-                    std::chrono::duration_cast<std::chrono::seconds>(
-                            protobuf_content.proof.expiry_unix_ts.time_since_epoch())
-                            .count(),
                     pro_backend_ed_pk.data(),
                     pro_backend_ed_pk.size(),
                     error,
