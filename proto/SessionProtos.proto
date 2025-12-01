@@ -4,6 +4,7 @@ syntax = "proto2";
 // iOS - package name determines class prefix
 package SessionProtos;
 
+option java_package = "org.session.protos";
 option optimize_for = LITE_RUNTIME;
 
 message Envelope {
@@ -52,13 +53,13 @@ message MessageRequestResponse {
 }
 
 message Content {
-  
+
   enum ExpirationType {
     UNKNOWN           = 0;
     DELETE_AFTER_READ = 1;
     DELETE_AFTER_SEND = 2;
   }
-    
+
   // reserved 7, 11, 15;
   // reserved "configurationMessage", "sharedConfigMessage", "lastDisappearingMessageChangeTimestamp";
 
@@ -178,6 +179,7 @@ message DataExtractionNotification {
 message LokiProfile {
   optional string displayName = 1;
   optional string profilePicture = 2;
+  optional uint64 lastUpdateSeconds = 3; // Timestamp of the last profile update
 }
 
 message DataMessage {
@@ -235,8 +237,8 @@ message DataMessage {
     // @required
     required string name = 3;
   }
-    
-    
+
+
   //  reserved 3;
   //  reserved "group";
   // reserved 104;
@@ -369,11 +371,11 @@ message GroupUpdateMemberChangeMessage {
 }
 
 message GroupUpdateMemberLeftMessage {
-  // the pubkey of the member left is included as part of the group encryption logic (senderIdentity on desktop)
+  // the pubkey of the member left is included as part of the closed group encryption logic (senderIdentity on desktop)
 }
 
 message GroupUpdateMemberLeftNotificationMessage {
-  // the pubkey of the member left is included as part of the group encryption logic (senderIdentity on desktop)
+  // the pubkey of the member left is included as part of the closed group encryption logic (senderIdentity on desktop)
 }
 
 message GroupUpdateInviteResponseMessage {
@@ -397,6 +399,6 @@ message ProProof {
 
 message ProMessage {
   optional ProProof proof          = 1;
-  optional uint64   profile_bitset = 2;
-  optional uint64   msg_bitset     = 3;
+  optional uint64   profileBitset  = 2;
+  optional uint64   msgBitset      = 3;
 }

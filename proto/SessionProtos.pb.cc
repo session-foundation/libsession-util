@@ -163,7 +163,8 @@ PROTOBUF_CONSTEXPR LokiProfile::LokiProfile(
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.displayname_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.profilepicture_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}} {}
+  , /*decltype(_impl_.profilepicture_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.lastupdateseconds_)*/uint64_t{0u}} {}
 struct LokiProfileDefaultTypeInternal {
   PROTOBUF_CONSTEXPR LokiProfileDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -501,8 +502,8 @@ PROTOBUF_CONSTEXPR ProMessage::ProMessage(
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.proof_)*/nullptr
-  , /*decltype(_impl_.profile_bitset_)*/uint64_t{0u}
-  , /*decltype(_impl_.msg_bitset_)*/uint64_t{0u}} {}
+  , /*decltype(_impl_.profilebitset_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgbitset_)*/uint64_t{0u}} {}
 struct ProMessageDefaultTypeInternal {
   PROTOBUF_CONSTEXPR ProMessageDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -4302,6 +4303,9 @@ class LokiProfile::_Internal {
   static void set_has_profilepicture(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
+  static void set_has_lastupdateseconds(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
 };
 
 LokiProfile::LokiProfile(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -4317,7 +4321,8 @@ LokiProfile::LokiProfile(const LokiProfile& from)
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.displayname_){}
-    , decltype(_impl_.profilepicture_){}};
+    , decltype(_impl_.profilepicture_){}
+    , decltype(_impl_.lastupdateseconds_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   _impl_.displayname_.InitDefault();
@@ -4336,6 +4341,7 @@ LokiProfile::LokiProfile(const LokiProfile& from)
     _this->_impl_.profilepicture_.Set(from._internal_profilepicture(), 
       _this->GetArenaForAllocation());
   }
+  _this->_impl_.lastupdateseconds_ = from._impl_.lastupdateseconds_;
   // @@protoc_insertion_point(copy_constructor:SessionProtos.LokiProfile)
 }
 
@@ -4348,6 +4354,7 @@ inline void LokiProfile::SharedCtor(
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.displayname_){}
     , decltype(_impl_.profilepicture_){}
+    , decltype(_impl_.lastupdateseconds_){uint64_t{0u}}
   };
   _impl_.displayname_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
@@ -4393,6 +4400,7 @@ void LokiProfile::Clear() {
       _impl_.profilepicture_.ClearNonDefaultToEmpty();
     }
   }
+  _impl_.lastupdateseconds_ = uint64_t{0u};
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
 }
@@ -4418,6 +4426,15 @@ const char* LokiProfile::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
           auto str = _internal_mutable_profilepicture();
           ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint64 lastUpdateSeconds = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _Internal::set_has_lastupdateseconds(&has_bits);
+          _impl_.lastupdateseconds_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -4465,6 +4482,12 @@ uint8_t* LokiProfile::_InternalSerialize(
         2, this->_internal_profilepicture(), target);
   }
 
+  // optional uint64 lastUpdateSeconds = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_lastupdateseconds(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -4482,7 +4505,7 @@ size_t LokiProfile::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     // optional string displayName = 1;
     if (cached_has_bits & 0x00000001u) {
       total_size += 1 +
@@ -4495,6 +4518,11 @@ size_t LokiProfile::ByteSizeLong() const {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
           this->_internal_profilepicture());
+    }
+
+    // optional uint64 lastUpdateSeconds = 3;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_lastupdateseconds());
     }
 
   }
@@ -4520,13 +4548,17 @@ void LokiProfile::MergeFrom(const LokiProfile& from) {
   (void) cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     if (cached_has_bits & 0x00000001u) {
       _this->_internal_set_displayname(from._internal_displayname());
     }
     if (cached_has_bits & 0x00000002u) {
       _this->_internal_set_profilepicture(from._internal_profilepicture());
     }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_impl_.lastupdateseconds_ = from._impl_.lastupdateseconds_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
@@ -4556,6 +4588,7 @@ void LokiProfile::InternalSwap(LokiProfile* other) {
       &_impl_.profilepicture_, lhs_arena,
       &other->_impl_.profilepicture_, rhs_arena
   );
+  swap(_impl_.lastupdateseconds_, other->_impl_.lastupdateseconds_);
 }
 
 std::string LokiProfile::GetTypeName() const {
@@ -11363,10 +11396,10 @@ class ProMessage::_Internal {
   static void set_has_proof(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
-  static void set_has_profile_bitset(HasBits* has_bits) {
+  static void set_has_profilebitset(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
-  static void set_has_msg_bitset(HasBits* has_bits) {
+  static void set_has_msgbitset(HasBits* has_bits) {
     (*has_bits)[0] |= 4u;
   }
 };
@@ -11388,16 +11421,16 @@ ProMessage::ProMessage(const ProMessage& from)
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.proof_){nullptr}
-    , decltype(_impl_.profile_bitset_){}
-    , decltype(_impl_.msg_bitset_){}};
+    , decltype(_impl_.profilebitset_){}
+    , decltype(_impl_.msgbitset_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   if (from._internal_has_proof()) {
     _this->_impl_.proof_ = new ::SessionProtos::ProProof(*from._impl_.proof_);
   }
-  ::memcpy(&_impl_.profile_bitset_, &from._impl_.profile_bitset_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.msg_bitset_) -
-    reinterpret_cast<char*>(&_impl_.profile_bitset_)) + sizeof(_impl_.msg_bitset_));
+  ::memcpy(&_impl_.profilebitset_, &from._impl_.profilebitset_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.msgbitset_) -
+    reinterpret_cast<char*>(&_impl_.profilebitset_)) + sizeof(_impl_.msgbitset_));
   // @@protoc_insertion_point(copy_constructor:SessionProtos.ProMessage)
 }
 
@@ -11409,8 +11442,8 @@ inline void ProMessage::SharedCtor(
       decltype(_impl_._has_bits_){}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.proof_){nullptr}
-    , decltype(_impl_.profile_bitset_){uint64_t{0u}}
-    , decltype(_impl_.msg_bitset_){uint64_t{0u}}
+    , decltype(_impl_.profilebitset_){uint64_t{0u}}
+    , decltype(_impl_.msgbitset_){uint64_t{0u}}
   };
 }
 
@@ -11444,9 +11477,9 @@ void ProMessage::Clear() {
     _impl_.proof_->Clear();
   }
   if (cached_has_bits & 0x00000006u) {
-    ::memset(&_impl_.profile_bitset_, 0, static_cast<size_t>(
-        reinterpret_cast<char*>(&_impl_.msg_bitset_) -
-        reinterpret_cast<char*>(&_impl_.profile_bitset_)) + sizeof(_impl_.msg_bitset_));
+    ::memset(&_impl_.profilebitset_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.msgbitset_) -
+        reinterpret_cast<char*>(&_impl_.profilebitset_)) + sizeof(_impl_.msgbitset_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -11467,20 +11500,20 @@ const char* ProMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ct
         } else
           goto handle_unusual;
         continue;
-      // optional uint64 profile_bitset = 2;
+      // optional uint64 profileBitset = 2;
       case 2:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
-          _Internal::set_has_profile_bitset(&has_bits);
-          _impl_.profile_bitset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          _Internal::set_has_profilebitset(&has_bits);
+          _impl_.profilebitset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
         continue;
-      // optional uint64 msg_bitset = 3;
+      // optional uint64 msgBitset = 3;
       case 3:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
-          _Internal::set_has_msg_bitset(&has_bits);
-          _impl_.msg_bitset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          _Internal::set_has_msgbitset(&has_bits);
+          _impl_.msgbitset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -11523,16 +11556,16 @@ uint8_t* ProMessage::_InternalSerialize(
         _Internal::proof(this).GetCachedSize(), target, stream);
   }
 
-  // optional uint64 profile_bitset = 2;
+  // optional uint64 profileBitset = 2;
   if (cached_has_bits & 0x00000002u) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_profile_bitset(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_profilebitset(), target);
   }
 
-  // optional uint64 msg_bitset = 3;
+  // optional uint64 msgBitset = 3;
   if (cached_has_bits & 0x00000004u) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_msg_bitset(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_msgbitset(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -11560,14 +11593,14 @@ size_t ProMessage::ByteSizeLong() const {
           *_impl_.proof_);
     }
 
-    // optional uint64 profile_bitset = 2;
+    // optional uint64 profileBitset = 2;
     if (cached_has_bits & 0x00000002u) {
-      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_profile_bitset());
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_profilebitset());
     }
 
-    // optional uint64 msg_bitset = 3;
+    // optional uint64 msgBitset = 3;
     if (cached_has_bits & 0x00000004u) {
-      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msg_bitset());
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgbitset());
     }
 
   }
@@ -11599,10 +11632,10 @@ void ProMessage::MergeFrom(const ProMessage& from) {
           from._internal_proof());
     }
     if (cached_has_bits & 0x00000002u) {
-      _this->_impl_.profile_bitset_ = from._impl_.profile_bitset_;
+      _this->_impl_.profilebitset_ = from._impl_.profilebitset_;
     }
     if (cached_has_bits & 0x00000004u) {
-      _this->_impl_.msg_bitset_ = from._impl_.msg_bitset_;
+      _this->_impl_.msgbitset_ = from._impl_.msgbitset_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
@@ -11625,8 +11658,8 @@ void ProMessage::InternalSwap(ProMessage* other) {
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.msg_bitset_)
-      + sizeof(ProMessage::_impl_.msg_bitset_)
+      PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.msgbitset_)
+      + sizeof(ProMessage::_impl_.msgbitset_)
       - PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.proof_)>(
           reinterpret_cast<char*>(&_impl_.proof_),
           reinterpret_cast<char*>(&other->_impl_.proof_));

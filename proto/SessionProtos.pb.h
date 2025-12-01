@@ -2368,6 +2368,7 @@ class LokiProfile final :
   enum : int {
     kDisplayNameFieldNumber = 1,
     kProfilePictureFieldNumber = 2,
+    kLastUpdateSecondsFieldNumber = 3,
   };
   // optional string displayName = 1;
   bool has_displayname() const;
@@ -2405,6 +2406,19 @@ class LokiProfile final :
   std::string* _internal_mutable_profilepicture();
   public:
 
+  // optional uint64 lastUpdateSeconds = 3;
+  bool has_lastupdateseconds() const;
+  private:
+  bool _internal_has_lastupdateseconds() const;
+  public:
+  void clear_lastupdateseconds();
+  uint64_t lastupdateseconds() const;
+  void set_lastupdateseconds(uint64_t value);
+  private:
+  uint64_t _internal_lastupdateseconds() const;
+  void _internal_set_lastupdateseconds(uint64_t value);
+  public:
+
   // @@protoc_insertion_point(class_scope:SessionProtos.LokiProfile)
  private:
   class _Internal;
@@ -2417,6 +2431,7 @@ class LokiProfile final :
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr displayname_;
     ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr profilepicture_;
+    uint64_t lastupdateseconds_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
@@ -6675,30 +6690,30 @@ class ProMessage final :
       ::SessionProtos::ProProof* proof);
   ::SessionProtos::ProProof* unsafe_arena_release_proof();
 
-  // optional uint64 profile_bitset = 2;
-  bool has_profile_bitset() const;
+  // optional uint64 profileBitset = 2;
+  bool has_profilebitset() const;
   private:
-  bool _internal_has_profile_bitset() const;
+  bool _internal_has_profilebitset() const;
   public:
-  void clear_profile_bitset();
-  uint64_t profile_bitset() const;
-  void set_profile_bitset(uint64_t value);
+  void clear_profilebitset();
+  uint64_t profilebitset() const;
+  void set_profilebitset(uint64_t value);
   private:
-  uint64_t _internal_profile_bitset() const;
-  void _internal_set_profile_bitset(uint64_t value);
+  uint64_t _internal_profilebitset() const;
+  void _internal_set_profilebitset(uint64_t value);
   public:
 
-  // optional uint64 msg_bitset = 3;
-  bool has_msg_bitset() const;
+  // optional uint64 msgBitset = 3;
+  bool has_msgbitset() const;
   private:
-  bool _internal_has_msg_bitset() const;
+  bool _internal_has_msgbitset() const;
   public:
-  void clear_msg_bitset();
-  uint64_t msg_bitset() const;
-  void set_msg_bitset(uint64_t value);
+  void clear_msgbitset();
+  uint64_t msgbitset() const;
+  void set_msgbitset(uint64_t value);
   private:
-  uint64_t _internal_msg_bitset() const;
-  void _internal_set_msg_bitset(uint64_t value);
+  uint64_t _internal_msgbitset() const;
+  void _internal_set_msgbitset(uint64_t value);
   public:
 
   // @@protoc_insertion_point(class_scope:SessionProtos.ProMessage)
@@ -6712,8 +6727,8 @@ class ProMessage final :
     ::PROTOBUF_NAMESPACE_ID::internal::HasBits<1> _has_bits_;
     mutable ::PROTOBUF_NAMESPACE_ID::internal::CachedSize _cached_size_;
     ::SessionProtos::ProProof* proof_;
-    uint64_t profile_bitset_;
-    uint64_t msg_bitset_;
+    uint64_t profilebitset_;
+    uint64_t msgbitset_;
   };
   union { Impl_ _impl_; };
   friend struct ::TableStruct_SessionProtos_2eproto;
@@ -9001,6 +9016,34 @@ inline void LokiProfile::set_allocated_profilepicture(std::string* profilepictur
   }
 #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.LokiProfile.profilePicture)
+}
+
+// optional uint64 lastUpdateSeconds = 3;
+inline bool LokiProfile::_internal_has_lastupdateseconds() const {
+  bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
+  return value;
+}
+inline bool LokiProfile::has_lastupdateseconds() const {
+  return _internal_has_lastupdateseconds();
+}
+inline void LokiProfile::clear_lastupdateseconds() {
+  _impl_.lastupdateseconds_ = uint64_t{0u};
+  _impl_._has_bits_[0] &= ~0x00000004u;
+}
+inline uint64_t LokiProfile::_internal_lastupdateseconds() const {
+  return _impl_.lastupdateseconds_;
+}
+inline uint64_t LokiProfile::lastupdateseconds() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.LokiProfile.lastUpdateSeconds)
+  return _internal_lastupdateseconds();
+}
+inline void LokiProfile::_internal_set_lastupdateseconds(uint64_t value) {
+  _impl_._has_bits_[0] |= 0x00000004u;
+  _impl_.lastupdateseconds_ = value;
+}
+inline void LokiProfile::set_lastupdateseconds(uint64_t value) {
+  _internal_set_lastupdateseconds(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.LokiProfile.lastUpdateSeconds)
 }
 
 // -------------------------------------------------------------------
@@ -13848,60 +13891,60 @@ inline void ProMessage::set_allocated_proof(::SessionProtos::ProProof* proof) {
   // @@protoc_insertion_point(field_set_allocated:SessionProtos.ProMessage.proof)
 }
 
-// optional uint64 profile_bitset = 2;
-inline bool ProMessage::_internal_has_profile_bitset() const {
+// optional uint64 profileBitset = 2;
+inline bool ProMessage::_internal_has_profilebitset() const {
   bool value = (_impl_._has_bits_[0] & 0x00000002u) != 0;
   return value;
 }
-inline bool ProMessage::has_profile_bitset() const {
-  return _internal_has_profile_bitset();
+inline bool ProMessage::has_profilebitset() const {
+  return _internal_has_profilebitset();
 }
-inline void ProMessage::clear_profile_bitset() {
-  _impl_.profile_bitset_ = uint64_t{0u};
+inline void ProMessage::clear_profilebitset() {
+  _impl_.profilebitset_ = uint64_t{0u};
   _impl_._has_bits_[0] &= ~0x00000002u;
 }
-inline uint64_t ProMessage::_internal_profile_bitset() const {
-  return _impl_.profile_bitset_;
+inline uint64_t ProMessage::_internal_profilebitset() const {
+  return _impl_.profilebitset_;
 }
-inline uint64_t ProMessage::profile_bitset() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.profile_bitset)
-  return _internal_profile_bitset();
+inline uint64_t ProMessage::profilebitset() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.profileBitset)
+  return _internal_profilebitset();
 }
-inline void ProMessage::_internal_set_profile_bitset(uint64_t value) {
+inline void ProMessage::_internal_set_profilebitset(uint64_t value) {
   _impl_._has_bits_[0] |= 0x00000002u;
-  _impl_.profile_bitset_ = value;
+  _impl_.profilebitset_ = value;
 }
-inline void ProMessage::set_profile_bitset(uint64_t value) {
-  _internal_set_profile_bitset(value);
-  // @@protoc_insertion_point(field_set:SessionProtos.ProMessage.profile_bitset)
+inline void ProMessage::set_profilebitset(uint64_t value) {
+  _internal_set_profilebitset(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.ProMessage.profileBitset)
 }
 
-// optional uint64 msg_bitset = 3;
-inline bool ProMessage::_internal_has_msg_bitset() const {
+// optional uint64 msgBitset = 3;
+inline bool ProMessage::_internal_has_msgbitset() const {
   bool value = (_impl_._has_bits_[0] & 0x00000004u) != 0;
   return value;
 }
-inline bool ProMessage::has_msg_bitset() const {
-  return _internal_has_msg_bitset();
+inline bool ProMessage::has_msgbitset() const {
+  return _internal_has_msgbitset();
 }
-inline void ProMessage::clear_msg_bitset() {
-  _impl_.msg_bitset_ = uint64_t{0u};
+inline void ProMessage::clear_msgbitset() {
+  _impl_.msgbitset_ = uint64_t{0u};
   _impl_._has_bits_[0] &= ~0x00000004u;
 }
-inline uint64_t ProMessage::_internal_msg_bitset() const {
-  return _impl_.msg_bitset_;
+inline uint64_t ProMessage::_internal_msgbitset() const {
+  return _impl_.msgbitset_;
 }
-inline uint64_t ProMessage::msg_bitset() const {
-  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.msg_bitset)
-  return _internal_msg_bitset();
+inline uint64_t ProMessage::msgbitset() const {
+  // @@protoc_insertion_point(field_get:SessionProtos.ProMessage.msgBitset)
+  return _internal_msgbitset();
 }
-inline void ProMessage::_internal_set_msg_bitset(uint64_t value) {
+inline void ProMessage::_internal_set_msgbitset(uint64_t value) {
   _impl_._has_bits_[0] |= 0x00000004u;
-  _impl_.msg_bitset_ = value;
+  _impl_.msgbitset_ = value;
 }
-inline void ProMessage::set_msg_bitset(uint64_t value) {
-  _internal_set_msg_bitset(value);
-  // @@protoc_insertion_point(field_set:SessionProtos.ProMessage.msg_bitset)
+inline void ProMessage::set_msgbitset(uint64_t value) {
+  _internal_set_msgbitset(value);
+  // @@protoc_insertion_point(field_set:SessionProtos.ProMessage.msgBitset)
 }
 
 #ifdef __GNUC__
