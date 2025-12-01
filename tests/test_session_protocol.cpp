@@ -53,8 +53,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Create protobuf `Content.proMessage`
     SessionProtos::ProMessage* pro = content.mutable_promessage();
-    pro->set_profile_bitset(profile_bitset.data);
-    pro->set_msg_bitset(msg_bitset.data);
+    pro->set_profilebitset(profile_bitset.data);
+    pro->set_msgbitset(msg_bitset.data);
 
     // Create protobuf `Content.proMessage.proof`
     SessionProtos::ProProof* proto_proof = pro->mutable_proof();
