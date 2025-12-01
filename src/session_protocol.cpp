@@ -868,8 +868,8 @@ DecodedEnvelope decode_envelope(
                         "Parse decrypted message failed, pro metadata was malformed");
 
             // Fill out the resulting proof structure, we have parsed successfully
-            pro.msg_bitset.data = pro_msg.msg_bitset();
-            pro.profile_bitset.data = pro_msg.profile_bitset();
+            pro.msg_bitset.data = pro_msg.msgbitset();
+            pro.profile_bitset.data = pro_msg.profilebitset();
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
             std::memcpy(
@@ -1028,8 +1028,8 @@ DecodedCommunityMessage decode_for_community(
                     "Decoding community message failed, pro metadata was malformed");
 
         // Fill out the resulting proof structure, we have parsed successfully
-        pro.msg_bitset.data = pro_msg.msg_bitset();
-        pro.profile_bitset.data = pro_msg.profile_bitset();
+        pro.msg_bitset.data = pro_msg.msgbitset();
+        pro.profile_bitset.data = pro_msg.profilebitset();
         std::memcpy(
                 proof.gen_index_hash.data(),
                 proto_proof.genindexhash().data(),
