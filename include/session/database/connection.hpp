@@ -24,6 +24,12 @@ struct SetResult {
     const char* sql_error;
 };
 
+struct GetAccount {
+    bool found;
+    uint32_t db_id;
+    uc64 long_term_privkey;
+};
+
 /// The row from the runtime table which is the table housing global settings of the Session
 /// database. There's only 1 row in the runtime table which gets extracted and filled out into this
 /// struct.
@@ -91,6 +97,27 @@ struct Connection {
     /// - `pro_revocations_ticket` -- Current version of the pro revocations list that has been
     ///   synced from the Session Pro Backend.
     Runtime get_runtime();
+
+    /// API: database/Connection::get_account
+    ///
+    /// Get the Session account secrets stored in this database. If no account was initialised yet
+    /// then the output object's found flag is set to false.
+    ///
+    /// Outputs:
+    /// - `found` -- True if there was an account secret in the DB, false otherwise
+    /// - `db_id` -- Primary key of the row that the secret was retrieved from. 0 if `found` is
+    ///   false
+    /// - `long_term_privkey` -- Session account's long term 64 byte libsodium-style private key.
+    ///   This key is all 0s if `found` was false.
+    GetAccount get_account();
+
+    /// API: database/Connection::set_account
+    ///
+    /// Sets the long-term 64 byte libsodium-style private key as the Session account's secret
+    /// associated with this database. This overwrites any pre-existing key, if any.
+    ///
+    /// This function throws if the key is incorrectly sized or if the DB insertion failed.
+    void set_account(std::span<const uint8_t> long_term_privkey);
 
     /// API: database/set_pro_revocations
     ///

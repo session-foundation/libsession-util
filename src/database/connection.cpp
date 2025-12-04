@@ -1,5 +1,6 @@
 #include "session/database/connection.hpp"
 
+#include <sodium/crypto_sign_ed25519.h>
 #include <oxenc/hex.h>
 #include <sqlcipher/sqlite3.h>
 
@@ -89,6 +90,12 @@ CREATE TABLE IF NOT EXISTS pro_revocations (
     expiry_unix_ts_ms INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS accounts (
+    id                INTEGER PRIMARY KEY NOT NULL,
+    long_term_privkey BLOB NOT NULL, -- 64 byte libsodium-style secret key
+    UNIQUE(long_term_privkey)
+);
+
 CREATE TABLE IF NOT EXISTS runtime (
     id                     INTEGER PRIMARY KEY NOT NULL,
     pro_revocations_ticket INTEGER NOT NULL
@@ -159,6 +166,57 @@ Runtime Connection::get_runtime() {
         result.pro_revocations_ticket = sqlite3_column_int(stmt, 1);
     });
     return result;
+}
+
+GetAccount Connection::get_account()
+{
+    GetAccount result = {};
+    sqlite3_stmt* stmt = nullptr;
+    query("SELECT id, long_term_privkey FROM accounts ORDER BY id ASC LIMIT 1",
+          [&result](sqlite3_stmt* stmt) {
+              int db_id = sqlite3_column_int(stmt, 0);
+              const void* privkey = sqlite3_column_blob(stmt, 1);
+              int privkey_size = sqlite3_column_bytes(stmt, 1);
+              if (privkey_size != result.long_term_privkey.max_size()) {
+                  throw std::runtime_error(
+                          fmt::format(
+                                  "Privkey for account was not {}b was {}b",
+                                  result.long_term_privkey.max_size(),
+                                  privkey_size));
+              }
+              result.found = true;
+              result.db_id = db_id;
+              std::memcpy(result.long_term_privkey.data(), privkey, privkey_size);
+          });
+    return result;
+}
+
+void Connection::set_account(std::span<const uint8_t> long_term_privkey)
+{
+    if (long_term_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
+        throw std::invalid_argument(
+                fmt::format(
+                        "Privkey must be {}b, was {}b, unable to set account keys",
+                        crypto_sign_ed25519_SECRETKEYBYTES,
+                        long_term_privkey.size()));
+    }
+
+    sqlite3_stmt* stmt = nullptr;
+    std::string_view sql = R"(
+INSERT OR REPLACE INTO accounts (id, long_term_privkey)
+VALUES (1, ?);
+)";
+
+    int rc = sqlite3_prepare_v2(db_.get(), sql.data(), sql.size() + 1, &stmt, nullptr);
+    if (rc == SQLITE_OK)
+        rc = sqlite3_bind_blob(stmt, 1, long_term_privkey.data(), long_term_privkey.size(), nullptr);
+    if (rc == SQLITE_OK)
+        rc = sqlite3_step(stmt);
+    int finalize_rc = sqlite3_finalize(stmt);
+    if (rc == SQLITE_OK)
+        rc = finalize_rc;
+    if (rc != SQLITE_DONE)
+        throw_sql_error(rc, "Failed to update account keys");
 }
 
 SetResult Connection::set_pro_revocations(
@@ -339,6 +397,43 @@ LIBSESSION_C_API void session_database_connection_close(session_database_connect
             memset(conn->opaque, 0, sizeof(conn->opaque));
         }
     }
+}
+
+LIBSESSION_C_API session_database_get_account
+session_database_connection_get_account(session_database_connection* conn)
+{
+    session_database_get_account result = {};
+    if (conn) {
+        auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+        GetAccount cpp = conn_cpp->get_account();
+        result.db_id = cpp.db_id;
+        result.found = cpp.found;
+        static_assert(sizeof(result.long_term_privkey.data) == cpp.long_term_privkey.max_size());
+        std::memcpy(
+                result.long_term_privkey.data,
+                cpp.long_term_privkey.data(),
+                cpp.long_term_privkey.size());
+    }
+    return result;
+}
+
+LIBSESSION_C_API session_c_result session_database_connection_set_account(
+        session_database_connection* conn,
+        void const* long_term_privkey,
+        size_t long_term_privkey_size) {
+    session_c_result result = {};
+    if (conn) {
+        auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+        auto long_term_privkey_cpp = std::span{
+                reinterpret_cast<const uint8_t*>(long_term_privkey), long_term_privkey_size};
+        try {
+            conn_cpp->set_account(long_term_privkey_cpp);
+            result.success = true;
+        } catch (const std::exception& e) {
+            session::write_exception_to_session_c_result(&result, e.what());
+        }
+    }
+    return result;
 }
 
 LIBSESSION_C_API session_database_set_result session_database_connection_set_pro_revocations(

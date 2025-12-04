@@ -162,4 +162,48 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     REQUIRE(src_items[1].expiry_unix_ts_ms == db_items_after_delete[0].expiry_unix_ts_ms);
     REQUIRE(ticket == 2);
 }
+
+TEST_CASE("Core", "[core][database][pro][account]") {
+    session_core_core core = {};
+    session_core_core_init(&core);
+    auto on_exit = session::scope_exit([&]() { session_core_core_deinit(&core); });
+
+    // Setup the encryption key
+    session::cleared_array<48> raw_key = {};
+    randombytes_buf(raw_key.data(), raw_key.size());
+    span_u8 raw_key_span = {raw_key.data(), raw_key.size()};
+
+    // Open the DB
+    session_database_connection db = session_core_core_db_conn(&core);
+    session_database_connection_open(&db, string8_literal(":memory:"), raw_key_span);
+
+    // Try get an account before we added one
+    bytes64 zero_long_term_key = {};
+    session_database_get_account get = session_database_connection_get_account(&db);
+    REQUIRE_FALSE(get.found);
+    REQUIRE(get.db_id == 0);
+    REQUIRE(memcmp(get.long_term_privkey.data,
+                   zero_long_term_key.data,
+                   sizeof(zero_long_term_key.data)) == 0);
+
+    // Set a 1 byte zero key for the account and check that it does not accept it
+    session_c_result c_result =
+            session_database_connection_set_account(&db, zero_long_term_key.data, 1);
+    REQUIRE(!c_result.success);
+    REQUIRE(c_result.error_count > 0);
+
+    // Generate a key and set it
+    bytes64 long_term_key = {};
+    randombytes_buf(long_term_key.data, sizeof(long_term_key.data));
+    c_result = session_database_connection_set_account(&db, long_term_key.data, sizeof(long_term_key.data));
+    INFO(c_result.error);
+    REQUIRE(c_result.success);
+    REQUIRE(c_result.error_count == 0);
+
+    // Try retrieving the account again
+    session_database_get_account get_again = session_database_connection_get_account(&db);
+    REQUIRE(get_again.found);
+    REQUIRE(get_again.db_id == 1);
+    REQUIRE(memcmp(get_again.long_term_privkey.data, long_term_key.data, sizeof(long_term_key.data)) == 0);
+}
 #endif  // !defined(DISABLE_SQLCIPHER_DATABASE)

@@ -33,6 +33,12 @@ struct session_database_get_pro_revocation_result {
     size_t count;
 };
 
+struct session_database_get_account {
+    bool found;
+    uint32_t db_id;
+    bytes64 long_term_privkey;
+};
+
 /// API: session_database_connection_open
 ///
 /// Open a connection to the DB specified at `path`. If this connection previously has an open
@@ -58,6 +64,31 @@ LIBSESSION_EXPORT session_c_result session_database_connection_open(
 /// Inputs:
 /// - `conn` -- DB connection object to close
 LIBSESSION_EXPORT void session_database_connection_close(session_database_connection* conn);
+
+/// API: session_database_connection::get_account
+///
+/// Get the Session account secrets stored in this database. If no account was initialised yet
+/// then the output object's found flag is set to false.
+///
+/// Outputs:
+/// - `found` -- True if there was an account secret in the DB, false otherwise
+/// - `db_id` -- Primary key of the row that the secret was retrieved from. 0 if `found` is
+///   false
+/// - `long_term_privkey` -- Session account's long term 64 byte libsodium-style private key.
+///   This key is all 0s if `found` was false.
+LIBSESSION_EXPORT session_database_get_account
+session_database_connection_get_account(session_database_connection* conn);
+
+/// API: session_database_connection_set_account
+///
+/// Sets the long-term 64 byte libsodium-style private key as the Session account's secret
+/// associated with this database. This overwrites any pre-existing key, if any.
+///
+/// This function errors if the key is incorrectly sized or if the DB insertion failed.
+LIBSESSION_EXPORT session_c_result session_database_connection_set_account(
+        session_database_connection* conn,
+        void const* long_term_privkey,
+        size_t long_term_privkey_size);
 
 /// API: session_database_connection_set_pro_revocations
 ///
