@@ -27,6 +27,11 @@ struct UserProfileTester {
                 static_cast<int>(value.time_since_epoch().count());
     }
 
+    static void set_profile_updated(
+            session::config::UserProfile& profile, std::chrono::sys_seconds value) {
+        profile.data["t"] = static_cast<int>(value.time_since_epoch().count());
+    }
+
     static std::chrono::sys_seconds get_reupload_profile_updated_value(config_object* conf) {
         return std::chrono::sys_seconds{std::chrono::seconds{
                 session::config::unbox<session::config::UserProfile>(conf)->data["T"].integer_or(
@@ -628,9 +633,12 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
     }
 
+    UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{123s});
+    CHECK(profile.get_profile_updated().time_since_epoch().count() == 123);
     CHECK_FALSE(profile.get_pro_config().has_value());
     profile.set_pro_config(pro_cpp);
     CHECK(profile.get_pro_config() == pro_cpp);
+    CHECK(profile.get_profile_updated().time_since_epoch().count() != 123);
 
     {
         session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};

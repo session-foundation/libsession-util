@@ -184,6 +184,9 @@ void UserProfile::set_pro_config(ProConfig const& pro) {
     if (pro_config != pro) {
         pro_config = pro;
         _needs_dump = true;
+        const auto target_timestamp =
+                (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+        data[target_timestamp] = ts_now();
     }
 }
 
