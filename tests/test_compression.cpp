@@ -10,11 +10,8 @@
 #include "utils.hpp"
 
 namespace session::config {
-void compress_message(ustring& msg, int level);
+void compress_message(std::vector<unsigned char>& msg, int level);
 }
-
-using namespace std::literals;
-using namespace oxenc::literals;
 
 TEST_CASE("compression", "[config][compression]") {
 
@@ -40,7 +37,7 @@ TEST_CASE("compression", "[config][compression]") {
     // This message (from the user profile test case) doesn't compress any better than plaintext
     // with zstd compression, so the compress_message call shouldn't change it.
     // clang-format off
-    data =
+    data = session::to_vector(
         "d"
           "1:#" "i1e"
           "1:&" "d"
@@ -51,8 +48,8 @@ TEST_CASE("compression", "[config][compression]") {
           "1:<" "l"
             "l"
               "i0e"
-              "32:"_bytes +
-                "ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hexbytes +
+              "32:" +
+                session::to_string("ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hexbytes) +
               "de"
             "e"
           "e"
@@ -61,10 +58,10 @@ TEST_CASE("compression", "[config][compression]") {
             "1:p" "0:"
             "1:q" "0:"
           "e"
-        "e"_bytes;
+        "e");
     //
     // If we add some more repetition in it, though, it will:
-    auto data2 =
+    auto data2 = session::to_vector(
         "d"
           "1:#" "i1e"
           "1:&" "d"
@@ -75,8 +72,8 @@ TEST_CASE("compression", "[config][compression]") {
           "1:<" "l"
             "l"
               "i0e"
-              "32:"_bytes +
-                "ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hexbytes +
+              "32:" +
+                session::to_string("ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hexbytes) +
               "de"
             "e"
           "e"
@@ -85,7 +82,7 @@ TEST_CASE("compression", "[config][compression]") {
             "1:p" "0:"
             "1:q" "0:"
           "e"
-        "e"_bytes;
+        "e");
     // clang-format on
 
     d = data;

@@ -37,7 +37,7 @@ namespace session::random {
 ///
 /// Outputs:
 /// - random bytes of the specified length.
-ustring random(size_t size);
+std::vector<unsigned char> random(size_t size);
 
 /// API: random/random_base32
 ///

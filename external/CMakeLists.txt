@@ -102,14 +102,14 @@ endif()
 
 set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
 if(ENABLE_ONIONREQ)
-  libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.1.0 oxen-libquic)
+  libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.3.0 oxen-libquic)
 endif()
 
 if(NOT TARGET oxenc::oxenc)
     # The oxenc target will already exist if we load libquic above via submodule
     set(OXENC_BUILD_TESTS OFF CACHE BOOL "")
     set(OXENC_BUILD_DOCS OFF CACHE BOOL "")
-    libsession_system_or_submodule(OXENC oxenc liboxenc>=1.1.0 oxen-libquic/external/oxen-encoding)
+    libsession_system_or_submodule(OXENC oxenc liboxenc>=1.3.0 oxen-libquic/external/oxen-encoding)
 endif()
 
 if(NOT TARGET oxen::logging)
@@ -125,7 +125,6 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang AND NOT CMAKE_CXX_COMPILE
     message(WARNING "${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} is broken: filenames in logging statements will not display properly")
     oxen_logging_add_source_dir("${CMAKE_CURRENT_SOURCE_DIR}/oxen-libquic/external/oxen-logging/include/oxen")
 endif()
-
 
 if(CMAKE_C_COMPILER_LAUNCHER)
   set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")

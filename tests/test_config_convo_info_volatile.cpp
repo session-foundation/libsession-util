@@ -10,9 +10,6 @@
 
 #include "utils.hpp"
 
-using namespace std::literals;
-using namespace oxenc::literals;
-
 TEST_CASE("Conversations", "[config][conversations]") {
 
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
@@ -30,13 +27,18 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{ustring_view{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
 
     constexpr auto definitely_real_id =
             "055000000000000000000000000000000000000000000000000000000000000000"sv;
 
     constexpr auto benders_nightmare_group =
             "030111101001001000101010011011010010101010111010000110100001210000"sv;
+
+    constexpr auto legacy_blinded_id =
+            "150000000000000000000000000000000000101010111010000110100001210000"sv;
+    constexpr auto blinded_id =
+            "255000000000000000000000000000000000101010111010000110100001210000"sv;
 
     CHECK_FALSE(convos.get_1to1(definitely_real_id));
 
@@ -93,12 +95,33 @@ TEST_CASE("Conversations", "[config][conversations]") {
     g.unread = true;
     convos.set(g);
 
+    CHECK_FALSE(convos.get_blinded_1to1(legacy_blinded_id));
+    CHECK_FALSE(convos.get_blinded_1to1(blinded_id));
+
+    auto lb = convos.get_or_construct_blinded_1to1(legacy_blinded_id);
+    CHECK(lb.blinded_session_id == legacy_blinded_id);
+    CHECK(lb.last_read == 0);
+    CHECK_FALSE(lb.unread);
+
+    lb.last_read = now_ms;
+    lb.unread = true;
+    convos.set(lb);
+
+    auto b = convos.get_or_construct_blinded_1to1(blinded_id);
+    CHECK(b.blinded_session_id == blinded_id);
+    CHECK(b.last_read == 0);
+    CHECK_FALSE(b.unread);
+
+    b.last_read = now_ms;
+    b.unread = true;
+    convos.set(b);
+
     auto [seqno, to_push, obs] = convos.push();
 
     CHECK(seqno == 1);
 
     // Pretend we uploaded it
-    convos.confirm_pushed(seqno, "hash1");
+    convos.confirm_pushed(seqno, {"hash1"});
     CHECK(convos.needs_dump());
     CHECK_FALSE(convos.needs_push());
 
@@ -130,6 +153,20 @@ TEST_CASE("Conversations", "[config][conversations]") {
     CHECK(x3->last_read == now_ms);
     CHECK(x3->unread);
 
+    auto x4 = convos2.get_blinded_1to1(legacy_blinded_id);
+    REQUIRE(x4);
+    CHECK(x4->blinded_session_id ==
+          "150000000000000000000000000000000000101010111010000110100001210000");
+    CHECK(x4->last_read == now_ms);
+    CHECK(x4->unread);
+
+    auto x5 = convos2.get_blinded_1to1(blinded_id);
+    REQUIRE(x5);
+    CHECK(x5->blinded_session_id ==
+          "255000000000000000000000000000000000101010111010000110100001210000");
+    CHECK(x5->last_read == now_ms);
+    CHECK(x5->unread);
+
     auto another_id = "051111111111111111111111111111111111111111111111111111111111111111"sv;
     auto c2 = convos.get_or_construct_1to1(another_id);
     c2.unread = true;
@@ -140,20 +177,27 @@ TEST_CASE("Conversations", "[config][conversations]") {
     c3.last_read = now_ms - 50;
     convos2.set(c3);
 
+    auto c4 = convos2.get_or_construct_blinded_1to1(
+            "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+    c4.unread = true;
+    convos2.set(c4);
+
     CHECK(convos2.needs_push());
 
     std::tie(seqno, to_push, obs) = convos2.push();
 
     CHECK(seqno == 2);
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
-    merge_configs.emplace_back("hash2", to_push);
+    REQUIRE(to_push.size() == 1);
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    merge_configs.emplace_back("hash2", to_push[0]);
     convos.merge(merge_configs);
-    convos2.confirm_pushed(seqno, "hash2");
+    convos2.confirm_pushed(seqno, {"hash2"});
 
     CHECK_FALSE(convos.needs_push());
     CHECK(std::get<seqno_t>(convos.push()) == seqno);
 
+    using session::config::convo::blinded_one_to_one;
     using session::config::convo::community;
     using session::config::convo::group;
     using session::config::convo::legacy_group;
@@ -165,17 +209,21 @@ TEST_CASE("Conversations", "[config][conversations]") {
           "1-to-1: 055000000000000000000000000000000000000000000000000000000000000000",
           "gr: 030111101001001000101010011011010010101010111010000110100001210000",
           "comm: http://example.org:5678/r/sudokuroom",
-          "lgr: 05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"})
+          "lgr: 05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "lb: 150000000000000000000000000000000000101010111010000110100001210000",
+          "b: 2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "b: 255000000000000000000000000000000000101010111010000110100001210000"})
         expected.emplace_back(e);
 
     for (auto* conv : {&convos, &convos2}) {
         // Iterate through and make sure we got everything we expected
         seen.clear();
-        CHECK(conv->size() == 5);
+        CHECK(conv->size() == 8);
         CHECK(conv->size_1to1() == 2);
         CHECK(conv->size_communities() == 1);
         CHECK(conv->size_legacy_groups() == 1);
         CHECK(conv->size_groups() == 1);
+        CHECK(conv->size_blinded_1to1() == 3);
         CHECK_FALSE(conv->empty());
         for (const auto& convo : *conv) {
             if (auto* c = std::get_if<one_to_one>(&convo))
@@ -187,6 +235,10 @@ TEST_CASE("Conversations", "[config][conversations]") {
                         "comm: " + std::string{c->base_url()} + "/r/" + std::string{c->room()});
             else if (auto* c = std::get_if<legacy_group>(&convo))
                 seen.push_back("lgr: " + c->id);
+            else if (auto* c = std::get_if<blinded_one_to_one>(&convo); c->legacy_blinding)
+                seen.push_back("lb: " + c->blinded_session_id);
+            else if (auto* c = std::get_if<blinded_one_to_one>(&convo); !c->legacy_blinding)
+                seen.push_back("b: " + c->blinded_session_id);
             else
                 seen.push_back("unknown convo type!");
         }
@@ -198,32 +250,48 @@ TEST_CASE("Conversations", "[config][conversations]") {
     convos.erase_1to1("052000000000000000000000000000000000000000000000000000000000000000");
     CHECK_FALSE(convos.needs_push());
     convos.erase_1to1("055000000000000000000000000000000000000000000000000000000000000000");
+    convos.erase_blinded_1to1("255000000000000000000000000000000000101010111010000110100001210000");
     CHECK(convos.needs_push());
-    CHECK(convos.size() == 4);
+    CHECK(convos.size() == 6);
     CHECK(convos.size_1to1() == 1);
     CHECK(convos.size_groups() == 1);
+    CHECK(convos.size_blinded_1to1() == 2);
 
     // Check the single-type iterators:
     seen.clear();
     for (auto it = convos.begin_1to1(); it != convos.end(); ++it)
         seen.push_back(it->session_id);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "051111111111111111111111111111111111111111111111111111111111111111",
-                  }});
+                  });
 
     seen.clear();
     for (auto it = convos.begin_communities(); it != convos.end(); ++it)
         seen.emplace_back(it->base_url());
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "http://example.org:5678",
-                  }});
+                  });
 
     seen.clear();
     for (auto it = convos.begin_legacy_groups(); it != convos.end(); ++it)
         seen.emplace_back(it->id);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                  }});
+                  });
+
+    seen.clear();
+    for (auto it = convos.begin_blinded_1to1(); it != convos.end(); ++it)
+        seen.emplace_back(it->blinded_session_id);
+    CHECK(seen == std::vector<std::string>{
+                          "150000000000000000000000000000000000101010111010000110100001210000",
+                          "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                  });
+
+    // Ensure that we throw correctly when giving invalid blinded ids
+    auto invalid_id_1 = "072222222222222222222222222222222222222222222222222222222222222222"sv;
+    auto invalid_id_2 = "992222222222222222222222222222222222222222222222222222222222222222"sv;
+    CHECK_THROWS(convos.get_or_construct_blinded_1to1(invalid_id_1));
+    CHECK_THROWS(convos.get_or_construct_blinded_1to1(invalid_id_2));
 }
 
 TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
@@ -316,13 +384,27 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     // The new data doesn't get stored until we call this:
     convo_info_volatile_set_community(conf, &og);
 
+    const char* const blinded_id =
+            "150000000000000000000000000000000000101010111010000110100001210000";
+    convo_info_volatile_blinded_1to1 b1;
+    REQUIRE_FALSE(convo_info_volatile_get_blinded_1to1(conf, &b1, blinded_id));
+    REQUIRE(convo_info_volatile_get_or_construct_blinded_1to1(conf, &b1, blinded_id));
+    b1.last_read = now_ms;
+    convo_info_volatile_set_blinded_1to1(conf, &b1);
+
+    CHECK(config_needs_push(conf));
+    CHECK(config_needs_dump(conf));
+
     config_push_data* to_push = config_push(conf);
     auto seqno = to_push->seqno;
-    free(to_push);
     CHECK(seqno == 1);
+    REQUIRE(to_push->n_configs == 1);
+    free(to_push);
+
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
 
     // Pretend we uploaded it
-    config_confirm_pushed(conf, seqno, "hash1");
+    config_confirm_pushed(conf, seqno, &(tmphash = "hash1"), 1);
     CHECK(config_needs_dump(conf));
     CHECK_FALSE(config_needs_push(conf));
 
@@ -359,20 +441,28 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     convo_info_volatile_set_legacy_group(conf2, &cg);
     CHECK(config_needs_push(conf2));
 
+    convo_info_volatile_blinded_1to1 b2;
+    REQUIRE(convo_info_volatile_get_or_construct_blinded_1to1(
+            conf2, &b2, "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"));
+    b2.unread = true;
+    convo_info_volatile_set_blinded_1to1(conf2, &b2);
+    CHECK(config_needs_push(conf2));
+
     to_push = config_push(conf2);
     CHECK(to_push->seqno == 2);
+    REQUIRE(to_push->n_configs == 1);
 
     const char* hash_data[1];
     const unsigned char* merge_data[1];
     size_t merge_size[1];
     hash_data[0] = "hash123";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
     config_string_list* accepted = config_merge(conf, hash_data, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "hash123"sv);
     free(accepted);
-    config_confirm_pushed(conf2, seqno, "hash123");
+    config_confirm_pushed(conf2, seqno, &(tmphash = "hash123"), 1);
     free(to_push);
 
     CHECK_FALSE(config_needs_push(conf));
@@ -381,14 +471,16 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     for (auto* conf : {conf, conf2}) {
         // Iterate through and make sure we got everything we expected
         seen.clear();
-        CHECK(convo_info_volatile_size(conf) == 4);
+        CHECK(convo_info_volatile_size(conf) == 6);
         CHECK(convo_info_volatile_size_1to1(conf) == 2);
         CHECK(convo_info_volatile_size_communities(conf) == 1);
         CHECK(convo_info_volatile_size_legacy_groups(conf) == 1);
+        CHECK(convo_info_volatile_size_blinded_1to1(conf) == 2);
 
         convo_info_volatile_1to1 c1;
         convo_info_volatile_community c2;
         convo_info_volatile_legacy_group c3;
+        convo_info_volatile_blinded_1to1 c4;
         convo_info_volatile_iterator* it = convo_info_volatile_iterator_new(conf);
         for (; !convo_info_volatile_iterator_done(it); convo_info_volatile_iterator_advance(it)) {
             if (convo_info_volatile_it_is_1to1(it, &c1)) {
@@ -397,19 +489,25 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
                 seen.push_back("comm: "s + c2.base_url + "/r/" + c2.room);
             } else if (convo_info_volatile_it_is_legacy_group(it, &c3)) {
                 seen.push_back("lgr: "s + c3.group_id);
+            } else if (convo_info_volatile_it_is_blinded_1to1(it, &c4)) {
+                seen.push_back("b: "s + c4.blinded_session_id);
             }
         }
         convo_info_volatile_iterator_free(it);
 
         CHECK(seen == std::vector<std::string>{
-                              {"1-to-1: "
-                               "051111111111111111111111111111111111111111111111111111111111111111",
-                               "1-to-1: "
-                               "055000000000000000000000000000000000000000000000000000000000000000",
-                               "comm: http://example.org:5678/r/sudokuroom",
-                               "lgr: "
-                               "05ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-                               "c"}});
+                              "1-to-1: "
+                              "051111111111111111111111111111111111111111111111111111111111111111",
+                              "1-to-1: "
+                              "055000000000000000000000000000000000000000000000000000000000000000",
+                              "comm: http://example.org:5678/r/sudokuroom",
+                              "lgr: "
+                              "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+                              "b: "
+                              "150000000000000000000000000000000000101010111010000110100001210000",
+                              "b: "
+                              "2512345cccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                              "c"});
     }
 
     CHECK_FALSE(config_needs_push(conf));
@@ -418,9 +516,12 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     CHECK_FALSE(config_needs_push(conf));
     convo_info_volatile_erase_1to1(
             conf, "055000000000000000000000000000000000000000000000000000000000000000");
+    convo_info_volatile_erase_blinded_1to1(
+            conf, "2512345ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
     CHECK(config_needs_push(conf));
-    CHECK(convo_info_volatile_size(conf) == 3);
+    CHECK(convo_info_volatile_size(conf) == 4);
     CHECK(convo_info_volatile_size_1to1(conf) == 1);
+    CHECK(convo_info_volatile_size_blinded_1to1(conf) == 1);
 
     // Check the single-type iterators:
     seen.clear();
@@ -446,9 +547,9 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
         seen.emplace_back(ogi.base_url);
     }
     convo_info_volatile_iterator_free(it);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "http://example.org:5678",
-                  }});
+                  });
 
     seen.clear();
     convo_info_volatile_legacy_group cgi;
@@ -459,9 +560,22 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
         seen.emplace_back(cgi.group_id);
     }
     convo_info_volatile_iterator_free(it);
-    CHECK(seen == std::vector<std::string>{{
+    CHECK(seen == std::vector<std::string>{
                           "05cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-                  }});
+                  });
+
+    seen.clear();
+    convo_info_volatile_blinded_1to1 bi;
+    for (it = convo_info_volatile_iterator_new_blinded_1to1(conf);
+         !convo_info_volatile_iterator_done(it);
+         convo_info_volatile_iterator_advance(it)) {
+        REQUIRE(convo_info_volatile_it_is_blinded_1to1(it, &bi));
+        seen.emplace_back(bi.blinded_session_id);
+    }
+    convo_info_volatile_iterator_free(it);
+    CHECK(seen == std::vector<std::string>{
+                          "150000000000000000000000000000000000101010111010000110100001210000",
+                  });
 }
 
 TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
@@ -481,10 +595,11 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::ConvoInfoVolatile convos{ustring_view{seed}, std::nullopt};
+    session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
 
-    auto some_pubkey = [](unsigned char x) -> ustring {
-        ustring s = "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes;
+    auto some_pubkey = [](unsigned char x) -> std::vector<unsigned char> {
+        std::vector<unsigned char> s =
+                "0000000000000000000000000000000000000000000000000000000000000000"_hexbytes;
         s[31] = x;
         return s;
     };
@@ -513,7 +628,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
             convos.set(c);
         } else {
             auto c = convos.get_or_construct_community(
-                    "https://example.org", "room" + std::to_string(i), some_pubkey(i));
+                    "https://example.org", "room{}"_format(i), some_pubkey(i));
             c.last_read = unix_timestamp(i);
             if (i % 5 == 0)
                 c.unread = true;
@@ -590,9 +705,13 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
     // Fake push:
     config_push_data* to_push = config_push(conf);
     seqno_t seqno = to_push->seqno;
+    REQUIRE(to_push->n_configs == 1);
     free(to_push);
     CHECK(seqno == 1);
-    config_confirm_pushed(conf, seqno, "somehash");
+
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
+
+    config_confirm_pushed(conf, seqno, &(tmphash = "somehash"), 1);
     CHECK(config_needs_dump(conf));
 
     // Dump:
@@ -616,7 +735,8 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
 
     to_push = config_push(conf);
     CHECK(to_push->seqno == 2);
-    config_confirm_pushed(conf, to_push->seqno, "hash5235");
+    REQUIRE(to_push->n_configs == 1);
+    config_confirm_pushed(conf, to_push->seqno, &(tmphash = "hash5235"), 1);
 
     // But *before* we load the push make a dirtying change to conf2 that we *don't* push (so that
     // we'll be merging into a dirty-state config):
@@ -632,8 +752,9 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
     const unsigned char* merge_data[1];
     size_t merge_size[1];
     merge_hash[0] = "hash5235";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    REQUIRE(to_push->n_configs == 1);
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
 
     config_string_list* accepted = config_merge(conf2, merge_hash, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
@@ -655,7 +776,8 @@ TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load
     CHECK(config_needs_push(conf2));
     to_push = config_push(conf2);
     CHECK(to_push->seqno == 3);
-    config_confirm_pushed(conf2, to_push->seqno, "hashz");
+    REQUIRE(to_push->n_configs == 1);
+    config_confirm_pushed(conf2, to_push->seqno, &(tmphash = "hashz"), 1);
     CHECK_FALSE(config_needs_push(conf2));
 
     config_dump(conf2, &dump, &dumplen);

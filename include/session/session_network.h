@@ -37,8 +37,8 @@ typedef struct network_server_destination {
     const char* endpoint;
     uint16_t port;
     const char* x25519_pubkey;
-    const char** headers;
-    const char** header_values;
+    const char* const* headers;
+    const char* const* header_values;
     size_t headers_size;
 } network_server_destination;
 
@@ -77,7 +77,7 @@ LIBSESSION_EXPORT bool network_init(
         bool use_testnet,
         bool single_path_mode,
         bool pre_build_paths,
-        char* error) __attribute__((warn_unused_result));
+        char* error) LIBSESSION_WARN_UNUSED;
 
 /// API: network/network_free
 ///
@@ -197,8 +197,8 @@ typedef void (*network_onion_response_callback_t)(
         bool success,
         bool timeout,
         int16_t status_code,
-        const char** headers,
-        const char** header_values,
+        const char* const* headers,
+        const char* const* header_values,
         size_t headers_size,
         const char* response,
         size_t response_size,

@@ -21,8 +21,11 @@ namespace session::config::protos {
 /// Outputs:
 /// Returns the wrapped config.  Will throw on serious errors (e.g. `ed25519_sk` or `ns` are
 /// invalid).
-ustring wrap_config(
-        ustring_view ed25519_sk, ustring_view data, int64_t seqno, config::Namespace ns);
+std::vector<unsigned char> wrap_config(
+        std::span<const unsigned char> ed25519_sk,
+        std::span<const unsigned char> data,
+        int64_t seqno,
+        config::Namespace ns);
 
 /// API: config/protos::unwrap_config
 ///
@@ -41,6 +44,9 @@ ustring wrap_config(
 /// Throws a std::invalid_argument if the given ed25519_sk is invalid.  (It is recommended that only
 /// the std::runtime_error is caught for detecting non-wrapped input as the invalid secret key is
 /// more serious).
-ustring unwrap_config(ustring_view ed25519_sk, ustring_view data, config::Namespace ns);
+std::vector<unsigned char> unwrap_config(
+        std::span<const unsigned char> ed25519_sk,
+        std::span<const unsigned char> data,
+        config::Namespace ns);
 
 }  // namespace session::config::protos

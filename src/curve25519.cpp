@@ -18,7 +18,7 @@ std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>> curve255
     return {curve_pk, curve_sk};
 }
 
-std::array<unsigned char, 32> to_curve25519_pubkey(ustring_view ed25519_pubkey) {
+std::array<unsigned char, 32> to_curve25519_pubkey(std::span<const unsigned char> ed25519_pubkey) {
     if (ed25519_pubkey.size() != 32) {
         throw std::invalid_argument{"Invalid ed25519_pubkey: expected 32 bytes"};
     }
@@ -33,7 +33,7 @@ std::array<unsigned char, 32> to_curve25519_pubkey(ustring_view ed25519_pubkey) 
     return curve_pk;
 }
 
-std::array<unsigned char, 32> to_curve25519_seckey(ustring_view ed25519_seckey) {
+std::array<unsigned char, 32> to_curve25519_seckey(std::span<const unsigned char> ed25519_seckey) {
     if (ed25519_seckey.size() != 64) {
         throw std::invalid_argument{"Invalid ed25519_seckey: expected 64 bytes"};
     }
@@ -67,7 +67,8 @@ LIBSESSION_C_API bool session_curve25519_key_pair(
 LIBSESSION_C_API bool session_to_curve25519_pubkey(
         const unsigned char* ed25519_pubkey, unsigned char* curve25519_pk_out) {
     try {
-        auto curve_pk = session::curve25519::to_curve25519_pubkey(ustring_view{ed25519_pubkey, 32});
+        auto curve_pk = session::curve25519::to_curve25519_pubkey(
+                std::span<const unsigned char>{ed25519_pubkey, 32});
         std::memcpy(curve25519_pk_out, curve_pk.data(), curve_pk.size());
         return true;
     } catch (...) {
@@ -78,7 +79,8 @@ LIBSESSION_C_API bool session_to_curve25519_pubkey(
 LIBSESSION_C_API bool session_to_curve25519_seckey(
         const unsigned char* ed25519_seckey, unsigned char* curve25519_sk_out) {
     try {
-        auto curve_sk = session::curve25519::to_curve25519_seckey(ustring_view{ed25519_seckey, 64});
+        auto curve_sk = session::curve25519::to_curve25519_seckey(
+                std::span<const unsigned char>{ed25519_seckey, 64});
         std::memcpy(curve25519_sk_out, curve_sk.data(), curve_sk.size());
         return true;
     } catch (...) {

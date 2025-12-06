@@ -1,5 +1,8 @@
-#include "session/network.hpp"
+#include "session/session_network.hpp"
 
+#include <fmt/ranges.h>
+#include <oxenc/base64.h>
+#include <oxenc/bt_producer.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
 #include <sodium/crypto_sign_ed25519.h>
@@ -10,21 +13,23 @@
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <oxen/quic.hpp>
+#include <oxen/quic/gnutls_crypto.hpp>
 #include <oxen/quic/opt.hpp>
 #include <oxen/quic/utils.hpp>
 #include <string>
 #include <string_view>
 #include <thread>
 
+#include "internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/ed25519.hpp"
 #include "session/export.h"
 #include "session/file.hpp"
-#include "session/network.h"
 #include "session/onionreq/builder.h"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/key_types.hpp"
 #include "session/onionreq/response_parser.hpp"
+#include "session/session_network.h"
 #include "session/util.hpp"
 
 using namespace oxen;
@@ -91,7 +96,7 @@ namespace {
 
     constexpr auto node_not_found_prefix = "502 Bad Gateway\n\nNext node not found: "sv;
     constexpr auto node_not_found_prefix_no_status = "Next node not found: "sv;
-    constexpr auto ALPN = "oxenstorage"sv;
+    constexpr auto ALPN = "oxenstorage";
     constexpr auto ONION = "onion_req";
 
     enum class PathSelectionBehaviour {
@@ -180,11 +185,17 @@ namespace {
         else
             ip = json["ip"].get<std::string>();
 
+        if (ip == "0.0.0.0")
+            throw std::runtime_error{"Invalid IP address"};
+
         uint16_t port;
         if (json.contains("storage_lmq_port"))
             port = json["storage_lmq_port"].get<uint16_t>();
         else
             port = json["port_omq"].get<uint16_t>();
+
+        if (port == 0)
+            throw std::runtime_error{"Invalid lmq port"};
 
         swarm_id_t swarm_id = INVALID_SWARM_ID;
         if (json.contains("swarm_id"))
@@ -223,16 +234,16 @@ namespace {
     }
 
     const std::vector<service_node> seed_nodes_testnet{
-            node_from_disk("144.76.164.202|35400|2.8.0|"
+            node_from_disk("95.216.33.113|35400|2.8.0|"
                            "decaf007f26d3d6f9b845ad031ffdf6d04638c25bb10b8fffbbe99135303c4b9|"sv)};
     const std::vector<service_node> seed_nodes_mainnet{
-            node_from_disk("144.76.164.202|20200|2.8.0|"
+            node_from_disk("95.216.33.113|20200|2.8.0|"
                            "1f000f09a7b07828dcb72af7cd16857050c10c02bd58afb0e38111fb6cda1fef|"sv),
-            node_from_disk("88.99.102.229|20201|2.8.0|"
+            node_from_disk("37.27.236.229|20201|2.8.0|"
                            "1f101f0acee4db6f31aaa8b4df134e85ca8a4878efaef7f971e88ab144c1a7ce|"sv),
-            node_from_disk("195.16.73.17|20202|2.8.0|"
+            node_from_disk("172.96.140.124|20202|2.8.0|"
                            "1f202f00f4d2d4acc01e20773999a291cf3e3136c325474d159814e06199919f|"sv),
-            node_from_disk("104.194.11.120|20203|2.8.0|"
+            node_from_disk("208.73.207.54|20203|2.8.0|"
                            "1f303f1d7523c46fa5398826740d13282d26b5de90fbae5749442f66afb6d78b|"sv),
             node_from_disk("104.194.8.115|20204|2.8.0|"
                            "1f604f1c858a121a681d8f9b470ef72e6946ee1b9c5ad15a35e16b50c28db7b0|"sv)};
@@ -253,7 +264,7 @@ namespace {
                 node.swarm_id);
     }
 
-    session::onionreq::x25519_pubkey compute_xpk(ustring_view ed25519_pk) {
+    session::onionreq::x25519_pubkey compute_xpk(std::span<const unsigned char> ed25519_pk) {
         std::array<unsigned char, 32> xpk;
         if (0 != crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed25519_pk.data()))
             throw std::runtime_error{
@@ -345,22 +356,38 @@ namespace detail {
         auto node = result_dict.consume_list_consumer();
 
         while (!node.is_finished()) {
-            auto node_consumer = node.consume_dict_consumer();
-            auto pubkey_ed25519 = oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
-            auto public_ip = consume_string(node_consumer, "public_ip");
-            auto storage_lmq_port = consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
+            try {
+                auto node_consumer = node.consume_dict_consumer();
+                auto pubkey_ed25519 =
+                        oxenc::from_hex(consume_string(node_consumer, "pubkey_ed25519"));
+                auto public_ip = consume_string(node_consumer, "public_ip");
+                auto storage_lmq_port =
+                        consume_integer<uint16_t>(node_consumer, "storage_lmq_port");
 
-            std::vector<int> storage_server_version;
-            node_consumer.skip_until("storage_server_version");
-            auto version_consumer = node_consumer.consume_list_consumer();
-            auto swarm_id = consume_integer<uint64_t>(node_consumer, "swarm_id");
+                if (public_ip == "0.0.0.0")
+                    throw std::runtime_error{"Invalid IP address"};
 
-            while (!version_consumer.is_finished()) {
-                storage_server_version.emplace_back(version_consumer.consume_integer<int>());
+                if (storage_lmq_port == 0)
+                    throw std::runtime_error{"Invalid lmq port"};
+
+                std::vector<int> storage_server_version;
+                node_consumer.skip_until("storage_server_version");
+                auto version_consumer = node_consumer.consume_list_consumer();
+                auto swarm_id = consume_integer<uint64_t>(node_consumer, "swarm_id");
+
+                while (!version_consumer.is_finished()) {
+                    storage_server_version.emplace_back(version_consumer.consume_integer<int>());
+                }
+
+                result.emplace_back(
+                        pubkey_ed25519,
+                        storage_server_version,
+                        swarm_id,
+                        public_ip,
+                        storage_lmq_port);
+            } catch (const std::exception& e) {
+                log::warning(cat, "Ignoring invalid snode: {}.", e.what());
             }
-
-            result.emplace_back(
-                    pubkey_ed25519, storage_server_version, swarm_id, public_ip, storage_lmq_port);
         }
 
         return result;
@@ -377,7 +404,11 @@ namespace detail {
 
         std::vector<service_node> result;
         for (auto& snode : result_json["service_node_states"])
-            result.emplace_back(node_from_json(snode));
+            try {
+                result.emplace_back(node_from_json(snode));
+            } catch (const std::exception& e) {
+                log::warning(cat, "Ignoring invalid snode: {}.", e.what());
+            }
 
         return result;
     }
@@ -450,14 +481,14 @@ namespace detail {
 
 request_info request_info::make(
         onionreq::network_destination _dest,
-        std::optional<ustring> _original_body,
+        std::optional<std::vector<unsigned char>> _original_body,
         std::optional<session::onionreq::x25519_pubkey> _swarm_pk,
         std::chrono::milliseconds _request_timeout,
         std::optional<std::chrono::milliseconds> _request_and_path_build_timeout,
         PathType _type,
         std::optional<std::string> _req_id,
         std::optional<std::string> _ep,
-        std::optional<ustring> _body) {
+        std::optional<std::vector<unsigned char>> _body) {
     return request_info{
             _req_id.value_or("R-{}"_format(random::random_base32(4))),
             std::move(_dest),
@@ -501,6 +532,8 @@ Network::Network(
         should_cache_to_disk{cache_path},
         single_path_mode{single_path_mode},
         cache_path{cache_path.value_or(default_cache_path)} {
+    loop = std::make_shared<quic::Loop>();
+
     // Load the cache from disk and start the disk write thread
     if (should_cache_to_disk) {
         load_cache_from_disk();
@@ -512,15 +545,18 @@ Network::Network(
         for (int i = 0; i < min_path_count(PathType::standard, single_path_mode); ++i) {
             auto path_id = "P-{}"_format(random::random_base32(4));
             in_progress_path_builds[path_id] = PathType::standard;
-            net.call_soon([this, path_id] { build_path(path_id, PathType::standard); });
+            loop->call_soon([this, path_id] { build_path(path_id, PathType::standard); });
         }
 }
 
 Network::~Network() {
-    // We need to explicitly close the connections at the start of the destructor to prevent ban
-    // memory errors due to complex logic with the quic::Network instance
-    destroyed = true;
-    _close_connections();
+    // Flag the network as suspended when we start destroying to ensure no new requests get started
+    // (which could result in additional calls being added to the `loop` incorrectly and cause bad
+    // memory crashes)
+    suspended = true;
+
+    // Trigger a 'call_get' to block until the endpoint has been destroyed
+    loop->call_get([this]() mutable { _close_connections(); });
 
     {
         std::lock_guard lock{snode_cache_mutex};
@@ -604,7 +640,7 @@ void Network::update_disk_cache_throttled(bool force_immediate_write) {
         return;
 
     has_pending_disk_write = true;
-    net.call_later(1s, [this]() {
+    loop->call_later(1s, [this]() {
         snode_cache_cv.notify_one();
         has_pending_disk_write = false;
     });
@@ -671,7 +707,7 @@ void Network::disk_write_thread_loop() {
 }
 
 void Network::clear_cache() {
-    net.call([this]() mutable {
+    loop->call([this] {
         {
             std::lock_guard lock{snode_cache_mutex};
             need_clear_cache = true;
@@ -681,13 +717,13 @@ void Network::clear_cache() {
 }
 
 size_t Network::snode_cache_size() {
-    return net.call_get([this]() -> size_t { return snode_cache.size(); });
+    return loop->call_get([this]() -> size_t { return snode_cache.size(); });
 }
 
 // MARK: Connection
 
 void Network::suspend() {
-    net.call([this]() mutable {
+    loop->call([this] {
         suspended = true;
         close_connections();
         log::info(cat, "Suspended.");
@@ -695,18 +731,20 @@ void Network::suspend() {
 }
 
 void Network::resume() {
-    net.call([this]() mutable {
+    loop->call([this] {
         suspended = false;
         log::info(cat, "Resumed.");
     });
 }
 
 void Network::close_connections() {
-    net.call([this]() mutable { _close_connections(); });
+    loop->call([this] { _close_connections(); });
 }
 
 void Network::_close_connections() {
-    // Explicitly reset the endpoint to close all connections
+    // Explicitly close all connections then reset the endpoint
+    if (endpoint)
+        endpoint->close_conns();
     endpoint.reset();
 
     // Cancel any pending requests (they can't succeed once the connection is closed)
@@ -761,9 +799,13 @@ std::chrono::milliseconds Network::retry_delay(
 }
 
 std::shared_ptr<quic::Endpoint> Network::get_endpoint() {
-    return net.call_get([this]() mutable {
+    return loop->call_get([this]() mutable {
         if (!endpoint)
-            endpoint = net.endpoint(quic::Address{"0.0.0.0", 0}, quic::opt::alpns{ALPN});
+            endpoint = quic::Endpoint::endpoint(
+                    *loop,
+                    quic::Address{"0.0.0.0", 0},
+                    quic::opt::alpns{ALPN},
+                    quic::opt::disable_mtu_discovery{});
 
         return endpoint;
     });
@@ -779,6 +821,10 @@ size_t Network::min_snode_cache_size() const {
     // having issues) then the minimum size should be the full cache size (minus enough to build a
     // path) or at least the size of a path
     auto min_path_size = static_cast<size_t>(path_size);
+
+    if (use_testnet)
+        return min_path_size;
+
     return std::min(
             std::max(min_path_size, *seed_node_cache_size - min_path_size), min_snode_cache_count);
 }
@@ -844,7 +890,7 @@ void Network::establish_connection(
         std::optional<std::chrono::milliseconds> timeout,
         std::function<void(connection_info info, std::optional<std::string> error)> callback) {
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, id);
-    auto currently_suspended = net.call_get([this]() -> bool { return suspended; });
+    auto currently_suspended = loop->call_get([this]() -> bool { return suspended; });
 
     // If the network is currently suspended then don't try to open a connection
     if (currently_suspended)
@@ -852,11 +898,11 @@ void Network::establish_connection(
                 {target, std::make_shared<size_t>(0), nullptr, nullptr}, "Network is suspended.");
 
     auto conn_key_pair = ed25519::ed25519_key_pair();
-    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(from_unsigned_sv(conn_key_pair.second));
+    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
     auto cb_called = std::make_shared<std::once_flag>();
     auto cb = std::make_shared<std::function<void(connection_info, std::optional<std::string>)>>(
             std::move(callback));
-    auto conn_promise = std::promise<std::shared_ptr<oxen::quic::connection_interface>>();
+    auto conn_promise = std::promise<std::shared_ptr<oxen::quic::Connection>>();
     auto conn_future = conn_promise.get_future().share();
     auto handshake_timeout =
             timeout ? std::optional{quic::opt::handshake_timeout{
@@ -868,11 +914,11 @@ void Network::establish_connection(
             creds,
             quic::opt::keep_alive{10s},
             handshake_timeout,
-            [this, id, target, cb, cb_called, conn_future](quic::connection_interface&) mutable {
+            [this, id, target, cb, cb_called, conn_future](quic::Connection&) mutable {
                 log::trace(cat, "Connection established for {}.", id);
 
-                // Just in case, call it within a `net.call`
-                net.call([&] {
+                // Just in case, call it within a `loop->call`
+                loop->call([&] {
                     std::call_once(*cb_called, [&]() {
                         if (cb) {
                             auto conn = conn_future.get();
@@ -887,7 +933,7 @@ void Network::establish_connection(
                 });
             },
             [this, target, id, cb, cb_called, conn_future](
-                    quic::connection_interface& conn, uint64_t error_code) mutable {
+                    quic::Connection& conn, uint64_t error_code) mutable {
                 if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
                     log::info(
                             cat,
@@ -897,8 +943,8 @@ void Network::establish_connection(
                 else
                     log::info(cat, "Connection to {} closed for {}.", target.to_string(), id);
 
-                // Just in case, call it within a `net.call`
-                net.call([&] {
+                // Just in case, call it within a `loop->call`
+                loop->call([&] {
                     // Trigger the callback first before updating the paths in case this was
                     // triggered when try to establish a connection
                     std::call_once(*cb_called, [&]() {
@@ -908,12 +954,6 @@ void Network::establish_connection(
                             cb.reset();
                         }
                     });
-
-                    // If the Network instance has been `destroyed` (ie. it's destructor has been
-                    // called) then don't do any of the following logic as it'll likely result in
-                    // undefined behaviours and crashes
-                    if (destroyed)
-                        return;
 
                     // Remove the connection from `unused_connection` if present
                     std::erase_if(unused_connections, [&conn, &target](auto& unused_conn) {
@@ -970,7 +1010,7 @@ void Network::establish_and_store_connection(std::string path_id) {
                 "Unable to establish new connection due to lack of unused nodes, refreshing snode "
                 "cache ({}).",
                 path_id);
-        return net.call_soon([this, path_id]() { refresh_snode_cache(path_id); });
+        return loop->call_soon([this, path_id]() { refresh_snode_cache(path_id); });
     }
 
     // Otherwise check if it's been too long since the last cache update and, if so, trigger a
@@ -979,7 +1019,7 @@ void Network::establish_and_store_connection(std::string path_id) {
             std::chrono::system_clock::now() - last_snode_cache_update);
 
     if (cache_lifetime < 0s || cache_lifetime > snode_cache_expiration_duration)
-        net.call_soon([this]() { refresh_snode_cache(); });
+        loop->call_soon([this]() { refresh_snode_cache(); });
 
     // If there are no in progress connections then reset the failure count
     if (in_progress_connections.empty())
@@ -1009,7 +1049,7 @@ void Network::establish_and_store_connection(std::string path_id) {
                             "Failed to connect to {}, will try another after {}ms.",
                             target_node.to_string(),
                             connection_retry_delay.count());
-                    return net.call_later(connection_retry_delay, [this, path_id]() {
+                    return loop->call_later(connection_retry_delay, [this, path_id]() {
                         establish_and_store_connection(path_id);
                     });
                 }
@@ -1021,7 +1061,7 @@ void Network::establish_and_store_connection(std::string path_id) {
                 // Kick off the next pending path build since we now have a valid connection
                 if (!path_build_queue.empty()) {
                     in_progress_path_builds[path_id] = path_build_queue.front();
-                    net.call_soon([this, path_type = path_build_queue.front(), path_id]() {
+                    loop->call_soon([this, path_type = path_build_queue.front(), path_id]() {
                         build_path(path_id, path_type);
                     });
                     path_build_queue.pop_front();
@@ -1032,7 +1072,7 @@ void Network::establish_and_store_connection(std::string path_id) {
                 // better to be safe and avoid a situation where a path build gets orphaned)
                 if (!path_build_queue.empty() && in_progress_connections.empty())
                     for ([[maybe_unused]] const auto& _ : path_build_queue)
-                        net.call_soon([this]() {
+                        loop->call_soon([this]() {
                             auto conn_id = "EC-{}"_format(random::random_base32(4));
                             establish_and_store_connection(conn_id);
                         });
@@ -1073,14 +1113,14 @@ void Network::refresh_snode_cache_complete(std::vector<service_node> nodes) {
 
     // Run any post-refresh processes
     for (const auto& callback : after_snode_cache_refresh)
-        net.call_soon([cb = std::move(callback)]() { cb(); });
+        loop->call_soon([cb = std::move(callback)]() { cb(); });
     after_snode_cache_refresh.clear();
 
     // Resume any queued path builds
     for (const auto& path_type : path_build_queue) {
         auto path_id = "P-{}"_format(random::random_base32(4));
         in_progress_path_builds[path_id] = path_type;
-        net.call_soon([this, path_type, path_id]() { build_path(path_id, path_type); });
+        loop->call_soon([this, path_type, path_id]() { build_path(path_id, path_type); });
     }
     path_build_queue.clear();
 }
@@ -1137,7 +1177,7 @@ void Network::refresh_snode_cache_from_seed_nodes(std::string request_id, bool r
                             "after {}ms ({}).",
                             cache_refresh_retry_delay.count(),
                             request_id);
-                    return net.call_later(cache_refresh_retry_delay, [this, request_id]() {
+                    return loop->call_later(cache_refresh_retry_delay, [this, request_id]() {
                         refresh_snode_cache_from_seed_nodes(request_id, false);
                     });
                 }
@@ -1160,7 +1200,7 @@ void Network::refresh_snode_cache_from_seed_nodes(std::string request_id, bool r
                                         error.value_or("Unknown Error"),
                                         cache_refresh_retry_delay.count(),
                                         request_id);
-                                return net.call_later(
+                                return loop->call_later(
                                         cache_refresh_retry_delay, [this, request_id]() {
                                             refresh_snode_cache_from_seed_nodes(request_id, false);
                                         });
@@ -1203,6 +1243,8 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     // `snode_refresh_results` so we can use it to track the results from the different requests)
     if (!current_snode_cache_refresh_request_id) {
         log::info(cat, "Refreshing snode cache ({}).", request_id);
+        snode_cache_refresh_failure_count = 0;
+        in_progress_snode_cache_refresh_count = 0;
         current_snode_cache_refresh_request_id = request_id;
         snode_refresh_results = std::make_shared<std::vector<std::vector<service_node>>>();
     }
@@ -1225,7 +1267,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     // If there are still more concurrent refresh_snode_cache requests we want to trigger then
     // trigger the next one to run in the next run loop
     if (in_progress_snode_cache_refresh_count < num_snodes_to_refresh_cache_from)
-        net.call_soon([this, request_id]() { refresh_snode_cache(request_id); });
+        loop->call_soon([this, request_id]() { refresh_snode_cache(request_id); });
 
     // Prepare and send the request to retrieve service nodes
     nlohmann::json payload{
@@ -1236,7 +1278,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
     };
     auto info = request_info::make(
             target_node,
-            ustring{quic::to_usv(payload.dump())},
+            to_vector(payload.dump()),
             std::nullopt,
             quic::DEFAULT_TIMEOUT,
             std::nullopt,
@@ -1282,11 +1324,11 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                     log::error(
                             cat,
                             "Failed to retrieve nodes from one target when refreshing cache due to "
-                            "error: {} Will try another target after {}ms ({}).",
+                            "error: {}, Will try another target after {}ms ({}).",
                             e.what(),
                             cache_refresh_retry_delay.count(),
                             request_id);
-                    return net.call_later(cache_refresh_retry_delay, [this, request_id]() {
+                    return loop->call_later(cache_refresh_retry_delay, [this, request_id]() {
                         refresh_snode_cache(request_id);
                     });
                 }
@@ -1319,8 +1361,16 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                 }
 
                 // Sort the vectors (so make it easier to find the intersection)
+                auto compare_service_nodes = [](const service_node& a, const service_node& b) {
+                    if (auto cmp = quic::Address(a) <=> quic::Address(b); cmp != 0)
+                        return cmp < 0;
+
+                    return std::tie(a.get_remote_key(), a.swarm_id, a.storage_server_version) <
+                           std::tie(b.get_remote_key(), b.swarm_id, b.storage_server_version);
+                };
+
                 for (auto& nodes : *snode_refresh_results)
-                    std::stable_sort(nodes.begin(), nodes.end());
+                    std::stable_sort(nodes.begin(), nodes.end(), compare_service_nodes);
 
                 auto nodes = (*snode_refresh_results)[0];
 
@@ -1334,7 +1384,7 @@ void Network::refresh_snode_cache(std::optional<std::string> existing_request_id
                                 (*snode_refresh_results)[i].begin(),
                                 (*snode_refresh_results)[i].end(),
                                 std::back_inserter(temp),
-                                [](const auto& a, const auto& b) { return a == b; });
+                                compare_service_nodes);
                         nodes = std::move(temp);
                     }
                 }
@@ -1366,7 +1416,7 @@ void Network::build_path(std::string path_id, PathType path_type) {
                 path_id);
         path_build_queue.emplace_back(path_type);
         in_progress_path_builds.erase(path_id);
-        return net.call_soon([this, path_id]() { establish_and_store_connection(path_id); });
+        return loop->call_soon([this, path_id]() { establish_and_store_connection(path_id); });
     }
 
     // Reset the unused nodes list if it's too small
@@ -1380,7 +1430,7 @@ void Network::build_path(std::string path_id, PathType path_type) {
         path_build_failures = 0;
         path_build_queue.emplace_back(path_type);
         in_progress_path_builds.erase(path_id);
-        return net.call_soon([this]() { refresh_snode_cache(); });
+        return loop->call_soon([this]() { refresh_snode_cache(); });
     }
 
     // Build the path
@@ -1404,7 +1454,8 @@ void Network::build_path(std::string path_id, PathType path_type) {
             path_build_failures++;
             unused_connections.push_front(std::move(conn_info));
             auto delay = retry_delay(path_build_failures);
-            net.call_later(delay, [this, path_id, path_type]() { build_path(path_id, path_type); });
+            loop->call_later(
+                    delay, [this, path_id, path_type]() { build_path(path_id, path_type); });
             return;
         }
 
@@ -1466,7 +1517,7 @@ void Network::build_path(std::string path_id, PathType path_type) {
         if (!find_valid_path(request.first, {path}))
             return false;
 
-        net.call_soon([this, info = request.first, cb = std::move(request.second)]() {
+        loop->call_soon([this, info = request.first, cb = std::move(request.second)]() {
             _send_onion_request(std::move(info), std::move(cb));
         });
         return true;
@@ -1477,7 +1528,7 @@ void Network::build_path(std::string path_id, PathType path_type) {
     if (!request_queue[path_type].empty()) {
         auto additional_path_id = "P-{}"_format(random::random_base32(4));
         in_progress_path_builds[additional_path_id] = path_type;
-        net.call_soon([this, path_type, additional_path_id] {
+        loop->call_soon([this, path_type, additional_path_id] {
             build_path(additional_path_id, path_type);
         });
     } else
@@ -1634,7 +1685,7 @@ void Network::get_swarm(
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, swarm_pubkey.hex());
 
-    net.call([this, swarm_pubkey, cb = std::move(callback)]() {
+    loop->call([this, swarm_pubkey, cb = std::move(callback)]() {
         // If we have a cached swarm then return it
         auto cached_swarm = swarm_cache[swarm_pubkey.hex()];
         if (!cached_swarm.second.empty())
@@ -1646,7 +1697,7 @@ void Network::get_swarm(
             after_snode_cache_refresh.emplace_back([this, swarm_pubkey, cb = std::move(cb)]() {
                 get_swarm(swarm_pubkey, std::move(cb));
             });
-            return net.call_soon([this]() { refresh_snode_cache(); });
+            return loop->call_soon([this]() { refresh_snode_cache(); });
         }
 
         // If there is only a single swarm then return it
@@ -1692,7 +1743,7 @@ void Network::get_random_nodes(
     auto request_id = "R-{}"_format(random::random_base32(4));
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, request_id);
 
-    net.call([this, request_id, count, cb = std::move(callback)]() mutable {
+    loop->call([this, request_id, count, cb = std::move(callback)]() mutable {
         // If we don't have sufficient unused nodes then regenerate it
         if (unused_nodes.size() < count)
             unused_nodes = get_unused_nodes();
@@ -1701,7 +1752,7 @@ void Network::get_random_nodes(
         if (unused_nodes.size() < count) {
             after_snode_cache_refresh.emplace_back(
                     [this, count, cb = std::move(cb)]() { get_random_nodes(count, cb); });
-            return net.call_soon([this]() { refresh_snode_cache(); });
+            return loop->call_soon([this]() { refresh_snode_cache(); });
         }
 
         // Otherwise callback with the requested random number of nodes
@@ -1715,8 +1766,8 @@ void Network::get_random_nodes(
 // MARK: Request Handling
 
 void Network::check_request_queue_timeouts(std::optional<std::string> request_timeout_id_) {
-    // If the network is suspended (or destroyed) then don't bother checking for timeouts
-    if (suspended || destroyed)
+    // If the network is suspended then don't bother checking for timeouts
+    if (suspended)
         return;
 
     // If there is an existing timeout checking loop then we don't want to start a second
@@ -1763,7 +1814,7 @@ void Network::check_request_queue_timeouts(std::optional<std::string> request_ti
     }
 
     // Otherwise schedule the next check
-    net.call_later(queued_request_path_build_timeout_frequency, [this]() {
+    loop->call_later(queued_request_path_build_timeout_frequency, [this]() {
         check_request_queue_timeouts(request_timeout_id);
     });
 }
@@ -1776,10 +1827,10 @@ void Network::send_request(
         return handle_response(
                 false, false, -1, {content_type_plain_text}, "Network is unreachable.");
 
-    quic::bstring_view payload{};
+    std::span<const std::byte> payload{};
 
     if (info.body)
-        payload = convert_sv<std::byte>(*info.body);
+        payload = to_span<std::byte>(*info.body);
 
     // Calculate the remaining timeout
     std::chrono::milliseconds timeout = info.request_timeout;
@@ -1846,7 +1897,7 @@ void Network::send_request(
 
 void Network::send_onion_request(
         onionreq::network_destination destination,
-        std::optional<ustring> body,
+        std::optional<std::vector<unsigned char>> body,
         std::optional<session::onionreq::x25519_pubkey> swarm_pubkey,
         network_response_callback_t handle_response,
         std::chrono::milliseconds request_timeout,
@@ -1869,16 +1920,16 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
 
     // Try to retrieve a valid path for this request, if we can't get one then add the request to
     // the queue to be run once a path for it has successfully been built
-    auto path = net.call_get([this, info]() {
+    auto path = loop->call_get([this, info]() {
         auto result = find_valid_path(info, paths[info.path_type]);
-        net.call_soon([this, path_type = info.path_type, found_path = result.has_value()]() {
+        loop->call_soon([this, path_type = info.path_type, found_path = result.has_value()]() {
             build_path_if_needed(path_type, found_path);
         });
         return result;
     });
 
     if (!path) {
-        return net.call([this, info = std::move(info), cb = std::move(handle_response)]() {
+        return loop->call([this, info = std::move(info), cb = std::move(handle_response)]() {
             // If the network is suspended then fail immediately
             if (suspended)
                 return cb(
@@ -1892,7 +1943,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
 
             // If the request has a path_build_timeout then start the timeout check loop
             if (info.request_and_path_build_timeout)
-                net.call_later(queued_request_path_build_timeout_frequency, [this]() {
+                loop->call_later(queued_request_path_build_timeout_frequency, [this]() {
                     check_request_queue_timeouts();
                 });
         });
@@ -2059,7 +2110,7 @@ void Network::_send_onion_request(request_info info, network_response_callback_t
 }
 
 void Network::upload_file_to_server(
-        ustring data,
+        std::vector<unsigned char> data,
         onionreq::ServerDestination server,
         std::optional<std::string> file_name,
         network_response_callback_t handle_response,
@@ -2148,11 +2199,11 @@ void Network::get_client_version(
     }
 
     // Generate the auth signature
-    auto blinded_keys = blind_version_key_pair(to_unsigned_sv(seckey.view()));
+    auto blinded_keys = blind_version_key_pair(to_span(seckey.view()));
     auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
                              (std::chrono::system_clock::now()).time_since_epoch())
                              .count();
-    auto signature = blind_version_sign(to_unsigned_sv(seckey.view()), platform, timestamp);
+    auto signature = blind_version_sign(to_span(seckey.view()), platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(file_server_pubkey);
     std::string blinded_pk_hex;
     blinded_pk_hex.reserve(66);
@@ -2165,7 +2216,7 @@ void Network::get_client_version(
     auto headers = std::vector<std::pair<std::string, std::string>>{};
     headers.emplace_back("X-FS-Pubkey", blinded_pk_hex);
     headers.emplace_back("X-FS-Timestamp", "{}"_format(timestamp));
-    headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature));
+    headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature.begin(), signature.end()));
 
     send_onion_request(
             ServerDestination{
@@ -2197,7 +2248,7 @@ Network::process_v3_onion_response(Builder builder, std::string response) {
     if (!oxenc::is_base64(base64_iv_and_ciphertext))
         throw std::runtime_error{"Invalid base64 encoded IV and ciphertext."};
 
-    ustring iv_and_ciphertext;
+    std::vector<unsigned char> iv_and_ciphertext;
     oxenc::from_base64(
             base64_iv_and_ciphertext.begin(),
             base64_iv_and_ciphertext.end(),
@@ -2233,12 +2284,12 @@ Network::process_v3_onion_response(Builder builder, std::string response) {
 
 std::tuple<int16_t, std::vector<std::pair<std::string, std::string>>, std::optional<std::string>>
 Network::process_v4_onion_response(Builder builder, std::string response) {
-    ustring response_data{to_unsigned(response.data()), response.size()};
+    auto response_data = to_vector(response);
     auto parser = ResponseParser(builder);
     auto result = parser.decrypt(response_data);
 
     // Process the bencoded response
-    oxenc::bt_list_consumer result_bencode{result};
+    oxenc::bt_list_consumer result_bencode{to_span<std::byte>(result)};
 
     if (result_bencode.is_finished() || !result_bencode.is_string())
         throw std::runtime_error{"Invalid bencoded response"};
@@ -2269,7 +2320,7 @@ Network::process_v4_onion_response(Builder builder, std::string response) {
 // MARK: Error Handling
 
 std::pair<uint16_t, std::string> Network::validate_response(quic::message resp, bool is_bencoded) {
-    std::string body = resp.body_str();
+    std::string body = std::string(resp.body());
 
     if (resp.timed_out)
         throw std::runtime_error{"Timed out"};
@@ -2403,7 +2454,7 @@ void Network::handle_errors(
                 path_name);
         auto updated_info = info;
         updated_info.retry_reason = request_info::RetryReason::decryption_failure;
-        return net.call_soon([this, updated_info, cb = std::move(*handle_response)]() {
+        return loop->call_soon([this, updated_info, cb = std::move(*handle_response)]() {
             _send_onion_request(updated_info, std::move(cb));
         });
     }
@@ -2511,7 +2562,7 @@ void Network::handle_errors(
                         auto updated_info = info;
                         updated_info.destination = swarm_copy.front();
                         updated_info.retry_reason = request_info::RetryReason::redirect;
-                        return net.call_soon(
+                        return loop->call_soon(
                                 [this, updated_info, cb = std::move(*handle_response)]() {
                                     _send_onion_request(updated_info, std::move(cb));
                                 });
@@ -2573,12 +2624,12 @@ void Network::handle_errors(
                                         updated_info.retry_reason =
                                                 request_info::RetryReason::redirect_swarm_refresh;
                                         updated_info.destination = swarm_copy.front();
-                                        net.call_soon([this, updated_info, cb = std::move(cb)]() {
+                                        loop->call_soon([this, updated_info, cb = std::move(cb)]() {
                                             _send_onion_request(updated_info, std::move(cb));
                                         });
                                     });
                         });
-                        return net.call_soon([this, request_id = info.request_id]() {
+                        return loop->call_soon([this, request_id = info.request_id]() {
                             refresh_snode_cache(request_id);
                         });
 
@@ -2677,12 +2728,14 @@ void Network::handle_errors(
             oxenc::is_hex(*ed25519PublicKey)) {
             session::onionreq::ed25519_pubkey edpk =
                     session::onionreq::ed25519_pubkey::from_hex(*ed25519PublicKey);
-            auto edpk_view = to_unsigned_sv(edpk.view());
+            auto edpk_view = to_span(edpk.view());
 
             auto snode_it = std::find_if(
                     updated_path.nodes.begin(),
                     updated_path.nodes.end(),
-                    [&edpk_view](const auto& node) { return node.view_remote_key() == edpk_view; });
+                    [&edpk_view](const auto& node) {
+                        return to_string_view(node.view_remote_key()) == to_string_view(edpk_view);
+                    });
 
             if (snode_it != updated_path.nodes.end()) {
                 found_invalid_node = true;
@@ -2774,17 +2827,6 @@ namespace {
 inline session::network::Network& unbox(network_object* network_) {
     assert(network_ && network_->internals);
     return *static_cast<session::network::Network*>(network_->internals);
-}
-
-inline bool set_error(char* error, const std::exception& e) {
-    if (!error)
-        return false;
-
-    std::string msg = e.what();
-    if (msg.size() > 255)
-        msg.resize(255);
-    std::memcpy(error, msg.c_str(), msg.size() + 1);
-    return false;
 }
 
 }  // namespace
@@ -2924,9 +2966,9 @@ LIBSESSION_C_API void network_send_onion_request_to_snode_destination(
     assert(callback);
 
     try {
-        std::optional<ustring> body;
+        std::optional<std::vector<unsigned char>> body;
         if (body_size > 0)
-            body = {body_, body_size};
+            body.emplace(body_, body_ + body_size);
 
         std::optional<x25519_pubkey> swarm_pubkey;
         if (swarm_pubkey_hex)
@@ -3006,9 +3048,9 @@ LIBSESSION_C_API void network_send_onion_request_to_server_destination(
            server.x25519_pubkey && callback);
 
     try {
-        std::optional<ustring> body;
+        std::optional<std::vector<unsigned char>> body;
         if (body_size > 0)
-            body = {body_, body_size};
+            body.emplace(body_, body_ + body_size);
 
         std::optional<std::chrono::milliseconds> request_and_path_build_timeout;
         if (request_and_path_build_timeout_ms > 0)
@@ -3087,7 +3129,7 @@ LIBSESSION_C_API void network_upload_to_server(
                     std::chrono::milliseconds{request_and_path_build_timeout_ms};
 
         unbox(network).upload_file_to_server(
-                {data, data_len},
+                {data, data + data_len},
                 network::detail::convert_server_destination(server),
                 file_name,
                 [cb = std::move(callback), ctx](

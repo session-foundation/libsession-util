@@ -246,7 +246,7 @@ LIBSESSION_EXPORT bool groups_keys_load_message(
         config_object* info,
         config_object* members) LIBSESSION_WARN_UNUSED;
 
-/// API: groups/groups_keys_current_hashes
+/// API: groups/groups_keys_active_hashes
 ///
 /// Returns the hashes of currently active keys messages, that is, messages that have a decryption
 /// key that new devices or clients might require; these are the messages that should have their
@@ -258,7 +258,7 @@ LIBSESSION_EXPORT bool groups_keys_load_message(
 /// Outputs:
 /// - `config_string_list*` -- pointer to an array of message hashes.  The returned pointer belongs
 ///   to the caller and must be free()d when done.
-LIBSESSION_EXPORT config_string_list* groups_keys_current_hashes(const config_group_keys* conf);
+LIBSESSION_EXPORT config_string_list* groups_keys_active_hashes(const config_group_keys* conf);
 
 /// API: groups/groups_keys_needs_rekey
 ///
@@ -328,12 +328,12 @@ LIBSESSION_EXPORT void groups_keys_dump(
 ///   not leak the message memory (but only if the function returns true).
 /// - `message_len` -- pointer to a `size_t` that will be set to the length of the `message` buffer.
 ///
-/// Oututs:
+/// Outputs:
 /// - `true` and sets `*message` and `*message_len` on success; returns `false` and does not set
 ///   them on failure.
 LIBSESSION_EXPORT bool groups_keys_key_supplement(
         config_group_keys* conf,
-        const char** sids,
+        const char* const* sids,
         size_t sids_len,
         unsigned char** message,
         size_t* message_len);
@@ -345,7 +345,7 @@ LIBSESSION_EXPORT bool groups_keys_key_supplement(
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 ///
-/// Oututs:
+/// Outputs:
 /// - `int` -- latest keys generation number
 LIBSESSION_EXPORT int groups_keys_current_generation(config_group_keys* conf);
 

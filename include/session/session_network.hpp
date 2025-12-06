@@ -1,5 +1,6 @@
 #pragma once
 
+#include <filesystem>
 #include <limits>
 #include <oxen/quic.hpp>
 
@@ -55,7 +56,7 @@ struct service_node : public oxen::quic::RemoteAddress {
 
     template <typename... Opt>
     service_node(
-            ustring_view remote_pk,
+            std::span<const unsigned char> remote_pk,
             std::vector<int> storage_server_version,
             swarm_id_t swarm_id,
             Opt&&... opts) :
@@ -75,9 +76,9 @@ struct service_node : public oxen::quic::RemoteAddress {
         return *this;
     }
 
+    auto operator<=>(const service_node& other) const = delete;
     bool operator==(const service_node& other) const {
-        return static_cast<const oxen::quic::RemoteAddress&>(*this) ==
-                       static_cast<const oxen::quic::RemoteAddress&>(other) &&
+        return RemoteAddress::operator==(other) &&
                storage_server_version == other.storage_server_version && swarm_id == other.swarm_id;
     }
 };
@@ -85,7 +86,7 @@ struct service_node : public oxen::quic::RemoteAddress {
 struct connection_info {
     service_node node;
     std::shared_ptr<size_t> pending_requests;
-    std::shared_ptr<oxen::quic::connection_interface> conn;
+    std::shared_ptr<oxen::quic::Connection> conn;
     std::shared_ptr<oxen::quic::BTRequestStream> stream;
 
     bool is_valid() const { return conn && stream && !stream->is_closing(); };
@@ -146,14 +147,14 @@ namespace detail {
 struct request_info {
     static request_info make(
             onionreq::network_destination _dest,
-            std::optional<ustring> _original_body,
+            std::optional<std::vector<unsigned char>> _original_body,
             std::optional<session::onionreq::x25519_pubkey> _swarm_pk,
             std::chrono::milliseconds _request_timeout,
             std::optional<std::chrono::milliseconds> _request_and_path_build_timeout = std::nullopt,
             PathType _type = PathType::standard,
             std::optional<std::string> _req_id = std::nullopt,
             std::optional<std::string> endpoint = "onion_req",
-            std::optional<ustring> _body = std::nullopt);
+            std::optional<std::vector<unsigned char>> _body = std::nullopt);
 
     enum class RetryReason {
         none,
@@ -165,8 +166,8 @@ struct request_info {
     std::string request_id;
     session::onionreq::network_destination destination;
     std::string endpoint;
-    std::optional<ustring> body;
-    std::optional<ustring> original_body;
+    std::optional<std::vector<unsigned char>> body;
+    std::optional<std::vector<unsigned char>> original_body;
     std::optional<session::onionreq::x25519_pubkey> swarm_pubkey;
     PathType path_type;
     std::chrono::milliseconds request_timeout;
@@ -203,10 +204,10 @@ class Network {
     std::thread disk_write_thread;
 
     // General values
-    bool destroyed = false;
     bool suspended = false;
     ConnectionStatus status;
-    oxen::quic::Network net;
+
+    std::shared_ptr<oxen::quic::Loop> loop;
     std::shared_ptr<oxen::quic::Endpoint> endpoint;
     std::unordered_map<PathType, std::vector<onion_path>> paths;
     std::vector<std::pair<onion_path, PathType>> paths_pending_drop;
@@ -216,8 +217,8 @@ class Network {
     std::unordered_map<std::string, std::pair<swarm_id_t, std::vector<service_node>>> swarm_cache;
 
     // Snode refresh state
-    int snode_cache_refresh_failure_count;
-    int in_progress_snode_cache_refresh_count;
+    int snode_cache_refresh_failure_count = 0;
+    int in_progress_snode_cache_refresh_count = 0;
     std::optional<std::string> current_snode_cache_refresh_request_id;
     std::vector<std::function<void()>> after_snode_cache_refresh;
     std::optional<std::vector<service_node>> unused_snode_refresh_nodes;
@@ -332,7 +333,7 @@ class Network {
     /// - 'type' - [in] the type of paths to send the request across.
     void send_onion_request(
             onionreq::network_destination destination,
-            std::optional<ustring> body,
+            std::optional<std::vector<unsigned char>> body,
             std::optional<session::onionreq::x25519_pubkey> swarm_pubkey,
             network_response_callback_t handle_response,
             std::chrono::milliseconds request_timeout,
@@ -356,7 +357,7 @@ class Network {
     /// it took to build the path.
     /// - `handle_response` -- [in] callback to be called with the result of the request.
     void upload_file_to_server(
-            ustring data,
+            std::vector<unsigned char> data,
             onionreq::ServerDestination server,
             std::optional<std::string> file_name,
             network_response_callback_t handle_response,
@@ -671,7 +672,7 @@ class Network {
     /// Outputs:
     /// - A tuple containing the status code, headers and body of the decrypted onion request
     /// response.
-    std::tuple<
+    virtual std::tuple<
             int16_t,
             std::vector<std::pair<std::string, std::string>>,
             std::optional<std::string>>
@@ -688,7 +689,7 @@ class Network {
     /// Outputs:
     /// - A tuple containing the status code, headers and body of the decrypted onion request
     /// response.
-    std::tuple<
+    virtual std::tuple<
             int16_t,
             std::vector<std::pair<std::string, std::string>>,
             std::optional<std::string>>

@@ -38,6 +38,14 @@ typedef struct convo_info_volatile_legacy_group {
     bool unread;        // true if marked unread
 } convo_info_volatile_legacy_group;
 
+typedef struct convo_info_volatile_blinded_1to1 {
+    char blinded_session_id[67];  // in hex; 66 hex chars + null terminator.
+    bool legacy_blinding;
+
+    int64_t last_read;  // ms since unix epoch
+    bool unread;        // true if the conversation is explicitly marked unread
+} convo_info_volatile_blinded_1to1;
+
 /// API: convo_info_volatile/convo_info_volatile_init
 ///
 /// Constructs a conversations config object and sets a pointer to it in `conf`.
@@ -345,6 +353,70 @@ LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_legacy_group(
         convo_info_volatile_legacy_group* convo,
         const char* id) LIBSESSION_WARN_UNUSED;
 
+/// API: convo_info_volatile/convo_info_volatile_get_blinded_1to1
+///
+/// Fills `convo` with the conversation info given a blinded session ID (specified as a
+/// null-terminated hex string), if the conversation exists, and returns true.  If the conversation
+/// does not exist then `convo` is left unchanged and false is returned.  If an error occurs, false
+/// is returned and `conf->last_error` will be set to non-NULL containing the error string (if no
+/// error occurs, such as in the case where the conversation merely doesn't exist, `last_error` will
+/// be set to NULL).
+///
+/// Declaration:
+/// ```cpp
+/// BOOL convo_info_volatile_get_blinded_1to1(
+///     [in]    config_object*                      conf,
+///     [out]   convo_info_volatile_blinded_1to1*   convo,
+///     [in]    const char*                         blinded_session_id
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `convo` -- [out] Pointer to conversation info
+/// - `blinded_session_id` -- [in] Null terminated hex string of the session_id
+///
+/// Outputs:
+/// - `bool` - Returns true if the conversation exists
+LIBSESSION_EXPORT bool convo_info_volatile_get_blinded_1to1(
+        config_object* conf,
+        convo_info_volatile_blinded_1to1* convo,
+        const char* blinded_session_id) LIBSESSION_WARN_UNUSED;
+
+/// API: convo_info_volatile/convo_info_volatile_get_or_construct_blinded_1to1
+///
+/// Same as the above convo_info_volatile_get_blinded_1to1 except that when the conversation does
+/// not exist, this sets all the convo fields to defaults and loads it with the given
+/// blinded_session_id.
+///
+/// Returns true as long as it is given a valid blinded_session_id.  A false return is considered an
+/// error, and means the blinded_session_id was not a valid blinded_session_id.  In such a case
+/// `conf->last_error` will be set to an error string.
+///
+/// This is the method that should usually be used to create or update a conversation, followed by
+/// setting fields in the convo, and then giving it to convo_info_volatile_set().
+///
+/// Declaration:
+/// ```cpp
+/// BOOL convo_info_volatile_get_or_construct_1to1(
+///     [in]    config_object*                      conf,
+///     [out]   convo_info_volatile_blinded_1to1*   convo,
+///     [in]    const char*                         blinded_session_id
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `convo` -- [out] Pointer to conversation info
+/// - `blinded_session_id` -- [in] Null terminated hex string of the blinded session id
+///
+/// Outputs:
+/// - `bool` - Returns true if the conversation exists
+LIBSESSION_EXPORT bool convo_info_volatile_get_or_construct_blinded_1to1(
+        config_object* conf,
+        convo_info_volatile_blinded_1to1* convo,
+        const char* blinded_session_id) LIBSESSION_WARN_UNUSED;
+
 /// API: convo_info_volatile/convo_info_volatile_set_1to1
 ///
 /// Adds or updates a conversation from the given convo info
@@ -428,6 +500,27 @@ LIBSESSION_EXPORT bool convo_info_volatile_set_group(
 /// - `bool` -- Returns true if the call succeeds, false if an error occurs.
 LIBSESSION_EXPORT bool convo_info_volatile_set_legacy_group(
         config_object* conf, const convo_info_volatile_legacy_group* convo);
+
+/// API: convo_info_volatile/convo_info_volatile_set_blinded_1to1
+///
+/// Adds or updates a conversation from the given convo info
+///
+/// Declaration:
+/// ```cpp
+/// VOID convo_info_volatile_set_blinded_1to1(
+///     [in]    config_object*                              conf,
+///     [in]    const convo_info_volatile_blidned_1to1*     convo
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `convo` -- [in] Pointer to conversation info structure
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool convo_info_volatile_set_blinded_1to1(
+        config_object* conf, const convo_info_volatile_blinded_1to1* convo);
 
 /// API: convo_info_volatile/convo_info_volatile_erase_1to1
 ///
@@ -520,6 +613,29 @@ LIBSESSION_EXPORT bool convo_info_volatile_erase_group(config_object* conf, cons
 LIBSESSION_EXPORT bool convo_info_volatile_erase_legacy_group(
         config_object* conf, const char* group_id);
 
+/// API: convo_info_volatile/convo_info_volatile_erase_blinded_1to1
+///
+/// Erases a conversation from the conversation list.  Returns true if the conversation was found
+/// and removed, false if the conversation was not present.  You must not call this during
+/// iteration; see details below.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL convo_info_volatile_erase_blinded_1to1(
+///     [in]    config_object*  conf,
+///     [in]    const char*     blinded_session_id
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `blinded_session_id` -- [in] Null terminated hex string
+///
+/// Outputs:
+/// - `bool` - Returns true if conversation was found and removed
+LIBSESSION_EXPORT bool convo_info_volatile_erase_blinded_1to1(
+        config_object* conf, const char* blinded_session_id);
+
 /// API: convo_info_volatile/convo_info_volatile_size
 ///
 /// Returns the number of conversations.
@@ -610,6 +726,24 @@ LIBSESSION_EXPORT size_t convo_info_volatile_size_groups(const config_object* co
 /// - `size_t` -- number of legacy groups
 LIBSESSION_EXPORT size_t convo_info_volatile_size_legacy_groups(const config_object* conf);
 
+/// API: convo_info_volatile/convo_info_volatile_size_blinded_1to1
+///
+/// Returns the number of conversations.
+///
+/// Declaration:
+/// ```cpp
+/// SIZE_T convo_info_volatile_size_blinded_1to1(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `size_t` -- number of conversations
+LIBSESSION_EXPORT size_t convo_info_volatile_size_blinded_1to1(const config_object* conf);
+
 typedef struct convo_info_volatile_iterator convo_info_volatile_iterator;
 
 /// API: convo_info_volatile/convo_info_volatile_iterator_new
@@ -622,6 +756,7 @@ typedef struct convo_info_volatile_iterator convo_info_volatile_iterator;
 ///     convo_info_volatile_community c2;
 ///     convo_info_volatile_group c3;
 ///     convo_info_volatile_legacy_group c4;
+///     convo_info_volatile_blinded_1to1 c5;
 ///     convo_info_volatile_iterator *it = convo_info_volatile_iterator_new(my_convos);
 ///     for (; !convo_info_volatile_iterator_done(it); convo_info_volatile_iterator_advance(it)) {
 ///         if (convo_info_volatile_it_is_1to1(it, &c1)) {
@@ -632,6 +767,8 @@ typedef struct convo_info_volatile_iterator convo_info_volatile_iterator;
 ///             // use c3.whatever
 ///         } else if (convo_info_volatile_it_is_legacy_group(it, &c4)) {
 ///             // use c4.whatever
+///         } else if (convo_info_volatile_it_is_blinded_1to1(it, &c5)) {
+///             // use c5.whatever
 ///         }
 ///     }
 ///     convo_info_volatile_iterator_free(it);
@@ -745,6 +882,29 @@ LIBSESSION_EXPORT convo_info_volatile_iterator* convo_info_volatile_iterator_new
 /// Outputs:
 /// - `convo_info_volatile_iterator*` -- Iterator
 LIBSESSION_EXPORT convo_info_volatile_iterator* convo_info_volatile_iterator_new_legacy_groups(
+        const config_object* conf);
+
+/// API: convo_info_volatile/convo_info_volatile_iterator_new_blinded_1to1
+///
+/// The same as `convo_info_volatile_iterator_new` except that this iterates *only* over one type of
+/// conversation. You still need to use `convo_info_volatile_it_is_blinded_1to1` (or the
+/// alternatives) to load the data in each pass of the loop.  (You can, however, safely ignore the
+/// bool return value of the `it_is_whatever` function: it will always be true for the particular
+/// type being iterated over).
+///
+/// Declaration:
+/// ```cpp
+/// CONVO_INFO_VOLATILE_ITERATOR* convo_info_volatile_iterator_new_blinded_1to1(
+///     [in]    const config_object*    conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `convo_info_volatile_iterator*` -- Iterator
+LIBSESSION_EXPORT convo_info_volatile_iterator* convo_info_volatile_iterator_new_blinded_1to1(
         const config_object* conf);
 
 /// API: convo_info_volatile/convo_info_volatile_iterator_free
@@ -882,6 +1042,28 @@ LIBSESSION_EXPORT bool convo_info_volatile_it_is_group(
 /// - `bool` -- True if the record is a legacy group conversation
 LIBSESSION_EXPORT bool convo_info_volatile_it_is_legacy_group(
         convo_info_volatile_iterator* it, convo_info_volatile_legacy_group* c);
+
+/// API: convo_info_volatile/convo_info_volatile_it_is_blinded_1to1
+///
+/// If the current iterator record is a blinded 1-to-1 conversation this sets the details into `c`
+/// and returns true.  Otherwise it returns false.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL convo_info_volatile_it_is_blinded_1to1(
+///     [in]    convo_info_volatile_iterator*      it,
+///     [out]   convo_info_volatile_blinded_1to1*  c
+/// );
+/// ```
+///
+/// Inputs:
+/// - `it` -- [in] The convo_info_volatile_iterator
+/// - `c` -- [out] Pointer to the convo_info_volatile, will be populated if true
+///
+/// Outputs:
+/// - `bool` -- True if the record is a blinded 1-to-1 conversation
+LIBSESSION_EXPORT bool convo_info_volatile_it_is_blinded_1to1(
+        convo_info_volatile_iterator* it, convo_info_volatile_blinded_1to1* c);
 
 #ifdef __cplusplus
 }  // extern "C"

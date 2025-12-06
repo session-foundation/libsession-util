@@ -10,6 +10,7 @@
 #include <iterator>
 #include <memory>
 #include <optional>
+#include <span>
 #include <type_traits>
 #include <vector>
 
@@ -17,11 +18,90 @@
 
 namespace session {
 
+using namespace oxenc;
+
+// Helper functions to convert to/from spans
+template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+inline std::span<const OutChar, Extent> as_span(std::span<const InChar, Extent> sp) {
+    return std::span<const OutChar, Extent>{reinterpret_cast<const OutChar*>(sp.data()), sp.size()};
+}
+template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+inline std::span<OutChar, Extent> as_span(std::span<InChar, Extent> sp) {
+    return std::span<OutChar, Extent>{reinterpret_cast<OutChar*>(sp.data()), sp.size()};
+}
+
+template <typename OutChar = unsigned char, oxenc::bt_input_string T>
+inline std::span<const OutChar> to_span(const T& c) {
+    return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
+}
+
+template <typename OutChar = unsigned char, std::size_t N>
+inline std::span<const OutChar> to_span(const char (&literal)[N]) {
+    return {reinterpret_cast<const OutChar*>(literal), N - 1};
+}
+
+template <typename OutChar = unsigned char, typename Container>
+    requires(!oxenc::bt_input_string<Container>)
+inline std::span<const OutChar> to_span(const Container& c) {
+    return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
+}
+
+// Helper functions to convert container types
+template <typename OutContainer, typename InContainer>
+inline OutContainer convert(const InContainer& in) {
+    using out_value_type = typename OutContainer::value_type;
+    auto begin = reinterpret_cast<const out_value_type*>(in.data());
+    return OutContainer(begin, begin + in.size());
+}
+
+template <typename OutChar = unsigned char, typename InChar>
+inline std::vector<OutChar> to_vector(std::span<const InChar> sp) {
+    return convert<std::vector<OutChar>>(sp);
+}
+
+template <typename OutChar = unsigned char, oxenc::bt_input_string T>
+inline std::vector<OutChar> to_vector(const T& c) {
+    return convert<std::vector<OutChar>>(to_span(c));
+}
+
+template <typename OutChar = unsigned char, typename InChar, std::size_t N>
+inline std::vector<OutChar> to_vector(const std::array<InChar, N>& arr) {
+    return convert<std::vector<OutChar>>(arr);
+}
+
+template <typename OutChar = unsigned char, typename Container>
+    requires(!oxenc::bt_input_string<Container>)
+inline std::vector<OutChar> to_vector(const Container& c) {
+    return convert<std::vector<OutChar>>(to_span(c));
+}
+
+template <std::size_t N, typename InChar>
+inline std::array<unsigned char, N> to_array(std::span<const InChar> sp) {
+    std::array<unsigned char, N> result{};
+    std::copy_n(
+            reinterpret_cast<const unsigned char*>(sp.data()),
+            std::min(N, sp.size()),
+            result.begin());
+    return result;
+}
+
+template <typename Container>
+inline std::string to_string(const Container& c) {
+    return convert<std::string>(c);
+}
+
+template <typename OutChar = char, typename Container>
+inline std::string_view to_string_view(const Container& c) {
+    return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
+}
+
 // Helper function to go to/from char pointers to unsigned char pointers:
-inline const unsigned char* to_unsigned(const char* x) {
+template <oxenc::basic_char Char>
+inline const unsigned char* to_unsigned(const Char* x) {
     return reinterpret_cast<const unsigned char*>(x);
 }
-inline unsigned char* to_unsigned(char* x) {
+template <oxenc::basic_char Char>
+inline unsigned char* to_unsigned(Char* x) {
     return reinterpret_cast<unsigned char*>(x);
 }
 inline const unsigned char* to_unsigned(const std::byte* x) {
@@ -37,48 +117,9 @@ inline const unsigned char* to_unsigned(const unsigned char* x) {
 inline unsigned char* to_unsigned(unsigned char* x) {
     return x;
 }
-inline const char* from_unsigned(const unsigned char* x) {
-    return reinterpret_cast<const char*>(x);
-}
-inline char* from_unsigned(unsigned char* x) {
-    return reinterpret_cast<char*>(x);
-}
-// Helper to switch from basic_string_view<CFrom> to basic_string_view<CTo>.  Both CFrom and CTo
-// must be primitive, one-byte types.
-template <oxenc::basic_char CTo, oxenc::basic_char CFrom>
-inline std::basic_string_view<CTo> convert_sv(std::basic_string_view<CFrom> from) {
-    return {reinterpret_cast<const CTo*>(from.data()), from.size()};
-}
-// Same as above, but with a const basic_string<CFrom>& argument (to allow deduction of CFrom when
-// using a basic_string<CFrom>).
-template <oxenc::basic_char CTo, oxenc::basic_char CFrom>
-inline std::basic_string_view<CTo> convert_sv(const std::basic_string<CFrom>& from) {
-    return {reinterpret_cast<const CTo*>(from.data()), from.size()};
-}
-// Helper function to switch between basic_string_view<C> and ustring_view
-inline ustring_view to_unsigned_sv(std::string_view v) {
-    return {to_unsigned(v.data()), v.size()};
-}
-inline ustring_view to_unsigned_sv(std::basic_string_view<std::byte> v) {
-    return {to_unsigned(v.data()), v.size()};
-}
-inline ustring_view to_unsigned_sv(ustring_view v) {
-    return v;  // no-op, but helps with template metaprogramming
-}
-inline std::string_view from_unsigned_sv(ustring_view v) {
-    return {from_unsigned(v.data()), v.size()};
-}
-template <size_t N>
-inline std::string_view from_unsigned_sv(const std::array<unsigned char, N>& v) {
-    return {from_unsigned(v.data()), v.size()};
-}
-template <typename T, typename A>
-inline std::string_view from_unsigned_sv(const std::vector<T, A>& v) {
-    return {from_unsigned(v.data()), v.size()};
-}
-template <typename Char, size_t N>
-inline std::basic_string_view<Char> to_sv(const std::array<Char, N>& v) {
-    return {v.data(), N};
+
+inline uint64_t get_timestamp() {
+    return std::chrono::steady_clock::now().time_since_epoch().count();
 }
 
 /// Returns true if the first string is equal to the second string, compared case-insensitively.
@@ -93,10 +134,11 @@ using uc32 = std::array<unsigned char, 32>;
 using uc33 = std::array<unsigned char, 33>;
 using uc64 = std::array<unsigned char, 64>;
 
-/// Takes a container of string-like binary values and returns a vector of ustring_views viewing
-/// those values.  This can be used on a container of any type with a `.data()` and a `.size()`
-/// where `.data()` is a one-byte value pointer; std::string, std::string_view, ustring,
-/// ustring_view, etc. apply, as does std::array of 1-byte char types.
+/// Takes a container of string-like binary values and returns a vector of unsigned char spans
+/// viewing those values.  This can be used on a container of any type with a `.data()` and a
+/// `.size()` where `.data()` is a one-byte value pointer; std::string, std::string_view,
+/// std::vector<const unsigned char>, std::span<const unsigned char>, etc. apply, as does std::array
+/// of 1-byte char types.
 ///
 /// This is useful in various libsession functions that require such a vector.  Note that the
 /// returned vector's views are valid only as the original container remains alive; this is
@@ -107,8 +149,8 @@ using uc64 = std::array<unsigned char, 64>;
 /// There are two versions of this: the first takes a generic iterator pair; the second takes a
 /// single container.
 template <typename It>
-std::vector<ustring_view> to_view_vector(It begin, It end) {
-    std::vector<ustring_view> vec;
+std::vector<std::span<const unsigned char>> to_view_vector(It begin, It end) {
+    std::vector<std::span<const unsigned char>> vec;
     vec.reserve(std::distance(begin, end));
     for (; begin != end; ++begin) {
         if constexpr (std::is_same_v<std::remove_cv_t<decltype(*begin)>, char*>)  // C strings
@@ -125,7 +167,7 @@ std::vector<ustring_view> to_view_vector(It begin, It end) {
 }
 
 template <typename Container>
-std::vector<ustring_view> to_view_vector(const Container& c) {
+std::vector<std::span<const unsigned char>> to_view_vector(const Container& c) {
     return to_view_vector(c.begin(), c.end());
 }
 
@@ -218,5 +260,24 @@ inline int64_t to_epoch_seconds(int64_t timestamp) {
          : timestamp > 9'000'000'000     ? timestamp / 1'000
                                          : timestamp;
 }
+
+// Takes a timestamp as unix epoch seconds (not ms, µs) and wraps it in a sys_seconds containing it.
+inline std::chrono::sys_seconds as_sys_seconds(int64_t timestamp) {
+    return std::chrono::sys_seconds{std::chrono::seconds{timestamp}};
+}
+
+// Helper function to transform a timestamp integer that might be seconds, milliseconds or
+// microseconds to typesafe system clock seconds unix timestamp.
+inline std::chrono::sys_seconds to_sys_seconds(int64_t timestamp) {
+    if (timestamp > 9'000'000'000'000)
+        timestamp /= 1'000'000;
+    else if (timestamp > 9'000'000'000)
+        timestamp /= 1'000;
+    return as_sys_seconds(timestamp);
+}
+
+static_assert(std::is_same_v<
+              std::chrono::seconds,
+              decltype(std::declval<std::chrono::sys_seconds>().time_since_epoch())>);
 
 }  // namespace session

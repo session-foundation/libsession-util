@@ -25,9 +25,9 @@ TEST_CASE("Ed25519 key pair generation seed", "[ed25519][keypair]") {
     auto ed_seed2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
     auto ed_seed_invalid = "010203040506070809"_hexbytes;
 
-    auto kp1 = session::ed25519::ed25519_key_pair(to_unsigned_sv(ed_seed1));
-    auto kp2 = session::ed25519::ed25519_key_pair(to_unsigned_sv(ed_seed2));
-    CHECK_THROWS(session::ed25519::ed25519_key_pair(to_unsigned_sv(ed_seed_invalid)));
+    auto kp1 = session::ed25519::ed25519_key_pair(to_span(ed_seed1));
+    auto kp2 = session::ed25519::ed25519_key_pair(to_span(ed_seed2));
+    CHECK_THROWS(session::ed25519::ed25519_key_pair(to_span(ed_seed_invalid)));
 
     CHECK(kp1.first.size() == 32);
     CHECK(kp1.second.size() == 64);
@@ -57,9 +57,9 @@ TEST_CASE("Ed25519 seed for private key", "[ed25519][seed]") {
     auto ed_sk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
     auto ed_sk_invalid = "010203040506070809"_hexbytes;
 
-    auto seed1 = session::ed25519::seed_for_ed_privkey(to_unsigned_sv(ed_sk1));
-    auto seed2 = session::ed25519::seed_for_ed_privkey(to_unsigned_sv(ed_sk2));
-    CHECK_THROWS(session::ed25519::seed_for_ed_privkey(to_unsigned_sv(ed_sk_invalid)));
+    auto seed1 = session::ed25519::seed_for_ed_privkey(to_span(ed_sk1));
+    auto seed2 = session::ed25519::seed_for_ed_privkey(to_span(ed_sk2));
+    CHECK_THROWS(session::ed25519::seed_for_ed_privkey(to_span(ed_sk_invalid)));
 
     CHECK(oxenc::to_hex(seed1.begin(), seed1.end()) ==
           "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -74,15 +74,15 @@ TEST_CASE("Ed25519", "[ed25519][signature]") {
     auto ed_pk = "8862834829a87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"_hexbytes;
     auto ed_invalid = "010203040506070809"_hexbytes;
 
-    auto sig1 = session::ed25519::sign(to_unsigned_sv(ed_seed), to_unsigned_sv("hello"));
-    CHECK_THROWS(session::ed25519::sign(to_unsigned_sv(ed_invalid), to_unsigned_sv("hello")));
+    auto sig1 = session::ed25519::sign(to_span(ed_seed), to_span("hello"));
+    CHECK_THROWS(session::ed25519::sign(to_span(ed_invalid), to_span("hello")));
 
     auto expected_sig_hex =
             "e03b6e87a53d83f202f2501e9b52193dbe4a64c6503f88244948dee53271"
             "85011574589aa7b59bc9757f9b9c31b7be9c9212b92ac7c81e029ee21c338ee12405";
     CHECK(oxenc::to_hex(sig1.begin(), sig1.end()) == expected_sig_hex);
 
-    CHECK(session::ed25519::verify(sig1, ed_pk, to_unsigned_sv("hello")));
-    CHECK_THROWS(session::ed25519::verify(ed_invalid, ed_pk, to_unsigned_sv("hello")));
-    CHECK_THROWS(session::ed25519::verify(ed_pk, ed_invalid, to_unsigned_sv("hello")));
+    CHECK(session::ed25519::verify(sig1, ed_pk, to_span("hello")));
+    CHECK_THROWS(session::ed25519::verify(ed_invalid, ed_pk, to_span("hello")));
+    CHECK_THROWS(session::ed25519::verify(ed_pk, ed_invalid, to_span("hello")));
 }

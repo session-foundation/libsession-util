@@ -1,18 +1,13 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
-namespace session {
-
-using ustring = std::basic_string<unsigned char>;
-using ustring_view = std::basic_string_view<unsigned char>;
-
-namespace config {
+namespace session { namespace config {
 
     using seqno_t = std::int64_t;
 
-}  // namespace config
-
-}  // namespace session
+}}  // namespace session::config

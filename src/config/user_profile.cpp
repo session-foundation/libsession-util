@@ -10,14 +10,149 @@
 #include "session/types.hpp"
 
 using namespace session::config;
-using session::ustring_view;
 
-LIBSESSION_C_API const size_t PROFILE_PIC_MAX_URL_LENGTH = profile_pic::MAX_URL_LENGTH;
-
-UserProfile::UserProfile(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+UserProfile::UserProfile(
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
+
+std::optional<std::string_view> UserProfile::get_name() const {
+    if (auto* s = data["n"].string(); s && !s->empty())
+        return *s;
+    return std::nullopt;
+}
+
+void UserProfile::set_name(std::string_view new_name) {
+    if (new_name.size() > contact_info::MAX_NAME_LENGTH)
+        throw std::invalid_argument{"Invalid profile name: exceeds maximum length"};
+
+    auto current_name = get_name();
+    if (current_name && *current_name == new_name)
+        return;
+
+    set_nonempty_str(data["n"], new_name);
+
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] = ts_now();
+}
+void UserProfile::set_name_truncated(std::string new_name) {
+    set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
+}
+
+profile_pic UserProfile::get_profile_pic() const {
+    profile_pic pic{};
+
+    const bool use_primary_keys = (data["t"].integer_or(0) >= data["T"].integer_or(0));
+    const auto url_key = (use_primary_keys ? "p" : "P");
+    const auto key_key = (use_primary_keys ? "q" : "Q");
+
+    if (auto* url = data[url_key].string(); url && !url->empty())
+        pic.url = *url;
+    if (auto* key = data[key_key].string(); key && key->size() == 32)
+        pic.key.assign(
+                reinterpret_cast<const unsigned char*>(key->data()),
+                reinterpret_cast<const unsigned char*>(key->data()) + 32);
+    return pic;
+}
+
+void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
+    auto current_url = data["p"].string_view_or("");
+    auto current_key_str = data["q"].string_view_or("");
+    std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
+    bool changed = (current_url != url) || (current_key_str != new_key_str);
+
+    if (!changed)
+        return;
+
+    set_pair_if(!url.empty() && key.size() == 32, data["p"], url, data["q"], key);
+
+    // If the profile was removed then we should remove the "reupload" version as well
+    if (url.empty() || key.size() != 32)
+        set_reupload_profile_pic({});
+
+    data["t"] = ts_now();
+}
+
+void UserProfile::set_profile_pic(profile_pic pic) {
+    set_profile_pic(pic.url, pic.key);
+}
+
+void UserProfile::set_reupload_profile_pic(
+        std::string_view url, std::span<const unsigned char> key) {
+    auto current_url = data["P"].string_view_or("");
+    auto current_key_str = data["Q"].string_view_or("");
+    std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
+    bool changed = (current_url != url) || (current_key_str != new_key_str);
+
+    if (!changed)
+        return;
+
+    set_pair_if(!url.empty() && key.size() == 32, data["P"], url, data["Q"], key);
+    data["T"] = ts_now();
+}
+
+void UserProfile::set_reupload_profile_pic(profile_pic pic) {
+    set_reupload_profile_pic(pic.url, pic.key);
+}
+
+void UserProfile::set_nts_priority(int priority) {
+    set_nonzero_int(data["+"], priority);
+}
+
+int UserProfile::get_nts_priority() const {
+    return data["+"].integer_or(0);
+}
+
+void UserProfile::set_nts_expiry(std::chrono::seconds expiry) {
+    set_positive_int(data["e"], expiry.count());
+}
+
+std::optional<std::chrono::seconds> UserProfile::get_nts_expiry() const {
+    if (auto* e = data["e"].integer(); e && *e > 0)
+        return std::chrono::seconds{*e};
+    return std::nullopt;
+}
+
+void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
+    std::optional<bool> current_value;
+    if (data["M"].exists())
+        current_value = static_cast<bool>(data["M"].integer_or(0));
+
+    if (current_value == value)
+        return;
+
+    if (!value)
+        data["M"].erase();
+    else
+        data["M"] = static_cast<int>(*value);
+
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] = ts_now();
+}
+
+std::optional<bool> UserProfile::get_blinded_msgreqs() const {
+    if (auto* M = data["M"].integer(); M)
+        return static_cast<bool>(*M);
+    return std::nullopt;
+}
+
+std::chrono::sys_seconds UserProfile::get_profile_updated() const {
+    if (auto t = data["t"].sys_seconds()) {
+        if (auto T = data["T"].sys_seconds(); T && *T > *t)
+            return *T;
+        return *t;
+    }
+    return std::chrono::sys_seconds{};
+}
+
+extern "C" {
+
+using namespace session;
+using namespace session::config;
+
+LIBSESSION_C_API const size_t PROFILE_PIC_MAX_URL_LENGTH = profile_pic::MAX_URL_LENGTH;
 
 LIBSESSION_C_API int user_profile_init(
         config_object** conf,
@@ -28,25 +163,12 @@ LIBSESSION_C_API int user_profile_init(
     return c_wrapper_init<UserProfile>(conf, ed25519_secretkey_bytes, dumpstr, dumplen, error);
 }
 
-std::optional<std::string_view> UserProfile::get_name() const {
-    if (auto* s = data["n"].string(); s && !s->empty())
-        return *s;
-    return std::nullopt;
-}
 LIBSESSION_C_API const char* user_profile_get_name(const config_object* conf) {
     if (auto s = unbox<UserProfile>(conf)->get_name())
         return s->data();
     return nullptr;
 }
 
-void UserProfile::set_name(std::string_view new_name) {
-    if (new_name.size() > contact_info::MAX_NAME_LENGTH)
-        throw std::invalid_argument{"Invalid profile name: exceeds maximum length"};
-    set_nonempty_str(data["n"], new_name);
-}
-void UserProfile::set_name_truncated(std::string new_name) {
-    set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
-}
 LIBSESSION_C_API int user_profile_set_name(config_object* conf, const char* name) {
     return wrap_exceptions(
             conf,
@@ -55,15 +177,6 @@ LIBSESSION_C_API int user_profile_set_name(config_object* conf, const char* name
                 return 0;
             },
             static_cast<int>(SESSION_ERR_BAD_VALUE));
-}
-
-profile_pic UserProfile::get_profile_pic() const {
-    profile_pic pic{};
-    if (auto* url = data["p"].string(); url && !url->empty())
-        pic.url = *url;
-    if (auto* key = data["q"].string(); key && key->size() == 32)
-        pic.key = {reinterpret_cast<const unsigned char*>(key->data()), 32};
-    return pic;
 }
 
 LIBSESSION_C_API user_profile_pic user_profile_get_pic(const config_object* conf) {
@@ -77,17 +190,9 @@ LIBSESSION_C_API user_profile_pic user_profile_get_pic(const config_object* conf
     return p;
 }
 
-void UserProfile::set_profile_pic(std::string_view url, ustring_view key) {
-    set_pair_if(!url.empty() && key.size() == 32, data["p"], url, data["q"], key);
-}
-
-void UserProfile::set_profile_pic(profile_pic pic) {
-    set_profile_pic(pic.url, pic.key);
-}
-
 LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    ustring_view key;
+    std::span<const unsigned char> key;
     if (!url.empty())
         key = {pic.key, 32};
 
@@ -100,12 +205,19 @@ LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic 
             static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
-void UserProfile::set_nts_priority(int priority) {
-    set_nonzero_int(data["+"], priority);
-}
+LIBSESSION_C_API int user_profile_set_reupload_pic(config_object* conf, user_profile_pic pic) {
+    std::string_view url{pic.url};
+    std::span<const unsigned char> key;
+    if (!url.empty())
+        key = {pic.key, 32};
 
-int UserProfile::get_nts_priority() const {
-    return data["+"].integer_or(0);
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<UserProfile>(conf)->set_reupload_profile_pic(url, key);
+                return 0;
+            },
+            static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
 LIBSESSION_C_API int user_profile_get_nts_priority(const config_object* conf) {
@@ -116,35 +228,12 @@ LIBSESSION_C_API void user_profile_set_nts_priority(config_object* conf, int pri
     unbox<UserProfile>(conf)->set_nts_priority(priority);
 }
 
-void UserProfile::set_nts_expiry(std::chrono::seconds expiry) {
-    set_positive_int(data["e"], expiry.count());
-}
-
-std::optional<std::chrono::seconds> UserProfile::get_nts_expiry() const {
-    if (auto* e = data["e"].integer(); e && *e > 0)
-        return std::chrono::seconds{*e};
-    return std::nullopt;
-}
-
 LIBSESSION_C_API int user_profile_get_nts_expiry(const config_object* conf) {
     return unbox<UserProfile>(conf)->get_nts_expiry().value_or(0s).count();
 }
 
 LIBSESSION_C_API void user_profile_set_nts_expiry(config_object* conf, int expiry) {
     unbox<UserProfile>(conf)->set_nts_expiry(std::max(0, expiry) * 1s);
-}
-
-void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
-    if (!value)
-        data["M"].erase();
-    else
-        data["M"] = static_cast<int>(*value);
-}
-
-std::optional<bool> UserProfile::get_blinded_msgreqs() const {
-    if (auto* M = data["M"].integer(); M)
-        return static_cast<bool>(*M);
-    return std::nullopt;
 }
 
 LIBSESSION_C_API int user_profile_get_blinded_msgreqs(const config_object* conf) {
@@ -159,3 +248,9 @@ LIBSESSION_C_API void user_profile_set_blinded_msgreqs(config_object* conf, int 
         val = static_cast<bool>(enabled);
     unbox<UserProfile>(conf)->set_blinded_msgreqs(std::move(val));
 }
+
+LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
+    return unbox<UserProfile>(conf)->get_profile_updated().time_since_epoch().count();
+}
+
+}  // extern "C"

@@ -3,7 +3,6 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
@@ -20,7 +19,6 @@
 #include "session/util.hpp"
 
 using namespace std::literals;
-using session::ustring_view;
 
 LIBSESSION_C_API const size_t GROUP_NAME_MAX_LENGTH =
         session::config::legacy_group_info::NAME_MAX_LENGTH;
@@ -60,7 +58,7 @@ legacy_group_info::legacy_group_info(std::string sid) : session_id{std::move(sid
 }
 
 community_info::community_info(const ugroups_community_info& c) :
-        community_info{c.base_url, c.room, ustring_view{c.pubkey, 32}} {
+        community_info{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}} {
     base_from(*this, c);
 }
 
@@ -82,8 +80,8 @@ legacy_group_info::legacy_group_info(const ugroups_legacy_group_info& c, impl_t)
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
     base_from(*this, c);
     if (c.have_enc_keys) {
-        enc_pubkey.assign(c.enc_pubkey, 32);
-        enc_seckey.assign(c.enc_seckey, 32);
+        enc_pubkey.assign(c.enc_pubkey, c.enc_pubkey + 32);
+        enc_seckey.assign(c.enc_seckey, c.enc_seckey + 32);
     }
 }
 
@@ -128,18 +126,18 @@ void legacy_group_info::into(ugroups_legacy_group_info& c) && {
 }
 
 void base_group_info::load(const dict& info_dict) {
-    priority = maybe_int(info_dict, "+").value_or(0);
-    joined_at = to_epoch_seconds(std::max<int64_t>(0, maybe_int(info_dict, "j").value_or(0)));
+    priority = int_or_0(info_dict, "+");
+    joined_at = to_epoch_seconds(std::max<int64_t>(0, int_or_0(info_dict, "j")));
 
-    int notify = maybe_int(info_dict, "@").value_or(0);
+    int notify = int_or_0(info_dict, "@");
     if (notify >= 0 && notify <= 3)
         notifications = static_cast<notify_mode>(notify);
     else
         notifications = notify_mode::defaulted;
 
-    mute_until = to_epoch_seconds(maybe_int(info_dict, "!").value_or(0));
+    mute_until = to_epoch_seconds(int_or_0(info_dict, "!"));
 
-    invited = maybe_int(info_dict, "i").value_or(0);
+    invited = int_or_0(info_dict, "i");
 }
 
 void legacy_group_info::load(const dict& info_dict) {
@@ -150,8 +148,8 @@ void legacy_group_info::load(const dict& info_dict) {
     else
         name.clear();
 
-    auto enc_pub = maybe_ustring(info_dict, "k");
-    auto enc_sec = maybe_ustring(info_dict, "K");
+    auto enc_pub = maybe_vector(info_dict, "k");
+    auto enc_sec = maybe_vector(info_dict, "K");
     if (enc_pub && enc_sec && enc_pub->size() == 32 && enc_sec->size() == 32) {
         enc_pubkey = std::move(*enc_pub);
         enc_seckey = std::move(*enc_sec);
@@ -159,10 +157,7 @@ void legacy_group_info::load(const dict& info_dict) {
         enc_pubkey.clear();
         enc_seckey.clear();
     }
-    if (auto secs = maybe_int(info_dict, "E").value_or(0); secs > 0)
-        disappearing_timer = std::chrono::seconds{secs};
-    else
-        disappearing_timer = 0s;
+    disappearing_timer = std::max(0s, std::chrono::seconds{int_or_0(info_dict, "E")});
 
     members_.clear();
     if (auto* members = maybe_set(info_dict, "m"))
@@ -210,9 +205,9 @@ group_info::group_info(const ugroups_group_info& c) : id{c.id, 66} {
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
 
     if (c.have_secretkey)
-        secretkey.assign(c.secretkey, 64);
+        secretkey.assign(c.secretkey, c.secretkey + 64);
     if (c.have_auth_data)
-        auth_data.assign(c.auth_data, sizeof(c.auth_data));
+        auth_data.assign(c.auth_data, c.auth_data + sizeof(c.auth_data));
 }
 
 void group_info::into(ugroups_group_info& c) const {
@@ -235,7 +230,7 @@ void group_info::load(const dict& info_dict) {
     else
         name.clear();
 
-    if (auto seed = maybe_ustring(info_dict, "K"); seed && seed->size() == 32) {
+    if (auto seed = maybe_vector(info_dict, "K"); seed && seed->size() == 32) {
         std::array<unsigned char, 33> pk;
         pk[0] = 0x03;
         secretkey.resize(64);
@@ -243,10 +238,10 @@ void group_info::load(const dict& info_dict) {
         if (id != oxenc::to_hex(pk.begin(), pk.end()))
             secretkey.clear();
     }
-    if (auto sig = maybe_ustring(info_dict, "s"); sig && sig->size() == 100)
+    if (auto sig = maybe_vector(info_dict, "s"); sig && sig->size() == 100)
         auth_data = std::move(*sig);
 
-    removed_status = maybe_int(info_dict, "r").value_or(0);
+    removed_status = int_or_0(info_dict, "r");
 }
 
 void group_info::mark_kicked() {
@@ -284,19 +279,21 @@ void community_info::load(const dict& info_dict) {
         set_room(std::move(*n));
 }
 
-UserGroups::UserGroups(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped) :
+UserGroups::UserGroups(
+        std::span<const unsigned char> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
         ConfigBase{dumped} {
     load_key(ed25519_secretkey);
 }
 
 ConfigBase::DictFieldProxy UserGroups::community_field(
-        const community_info& og, ustring_view* get_pubkey) const {
+        const community_info& og, std::span<const unsigned char>* get_pubkey) const {
     auto record = data["o"][og.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey =
-                    ustring_view{reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+            *get_pubkey = std::span<const unsigned char>{
+                    reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
     }
     return record["R"][og.room_norm()];
 }
@@ -305,7 +302,7 @@ std::optional<community_info> UserGroups::get_community(
         std::string_view base_url, std::string_view room) const {
     community_info og{base_url, room};
 
-    ustring_view pubkey;
+    std::span<const unsigned char> pubkey;
     if (auto* info_dict = community_field(og, &pubkey).dict()) {
         og.load(*info_dict);
         if (!pubkey.empty())
@@ -321,7 +318,9 @@ std::optional<community_info> UserGroups::get_community(std::string_view partial
 }
 
 community_info UserGroups::get_or_construct_community(
-        std::string_view base_url, std::string_view room, ustring_view pubkey) const {
+        std::string_view base_url,
+        std::string_view room,
+        std::span<const unsigned char> pubkey) const {
     community_info result{base_url, room, pubkey};
 
     if (auto* info_dict = community_field(result).dict())
@@ -385,7 +384,7 @@ group_info UserGroups::get_or_construct_group(std::string_view pubkey_hex) const
 
 group_info UserGroups::create_group() const {
     std::array<unsigned char, 32> pk;
-    ustring sk;
+    std::vector<unsigned char> sk;
     sk.resize(64);
     crypto_sign_keypair(pk.data(), sk.data());
     std::string pk_hex;
@@ -447,13 +446,13 @@ void UserGroups::set(const group_info& g) {
 
     if (g.secretkey.size() == 64 &&
         // Make sure the secretkey's embedded pubkey matches the group id:
-        ustring_view{g.secretkey.data() + 32, 32} ==
-                ustring_view{
+        to_string_view(std::span<const unsigned char>{g.secretkey.data() + 32, 32}) ==
+                to_string_view(std::span<const unsigned char>{
                         reinterpret_cast<const unsigned char*>(pk_bytes.data() + 1),
-                        pk_bytes.size() - 1})
-        info["K"] = ustring_view{g.secretkey.data(), 32};
+                        pk_bytes.size() - 1}))
+        info["K"] = std::span<const unsigned char>{g.secretkey.data(), 32};
     else {
-        info["K"] = ustring_view{};
+        info["K"] = std::span<const unsigned char>{};
         if (g.auth_data.size() == 100)
             info["s"] = g.auth_data;
         else
@@ -490,7 +489,7 @@ bool UserGroups::erase(const legacy_group_info& c) {
 }
 
 bool UserGroups::erase(const any_group_info& c) {
-    return var::visit([this](const auto& c) { return erase(c); }, c);
+    return std::visit([this](const auto& c) { return erase(c); }, c);
 }
 bool UserGroups::erase_community(std::string_view base_url, std::string_view room) {
     return erase(community_info{base_url, room});
@@ -668,7 +667,8 @@ LIBSESSION_C_API bool user_groups_get_or_construct_community(
             conf,
             [&] {
                 unbox<UserGroups>(conf)
-                        ->get_or_construct_community(base_url, room, ustring_view{pubkey, 32})
+                        ->get_or_construct_community(
+                                base_url, room, std::span<const unsigned char>{pubkey, 32})
                         .into(*comm);
                 return true;
             },

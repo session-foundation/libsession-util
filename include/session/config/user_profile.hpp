@@ -24,10 +24,19 @@ using namespace std::literals;
 /// M - set to 1 if blinded message request retrieval is enabled, 0 if retrieval is *disabled*, and
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
+/// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
+///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
+/// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
+/// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
+///     when `T > t`).
+/// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
+///    (automatically updates when calling `set_reupload_profile_pic`).
 
 class UserProfile : public ConfigBase {
 
   public:
+    friend class UserProfileTester;
+
     // No default constructor
     UserProfile() = delete;
 
@@ -47,7 +56,9 @@ class UserProfile : public ConfigBase {
     ///
     /// Outputs:
     /// - `UserProfile` - Constructor
-    UserProfile(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped);
+    UserProfile(
+            std::span<const unsigned char> ed25519_secretkey,
+            std::optional<std::span<const unsigned char>> dumped);
 
     /// API: user_profile/UserProfile::storage_namespace
     ///
@@ -99,7 +110,8 @@ class UserProfile : public ConfigBase {
     /// API: user_profile/UserProfile::get_profile_pic
     ///
     /// Gets the user's current profile pic URL and decryption key.  The returned object will
-    /// evaluate as false if the URL and/or key are not set.
+    /// evaluate as false if the URL and/or key are not set.  The returned value will be the latest
+    /// profile pic between when the user last set their profile and when it was last re-uploaded.
     ///
     /// Inputs: None
     ///
@@ -109,12 +121,12 @@ class UserProfile : public ConfigBase {
 
     /// API: user_profile/UserProfile::set_profile_pic
     ///
-    /// Sets the user's current profile pic to a new URL and decryption key.  Clears both if either
-    /// one is empty.
+    /// Sets the user's current profile pic to a new URL and decryption key.  Clears both as well as
+    /// the reupload values if either one is empty.
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, ustring_view key);
+    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -124,8 +136,27 @@ class UserProfile : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, ustring_view key);
+    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     void set_profile_pic(profile_pic pic);
+
+    /// API: user_profile/UserProfile::set_reupload_profile_pic
+    ///
+    /// Sets the user's profile pic to a new URL and decryption key after reuploading.
+    ///
+    /// Declaration:
+    /// ```cpp
+    /// void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_reupload_profile_pic(profile_pic pic);
+    /// ```
+    ///
+    /// Inputs:
+    /// - First function:
+    ///    - `url` -- URL pointing to the profile pic
+    ///    - `key` -- Decryption key
+    /// - Second function:
+    ///    - `pic` -- Profile pic object
+    void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_reupload_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::get_nts_priority
     ///
@@ -196,6 +227,19 @@ class UserProfile : public ConfigBase {
     ///   not, and `std::nullopt` to drop the setting from the config (and thus use the client's
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
+
+    /// API: user_profile/UserProfile::get_profile_updated
+    ///
+    /// Returns the timestamp that the user last updated their profile information; or `0` if it's
+    /// never been updated.  This value will return the latest timestamp between when the user last
+    /// set their profile and when it was last re-uploaded.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::sys_seconds` - timestamp that the user last updated their profile
+    /// information.  Will be `0` if it's never been updated.
+    std::chrono::sys_seconds get_profile_updated() const;
 
     bool accepts_protobuf() const override { return true; }
 };

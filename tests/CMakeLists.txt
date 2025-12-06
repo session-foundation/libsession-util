@@ -5,6 +5,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
+    test_attachment_encrypt.cpp
     test_blinding.cpp
     test_bt_merge.cpp
     test_bugs.cpp
@@ -14,6 +15,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_configdata.cpp
     test_config_contacts.cpp
     test_config_convo_info_volatile.cpp
+    test_config_local.cpp
     test_curve25519.cpp
     test_ed25519.cpp
     test_encrypt.cpp
@@ -27,10 +29,12 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_random.cpp
     test_session_encrypt.cpp
     test_xed25519.cpp
+
+    case_logger.cpp
 )
 
 if (ENABLE_ONIONREQ)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_network.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_session_network.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
 endif()
 

@@ -43,6 +43,7 @@ add_libsession_util_library(util
 )
 
 add_libsession_util_library(crypto
+    attachments.cpp
     blinding.cpp
     curve25519.cpp
     ed25519.cpp
@@ -67,6 +68,7 @@ add_libsession_util_library(config
     config/groups/keys.cpp
     config/groups/members.cpp
     config/internal.cpp
+    config/local.cpp
     config/protos.cpp
     config/user_groups.cpp
     config/user_profile.cpp
@@ -104,7 +106,7 @@ if(ENABLE_ONIONREQ)
         onionreq/key_types.cpp
         onionreq/parser.cpp
         onionreq/response_parser.cpp
-        network.cpp
+        session_network.cpp
     )
 
     target_link_libraries(onionreq
@@ -116,6 +118,10 @@ if(ENABLE_ONIONREQ)
         libsodium::sodium-internal
         nettle::nettle
     )
+
+    if (BUILD_STATIC_DEPS)
+        target_include_directories(onionreq PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
+    endif()
 endif()
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
@@ -124,6 +130,14 @@ if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
     target_compile_options(config PUBLIC -Wno-error=stringop-overread)
 endif()
 
+# GCC's stringop overflow and overread warnings are very buggy, producing false positives for all
+# sorts of valid things, so make sure we don't have -Werror for them.  We cap this check for now at
+# 15 (where these still occur in the latest gcc snapshot) with the vain hope that maybe they'll get
+# fixed for gcc 16.
+if(WARNINGS_AS_ERRORS AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 12.0.0 AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16.0.0)
+    target_compile_options(crypto PUBLIC -Wno-error=stringop-overflow -Wno-error=stringop-overread)
+endif()
 
 if(LIBSESSION_UTIL_VERSIONTAG)
     set(PROJECT_VERSION_TAG "${LIBSESSION_UTIL_VERSIONTAG}")

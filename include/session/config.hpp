@@ -15,8 +15,20 @@
 
 namespace session::config {
 
-// FIXME: for multi-message we encode to longer and then split it up
-inline constexpr int MAX_MESSAGE_SIZE = 76800;  // 76.8kB = Storage server's limit
+// The maximum size of a single message in storage server.  For larger configs we have to split a
+// config message into a multipart message.
+inline constexpr int MAX_MESSAGE_SIZE = 76'800;  // 76.8kB = Storage server's limit
+
+// Maximum size of a post-compression outgoing multipart config message (before chopping into
+// multiple parts, and so not counting the small encryption and encoding overhead of each piece)
+// that we will allow.  This is not a strict network limit, but rather is simply to prevent bugs
+// that have some sort of accidental runaway size.  This limit does not apply to *incoming*
+// multipart messages so that if a future version changes the limit it will not break compatibility
+// with existing clients.
+//
+// Also note that we encode part index and length as 1 byte each, so this must be small enough to
+// not exceed 255 parts (but that would be insane anyway).
+inline constexpr int MAX_MULTIPART_SIZE = 5'000'000;
 
 // Application data data types:
 using scalar = std::variant<int64_t, std::string>;
@@ -108,10 +120,12 @@ class ConfigMessage {
     /// message.  It can also throw to abort message construction (that is: returning false skips
     /// the message when loading multiple messages, but can still continue with other messages;
     /// throwing aborts the entire construction).
-    using verify_callable = std::function<bool(ustring_view data, ustring_view signature)>;
+    using verify_callable = std::function<bool(
+            std::span<const unsigned char> data, std::span<const unsigned char> signature)>;
 
     /// Signing function: this is passed the data to be signed and returns the 64-byte signature.
-    using sign_callable = std::function<ustring(ustring_view data)>;
+    using sign_callable =
+            std::function<std::vector<unsigned char>(std::span<const unsigned char> data)>;
 
     ConfigMessage();
     ConfigMessage(const ConfigMessage&) = default;
@@ -124,7 +138,7 @@ class ConfigMessage {
     /// Initializes a config message by parsing a serialized message.  Throws on any error.  See the
     /// vector version below for argument descriptions.
     explicit ConfigMessage(
-            ustring_view serialized,
+            std::span<const unsigned char> serialized,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -160,7 +174,7 @@ class ConfigMessage {
     /// `[](size_t, const auto& e) { throw e; }` can be used to make any parse error of any message
     /// fatal.
     explicit ConfigMessage(
-            const std::vector<ustring_view>& configs,
+            const std::vector<std::span<const unsigned char>>& configs,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -231,10 +245,11 @@ class ConfigMessage {
     /// typically for a local serialization value that isn't being pushed to the server).  Note that
     /// signing is always disabled if there is no signing callback set, regardless of the value of
     /// this argument.
-    virtual ustring serialize(bool enable_signing = true);
+    virtual std::vector<unsigned char> serialize(bool enable_signing = true);
 
   protected:
-    ustring serialize_impl(const oxenc::bt_dict& diff, bool enable_signing = true);
+    std::vector<unsigned char> serialize_impl(
+            const oxenc::bt_dict& diff, bool enable_signing = true);
 };
 
 // Constructor tag
@@ -282,7 +297,7 @@ class MutableConfigMessage : public ConfigMessage {
     /// constructor only increments seqno once while the indirect version would increment twice in
     /// the case of a required merge conflict resolution.
     explicit MutableConfigMessage(
-            const std::vector<ustring_view>& configs,
+            const std::vector<std::span<const unsigned char>>& configs,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -292,7 +307,7 @@ class MutableConfigMessage : public ConfigMessage {
     /// take an error handler and instead always throws on parse errors (the above also throws for
     /// an erroneous single message, but with a less specific "no valid config messages" error).
     explicit MutableConfigMessage(
-            ustring_view config,
+            std::span<const unsigned char> config,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS);
@@ -334,12 +349,13 @@ class MutableConfigMessage : public ConfigMessage {
     /// pruning.
     bool prune();
 
-    /// Calculates the hash of the current message.  Can optionally be given the already-serialized
-    /// value, if available; if empty/omitted, `serialize()` will be called to compute it.
+    /// Calculates the hash of the current message.
     const hash_t& hash() override;
 
   protected:
-    const hash_t& hash(ustring_view serialized);
+    /// Internal version of hash() that takes the already-serialized value, to avoid needing a call
+    /// to `serialize()` when such a call has already been done for other reasons.
+    const hash_t& hash(std::span<const unsigned char> serialized);
     void increment_impl();
 };
 

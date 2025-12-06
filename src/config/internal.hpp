@@ -3,6 +3,7 @@
 #include <oxenc/bt_producer.h>
 
 #include <cassert>
+#include <chrono>
 #include <memory>
 #include <string_view>
 #include <type_traits>
@@ -11,6 +12,32 @@
 #include "session/config/base.hpp"
 #include "session/config/error.h"
 #include "session/types.hpp"
+
+namespace session {
+
+enum class SessionIDPrefix {
+    standard,
+    group,
+    community_blinded_legacy,
+    community_blinded,
+    version_blinded,
+    unblinded,
+};
+
+inline constexpr std::string_view to_string(session::SessionIDPrefix prefix) {
+    switch (prefix) {
+        case session::SessionIDPrefix::unblinded: return "00"sv;
+        case session::SessionIDPrefix::group: return "03"sv;
+        case session::SessionIDPrefix::standard: return "05"sv;
+        case session::SessionIDPrefix::community_blinded_legacy: return "15"sv;
+        case session::SessionIDPrefix::community_blinded: return "25"sv;
+        case session::SessionIDPrefix::version_blinded: return "07"sv;
+    }
+
+    return "05"sv;  // Fallback to standard, shouldn't occur
+};
+
+};  // namespace session
 
 namespace session::config {
 
@@ -45,8 +72,8 @@ template <typename ConfigT>
         size_t dumplen,
         char* error) {
     assert(ed25519_secretkey_bytes);
-    ustring_view ed25519_secretkey{ed25519_secretkey_bytes, 64};
-    std::optional<ustring_view> dump;
+    std::span<const unsigned char> ed25519_secretkey{ed25519_secretkey_bytes, 64};
+    std::optional<std::span<const unsigned char>> dump;
     if (dumpstr && dumplen)
         dump.emplace(dumpstr, dumplen);
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_secretkey, dump);
@@ -63,11 +90,11 @@ template <typename ConfigT>
 
     assert(ed25519_pubkey_bytes);
 
-    ustring_view ed25519_pubkey{ed25519_pubkey_bytes, 32};
-    std::optional<ustring_view> ed25519_secretkey;
+    std::span<const unsigned char> ed25519_pubkey{ed25519_pubkey_bytes, 32};
+    std::optional<std::span<const unsigned char>> ed25519_secretkey;
     if (ed25519_secretkey_bytes)
         ed25519_secretkey.emplace(ed25519_secretkey_bytes, 64);
-    std::optional<ustring_view> dump;
+    std::optional<std::span<const unsigned char>> dump;
     if (dump_bytes && dumplen)
         dump.emplace(dump_bytes, dumplen);
 
@@ -122,6 +149,9 @@ config_string_list* make_string_list(Container vals) {
 // byte for id's that aren't starting with 0x05 (e.g. 0x03 for non-legacy group ids).
 void check_session_id(std::string_view session_id, std::string_view prefix = "05");
 
+// Throws std::invalid_argument if id doesn't look valid.
+SessionIDPrefix get_session_id_prefix(std::string_view id);
+
 // Checks the session_id (throwing if invalid) then returns it as bytes
 std::string session_id_to_bytes(std::string_view session_id, std::string_view prefix = "05");
 
@@ -136,7 +166,7 @@ void check_encoded_pubkey(std::string_view pk);
 
 // Takes a 32-byte pubkey value encoded as hex, base32z, or base64 and returns the decoded 32 bytes.
 // Throws if invalid.
-ustring decode_pubkey(std::string_view pk);
+std::vector<unsigned char> decode_pubkey(std::string_view pk);
 
 // Modifies a string to be (ascii) lowercase.
 void make_lc(std::string& s);
@@ -147,15 +177,43 @@ const config::set* maybe_set(const session::config::dict& d, const char* key);
 // Digs into a config `dict` to get out an int64_t; nullopt if not there (or not int)
 std::optional<int64_t> maybe_int(const session::config::dict& d, const char* key);
 
+// Digs into a config `dict` to get out an int64_t; returns 0 if the value is not there or not an
+// int.  Equivalent to `maybe_int(d, key).value_or(0)`.
+int64_t int_or_0(const session::config::dict& d, const char* key);
+
+// Returns std::chrono::system_clock::now(), with the given precision (seconds, if unspecified).
+template <typename Duration = std::chrono::seconds>
+std::chrono::sys_time<Duration> ts_now() {
+    return std::chrono::floor<Duration>(std::chrono::system_clock::now());
+}
+
+// Digs into a config `dict` to get out an int64_t containing unix timestamp seconds, returns it
+// wrapped in a std::chrono::sys_seconds.  Returns nullopt if not there (or not int).
+std::optional<std::chrono::sys_seconds> maybe_ts(const session::config::dict& d, const char* key);
+
+// Works like maybe_ts, except that if the value isn't present it returns a default-constructed
+// sys_seconds (i.e. unix timestamp 0).  Equivalent to `maybe_ts(d,
+// key).value_or(std::chrono::sys_seconds{})`.
+std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char* key);
+
 // Digs into a config `dict` to get out a string; nullopt if not there (or not string)
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key);
 
-// Digs into a config `dict` to get out a ustring; nullopt if not there (or not string)
-std::optional<ustring> maybe_ustring(const session::config::dict& d, const char* key);
+// Digs into a config `dict` to get out a string; ""s if not there (or not string)
+std::string string_or_empty(const session::config::dict& d, const char* key);
 
 // Digs into a config `dict` to get out a string view; nullopt if not there (or not string).  The
 // string view is only valid as long as the dict stays unchanged.
 std::optional<std::string_view> maybe_sv(const session::config::dict& d, const char* key);
+
+// Digs into a config `dict` to get out a string view; ""sv if not there (or not string).  The
+// string view is only valid as long as the dict stays unchanged.
+std::string_view sv_or_empty(const session::config::dict& d, const char* key);
+
+// Digs into a config `dict` to get out a std::vector<unsigned char>; nullopt if not there (or not
+// string)
+std::optional<std::vector<unsigned char>> maybe_vector(
+        const session::config::dict& d, const char* key);
 
 /// Sets a value to 1 if true, removes it if false.
 void set_flag(ConfigBase::DictFieldProxy&& field, bool val);
@@ -169,6 +227,11 @@ void set_nonzero_int(ConfigBase::DictFieldProxy&& field, int64_t val);
 
 /// Sets an integer value, if positive; removes it if <= 0.
 void set_positive_int(ConfigBase::DictFieldProxy&& field, int64_t val);
+
+/// Sets a unix timestamp as an integer, if positive; removes it if <= 0.
+inline void set_ts(ConfigBase::DictFieldProxy&& field, std::chrono::sys_seconds val) {
+    set_positive_int(std::move(field), val.time_since_epoch().count());
+}
 
 /// Sets a pair of values if the given condition is satisfied, clears both values otherwise.
 template <typename Condition, typename T1, typename T2>
@@ -203,10 +266,25 @@ void load_unknowns(
 
 /// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
 /// serious error.
-ustring zstd_compress(ustring_view data, int level = 1, ustring_view prefix = {});
+std::vector<unsigned char> zstd_compress(
+        std::span<const unsigned char> data,
+        int level = 1,
+        std::span<const unsigned char> prefix = {});
 
 /// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
 /// then this returns nullopt if the decompressed size would exceed that limit.
-std::optional<ustring> zstd_decompress(ustring_view data, size_t max_size = 0);
+std::optional<std::vector<unsigned char>> zstd_decompress(
+        std::span<const unsigned char> data, size_t max_size = 0);
 
 }  // namespace session::config
+
+namespace fmt {
+
+template <>
+struct formatter<session::SessionIDPrefix, char> : formatter<std::string_view> {
+    auto format(const session::SessionIDPrefix& val, fmt::format_context& ctx) const {
+        return formatter<std::string_view>::format(to_string(val), ctx);
+    }
+};
+
+}  // namespace fmt

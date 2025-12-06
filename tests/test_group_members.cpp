@@ -4,15 +4,13 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
-#include <iostream>
+#include <chrono>
 #include <session/config/groups/members.hpp>
 #include <string_view>
 
 #include "utils.hpp"
 
 using namespace std::literals;
-using namespace oxenc::literals;
-
 using namespace session::config;
 
 constexpr bool is_prime100(int i) {
@@ -37,10 +35,10 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    std::vector<ustring> enc_keys{
+    std::vector<std::vector<unsigned char>> enc_keys{
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes};
 
-    groups::Members gmem1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Members gmem1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     // This is just for testing: normally you don't load keys manually but just make a groups::Keys
     // object that loads the keys into the Members object for you.
@@ -52,7 +50,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
             "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
     enc_keys.push_back("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hexbytes);
     enc_keys.push_back("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hexbytes);
-    groups::Members gmem2{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Members gmem2{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
         gmem2.add_key(k, false);
@@ -70,19 +68,21 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     for (int i = 0; i < 10; i++) {
         auto m = gmem1.get_or_construct(sids[i]);
         m.set_promotion_accepted();
-        m.name = "Admin " + std::to_string(i);
-        m.profile_picture.url = "http://example.com/" + std::to_string(i);
+        m.name = "Admin {}"_format(i);
+        m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
                 "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
+        m.profile_updated = std::chrono::sys_seconds{1s};
         gmem1.set(m);
     }
     // 10 members:
     for (int i = 10; i < 20; i++) {
         auto m = gmem1.get_or_construct(sids[i]);
-        m.set_name("Member " + std::to_string(i));
-        m.profile_picture.url = "http://example.com/" + std::to_string(i);
+        m.set_name("Member {}"_format(i));
+        m.profile_picture.url = "http://example.com/{}"_format(i);
         m.profile_picture.key =
                 "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes;
+        m.profile_updated = session::to_sys_seconds(2);
         gmem1.set(m);
     }
     // 5 members with no attributes (not even a name):
@@ -95,15 +95,16 @@ TEST_CASE("Group Members", "[config][groups][members]") {
 
     CHECK(gmem1.needs_push());
     auto [s1, p1, o1] = gmem1.push();
-    CHECK(p1.size() == 768);
+    CHECK(p1.size() == 1);
+    CHECK(p1.at(0).size() == 768);
 
-    gmem1.confirm_pushed(s1, "fakehash1");
+    gmem1.confirm_pushed(s1, {"fakehash1"});
     CHECK(gmem1.needs_dump());
     CHECK_FALSE(gmem1.needs_push());
 
-    std::vector<std::pair<std::string, ustring_view>> merge_configs;
-    merge_configs.emplace_back("fakehash1", p1);
-    CHECK(gmem2.merge(merge_configs) == std::vector<std::string>{{"fakehash1"}});
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> merge_configs;
+    merge_configs.emplace_back("fakehash1", p1.at(0));
+    CHECK(gmem2.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(gmem2.needs_push());
 
     for (int i = 0; i < 25; i++)
@@ -131,7 +132,8 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                         gmem2.get_status(m) ==
                         session::config::groups::member::Status::invite_not_sent);
                 CHECK(m.admin);
-                CHECK(m.name == "Admin " + std::to_string(i));
+                CHECK(m.name == "Admin {}"_format(i));
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
                 CHECK_FALSE(m.profile_picture.empty());
                 CHECK(gmem2.get_status(m) ==
                       session::config::groups::member::Status::promotion_accepted);
@@ -144,11 +146,13 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                       session::config::groups::member::Status::invite_not_sent);
                 CHECK_FALSE(m.admin);
                 if (i < 20) {
-                    CHECK(m.name == "Member " + std::to_string(i));
+                    CHECK(m.name == "Member {}"_format(i));
+                    CHECK(m.profile_updated.time_since_epoch() == 2s);
                     CHECK_FALSE(m.profile_picture.empty());
                 } else {
                     CHECK(m.name.empty());
                     CHECK(m.profile_picture.empty());
+                    CHECK(m.profile_updated.time_since_epoch() == 0s);
                 }
             }
             i++;
@@ -156,9 +160,15 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         CHECK(i == 25);
     }
 
+    for (int i = 5; i < 15; i++) {
+        auto m = gmem2.get_or_construct(sids[i]);
+        m.profile_updated += 1s;
+        gmem2.set(m);
+    }
     for (int i = 22; i < 50; i++) {
         auto m = gmem2.get_or_construct(sids[i]);
-        m.name = "Member " + std::to_string(i);
+        m.name = "Member {}"_format(i);
+        m.profile_updated = std::chrono::sys_seconds{1s};
         gmem2.set(m);
     }
     for (int i = 50; i < 55; i++) {
@@ -192,11 +202,11 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     CHECK(gmem2.get(sids[23]).value().name == "Member 23");
 
     auto [s2, p2, o2] = gmem2.push();
-    gmem2.confirm_pushed(s2, "fakehash2");
-    merge_configs.emplace_back("fakehash2", p2);  // not clearing it first!
-    CHECK(gmem1.merge(merge_configs) == std::vector{{"fakehash1"s}});
+    gmem2.confirm_pushed(s2, {"fakehash2"});
+    merge_configs.emplace_back("fakehash2", p2.at(0));  // not clearing it first!
+    CHECK(gmem1.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     gmem1.add_key("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hexbytes);
-    CHECK(gmem1.merge(merge_configs) == std::vector{{"fakehash1"s, "fakehash2"s}});
+    CHECK(gmem1.merge(merge_configs) == std::unordered_set{{"fakehash1"s, "fakehash2"s}});
 
     CHECK(gmem1.get(sids[23]).value().name == "Member 23");
 
@@ -205,14 +215,27 @@ TEST_CASE("Group Members", "[config][groups][members]") {
         for (auto& m : gmem1) {
             CHECK(m.session_id == sids[i]);
             CHECK(m.admin == (i < 10 || (i >= 58 && i < 62)));
-            CHECK(m.name == ((i == 20 || i == 21 || i >= 50) ? ""
-                             : i < 10                        ? "Admin " + std::to_string(i)
-                                                             : "Member " + std::to_string(i)));
+            CHECK(m.name == ((i == 20 || i == 21 || i >= 50)
+                                     ? ""
+                                     : "{} {}"_format(i < 10 ? "Admin" : "Member", i)));
             CHECK(m.profile_picture.key ==
                   (i < 20 ? "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes
                           : ""_hexbytes));
-            CHECK(m.profile_picture.url ==
-                  (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
+            CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
+            if (i < 5)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 5 && i < 10)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 10 && i < 15)
+                CHECK(m.profile_updated.time_since_epoch() == 3s);
+            if (i >= 15 && i < 20)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 20 && i < 22)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
+            if (i >= 22 && i < 50)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 50)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
             if (i >= 10 && i < 25)
                 CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_sending);
@@ -266,24 +289,37 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     }
 
     auto [s3, p3, o3] = gmem1.push();
-    gmem1.confirm_pushed(s3, "fakehash3");
+    gmem1.confirm_pushed(s3, {"fakehash3"});
     merge_configs.clear();
-    merge_configs.emplace_back("fakehash3", p3);
-    CHECK(gmem2.merge(merge_configs) == std::vector{{"fakehash3"s}});
+    merge_configs.emplace_back("fakehash3", p3.at(0));
+    CHECK(gmem2.merge(merge_configs) == std::unordered_set{{"fakehash3"s}});
 
     {
         int i = 0;
         for (auto& m : gmem2) {
             CHECK(m.session_id == sids[i]);
             CHECK(m.admin == (i < 10 || (i >= 58 && i < 62)));
-            CHECK(m.name == ((i == 20 || i == 21 || i >= 50) ? ""
-                             : i < 10                        ? "Admin " + std::to_string(i)
-                                                             : "Member " + std::to_string(i)));
+            CHECK(m.name == ((i == 20 || i == 21 || i >= 50)
+                                     ? ""
+                                     : "{} {}"_format(i < 10 ? "Admin" : "Member", i)));
             CHECK(m.profile_picture.key ==
                   (i < 20 ? "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hexbytes
                           : ""_hexbytes));
-            CHECK(m.profile_picture.url ==
-                  (i < 20 ? "http://example.com/" + std::to_string(i) : ""));
+            CHECK(m.profile_picture.url == (i < 20 ? "http://example.com/{}"_format(i) : ""));
+            if (i < 5)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 5 && i < 10)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 10 && i < 15)
+                CHECK(m.profile_updated.time_since_epoch() == 3s);
+            if (i >= 15 && i < 20)
+                CHECK(m.profile_updated.time_since_epoch() == 2s);
+            if (i >= 20 && i < 22)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
+            if (i >= 22 && i < 50)
+                CHECK(m.profile_updated.time_since_epoch() == 1s);
+            if (i >= 50)
+                CHECK(m.profile_updated.time_since_epoch() == 0s);
             if (is_prime100(i) || (i >= 25 && i < 50))
                 CHECK(gmem1.get_status(m) ==
                       session::config::groups::member::Status::invite_not_sent);
@@ -346,7 +382,7 @@ TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    groups::Members gmem1{to_usv(ed_pk), to_usv(ed_sk), std::nullopt};
+    groups::Members gmem1{session::to_span(ed_pk), session::to_span(ed_sk), std::nullopt};
 
     auto memberId1 = "050000000000000000000000000000000000000000000000000000000000000000";
     auto memberId2 = "051111111111111111111111111111111111111111111111111111111111111111";
@@ -365,7 +401,7 @@ TEST_CASE("Group Members restores extra data", "[config][groups][members]") {
 
     auto dumped = gmem1.dump();
 
-    groups::Members gmem2{to_usv(ed_pk), to_usv(ed_sk), dumped};
+    groups::Members gmem2{session::to_span(ed_pk), session::to_span(ed_sk), dumped};
 
     CHECK(gmem2.get_status(gmem1.get_or_construct(memberId1)) ==
           groups::member::Status::invite_sending);

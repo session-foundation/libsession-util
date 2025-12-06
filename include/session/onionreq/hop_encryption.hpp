@@ -22,12 +22,20 @@ class HopEncryption {
     // Encrypts `plaintext` message using encryption `type`. `pubkey` is the recipients public key.
     // `reply` should be false for a client-to-snode message, and true on a returning
     // snode-to-client message.
-    ustring encrypt(EncryptType type, ustring plaintext, const x25519_pubkey& pubkey) const;
-    ustring decrypt(EncryptType type, ustring ciphertext, const x25519_pubkey& pubkey) const;
+    std::vector<unsigned char> encrypt(
+            EncryptType type,
+            std::vector<unsigned char> plaintext,
+            const x25519_pubkey& pubkey) const;
+    std::vector<unsigned char> decrypt(
+            EncryptType type,
+            std::vector<unsigned char> ciphertext,
+            const x25519_pubkey& pubkey) const;
 
     // AES-GCM encryption.
-    ustring encrypt_aesgcm(ustring plainText, const x25519_pubkey& pubKey) const;
-    ustring decrypt_aesgcm(ustring cipherText, const x25519_pubkey& pubKey) const;
+    std::vector<unsigned char> encrypt_aesgcm(
+            std::vector<unsigned char> plainText, const x25519_pubkey& pubKey) const;
+    std::vector<unsigned char> decrypt_aesgcm(
+            std::vector<unsigned char> cipherText, const x25519_pubkey& pubKey) const;
 
     // xchacha20-poly1305 encryption; for a message sent from client Alice to server Bob we use a
     // shared key of a Blake2B 32-byte (i.e. crypto_aead_xchacha20poly1305_ietf_KEYBYTES) hash of
@@ -37,8 +45,10 @@ class HopEncryption {
     // When Bob (the server) encrypts a method for Alice (the client), he uses shared key
     // H(bA || A || B) (note that this is *different* that what would result if Bob was a client
     // sending to Alice the client).
-    ustring encrypt_xchacha20(ustring plaintext, const x25519_pubkey& pubKey) const;
-    ustring decrypt_xchacha20(ustring ciphertext, const x25519_pubkey& pubKey) const;
+    std::vector<unsigned char> encrypt_xchacha20(
+            std::vector<unsigned char> plaintext, const x25519_pubkey& pubKey) const;
+    std::vector<unsigned char> decrypt_xchacha20(
+            std::vector<unsigned char> ciphertext, const x25519_pubkey& pubKey) const;
 
   private:
     const x25519_seckey private_key_;

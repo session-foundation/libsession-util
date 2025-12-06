@@ -13,7 +13,9 @@ int main(int argc, char* argv[]) {
                    "level")["--log-level"]("oxen-logging log level to apply to the test run") |
                Opt(log_file, "file")["--log-file"](
                        "oxen-logging log file to output logs to, or one of  or one of "
-                       "stdout/-/stderr/syslog.");
+                       "stdout/-/stderr/syslog.") |
+               Opt(test_case_tracing)["-T"]["--test-tracing"](
+                       "enable oxen log tracing of test cases/sections");
 
     session.cli(cli);
 

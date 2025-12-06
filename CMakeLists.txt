@@ -17,7 +17,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 project(libsession-util
-    VERSION 1.2.1
+    VERSION 1.5.7
     DESCRIPTION "Session client utility library"
     LANGUAGES ${LANGS})
 
@@ -43,6 +43,7 @@ endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 
 set(default_static_libstd OFF)
 if(WIN32)

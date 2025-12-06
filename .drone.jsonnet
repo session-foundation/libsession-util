@@ -255,7 +255,8 @@ local mac_builder(name,
                   local_mirror=true,
                   jobs=6,
                   tests=true,
-                  allow_fail=false)
+                  allow_fail=false,
+                  allow_test_fail=false)
       = mac_pipeline(name, arch=arch, allow_fail=allow_fail, build=[
   'mkdir build',
   'cd build',
@@ -271,7 +272,7 @@ local mac_builder(name,
                      (if tests then
                         [{
                           name: 'tests',
-                          [if allow_fail then 'failure']: 'ignore',
+                          [if (allow_fail || allow_test_fail) then 'failure']: 'ignore',
                           commands: [
                             'cd build',
                             './tests/testLogging --colour-mode ansi -d yes',
@@ -319,7 +320,7 @@ local static_build(name,
         'echo "Building on ${DRONE_STAGE_MACHINE}"',
         apt_get_quiet + ' update',
         apt_get_quiet + ' install -y eatmydata',
-        'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y git clang-format-15 jsonnet',
+        'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y git clang-format-19 jsonnet',
         './utils/ci/drone-format-verify.sh',
       ],
     }],
@@ -331,17 +332,18 @@ local static_build(name,
     type: 'docker',
     steps: [{
       name: 'build',
-      image: 'node:19-bullseye',
+      image: docker_base + 'debian-stable',
       pull: 'always',
       environment: { SSH_KEY: { from_secret: 'SSH_KEY' } },
       commands: [
         'echo "Building on ${DRONE_STAGE_MACHINE}"',
         apt_get_quiet + ' update',
-        apt_get_quiet + ' install -y python3-requests rsync',
-        'npm i docsify-cli docsify-themeable docsify-katex@1.4.4 katex marked@4',
+        apt_get_quiet + ' install -y rsync python3-venv',
         'cd docs/api/',
-        'export NODE_PATH=node_modules',
-        'make',
+        'python3 -m venv .venv',
+        '. .venv/bin/activate',
+        'pip install -r requirements.txt',
+        'make build-all',
         '../../utils/ci/drone-docs-upload.sh',
       ],
     }],
@@ -355,7 +357,7 @@ local static_build(name,
   clang(17),
   full_llvm(17),
   debian_build('Debian stable (i386)', docker_base + 'debian-stable/i386'),
-  debian_build('Debian 11', docker_base + 'debian-bullseye', extra_setup=debian_backports('bullseye', ['cmake'])),
+  debian_build('Debian 12', docker_base + 'debian-bookworm'),
   debian_build('Ubuntu latest', docker_base + 'ubuntu-rolling'),
   debian_build('Ubuntu LTS', docker_base + 'ubuntu-lts'),
 
@@ -364,7 +366,7 @@ local static_build(name,
   debian_build('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', jobs=4),
 
   // Macos builds:
-  mac_builder('macOS Intel (Release)'),
+  mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
   mac_builder('macOS Arm64 (Release)', arch='arm64'),
   mac_builder('macOS Arm64 (Debug)', arch='arm64', build_type='Debug'),
 
@@ -397,7 +399,7 @@ local static_build(name,
     ]
   ),
 
-  mac_pipeline('Static macOS', build=[
+  mac_pipeline('Static macOS', arch='arm64', build=[
     'export JOBS=6',
     './utils/macos.sh',
     'cd build-macos && ../utils/ci/drone-static-upload.sh',

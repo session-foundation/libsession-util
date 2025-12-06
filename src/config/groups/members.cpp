@@ -8,9 +8,9 @@
 namespace session::config::groups {
 
 Members::Members(
-        ustring_view ed25519_pubkey,
-        std::optional<ustring_view> ed25519_secretkey,
-        std::optional<ustring_view> dumped) {
+        std::span<const unsigned char> ed25519_pubkey,
+        std::optional<std::span<const unsigned char>> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) {
     init(dumped, ed25519_pubkey, ed25519_secretkey);
 }
 
@@ -66,6 +66,7 @@ void Members::set(const member& mem) {
             info["q"],
             mem.profile_picture.key);
 
+    set_ts(info["t"], mem.profile_updated);
     set_flag(info["A"], mem.admin);
     set_positive_int(info["P"], mem.promotion_status);
     set_positive_int(info["I"], mem.admin ? 0 : mem.invite_status);
@@ -84,10 +85,10 @@ void Members::set(const member& mem) {
 }
 
 void member::load(const dict& info_dict) {
-    name = maybe_string(info_dict, "n").value_or("");
+    name = string_or_empty(info_dict, "n");
 
     auto url = maybe_string(info_dict, "p");
-    auto key = maybe_ustring(info_dict, "q");
+    auto key = maybe_vector(info_dict, "q");
     if (url && key && !url->empty() && key->size() == 32) {
         profile_picture.url = std::move(*url);
         profile_picture.key = std::move(*key);
@@ -95,13 +96,13 @@ void member::load(const dict& info_dict) {
         profile_picture.clear();
     }
 
-    admin = maybe_int(info_dict, "A").value_or(0);
-    invite_status = admin ? 0 : maybe_int(info_dict, "I").value_or(0);
-    promotion_status = maybe_int(info_dict, "P").value_or(0);
-    removed_status = maybe_int(info_dict, "R").value_or(0);
-    supplement = invite_status > 0 && !(admin || promotion_status > 0)
-                       ? maybe_int(info_dict, "s").value_or(0)
-                       : 0;
+    profile_updated = ts_or_epoch(info_dict, "t");
+    admin = int_or_0(info_dict, "A");
+    invite_status = admin ? 0 : int_or_0(info_dict, "I");
+    promotion_status = int_or_0(info_dict, "P");
+    removed_status = int_or_0(info_dict, "R");
+    supplement =
+            invite_status > 0 && !(admin || promotion_status > 0) ? int_or_0(info_dict, "s") : 0;
 }
 
 /// Load _val from the current iterator position; if it is invalid, skip to the next key until we
@@ -185,8 +186,9 @@ member::member(const config_group_member& m) : session_id{m.session_id, 66} {
     assert(std::strlen(m.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(m.profile_pic.url)) {
         profile_picture.url = m.profile_pic.url;
-        profile_picture.key = {m.profile_pic.key, 32};
+        profile_picture.key.assign(m.profile_pic.key, m.profile_pic.key + 32);
     }
+    profile_updated = to_sys_seconds(m.profile_updated);
     admin = m.admin;
     invite_status =
             (m.invited == STATUS_SENT || m.invited == STATUS_FAILED || m.invited == STATUS_NOT_SENT)
@@ -211,6 +213,7 @@ void member::into(config_group_member& m) const {
     } else {
         copy_c_str(m.profile_pic.url, "");
     }
+    m.profile_updated = profile_updated.time_since_epoch().count();
     m.admin = admin;
     static_assert(groups::STATUS_SENT == ::STATUS_SENT);
     static_assert(groups::STATUS_FAILED == ::STATUS_FAILED);

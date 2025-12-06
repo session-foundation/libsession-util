@@ -1,19 +1,26 @@
 #pragma once
 
+#include <fmt/format.h>
+
 #include <cassert>
+#include <chrono>
+#include <list>
 #include <memory>
 #include <session/config.hpp>
 #include <session/util.hpp>
-#include <stdexcept>
+#include <span>
 #include <type_traits>
 #include <unordered_set>
 #include <variant>
 #include <vector>
 
+#include "../hash.hpp"
 #include "../logging.hpp"
 #include "../sodium_array.hpp"
 #include "base.h"
 #include "namespaces.hpp"
+
+using namespace std::literals;
 
 namespace oxenc {
 class bt_dict_producer;
@@ -78,8 +85,8 @@ class ConfigSig {
     //
     // Throws if given invalid data (i.e. wrong key size, or mismatched pubkey/secretkey).
     void init_sig_keys(
-            std::optional<ustring_view> ed25519_pubkey,
-            std::optional<ustring_view> ed25519_secretkey);
+            std::optional<std::span<const unsigned char>> ed25519_pubkey,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey);
 
   public:
     virtual ~ConfigSig() = default;
@@ -107,7 +114,7 @@ class ConfigSig {
     /// Inputs:
     /// - `secret` -- the 64-byte sodium-style Ed25519 "secret key" (actually the seed+pubkey
     ///   concatenated together) that sets both the secret key and public key.
-    void set_sig_keys(ustring_view secret);
+    void set_sig_keys(std::span<const unsigned char> secret);
 
     /// API: base/ConfigSig::set_sig_pubkey
     ///
@@ -117,7 +124,7 @@ class ConfigSig {
     ///
     /// Inputs:
     /// - `pubkey` -- the 32 byte Ed25519 pubkey that must have signed incoming messages
-    void set_sig_pubkey(ustring_view pubkey);
+    void set_sig_pubkey(std::span<const unsigned char> pubkey);
 
     /// API: base/ConfigSig::get_sig_pubkey
     ///
@@ -157,14 +164,85 @@ class ConfigBase : public ConfigSig {
     using Key = std::array<unsigned char, KEY_SIZE>;
     sodium_vector<Key> _keys;
 
-    // Contains the current active message hash, as fed into us in `confirm_pushed()`.  Empty if we
-    // don't know it yet.  When we dirty the config this value gets moved into `old_hashes_` to be
-    // removed by the next push.
-    std::string _curr_hash;
+    // Contains the current active message hash(es), as fed into us in `confirm_pushed()`.
+    // Typically just one hash, but multiple will occur when dealing with multipart config messages.
+    // Empty if we don't know it yet.  When we dirty the config these hashes get moved into
+    // `old_hashes_` to be removed by the next push.
+    std::unordered_set<std::string> _curr_hashes;
 
     // Contains obsolete known message hashes that are obsoleted by the most recent merge or push;
     // these are returned (and cleared) when `push` or `old_hashes` are called.
     std::unordered_set<std::string> _old_hashes;
+
+    struct PartialMessage {
+        int index;                        // 0-based index of this part
+        std::string message_id;           // storage server message hash of this part
+        std::vector<unsigned char> data;  // Data chunk
+
+        PartialMessage(
+                int index, std::string_view message_id, std::span<const unsigned char> data) :
+                index{index}, message_id{message_id}, data{data.begin(), data.end()} {}
+    };
+    struct PartialMessages {
+        bool done = false;  // Will be true if this is an already-processed multipart set.  We keep
+                            // such stubs around after completing them so that we can optimize away
+                            // reprocessing duplicate parts that might arrive in the near future.
+
+        int size = 0;  // Total number of parts of this multipart message, if still being
+                       // accumulated.  0 if the message is done.
+
+        std::list<PartialMessage> parts;  // The individual message parts, in ascending order.
+
+        // The expiry of this message info.  This gets updated whenever we receive a new part of the
+        // same message set, and when we complete processing.
+        std::chrono::system_clock::time_point expiry;
+
+        // Shortcut for resetting all fields as appropriate for a finished record: this clears
+        // parts, sets size to 0, and updates the expiry to now plus the given expiry duration
+        // (usually the MULTIPART_MAX_REMEMBER value).
+        void finish(std::chrono::milliseconds lifetime) {
+            done = true;
+            size = 0;
+            parts.clear();
+            expiry = std::chrono::system_clock::now() + lifetime;
+        }
+    };
+
+    // Partial message sets that we have received but not yet been able to join into a full message.
+    // The key is a hash of the final combined data (included in each part to identify related
+    // parts) used as a unique identifier and checksum; the value is the PartialMessages struct
+    // containing set metadata and individual parts.  (This is an ordered hash, because we relying
+    // on the keys being sorted when dumping our state to a config item.)
+    std::map<hash_t, PartialMessages> _multiparts;
+
+    // Parses a new multipart message, handling parsing, adding to _multiparts, etc.  This is called
+    // by _merge when it finds a `m`-type message for handling.
+    //
+    // - msg_id is the storage-server assigned message id (which is, in current implementation a
+    //   base64 encoded hash, but storage server is allowed to do whatever it wants for this).
+    // - message is the full message body received (i.e. including the `m` message type prefix).
+    //
+    // Returns pair of:
+    // - true/false indicating whether the single given message was accepted (i.e. parsed correctly
+    //   and didn't have invalid parameters).
+    // - optional pair that will be non-null only when this message part completed a set of message
+    //   parts resulting in a new, previously unseen message.  The first element is a list of
+    //   individual message ids (which will include the input one); the second is the reconstituted
+    //   (and decompressed, if needed) final message body.
+    //
+    //   For new parts that don't complete a set, errors, and already seen messages the optional
+    //   value will be nullopt.
+    std::pair<bool, std::optional<std::pair<std::list<std::string>, std::vector<unsigned char>>>>
+    _handle_multipart(std::string_view msg_id, std::span<const unsigned char> message);
+
+    // Writes multipart data into the sub-dict of the dump data.
+    void _dump_multiparts(oxenc::bt_dict_producer&& multi) const;
+
+    // Loads multipart data from the sub-dict of the dump data.
+    void _load_multiparts(oxenc::bt_dict_consumer&& multi);
+
+    // Cleans up any expired multipart data.
+    void _expire_multiparts();
 
   protected:
     // Constructs a base config by loading the data from a dump as produced by `dump()`.  If the
@@ -176,9 +254,9 @@ class ConfigBase : public ConfigSig {
     // verification of incoming messages using the associated pubkey, and will be signed using the
     // secretkey (if a secret key is given).
     explicit ConfigBase(
-            std::optional<ustring_view> dump = std::nullopt,
-            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
-            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+            std::optional<std::span<const unsigned char>> dump = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_pubkey = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey = std::nullopt);
 
     // Initializes the base config object with dump data and keys; this is typically invoked by the
     // constructor, but is exposed to subclasses so that they can delay initial processing by
@@ -189,9 +267,9 @@ class ConfigBase : public ConfigSig {
     //
     // This method must not be called outside derived class construction!
     void init(
-            std::optional<ustring_view> dump = std::nullopt,
-            std::optional<ustring_view> ed25519_pubkey = std::nullopt,
-            std::optional<ustring_view> ed25519_secretkey = std::nullopt);
+            std::optional<std::span<const unsigned char>> dump = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_pubkey = std::nullopt,
+            std::optional<std::span<const unsigned char>> ed25519_secretkey = std::nullopt);
 
     // Tracks whether we need to dump again; most mutating methods should set this to true (unless
     // calling set_state, which sets to to true implicitly).
@@ -459,15 +537,18 @@ class ConfigBase : public ConfigSig {
 
         /// API: base/ConfigBase::DictFieldProxy::uview
         ///
-        /// Returns the value as a ustring_view, if it exists and is a string; nullopt otherwise.
+        /// Returns the value as a std::span<const unsigned char>, if it exists and is a string;
+        /// nullopt otherwise.
         ///
         /// Inputs: None
         ///
         /// Outputs:
-        /// - `std::optional<ustring_view>` -- Returns a value as a view if it exists
-        std::optional<ustring_view> uview() const {
+        /// - `std::optional<std::span<const unsigned char>>` -- Returns a value as a view if it
+        /// exists
+        std::optional<std::span<const unsigned char>> uview() const {
             if (auto* s = get_clean<std::string>())
-                return ustring_view{reinterpret_cast<const unsigned char*>(s->data()), s->size()};
+                return std::span<const unsigned char>{
+                        reinterpret_cast<const unsigned char*>(s->data()), s->size()};
             return std::nullopt;
         }
 
@@ -531,6 +612,36 @@ class ConfigBase : public ConfigSig {
             return fallback;
         }
 
+        /// API: base/ConfigBase::DictFieldProxy::sys_time
+        ///
+        /// Returns the integer value loaded into a seconds-since-epoch std::chrono::sys_seconds
+        /// value if an integer value exists at the given location, std::nullopt otherwise.
+        ///
+        /// Inputs: None
+        ///
+        /// Outputs:
+        /// - `std::optional<std::chrono::sys_time>` -- nullopt if the value doesn't exist (or isn't
+        ///   an integer), otherwise the integer value loaded as a seconds-from-epoch.
+        std::optional<std::chrono::sys_seconds> sys_seconds() const {
+            if (const auto* i = integer())
+                return std::make_optional<std::chrono::sys_seconds>(std::chrono::seconds{*i});
+            return std::nullopt;
+        }
+
+        /// API: base/ConfigBase::DictFieldProxy::sys_time_or
+        ///
+        /// Returns the value as a std::chrono::sys_time or a fallback if the value doesn't exist
+        /// (or isn't an integer).
+        ///
+        /// Inputs:
+        /// - `fallback` -- this value will be returned if it the requested value doesn't exist
+        ///
+        /// Outputs:
+        /// - `int64_t` -- Returned Integer
+        std::chrono::sys_seconds sys_seconds_or(std::chrono::sys_seconds fallback) const {
+            return sys_seconds().value_or(fallback);
+        }
+
         /// API: base/ConfigBase::DictFieldProxy::set
         ///
         /// Returns a const pointer to the set if one exists at the given location, nullptr
@@ -574,17 +685,17 @@ class ConfigBase : public ConfigSig {
         /// - `value` -- replaces current value with given string view
         void operator=(std::string_view value) { *this = std::string{value}; }
 
-        /// API: base/ConfigBase::DictFieldProxy::operator=(ustring_view)
+        /// API: base/ConfigBase::DictFieldProxy::operator=(std::span)
         ///
-        /// Replaces the current value with the given ustring_view.  This also auto-vivifies any
-        /// intermediate dicts needed to reach the given key, including replacing non-dict values if
-        /// they currently exist along the path (this makes a copy).
+        /// Replaces the current value with the given std::span<const unsigned char>.  This also
+        /// auto-vivifies any intermediate dicts needed to reach the given key, including replacing
+        /// non-dict values if they currently exist along the path (this makes a copy).
         ///
         /// Inputs:
-        /// - `value` -- replaces current value with given ustring_view
+        /// - `value` -- replaces current value with given std::span<const unsigned char>
         ///
-        /// Same as above, but takes a ustring_view
-        void operator=(ustring_view value) {
+        /// Same as above, but takes a std::span<const unsigned char>
+        void operator=(std::span<const unsigned char> value) {
             *this = std::string{reinterpret_cast<const char*>(value.data()), value.size()};
         }
 
@@ -597,6 +708,19 @@ class ConfigBase : public ConfigSig {
         /// Inputs:
         /// - `value` -- replaces current value with given integer
         void operator=(int64_t value) { assign_if_changed(value); }
+
+        /// API: base/ConfigBase::DictFieldProxy::operator=(std::chrono::sys_seconds)
+        ///
+        /// Replaces the current value with an integer containing the seconds-since-epoch of the
+        /// given system time point.  This also auto-vivifies any intermediate dicts needed to reach
+        /// the given key, including replacing non-dict values if they currently exist along the
+        /// path.
+        ///
+        /// Inputs:
+        /// - `value` -- replaces current value with given sys_seconds's time_since_epoch() value.
+        void operator=(std::chrono::sys_seconds value) {
+            assign_if_changed(static_cast<int64_t>(value.time_since_epoch().count()));
+        }
 
         /// API: base/ConfigBase::DictFieldProxy::operator=(config::set)
         ///
@@ -771,22 +895,22 @@ class ConfigBase : public ConfigSig {
     /// updated and needs to be pushed to the server again (for example, because the data contained
     /// conflicts that required another update to resolve).
     ///
-    /// Returns the number of the given config messages that were successfully parsed.
+    /// Returns the ids of the given config messages that were successfully parsed.
     ///
     /// Will throw on serious error (i.e. if neither the current nor any of the given configs are
     /// parseable).  This should not happen (the current config, at least, should always be
     /// re-parseable).
     ///
     /// Inputs:
-    /// - `configs` -- vector of pairs containing the message hash and the raw message body
+    /// - `configs` -- span of pairs containing the message hash and the raw message body
     ///
     /// Outputs:
-    /// - vector of successfully parsed hashes.  Note that this does not mean the hash was recent or
-    ///   that it changed the config, merely that the returned hash was properly parsed and
-    ///   processed as a config message, even if it was too old to be useful (or was already known
-    ///   to be included).  The hashes will be in the same order as in the input vector.
-    std::vector<std::string> _merge(
-            const std::vector<std::pair<std::string, ustring_view>>& configs);
+    /// - unordered_set of successfully parsed hashes.  Note that this does not mean the hash was
+    ///   recent or that it changed the config, merely that the returned hash was properly parsed
+    ///   and processed as a config message, even if it was too old to be useful (or was already
+    ///   known to be included).
+    std::unordered_set<std::string> _merge(
+            std::span<const std::pair<std::string, std::span<const unsigned char>>> configs);
 
     /// API: base/ConfigBase::extra_data
     ///
@@ -828,7 +952,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Inputs:
     /// - `ed25519_secret_key` -- key is loaded for encryption
-    void load_key(ustring_view ed25519_secretkey);
+    void load_key(std::span<const unsigned char> ed25519_secretkey);
 
   public:
     virtual ~ConfigBase() = default;
@@ -908,7 +1032,8 @@ class ConfigBase : public ConfigSig {
     /// updated and needs to be pushed to the server again (for example, because the data contained
     /// conflicts that required another update to resolve).
     ///
-    /// Returns the number of the given config messages that were successfully parsed.
+    /// Returns a set of all config message ids that were successfully parsed (regardless of whether
+    /// they had any effect on the config).
     ///
     /// Will throw on serious error (i.e. if neither the current nor any of the given configs are
     /// parseable).  This should not happen (the current config, at least, should always be
@@ -916,10 +1041,10 @@ class ConfigBase : public ConfigSig {
     ///
     /// Declaration:
     /// ```cpp
-    /// std::vector<std::string> merge(
-    ///     const std::vector<std::pair<std::string, ustring_view>>& configs);
-    /// std::vector<std::string> merge(
-    ///     const std::vector<std::pair<std::string, ustring>>& configs);
+    /// std::unordered_set<std::string> merge(
+    ///     const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs);
+    /// std::unordered_set<std::string> merge(
+    ///     const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs);
     /// ```
     ///
     /// Inputs:
@@ -927,15 +1052,21 @@ class ConfigBase : public ConfigSig {
     ///   protobuf-wrapped raw message for certain config types).
     ///
     /// Outputs:
-    /// - vector of successfully parsed hashes.  Note that this does not mean the hash was recent or
-    ///   that it changed the config, merely that the returned hash was properly parsed and
-    ///   processed as a config message, even if it was too old to be useful (or was already known
-    ///   to be included).  The hashes will be in the same order as in the input vector.
-    std::vector<std::string> merge(const std::vector<std::pair<std::string, ustring>>& configs);
+    /// - unordered set of successfully parsed hashes.  Note that this does not mean the hash was
+    ///   recent or that it changed the config, merely that the returned hash was properly parsed
+    ///   and processed as a config message, even if it was too old to be useful (or was already
+    ///   known to be included).  For *multipart* message parts that form a complete set of parts
+    ///   (considering all input messages plus any previously stored incomplete parts), the hash
+    ///   will be included if the resulting reconstituted multipart message was a valid config; for
+    ///   parts that do not complete a message set, inclusion in the return value is based only on
+    ///   whether the multipart part itself looked valid.
+    std::unordered_set<std::string> merge(
+            const std::vector<std::pair<std::string, std::vector<unsigned char>>>& configs);
 
-    // Same as above, but takes values as ustrings (because sometimes that is more convenient).
-    std::vector<std::string> merge(
-            const std::vector<std::pair<std::string, ustring_view>>& configs);
+    // Same as above, but takes values as std::span<const unsigned char>s (because sometimes that is
+    // more convenient).
+    std::unordered_set<std::string> merge(
+            const std::vector<std::pair<std::string, std::span<const unsigned char>>>& configs);
 
     /// API: base/ConfigBase::is_dirty
     ///
@@ -1016,16 +1147,34 @@ class ConfigBase : public ConfigSig {
     /// - `bool` true if this config object is read-only
     bool is_readonly() const { return _config->verifier && !_config->signer; }
 
-    /// API: base/ConfigBase::current_hashes
+    /// API: base/ConfigBase::curr_hashes
     ///
-    /// The current config hash(es); this can be empty if the current hash is unknown or the current
-    /// state is not clean (i.e. a push is needed or pending).
+    /// The hashes of the current config state.  This can be empty if the current hashes are not
+    /// known (i.e. a push is still in progress) or the current state is not clean (i.e. a push is
+    /// needed or pending).
+    ///
+    /// See also active_hashes(), which you often want instead of this.
     ///
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::vector<std::string>` -- Returns current config hashes
-    std::vector<std::string> current_hashes() const;
+    /// - `std::unordered_set<std::string>` -- Returns current config hashes
+    const std::unordered_set<std::string>& curr_hashes() const;
+
+    /// API: base/ConfigBase::active_hashes
+    ///
+    /// Returns the hashes of known config messages that we think should be kept alive on the
+    /// server: this includes the message(s) comprising the current config (as returned by
+    /// curr_hashes()) but *also* includes any partial multi-messages for which we have not yet
+    /// received the full set, as those messages may be part of an impending config update that
+    /// cannot be processed until the full set is received.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::unordered_set<std::string>` -- Returns active (current and in-progress partial)
+    ///   config hashes
+    std::unordered_set<std::string> active_hashes() const;
 
     /// API: base/ConfigBase::old_hashes
     ///
@@ -1056,19 +1205,20 @@ class ConfigBase : public ConfigSig {
     ///
     /// Returns a tuple of three elements:
     /// - the seqno value of the data
-    /// - the data message to push to the server
+    /// - a vector of data messages to push to the server (will be > 1 if the config message has to
+    ///   be split into multi-part messages).
     /// - a list of known message hashes that are obsoleted by this push.
     ///
     /// Additionally, if the internal state is currently dirty (i.e. there are unpushed changes),
     /// the internal state will be marked as awaiting-confirmation.  Any further data changes made
     /// after this call will re-dirty the data (incrementing seqno and requiring another push).
     ///
-    /// The client is expected to send a sequence request to the server that stores the message and
+    /// The client is expected to send a sequence request to the server that stores the messages and
     /// deletes the hashes (if any).  It is strongly recommended to use a sequence rather than a
-    /// batch so that the deletions won't happen if the store fails for some reason.
+    /// batch so that the deletions won't happen if the store(s) fail for some reason.
     ///
     /// Upon successful completion of the store+deletion requests the client should call
-    /// `confirm_pushed` with the seqno value to confirm that the message has been stored.
+    /// `confirm_pushed` with the seqno value to confirm that the message(s) have been stored.
     ///
     /// Subclasses that need to perform pre-push tasks (such as pruning stale data) can override
     /// this to prune and then call the base method to perform the actual push generation.
@@ -1076,24 +1226,28 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::tuple<seqno_t, ustring, std::vector<std::string>>` - Returns a tuple containing
+    /// - `std::tuple<seqno_t, std::vector<unsigned char>, std::vector<std::string>>` - Returns a
+    /// tuple containing
     ///   - `seqno_t` -- sequence number
-    ///   - `ustring` -- data message to push to the server
+    ///   - `std::vector<unsigned char>` -- data message to push to the server
     ///   - `std::vector<std::string>` -- list of known message hashes
-    virtual std::tuple<seqno_t, ustring, std::vector<std::string>> push();
+    virtual std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
+    push();
 
     /// API: base/ConfigBase::confirm_pushed
     ///
     /// Should be called after the push is confirmed stored on the storage server swarm to let the
-    /// object know the config message has been stored and, ideally, that the obsolete messages
+    /// object know the config message has been stored and (ideally) that the obsolete messages
     /// returned by `push()` are deleted.  Once this is called `needs_push` will start returning
     /// false until something changes.  Takes the seqno that was pushed so that the object can
     /// ensure that the latest version was pushed (i.e. in case there have been other changes since
-    /// the `push()` call that returned this seqno).
+    /// the `push()` call that returned this seqno), and a set of message hashes that were returned
+    /// by the storage server corresponding to the storage messages (typically 1, but can be
+    /// multiple for large, multipart config messages).
     ///
-    /// Ideally the caller should have both stored the returned message and deleted the given
-    /// messages.  The deletion step isn't critical (it is just cleanup) and callers should call
-    /// this as long as the store succeeded even if there were errors in the deletions.
+    /// Ideally the caller should have both stored the returned messages and deleted the given
+    /// obsolete ones.  The deletion step isn't critical (it is just cleanup) and callers should
+    /// call this as long as the store succeeded even if there were errors in the deletions.
     ///
     /// It is safe to call this multiple times with the same seqno value, and with out-of-order
     /// seqnos (e.g. calling with seqno 122 after having called with 123; the duplicates and earlier
@@ -1101,8 +1255,8 @@ class ConfigBase : public ConfigSig {
     ///
     /// Inputs:
     /// - `seqno` -- sequence number that was pushed
-    /// - `msg_hash` -- message hash that was pushed
-    virtual void confirm_pushed(seqno_t seqno, std::string msg_hash);
+    /// - `msg_hashes` -- unordered set of message hashes that were pushed.
+    virtual void confirm_pushed(seqno_t seqno, std::unordered_set<std::string> msg_hashes);
 
     /// API: base/ConfigBase::dump
     ///
@@ -1114,8 +1268,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `ustring` -- Returns binary data of the state dump
-    ustring dump();
+    /// - `std::vector<unsigned char>` -- Returns binary data of the state dump
+    std::vector<unsigned char> dump();
 
     /// API: base/ConfigBase::make_dump
     ///
@@ -1126,8 +1280,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `ustring` -- Returns binary data of the state dump
-    ustring make_dump() const;
+    /// - `std::vector<unsigned char>` -- Returns binary data of the state dump
+    std::vector<unsigned char> make_dump() const;
 
     /// API: base/ConfigBase::needs_dump
     ///
@@ -1139,6 +1293,33 @@ class ConfigBase : public ConfigSig {
     /// Outputs:
     /// - `bool` -- Returns true if something has changed since last call to dump
     virtual bool needs_dump() const { return _needs_dump; }
+
+    /// API: base/ConfigBase::MULTIPART_MAX_WAIT
+    ///
+    /// Member variable
+    ///
+    /// This value controls how long we will store incomplete multipart messages since the last part
+    /// of such a message that we received, in the hopes of getting the rest of the parts soon.  The
+    /// default is a week: although long, this allows for extended downtime of a multidevice client
+    /// that uploads only some of the parts before going offline.
+    ///
+    /// Storage of such incomplete sets requires storing (via dump data) all the partial data until
+    /// the full set is received.
+    ///
+    /// Note that only *incomplete* partial sets are affected by this (and stored); we also
+    /// separately retain metadata about *completed* multipart sets (see MULTIPART_MAX_REMEMBER).
+    std::chrono::milliseconds MULTIPART_MAX_WAIT = 7 * 24h;
+
+    /// API: base/ConfigBase::MULTIPART_MAX_REMEMBER
+    ///
+    /// Member variable
+    ///
+    /// This value controls how long we retain the hashes of *completed* multipart config sets (so
+    /// that we can know to ignore duplicate message parts of messages we have already processed).
+    ///
+    /// Unlike MULTIPART_MAX_WAIT, such storage does not include the data itself, but merely the
+    /// (final) config hash and timestamp of the recombined parts needed for deduplication.
+    std::chrono::milliseconds MULTIPART_MAX_REMEMBER = 14 * 24h;
 
     /// API: base/ConfigBase::add_key
     ///
@@ -1163,13 +1344,16 @@ class ConfigBase : public ConfigSig {
     /// Will throw a std::invalid_argument if the key is not 32 bytes.
     ///
     /// Inputs:
-    /// - `ustring_view key` -- 32 byte binary key
+    /// - `std::span<const unsigned char> key` -- 32 byte binary key
     /// - `high_priority` -- Whether to add to front or back of key list. If true then key is added
     ///   to beginning and replace highest-priority key for encryption
     /// - `dirty_config` -- if true then mark the config as dirty (incrementing seqno and needing a
     ///   push) if the first key (i.e. the key used for encryption) is changed as a result of this
     ///   call.  Ignored if the config is not modifiable.
-    void add_key(ustring_view key, bool high_priority = true, bool dirty_config = false);
+    void add_key(
+            std::span<const unsigned char> key,
+            bool high_priority = true,
+            bool dirty_config = false);
 
     /// API: base/ConfigBase::clear_keys
     ///
@@ -1201,7 +1385,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if found and removed
-    bool remove_key(ustring_view key, size_t from = 0, bool dirty_config = false);
+    bool remove_key(std::span<const unsigned char> key, size_t from = 0, bool dirty_config = false);
 
     /// API: base/ConfigBase::replace_keys
     ///
@@ -1214,7 +1398,8 @@ class ConfigBase : public ConfigSig {
     /// - `dirty_config` -- if true then set the config status to dirty (incrementing seqno and
     ///   requiring a repush) if the old and new first key are not the same.  Ignored if the config
     ///   is not modifiable.
-    void replace_keys(const std::vector<ustring_view>& new_keys, bool dirty_config = false);
+    void replace_keys(
+            const std::vector<std::span<const unsigned char>>& new_keys, bool dirty_config = false);
 
     /// API: base/ConfigBase::get_keys
     ///
@@ -1228,8 +1413,8 @@ class ConfigBase : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::vector<ustring_view>` -- Returns vector of encryption keys
-    std::vector<ustring_view> get_keys() const;
+    /// - `std::vector<std::span<const unsigned char>>` -- Returns vector of encryption keys
+    std::vector<std::span<const unsigned char>> get_keys() const;
 
     /// API: base/ConfigBase::key_count
     ///
@@ -1250,7 +1435,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if it does exist
-    bool has_key(ustring_view key) const;
+    bool has_key(std::span<const unsigned char> key) const;
 
     /// API: base/ConfigBase::key
     ///
@@ -1262,8 +1447,8 @@ class ConfigBase : public ConfigSig {
     /// - `i` -- keys position in key list
     ///
     /// Outputs:
-    /// - `ustring_view` -- binary data of the key
-    ustring_view key(size_t i = 0) const {
+    /// - `std::span<const unsigned char>` -- binary data of the key
+    std::span<const unsigned char> key(size_t i = 0) const {
         assert(i < _keys.size());
         return {_keys[i].data(), _keys[i].size()};
     }
