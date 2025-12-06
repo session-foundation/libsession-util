@@ -22,6 +22,7 @@
 #include "session/config/groups/keys.h"
 #include "session/config/groups/members.hpp"
 #include "session/multi_encrypt.hpp"
+#include "session/util.hpp"
 #include "session/xed25519.hpp"
 
 using namespace std::literals;
@@ -657,7 +658,7 @@ Keys::swarm_auth Keys::swarm_subaccount_sign_as_user(
         std::span<const unsigned char> user_ed25519_sk,
         std::span<const unsigned char> msg,
         std::span<const unsigned char> sign_val,
-        bool binary) const {
+        bool binary) {
     if (sign_val.size() != 100)
         throw std::logic_error{"Invalid signing value: size is wrong"};
 
@@ -774,9 +775,13 @@ Keys::swarm_auth Keys::swarm_subaccount_sign_as_user(
 }
 
 Keys::swarm_auth Keys::swarm_subaccount_sign(
-        ustring_view msg, ustring_view sign_val, bool binary) const {
+        std::span<const unsigned char> msg,
+        std::span<const unsigned char> sign_val,
+        bool binary) const {
     auto user_ed25519_sk_buf = this->user_ed25519_sk.data();
-    return Keys::swarm_subaccount_sign_as_user(user_ed25519_sk_buf, msg, sign_val, binary);
+    std::span<const unsigned char> user_ed25519_sk(
+            user_ed25519_sk_buf, this->user_ed25519_sk.size());
+    return Keys::swarm_subaccount_sign_as_user(user_ed25519_sk, msg, sign_val, binary);
 }
 
 bool Keys::swarm_verify_subaccount(

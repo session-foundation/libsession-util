@@ -492,9 +492,9 @@ class Keys : public ConfigSig {
             bool binary = false) const;
 
     static Keys::swarm_auth swarm_subaccount_sign_as_user(
-            session::ustring_view user_ed25519_sk,
-            session::ustring_view msg,
-            session::ustring_view sign_val,
+            std::span<const unsigned char> user_ed25519_sk,
+            std::span<const unsigned char> msg,
+            std::span<const unsigned char> sign_val,
             bool binary = false);
 
     /// API: groups/Keys::swarm_subaccount_token
