@@ -164,6 +164,8 @@ void set_int64_set_from_bitset(ConfigBase::DictFieldProxy&& field, uint64_t bits
         uint64_t bit = bitset & (1ULL << index);
         if (bit)
             field.set_insert(index);
+        else
+            field.set_erase(index);
     }
 }
 
