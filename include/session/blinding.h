@@ -5,6 +5,7 @@ extern "C" {
 #endif
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include "export.h"
 #include "platform.h"
@@ -15,7 +16,7 @@ extern "C" {
 ///
 /// Inputs:
 /// - `ed25519_seckey` -- [in] the Ed25519 private key of the sender (64 bytes).
-/// - `server_pk` -- [in] the public key of the open group server to generate the
+/// - `server_pk` -- [in] the public key of the community server to generate the
 ///   blinded id for (32 bytes).
 /// - `blinded_pk_out` -- [out] pointer to a buffer of at least 32 bytes where the blinded_pk will
 ///   be written if generation was successful.
@@ -36,7 +37,7 @@ LIBSESSION_EXPORT bool session_blind15_key_pair(
 ///
 /// Inputs:
 /// - `ed25519_seckey` -- [in] the Ed25519 private key of the sender (64 bytes).
-/// - `server_pk` -- [in] the public key of the open group server to generate the
+/// - `server_pk` -- [in] the public key of the community server to generate the
 ///   blinded id for (32 bytes).
 /// - `blinded_pk_out` -- [out] pointer to a buffer of at least 32 bytes where the blinded_pk will
 ///   be written if generation was successful.
@@ -75,7 +76,7 @@ LIBSESSION_EXPORT bool session_blind_version_key_pair(
 ///
 /// Inputs:
 /// - `ed25519_seckey` -- [in] the Ed25519 private key of the sender (64 bytes).
-/// - `server_pk` -- [in] the public key of the open group server to generate the
+/// - `server_pk` -- [in] the public key of the community server to generate the
 ///   blinded id for (32 bytes).
 /// - `msg` -- [in] Pointer to a data buffer containing the message to generate a signature for.
 /// - `msg_len` -- [in] Length of `msg`
@@ -97,7 +98,7 @@ LIBSESSION_EXPORT bool session_blind15_sign(
 ///
 /// Inputs:
 /// - `ed25519_seckey` -- [in] the Ed25519 private key of the sender (64 bytes).
-/// - `server_pk` -- [in] the public key of the open group server to generate the
+/// - `server_pk` -- [in] the public key of the community server to generate the
 ///   blinded id for (32 bytes).
 /// - `msg` -- [in] Pointer to a data buffer containing the message to generate a signature for.
 /// - `msg_len` -- [in] Length of `msg`
@@ -145,7 +146,7 @@ LIBSESSION_EXPORT bool session_blind_version_sign(
 /// Inputs:
 /// - `session_id` -- [in] the session_id to compare (66 bytes with a 05 prefix).
 /// - `blinded_id` -- [in] the blinded_id to compare, can be either 15 or 25 blinded (66 bytes).
-/// - `server_pk` -- [in] the public key of the open group server to the blinded id came from (64
+/// - `server_pk` -- [in] the public key of the community server to the blinded id came from (64
 /// bytes).
 ///
 /// Outputs:

@@ -27,6 +27,11 @@ struct UserProfileTester {
                 static_cast<int>(value.time_since_epoch().count());
     }
 
+    static void set_profile_updated(
+            session::config::UserProfile& profile, std::chrono::sys_seconds value) {
+        profile.data["t"] = static_cast<int>(value.time_since_epoch().count());
+    }
+
     static std::chrono::sys_seconds get_reupload_profile_updated_value(config_object* conf) {
         return std::chrono::sys_seconds{std::chrono::seconds{
                 session::config::unbox<session::config::UserProfile>(conf)->data["T"].integer_or(
@@ -65,26 +70,22 @@ TEST_CASE("UserProfile", "[config][user_profile]") {
 
     CHECK_THROWS(
             profile.set_name("123456789012345678901234567890123456789012345678901234567890123456789"
-                             "01"
-                             "23456789012345678901234567890A"));
+                             "0123456789012345678901234567890A"));
     CHECK_NOTHROW(
             profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
-                                       "01"
-                                       "234567890123456789012345678901234567890A"));
+                                       "01234567890123456789012345678901234567890A"));
     CHECK(profile.get_name() ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "901234567890");
     CHECK_NOTHROW(
             profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
-                                       "01"
-                                       "234567890123456789012345678901234567🎂"));
+                                       "01234567890123456789012345678901234567🎂"));
     CHECK(profile.get_name() ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "901234567");
     CHECK_NOTHROW(
             profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
-                                       "01"
-                                       "2345678901234567890123456789012345🎂🎂"));
+                                       "012345678901234567890123456789012345🎂🎂"));
     CHECK(profile.get_name() ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "9012345🎂");
@@ -559,4 +560,96 @@ TEST_CASE("user profile timestamp update bug", "[config][user_profile]") {
     // Also make sure it does change
     profile.set_name("Nibbler1");
     CHECK(profile.get_profile_updated() != seconds_before_call);
+}
+
+TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+
+    // Ensure the bitset is being updated correctly
+    CHECK(profile.get_profile_bitset().data == 0);
+
+    profile.set_pro_badge(true);
+    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+
+    profile.set_pro_badge(false);
+    CHECK(profile.get_profile_bitset().data == 0);
+
+    profile.set_animated_avatar(true);
+    CHECK(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+
+    profile.set_animated_avatar(false);
+    CHECK(profile.get_profile_bitset().data == 0);
+
+    profile.set_pro_badge(true);
+    profile.set_animated_avatar(true);
+    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+
+    profile.set_animated_avatar(false);
+    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK_FALSE(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+
+    {
+        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        CHECK(profile2.get_profile_bitset().is_set(
+                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK_FALSE(profile2.get_profile_bitset().is_set(
+                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    }
+
+    // Ensure the pro config is being stored correctly
+    std::array<uint8_t, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
+    session::cleared_uc64 rotating_sk, signing_sk;
+    {
+        crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
+        crypto_sign_ed25519_keypair(signing_pk.data(), signing_sk.data());
+    }
+
+    session::config::ProConfig pro_cpp = {};
+    pro_pro_config pro = {};
+    {
+        // CPP
+        pro_cpp.rotating_privkey = rotating_sk;
+        pro_cpp.proof.version = 2;
+        pro_cpp.proof.rotating_pubkey = rotating_pk;
+        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
+        constexpr auto gen_index_hash =
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
+        static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
+        std::memcpy(
+                pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
+
+        // C
+        std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
+        pro.proof.version = pro_cpp.proof.version;
+        std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
+        pro.proof.expiry_unix_ts_ms = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
+        std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
+    }
+
+    UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{123s});
+    CHECK(profile.get_profile_updated().time_since_epoch().count() == 123);
+    CHECK_FALSE(profile.get_pro_config().has_value());
+    profile.set_pro_config(pro_cpp);
+    CHECK(profile.get_pro_config() == pro_cpp);
+    CHECK(profile.get_profile_updated().time_since_epoch().count() != 123);
+
+    {
+        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        CHECK(profile.get_pro_config() == pro_cpp);
+    }
+
+    profile.remove_pro_config();
+    CHECK_FALSE(profile.get_pro_config().has_value());
+
+    auto access_expiry_ms =
+            std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{500}};
+    profile.set_pro_access_expiry(access_expiry_ms);
+    CHECK(profile.get_pro_access_expiry() == access_expiry_ms);
 }

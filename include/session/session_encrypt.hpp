@@ -1,10 +1,11 @@
 #pragma once
 
+#include <stdint.h>
+
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
-
-#include "types.hpp"
 
 // Helper functions for the "Session Protocol" encryption mechanism.  This is the encryption used
 // for DMs sent from one Session user to another.
@@ -108,6 +109,81 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
         std::span<const unsigned char> server_pk,
         std::span<const unsigned char> recipient_blinded_id,
         std::span<const unsigned char> message);
+
+static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
+
+/// API: crypto/encrypt_for_group
+///
+/// Compresses, signs, and encrypts group message content.
+///
+/// This function is passed a binary value containing a group message (typically a serialized
+/// protobuf, but this method doesn't care about the specific data).  That data will be, in
+/// order:
+/// - compressed (but only if this actually reduces the data size)
+/// - signed by the user's underlying session Ed25519 pubkey
+/// - tagged with the user's underlying session Ed25519 pubkey (from which the session id can be
+///   computed).
+/// - all of the above encoded into a bt-encoded dict
+/// - suffix-padded with null bytes so that the final output value will be a multiple of 256
+///   bytes
+/// - encrypted with the most-current group encryption key
+///
+/// Since compression and padding is applied as part of this method, it is not required that the
+/// given message include its own padding (and in fact, such padding will typically be
+/// compressed down to nothing (if non-random)).
+///
+/// This final encrypted value is then returned to be pushed to the swarm as-is (i.e. not
+/// further wrapped).  For users downloading the message, all of the above is processed in
+/// reverse by passing the returned message into `decrypt_message()`.
+///
+/// The current implementation uses XChaCha20-Poly1305 for encryption and zstd for compression;
+/// the bt-encoded value is a dict consisting of keys:
+/// - "": the version of this encoding, currently set to 1.  This *MUST* be bumped if this is
+///   changed in such a way that older clients will not be able to properly decrypt such a
+///   message.
+/// - "a": the *Ed25519* pubkey (32 bytes) of the author of the message.  (This will be
+///   converted to a x25519 pubkey to extract the sender's session id when decrypting).
+/// - "s": signature by "a" of whichever of "d" or "z" are included in the data.
+/// Exacly one of:
+/// - "d": the uncompressed data (which must be non-empty if present)
+/// - "z": the zstd-compressed data (which must be non-empty if present)
+///
+/// When compression is enabled (by omitting the `compress` argument or specifying it as true)
+/// then ZSTD compression will be *attempted* on the plaintext message and will be used if the
+/// compressed data is smaller than the uncompressed data.  If disabled, or if compression does
+/// not reduce the size, then the message will not be compressed.
+///
+/// This function will throw on failure:
+/// - if any of the keys passed in are invalidly sized or non-valid keys
+/// - if there no encryption keys are available at all (which should not occur in normal use).
+/// - if given a plaintext buffer larger than 1MB (even if the compressed version would be much
+///   smaller).  It is recommended that clients impose their own limits much smaller than this
+///   on data passed into encrypt_message; this limitation is in *this* function to match the
+///   `decrypt_message` limit which is merely intended to guard against decompression memory
+///   exhaustion attacks.
+///
+/// Inputs:
+/// - `user_ed25519_privkey` -- the private key of the user. Can be a 32-byte seed, or a 64-byte
+///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
+/// - `group_ed25519_pubkey` -- The 32 byte public key of the group
+/// - group_enc_key -- The group's encryption key (32 bytes or 64-byte libsodium key) for groups v2
+///   messages, typically the latest key for the group (e.g., Keys::group_enc_key).
+/// - `plaintext` -- the binary message to encrypt.
+/// - `compress` -- can be specified as `false` to forcibly disable compression.  Normally
+///   omitted, to use compression if and only if it reduces the size.
+/// - `padding` -- the padding multiple: padding will be added as needed to attain a multiple of
+///   this value for the final result.  0 or 1 disables padding entirely.  Normally omitted to
+///   use the default of next-multiple-of-256.
+///
+/// Outputs:
+/// - `ciphertext` -- the encrypted, etc. value to send to the swarm
+std::vector<unsigned char> encrypt_for_group(
+        std::span<const unsigned char> user_ed25519_privkey,
+        std::span<const unsigned char> group_ed25519_pubkey,
+        std::span<const unsigned char> group_enc_key,
+        std::span<const unsigned char> plaintext,
+        bool compress,
+        size_t padding);
 
 /// API: crypto/sign_for_recipient
 ///
@@ -229,7 +305,7 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 /// 64-byte
 ///   libsodium secret key.  The latter is a bit faster as it doesn't have to re-compute the pubkey
 ///   from the seed.
-/// - `server_pk` -- the public key of the open group server to route the blinded message through
+/// - `server_pk` -- the public key of the community server to route the blinded message through
 /// (32 bytes).
 /// - `sender_id` -- the blinded id of the sender including the blinding prefix (33 bytes),
 ///   'blind15' or 'blind25' decryption will be chosed based on this value.
@@ -246,6 +322,43 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
         std::span<const unsigned char> server_pk,
         std::span<const unsigned char> sender_id,
         std::span<const unsigned char> recipient_id,
+        std::span<const unsigned char> ciphertext);
+
+struct DecryptGroupMessage {
+    size_t index;            // Index of the key that successfully decrypted the message
+    std::string session_id;  // In hex
+    std::vector<unsigned char> plaintext;
+};
+
+/// API: crypto/decrypt_group_message
+///
+/// Decrypts group message content that was presumably encrypted with `encrypt_for_group`,
+/// verifies the sender signature, decompresses the message (if necessary) and then returns the
+/// author pubkey and the plaintext data.
+///
+/// To prevent against memory exhaustion attacks, this method will fail if the value is
+/// a compressed value that would decompress to a value larger than 1MB.
+///
+/// Inputs:
+/// - `decrypt_ed25519_privkey_list` -- the list of private keys to try to decrypt the message with.
+///   Can be a 32-byte seed, or a 64-byte libsodium secret key. The public key component is not
+///   used.
+/// - `group_ed25519_pubkey` -- the 32 byte public key of the group
+/// - `ciphertext` -- an encrypted, encoded, signed, (possibly) compressed message as produced
+///   by `encrypt_message()`.
+///
+/// Outputs:
+/// - `std::pair<std::string, std::vector<unsigned char>>` -- the session ID (in hex) and the
+/// plaintext binary
+///   data that was encrypted.
+///
+/// On failure this throws a std::exception-derived exception with a `.what()` string containing
+/// some diagnostic info on what part failed.  Typically a production session client would catch
+/// (and possibly log) but otherwise ignore such exceptions and just not process the message if
+/// it throws.
+DecryptGroupMessage decrypt_group_message(
+        std::span<std::span<const unsigned char>> decrypt_ed25519_privkey_list,
+        std::span<const unsigned char> group_ed25519_pubkey,
         std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_ons_response

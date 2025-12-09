@@ -7,6 +7,7 @@ extern "C" {
 #include "base.h"
 #include "expiring.h"
 #include "notify.h"
+#include "pro.h"
 #include "profile_pic.h"
 #include "util.h"
 
@@ -35,6 +36,8 @@ typedef struct contacts_contact {
 
     int64_t created;  // unix timestamp (seconds)
 
+    session_protocol_pro_profile_bitset profile_bitset;
+
 } contacts_contact;
 
 typedef struct contacts_blinded_contact {
@@ -51,6 +54,8 @@ typedef struct contacts_blinded_contact {
 
     bool legacy_blinding;
     int64_t created;  // unix timestamp (seconds)
+
+    session_protocol_pro_profile_bitset profile_bitset;
 
 } contacts_blinded_contact;
 

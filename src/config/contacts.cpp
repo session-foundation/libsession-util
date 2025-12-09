@@ -60,8 +60,8 @@ void contact_info::set_nickname_truncated(std::string n) {
 
 Contacts::Contacts(
         std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
-        ConfigBase{dumped} {
+        std::optional<std::span<const unsigned char>> dumped) {
+    init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
 
@@ -115,6 +115,10 @@ void contact_info::load(const dict& info_dict) {
     }
 
     created = to_epoch_seconds(int_or_0(info_dict, "j"));
+
+    const session::config::set* profile_bitset_set = maybe_set(info_dict, "f");
+    if (profile_bitset_set)
+        profile_bitset.data = bitset_from_set_of_int64_or_0(*profile_bitset_set);
 }
 
 void contact_info::into(contacts_contact& c) const {
@@ -139,6 +143,7 @@ void contact_info::into(contacts_contact& c) const {
     if (c.exp_seconds <= 0 && c.exp_mode != CONVO_EXPIRATION_NONE)
         c.exp_mode = CONVO_EXPIRATION_NONE;
     c.created = to_epoch_seconds(created);
+    c.profile_bitset.data = profile_bitset.data;
 }
 
 contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id, 66} {
@@ -163,6 +168,7 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     if (exp_timer <= 0s && exp_mode != expiration_mode::none)
         exp_mode = expiration_mode::none;
     created = to_epoch_seconds(c.created);
+    profile_bitset.data = c.profile_bitset.data;
 }
 
 std::optional<contact_info> Contacts::get(std::string_view pubkey_hex) const {
@@ -222,6 +228,7 @@ void Contacts::set(const contact_info& contact) {
             contact.exp_timer.count());
 
     set_positive_int(info["j"], to_epoch_seconds(contact.created));
+    set_int64_set_from_bitset(info["f"], contact.profile_bitset.data);
 }
 
 void Contacts::set_name(std::string_view session_id, std::string name) {
@@ -292,6 +299,12 @@ void Contacts::set_created(std::string_view session_id, int64_t timestamp) {
     set(c);
 }
 
+void Contacts::set_pro_features(std::string_view session_id, ProProfileBitset features) {
+    auto c = get_or_construct(session_id);
+    c.profile_bitset = features;
+    set(c);
+}
+
 bool Contacts::erase(std::string_view session_id) {
     std::string pk = session_id_to_bytes(session_id);
     auto info = data["c"][pk];
@@ -336,6 +349,11 @@ void blinded_contact_info::load(const dict& info_dict) {
     priority = int_or_0(info_dict, "+");
     legacy_blinding = int_or_0(info_dict, "y");
     created = ts_or_epoch(info_dict, "j");
+    auto it = info_dict.find("f");
+    if (it != info_dict.end()) {
+        if (auto* set = std::get_if<session::config::set>(&it->second))
+            profile_bitset.data = bitset_from_set_of_int64_or_0(*set);
+    }
 }
 
 void blinded_contact_info::into(contacts_blinded_contact& c) const {
@@ -356,6 +374,7 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     c.priority = priority;
     c.legacy_blinding = legacy_blinding;
     c.created = created.time_since_epoch().count();
+    c.profile_bitset.data = profile_bitset.data;
 }
 
 blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
@@ -371,6 +390,7 @@ blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
     priority = c.priority;
     legacy_blinding = c.legacy_blinding;
     created = to_sys_seconds(c.created);
+    profile_bitset.data = c.profile_bitset.data;
 }
 
 const std::string blinded_contact_info::session_id() const {
@@ -484,6 +504,7 @@ void Contacts::set_blinded(const blinded_contact_info& bc) {
     set_nonzero_int(info["+"], bc.priority);
     set_positive_int(info["y"], bc.legacy_blinding);
     set_ts(info["j"], bc.created);
+    set_int64_set_from_bitset(info["f"], bc.profile_bitset.data);
 }
 
 bool Contacts::erase_blinded(std::string_view base_url_, std::string_view blinded_id) {

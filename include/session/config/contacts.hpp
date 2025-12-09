@@ -11,6 +11,7 @@
 #include "expiring.hpp"
 #include "namespaces.hpp"
 #include "notify.hpp"
+#include "pro.hpp"
 #include "profile_pic.hpp"
 
 extern "C" struct contacts_contact;
@@ -47,6 +48,7 @@ namespace session::config {
 ///     j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
 ///         equivalent "j"oined field). Omitted if 0.
 ///     t - The `profile_updated` unix timestamp (seconds) for this contacts profile information.
+///     f - session pro profile features bitset for this contact
 ///
 /// b - dict of blinded contacts.  This is a nested dict where the outer keys are the BASE_URL of
 ///     the community the blinded contact originated from and the outer value is a dict containing:
@@ -68,6 +70,7 @@ namespace session::config {
 ///       j - Unix timestamp (seconds) when the contact was created ("j" to match user_groups
 ///           equivalent "j"oined field). Omitted if 0.
 ///       y - flag indicating whether the blinded message request is using legac"y" blinding.
+///       f - session pro profile features bitset for this blinded contact
 
 struct contact_info {
     static constexpr size_t MAX_NAME_LENGTH = 100;
@@ -92,6 +95,8 @@ struct contact_info {
     expiration_mode exp_mode = expiration_mode::none;  // The expiry time; none if not expiring.
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
+
+    ProProfileBitset profile_bitset = {};
 
     explicit contact_info(std::string sid);
 
@@ -135,6 +140,8 @@ struct blinded_contact_info {
 
     bool legacy_blinding;
     std::chrono::sys_seconds created{};  // Unix timestamp (seconds) when this contact was added
+
+    ProProfileBitset profile_bitset = {};
 
     blinded_contact_info() = default;
     explicit blinded_contact_info(
@@ -427,6 +434,16 @@ class Contacts : public ConfigBase {
     /// - `session_id` -- hex string of the session id
     /// - `timestamp` -- standard unix timestamp of the time contact was created
     void set_created(std::string_view session_id, int64_t timestamp);
+
+    /// API: contacts/contacts::set_pro_features
+    ///
+    /// Alternative to `set()` for setting a single field.  (If setting multiple fields at once you
+    /// should use `set()` instead).
+    ///
+    /// Inputs:
+    /// - `session_id` -- hex string of the session id
+    /// - `features` -- The updated profile features to use
+    void set_pro_features(std::string_view session_id, ProProfileBitset features);
 
     /// API: contacts/contacts::erase
     ///

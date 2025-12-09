@@ -1,6 +1,8 @@
 #include <catch2/catch_session.hpp>
 #include <oxen/log.hpp>
 
+std::string g_test_pro_backend_dev_server_url = "http://127.0.0.1:5000";
+
 int main(int argc, char* argv[]) {
     Catch::Session session;
 
@@ -15,7 +17,10 @@ int main(int argc, char* argv[]) {
                        "oxen-logging log file to output logs to, or one of  or one of "
                        "stdout/-/stderr/syslog.") |
                Opt(test_case_tracing)["-T"]["--test-tracing"](
-                       "enable oxen log tracing of test cases/sections");
+                       "enable oxen log tracing of test cases/sections") |
+               Opt(g_test_pro_backend_dev_server_url, "url")["--pro-backend-dev-server-url"](
+                       "URL to a SESH_PRO_BACKEND_DEV=1 enabled Session Pro Backend server. Only "
+                       "used if compiled with -D TEST_PRO_BACKEND_WITH_DEV_SERVER=1 support");
 
     session.cli(cli);
 

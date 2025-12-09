@@ -4,8 +4,6 @@
 #include <span>
 #include <vector>
 
-#include "types.hpp"
-
 namespace session::ed25519 {
 
 /// Generates a random Ed25519 key pair
@@ -57,5 +55,19 @@ bool verify(
         std::span<const unsigned char> sig,
         std::span<const unsigned char> pubkey,
         std::span<const unsigned char> msg);
+
+/// API: ed25519/ed25519_pro_privkey_for_ed25519_seed
+///
+/// Generate the deterministic Master Session Pro key for signing requests to interact with the
+/// Session Pro features of the protocol.
+///
+/// Inputs:
+/// - `ed25519_seed` -- the seed to the long-term key for the Session account to derive the
+///   deterministic key from.
+///
+/// Outputs:
+/// - The libsodium-style Master Session Pro Ed25519 secret key, 64 bytes.
+std::array<unsigned char, 64> ed25519_pro_privkey_for_ed25519_seed(
+        std::span<const unsigned char> ed25519_seed);
 
 }  // namespace session::ed25519

@@ -193,3 +193,15 @@ libsession_static_bundle(libzstd_static)
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
 libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json>=3.7.0 nlohmann-json)
+
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
+
+function(simdutf_subdir)
+    set(SIMDUTF_TESTS OFF CACHE BOOL "")
+    set(SIMDUTF_TOOLS OFF CACHE BOOL "")
+    set(BUILD_SHARED_LIBS OFF)
+    add_subdirectory(simdutf)
+endfunction()
+simdutf_subdir()
+libsession_static_bundle(simdutf)
