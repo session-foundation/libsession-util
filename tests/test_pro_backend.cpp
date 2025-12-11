@@ -549,7 +549,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
         SECTION("session_pro_backend_get_pro_revocations_response_parse") {
             nlohmann::json j;
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
-            j["result"] = {{"ticket", 123}, {"items", nlohmann::json::array()}};
+            j["result"]["ticket"] = 123;
+            j["result"]["items"] = nlohmann::json::array();
 
             char fake_gen_index_hash[32];
             randombytes_buf(fake_gen_index_hash, sizeof(fake_gen_index_hash));
@@ -801,7 +802,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
         SECTION("session_pro_backend_set_payment_refund_requested_response_parse") {
             nlohmann::json j;
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
-            j["result"] = {{"updated", true}, {"version", 0}};
+            j["result"]["updated"] = true;
+            j["result"]["version"] = 0;
             std::string json = j.dump();
 
             // Valid JSON
