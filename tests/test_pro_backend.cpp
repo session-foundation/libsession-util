@@ -229,10 +229,15 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
                 // Verify JSON matches C++ implementation
                 AddProPaymentRequest cpp = {};
+                static_assert(sizeof(master_pubkey.data) == cpp.master_pkey.max_size());
+                static_assert(sizeof(rotating_pubkey.data) == cpp.rotating_pkey.max_size());
+
                 cpp.version = request.version;
-                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey));
+                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey.data));
                 std::memcpy(
-                        cpp.rotating_pkey.data(), rotating_pubkey.data, sizeof(rotating_pubkey));
+                        cpp.rotating_pkey.data(),
+                        rotating_pubkey.data,
+                        sizeof(rotating_pubkey.data));
                 cpp.payment_tx.provider = payment_tx.provider;
                 cpp.payment_tx.payment_id =
                         std::string(payment_tx.payment_id, payment_tx.payment_id_count);
