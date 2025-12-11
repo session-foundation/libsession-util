@@ -104,9 +104,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     session_pro_backend_add_pro_payment_request_build_sigs(
                             /*version*/ 0,
                             master_privkey.data,
-                            sizeof(master_privkey),
+                            sizeof(master_privkey.data),
                             rotating_privkey.data,
-                            sizeof(rotating_privkey),
+                            sizeof(rotating_privkey.data),
                             payment_tx.provider,
                             reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
                             payment_tx.payment_id_count,
@@ -142,9 +142,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             result = session_pro_backend_add_pro_payment_request_build_sigs(
                     0,
                     master_privkey.data,
-                    sizeof(master_privkey) - 1,
+                    sizeof(master_privkey.data) - 1,
                     rotating_privkey.data,
-                    sizeof(rotating_privkey),
+                    sizeof(rotating_privkey.data),
                     payment_tx.provider,
                     reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
                     payment_tx.payment_id_count,
@@ -161,9 +161,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             result = session_pro_backend_generate_pro_proof_request_build_sigs(
                     0,
                     master_privkey.data,
-                    sizeof(master_privkey),
+                    sizeof(master_privkey.data),
                     rotating_privkey.data,
-                    sizeof(rotating_privkey),
+                    sizeof(rotating_privkey.data),
                     unix_ts_ms);
             REQUIRE(result.success);
             REQUIRE(result.error_count == 0);
@@ -178,19 +178,19 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             REQUIRE(std::memcmp(
                             result.master_sig.data,
                             cpp_sigs.master_sig.data(),
-                            sizeof(result.master_sig)) == 0);
+                            sizeof(result.master_sig.data)) == 0);
             REQUIRE(std::memcmp(
                             result.rotating_sig.data,
                             cpp_sigs.rotating_sig.data(),
-                            sizeof(result.rotating_sig)) == 0);
+                            sizeof(result.rotating_sig.data)) == 0);
 
             // Invalid rotating key size
             result = session_pro_backend_generate_pro_proof_request_build_sigs(
                     0,
                     master_privkey.data,
-                    sizeof(master_privkey),
+                    sizeof(master_privkey.data),
                     rotating_privkey.data,
-                    sizeof(rotating_privkey) - 1,
+                    sizeof(rotating_privkey.data) - 1,
                     unix_ts_ms);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
@@ -243,9 +243,12 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         std::string(payment_tx.payment_id, payment_tx.payment_id_count);
                 cpp.payment_tx.order_id =
                         std::string(payment_tx.order_id, payment_tx.order_id_count);
-                std::memcpy(cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig));
                 std::memcpy(
-                        cpp.rotating_sig.data(), sigs.rotating_sig.data, sizeof(sigs.rotating_sig));
+                        cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig.data));
+                std::memcpy(
+                        cpp.rotating_sig.data(),
+                        sigs.rotating_sig.data,
+                        sizeof(sigs.rotating_sig.data));
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
 
@@ -308,14 +311,19 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Verify JSON matches C++ implementation
                 GenerateProProofRequest cpp = {};
                 cpp.version = request.version;
-                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey));
+                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey.data));
                 std::memcpy(
-                        cpp.rotating_pkey.data(), rotating_pubkey.data, sizeof(rotating_pubkey));
+                        cpp.rotating_pkey.data(),
+                        rotating_pubkey.data,
+                        sizeof(rotating_pubkey.data));
                 cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
                         std::chrono::milliseconds{unix_ts_ms});
-                std::memcpy(cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig));
                 std::memcpy(
-                        cpp.rotating_sig.data(), sigs.rotating_sig.data, sizeof(sigs.rotating_sig));
+                        cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig.data));
+                std::memcpy(
+                        cpp.rotating_sig.data(),
+                        sigs.rotating_sig.data,
+                        sizeof(sigs.rotating_sig.data));
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
 
@@ -404,8 +412,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Verify JSON matches C++ implementation
                 GetProDetailsRequest cpp = {};
                 cpp.version = 0;
-                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey));
-                std::memcpy(cpp.master_sig.data(), sig.sig.data, sizeof(sig.sig));
+                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey.data));
+                std::memcpy(cpp.master_sig.data(), sig.sig.data, sizeof(sig.sig.data));
                 cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
                         std::chrono::milliseconds{unix_ts_ms}};
                 cpp.count = request.count;
@@ -476,11 +484,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(std::memcmp(
                                 result.proof.rotating_pubkey.data,
                                 rotating_pubkey.data,
-                                sizeof(rotating_pubkey)) == 0);
+                                sizeof(rotating_pubkey.data)) == 0);
                 REQUIRE(std::memcmp(
                                 result.proof.sig.data,
                                 master_privkey.data,
-                                sizeof(master_privkey)) == 0);
+                                sizeof(master_privkey.data)) == 0);
 
                 // Here we also create the CPP version, we will run the conversion functions into
                 // pro proofs (both C and CPP variants) and then compare the two structures to make
@@ -689,9 +697,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             json = "{invalid}";
             result = session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
             {
-                std::unique_ptr<void, std::function<void(void*)>> esult_free(nullptr, [&](void*) {
-                    session_pro_backend_get_pro_details_response_free(&result);
-                });
+                scope_exit result_free{
+                        [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
                 REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
                 REQUIRE(result.header.errors_count > 0);
                 REQUIRE(result.header.errors != nullptr);
@@ -929,9 +936,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 session_pro_backend_add_pro_payment_request_build_sigs(
                         /*version*/ 0,
                         master_privkey.data,
-                        sizeof(master_privkey),
+                        sizeof(master_privkey.data),
                         rotating_privkey.data,
-                        sizeof(rotating_privkey),
+                        sizeof(rotating_privkey.data),
                         payment_tx.provider,
                         reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
                         payment_tx.payment_id_count,
@@ -979,7 +986,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         REQUIRE(std::memcmp(
                         response.proof.rotating_pubkey.data,
                         request.rotating_pkey.data,
-                        sizeof(request.rotating_pkey)) == 0);
+                        sizeof(request.rotating_pkey.data)) == 0);
     }
 
     // Authorise new key
@@ -990,9 +997,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 session_pro_backend_generate_pro_proof_request_build_sigs(
                         /*version*/ 0,
                         master_privkey.data,
-                        sizeof(master_privkey),
+                        sizeof(master_privkey.data),
                         rotating_privkey.data,
-                        sizeof(rotating_privkey),
+                        sizeof(rotating_privkey.data),
                         now_unix_ts_ms);
 
         session_pro_backend_generate_pro_proof_request request = {};
@@ -1018,9 +1025,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         session_pro_backend_add_pro_payment_or_generate_pro_proof_response response =
                 session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
                         response_json.data(), response_json.size());
-        std::unique_ptr<void, std::function<void(void*)>> response_free(nullptr, [&](void*) {
+        scope_exit response_free{[&]() {
             session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(&response);
-        });
+        }};
 
         for (size_t index = 0; index < response.header.errors_count; index++) {
             if (index == 0)
@@ -1038,7 +1045,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         REQUIRE(std::memcmp(
                         response.proof.rotating_pubkey.data,
                         request.rotating_pkey.data,
-                        sizeof(request.rotating_pkey)) == 0);
+                        sizeof(request.rotating_pkey.data)) == 0);
 
         session_pro_backend_to_json_free(&request_json);
         session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(&response);
@@ -1171,9 +1178,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 session_pro_backend_add_pro_payment_request_build_sigs(
                         /*version*/ 0,
                         master_privkey.data,
-                        sizeof(master_privkey),
+                        sizeof(master_privkey.data),
                         rotating_privkey.data,
-                        sizeof(rotating_privkey),
+                        sizeof(rotating_privkey.data),
                         another_payment_tx.provider,
                         reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
                         another_payment_tx.payment_id_count,
@@ -1214,7 +1221,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         REQUIRE(std::memcmp(
                         response.proof.rotating_pubkey.data,
                         request.rotating_pkey.data,
-                        sizeof(request.rotating_pkey)) == 0);
+                        sizeof(request.rotating_pkey.data)) == 0);
     }
 
     // Get revocation list
