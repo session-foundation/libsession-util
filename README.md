@@ -23,8 +23,8 @@ apt install cmake build-essential git tcl libssl-dev m4 pkg-config
 #   `find_package(CURL)` succeeds (e.g. a system installed libcurl) for this to compile
 #   successfully.
 #
-#   By default, it contacts http://127.0.0.1:5000 but this URL can be changed using the CLI arg
-#   --pro-backend-dev-server-url="<url>" when invoking the test suite.
+#   These tests do not run by default, they can be invoked by passing the dev server URL in the CLI
+#   arg --pro-backend-dev-server-url="<url>" when invoking the test suite.
 #
 cmake -G Ninja -S . -B Build
 

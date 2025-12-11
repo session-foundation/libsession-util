@@ -1,7 +1,7 @@
 #include "session/database/connection.hpp"
 
-#include <sodium/crypto_sign_ed25519.h>
 #include <oxenc/hex.h>
+#include <sodium/crypto_sign_ed25519.h>
 #include <sqlcipher/sqlite3.h>
 
 #include <chrono>
@@ -168,8 +168,7 @@ Runtime Connection::get_runtime() {
     return result;
 }
 
-GetAccount Connection::get_account()
-{
+GetAccount Connection::get_account() {
     GetAccount result = {};
     sqlite3_stmt* stmt = nullptr;
     query("SELECT id, long_term_privkey FROM accounts ORDER BY id ASC LIMIT 1",
@@ -178,11 +177,10 @@ GetAccount Connection::get_account()
               const void* privkey = sqlite3_column_blob(stmt, 1);
               int privkey_size = sqlite3_column_bytes(stmt, 1);
               if (privkey_size != result.long_term_privkey.max_size()) {
-                  throw std::runtime_error(
-                          fmt::format(
-                                  "Privkey for account was not {}b was {}b",
-                                  result.long_term_privkey.max_size(),
-                                  privkey_size));
+                  throw std::runtime_error(fmt::format(
+                          "Privkey for account was not {}b was {}b",
+                          result.long_term_privkey.max_size(),
+                          privkey_size));
               }
               result.found = true;
               result.db_id = db_id;
@@ -191,14 +189,12 @@ GetAccount Connection::get_account()
     return result;
 }
 
-void Connection::set_account(std::span<const uint8_t> long_term_privkey)
-{
+void Connection::set_account(std::span<const uint8_t> long_term_privkey) {
     if (long_term_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument(
-                fmt::format(
-                        "Privkey must be {}b, was {}b, unable to set account keys",
-                        crypto_sign_ed25519_SECRETKEYBYTES,
-                        long_term_privkey.size()));
+        throw std::invalid_argument(fmt::format(
+                "Privkey must be {}b, was {}b, unable to set account keys",
+                crypto_sign_ed25519_SECRETKEYBYTES,
+                long_term_privkey.size()));
     }
 
     sqlite3_stmt* stmt = nullptr;
@@ -209,7 +205,8 @@ VALUES (1, ?);
 
     int rc = sqlite3_prepare_v2(db_.get(), sql.data(), sql.size() + 1, &stmt, nullptr);
     if (rc == SQLITE_OK)
-        rc = sqlite3_bind_blob(stmt, 1, long_term_privkey.data(), long_term_privkey.size(), nullptr);
+        rc = sqlite3_bind_blob(
+                stmt, 1, long_term_privkey.data(), long_term_privkey.size(), nullptr);
     if (rc == SQLITE_OK)
         rc = sqlite3_step(stmt);
     int finalize_rc = sqlite3_finalize(stmt);
@@ -400,8 +397,7 @@ LIBSESSION_C_API void session_database_connection_close(session_database_connect
 }
 
 LIBSESSION_C_API session_database_get_account
-session_database_connection_get_account(session_database_connection* conn)
-{
+session_database_connection_get_account(session_database_connection* conn) {
     session_database_get_account result = {};
     if (conn) {
         auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);

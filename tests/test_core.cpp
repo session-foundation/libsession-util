@@ -195,7 +195,8 @@ TEST_CASE("Core", "[core][database][pro][account]") {
     // Generate a key and set it
     bytes64 long_term_key = {};
     randombytes_buf(long_term_key.data, sizeof(long_term_key.data));
-    c_result = session_database_connection_set_account(&db, long_term_key.data, sizeof(long_term_key.data));
+    c_result = session_database_connection_set_account(
+            &db, long_term_key.data, sizeof(long_term_key.data));
     INFO(c_result.error);
     REQUIRE(c_result.success);
     REQUIRE(c_result.error_count == 0);
@@ -204,6 +205,8 @@ TEST_CASE("Core", "[core][database][pro][account]") {
     session_database_get_account get_again = session_database_connection_get_account(&db);
     REQUIRE(get_again.found);
     REQUIRE(get_again.db_id == 1);
-    REQUIRE(memcmp(get_again.long_term_privkey.data, long_term_key.data, sizeof(long_term_key.data)) == 0);
+    REQUIRE(memcmp(get_again.long_term_privkey.data,
+                   long_term_key.data,
+                   sizeof(long_term_key.data)) == 0);
 }
 #endif  // !defined(DISABLE_SQLCIPHER_DATABASE)
