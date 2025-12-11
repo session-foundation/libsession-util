@@ -20,12 +20,17 @@ static bool string8_equals(string8 s8, std::string_view str) {
 }
 [[maybe_unused]] static void dump_pro_proof_to_stderr(const session_protocol_pro_proof& proof) {
     fprintf(stderr, "proof.version: %u\n", proof.version);
-    fprintf(stderr, "proof.gen_index_hash: %s\n", oxenc::to_hex(proof.gen_index_hash.data).c_str());
+    fprintf(stderr,
+            "proof.gen_index_hash: %s\n",
+            oxenc::to_hex(proof.gen_index_hash.data, std::end(proof.gen_index_hash.data)).c_str());
     fprintf(stderr,
             "proof.rotating_pubkey: %s\n",
-            oxenc::to_hex(proof.rotating_pubkey.data).c_str());
+            oxenc::to_hex(proof.rotating_pubkey.data, std::end(proof.rotating_pubkey.data))
+                    .c_str());
     fprintf(stderr, "proof.expiry_unix_ts_ms: %" PRIu64 "\n", proof.expiry_unix_ts_ms);
-    fprintf(stderr, "proof.sig: %s\n", oxenc::to_hex(proof.sig.data).c_str());
+    fprintf(stderr,
+            "proof.sig: %s\n",
+            oxenc::to_hex(proof.sig.data, std::end(proof.sig.data)).c_str());
 }
 
 [[maybe_unused]] static void dump_pro_payment_item(
@@ -62,7 +67,9 @@ static bool string8_equals(string8 s8, std::string_view str) {
 [[maybe_unused]] static void dump_pro_revocation(
         const session_pro_backend_pro_revocation_item& item) {
     fprintf(stderr, "item.expiry_unix_ts: %" PRIu64 "zu\n", item.expiry_unix_ts_ms);
-    fprintf(stderr, "item.gen_index_hash: %s\n", oxenc::to_hex(item.gen_index_hash.data).c_str());
+    fprintf(stderr,
+            "item.gen_index_hash: %s\n",
+            oxenc::to_hex(item.gen_index_hash.data, std::end(item.gen_index_hash.data)).c_str());
 }
 
 TEST_CASE("Pro Backend C API", "[pro_backend]") {
@@ -76,13 +83,13 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
-        char fake_google_payment_token[8];
-        randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
+        std::array<uint8_t, 8> fake_google_payment_token;
+        randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
         std::string fake_google_payment_token_hex =
                 "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-        char fake_google_order_id[8];
-        randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
+        std::array<uint8_t, 8> fake_google_order_id;
+        randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
         std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
         session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
@@ -445,20 +452,18 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
         }
 
         SECTION("session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse") {
-            char fake_gen_index_hash[32];
-            randombytes_buf(fake_gen_index_hash, sizeof(fake_gen_index_hash));
+            std::array<uint8_t, 32> fake_gen_index_hash;
+            randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
 
             nlohmann::json j;
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
                     {"version", 0},
                     {"expiry_unix_ts_ms", unix_ts_ms},
-                    {"gen_index_hash",
-                     oxenc::to_hex(
-                             fake_gen_index_hash,
-                             fake_gen_index_hash + sizeof(fake_gen_index_hash))},
-                    {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
-                    {"sig", oxenc::to_hex(master_privkey.data)}};
+                    {"gen_index_hash", oxenc::to_hex(fake_gen_index_hash)},
+                    {"rotating_pkey",
+                     oxenc::to_hex(rotating_pubkey.data, std::end(rotating_pubkey.data))},
+                    {"sig", oxenc::to_hex(master_privkey.data, std::end(master_privkey.data))}};
             std::string json = j.dump();
 
             // Valid JSON
@@ -479,8 +484,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.proof.expiry_unix_ts_ms == unix_ts_ms);
                 REQUIRE(std::memcmp(
                                 result.proof.gen_index_hash.data,
-                                fake_gen_index_hash,
-                                sizeof(fake_gen_index_hash)) == 0);
+                                fake_gen_index_hash.data(),
+                                fake_gen_index_hash.size()) == 0);
                 REQUIRE(std::memcmp(
                                 result.proof.rotating_pubkey.data,
                                 rotating_pubkey.data,
@@ -552,13 +557,12 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             j["result"]["ticket"] = 123;
             j["result"]["items"] = nlohmann::json::array();
 
-            char fake_gen_index_hash[32];
-            randombytes_buf(fake_gen_index_hash, sizeof(fake_gen_index_hash));
+            std::array<uint8_t, 32> fake_gen_index_hash;
+            randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
 
             auto obj = nlohmann::json::object();
             obj["expiry_unix_ts_ms"] = unix_ts_ms;
-            obj["gen_index_hash"] = oxenc::to_hex(
-                    fake_gen_index_hash, fake_gen_index_hash + sizeof(fake_gen_index_hash));
+            obj["gen_index_hash"] = oxenc::to_hex(fake_gen_index_hash);
             j["result"]["items"].push_back(obj);
 
             std::string json = j.dump();
@@ -580,8 +584,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
                 REQUIRE(std::memcmp(
                                 result.items[0].gen_index_hash.data,
-                                fake_gen_index_hash,
-                                sizeof(fake_gen_index_hash)) == 0);
+                                fake_gen_index_hash.data(),
+                                fake_gen_index_hash.size()) == 0);
             }
 
             // After freeeing
@@ -913,13 +917,13 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     // Add pro payment
     session_protocol_pro_proof first_pro_proof = {};
     {
-        char fake_google_payment_token[8];
-        randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
+        std::array<uint8_t, 8> fake_google_payment_token;
+        randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
         std::string fake_google_payment_token_hex =
                 "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-        char fake_google_order_id[8];
-        randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
+        std::array<uint8_t, 8> fake_google_order_id;
+        randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
         std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
         session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
@@ -981,8 +985,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
         // Verify response
         first_pro_proof = response.proof;
-        INFO("Signature: " << oxenc::to_hex(first_pro_proof.sig.data) << ", backend pubkey: "
-                           << oxenc::to_hex(DEV_BACKEND_PUBKEY) << ", response: " << response_json);
+        INFO("Signature: " << oxenc::to_hex(
+                                      first_pro_proof.sig.data, std::end(first_pro_proof.sig.data))
+                           << ", backend pubkey: " << oxenc::to_hex(DEV_BACKEND_PUBKEY)
+                           << ", response: " << response_json);
         REQUIRE(session_protocol_pro_proof_verify_signature(
                 &first_pro_proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
         REQUIRE(std::memcmp(
@@ -1154,13 +1160,13 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     // Add _another_ payment, same details
     session_pro_backend_add_pro_payment_user_transaction another_payment_tx = {};
     {
-        char fake_google_payment_token[8];
-        randombytes_buf(fake_google_payment_token, sizeof(fake_google_payment_token));
+        std::array<uint8_t, 8> fake_google_payment_token;
+        randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
         std::string fake_google_payment_token_hex =
                 "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-        char fake_google_order_id[8];
-        randombytes_buf(fake_google_order_id, sizeof(fake_google_order_id));
+        std::array<uint8_t, 8> fake_google_order_id;
+        randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
         std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
         another_payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
