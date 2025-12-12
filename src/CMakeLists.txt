@@ -51,8 +51,11 @@ add_libsession_util_library(crypto
     multi_encrypt.cpp
     random.cpp
     session_encrypt.cpp
+    session_protocol.cpp
     sodium_array.cpp
     xed25519.cpp
+    pro_backend.cpp
+    types.cpp
 )
 
 add_libsession_util_library(config
@@ -70,6 +73,7 @@ add_libsession_util_library(config
     config/internal.cpp
     config/local.cpp
     config/protos.cpp
+    config/pro.cpp
     config/user_groups.cpp
     config/user_profile.cpp
     fields.cpp
@@ -81,6 +85,8 @@ target_link_libraries(util
     PUBLIC
     common
     oxen::logging
+    libzstd::static
+    simdutf
 )
 
 target_link_libraries(crypto
@@ -88,6 +94,8 @@ target_link_libraries(crypto
     util
     PRIVATE
     libsodium::sodium-internal
+    nlohmann_json::nlohmann_json
+    libsession::protos
 )
 
 target_link_libraries(config
@@ -96,7 +104,6 @@ target_link_libraries(config
     libsession::protos
     PRIVATE
     libsodium::sodium-internal
-    libzstd::static
 )
 
 if(ENABLE_ONIONREQ)

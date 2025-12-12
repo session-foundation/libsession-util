@@ -22,6 +22,7 @@
 #include "session/config/groups/keys.h"
 #include "session/config/groups/members.hpp"
 #include "session/multi_encrypt.hpp"
+#include "session/session_encrypt.hpp"
 #include "session/xed25519.hpp"
 
 using namespace std::literals;
@@ -1201,203 +1202,51 @@ static constexpr size_t ENCRYPT_OVERHEAD =
 
 std::vector<unsigned char> Keys::encrypt_message(
         std::span<const unsigned char> plaintext, bool compress, size_t padding) const {
-    if (plaintext.size() > MAX_PLAINTEXT_MESSAGE_SIZE)
-        throw std::runtime_error{"Cannot encrypt plaintext: message size is too large"};
-    std::vector<unsigned char> _compressed;
-    if (compress) {
-        _compressed = zstd_compress(plaintext);
-        if (_compressed.size() < plaintext.size())
-            plaintext = _compressed;
-        else {
-            _compressed.clear();
-            compress = false;
-        }
-    }
-    // `plaintext` is now pointing at either the original input data, or at `_compressed` local
-    // variable containing the compressed form of that data.
-
-    oxenc::bt_dict_producer dict{};
-
-    // encoded data version (bump this if something changes in an incompatible way)
-    dict.append("", 1);
-
-    // Sender ed pubkey, by which the message can be validated.  Note that there are *two*
-    // components to this validation: first the regular signature validation of the "s" signature we
-    // add below, but then also validation that this Ed25519 converts to the Session ID of the
-    // claimed sender of the message inside the encoded message data.
-    dict.append(
-            "a", std::string_view{reinterpret_cast<const char*>(user_ed25519_sk.data()) + 32, 32});
-
-    if (!compress)
-        dict.append("d", to_string_view(plaintext));
-
-    // We sign `plaintext || group_ed25519_pubkey` rather than just `plaintext` so that if this
-    // encrypted data will not validate if cross-posted to any other group.  We don't actually
-    // include the pubkey alongside, because that is implicitly known by the group members that
-    // receive it.
     assert(_sign_pk);
-    std::vector<unsigned char> to_sign(plaintext.size() + _sign_pk->size());
-    std::memcpy(to_sign.data(), plaintext.data(), plaintext.size());
-    std::memcpy(to_sign.data() + plaintext.size(), _sign_pk->data(), _sign_pk->size());
-
-    std::array<unsigned char, 64> signature;
-    crypto_sign_ed25519_detached(
-            signature.data(), nullptr, to_sign.data(), to_sign.size(), user_ed25519_sk.data());
-    dict.append("s", to_string_view(signature));
-
-    if (compress)
-        dict.append("z", to_string_view(plaintext));
-
-    auto encoded = std::move(dict).str();
-
-    // suppose size == 250, padding = 256
-    // so size + overhead(40) == 290
-    // need padding of (256 - (290 % 256)) = 256 - 34 = 222
-    // thus 290 + 222 = 512
-    size_t final_len = ENCRYPT_OVERHEAD + encoded.size();
-    if (padding > 1 && final_len % padding != 0) {
-        size_t to_append = padding - (final_len % padding);
-        encoded.resize(encoded.size() + to_append);
-    }
-
-    std::vector<unsigned char> ciphertext;
-    ciphertext.resize(ENCRYPT_OVERHEAD + encoded.size());
-    randombytes_buf(ciphertext.data(), crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    std::span<const unsigned char> nonce{
-            ciphertext.data(), crypto_aead_xchacha20poly1305_ietf_NPUBBYTES};
-    if (0 != crypto_aead_xchacha20poly1305_ietf_encrypt(
-                     ciphertext.data() + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-                     nullptr,
-                     to_unsigned(encoded.data()),
-                     encoded.size(),
-                     nullptr,
-                     0,
-                     nullptr,
-                     nonce.data(),
-                     group_enc_key().data()))
-        throw std::runtime_error{"Encryption failed"};
-
+    std::vector<unsigned char> ciphertext = encrypt_for_group(
+            user_ed25519_sk, *_sign_pk, group_enc_key(), plaintext, compress, padding);
     return ciphertext;
 }
 
 std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
         std::span<const unsigned char> ciphertext) const {
-    if (ciphertext.size() < ENCRYPT_OVERHEAD)
-        throw std::runtime_error{"ciphertext is too small to be encrypted data"};
-
-    std::vector<unsigned char> plain;
-
-    auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    ciphertext = ciphertext.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    plain.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
+    assert(_sign_pk);
 
     //
     // Decrypt, using all the possible keys, starting with a pending one (if we have one)
     //
+    DecryptGroupMessage decrypt = {};
     bool decrypt_success = false;
-    if (auto pending = pending_key();
-        pending && try_decrypting(plain.data(), ciphertext, nonce, *pending)) {
-        decrypt_success = true;
-    } else {
+    if (auto pending = pending_key(); pending) {
+        try {
+            std::span<std::span<const uint8_t>> key_list = {&(*pending), 1};
+            decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
+            decrypt_success = true;
+        } catch (const std::exception&) {
+        }
+    }
+
+    if (!decrypt_success) {
         for (auto& k : keys_) {
-            if (try_decrypting(plain.data(), ciphertext, nonce, k.key)) {
+            try {
+                std::span<const uint8_t> key = {k.key.data(), k.key.size()};
+                std::span<std::span<const uint8_t>> key_list = {&key, 1};
+                decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
                 decrypt_success = true;
                 break;
+            } catch (const std::exception&) {
             }
         }
     }
 
     if (!decrypt_success)  // none of the keys worked
-        throw std::runtime_error{"unable to decrypt ciphertext with any current group keys"};
-
-    //
-    // Removing any null padding bytes from the end
-    //
-    if (auto it =
-                std::find_if(plain.rbegin(), plain.rend(), [](unsigned char c) { return c != 0; });
-        it != plain.rend())
-        plain.resize(plain.size() - std::distance(plain.rbegin(), it));
-
-    //
-    // Now what we have less should be a bt_dict
-    //
-    if (plain.empty() || plain.front() != 'd' || plain.back() != 'e')
-        throw std::runtime_error{"decrypted data is not a bencoded dict"};
-
-    oxenc::bt_dict_consumer dict{to_string_view(plain)};
-
-    if (!dict.skip_until(""))
-        throw std::runtime_error{"group message version tag (\"\") is missing"};
-    if (auto v = dict.consume_integer<int>(); v != 1)
-        throw std::runtime_error{
-                "group message version tag (" + std::to_string(v) +
-                ") is not compatible (we support v1)"};
-
-    if (!dict.skip_until("a"))
-        throw std::runtime_error{"missing message author pubkey"};
-    auto ed_pk = to_span(dict.consume_string_view());
-    if (ed_pk.size() != 32)
-        throw std::runtime_error{
-                "message author pubkey size (" + std::to_string(ed_pk.size()) + ") is invalid"};
-
-    std::array<unsigned char, 32> x_pk;
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(x_pk.data(), ed_pk.data()))
-        throw std::runtime_error{
-                "author ed25519 pubkey is invalid (unable to convert it to a session id)"};
+        throw std::runtime_error{fmt::format(
+                "unable to decrypt ciphertext with any current group keys; tried {}",
+                keys_.size() + (pending_key() ? 1 : 0))};
 
     std::pair<std::string, std::vector<unsigned char>> result;
-    auto& [session_id, data] = result;
-    session_id.reserve(66);
-    session_id += "05";
-    oxenc::to_hex(x_pk.begin(), x_pk.end(), std::back_inserter(session_id));
-
-    std::span<const unsigned char> raw_data;
-    if (dict.skip_until("d")) {
-        raw_data = to_span(dict.consume_string_view());
-        if (raw_data.empty())
-            throw std::runtime_error{"uncompressed message data (\"d\") cannot be empty"};
-    }
-
-    if (!dict.skip_until("s"))
-        throw std::runtime_error{"message signature is missing"};
-    auto ed_sig = to_span(dict.consume_string_view());
-    if (ed_sig.size() != 64)
-        throw std::runtime_error{
-                "message signature size (" + std::to_string(ed_sig.size()) + ") is invalid"};
-
-    bool compressed = false;
-    if (dict.skip_until("z")) {
-        if (!raw_data.empty())
-            throw std::runtime_error{
-                    "message signature cannot contain both compressed (z) and uncompressed (d) "
-                    "data"};
-        raw_data = to_span(dict.consume_string_view());
-        if (raw_data.empty())
-            throw std::runtime_error{"compressed message data (\"z\") cannot be empty"};
-
-        compressed = true;
-    } else if (raw_data.empty())
-        throw std::runtime_error{"message must contain compressed (z) or uncompressed (d) data"};
-
-    // The value we verify is the raw data *followed by* the group Ed25519 pubkey.  (See the comment
-    // in encrypt_message).
-    assert(_sign_pk);
-    std::vector<unsigned char> to_verify;
-    to_verify.resize(raw_data.size() + _sign_pk->size());
-    std::memcpy(to_verify.data(), raw_data.data(), raw_data.size());
-    std::memcpy(to_verify.data() + raw_data.size(), _sign_pk->data(), _sign_pk->size());
-    if (0 != crypto_sign_ed25519_verify_detached(
-                     ed_sig.data(), to_verify.data(), to_verify.size(), ed_pk.data()))
-        throw std::runtime_error{"message signature failed validation"};
-
-    if (compressed) {
-        if (auto decomp = zstd_decompress(raw_data, MAX_PLAINTEXT_MESSAGE_SIZE)) {
-            data = std::move(*decomp);
-        } else
-            throw std::runtime_error{"message decompression failed"};
-    } else
-        data.assign(raw_data.begin(), raw_data.end());
-
+    result.first = std::move(decrypt.session_id);
+    result.second = std::move(decrypt.plaintext);
     return result;
 }
 
@@ -1508,11 +1357,39 @@ LIBSESSION_C_API size_t groups_keys_size(const config_group_keys* conf) {
     return unbox(conf).size();
 }
 
-LIBSESSION_C_API const unsigned char* group_keys_get_key(const config_group_keys* conf, size_t N) {
+LIBSESSION_C_API const unsigned char* groups_keys_get_key(const config_group_keys* conf, size_t N) {
     auto keys = unbox(conf).group_keys();
     if (N >= keys.size())
         return nullptr;
     return keys[N].data();
+}
+
+LIBSESSION_C_API size_t groups_keys_get_keys(
+        const config_group_keys* conf, size_t offset, span_u8* dest, size_t dest_size) {
+    size_t result = 0;
+    if (dest) {
+        auto keys = unbox(conf).group_keys();
+        size_t clamped_offset = std::min(keys.size(), offset);
+        for (size_t index = clamped_offset; index < keys.size() && result < dest_size; index++) {
+            const std::span<const uint8_t>& src_key = keys[index];
+            span_u8* dest_key = dest + result++;
+            dest_key->data = const_cast<uint8_t*>(src_key.data());
+            dest_key->size = src_key.size();
+        }
+    }
+    return result;
+}
+
+LIBSESSION_C_API const span_u8 groups_keys_group_enc_key(const config_group_keys* conf) {
+    span_u8 result = {};
+    try {
+        std::span<const uint8_t> key = unbox(conf).group_enc_key();
+        result.data = const_cast<uint8_t*>(key.data());
+        result.size = key.size();
+        assert(result.size == 32);
+    } catch (const std::exception& e) {
+    }
+    return result;
 }
 
 LIBSESSION_C_API bool groups_keys_is_admin(const config_group_keys* conf) {

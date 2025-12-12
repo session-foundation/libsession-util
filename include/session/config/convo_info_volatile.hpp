@@ -31,6 +31,8 @@ class val_loader;
 ///
 /// 1 - dict of one-to-one conversations.  Each key is the Session ID of the contact (in hex).
 ///     Values are dicts with keys:
+///     e - contacts pro expiry unix timestamp (in milliseconds)
+///     g - contacts pro gen_index_hash
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
@@ -44,13 +46,13 @@ class val_loader;
 ///           included, but will be 0 if no messages are read.
 ///       u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
-/// g - group conversations (aka new, non-legacy closed groups).  The key is the group identifier
+/// g - group conversations (aka new, non-legacy groups).  The key is the group identifier
 ///     (beginning with 03).  Values are dicts with keys:
 ///     r - the unix timestamp (in integer milliseconds) of the last-read message.  Always
 ///         included, but will be 0 if no messages are read.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
 ///
-/// C - legacy group conversations (aka closed groups).  The key is the group identifier (which
+/// C - legacy group conversations (aka groups).  The key is the group identifier (which
 ///     looks indistinguishable from a Session ID, but isn't really a proper Session ID).  Values
 ///     are dicts with keys:
 ///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,
@@ -59,6 +61,8 @@ class val_loader;
 ///
 /// b - outgoing blinded message request conversations.  The key is the blinded Session ID without
 ///     the prefix.  Values are dicts with keys:
+///     e - contacts pro expiry unix timestamp (in milliseconds)
+///     g - contacts pro gen_index_hash
 ///     r - the unix timestamp (integer milliseconds) of the last-read message.  Always included,
 ///         but will be 0 if no messages are read.
 ///     u - will be present and set to 1 if this conversation is specifically marked unread.
@@ -78,6 +82,13 @@ namespace convo {
 
     struct one_to_one : base {
         std::string session_id;  // in hex
+
+        /// Hash of the generation index set by the Session Pro Backend
+        std::optional<array_uc32> pro_gen_index_hash;
+
+        /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid
+        /// to
+        std::chrono::sys_time<std::chrono::milliseconds> pro_expiry_unix_ts{};
 
         /// API: convo_info_volatile/one_to_one::one_to_one
         ///
@@ -160,6 +171,13 @@ namespace convo {
     struct blinded_one_to_one : base {
         std::string blinded_session_id;  // in hex
         bool legacy_blinding;
+
+        /// Hash of the generation index set by the Session Pro Backend
+        std::optional<array_uc32> pro_gen_index_hash;
+
+        /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid
+        /// to
+        std::chrono::sys_time<std::chrono::milliseconds> pro_expiry_unix_ts{};
 
         /// API: convo_info_volatile/blinded_one_to_one::blinded_one_to_one
         ///

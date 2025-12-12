@@ -1,6 +1,7 @@
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/config/contacts.h>
+#include <session/session_protocol.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -1115,4 +1116,59 @@ TEST_CASE("Contacts", "[config][blinded_contacts]") {
     auto invalid_id_2 = "992222222222222222222222222222222222222222222222222222222222222222"sv;
     CHECK_THROWS(contacts.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, invalid_id_1));
     CHECK_THROWS(contacts.get_or_construct_blinded(comm_base_url, comm_pubkey_hex, invalid_id_2));
+}
+
+TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+
+    session::config::Contacts contacts{std::span<const unsigned char>{seed}, std::nullopt};
+
+    // Set the bitsets onto the profile
+    {
+        auto c = contacts.get_or_construct(
+                "050000000000000000000000000000000000000000000000000000000000000000"sv);
+        CHECK(c.profile_bitset.data == 0);
+
+        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        contacts.set(c);
+
+        c = contacts.get_or_construct(
+                "050000000000000000000000000000000000000000000000000000000000000000"sv);
+        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+
+        contacts.set(c);
+        c = contacts.get_or_construct(
+                "050000000000000000000000000000000000000000000000000000000000000000"sv);
+        CHECK_FALSE(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+
+        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR);
+        contacts.set(c);
+        c = contacts.get_or_construct(
+                "050000000000000000000000000000000000000000000000000000000000000000"sv);
+
+        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    }
+
+    // Set and unset the bitset from the profile on a new contact
+    {
+        auto c = contacts.get_or_construct(
+                "050000000000000000000000000000000000000000000000000000000000000001"sv);
+        CHECK(c.profile_bitset.data == 0);
+
+        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        contacts.set(c);
+
+        c = contacts.get_or_construct(
+                "050000000000000000000000000000000000000000000000000000000000000001"sv);
+        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+
+        c.profile_bitset.unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        contacts.set(c);
+
+        c = contacts.get_or_construct(
+                "050000000000000000000000000000000000000000000000000000000000000001"sv);
+        CHECK(!c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    }
 }

@@ -15,15 +15,6 @@
 
 namespace session {
 
-enum class SessionIDPrefix {
-    standard,
-    group,
-    community_blinded_legacy,
-    community_blinded,
-    version_blinded,
-    unblinded,
-};
-
 inline constexpr std::string_view to_string(session::SessionIDPrefix prefix) {
     switch (prefix) {
         case session::SessionIDPrefix::unblinded: return "00"sv;
@@ -160,7 +151,7 @@ std::string session_id_to_bytes(std::string_view session_id, std::string_view pr
 std::array<unsigned char, 32> session_id_pk(
         std::string_view session_id, std::string_view prefix = "05");
 
-// Validates an open group pubkey; we accept it in hex, base32z, or base64 (padded or unpadded).
+// Validates a community pubkey; we accept it in hex, base32z, or base64 (padded or unpadded).
 // Throws std::invalid_argument if invalid.
 void check_encoded_pubkey(std::string_view pk);
 
@@ -191,6 +182,12 @@ std::chrono::sys_time<Duration> ts_now() {
 // wrapped in a std::chrono::sys_seconds.  Returns nullopt if not there (or not int).
 std::optional<std::chrono::sys_seconds> maybe_ts(const session::config::dict& d, const char* key);
 
+// Digs into a config `dict` to get out an int64_t containing unix timestamp milliseconds, returns
+// it wrapped in a std::chrono::sys_time<std::chrono::milliseconds>.  Returns nullopt if not there
+// (or not int).
+std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_ts_ms(
+        const session::config::dict& d, const char* key);
+
 // Works like maybe_ts, except that if the value isn't present it returns a default-constructed
 // sys_seconds (i.e. unix timestamp 0).  Equivalent to `maybe_ts(d,
 // key).value_or(std::chrono::sys_seconds{})`.
@@ -198,6 +195,12 @@ std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char*
 
 // Digs into a config `dict` to get out a string; nullopt if not there (or not string)
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key);
+
+// Extract a U64 bitset from a set of i64's
+uint64_t bitset_from_set_of_int64_or_0(const session::config::set& s);
+
+// Individually write each bit from bitset into a set consisting of int64's
+void set_int64_set_from_bitset(ConfigBase::DictFieldProxy&& field, uint64_t bitset);
 
 // Digs into a config `dict` to get out a string; ""s if not there (or not string)
 std::string string_or_empty(const session::config::dict& d, const char* key);
@@ -263,19 +266,6 @@ void load_unknowns(
         oxenc::bt_dict_consumer& in,
         std::string_view previous,
         std::string_view until);
-
-/// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
-/// serious error.
-std::vector<unsigned char> zstd_compress(
-        std::span<const unsigned char> data,
-        int level = 1,
-        std::span<const unsigned char> prefix = {});
-
-/// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
-/// then this returns nullopt if the decompressed size would exceed that limit.
-std::optional<std::vector<unsigned char>> zstd_decompress(
-        std::span<const unsigned char> data, size_t max_size = 0);
-
 }  // namespace session::config
 
 namespace fmt {

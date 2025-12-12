@@ -88,8 +88,8 @@ struct base_group_info {
     notify_mode notifications = notify_mode::defaulted;  // When the user wants notifications
     int64_t mute_until = 0;  // unix timestamp (seconds) until which notifications are disabled
 
-    std::string name;  // human-readable; always set for a legacy closed group, only used before
-                       // joining a new closed group (after joining the group info provide the name)
+    std::string name;  // human-readable; always set for a legacy group, only used before
+                       // joining a new group (after joining the group info provide the name)
 
     bool invited = false;  // True if this is currently in the invite-but-not-accepted state.
 
@@ -97,7 +97,7 @@ struct base_group_info {
     void load(const dict& info_dict);
 };
 
-/// Struct containing legacy group info (aka "closed groups").
+/// Struct containing legacy group info (aka "groups").
 struct legacy_group_info : base_group_info {
     std::string session_id;                      // The legacy group "session id" (33 bytes).
     std::vector<unsigned char> enc_pubkey;       // bytes (32 or empty)
@@ -185,7 +185,7 @@ struct legacy_group_info : base_group_info {
 
 constexpr int NOT_REMOVED = 0, KICKED_FROM_GROUP = 1, GROUP_DESTROYED = 2;
 
-/// Struct containing new group info (aka "closed groups v2").
+/// Struct containing new group info (aka "groups v2").
 struct group_info : base_group_info {
     std::string id;  // The group pubkey (66 hex digits); this is an ed25519 key, prefixed with "03"
                      // (to distinguish it from a 05 x25519 pubkey session id).
@@ -344,7 +344,7 @@ class UserGroups : public ConfigBase {
 
     /// API: user_groups/UserGroups::get_group
     ///
-    /// Looks up and returns a group (aka new closed group) by group ID (hex, looks like a Session
+    /// Looks up and returns a group (aka new group) by group ID (hex, looks like a Session
     /// ID but starting with 03).  Returns nullopt if the group was not found, otherwise returns a
     /// filled out `group_info`.
     ///
