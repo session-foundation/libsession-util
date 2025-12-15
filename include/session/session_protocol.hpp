@@ -213,6 +213,8 @@ enum class DestinationType {
     Group = SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
     CommunityInbox = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
     Community = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY,
+    EnvelopeCommunityInbox = SESSION_PROTOCOL_DESTINATION_TYPE_ENVELOPE_COMMUNITY_INBOX,
+    EnvelopeCommunity = SESSION_PROTOCOL_DESTINATION_TYPE_ENVELOPE_COMMUNITY,
 };
 
 struct Destination {
@@ -604,6 +606,23 @@ std::vector<uint8_t> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
+        const array_uc32& pro_backend_pubkey);
+
+/// API: session_protocol/decode_for_community_inbox
+///
+/// Given a blinded encrypted content or envelope payload extract the plaintext to the content and
+/// any associated pro metadata if there was any in the message.
+///
+/// This function is the same as calling `decrypt_from_blinded_recipient` to decrypt the payload and
+/// then decode with `decode_for_community`. See those functions for more information. On failure
+/// this function throws as per `decrypt_from_blinded_recipient`
+DecodedCommunityMessage decode_for_community_inbox(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> community_pubkey,
+        std::span<const unsigned char> sender_id,
+        std::span<const unsigned char> recipient_id,
+        std::span<const unsigned char> ciphertext,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         const array_uc32& pro_backend_pubkey);
 
 /// API: session_protocol/decode_for_community
