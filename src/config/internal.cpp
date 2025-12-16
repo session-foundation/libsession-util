@@ -149,9 +149,9 @@ std::optional<std::string> maybe_string(const session::config::dict& d, const ch
 
 uint64_t bitset_from_set_of_int64_or_0(const session::config::set& s) {
     uint64_t result = 0;
-    const size_t bits_available = sizeof(result) * 8;
-    for (auto it : s) {
-        auto* val = std::get_if<int64_t>(&it);
+    constexpr size_t bits_available = sizeof(result) * 8;
+    for (auto& v : s) {
+        auto* val = std::get_if<int64_t>(&v);
         if (val && (*val >= 0 && *val < bits_available))
             result |= (1ULL << *val);
     }
@@ -159,7 +159,7 @@ uint64_t bitset_from_set_of_int64_or_0(const session::config::set& s) {
 }
 
 void set_int64_set_from_bitset(ConfigBase::DictFieldProxy&& field, uint64_t bitset) {
-    const size_t bits_available = sizeof(bitset) * 8;
+    constexpr size_t bits_available = sizeof(bitset) * 8;
     for (size_t index = 0; index < bits_available; index++) {
         uint64_t bit = bitset & (1ULL << index);
         if (bit)
