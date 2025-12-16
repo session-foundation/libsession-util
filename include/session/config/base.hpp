@@ -438,8 +438,13 @@ class ConfigBase : public ConfigSig {
         /// Ouputs:
         /// - `bool` -- True if the value was inserted, false otherwise
         bool insert_if_missing(config::scalar&& value) {
+            // If the config isn't marked dirty then we can do a first pass to see if the value is
+            // already there: if it is, we want to short-circuit marking the config dirty because
+            // this insertion is a no-op.  If the config is *already* dirty then there's no point in
+            // doing this possibly extra check, because even if we don't change anything the config
+            // is *already* dirty.
             if (!_conf.is_dirty())
-                if (auto current = get_clean<config::set>(); current && current->count(value))
+                if (auto current = get_clean<config::set>(); current && current->contains(value))
                     return false;
 
             get_dirty<config::set>().insert(std::move(value));
@@ -456,8 +461,10 @@ class ConfigBase : public ConfigSig {
         /// Outputs:
         /// - `bool` -- True if an element was erased, false otherwise
         bool set_erase_impl(const config::scalar& value) {
+            // See comment in `insert_if_missing`, above.  This is the same short-circuiting logic
+            // (but with a negated condition because this is erasing instead of inserting).
             if (!_conf.is_dirty())
-                if (auto current = get_clean<config::set>(); current && !current->count(value))
+                if (auto current = get_clean<config::set>(); !(current && current->contains(value)))
                     return false;
 
             config::dict* data = &_conf.dirty().data();
