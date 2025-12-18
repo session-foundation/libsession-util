@@ -104,43 +104,8 @@ struct session_pro_backend_payment_provider_metadata {
 
 /// The centralised list of common URLs and properties for handling payment provider specific
 /// integrations. Especially useful for cross-device management of Session Pro subscriptions.
-// clang-format off
-const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT] = {
-    /*SESSION_PRO_PAYMENT_PROVIDER_NIL*/ {
-        .device                             = string8_literal(""),
-        .store                              = string8_literal(""),
-        .platform                           = string8_literal(""),
-        .platform_account                   = string8_literal(""),
-        .refund_platform_url                = string8_literal(""),
-        .refund_support_url                 = string8_literal(""),
-        .refund_status_url                  = string8_literal(""),
-        .update_subscription_url            = string8_literal(""),
-        .cancel_subscription_url            = string8_literal(""),
-    },
-    /*SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE*/ {
-        .device                             = string8_literal("Android"),
-        .store                              = string8_literal("Google Play Store"),
-        .platform                           = string8_literal("Google"),
-        .platform_account                   = string8_literal("Google account"),
-        .refund_platform_url                = string8_literal("https://support.google.com/googleplay/workflow/9813244?"),
-        .refund_support_url                 = string8_literal("https://getsession.org/android-refund"),
-        .refund_status_url                  = string8_literal("https://getsession.org/android-refund"),
-        .update_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
-        .cancel_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
-    },
-    /*SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE*/ {
-        .device                             = string8_literal("iOS"),
-        .store                              = string8_literal("Apple App Store"),
-        .platform                           = string8_literal("Apple"),
-        .platform_account                   = string8_literal("Apple account"),
-        .refund_platform_url                = string8_literal("https://support.apple.com/118223"),
-        .refund_support_url                 = string8_literal("https://support.apple.com/118223"),
-        .refund_status_url                  = string8_literal("https://support.apple.com/118224"),
-        .update_subscription_url            = string8_literal("https://apps.apple.com/account/subscriptions"),
-        .cancel_subscription_url            = string8_literal("https://account.apple.com/account/manage/section/subscriptions"),
-    }
-};
-// clang-format on
+extern const session_pro_backend_payment_provider_metadata
+        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT];
 
 typedef struct session_pro_backend_response_header session_pro_backend_response_header;
 struct session_pro_backend_response_header {

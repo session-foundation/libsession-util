@@ -69,34 +69,7 @@ struct session_protocol_strings {
     string8 url_token;
     string8 url_translate;
 };
-
-// clang-format off
-const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
-    .build_variant_apk        = string8_literal("APK"),
-    .build_variant_fdroid     = string8_literal("F-Droid Store"),
-    .build_variant_huawei     = string8_literal("Huawei App Gallery"),
-    .build_variant_ipa        = string8_literal("IPA"),
-    .url_donations            = string8_literal("https://getsession.org/donate"),
-    .url_donations_app        = string8_literal("https://getsession.org/donate#app"),
-    .url_download             = string8_literal("https://getsession.org/download"),
-    .url_faq                  = string8_literal("https://getsession.org/faq"),
-    .url_feedback             = string8_literal("https://getsession.org/feedback"),
-    .url_network              = string8_literal("https://docs.getsession.org/session-network"),
-    .url_privacy_policy       = string8_literal("https://getsession.org/privacy-policy"),
-    .url_pro_access_not_found = string8_literal("https://sessionapp.zendesk.com/hc/sections/4416517450649-Support"),
-    .url_pro_faq              = string8_literal("https://getsession.org/faq#pro"),
-    .url_pro_privacy_policy   = string8_literal("https://getsession.org/pro/privacy"),
-    .url_pro_roadmap          = string8_literal("https://getsession.org/pro-roadmap"),
-    .url_pro_support          = string8_literal("https://getsession.org/pro-form"),
-    .url_pro_terms_of_service = string8_literal("https://getsession.org/pro/terms"),
-    .url_staking              = string8_literal("https://docs.getsession.org/session-network/staking"),
-    .url_support              = string8_literal("https://getsession.org/support"),
-    .url_survey               = string8_literal("https://getsession.org/survey"),
-    .url_terms_of_service     = string8_literal("https://getsession.org/terms-of-service"),
-    .url_token                = string8_literal("https://token.getsession.org"),
-    .url_translate            = string8_literal("https://getsession.org/translate"),
-};
-// clang-format on
+extern const session_protocol_strings SESSION_PROTOCOL_STRINGS;
 
 typedef enum SESSION_PROTOCOL_PRO_STATUS {  // See session::ProStatus
     SESSION_PROTOCOL_PRO_STATUS_NIL,
