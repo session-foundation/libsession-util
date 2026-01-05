@@ -33,11 +33,26 @@ LIBSESSION_EXPORT void session_core_core_deinit(session_core_core* core);
 
 /// API: core/session_core_core_db_conn
 ///
-/// Get a DB handle from the core object. This DB connection may be uninitialised if
-/// `session_database_connection_open` has not been called on the returned database connection
-/// before for this instance.
-LIBSESSION_EXPORT session_database_connection session_core_core_db_conn(session_core_core* core)
+/// Get a DB handle from the core object if the DB has been opened before. If the DB has not been
+/// opened, this function returns a nullptr. If libsession is built without DB support this will
+/// also cause the function to return a nullptr.
+///
+/// This pointer's lifetime is bound to the current instance of the DB associated with the Core. The
+/// caller must take care not to deinitialise the connection independently from the Core as
+/// ownership of the database is bound to `session_core_core_deinit`.
+LIBSESSION_EXPORT session_database_connection *session_core_core_db_conn(session_core_core* core)
         NON_NULL_ARG(1);
+
+/// API: core/session_core_core_open_db
+///
+/// Create/open the SQLCipher DB at the specified `path`. Upon load the core in-memory runtime
+/// state will be reset and populated with the contents of the DB. This closes the DB automatically
+/// if the core previously opened it.
+//
+/// This function returns an error if there were issues opening the database. No-op if libsession
+/// has been compiled without database support.
+LIBSESSION_EXPORT session_c_result
+session_core_core_open_db(session_core_core* core, string8 path, span_u8 raw_key);
 
 /// API: core/session_core_core_pro_proof_is_revoked
 ///

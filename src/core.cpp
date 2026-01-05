@@ -7,12 +7,83 @@
 
 static auto logcat = oxen::log::Cat("core");
 
+namespace {
+enum class SaveToDB { No, Yes };
+void pro_update_revocations_internal(
+        uint32_t& core_revocations_ticket,
+        std::set<session::pro_backend::ProRevocationItem, session::core::ProRevocationItemComparer>&
+                core_revocations,
+#if !defined(DISABLED_SQLCIPHER_DATABASE)
+        session::database::Connection& core_db_conn,
+#endif
+        uint32_t revocations_ticket,
+        std::span<const session::pro_backend::ProRevocationItem> revocations,
+        [[maybe_unused]] SaveToDB save_to_db) {
+    if (core_revocations_ticket == revocations_ticket)
+        return;
+
+#if !defined(DISABLED_SQLCIPHER_DATABASE)
+    if (core_db_conn.db_ && save_to_db == SaveToDB::Yes) {
+        session::database::SetResult set_result =
+                core_db_conn.set_pro_revocations(revocations_ticket, revocations);
+
+        // There's not much we can do here for whatever reason it failed. The runtime cache is
+        // updated but not the DB. The DB is only for permanence of the list across restarts of
+        // libsession at which point, it will load from the DB, query the backend and notice the
+        // ticket is out of sync and try again.
+        if (!set_result.success) {
+            oxen::log::warning(
+                    logcat,
+                    "Failed to update SQL revocations from (items {}; ticket {}) -> (items {}; "
+                    "ticket "
+                    "{}): ({}) {}",
+                    core_revocations.size(),
+                    core_revocations_ticket,
+                    revocations.size(),
+                    revocations_ticket,
+                    set_result.sql_return_code,
+                    set_result.sql_error);
+        }
+    }
+#endif
+
+    // Currently we just dump the entire thing and re-write it, we don't expect this list to get big
+    core_revocations.clear();
+    core_revocations.insert(revocations.begin(), revocations.end());
+    core_revocations_ticket = revocations_ticket;
+}
+};
+
 namespace session::core {
 bool ProRevocationItemComparer::operator()(
         const pro_backend::ProRevocationItem& lhs,
         const pro_backend::ProRevocationItem& rhs) const noexcept {
     bool result = lhs.gen_index_hash < rhs.gen_index_hash;
     return result;
+}
+
+void Core::open_db(
+        [[maybe_unused]] const std::string& path,
+        [[maybe_unused]] const cleared_array<48>& raw_key) {
+#if !defined(DISABLE_SQLCIPHER_DATABASE)
+    // NOTE: Zero initialise everything
+    *this = {};
+
+    // NOTE: Open the DB
+    db_conn.open(path, raw_key);
+
+    // NOTE: Load in the pro-revocations from the DB
+    uint32_t pro_revocations_ticket = 0;
+    std::vector<pro_backend::ProRevocationItem> pro_revocations =
+            db_conn.get_pro_revocations(&pro_revocations_ticket);
+    pro_update_revocations_internal(
+            revocations_ticket_,
+            revocations_,
+            db_conn,
+            pro_revocations_ticket,
+            pro_revocations,
+            SaveToDB::No);
+#endif
 }
 
 bool Core::pro_proof_is_revoked(
@@ -30,38 +101,15 @@ bool Core::pro_proof_is_revoked(
 void Core::pro_update_revocations(
         uint32_t revocations_ticket,
         std::span<const session::pro_backend::ProRevocationItem> revocations) {
-    if (revocations_ticket_ == revocations_ticket)
-        return;
-
-    // Currently we just dump the entire thing and re-write it, we don't expect this list to get big
-    revocations_.clear();
-    revocations_.insert(revocations.begin(), revocations.end());
-    revocations_ticket_ = revocations_ticket;
-
+    pro_update_revocations_internal(
+            revocations_ticket_,
+            revocations_,
 #if !defined(DISABLED_SQLCIPHER_DATABASE)
-    if (db_conn.db_) {
-        session::database::SetResult set_result =
-                db_conn.set_pro_revocations(revocations_ticket, revocations);
-
-        // There's not much we can do here for whatever reason it failed. The runtime cache is
-        // updated but not the DB. The DB is only for permanence of the list across restarts of
-        // libsession at which point, it will load from the DB, query the backend and notice the
-        // ticket is out of sync and try again.
-        if (!set_result.success) {
-            oxen::log::warning(
-                    logcat,
-                    "Failed to update SQL revocations from (items {}; ticket {}) -> (items {}; "
-                    "ticket "
-                    "{}): ({}) {}",
-                    revocations_.size(),
-                    revocations_ticket_,
-                    revocations.size(),
-                    revocations_ticket,
-                    set_result.sql_return_code,
-                    set_result.sql_error);
-        }
-    }
+            db_conn,
 #endif
+            revocations_ticket,
+            revocations,
+            SaveToDB::Yes);
 }
 };  // namespace session::core
 
@@ -84,11 +132,39 @@ LIBSESSION_C_API void session_core_core_deinit(session_core_core* core) {
     }
 }
 
-LIBSESSION_C_API session_database_connection session_core_core_db_conn(session_core_core* core) {
+LIBSESSION_C_API session_database_connection *session_core_core_db_conn(session_core_core* core) {
+    session_database_connection *result = nullptr;
     auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
-    session_database_connection result = {};
-    uintptr_t ptr_address = reinterpret_cast<uintptr_t>(&core_cpp->db_conn);
-    memcpy(result.opaque, &ptr_address, sizeof(ptr_address));
+#if !defined(DISABLED_SQLCIPHER_DATABASE)
+    if (core_cpp->db_conn.db_.get())
+        result = reinterpret_cast<session_database_connection*>(&core_cpp->db_conn);
+#endif
+    return result;
+}
+
+LIBSESSION_C_API session_c_result
+session_core_core_open_db(session_core_core* core, string8 path, span_u8 raw_key) {
+    auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
+    session::cleared_array<48> raw_key_cpp;
+
+    session_c_result result = {};
+    if (raw_key.size != raw_key_cpp.max_size()) {
+        result.error_count = snprintf_clamped(
+                result.error,
+                sizeof(result.error),
+                "Raw key must be %zu bytes, unable to open DB. Received: %zu",
+                raw_key.size,
+                raw_key_cpp.max_size());
+        return result;
+    }
+
+    try {
+        std::string path_cpp = std::string(path.data, path.size);
+        core_cpp->open_db(path_cpp, raw_key_cpp);
+        result.success = true;
+    } catch (const std::exception& e) {
+        session::write_exception_to_session_c_result(&result, e.what());
+    }
     return result;
 }
 

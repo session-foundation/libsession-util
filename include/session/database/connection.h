@@ -14,7 +14,7 @@ struct session_pro_backend_pro_revocation_item;
 
 typedef struct session_database_connection session_database_connection;
 struct session_database_connection {
-    uint64_t opaque[2];
+    uint64_t opaque;
 };
 
 typedef struct session_database_set_result session_database_set_result;

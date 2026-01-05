@@ -24,26 +24,38 @@
 /// appropriate data from the network and you can opt out of using a database by either,
 ///
 ///  - Compiling without database support
-///  - Not opening the database or ensuring the database is closed if it was open
+///  - Not opening the database and/or ensuring the database is on the Core object is is closed
+///    during use.
 ///
 /// The typical intended flow for using the Core is as follows:
-///
-/// ```
-///  #include <sodium/randombytes.h>
-///  #include <session/core.hpp>
-///
-///  session::cleared_array<48> db_enc_key = {};
-///  randombytes_buf(db_enc_key.data(), db_enc_key.size());
-///
-///  try {
-///    session::core::Core core = {};
-///    core.db_conn.open(":memory:", db_enc_key);
-///
-///    // Then use the Core API ...
-///    if (core.pro_proof_is_revoked(...)) { ... }
-///  } catch (const std::exception& e) {
-///  }
-/// ```
+/*
+```
+  #include <sodium/randombytes.h>
+  #include <session/core.hpp>
+
+  session::cleared_array<48> db_enc_key = {};
+  randombytes_buf(db_enc_key.data(), db_enc_key.size());
+
+  session::core::Core core = {};
+
+  // Optionally create/open the DB to persist state to. If this step is skipped the core will only
+  // maintain libsession state (like the user's long term seed or the pro revocation list) in
+  // runtime memory and will be lost on shutdown. Persisting user state is then left to the
+  // integrating application's discretion.
+  try {
+    core.db_conn.open(":memory:", db_enc_key);
+  } catch (const std::exception& e) {
+    // ... error handling
+  }
+
+  // Then use the Core API ...
+  if (core.pro_proof_is_revoked(...)) { ... }
+
+  // Update the revocation list stored in Core (if the DB was opened successfully, this will also
+  // persist the revocation list to the DB for example).
+  if (core.pro_update_revocations(...)) { ... }
+```
+*/
 
 namespace session::pro_backend {
 struct ProRevocationItem;
@@ -64,11 +76,19 @@ struct Core {
     /// from the Session Pro Backend when the revocation list is queried.
     uint32_t revocations_ticket_;
 
-    /// After initialisation you must call `db_conn.open()` if you wish to use
-    /// functions requiring the database which are denoted by DISABLE_SQLCIPHER_DATABASE.
 #if !defined(DISABLE_SQLCIPHER_DATABASE)
     session::database::Connection db_conn;
 #endif
+
+    /// API: core/Core::open_db
+    ///
+    /// Create/open the SQLCipher DB at the specified `path`. Upon load the core in-memory runtime
+    /// state will be reset and populated with the contents of the DB. This closes the DB
+    /// automatically if the core previously opened it.
+    //
+    /// This function throws if there was an error opening the database. No-op if libsession has
+    /// been compiled without database support.
+    void open_db(const std::string& path, const cleared_array<48>& raw_key);
 
     /// API: core/Core::pro_proof_is_revoked
     ///
@@ -90,6 +110,14 @@ struct Core {
     ///
     /// If `db_conn` does not have an open connection then only the in-memory revocation list is
     /// updated.
+    ///
+    /// Inputs:
+    /// - `revocations_ticket` -- Ticket that describes the version of the revocations. This value
+    ///   comes alongside the revocation list when queried. If the ticket is the same as the ticket
+    ///   stored in the core, this function no-ops (because the revocation list is the same in this
+    ///   case).
+    /// - `revocations` -- List of Session Pro revocations to update in the core. Overwrites the
+    ///   previous list stored in the core.
     void pro_update_revocations(
             uint32_t revocations_ticket,
             std::span<const session::pro_backend::ProRevocationItem> revocations);

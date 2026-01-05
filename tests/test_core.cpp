@@ -1,4 +1,5 @@
 #include <session/core.h>
+#include <session/core.hpp>
 #include <session/database/connection.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -12,37 +13,6 @@
 #include <session/database/connection.hpp>
 #endif
 
-TEST_CASE("Core", "[core][database][open]") {
-    session_core_core core = {};
-    session_core_core_init(&core);
-    auto on_exit = session::scope_exit([&]() { session_core_core_deinit(&core); });
-
-    // Check that the core opaque handle is not zero
-    session_core_core zero_core = {};
-    REQUIRE(memcmp(core.opaque, zero_core.opaque, sizeof(core.opaque)) != 0);
-
-#if !defined(DISABLE_SQLCIPHER_DATABASE)
-    // Setup the encryption key
-    session::cleared_array<48> raw_key = {};
-    randombytes_buf(raw_key.data(), raw_key.size());
-    span_u8 raw_key_span = {raw_key.data(), raw_key.size()};
-
-    // Get the DB connection from core, and check that the handle is not zero
-    session_database_connection db = session_core_core_db_conn(&core);
-    session_database_connection zero_db = {};
-    REQUIRE(memcmp(db.opaque, zero_db.opaque, sizeof(db.opaque)) != 0);
-
-    // Open a DB connection
-    session_c_result open_result =
-            session_database_connection_open(&db, string8_literal(":memory:"), raw_key_span);
-    REQUIRE(open_result.success);
-
-    // Close the DB connection
-    session_database_connection_close(&db);
-    REQUIRE(memcmp(db.opaque, zero_db.opaque, sizeof(db.opaque)) == 0);
-#endif
-}
-
 #if !defined(DISABLE_SQLCIPHER_DATABASE)
 TEST_CASE("Core", "[core][database][pro][revocations]") {
     session_core_core core = {};
@@ -55,9 +25,12 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     span_u8 raw_key_span = {raw_key.data(), raw_key.size()};
 
     // Open the DB
-    session_database_connection db = session_core_core_db_conn(&core);
-    session_database_connection_open(&db, string8_literal(":memory:"), raw_key_span);
-    auto* db_cpp = reinterpret_cast<session::database::Connection*>(db.opaque);
+    string8 db_path = string8_literal("file::memory:?cache=shared");
+    session_c_result open_db_result = session_core_core_open_db(&core, db_path, raw_key_span);
+    REQUIRE(open_db_result.success);
+
+    session_database_connection *db = session_core_core_db_conn(&core);
+    auto* db_cpp = reinterpret_cast<session::database::Connection*>(&db->opaque);
 
     // Check runtime was seeded to ticket 0
     session::database::Runtime runtime = db_cpp->get_runtime();
@@ -67,7 +40,7 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     // Check that the DB has no revocations in it
     uint32_t ticket = 0;
     session_database_get_pro_revocation_result get_result =
-            session_database_connection_get_pro_revocations_buffer(&db, nullptr, 0, 0, &ticket);
+            session_database_connection_get_pro_revocations_buffer(db, nullptr, 0, 0, &ticket);
     REQUIRE(get_result.db.success);
     REQUIRE(get_result.count == 0);
 
@@ -93,12 +66,11 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
             },
     };
 
-    // Set the items
-    session_database_set_result set_result = session_database_connection_set_pro_revocations(
-            &db, 1, src_items, sizeof(src_items) / sizeof(src_items[0]));
-    INFO("Set w/ 2 items failed: " << sqlite3_errstr(set_result.sql_return_code));
-    REQUIRE(set_result.db.success);
-    REQUIRE(set_result.sql_return_code == SQLITE_OK);
+    // Set the items in Core (and consequently, the DB)
+    session_c_result set_result = session_core_core_pro_update_revocations(
+            &core, 1 /*ticket*/, src_items, sizeof(src_items) / sizeof(src_items[0]));
+    INFO("Set w/ 2 items failed: " << set_result.error);
+    REQUIRE(set_result.success);
 
     // Check runtime ticket was changed to 1
     runtime = db_cpp->get_runtime();
@@ -107,7 +79,7 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
 
     // Count the number of revocations in the DB (should be 2 as we've inserted them)
     get_result =
-            session_database_connection_get_pro_revocations_buffer(&db, nullptr, 0, 0, &ticket);
+            session_database_connection_get_pro_revocations_buffer(db, nullptr, 0, 0, &ticket);
     REQUIRE(ticket == runtime.pro_revocations_ticket);
     REQUIRE(get_result.db.success);
     REQUIRE(get_result.count == 2);
@@ -128,16 +100,15 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     REQUIRE(src_items[1].expiry_unix_ts_ms ==
             db_items[1].expiry_unix_ts.time_since_epoch().count());
 
-    // Delete the first item (src[0]) from the DB
+    // Delete the first item (src[0]) from the Core (and consequently the DB)
     session_pro_backend_pro_revocation_item set_item = src_items[1];
-    set_result = session_database_connection_set_pro_revocations(&db, 2, &set_item, 1);
-    INFO("Set w/ 1 item failed: " << sqlite3_errstr(set_result.sql_return_code));
-    REQUIRE(set_result.db.success);
-    REQUIRE(set_result.sql_return_code == SQLITE_OK);
+    set_result = session_core_core_pro_update_revocations(&core, 2 /*ticket*/, &set_item, 1);
+    INFO("Set w/ 1 item failed: " << set_result.error);
+    REQUIRE(set_result.success);
 
     // Count the number of revocations in the DB (should be 1 as we've deleted one of them)
     get_result =
-            session_database_connection_get_pro_revocations_buffer(&db, nullptr, 0, 0, &ticket);
+            session_database_connection_get_pro_revocations_buffer(db, nullptr, 0, 0, &ticket);
     REQUIRE(get_result.db.success);
     REQUIRE(get_result.count == 1);
     REQUIRE(ticket == 2);
@@ -148,7 +119,7 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
 
     session_database_get_pro_revocation_result db_items_after_delete_result =
             session_database_connection_get_pro_revocations_buffer(
-                    &db,
+                    db,
                     db_items_after_delete,
                     sizeof(db_items_after_delete) / sizeof(db_items_after_delete[0]),
                     0,
@@ -161,6 +132,18 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
                    sizeof(db_items_after_delete[0].gen_index_hash.data)) == 0);
     REQUIRE(src_items[1].expiry_unix_ts_ms == db_items_after_delete[0].expiry_unix_ts_ms);
     REQUIRE(ticket == 2);
+
+    // Test a 2nd core, opening the DB that the 1st core created
+    session_core_core core_2nd = {};
+    session_core_core_init(&core_2nd);
+    auto on_exit_2nd = session::scope_exit([&]() { session_core_core_deinit(&core_2nd); });
+    session_c_result open_db_2nd = session_core_core_open_db(&core_2nd, db_path, raw_key_span);
+    REQUIRE(open_db_2nd.success);
+
+    // Verify that the 2nd core loaded into memory the same contents as the 1st core
+    auto *core_1st_cpp = reinterpret_cast<session::core::Core*>(core.opaque);
+    auto *core_2nd_cpp = reinterpret_cast<session::core::Core*>(core_2nd.opaque);
+    REQUIRE(core_1st_cpp->revocations_ticket_ == core_2nd_cpp->revocations_ticket_);
 }
 
 TEST_CASE("Core", "[core][database][pro][account]") {
@@ -174,12 +157,15 @@ TEST_CASE("Core", "[core][database][pro][account]") {
     span_u8 raw_key_span = {raw_key.data(), raw_key.size()};
 
     // Open the DB
-    session_database_connection db = session_core_core_db_conn(&core);
-    session_database_connection_open(&db, string8_literal(":memory:"), raw_key_span);
+    string8 db_path = string8_literal(":memory:");
+    session_c_result open_db_result = session_core_core_open_db(&core, db_path, raw_key_span);
+    REQUIRE(open_db_result.success);
+
+    session_database_connection *db = session_core_core_db_conn(&core);
 
     // Try get an account before we added one
     bytes64 zero_long_term_key = {};
-    session_database_get_account get = session_database_connection_get_account(&db);
+    session_database_get_account get = session_database_connection_get_account(db);
     REQUIRE_FALSE(get.found);
     REQUIRE(get.db_id == 0);
     REQUIRE(memcmp(get.long_term_privkey.data,
@@ -188,7 +174,7 @@ TEST_CASE("Core", "[core][database][pro][account]") {
 
     // Set a 1 byte zero key for the account and check that it does not accept it
     session_c_result c_result =
-            session_database_connection_set_account(&db, zero_long_term_key.data, 1);
+            session_database_connection_set_account(db, zero_long_term_key.data, 1);
     REQUIRE(!c_result.success);
     REQUIRE(c_result.error_count > 0);
 
@@ -196,13 +182,13 @@ TEST_CASE("Core", "[core][database][pro][account]") {
     bytes64 long_term_key = {};
     randombytes_buf(long_term_key.data, sizeof(long_term_key.data));
     c_result = session_database_connection_set_account(
-            &db, long_term_key.data, sizeof(long_term_key.data));
+            db, long_term_key.data, sizeof(long_term_key.data));
     INFO(c_result.error);
     REQUIRE(c_result.success);
     REQUIRE(c_result.error_count == 0);
 
     // Try retrieving the account again
-    session_database_get_account get_again = session_database_connection_get_account(&db);
+    session_database_get_account get_again = session_database_connection_get_account(db);
     REQUIRE(get_again.found);
     REQUIRE(get_again.db_id == 1);
     REQUIRE(memcmp(get_again.long_term_privkey.data,

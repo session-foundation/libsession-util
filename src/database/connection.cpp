@@ -360,7 +360,7 @@ session_database_connection_open(session_database_connection* conn, string8 path
             "the capacity must be large enough to hold the `Connection` instance");
 
     session_database_connection_close(conn);
-    Connection* conn_cpp = new (conn->opaque) Connection();
+    Connection* conn_cpp = new (&conn->opaque) Connection();
 
     session::cleared_array<48> raw_key_cpp;
     if (raw_key.size != raw_key_cpp.max_size()) {
@@ -388,10 +388,10 @@ session_database_connection_open(session_database_connection* conn, string8 path
 
 LIBSESSION_C_API void session_database_connection_close(session_database_connection* conn) {
     if (conn) {
-        auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+        auto* conn_cpp = reinterpret_cast<Connection*>(&conn->opaque);
         if (conn_cpp) {
             conn_cpp->close();
-            memset(conn->opaque, 0, sizeof(conn->opaque));
+            memset(&conn->opaque, 0, sizeof(conn->opaque));
         }
     }
 }
@@ -400,7 +400,7 @@ LIBSESSION_C_API session_database_get_account
 session_database_connection_get_account(session_database_connection* conn) {
     session_database_get_account result = {};
     if (conn) {
-        auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+        auto* conn_cpp = reinterpret_cast<Connection*>(&conn->opaque);
         GetAccount cpp = conn_cpp->get_account();
         result.db_id = cpp.db_id;
         result.found = cpp.found;
@@ -419,7 +419,7 @@ LIBSESSION_C_API session_c_result session_database_connection_set_account(
         size_t long_term_privkey_size) {
     session_c_result result = {};
     if (conn) {
-        auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+        auto* conn_cpp = reinterpret_cast<Connection*>(&conn->opaque);
         auto long_term_privkey_cpp = std::span{
                 reinterpret_cast<const uint8_t*>(long_term_privkey), long_term_privkey_size};
         try {
@@ -438,7 +438,7 @@ LIBSESSION_C_API session_database_set_result session_database_connection_set_pro
         session_pro_backend_pro_revocation_item* revocations,
         size_t revocations_len) {
     session_database_set_result result = {};
-    auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+    auto* conn_cpp = reinterpret_cast<Connection*>(&conn->opaque);
     try {
         // Convert revocations to CPP instance
         std::vector<session::pro_backend::ProRevocationItem> revocations_cpp;
@@ -468,7 +468,7 @@ session_database_connection_get_pro_revocations_buffer(
         size_t buf_count,
         size_t offset,
         OPTIONAL uint32_t* ticket) {
-    auto* conn_cpp = reinterpret_cast<Connection*>(conn->opaque);
+    auto* conn_cpp = reinterpret_cast<Connection*>(&conn->opaque);
     session_database_get_pro_revocation_result result = {};
     try {
         std::vector<session::pro_backend::ProRevocationItem> buf_cpp;
