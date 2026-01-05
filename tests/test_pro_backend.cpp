@@ -894,6 +894,10 @@ std::string curl_do_basic_blocking_post_request(
 }
 
 TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
+    if (g_test_pro_backend_dev_server_url.empty()) {
+        return;
+    }
+
     // Setup: Generate keys and payment token hash
     bytes32 master_pubkey = {};
     bytes64 master_privkey = {};
