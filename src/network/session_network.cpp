@@ -192,7 +192,17 @@ Network::Network(config::Config config) : config{config} {
 
 Network::~Network() {
     // Use 'call_get' to force this to be synchronous
-    _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
+    _loop->call_get([this] {
+        // Need to ensure the destruction of the router and transport objects don't trigger
+        // `_recalculate_status` since that accesses both values which could result in a crash due
+        // to accessing deallocated memory
+        if (_router)
+            _router->on_status_changed = nullptr;
+        if (_transport)
+            _transport->on_status_changed = nullptr;
+
+        _update_status(ConnectionStatus::disconnected);
+    });
     log::debug(cat, "[Network] Destroyed.");
 }
 
