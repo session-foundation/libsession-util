@@ -62,6 +62,8 @@
 
     // Interfacing code calls this API to check if the specific proof in question is revoked or not
     if (core.pro_proof_is_revoked(...)) { ... }
+
+    core.deinit();
   }
 ```
 */

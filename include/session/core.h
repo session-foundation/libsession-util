@@ -40,7 +40,7 @@ LIBSESSION_EXPORT void session_core_core_deinit(session_core_core* core);
 /// This pointer's lifetime is bound to the current instance of the DB associated with the Core. The
 /// caller must take care not to deinitialise the connection independently from the Core as
 /// ownership of the database is bound to `session_core_core_deinit`.
-LIBSESSION_EXPORT session_database_connection *session_core_core_db_conn(session_core_core* core)
+LIBSESSION_EXPORT session_database_connection* session_core_core_db_conn(session_core_core* core)
         NON_NULL_ARG(1);
 
 /// API: core/session_core_core_open_db

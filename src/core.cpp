@@ -52,7 +52,7 @@ void pro_update_revocations_internal(
     core_revocations.insert(revocations.begin(), revocations.end());
     core_revocations_ticket = revocations_ticket;
 }
-};
+};  // namespace
 
 namespace session::core {
 bool ProRevocationItemComparer::operator()(
@@ -137,8 +137,8 @@ LIBSESSION_C_API void session_core_core_deinit(session_core_core* core) {
     }
 }
 
-LIBSESSION_C_API session_database_connection *session_core_core_db_conn(session_core_core* core) {
-    session_database_connection *result = nullptr;
+LIBSESSION_C_API session_database_connection* session_core_core_db_conn(session_core_core* core) {
+    session_database_connection* result = nullptr;
     auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
 #if !defined(DISABLED_SQLCIPHER_DATABASE)
     if (core_cpp->db_conn_.db_.get())

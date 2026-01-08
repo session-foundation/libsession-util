@@ -1,14 +1,15 @@
 #include <session/core.h>
-#include <session/core.hpp>
 #include <session/database/connection.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <session/core.hpp>
 #include <session/sodium_array.hpp>
 #include <session/util.hpp>
 
 #if !defined(DISABLE_SQLCIPHER_DATABASE)
 #include <sodium.h>
 #include <sqlite3.h>
+
 #include <session/database/connection.hpp>
 #endif
 
@@ -28,7 +29,7 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     session_c_result open_db_result = session_core_core_open_db(&core, db_path, raw_key_span);
     REQUIRE(open_db_result.success);
 
-    session_database_connection *db = session_core_core_db_conn(&core);
+    session_database_connection* db = session_core_core_db_conn(&core);
     auto* db_cpp = reinterpret_cast<session::database::Connection*>(&db->opaque);
 
     // Check runtime was seeded to ticket 0
@@ -77,8 +78,7 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     REQUIRE(runtime.pro_revocations_ticket == 1);
 
     // Count the number of revocations in the DB (should be 2 as we've inserted them)
-    get_result =
-            session_database_connection_get_pro_revocations_buffer(db, nullptr, 0, 0, &ticket);
+    get_result = session_database_connection_get_pro_revocations_buffer(db, nullptr, 0, 0, &ticket);
     REQUIRE(ticket == runtime.pro_revocations_ticket);
     REQUIRE(get_result.db.success);
     REQUIRE(get_result.count == 2);
@@ -106,8 +106,7 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     REQUIRE(set_result.success);
 
     // Count the number of revocations in the DB (should be 1 as we've deleted one of them)
-    get_result =
-            session_database_connection_get_pro_revocations_buffer(db, nullptr, 0, 0, &ticket);
+    get_result = session_database_connection_get_pro_revocations_buffer(db, nullptr, 0, 0, &ticket);
     REQUIRE(get_result.db.success);
     REQUIRE(get_result.count == 1);
     REQUIRE(ticket == 2);
@@ -140,8 +139,8 @@ TEST_CASE("Core", "[core][database][pro][revocations]") {
     REQUIRE(open_db_2nd.success);
 
     // Verify that the 2nd core loaded into memory the same contents as the 1st core
-    auto *core_1st_cpp = reinterpret_cast<session::core::Core*>(core.opaque);
-    auto *core_2nd_cpp = reinterpret_cast<session::core::Core*>(core_2nd.opaque);
+    auto* core_1st_cpp = reinterpret_cast<session::core::Core*>(core.opaque);
+    auto* core_2nd_cpp = reinterpret_cast<session::core::Core*>(core_2nd.opaque);
     REQUIRE(core_1st_cpp->revocations_ticket_ == core_2nd_cpp->revocations_ticket_);
 }
 
@@ -160,7 +159,7 @@ TEST_CASE("Core", "[core][database][pro][account]") {
     session_c_result open_db_result = session_core_core_open_db(&core, db_path, raw_key_span);
     REQUIRE(open_db_result.success);
 
-    session_database_connection *db = session_core_core_db_conn(&core);
+    session_database_connection* db = session_core_core_db_conn(&core);
 
     // Try get an account before we added one
     bytes64 zero_long_term_key = {};
