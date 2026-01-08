@@ -66,20 +66,22 @@ void Core::open_db(
         [[maybe_unused]] const std::string& path,
         [[maybe_unused]] const cleared_array<48>& raw_key) {
 #if !defined(DISABLE_SQLCIPHER_DATABASE)
+    std::lock_guard<std::shared_mutex> lock{shared_mutex_};
     // NOTE: Zero initialise everything
-    *this = {};
+    revocations_.clear();
+    revocations_ticket_ = 0;
 
     // NOTE: Open the DB
-    db_conn.open(path, raw_key);
+    db_conn_.open(path, raw_key);
 
     // NOTE: Load in the pro-revocations from the DB
     uint32_t pro_revocations_ticket = 0;
     std::vector<pro_backend::ProRevocationItem> pro_revocations =
-            db_conn.get_pro_revocations(&pro_revocations_ticket);
+            db_conn_.get_pro_revocations(&pro_revocations_ticket);
     pro_update_revocations_internal(
             revocations_ticket_,
             revocations_,
-            db_conn,
+            db_conn_,
             pro_revocations_ticket,
             pro_revocations,
             SaveToDB::No);
@@ -92,6 +94,8 @@ bool Core::pro_proof_is_revoked(
     bool result = false;
     pro_backend::ProRevocationItem item = {};
     item.gen_index_hash = gen_index_hash;
+
+    std::shared_lock lock{shared_mutex_};
     auto it = revocations_.find(item);
     if (it != revocations_.end())
         result = unix_ts >= it->expiry_unix_ts;
@@ -101,11 +105,12 @@ bool Core::pro_proof_is_revoked(
 void Core::pro_update_revocations(
         uint32_t revocations_ticket,
         std::span<const session::pro_backend::ProRevocationItem> revocations) {
+    std::lock_guard lock{shared_mutex_};
     pro_update_revocations_internal(
             revocations_ticket_,
             revocations_,
 #if !defined(DISABLED_SQLCIPHER_DATABASE)
-            db_conn,
+            db_conn_,
 #endif
             revocations_ticket,
             revocations,
@@ -136,8 +141,8 @@ LIBSESSION_C_API session_database_connection *session_core_core_db_conn(session_
     session_database_connection *result = nullptr;
     auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
 #if !defined(DISABLED_SQLCIPHER_DATABASE)
-    if (core_cpp->db_conn.db_.get())
-        result = reinterpret_cast<session_database_connection*>(&core_cpp->db_conn);
+    if (core_cpp->db_conn_.db_.get())
+        result = reinterpret_cast<session_database_connection*>(&core_cpp->db_conn_);
 #endif
     return result;
 }

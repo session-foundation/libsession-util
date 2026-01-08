@@ -7,6 +7,7 @@
 #include <chrono>
 #include <session/types.hpp>
 #include <set>
+#include <shared_mutex>
 
 /// The fundamental library context that an application should instantiate at the start of their
 /// libsession integrated application. Its goal is to maintain libsession data structures for
@@ -33,27 +34,35 @@
   #include <sodium/randombytes.h>
   #include <session/core.hpp>
 
-  session::cleared_array<48> db_enc_key = {};
-  randombytes_buf(db_enc_key.data(), db_enc_key.size());
+  int main() {
+    session::core::Core core = {};
 
-  session::core::Core core = {};
+    // Optionally create/open the DB to persist state to. If this step is skipped the core will only
+    // maintain libsession state (like the user's long term seed or the pro revocation list) in
+    // runtime memory and will be lost on shutdown. Persisting user state is then left to the
+    // integrating application's discretion.
+    try {
+      // Generate the encryption key for the DB (if you had a pre-existing DB this is where you
+      // would load the key to pass in).
+      session::cleared_array<48> db_enc_key = {};
+      randombytes_buf(db_enc_key.data(), db_enc_key.size());
 
-  // Optionally create/open the DB to persist state to. If this step is skipped the core will only
-  // maintain libsession state (like the user's long term seed or the pro revocation list) in
-  // runtime memory and will be lost on shutdown. Persisting user state is then left to the
-  // integrating application's discretion.
-  try {
-    core.db_conn.open(":memory:", db_enc_key);
-  } catch (const std::exception& e) {
-    // ... error handling
+      core.open_db(":memory:", db_enc_key);
+    } catch (const std::exception& e) {
+      // ... error handling
+    }
+
+    // Update the revocation list stored in Core (if the DB was opened successfully, this will also
+    // persist the revocation list to the DB for example).
+    //
+    // In a production application you would sleep on an event loop responsible for dispatching and
+    // receiving the revocation list queries and call this function to update the revocation list
+    // that is cached and the DB
+    if (core.pro_update_revocations(...)) { ... }
+
+    // Interfacing code calls this API to check if the specific proof in question is revoked or not
+    if (core.pro_proof_is_revoked(...)) { ... }
   }
-
-  // Then use the Core API ...
-  if (core.pro_proof_is_revoked(...)) { ... }
-
-  // Update the revocation list stored in Core (if the DB was opened successfully, this will also
-  // persist the revocation list to the DB for example).
-  if (core.pro_update_revocations(...)) { ... }
 ```
 */
 
@@ -76,8 +85,14 @@ struct Core {
     /// from the Session Pro Backend when the revocation list is queried.
     uint32_t revocations_ticket_;
 
+    /// This class is intended to be use on an network event loop alongside the application which
+    /// calls into functions that lookup the cache. When the event loop updates the data stored in
+    /// the in-memory cache and database it requires an exclusive lock. When the application queries
+    /// the in-memory caches and database, concurrent reads are accepted if there are ongoing writes
+    mutable std::shared_mutex shared_mutex_;
+
 #if !defined(DISABLE_SQLCIPHER_DATABASE)
-    session::database::Connection db_conn;
+    session::database::Connection db_conn_;
 #endif
 
     /// API: core/Core::open_db
