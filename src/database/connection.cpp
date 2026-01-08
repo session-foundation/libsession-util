@@ -2,7 +2,7 @@
 
 #include <oxenc/hex.h>
 #include <sodium/crypto_sign_ed25519.h>
-#include <sqlcipher/sqlite3.h>
+#include <sqlite3.h>
 
 #include <chrono>
 #include <oxen/log.hpp>

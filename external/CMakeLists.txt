@@ -205,3 +205,7 @@ function(simdutf_subdir)
 endfunction()
 simdutf_subdir()
 libsession_static_bundle(simdutf)
+
+if(ENABLE_DATABASE)
+    libsession_system_or_submodule(SQLCIPHER sqlcipher sqlcipher>=4.12.0 sqlcipher-cmake)
+endif()

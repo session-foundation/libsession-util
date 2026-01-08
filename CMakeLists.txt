@@ -139,10 +139,6 @@ endif()
 add_subdirectory(src)
 add_subdirectory(proto)
 
-if (BUILD_STATIC_DEPS)
-    include(StaticBuild)
-endif()
-
 if(STATIC_BUNDLE)
 
     include(combine_archives)

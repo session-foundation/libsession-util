@@ -133,10 +133,7 @@ if(ENABLE_ONIONREQ)
 endif()
 
 if(ENABLE_DATABASE)
-    add_libsession_util_library(database
-        database/connection.cpp
-    )
-
+    add_libsession_util_library(database database/connection.cpp)
     target_link_libraries(database PUBLIC util PRIVATE sqlcipher::sqlcipher)
 else()
     target_compile_definitions(database INTERFACE DISABLE_SQLCIPHER_DATABASE)

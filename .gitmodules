@@ -25,3 +25,6 @@
 [submodule "external/simdutf"]
 	path = external/simdutf
 	url = https://github.com/simdutf/simdutf.git
+[submodule "external/sqlcipher"]
+	path = external/sqlcipher
+	url = https://github.com/sqlcipher/sqlcipher

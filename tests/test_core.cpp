@@ -8,8 +8,7 @@
 
 #if !defined(DISABLE_SQLCIPHER_DATABASE)
 #include <sodium.h>
-#include <sqlcipher/sqlite3.h>
-
+#include <sqlite3.h>
 #include <session/database/connection.hpp>
 #endif
 
