@@ -23,7 +23,7 @@ set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT
 set(sqlcipher_link_libs "")
 
 if(APPLE)
-    set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_COMMONCRYPTO")
+    set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
     list(APPEND sqlcipher_link_libs             -framework Security -framework Foundation -framework CoreFoundation)
     set(sqlcipher_ldflags "${sqlcipher_ldflags} -framework Security -framework Foundation -framework CoreFoundation")
 else()
