@@ -1,9 +1,9 @@
 #include <session/core.h>
 #include <session/database/connection.h>
-#include <session/pro_backend.h>
 
 #include <oxen/log.hpp>
 #include <session/core.hpp>
+#include <session/pro_backend.hpp>
 
 static auto logcat = oxen::log::Cat("core");
 

@@ -5,6 +5,7 @@
 #include <session/database/connection.hpp>
 #endif
 #include <chrono>
+#include <session/sodium_array.hpp>
 #include <session/types.hpp>
 #include <set>
 #include <shared_mutex>
