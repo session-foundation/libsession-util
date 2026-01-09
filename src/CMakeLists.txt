@@ -34,8 +34,6 @@ macro(add_libsession_util_library name)
     list(APPEND export_targets ${name})
 endmacro()
 
-
-
 add_libsession_util_library(util
     file.cpp
     logging.cpp
@@ -47,7 +45,6 @@ add_libsession_util_library(crypto
     attachments.cpp
     blinding.cpp
     curve25519.cpp
-    core.cpp
     ed25519.cpp
     hash.cpp
     multi_encrypt.cpp
@@ -80,8 +77,6 @@ add_libsession_util_library(config
     fields.cpp
 )
 
-
-
 target_link_libraries(util
     PUBLIC
     common
@@ -98,6 +93,24 @@ target_link_libraries(crypto
     nlohmann_json::nlohmann_json
     libsession::protos
 )
+
+# NOTE: High level services/layers that use the primitives (cryptography, utils...) provided
+# by libsession
+add_libsession_util_library(services core.cpp)
+target_link_libraries(
+    services
+    PUBLIC
+    crypto
+    PRIVATE
+    libsodium::sodium-internal
+)
+
+if(ENABLE_DATABASE)
+    target_sources(services PUBLIC database/connection.cpp)
+    target_link_libraries(services PUBLIC sqlcipher::sqlcipher)
+else()
+    target_compile_definitions(services PUBLIC DISABLE_SQLCIPHER)
+endif()
 
 target_link_libraries(config
     PUBLIC
@@ -130,13 +143,6 @@ if(ENABLE_ONIONREQ)
     if (BUILD_STATIC_DEPS)
         target_include_directories(onionreq PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
     endif()
-endif()
-
-if(ENABLE_DATABASE)
-    add_libsession_util_library(database database/connection.cpp)
-    target_link_libraries(database PUBLIC util PRIVATE sqlcipher::sqlcipher)
-else()
-    target_compile_definitions(database INTERFACE DISABLE_SQLCIPHER_DATABASE)
 endif()
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")

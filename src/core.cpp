@@ -13,7 +13,7 @@ void pro_update_revocations_internal(
         uint32_t& core_revocations_ticket,
         std::set<session::pro_backend::ProRevocationItem, session::core::ProRevocationItemComparer>&
                 core_revocations,
-#if !defined(DISABLED_SQLCIPHER_DATABASE)
+#if !defined(DISABLE_SQLCIPHER)
         session::database::Connection& core_db_conn,
 #endif
         uint32_t revocations_ticket,
@@ -22,7 +22,7 @@ void pro_update_revocations_internal(
     if (core_revocations_ticket == revocations_ticket)
         return;
 
-#if !defined(DISABLED_SQLCIPHER_DATABASE)
+#if !defined(DISABLE_SQLCIPHER)
     if (core_db_conn.db_ && save_to_db == SaveToDB::Yes) {
         session::database::SetResult set_result =
                 core_db_conn.set_pro_revocations(revocations_ticket, revocations);
@@ -65,7 +65,7 @@ bool ProRevocationItemComparer::operator()(
 void Core::open_db(
         [[maybe_unused]] const std::string& path,
         [[maybe_unused]] const cleared_array<48>& raw_key) {
-#if !defined(DISABLE_SQLCIPHER_DATABASE)
+#if !defined(DISABLE_SQLCIPHER)
     std::lock_guard<std::shared_mutex> lock{shared_mutex_};
     // NOTE: Zero initialise everything
     revocations_.clear();
@@ -109,7 +109,7 @@ void Core::pro_update_revocations(
     pro_update_revocations_internal(
             revocations_ticket_,
             revocations_,
-#if !defined(DISABLED_SQLCIPHER_DATABASE)
+#if !defined(DISABLE_SQLCIPHER)
             db_conn_,
 #endif
             revocations_ticket,
@@ -140,7 +140,7 @@ LIBSESSION_C_API void session_core_core_deinit(session_core_core* core) {
 LIBSESSION_C_API session_database_connection* session_core_core_db_conn(session_core_core* core) {
     session_database_connection* result = nullptr;
     auto* core_cpp = reinterpret_cast<Core*>(core->opaque);
-#if !defined(DISABLED_SQLCIPHER_DATABASE)
+#if !defined(DISABLE_SQLCIPHER)
     if (core_cpp->db_conn_.db_.get())
         result = reinterpret_cast<session_database_connection*>(&core_cpp->db_conn_);
 #endif

@@ -46,6 +46,7 @@ endif()
 add_library(test_libs INTERFACE)
 
 target_link_libraries(test_libs INTERFACE
+    libsession::services
     libsession::config
     libsodium::sodium-internal
     nlohmann_json::nlohmann_json
@@ -55,10 +56,6 @@ if (ENABLE_ONIONREQ)
     target_link_libraries(test_libs INTERFACE libsession::onionreq)
 else()
     target_compile_definitions(test_libs INTERFACE DISABLE_ONIONREQ)
-endif()
-
-if (ENABLE_DATABASE)
-    target_link_libraries(test_libs INTERFACE libsession::database)
 endif()
 
 add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})

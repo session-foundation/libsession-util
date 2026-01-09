@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#if !defined(DISABLE_SQLCIPHER_DATABASE)
+#if !defined(DISABLE_SQLCIPHER)
 #include <session/database/connection.hpp>
 #endif
 #include <chrono>
@@ -91,7 +91,7 @@ struct Core {
     /// the in-memory caches and database, concurrent reads are accepted if there are ongoing writes
     mutable std::shared_mutex shared_mutex_;
 
-#if !defined(DISABLE_SQLCIPHER_DATABASE)
+#if !defined(DISABLE_SQLCIPHER)
     session::database::Connection db_conn_;
 #endif
 

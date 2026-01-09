@@ -1,19 +1,13 @@
+#if !defined(DISABLE_SQLCIPHER)
 #include <session/core.h>
-#include <session/database/connection.h>
+#include <sodium.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <session/core.hpp>
+#include <session/database/connection.hpp>
 #include <session/sodium_array.hpp>
 #include <session/util.hpp>
 
-#if !defined(DISABLE_SQLCIPHER_DATABASE)
-#include <sodium.h>
-#include <sqlite3.h>
-
-#include <session/database/connection.hpp>
-#endif
-
-#if !defined(DISABLE_SQLCIPHER_DATABASE)
 TEST_CASE("Core", "[core][database][pro][revocations]") {
     session_core_core core = {};
     session_core_core_init(&core);
@@ -193,4 +187,4 @@ TEST_CASE("Core", "[core][database][pro][account]") {
                    long_term_key.data,
                    sizeof(long_term_key.data)) == 0);
 }
-#endif  // !defined(DISABLE_SQLCIPHER_DATABASE)
+#endif  // !defined(DISABLE_SQLCIPHER)
