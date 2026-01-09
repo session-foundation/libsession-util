@@ -40,6 +40,7 @@ add_libsession_util_library(util
     file.cpp
     logging.cpp
     util.cpp
+    types.cpp
 )
 
 add_libsession_util_library(crypto
@@ -56,7 +57,6 @@ add_libsession_util_library(crypto
     sodium_array.cpp
     xed25519.cpp
     pro_backend.cpp
-    types.cpp
 )
 
 add_libsession_util_library(config
