@@ -13,7 +13,8 @@ extern "C" {
 
 typedef struct session_core_core session_core_core;
 struct session_core_core {
-    uint64_t opaque[16];
+    /// ~184 bytes on debian sid libstdc++ 3.4.33
+    uint64_t opaque[24];
 };
 
 /// API: core/session_core_core_init
