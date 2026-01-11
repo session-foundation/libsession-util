@@ -62,44 +62,6 @@ macro(libsession_system_or_submodule BIGNAME smallname pkgconf subdir)
   endif()
 endmacro()
 
-
-set(deps_cc "${CMAKE_C_COMPILER}")
-set(cross_host "")
-set(cross_rc "")
-if(CMAKE_CROSSCOMPILING)
-    if(APPLE_TARGET_TRIPLE)
-        set(cross_host "--host=${APPLE_TARGET_TRIPLE}")
-    elseif(ANDROID)
-        if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64)
-            set(cross_host "--host=x86_64-linux-android")
-            set(android_compiler_prefix x86_64)
-            set(android_compiler_suffix linux-android)
-        elseif(CMAKE_ANDROID_ARCH_ABI MATCHES x86)
-            set(cross_host "--host=i686-linux-android")
-            set(android_compiler_prefix i686)
-            set(android_compiler_suffix linux-android)
-        elseif(CMAKE_ANDROID_ARCH_ABI MATCHES armeabi-v7a)
-            set(cross_host "--host=armv7a-linux-androideabi")
-            set(android_compiler_prefix armv7a)
-            set(android_compiler_suffix linux-androideabi)
-        elseif(CMAKE_ANDROID_ARCH_ABI MATCHES arm64-v8a)
-            set(cross_host "--host=aarch64-linux-android")
-            set(android_compiler_prefix aarch64)
-            set(android_compiler_suffix linux-android)
-        else()
-            message(FATAL_ERROR "unknown android arch: ${CMAKE_ANDROID_ARCH_ABI}")
-        endif()
-
-        string(REPLACE "android-" "" android_platform_num "${ANDROID_PLATFORM}")
-        set(deps_cc "${ANDROID_TOOLCHAIN_ROOT}/bin/${android_compiler_prefix}-${android_compiler_suffix}${android_platform_num}-clang")
-    else()
-        set(cross_host "--host=${ARCH_TRIPLET}")
-        if (ARCH_TRIPLET MATCHES mingw AND CMAKE_RC_COMPILER)
-            set(cross_rc "WINDRES=${CMAKE_RC_COMPILER}")
-        endif()
-    endif()
-endif()
-
 set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
 if(ENABLE_ONIONREQ)
   libsession_system_or_submodule(OXENQUIC quic liboxenquic>=1.3.0 oxen-libquic)
@@ -126,32 +88,12 @@ if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL AppleClang AND NOT CMAKE_CXX_COMPILE
     oxen_logging_add_source_dir("${CMAKE_CURRENT_SOURCE_DIR}/oxen-libquic/external/oxen-logging/include/oxen")
 endif()
 
-if(CMAKE_C_COMPILER_LAUNCHER)
-  set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")
-endif()
-set(deps_CFLAGS "-O2")
-
-if(IPO_ENABLED)
-  set(deps_CFLAGS "${deps_CFLAGS} -flto")
-endif()
-
-if(APPLE)
-    foreach(lang C CXX)
-        string(APPEND deps_${lang}FLAGS " ${CMAKE_${lang}_SYSROOT_FLAG} ${CMAKE_OSX_SYSROOT} ${CMAKE_${lang}_OSX_DEPLOYMENT_TARGET_FLAG}${CMAKE_OSX_DEPLOYMENT_TARGET}")
-        foreach(arch ${CMAKE_OSX_ARCHITECTURES})
-            string(APPEND deps_${lang}FLAGS " -arch ${arch}")
-        endforeach()
-    endforeach()
-endif()
-
-
 function(libsodium_internal_subdir)
     set(BUILD_SHARED_LIBS OFF)
     add_subdirectory(libsodium-internal)
 endfunction()
 libsodium_internal_subdir()
 libsession_static_bundle(libsodium::sodium-internal)
-
 
 set(protobuf_VERBOSE ON CACHE BOOL "" FORCE)
 set(protobuf_INSTALL ON CACHE BOOL "" FORCE)
@@ -167,7 +109,6 @@ libsession_system_or_submodule(PROTOBUF_LITE protobuf_lite protobuf-lite>=3.21 p
 if(TARGET PkgConfig::PROTOBUF_LITE AND NOT TARGET protobuf::libprotobuf-lite)
     add_library(protobuf::libprotobuf-lite ALIAS PkgConfig::PROTOBUF_LITE)
 endif()
-
 
 set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "")
 set(ZSTD_BUILD_TESTS OFF CACHE BOOL "")
@@ -188,7 +129,6 @@ export(
     FILE libsessionZstd.cmake
 )
 libsession_static_bundle(libzstd_static)
-
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
