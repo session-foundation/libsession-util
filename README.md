@@ -9,6 +9,13 @@ apt install cmake build-essential git libssl-dev m4 pkg-config ninja-build
 # Configure the build
 #
 # Options
+#   - Build libsession with its dependencies statically linked into the library (default: ON)
+#
+#     -D BUILD_STATIC_DEPS=ON
+#
+#     This currently influences top-level dependencies and forces OpenSSL on Linux/Windows to be
+#     statically linked into SQLCipher for database support.
+#
 #   - Enable APIs for creating onion-requests with (default: ON)
 #
 #     -D ENABLE_ONIONREQ=ON

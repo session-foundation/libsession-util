@@ -1,3 +1,5 @@
+option(BUILD_STATIC_DEPS "Link top-level libsession dependencies statically into the generated library" ON)
+
 option(SUBMODULE_CHECK "Enables checking that vendored library submodules are up to date" ON)
 if(SUBMODULE_CHECK)
   find_package(Git)
@@ -147,5 +149,6 @@ simdutf_subdir()
 libsession_static_bundle(simdutf)
 
 if(ENABLE_DATABASE)
+    libsession_system_or_submodule(OPENSSL openssl openssl>=3.5.4 openssl-cmake)
     libsession_system_or_submodule(SQLCIPHER sqlcipher sqlcipher>=4.12.0 sqlcipher-cmake)
 endif()
