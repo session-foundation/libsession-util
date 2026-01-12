@@ -44,9 +44,10 @@ if(APPLE)
 else()
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL")
     # NOTE: For example libraries are "/<blah>/lssl.so;/<blah>/lcrypto.so" the semicolon confuses
-    # the linker so we remove the delimiter to make it compliant.
+    # the linker so we remove the delimiter to make it compliant. Also note that -lm (math) is
+    # needed if we choose OpenSSL as our encryption library for SQLCipher.
     string(REPLACE ";" " " OPENSSL_LIBRARIES_STR "${OPENSSL_LIBRARIES}")
-    set(sqlcipher_ldflags "${sqlcipher_ldflags} ${OPENSSL_LIBRARIES_STR}")
+    set(sqlcipher_ldflags "${sqlcipher_ldflags} ${OPENSSL_LIBRARIES_STR} -lm")
 endif()
 
 ExternalProject_Add(sqlcipher_external
