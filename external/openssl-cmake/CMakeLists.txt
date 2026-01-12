@@ -215,6 +215,7 @@ if(NOT APPLE AND NOT WIN32)
     target_link_libraries(OpenSSL::SSL INTERFACE OpenSSL::Crypto)
     set(OPENSSL_INCLUDE_DIR ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
     set(OPENSSL_ROOT_DIR ${DEPS_DESTDIR} CACHE PATH "" FORCE)
+    set(OPENSSL_LIBRARIES "${DEPS_DESTDIR}/lib/libssl.a;${DEPS_DESTDIR}/lib/libcrypto.a" CACHE PATH "" FORCE)
 
     # NOTE: Create <smallname> target so then libsession_system_or_submodule exports the
     # <smallname>::<smallname> target so that we can universally use that target for both PkgConfig

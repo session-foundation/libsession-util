@@ -39,25 +39,28 @@ set(sqlcipher_ldflags "")
 set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT=sqlcipher_extra_init -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown")
 
 if(APPLE)
-    set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
-    set(sqlcipher_ldflags "${sqlcipher_ldflags}  -framework Security   -framework Foundation   -framework CoreFoundation")
+    set(sqlcipher_cflags  "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
+    set(sqlcipher_libs    "${sqlcipher_libs}   -framework Security -framework Foundation -framework CoreFoundation")
 else()
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL")
     # NOTE: For example libraries are "/<blah>/lssl.so;/<blah>/lcrypto.so" the semicolon confuses
     # the linker so we remove the delimiter to make it compliant. Also note that -lm (math) is
     # needed if we choose OpenSSL as our encryption library for SQLCipher.
-    string(REPLACE ";" " " OPENSSL_LIBRARIES_STR "${OPENSSL_LIBRARIES}")
-    set(sqlcipher_ldflags "${sqlcipher_ldflags} ${OPENSSL_LIBRARIES_STR} -lm")
+    string(REPLACE ";" " -l" OPENSSL_LIBRARIES_STR "-l${OPENSSL_LIBRARIES}")
+    set(sqlcipher_libs    "${sqlcipher_libs} -lm ${OPENSSL_LIBRARIES_STR}")
 endif()
 
 ExternalProject_Add(sqlcipher_external
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../sqlcipher
     DEPENDS ${sqlcipher_depends}
+    LOG_CONFIGURE ON
+    LOG_BUILD ON
+    LOG_OUTPUT_ON_FAILURE ON
     CONFIGURE_COMMAND
             ${CMAKE_CURRENT_LIST_DIR}/../sqlcipher/configure ${cross_host} --disable-shared
             --enable-static --disable-tcl --disable-readline --fts5 --with-tempstore=always
             --prefix=${SQLCIPHER_PREFIX} CC=${CMAKE_C_COMPILER} CFLAGS=${sqlcipher_cflags}
-            LDFLAGS=${sqlcipher_ldflags}
+            LDFLAGS=${sqlcipher_libs}
     BUILD_COMMAND make lib
     BUILD_BYPRODUCTS
         ${SQLCIPHER_LIBDIR}/libsqlite3.a
@@ -71,7 +74,7 @@ set_target_properties(sqlcipher::sqlcipher PROPERTIES
 )
 target_compile_definitions(sqlcipher::sqlcipher INTERFACE SQLITE_HAS_CODEC)
 if(APPLE)
-    target_link_libraries(sqlcipher::sqlcipher "-framework Security" "-framework Foundation" "-framework CoreFoundation")
+    target_link_libraries(sqlcipher::sqlcipher INTERFACE "-framework Security" "-framework Foundation" "-framework CoreFoundation")
 else()
     target_link_libraries(sqlcipher::sqlcipher INTERFACE openssl::openssl)
 endif()
