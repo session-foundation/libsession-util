@@ -37,7 +37,7 @@ if(APPLE)
     list(APPEND sqlcipher_link_libs             "-framework Security" "-framework Foundation" "-framework CoreFoundation")
     set(sqlcipher_ldflags "${sqlcipher_ldflags}  -framework Security   -framework Foundation   -framework CoreFoundation")
 else()
-    find_package(OpenSSL REQUIRED)
+    find_package(OpenSSL 3.5.4 REQUIRED)
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL")
     list(APPEND sqlcipher_link_libs OpenSSL::SSL OpenSSL::Crypto)
 

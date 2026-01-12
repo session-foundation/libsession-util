@@ -1,3 +1,5 @@
+set(LOCAL_MIRROR "" CACHE STRING "local mirror path/URL for lib downloads")
+
 set(OPENSSL_VERSION 3.5.4 CACHE STRING "openssl version")
 set(OPENSSL_MIRROR ${LOCAL_MIRROR} https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION} CACHE STRING "openssl download mirror(s)")
 set(OPENSSL_SOURCE openssl-${OPENSSL_VERSION}.tar.gz)
