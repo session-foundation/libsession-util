@@ -69,10 +69,8 @@ set_target_properties(sqlcipher::sqlcipher PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES ${SQLCIPHER_INCLUDEDIR}
 )
 target_compile_definitions(sqlcipher::sqlcipher INTERFACE SQLITE_HAS_CODEC)
-target_link_libraries(sqlcipher::sqlcipher      INTERFACE ${sqlcipher_link_libs})
-
 if(APPLE)
     target_link_libraries(sqlcipher::sqlcipher "-framework Security" "-framework Foundation" "-framework CoreFoundation")
 else()
-    target_link_libraries(sqlcipher::sqlcipher INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+    target_link_libraries(sqlcipher::sqlcipher INTERFACE openssl::openssl)
 endif()
