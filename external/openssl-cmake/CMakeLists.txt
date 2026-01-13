@@ -196,7 +196,7 @@ function(build_external target)
   )
 endfunction()
 
-if(NOT APPLE AND NOT WIN32)
+if(NOT APPLE)
     set(openssl_system_env "")
     set(openssl_cc "${deps_cc}")
     if(CMAKE_CROSSCOMPILING)
