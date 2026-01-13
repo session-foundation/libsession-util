@@ -92,6 +92,11 @@ else()
     endif()
 endif()
 
+if (ANDROID)
+    # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
+    set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
+endif()
+
 ExternalProject_Add(sqlcipher_external
     SOURCE_DIR ${CMAKE_CURRENT_LIST_DIR}/../sqlcipher
     DEPENDS ${sqlcipher_depends}
