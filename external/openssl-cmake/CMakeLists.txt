@@ -1,6 +1,16 @@
 set(LOCAL_MIRROR "" CACHE STRING "local mirror path/URL for lib downloads")
 
-set(OPENSSL_VERSION 3.5.4 CACHE STRING "openssl version")
+set(desired_version 3.5.4)
+set(OPENSSL_VERSION ${desired_version} CACHE STRING "openssl version")
+
+# NOTE: Workaround issue on CI where OpenSSL version seems to get blanked out on
+# Debian 12 for some reason. Those machines have 3.0.18 found via pkgconfig
+# which is insufficient and I suspect something there is blanking out the
+# version causing this to fail that I can't figure out how to fix.
+if(NOT OPENSSL_VERSION OR OPENSSL_VERSION STREQUAL "")
+    set(OPENSSL_VERSION "${desired_version}" CACHE STRING "openssl version" FORCE)
+endif()
+
 set(OPENSSL_MIRROR ${LOCAL_MIRROR} https://github.com/openssl/openssl/releases/download/openssl-${OPENSSL_VERSION} CACHE STRING "openssl download mirror(s)")
 set(OPENSSL_SOURCE openssl-${OPENSSL_VERSION}.tar.gz)
 set(OPENSSL_HASH SHA256=967311f84955316969bdb1d8d4b983718ef42338639c621ec4c34fddef355e99
