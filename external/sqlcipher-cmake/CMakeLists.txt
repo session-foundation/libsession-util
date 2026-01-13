@@ -108,7 +108,7 @@ ExternalProject_Add(sqlcipher_external
         --enable-static --disable-tcl --disable-readline --fts5 --with-tempstore=always
         --prefix=${SQLCIPHER_PREFIX} CC=${deps_cc} CFLAGS=${sqlcipher_cflags}
         LDFLAGS=${sqlcipher_ldflags} ${cross_rc}
-    BUILD_COMMAND make lib
+    BUILD_COMMAND make libsqlite3.a
     BUILD_BYPRODUCTS
         ${SQLCIPHER_LIBDIR}/libsqlite3.a
 )
