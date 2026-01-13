@@ -28,12 +28,16 @@ if (ANDROID)
     message(FATAL_ERROR "ANDROID_TOOLCHAIN_NAME not set; did you run with the proper android toolchain options?")
   endif()
   if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64)
+    set(openssl_android_arch android-x86_64)
     set(android_clang x86_64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
   elseif(CMAKE_ANDROID_ARCH_ABI MATCHES x86)
+    set(openssl_android_arch android-x86)
     set(android_clang i686-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
   elseif(CMAKE_ANDROID_ARCH_ABI MATCHES armeabi-v7a)
+    set(openssl_android_arch android-armeabi)
     set(android_clang armv7a-linux-androideabi${ANDROID_PLATFORM_LEVEL}-clang)
   elseif(CMAKE_ANDROID_ARCH_ABI MATCHES arm64-v8a)
+    set(openssl_android_arch android-arm64)
     set(android_clang aarch64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
   else()
     message(FATAL_ERROR "Don't know how to build for android arch abi ${CMAKE_ANDROID_ARCH_ABI}")
@@ -197,20 +201,21 @@ function(build_external target)
 endfunction()
 
 if(NOT APPLE)
-    set(openssl_cc "${deps_cc}")
     if(CMAKE_CROSSCOMPILING)
       if(ARCH_TRIPLET STREQUAL x86_64-w64-mingw32)
         set(openssl_extra_opts mingw64 --cross-compile-prefix=x86_64-w64-mingw32-)
       elseif(ARCH_TRIPLET STREQUAL i686-w64-mingw32)
         set(openssl_extra_opts mingw --cross-compile-prefix=i686-w64-mingw32-)
       elseif(ANDROID)
-        set(openssl_extra_opts ${CMAKE_ANDROID_ARCH_ABI} no-asm)
+        set(openssl_extra_opts ${openssl_android_arch} no-asm)
+        set(openssl_extra_env ANDROID_NDK_ROOT=${CMAKE_ANDROID_NDK} PATH="${ANDROID_TOOLCHAIN_ROOT}/bin:$ENV{PATH}")
       endif()
     endif()
     build_external(openssl
-      CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env 
-        CC=${openssl_cc}
+      CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
+        CC=${deps_cc}
         CFLAGS=${deps_CFLAGS}
+        ${openssl_extra_env}
         ./Configure --prefix=${DEPS_DESTDIR} --libdir=lib ${openssl_extra_opts}
           no-shared no-capieng no-dso no-dtls1 no-ec_nistp_64_gcc_128 no-gost
           no-heartbeats no-md2 no-rc5 no-rdrand no-rfc3779 no-sctp no-ssl-trace no-ssl2 no-ssl3
