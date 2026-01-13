@@ -21,19 +21,57 @@ if(USE_LTO)
 endif()
 
 set(cross_host "")
+set(cross_rc "")
 if(CMAKE_CROSSCOMPILING)
-    if (APPLE)
-        if(sane_cross_host MATCHES "^(.*-)ios([0-9.]+)(-.*)?$")
-            set(cross_host "--host=${CMAKE_MATCH_1}darwin${CMAKE_MATCH_2}${CMAKE_MATCH_3}")
-        endif()
-        if(sane_cross_host MATCHES "^(.*)-simulator$")
-            set(cross_host "--host=${CMAKE_MATCH_1}")
-        endif()
-    endif()
-    if(CMAKE_SYSTEM_PROCESSOR)
-        set(cross_host "--host=${CMAKE_SYSTEM_PROCESSOR}")
-    endif()
+  if(APPLE AND NOT ARCH_TRIPLET AND APPLE_TARGET_TRIPLE)
+    set(ARCH_TRIPLET "${APPLE_TARGET_TRIPLE}")
+  endif()
+  set(cross_host "--host=${ARCH_TRIPLET}")
+  if (ARCH_TRIPLET MATCHES mingw AND CMAKE_RC_COMPILER)
+    set(cross_rc "WINDRES=${CMAKE_RC_COMPILER}")
+  endif()
 endif()
+
+set(deps_cc ${CMAKE_C_COMPILER})
+if(CMAKE_C_COMPILER_LAUNCHER)
+  set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")
+endif()
+if(ANDROID)
+  set(android_toolchain_suffix linux-android)
+  set(android_compiler_suffix linux-android${ANDROID_PLATFORM_LEVEL})
+  if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64)
+    set(cross_host "--host=x86_64-linux-android")
+    set(android_compiler_prefix x86_64)
+    set(android_compiler_suffix linux-android${ANDROID_PLATFORM_LEVEL})
+    set(android_toolchain_prefix x86_64)
+    set(android_toolchain_suffix linux-android)
+  elseif(CMAKE_ANDROID_ARCH_ABI MATCHES x86)
+    set(cross_host "--host=i686-linux-android")
+    set(android_compiler_prefix i686)
+    set(android_compiler_suffix linux-android${ANDROID_PLATFORM_LEVEL})
+    set(android_toolchain_prefix i686)
+    set(android_toolchain_suffix linux-android)
+  elseif(CMAKE_ANDROID_ARCH_ABI MATCHES armeabi-v7a)
+    set(cross_host "--host=armv7a-linux-androideabi")
+    set(android_compiler_prefix armv7a)
+    set(android_compiler_suffix linux-androideabi${ANDROID_PLATFORM_LEVEL})
+    set(android_toolchain_prefix arm)
+    set(android_toolchain_suffix linux-androideabi)
+  elseif(CMAKE_ANDROID_ARCH_ABI MATCHES arm64-v8a)
+    set(cross_host "--host=aarch64-linux-android")
+    set(android_compiler_prefix aarch64)
+    set(android_compiler_suffix linux-android${ANDROID_PLATFORM_LEVEL})
+    set(android_toolchain_prefix aarch64)
+    set(android_toolchain_suffix linux-android)
+  else()
+    message(FATAL_ERROR "unknown android arch: ${CMAKE_ANDROID_ARCH_ABI}")
+  endif()
+  set(deps_cc "${ANDROID_TOOLCHAIN_ROOT}/bin/${android_compiler_prefix}-${android_compiler_suffix}-clang")
+endif()
+
+set(deps_CFLAGS "-O2")
+set(deps_CXXFLAGS "-O2")
+
 
 set(sqlcipher_ldflags "")
 set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT=sqlcipher_extra_init -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown")
@@ -63,8 +101,8 @@ ExternalProject_Add(sqlcipher_external
     CONFIGURE_COMMAND
         ${CMAKE_CURRENT_LIST_DIR}/../sqlcipher/configure ${cross_host} --disable-shared
         --enable-static --disable-tcl --disable-readline --fts5 --with-tempstore=always
-        --prefix=${SQLCIPHER_PREFIX} CC=${CMAKE_C_COMPILER} CFLAGS=${sqlcipher_cflags}
-        LDFLAGS=${sqlcipher_ldflags}
+        --prefix=${SQLCIPHER_PREFIX} CC=${deps_cc} CFLAGS=${sqlcipher_cflags}
+        LDFLAGS=${sqlcipher_ldflags} ${cross_rc}
     BUILD_COMMAND make lib
     BUILD_BYPRODUCTS
         ${SQLCIPHER_LIBDIR}/libsqlite3.a
