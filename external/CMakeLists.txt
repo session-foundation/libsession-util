@@ -27,9 +27,9 @@ if(SUBMODULE_CHECK)
     message(STATUS "Checking submodules")
     check_submodule(ios-cmake)
     check_submodule(libsodium-internal)
-    check_submodule(lokinet)
     check_submodule(zstd)
     check_submodule(protobuf)
+    check_submodule(session-router)
   endif()
 endif()
 
@@ -104,16 +104,16 @@ endif()
 
 if(ENABLE_NETWORKING)
   set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
-  libsession_system_or_submodule(OXENQUIC quic oxen::quic liboxenquic>=1.6 lokinet/external/oxen-libquic)
+  libsession_system_or_submodule(OXENQUIC quic oxen::quic liboxenquic>=1.6 session-router/external/oxen-libquic)
 endif()
 
-libsession_system_or_submodule(OXENC oxenc oxenc::oxenc liboxenc>=1.5.0 lokinet/external/oxen-libquic/external/oxen-encoding)
+libsession_system_or_submodule(OXENC oxenc oxenc::oxenc liboxenc>=1.5.0 session-router/external/oxen-libquic/external/oxen-encoding)
 
-libsession_system_or_submodule(OXENLOGGING oxenlogging oxen::logging liboxen-logging>=1.2.0 lokinet/external/oxen-libquic/external/oxen-logging)
+libsession_system_or_submodule(OXENLOGGING oxenlogging oxen::logging liboxen-logging>=1.2.0 session-router/external/oxen-libquic/external/oxen-logging)
 if(OXENLOGGING_FOUND)
     # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
     # but this script will give us them:
-    include(lokinet/external/oxen-libquic/external/oxen-logging/cmake/load_fmt_spdlog.cmake)
+    include(session-router/external/oxen-libquic/external/oxen-logging/cmake/load_fmt_spdlog.cmake)
 
     add_library(oxen-logging-fmt-spdlog INTERFACE)
     target_link_libraries(oxen-logging-fmt-spdlog INTERFACE oxenlogging::oxenlogging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
@@ -188,16 +188,16 @@ libsession_static_bundle(libzstd_static)
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
-libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json::nlohmann_json nlohmann_json>=3.7.0 lokinet/external/nlohmann)
+libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json::nlohmann_json nlohmann_json>=3.7.0 session-router/external/nlohmann)
 
 if(ENABLE_NETWORKING)
-    set(LOKINET_FULL OFF CACHE BOOL "")
-    set(LOKINET_DAEMON OFF CACHE BOOL "")
-    set(LOKINET_NATIVE_BUILD OFF CACHE BOOL "")
-    set(LOKINET_JEMALLOC OFF CACHE BOOL "")
+    set(SROUTER_FULL OFF CACHE BOOL "")
+    set(SROUTER_DAEMON OFF CACHE BOOL "")
+    set(SROUTER_NATIVE_BUILD OFF CACHE BOOL "")
+    set(SROUTER_JEMALLOC OFF CACHE BOOL "")
 
     add_library(sodium INTERFACE)
     target_link_libraries(sodium INTERFACE libsodium::sodium-internal)
-    add_static_subdirectory(lokinet EXCLUDE_FROM_ALL)
-    libsession_static_bundle(lokinet::liblokinet)
+    add_static_subdirectory(session-router EXCLUDE_FROM_ALL)
+    libsession_static_bundle(session-router::libsessionrouter)
 endif()

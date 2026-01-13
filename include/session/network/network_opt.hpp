@@ -109,7 +109,7 @@ namespace opt {
                             uint16_t{35520},
                             uint16_t{35420},
                             {2, 10, 0},
-                            swarm::INVALID_SWARM_ID},  // lokinet one
+                            swarm::INVALID_SWARM_ID},  // session router one
             };
 
             return netid(Target::testnet, seed_nodes);
@@ -125,12 +125,12 @@ namespace opt {
 
         static std::string to_string(Target target) {
             switch (target) {
-                case Target::mainnet: return "mainnet";
+                case Target::mainnet: return "session-router";
                 case Target::testnet: return "testnet";
                 case Target::devnet: return "devnet";
             }
 
-            return "mainnet";  // Shouldn't happen
+            return "session-router";  // Shouldn't happen
         }
     };
 
@@ -138,7 +138,7 @@ namespace opt {
     struct router : base {
         enum class Type {
             onion_requests,
-            lokinet,
+            session_router,
             direct,
         };
 
@@ -151,7 +151,7 @@ namespace opt {
         router() = delete;
 
         static router onion_requests() { return router(Type::onion_requests); }
-        static router lokinet() { return router(Type::lokinet); }
+        static router session_router() { return router(Type::session_router); }
         static router direct() { return router(Type::direct); }
     };
 
@@ -183,7 +183,7 @@ namespace opt {
     };
 
     /// Can be used to override the default (3) path length used when building onion request or
-    /// lokinet paths.
+    /// session router paths.
     struct path_length : base {
         uint8_t length;
 
@@ -191,7 +191,7 @@ namespace opt {
     };
 
     /// Can be used to prevent the code from excluding nodes within the same `/24` subnet from being
-    /// included in the same path when building onion request or lokinet paths.
+    /// included in the same path when building onion request or session router paths.
     struct disable_subnet_diversity : base {};
 
     /// Can be used to override the default (1) number of request retries that will occur when
@@ -238,7 +238,7 @@ namespace opt {
     // MARK: Snode Pool Options
 
     /// Can be used to override the default ('.') path the network uses to cache files (eg. snode
-    /// pool and lokinet bootstrap).
+    /// pool and session router bootstrap).
     struct cache_directory : base {
         fs::path path;
         explicit cache_directory(fs::path p) : path{p} {}

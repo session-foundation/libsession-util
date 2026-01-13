@@ -24,7 +24,7 @@ constexpr auto ALPN = "oxenstorage";
 
 QuicTransport::QuicTransport(
         config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop) :
-        _config{std::move(config)}, _loop{loop} {
+        _config{std::move(config)}, _loop{std::move(loop)} {
     log::trace(cat, "[QuicTransport] Initializing.");
     _recreate_endpoint();
 }
@@ -215,9 +215,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
     std::optional<oxen::quic::RemoteAddress> remote;
 
     std::visit(
-            [&remote, request_id = request.request_id](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-
+            [&remote, request_id = request.request_id]<typename T>(const T& arg) {
                 if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
                     log::trace(
                             cat,

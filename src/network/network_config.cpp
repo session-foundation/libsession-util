@@ -87,8 +87,8 @@ void Config::handle_config_opt(opt::router router_) {
             log::debug(cat, "Network config set to route requests using Onion Requests");
             break;
 
-        case opt::router::Type::lokinet:
-            log::debug(cat, "Network config set to route requests using Lokinet");
+        case opt::router::Type::session_router:
+            log::debug(cat, "Network config set to route requests using Session Router");
             break;
 
         case opt::router::Type::direct:

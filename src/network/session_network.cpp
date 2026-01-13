@@ -11,7 +11,7 @@
 #include "session/network/network_config.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/network/routing/direct_router.hpp"
-#include "session/network/routing/lokinet_router.hpp"
+#include "session/network/routing/session_router_router.hpp"
 #include "session/network/routing/onion_request_router.hpp"
 #include "session/network/session_network.h"
 #include "session/network/session_network_types.hpp"
@@ -54,12 +54,12 @@ namespace {
                 main_config.quic_disable_mtu_discovery};
     }
 
-    config::LokinetRouterConfig build_lokinet_router_config(const config::Config& main_config) {
+    config::SessionRouterConfig build_session_router_config(const config::Config& main_config) {
         if (!main_config.cache_directory)
-            throw std::invalid_argument{"Lokinet requires a cache_directory to be configured."};
+            throw std::invalid_argument{"Session Router requires a cache_directory to be configured."};
 
         if (main_config.netid == opt::netid::Target::devnet)
-            throw std::invalid_argument{"Lokinet does not support devnet."};
+            throw std::invalid_argument{"Session Router does not support devnet."};
 
         return {main_config.netid,
                 *main_config.cache_directory,
@@ -119,7 +119,7 @@ Network::Network(config::Config config) : config{config} {
             break;
 
         case opt::transport::Type::callbacks:
-            // _transport = std::make_shared<LokinetTransport>(_config, *_snode_pool, _loop);
+            // _transport = std::make_shared<SessionRouterTransport>(_config, *_snode_pool, _loop);
             break;
     }
 
@@ -154,9 +154,9 @@ Network::Network(config::Config config) : config{config} {
                     _transport);
             break;
 
-        case opt::router::Type::lokinet:
-            _router = std::make_unique<LokinetRouter>(
-                    std::move(build_lokinet_router_config(config)), _loop, _snode_pool, _transport);
+        case opt::router::Type::session_router:
+            _router = std::make_unique<SessionRouter>(
+                    std::move(build_session_router_config(config)), _loop, _snode_pool, _transport);
             break;
 
         case opt::router::Type::direct:
@@ -659,7 +659,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     switch (cpp_defaults.router) {
         case opt::router::Type::onion_requests:
             config.router = SESSION_NETWORK_ROUTER_ONION_REQUESTS;
-        case opt::router::Type::lokinet: config.router = SESSION_NETWORK_ROUTER_LOKINET;
+        case opt::router::Type::session_router: config.router = SESSION_NETWORK_ROUTER_SESSION_ROUTER;
         case opt::router::Type::direct: config.router = SESSION_NETWORK_ROUTER_DIRECT;
         default: config.router = SESSION_NETWORK_ROUTER_ONION_REQUESTS;
     }
@@ -752,8 +752,8 @@ LIBSESSION_C_API bool session_network_init(
             case SESSION_NETWORK_ROUTER_ONION_REQUESTS:
                 cpp_opts.emplace_back(opt::router::onion_requests());
                 break;
-            case SESSION_NETWORK_ROUTER_LOKINET:
-                cpp_opts.emplace_back(opt::router::lokinet());
+            case SESSION_NETWORK_ROUTER_SESSION_ROUTER:
+                cpp_opts.emplace_back(opt::router::session_router());
                 break;
             case SESSION_NETWORK_ROUTER_DIRECT: cpp_opts.emplace_back(opt::router::direct()); break;
         }
@@ -864,8 +864,8 @@ LIBSESSION_C_API bool session_network_init(
                     cpp_opts.emplace_back(opt::onionreq_disable_pre_build_paths{});
                 break;
 
-            case SESSION_NETWORK_ROUTER_LOKINET:
-                // Process the Lokinet options since we are using them
+            case SESSION_NETWORK_ROUTER_SESSION_ROUTER:
+                // Process the Session Router options since we are using them
                 if (config->path_length > 0)
                     cpp_opts.emplace_back(opt::path_length{config->path_length});
                 break;
@@ -1030,12 +1030,13 @@ LIBSESSION_C_API void session_network_get_active_paths(
         size_t total_metadata_size = 0;
         for (const auto& p : cpp_paths) {
             std::visit(
-                    [&](auto&& md) {
-                        using T = std::decay_t<decltype(md)>;
+                    [&]<typename T>(const T& md) {
                         if constexpr (std::is_same_v<T, OnionPathMetadata>)
                             total_metadata_size += sizeof(session_onion_path_metadata);
-                        else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>)
-                            total_metadata_size += sizeof(session_lokinet_tunnel_metadata);
+                        else {
+                            static_assert(std::is_same_v<T, SessionRouterTunnelMetadata>);
+                            total_metadata_size += sizeof(session_router_tunnel_metadata);
+                        }
                     },
                     p.metadata);
         }
@@ -1068,9 +1069,7 @@ LIBSESSION_C_API void session_network_get_active_paths(
 
             // Copy metadata
             std::visit(
-                    [&](auto&& m) {
-                        using T = std::decay_t<decltype(m)>;
-
+                    [&]<typename T>(const T& m) {
                         if constexpr (std::is_same_v<T, OnionPathMetadata>) {
                             auto* meta = reinterpret_cast<session_onion_path_metadata*>(
                                     current_metadata_ptr);
@@ -1079,10 +1078,11 @@ LIBSESSION_C_API void session_network_get_active_paths(
                                     static_cast<SESSION_NETWORK_REQUEST_CATEGORY>(m.category);
                             c_path.onion_metadata = meta;
                             current_metadata_ptr += sizeof(session_onion_path_metadata);
-                        } else if constexpr (std::is_same_v<T, LokinetTunnelMetadata>) {
-                            auto* meta = reinterpret_cast<session_lokinet_tunnel_metadata*>(
+                        } else {
+                            static_assert(std::is_same_v<T, SessionRouterTunnelMetadata>);
+                            auto* meta = reinterpret_cast<session_router_tunnel_metadata*>(
                                     current_metadata_ptr);
-                            new (meta) session_lokinet_tunnel_metadata{};
+                            new (meta) session_router_tunnel_metadata{};
                             strncpy(meta->destination_pubkey,
                                     m.destination_pubkey.c_str(),
                                     sizeof(meta->destination_pubkey) - 1);
@@ -1092,8 +1092,8 @@ LIBSESSION_C_API void session_network_get_active_paths(
                                     sizeof(meta->destination_snode_address) - 1);
                             meta->destination_snode_address
                                     [sizeof(meta->destination_snode_address) - 1] = '\0';
-                            c_path.lokinet_metadata = meta;
-                            current_metadata_ptr += sizeof(session_lokinet_tunnel_metadata);
+                            c_path.session_router_metadata = meta;
+                            current_metadata_ptr += sizeof(session_router_tunnel_metadata);
                         }
                     },
                     cpp_path.metadata);

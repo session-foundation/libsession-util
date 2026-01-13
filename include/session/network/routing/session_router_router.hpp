@@ -12,44 +12,45 @@
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
 
-namespace lokinet {
-class Lokinet;
+namespace session::router {
+class SessionRouter;
 struct tunnel_info;
-};  // namespace lokinet
+};  // namespace session::router
 
 namespace session::network {
 
 namespace config {
-    struct LokinetRouterConfig {
+    struct SessionRouterConfig {
         opt::netid::Target netid;
         fs::path cache_directory;
         std::chrono::milliseconds request_timeout_check_frequency;
 
         uint8_t path_length;
+        uint8_t max_streams;
     };
 }  // namespace config
 
-class LokinetRouter : public IRouter, public std::enable_shared_from_this<LokinetRouter> {
+class SessionRouter : public IRouter, public std::enable_shared_from_this<SessionRouter> {
   private:
     bool _ready = false;
     bool _suspended = false;
-    config::LokinetRouterConfig _config;
+    config::SessionRouterConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
-    std::shared_ptr<lokinet::Lokinet> lokinet;
+    std::shared_ptr<session::router::SessionRouter> srouter;
     std::weak_ptr<SnodePool> _snode_pool;
     std::weak_ptr<ITransport> _transport;
 
-    std::unordered_map<std::string, lokinet::tunnel_info> _active_tunnels;
+    std::unordered_map<std::string, session::router::tunnel_info> _active_tunnels;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
 
   public:
-    LokinetRouter(
-            config::LokinetRouterConfig config,
+    SessionRouter(
+            config::SessionRouterConfig config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::weak_ptr<SnodePool> snode_pool,
             std::weak_ptr<ITransport> transport);
-    ~LokinetRouter() override;
+    ~SessionRouter() override;
 
     void suspend() override;
     void resume(bool automatically_reconnect = true) override;
@@ -71,9 +72,9 @@ class LokinetRouter : public IRouter, public std::enable_shared_from_this<Lokine
     void _send_direct_request(Request request, network_response_callback_t callback);
     void _send_proxy_request(Request request, network_response_callback_t callback);
     void _establish_tunnel(
-            const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id);
+            std::span<const unsigned char>& remote_pubkey, const uint16_t remote_port, const std::string& initiating_req_id);
     void _send_via_tunnel(
-            lokinet::tunnel_info tunnel, Request request, network_response_callback_t callback);
+            session::router::tunnel_info tunnel, Request request, network_response_callback_t callback);
 };
 
 }  // namespace session::network

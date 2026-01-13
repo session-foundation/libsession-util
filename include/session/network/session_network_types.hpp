@@ -162,12 +162,12 @@ struct Response {
 struct OnionPathMetadata {
     RequestCategory category;
 };
-struct LokinetTunnelMetadata {
+struct SessionRouterTunnelMetadata {
     std::string destination_pubkey;
     std::string destination_snode_address;
 };
 
-using PathMetadata = std::variant<OnionPathMetadata, LokinetTunnelMetadata>;
+using PathMetadata = std::variant<OnionPathMetadata, SessionRouterTunnelMetadata>;
 
 struct PathInfo {
     std::vector<service_node> nodes;

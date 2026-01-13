@@ -116,7 +116,7 @@ if(ENABLE_NETWORKING)
         network/backends/session_file_server.cpp
         network/transport/quic_transport.cpp
         network/routing/direct_router.cpp
-        network/routing/lokinet_router.cpp
+        network/routing/session_router_router.cpp
         network/routing/onion_request_router.cpp
     )
 
@@ -124,7 +124,7 @@ if(ENABLE_NETWORKING)
         PUBLIC
         crypto
         quic
-        lokinet::liblokinet
+        session-router::libsessionrouter
         PRIVATE
         nlohmann_json::nlohmann_json
         libsodium::sodium-internal

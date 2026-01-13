@@ -13,6 +13,6 @@
 [submodule "external/protobuf"]
 	path = external/protobuf
 	url = https://github.com/protocolbuffers/protobuf.git
-[submodule "external/lokinet"]
-	path = external/lokinet
-	url = https://github.com/oxen-io/lokinet.git
+[submodule "external/session-router"]
+	path = external/session-router
+	url = https://github.com/session-foundation/session-router.git

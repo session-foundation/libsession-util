@@ -77,7 +77,7 @@ OnionRequestRouter::OnionRequestRouter(
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport} {
+        _config{std::move(config)}, _loop{std::move(loop)}, _snode_pool{snode_pool}, _transport{transport} {
     log::trace(cat, "[OnionRequestRouter] Initializing.");
 
     _request_queues[RequestCategory::standard] =

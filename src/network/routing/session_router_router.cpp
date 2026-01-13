@@ -1,13 +1,13 @@
-#include "session/network/routing/lokinet_router.hpp"
+#include "session/network/routing/session_router_router.hpp"
 
 #include <fmt/ranges.h>
 #include <fmt/std.h>
 #include <oxenc/base64.h>
+#include <oxenc/base32z.h>
 
-#include <llarp/contact/router_id.hpp>
-#include <lokinet.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <session/router.hpp>
 
 #include "session/network/network_opt.hpp"
 #include "session/onionreq/builder.hpp"
@@ -30,14 +30,11 @@ namespace {
         std::optional<std::string> key;
 
         std::visit(
-                [&key](auto&& arg) {
-                    using T = std::decay_t<decltype(arg)>;
-
-                    if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
+                [&key]<typename T>(const T& arg) {
+                    if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress> || std::is_same_v<T, service_node>) {
                         key = oxenc::to_hex(arg.view_remote_key());
-                    } else if constexpr (std::is_same_v<T, service_node>) {
-                        key = oxenc::to_hex(arg.view_remote_key());
-                    } else if constexpr (std::is_same_v<T, ServerDestination>) {
+                    } else {
+                        static_assert(std::is_same_v<T, ServerDestination>);
                         key = PROXIED_REQUESTS_KEY;
                     }
                 },
@@ -49,50 +46,49 @@ namespace {
         return *key;
     }
 
-    oxen::quic::RemoteAddress address_for_destination(
+    std::pair<std::span<const unsigned char>, uint16_t> remote_info_for_destination(
             const network_destination& dest, const std::string& request_id) {
-        std::optional<oxen::quic::RemoteAddress> address;
+        std::optional<std::pair<std::span<const unsigned char>, uint16_t>> result;
 
         std::visit(
-                [&address, &request_id](auto&& arg) {
-                    using T = std::decay_t<decltype(arg)>;
-
+                [&result, &request_id]<typename T>(const T& arg) {
                     if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
                         log::trace(
                                 cat,
-                                "[LokinetRouter Request {}]: Using pre-resolved RemoteAddress.",
+                                "[SessionRouter Request {}]: Using pre-resolved RemoteAddress.",
                                 request_id);
-                        address = arg;
+                        result.emplace(arg.view_remote_key(), arg.port());
                     } else if constexpr (std::is_same_v<T, service_node>) {
                         log::trace(
                                 cat,
-                                "[LokinetRouter Request {}]: Resolving service_node to "
+                                "[SessionRouter Request {}]: Resolving service_node to "
                                 "RemoteAddress.",
                                 request_id);
-                        address.emplace(arg.view_remote_key(), arg.host(), arg.omq_port);
+                        result.emplace(arg.view_remote_key(), arg.omq_port);
                     }
                 },
                 dest);
 
-        if (!address)
+        if (!result)
             throw std::runtime_error{"Invalid destination"};
 
-        if (address->view_remote_key().size() != 32)
+        if (result->first.size() != 32)
             throw std::runtime_error{"Invalid remote key"};
 
-        return *address;
+        return *result;
     }
 
 }  // namespace
 
-LokinetRouter::LokinetRouter(
-        config::LokinetRouterConfig config,
+SessionRouter::SessionRouter(
+        config::SessionRouterConfig config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport} {
-    log::trace(cat, "[LokinetRouter] Initializing.");
+        _config{std::move(config)}, _loop{std::move(loop)}, _snode_pool{snode_pool}, _transport{transport} {
+    log::trace(cat, "[SessionRouter] Initializing.");
 
+    // "listen=:0" listens on a random port - this prevents multiple test devices on the same machine from trying to listen on the same port and colliding
     auto test_ini = R"(
     [router]
     netid={}
@@ -107,79 +103,81 @@ LokinetRouter::LokinetRouter(
     try {
         _update_status(ConnectionStatus::connecting);
 
-        // TODO: Don't pass the loop for now.
-        lokinet = std::make_shared<lokinet::Lokinet>(test_ini /*, loop*/);
-
-        // TODO: Remove this hack to wait for lokinet to be ready before any requests get sent
-        _loop->call_later(5000ms, [this] {
-            auto snode_pool = _snode_pool.lock();
-            if (!snode_pool) {
-                log::critical(cat, "[LokinetRouter] SnodePool was destroyed, cannot setup router.");
+        srouter = std::make_shared<session::router::SessionRouter>(test_ini, loop);
+         srouter->on_connected([weak_self = weak_from_this()]{
+            auto self = weak_self.lock();
+            if (!self)
                 return;
-            }
+
+            auto snode_pool = self->_snode_pool.lock();
+            if (!snode_pool)
+                return;
 
             if (snode_pool->size() == 0)
-                snode_pool->refresh_if_needed({}, [weak_self = weak_from_this()] {
-                    if (auto self = weak_self.lock())
-                        self->_loop->call([weak_self] {
-                            if (auto self = weak_self.lock())
-                                self->_finish_setup();
-                        });
+                snode_pool->refresh_if_needed({}, [weak_self] {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return;
+                    
+                    self->_loop->call([weak_self] {
+                        if (auto self = weak_self.lock())
+                            self->_finish_setup();
+                    });
                 });
             else
-                _finish_setup();
-        });
+                self->_finish_setup();
+        }, /*with_path*/true, /*persist*/false);
     } catch (const std::exception& e) {
-        log::error(cat, "[LokinetRouter] Failed to start lokinet ({}).", e.what());
+        log::error(cat, "[SessionRouter] Failed to start ({}).", e.what());
         _update_status(ConnectionStatus::disconnected);
         throw;
     }
 }
 
-LokinetRouter::~LokinetRouter() {
+SessionRouter::~SessionRouter() {
     // Use 'call_get' to force this to be synchronous
     if (_loop)
         _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
-    log::debug(cat, "[LokinetRouter] Destroyed.");
+    log::debug(cat, "[SessionRouter] Destroyed.");
 }
 
 // MARK: IRouter
 
-void LokinetRouter::suspend() {
+void SessionRouter::suspend() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         _suspended = true;
         _close_connections();
-        log::info(cat, "[LokinetRouter] Suspended.");
+        log::info(cat, "[SessionRouter] Suspended.");
     });
 }
 
-void LokinetRouter::resume(bool automatically_reconnect) {
+void SessionRouter::resume(bool automatically_reconnect) {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         if (!_suspended)
             return;
 
         _suspended = false;
-        log::info(cat, "[LokinetRouter] Resumed.");
+        log::info(cat, "[SessionRouter] Resumed.");
     });
 }
 
-void LokinetRouter::close_connections() {
+void SessionRouter::close_connections() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] { _close_connections(); });
 }
 
-void LokinetRouter::clear_cache() {
-    // TODO: Implement this
+void SessionRouter::clear_cache() {
+    // TODO: Implement this.
 }
 
-std::vector<PathInfo> LokinetRouter::get_active_paths() {
-    // TODO: Implement this
+std::vector<PathInfo> SessionRouter::get_active_paths() {
+    // TODO: Implement this.
     return {};
 }
 
-void LokinetRouter::send_request(Request request, network_response_callback_t callback) {
+void SessionRouter::send_request(Request request, network_response_callback_t callback) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
         if (auto self = weak_self.lock())
             self->_send_request_internal(std::move(req), std::move(cb));
@@ -188,10 +186,10 @@ void LokinetRouter::send_request(Request request, network_response_callback_t ca
 
 // MARK: Internal Logic
 
-void LokinetRouter::_finish_setup() {
+void SessionRouter::_finish_setup() {
     // Start processing requests
     _ready = true;
-    log::debug(cat, "[LokinetRouter] Finishing setup, router is now ready.");
+    log::debug(cat, "[SessionRouter] Finishing setup, router is now ready.");
 
     auto requests_to_process = std::move(_pending_requests);
     if (requests_to_process.empty())
@@ -200,14 +198,14 @@ void LokinetRouter::_finish_setup() {
     // Process any requests that were queued before we were ready
     log::debug(
             cat,
-            "[LokinetRouter] Processing {} requests queued during initialization.",
+            "[SessionRouter] Processing {} requests queued during initialization.",
             requests_to_process.size());
 
     for (auto& [address, requests] : requests_to_process) {
         if (!requests.empty()) {
             log::debug(
                     cat,
-                    "[LokinetRouter] Processing {} queued requests for address {}.",
+                    "[SessionRouter] Processing {} queued requests for address {}.",
                     requests.size(),
                     address);
 
@@ -217,8 +215,8 @@ void LokinetRouter::_finish_setup() {
     }
 }
 
-void LokinetRouter::_close_connections() {
-    // TODO: Need to close any active connections on the lokinet instance
+void SessionRouter::_close_connections() {
+    // TODO: Need to close any active connections on the session router instance.
 
     // Cancel any pending requests (they can't succeed once the connection is closed)
     for (const auto& [pubkey, pupkey_requests] : _pending_requests)
@@ -235,10 +233,10 @@ void LokinetRouter::_close_connections() {
     _active_tunnels.clear();
     _pending_requests.clear();
     _update_status(ConnectionStatus::disconnected);
-    log::info(cat, "[LokinetRouter] Closed all connections.");
+    log::info(cat, "[SessionRouter] Closed all connections.");
 }
 
-void LokinetRouter::_update_status(ConnectionStatus new_status) {
+void SessionRouter::_update_status(ConnectionStatus new_status) {
     ConnectionStatus old_status = _status.load();
     if (old_status == new_status)
         return;
@@ -249,7 +247,7 @@ void LokinetRouter::_update_status(ConnectionStatus new_status) {
         on_status_changed();
 }
 
-void LokinetRouter::_send_request_internal(Request request, network_response_callback_t callback) {
+void SessionRouter::_send_request_internal(Request request, network_response_callback_t callback) {
     // If we are suspended then fail immediately
     if (_suspended)
         return callback(
@@ -257,7 +255,7 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
                 false,
                 ERROR_NETWORK_SUSPENDED,
                 {content_type_plain_text},
-                "LokinetRouter is suspended.");
+                "SessionRouter is suspended.");
 
     // Queue the request if we aren't ready
     auto key = pending_request_key(request.destination);
@@ -265,7 +263,7 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
     if (!_ready) {
         log::debug(
                 cat,
-                "[LokinetRouter Request {}]: Router not ready, queueing request.",
+                "[SessionRouter Request {}]: Router not ready, queueing request.",
                 request.request_id);
 
         // Queue the request if not ready. We need the pubkey hex as the key.
@@ -274,7 +272,7 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
         } catch (const std::exception& e) {
             log::critical(
                     cat,
-                    "[LokinetRouter Request {}]: Dropping after failure to queue due to error: {}.",
+                    "[SessionRouter Request {}]: Dropping after failure to queue due to error: {}.",
                     request.request_id,
                     e.what());
             return callback(false, false, -1, {content_type_plain_text}, e.what());
@@ -287,7 +285,7 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
     if (std::holds_alternative<ServerDestination>(request.destination)) {
         log::debug(
                 cat,
-                "[LokinetRouter Request {}]: Destination is a server, finding a proxy node.",
+                "[SessionRouter Request {}]: Destination is a server, finding a proxy node.",
                 request.request_id);
         _send_proxy_request(std::move(request), std::move(callback));
         return;
@@ -318,43 +316,43 @@ void LokinetRouter::_send_request_internal(Request request, network_response_cal
     _send_direct_request(std::move(request), std::move(json_parsing_callback));
 }
 
-void LokinetRouter::_send_direct_request(Request request, network_response_callback_t callback) {
+void SessionRouter::_send_direct_request(Request request, network_response_callback_t callback) {
     try {
         if (std::holds_alternative<ServerDestination>(request.destination))
             throw std::runtime_error{"Attempted to send server request directly"};
 
-        auto address = address_for_destination(request.destination, request.request_id);
-        const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
+        auto [remote_pubkey, remote_port] = remote_info_for_destination(request.destination, request.request_id);
+        const auto remote_pubkey_hex = oxenc::to_hex(remote_pubkey);
 
-        if (auto it = _active_tunnels.find(address_pubkey_hex); it != _active_tunnels.end()) {
-            log::trace(cat, "[LokinetRouter Request {}] Found active tunnel.", request.request_id);
+        if (auto it = _active_tunnels.find(remote_pubkey_hex); it != _active_tunnels.end()) {
+            log::trace(cat, "[SessionRouter Request {}] Found active tunnel.", request.request_id);
             _send_via_tunnel(it->second, std::move(request), std::move(callback));
             return;
         }
 
         // Add the request to the pending queue to be picked up once we have a tunnel for it
         std::string initiating_req_id = request.request_id;
-        _pending_requests[address_pubkey_hex].emplace_back(std::move(request), std::move(callback));
+        _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
 
         // If there is only a single pending request then we wouldn't have started establishing a
         // tunnel
-        if (_pending_requests.at(address_pubkey_hex).size() == 1) {
+        if (_pending_requests.at(remote_pubkey_hex).size() == 1) {
             log::info(
                     cat,
-                    "[LokinetRouter Request {}] No tunnel to {}, initiating new tunnel.",
+                    "[SessionRouter Request {}] No tunnel to {}, initiating new tunnel.",
                     initiating_req_id,
-                    address_pubkey_hex);
-            _establish_tunnel(address, initiating_req_id);
+                    remote_pubkey_hex);
+            _establish_tunnel(remote_pubkey, remote_port, initiating_req_id);
         } else
             log::debug(
                     cat,
-                    "[LokinetRouter Request {}] Tunnel to {} is pending, queueing request.",
+                    "[SessionRouter Request {}] Tunnel to {} is pending, queueing request.",
                     initiating_req_id,
-                    address_pubkey_hex);
+                    remote_pubkey_hex);
     } catch (const std::exception& e) {
         log::error(
                 cat,
-                "[LokinetRouter Request {}] Failed to send request due to error: {}",
+                "[SessionRouter Request {}] Failed to send request due to error: {}",
                 request.request_id,
                 e.what());
         return callback(
@@ -366,7 +364,7 @@ void LokinetRouter::_send_direct_request(Request request, network_response_callb
     }
 }
 
-void LokinetRouter::_send_proxy_request(Request request, network_response_callback_t callback) {
+void SessionRouter::_send_proxy_request(Request request, network_response_callback_t callback) {
     auto snode_pool = _snode_pool.lock();
     if (!snode_pool) {
         return callback(
@@ -382,7 +380,7 @@ void LokinetRouter::_send_proxy_request(Request request, network_response_callba
     if (proxy_nodes.empty()) {
         log::warning(
                 cat,
-                "[LokinetRouter Request {}]: No available proxy nodes, waiting for SnodePool "
+                "[SessionRouter Request {}]: No available proxy nodes, waiting for SnodePool "
                 "refresh.",
                 request.request_id);
 
@@ -414,7 +412,7 @@ void LokinetRouter::_send_proxy_request(Request request, network_response_callba
 
                     log::info(
                             cat,
-                            "[LokinetRouter Request {}]: SnodePool refresh complete, retrying "
+                            "[SessionRouter Request {}]: SnodePool refresh complete, retrying "
                             "proxy selection.",
                             req.request_id);
                     self->_send_proxy_request(std::move(req), std::move(cb));
@@ -427,7 +425,7 @@ void LokinetRouter::_send_proxy_request(Request request, network_response_callba
     std::shared_ptr<onionreq::ResponseParser> parser;
     log::debug(
             cat,
-            "[LokinetRouter Request {}]: Selected {} as proxy.",
+            "[SessionRouter Request {}]: Selected {} as proxy.",
             request.request_id,
             proxy_node.to_string());
 
@@ -439,7 +437,7 @@ void LokinetRouter::_send_proxy_request(Request request, network_response_callba
     } catch (const std::exception& e) {
         log::warning(
                 cat,
-                "[LokinetRouter Request {}]: Failed to build proxy request payload: {}",
+                "[SessionRouter Request {}]: Failed to build proxy request payload: {}",
                 request.request_id,
                 e.what());
         return callback(
@@ -486,15 +484,14 @@ void LokinetRouter::_send_proxy_request(Request request, network_response_callba
     _send_direct_request(std::move(proxy_request), std::move(proxy_callback));
 }
 
-void LokinetRouter::_establish_tunnel(
-        const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id) {
-    auto key = address.view_remote_key();
-    auto address_pubkey_hex = oxenc::to_hex(key);
+void SessionRouter::_establish_tunnel(
+        std::span<const unsigned char>& remote_pubkey, const uint16_t remote_port, const std::string& initiating_req_id) {
+    auto address_pubkey_hex = oxenc::to_hex(remote_pubkey);
 
     if (address_pubkey_hex.size() != 64) {
         log::critical(
                 cat,
-                "[LokinetRouter] Destination had an invalid remote key, request {} is being "
+                "[SessionRouter] Destination had an invalid remote key, request {} is being "
                 "dropped.",
                 initiating_req_id);
         // Fail all the pending requests for this connection
@@ -503,7 +500,7 @@ void LokinetRouter::_establish_tunnel(
             _pending_requests.erase(it);
             log::error(
                     cat,
-                    "[LokinetRouter] Failing {} pending request(s) due to connection failure.",
+                    "[SessionRouter] Failing {} pending request(s) due to connection failure.",
                     to_fail.size());
 
             for (auto& [req, cb] : to_fail)
@@ -516,30 +513,45 @@ void LokinetRouter::_establish_tunnel(
         return;
     }
 
-    llarp::RouterID router_id{key.first<32>()};
+    // TODO: Need to clean this up
+    // std::string RouterID::AddressPrinter::to_string() const
+    // {
+    //     std::string r;
+    //     r.reserve(B32Z_ID_SIZE + (is_relay ? RELAY_DOT_TLD : CLIENT_DOT_TLD).size());
+    //     oxenc::to_base32z(rid.begin(), rid.end(), std::back_inserter(r));
+    //     r += is_relay ? RELAY_DOT_TLD : CLIENT_DOT_TLD;
+    //     return r;
+    // }
+
+    std::string srouter_address;
+    srouter_address.reserve(oxenc::to_base32z_size(32UL) + ".snode"sv.size());
+    oxenc::to_base32z(remote_pubkey.begin(), remote_pubkey.begin() + 32, std::back_inserter(srouter_address));
+    srouter_address += ".snode"sv;
+
+    // srouter::RouterID router_id{remote_pubkey.first<32>()};
     // auto snode_address = "34d9udo9ethfcrcaxcgdyxsi1w8gr79jzornsytcfgdw5rpmif8y.loki";//
     // address.to_network_address(true);
     //  auto snode_address = "55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo.snode";
-    auto lokinet_address = router_id.to_network_address(true);
-    auto test_port = address.port();  // 35519;
+    // auto srouter_address = router_id.to_network_address(true);
+    auto test_port = remote_port;  // 35519;
 
     log::debug(
             cat,
-            "[LokinetRouter Request {}] Establishing new tunnel to {}.",
+            "[SessionRouter Request {}] Establishing new tunnel to {}.",
             initiating_req_id,
             address_pubkey_hex);
-    lokinet->establish_udp(
-            lokinet_address.to_string(),
+    srouter->establish_udp(
+            srouter_address,//.to_string(),
             test_port,
             [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
-                    lokinet::tunnel_info info) mutable {
+                    router::tunnel_info info) mutable {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
                 log::info(
                         cat,
-                        "[LokinetRouter Request {}] Tunnel to remote {} established.",
+                        "[SessionRouter Request {}] Tunnel to remote {} established.",
                         initiating_req_id,
                         address_pubkey_hex);
 
@@ -553,7 +565,7 @@ void LokinetRouter::_establish_tunnel(
                 if (!requests_to_process.empty()) {
                     log::debug(
                             cat,
-                            "[LokinetRouter] Processing {} pending requests on new tunnel to "
+                            "[SessionRouter] Processing {} pending requests on new tunnel to "
                             "{}.",
                             requests_to_process.size(),
                             info.remote);
@@ -562,20 +574,16 @@ void LokinetRouter::_establish_tunnel(
                         self->_send_via_tunnel(info, std::move(req), std::move(cb));
                 }
             },
-            [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
-                    std::string errmsg) mutable {
+            [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id]() mutable {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
                 log::info(
                         cat,
-                        "[LokinetRouter Request {}] Unable to establish lokinet UDP connection "
-                        "to "
-                        "{} due to error: {}.",
+                        "[SessionRouter Request {}] Unable to establish session router UDP connection to {}.",
                         initiating_req_id,
-                        address_pubkey_hex,
-                        errmsg);
+                        address_pubkey_hex);
 
                 self->_active_tunnels.erase(address_pubkey_hex);
 
@@ -587,12 +595,12 @@ void LokinetRouter::_establish_tunnel(
 
                     log::error(
                             cat,
-                            "[LokinetRouter] Failing {} pending requests due to UDP connection "
+                            "[SessionRouter] Failing {} pending requests due to UDP connection "
                             "failure.",
                             to_fail.size());
 
                     for (auto& [req, cb] : to_fail)
-                        cb(false, false, -1, {content_type_plain_text}, errmsg);
+                        cb(false, false, -1, {content_type_plain_text}, "Timeout");
                 }
 
                 // If we have no longer have any active connections then we are disconnected
@@ -601,9 +609,9 @@ void LokinetRouter::_establish_tunnel(
             });
 }
 
-void LokinetRouter::_send_via_tunnel(
-        lokinet::tunnel_info tunnel, Request request, network_response_callback_t callback) {
-    // TODO: Is there a way to check that the 'tunnel_info' still active?
+void SessionRouter::_send_via_tunnel(
+        router::tunnel_info tunnel, Request request, network_response_callback_t callback) {
+    // TODO: Is there a way to check that the 'tunnel_info' still active?.
 
     // If the request has already timedout at this point then just fail it immediately
     auto timeout = request.time_remaining();
@@ -612,37 +620,35 @@ void LokinetRouter::_send_via_tunnel(
 
     auto transport = _transport.lock();
     if (!transport) {
-        log::critical(cat, "[LokinetRouter] Transport was destroyed, cannot send request.");
+        log::critical(cat, "[SessionRouter] Transport was destroyed, cannot send request.");
         return;
     }
 
     // We have a valid connection and stream so we can send the request
-    log::debug(cat, "[LokinetRouter Request {}] Sending to {}.", request.request_id, tunnel.remote);
+    log::debug(cat, "[SessionRouter Request {}] Sending to {}.", request.request_id, tunnel.remote);
 
-    oxen::quic::RemoteAddress address =
-            address_for_destination(request.destination, request.request_id);
-    auto key = address.view_remote_key();
-    const auto address_pubkey_hex = oxenc::to_hex(key);
-    auto test_key = key;
+    auto [remote_pubkey, _] = remote_info_for_destination(request.destination, request.request_id);
+    const auto remote_pubkey_hex = oxenc::to_hex(remote_pubkey);
+    auto test_key = remote_pubkey;
     // auto test_key =
     // oxenc::from_base64("1n+DAM9hKyJhtXSPR5L/HdemIKPiHs8dZsPn2kEQuMs="); auto test_key
     // = oxenc::from_base32z("55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo");
-    auto loki_target = oxen::quic::RemoteAddress{test_key, "127.0.0.1", tunnel.local_port};
+    auto router_target = oxen::quic::RemoteAddress{test_key, "127.0.0.1", tunnel.local_port};
 
     // Construct the actual request to send
     std::optional<std::chrono::milliseconds> remaining_overall_timeout =
             (request.overall_timeout.has_value() ? std::optional{request.time_remaining()}
                                                  : std::nullopt);
-    Request lokinet_request{
+    Request router_request{
             request.request_id,
-            network_destination{loki_target},  // Send to local lokinet address
-            request.endpoint,                  // Send to onion request handling endpoint
+            network_destination{router_target},  // Send to local router address
+            request.endpoint,                    // Send to onion request handling endpoint
             request.body,
             request.category,
             request.time_remaining(),
             remaining_overall_timeout};
 
-    transport->send_request(std::move(lokinet_request), std::move(callback));
+    transport->send_request(std::move(router_request), std::move(callback));
 }
 
 }  // namespace session::network

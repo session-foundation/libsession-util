@@ -23,9 +23,7 @@ session_request_params* convert_cpp_request_to_c(const session::network::Request
     add_string_size(req.endpoint);
 
     std::visit(
-            [&](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-
+            [&]<typename T>(const T& arg) {
                 if constexpr (std::is_same_v<T, service_node>) {
                     total_size += sizeof(network_service_node);
                 } else if constexpr (std::is_same_v<T, ServerDestination>) {
@@ -87,9 +85,7 @@ session_request_params* convert_cpp_request_to_c(const session::network::Request
     }
 
     std::visit(
-            [&](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-
+            [&]<typename T>(const T& arg) {
                 if constexpr (std::is_same_v<T, service_node>) {
                     auto* c_snode = reinterpret_cast<network_service_node*>(current_ptr);
                     arg.into(*c_snode);
@@ -142,9 +138,7 @@ session_request_params* convert_cpp_request_to_c(const session::network::Request
             req.destination);
 
     std::visit(
-            [&](auto&& arg) {
-                using T = std::decay_t<decltype(arg)>;
-
+            [&]<typename T>(const T& arg) {
                 if constexpr (std::is_same_v<T, UploadInfo>) {
                     if (arg.file_name)
                         c_params->upload_file_name = copy_string(*arg.file_name);

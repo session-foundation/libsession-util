@@ -66,7 +66,7 @@ typedef struct {
 typedef struct {
     char destination_pubkey[65];         // The 64-byte ed25519 pubkey in hex + null terminator.
     char destination_snode_address[65];  // The 64-byte .snode address + null terminator.
-} session_lokinet_tunnel_metadata;
+} session_router_tunnel_metadata;
 
 typedef struct {
     const network_service_node* nodes;
@@ -74,7 +74,7 @@ typedef struct {
 
     // Only ONE of these pointers should be set, the other should be left null
     const session_onion_path_metadata* onion_metadata;
-    const session_lokinet_tunnel_metadata* lokinet_metadata;
+    const session_router_tunnel_metadata* session_router_metadata;
 
 } session_path_info;
 
