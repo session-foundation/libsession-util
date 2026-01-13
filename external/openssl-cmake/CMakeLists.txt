@@ -208,7 +208,7 @@ if(NOT APPLE)
         set(openssl_extra_opts mingw)
       elseif(ANDROID)
         set(openssl_extra_opts no-asm)
-        set(openssl_extra_env SYSTEM=Linux ${cross_extra})
+        set(openssl_extra_env SYSTEM=Linux)
       endif()
     endif()
     build_external(openssl
@@ -216,6 +216,7 @@ if(NOT APPLE)
         CC=${deps_cc}
         CFLAGS=${deps_CFLAGS}
         ${openssl_extra_env}
+        ${cross_extra}
         ./Configure --prefix=${DEPS_DESTDIR} --libdir=lib ${openssl_extra_opts}
           no-shared no-capieng no-dso no-dtls1 no-ec_nistp_64_gcc_128 no-gost
           no-heartbeats no-md2 no-rc5 no-rdrand no-rfc3779 no-sctp no-ssl-trace no-ssl2 no-ssl3
