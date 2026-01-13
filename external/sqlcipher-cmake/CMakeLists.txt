@@ -90,11 +90,17 @@ else()
     else()
         set(sqlcipher_ldflags "-lm -lcrypto -lssl")
     endif()
-endif()
 
-if (ANDROID)
-    # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
-    set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
+    if(WIN32)
+        # TODO: I'm unable to stop SQLCipher from building sqlite3.exe in the mingw cross-compile
+        # so we need to augment that executable with some Window's libraries to get us through...
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lws2_32 -lcrypt32")
+    endif()
+
+    if(ANDROID)
+        # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
+    endif()
 endif()
 
 ExternalProject_Add(sqlcipher_external
