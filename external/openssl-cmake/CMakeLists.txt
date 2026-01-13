@@ -207,7 +207,7 @@ if(NOT APPLE)
       elseif(ANDROID)
         set(openssl_extra_opts no-asm)
         set(openssl_extra_env SYSTEM=Linux)
-        set(deps_CFLAGS "${deps_CFLAGS} --sysroot=${CMAKE_ANDROID_NDK}")
+        set(deps_CFLAGS "${deps_CFLAGS} --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot")
       endif()
     endif()
     build_external(openssl
