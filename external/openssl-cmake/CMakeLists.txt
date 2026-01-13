@@ -206,7 +206,7 @@ if(NOT APPLE AND NOT WIN32)
         set(openssl_system_env SYSTEM=MINGW64 RC=${CMAKE_RC_COMPILER})
       elseif(ANDROID)
         set(openssl_system_env SYSTEM=Linux MACHINE=${openssl_machine} ${cross_extra})
-        set(openssl_extra_opts no-asm)
+        set(openssl_extra_opts no-asm --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot)
       endif()
     endif()
     build_external(openssl
