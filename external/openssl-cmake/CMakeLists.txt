@@ -223,8 +223,12 @@ if(NOT APPLE AND NOT WIN32)
     add_static_target(OpenSSL::SSL openssl_external libssl.a)
     add_static_target(OpenSSL::Crypto openssl_external libcrypto.a)
     target_link_libraries(OpenSSL::SSL INTERFACE OpenSSL::Crypto)
-    set(OPENSSL_INCLUDE_DIR ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
     set(OPENSSL_ROOT_DIR ${DEPS_DESTDIR} CACHE PATH "" FORCE)
+
+    # NOTE: FindOpenSSL defines OPENSSL_INCLUDE_DIR, we use pkg_check_modules which defines
+    # OPENSSL_INCLUDE_DIRS, we define both for maximum compatibility...
+    set(OPENSSL_INCLUDE_DIRS ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
+    set(OPENSSL_INCLUDE_DIR ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
 
     # NOTE: Create <smallname> target so then libsession_system_or_submodule exports the
     # <smallname>::<smallname> target so that we can universally use that target for both PkgConfig
