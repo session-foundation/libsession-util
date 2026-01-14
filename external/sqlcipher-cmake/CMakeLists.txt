@@ -72,13 +72,52 @@ endif()
 set(deps_CFLAGS "-O2")
 set(deps_CXXFLAGS "-O2")
 
+set(apple_cflags_arch)
+set(apple_cxxflags_arch)
+set(apple_ldflags_arch)
+if(APPLE AND CMAKE_CROSSCOMPILING)
+    if(cross_host MATCHES "^(.*-.*-)ios([0-9.]+)(-.*)?$")
+        set(cross_host "${CMAKE_MATCH_1}darwin${CMAKE_MATCH_2}${CMAKE_MATCH_3}")
+    endif()
+    if(cross_host MATCHES "^(.*-.*-.*)-simulator$")
+        set(cross_host "${CMAKE_MATCH_1}")
+    endif()
+
+    set(apple_arch)
+    if(ARCH_TRIPLET MATCHES "^(arm|aarch)64.*")
+        set(apple_arch "arm64")
+    elseif(ARCH_TRIPLET MATCHES "^x86_64.*")
+        set(apple_arch "x86_64")
+    else()
+        message(FATAL_ERROR "Don't know how to specify -arch for GMP for ${ARCH_TRIPLET} (${APPLE_TARGET_TRIPLE})")
+    endif()
+
+    set(apple_cflags_arch " -arch ${apple_arch}")
+    set(apple_cxxflags_arch " -arch ${apple_arch}")
+    if(CMAKE_OSX_DEPLOYMENT_TARGET)
+      if (SDK_NAME)
+        set(apple_ldflags_arch " -m${SDK_NAME}-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+      elseif(CMAKE_OSX_DEPLOYMENT_TARGET)
+        set(apple_ldflags_arch " -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
+      endif()
+    endif()
+    set(apple_ldflags_arch "${apple_ldflags_arch} -arch ${apple_arch}")
+
+    if(CMAKE_OSX_SYSROOT)
+      foreach(f c cxx ld)
+        set(apple_${f}flags_arch "${apple_${f}flags_arch} -isysroot ${CMAKE_OSX_SYSROOT}")
+      endforeach()
+    endif()
+elseif(cross_host STREQUAL "" AND CMAKE_LIBRARY_ARCHITECTURE)
+    set(cross_host "--build=${CMAKE_LIBRARY_ARCHITECTURE}")
+endif()
 
 set(sqlcipher_ldflags "")
 set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT=sqlcipher_extra_init -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown")
 
 if(APPLE)
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
-    set(sqlcipher_ldflags "-framework Security -framework Foundation -framework CoreFoundation")
+    set(sqlcipher_ldflags "${sqlcipher_ldflags} -framework Security -framework Foundation -framework CoreFoundation")
 else()
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL -I${OPENSSL_INCLUDE_DIRS}")
     # NOTE: For example libraries are "<blah>/libssl.so;/<blah>/libcrypto.so" the semicolon confuses
@@ -86,9 +125,9 @@ else()
     # needed if we choose OpenSSL as our encryption library for SQLCipher.
     string(REPLACE ";" " -l" OPENSSL_LIBRARIES_STR "-lcrypto -lssl}")
     if (TARGET openssl_external)
-        set(sqlcipher_ldflags "-lm -L${OPENSSL_ROOT_DIR}/lib -lcrypto -lssl")
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lm -L${OPENSSL_ROOT_DIR}/lib -lcrypto -lssl")
     else()
-        set(sqlcipher_ldflags "-lm -lcrypto -lssl")
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lm -lcrypto -lssl")
     endif()
 
     if(WIN32)
@@ -112,8 +151,8 @@ ExternalProject_Add(sqlcipher_external
     CONFIGURE_COMMAND
         ${CMAKE_CURRENT_LIST_DIR}/../sqlcipher/configure ${cross_host} --disable-shared
         --enable-static --disable-tcl --disable-readline --fts5 --with-tempstore=always
-        --prefix=${SQLCIPHER_PREFIX} CC=${deps_cc} CFLAGS=${sqlcipher_cflags}
-        LDFLAGS=${sqlcipher_ldflags} ${cross_rc}
+        --prefix=${SQLCIPHER_PREFIX} CC=${deps_cc} CFLAGS=${apple_cflags_arch}${sqlcipher_cflags}
+        LDFLAGS=${apple_ldflags_arch}${sqlcipher_ldflags} ${cross_rc}
     BUILD_COMMAND make libsqlite3.a
     BUILD_BYPRODUCTS
         ${SQLCIPHER_LIBDIR}/libsqlite3.a
