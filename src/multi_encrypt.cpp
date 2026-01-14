@@ -9,7 +9,7 @@
 #include <sodium/randombytes.h>
 
 #include <session/multi_encrypt.hpp>
-#include <stdexcept>multi_encrypt
+#include <stdexcept>
 
 namespace session {
 
