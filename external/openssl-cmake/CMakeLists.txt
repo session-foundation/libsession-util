@@ -1,3 +1,9 @@
+# NOTE: Apple does not build OpenSSL which we use for SQLCipher as SQLCipher compiles natively
+# against Apple's Common Crypto
+if (APPLE)
+    return()
+endif()
+
 set(LOCAL_MIRROR "" CACHE STRING "local mirror path/URL for lib downloads")
 
 set(desired_version 3.5.4)
@@ -76,12 +82,6 @@ endif()
 
 set(cross_host "")
 set(cross_extra "")
-if(APPLE)
-  set(ARCH_TRIPLET "${APPLE_TARGET_TRIPLE}")
-  if(NOT ARCH_TRIPLET OR ARCH_TRIPLET STREQUAL "")
-      message(FATAL_ERROR "Unknown or undefined Apple target triple")
-  endif()
-endif()
 if (ANDROID)
   set(cross_host "--host=${CMAKE_LIBRARY_ARCHITECTURE}")
   set(cross_extra "LD=${ANDROID_TOOLCHAIN_ROOT}/bin/${CMAKE_LIBRARY_ARCHITECTURE}-ld" "RANLIB=${CMAKE_RANLIB}" "AR=${CMAKE_AR}")
@@ -92,63 +92,10 @@ elseif(CMAKE_CROSSCOMPILING)
   endif()
 endif()
 
-set(apple_cflags_arch)
-set(apple_cxxflags_arch)
-set(apple_ldflags_arch)
-set(sane_cross_host "${cross_host}")
-if(APPLE AND CMAKE_CROSSCOMPILING)
-    if(sane_cross_host MATCHES "^(.*-)ios([0-9.]+)(-.*)?$")
-        set(sane_cross_host "${CMAKE_MATCH_1}darwin${CMAKE_MATCH_2}${CMAKE_MATCH_3}")
-    endif()
-    if(sane_cross_host MATCHES "^(.*)-simulator$")
-        set(sane_cross_host "${CMAKE_MATCH_1}")
-    endif()
-
-    set(apple_arch)
-    if(ARCH_TRIPLET MATCHES "^(arm|aarch)64.*")
-        set(apple_arch "arm64")
-    elseif(ARCH_TRIPLET MATCHES "^x86_64.*")
-        set(apple_arch "x86_64")
-    else()
-        message(FATAL_ERROR "Don't know how to specify -arch for GMP for ${ARCH_TRIPLET} (${APPLE_TARGET_TRIPLE})")
-    endif()
-
-    set(apple_cflags_arch " -arch ${apple_arch}")
-    set(apple_cxxflags_arch " -arch ${apple_arch}")
-    if(CMAKE_OSX_DEPLOYMENT_TARGET)
-      if (SDK_NAME)
-        set(apple_ldflags_arch " -m${SDK_NAME}-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      elseif(CMAKE_OSX_DEPLOYMENT_TARGET)
-        set(apple_ldflags_arch " -mmacosx-version-min=${CMAKE_OSX_DEPLOYMENT_TARGET}")
-      endif()
-    endif()
-    set(apple_ldflags_arch "${apple_ldflags_arch} -arch ${apple_arch}")
-
-    if(CMAKE_OSX_SYSROOT)
-      foreach(f c cxx ld)
-        set(apple_${f}flags_arch "${apple_${f}flags_arch} -isysroot ${CMAKE_OSX_SYSROOT}")
-      endforeach()
-    endif()
-elseif(cross_host STREQUAL "" AND CMAKE_LIBRARY_ARCHITECTURE)
-    set(build_host "--build=${CMAKE_LIBRARY_ARCHITECTURE}")
-endif()
-
 set(deps_CFLAGS "-O2 ${flto}")
 set(deps_CXXFLAGS "-O2 ${flto}")
 set(deps_noarch_CFLAGS "${deps_CFLAGS}")
 set(deps_noarch_CXXFLAGS "${deps_CXXFLAGS}")
-
-if(APPLE)
-  foreach(lang C CXX)
-    string(APPEND deps_${lang}FLAGS " ${CMAKE_${lang}_SYSROOT_FLAG} ${CMAKE_OSX_SYSROOT} ${CMAKE_${lang}_OSX_DEPLOYMENT_TARGET_FLAG}${CMAKE_OSX_DEPLOYMENT_TARGET}")
-
-    set(deps_noarch_${lang}FLAGS "${deps_${lang}FLAGS}")
-
-    foreach(arch ${CMAKE_OSX_ARCHITECTURES})
-      string(APPEND deps_${lang}FLAGS " -arch ${arch}")
-    endforeach()
-  endforeach()
-endif()
 
 # Builds a target; takes the target name (e.g. "readline") and builds it in an external project with
 # target name suffixed with `_external`.  Its upper-case value is used to get the download details
@@ -199,57 +146,54 @@ function(build_external target)
   )
 endfunction()
 
-if(NOT APPLE)
-    if(CMAKE_CROSSCOMPILING)
-      if(ARCH_TRIPLET STREQUAL x86_64-w64-mingw32)
-        set(openssl_extra_opts mingw64)
-        set(openssl_extra_env RC=${CMAKE_RC_COMPILER})
-      elseif(ARCH_TRIPLET STREQUAL i686-w64-mingw32)
-        set(openssl_extra_opts mingw)
-        set(openssl_extra_env RC=${CMAKE_RC_COMPILER})
-      elseif(ANDROID)
-        set(openssl_extra_opts no-asm)
-        set(openssl_extra_env SYSTEM=Linux)
-        set(deps_CFLAGS "${deps_CFLAGS} --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot")
-        if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64 OR CMAKE_ANDROID_ARCH_ABI MATCHES x86)
-            # NOTE: Sysroot isn't sufficient to find the asm/ folder sitting in the host-tagged folder
-            #  /usr/lib/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/linux/types.h:9:10: fatal error: 'asm/types.h' file not found
-            # At
-            #  /usr/lib/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/x86_64-linux-android/asm/
-            set(deps_CFLAGS "${deps_CFLAGS} -I${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr/includes/x86_64-linux-android")
-        endif()
-      endif()
+if(CMAKE_CROSSCOMPILING)
+  if(ARCH_TRIPLET STREQUAL x86_64-w64-mingw32)
+    set(openssl_extra_opts mingw64)
+    set(openssl_extra_env RC=${CMAKE_RC_COMPILER})
+  elseif(ARCH_TRIPLET STREQUAL i686-w64-mingw32)
+    set(openssl_extra_opts mingw)
+    set(openssl_extra_env RC=${CMAKE_RC_COMPILER})
+  elseif(ANDROID)
+    set(openssl_extra_opts no-asm)
+    set(openssl_extra_env SYSTEM=Linux)
+    set(deps_CFLAGS "${deps_CFLAGS} --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot")
+    if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64 OR CMAKE_ANDROID_ARCH_ABI MATCHES x86)
+        # NOTE: Sysroot isn't sufficient to find the asm/ folder sitting in the host-tagged folder
+        #  /usr/lib/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/linux/types.h:9:10: fatal error: 'asm/types.h' file not found
+        # At
+        #  /usr/lib/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/x86_64-linux-android/asm/
+        set(deps_CFLAGS "${deps_CFLAGS} -I${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr/include/x86_64-linux-android")
     endif()
-    build_external(openssl
-      CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
-        CC=${deps_cc}
-        CFLAGS=${deps_CFLAGS}
-        ${openssl_extra_env}
-        ${cross_extra}
-        ./Configure --prefix=${DEPS_DESTDIR} --libdir=lib ${openssl_extra_opts}
-          no-shared no-capieng no-dso no-dtls1 no-ec_nistp_64_gcc_128 no-gost
-          no-heartbeats no-md2 no-rc5 no-rdrand no-rfc3779 no-sctp no-ssl-trace no-ssl2 no-ssl3
-          no-static-engine no-tests no-weak-ssl-ciphers no-zlib no-zlib-dynamic
-      INSTALL_COMMAND make install_sw
-      BUILD_BYPRODUCTS
-        ${DEPS_DESTDIR}/lib/libssl.a ${DEPS_DESTDIR}/lib/libcrypto.a
-        ${DEPS_DESTDIR}/include/openssl/ssl.h ${DEPS_DESTDIR}/include/openssl/crypto.h
-    )
-    add_static_target(OpenSSL::SSL openssl_external libssl.a)
-    add_static_target(OpenSSL::Crypto openssl_external libcrypto.a)
-    target_link_libraries(OpenSSL::SSL INTERFACE OpenSSL::Crypto)
-    set(OPENSSL_ROOT_DIR ${DEPS_DESTDIR} CACHE PATH "" FORCE)
-
-    # NOTE: FindOpenSSL defines OPENSSL_INCLUDE_DIR, we use pkg_check_modules which defines
-    # OPENSSL_INCLUDE_DIRS, we define both for maximum compatibility...
-    set(OPENSSL_INCLUDE_DIRS ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
-    set(OPENSSL_INCLUDE_DIR ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
-
-    # NOTE: Create <smallname> target so then libsession_system_or_submodule exports the
-    # <smallname>::<smallname> target so that we can universally use that target for both PkgConfig
-    # and non-pkconfig versions of OpenSSL.
-    add_library(openssl INTERFACE)
-    target_link_libraries(openssl INTERFACE OpenSSL::SSL OpenSSL::Crypto)
-    target_include_directories(openssl INTERFACE ${OPENSSL_INCLUDE_DIRS})
+  endif()
 endif()
+build_external(openssl
+  CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
+    CC=${deps_cc}
+    CFLAGS=${deps_CFLAGS}
+    ${openssl_extra_env}
+    ${cross_extra}
+    ./Configure --prefix=${DEPS_DESTDIR} --libdir=lib ${openssl_extra_opts}
+      no-shared no-capieng no-dso no-dtls1 no-ec_nistp_64_gcc_128 no-gost
+      no-heartbeats no-md2 no-rc5 no-rdrand no-rfc3779 no-sctp no-ssl-trace no-ssl2 no-ssl3
+      no-static-engine no-tests no-weak-ssl-ciphers no-zlib no-zlib-dynamic
+  INSTALL_COMMAND make install_sw
+  BUILD_BYPRODUCTS
+    ${DEPS_DESTDIR}/lib/libssl.a ${DEPS_DESTDIR}/lib/libcrypto.a
+    ${DEPS_DESTDIR}/include/openssl/ssl.h ${DEPS_DESTDIR}/include/openssl/crypto.h
+)
+add_static_target(OpenSSL::SSL openssl_external libssl.a)
+add_static_target(OpenSSL::Crypto openssl_external libcrypto.a)
+target_link_libraries(OpenSSL::SSL INTERFACE OpenSSL::Crypto)
+set(OPENSSL_ROOT_DIR ${DEPS_DESTDIR} CACHE PATH "" FORCE)
 
+# NOTE: FindOpenSSL defines OPENSSL_INCLUDE_DIR, we use pkg_check_modules which defines
+# OPENSSL_INCLUDE_DIRS, we define both for maximum compatibility...
+set(OPENSSL_INCLUDE_DIRS ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
+set(OPENSSL_INCLUDE_DIR ${DEPS_DESTDIR}/include CACHE PATH "" FORCE)
+
+# NOTE: Create <smallname> target so then libsession_system_or_submodule exports the
+# <smallname>::<smallname> target so that we can universally use that target for both PkgConfig
+# and non-pkconfig versions of OpenSSL.
+add_library(openssl INTERFACE)
+target_link_libraries(openssl INTERFACE OpenSSL::SSL OpenSSL::Crypto)
+target_include_directories(openssl INTERFACE ${OPENSSL_INCLUDE_DIRS})
