@@ -119,17 +119,6 @@ if(APPLE)
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
     set(sqlcipher_ldflags "${sqlcipher_ldflags} -framework Security -framework Foundation -framework CoreFoundation")
 else()
-    set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL -I${OPENSSL_INCLUDE_DIRS}")
-    # NOTE: For example libraries are "<blah>/libssl.so;/<blah>/libcrypto.so" the semicolon confuses
-    # the linker so we remove the delimiter to make it compliant. Also note that -lm (math) is
-    # needed if we choose OpenSSL as our encryption library for SQLCipher.
-    string(REPLACE ";" " -l" OPENSSL_LIBRARIES_STR "-lcrypto -lssl}")
-    if (TARGET openssl_external)
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lm -L${OPENSSL_ROOT_DIR}/lib -lcrypto -lssl")
-    else()
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lm -lcrypto -lssl")
-    endif()
-
     if(WIN32)
         # TODO: I'm unable to stop SQLCipher from building sqlite3.exe in the mingw cross-compile
         # so we need to augment that executable with some Window's libraries to get us through...
@@ -139,7 +128,18 @@ else()
     if(ANDROID)
         # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
         set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
+    else()
+        # NOTE: Apparently Android doesn't ship libmath, it's included in glibc itself
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lm")
     endif()
+
+    set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL -I${OPENSSL_INCLUDE_DIRS}")
+    if (TARGET openssl_external)
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -L${OPENSSL_ROOT_DIR}/lib -lcrypto -lssl")
+    else()
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lcrypto -lssl")
+    endif()
+
 endif()
 
 ExternalProject_Add(sqlcipher_external
