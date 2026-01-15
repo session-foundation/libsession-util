@@ -126,6 +126,12 @@ else()
     endif()
 
     if(ANDROID)
+        # NOTE: x86 build seems to have trouble finding -llog, help it find it by specifying the
+        # library path
+        if(CMAKE_ANDROID_ARCH_ABI MATCHES x86)
+            set(sqlcipher_ldflags "${sqlcipher_ldflags} -L${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr/lib/i686-linux-android/${ANDROID_PLATFORM_LEVEL} -lm")
+        endif()
+
         # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
         set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
     endif()
