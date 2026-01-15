@@ -154,6 +154,7 @@ ExternalProject_Add(sqlcipher_external
         --prefix=${SQLCIPHER_PREFIX} CC=${deps_cc} CFLAGS=${apple_cflags_arch}${sqlcipher_cflags}
         LDFLAGS=${apple_ldflags_arch}${sqlcipher_ldflags} ${cross_rc}
     BUILD_COMMAND make libsqlite3.a
+    INSTALL_COMMAND make install-lib install-headers
     BUILD_BYPRODUCTS
         ${SQLCIPHER_LIBDIR}/libsqlite3.a
 )
