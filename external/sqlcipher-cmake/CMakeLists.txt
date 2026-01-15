@@ -128,9 +128,6 @@ else()
     if(ANDROID)
         # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
         set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
-    else()
-        # NOTE: Apparently Android doesn't ship libmath, it's included in glibc itself
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lm")
     endif()
 
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL -I${OPENSSL_INCLUDE_DIRS}")
