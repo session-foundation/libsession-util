@@ -985,7 +985,7 @@ LIBSESSION_C_API void session_network_callbacks_respond(
     if (!response_handle)
         return;
 
-    std::unique_ptr<session_response_handle_cpp_t> handle_guard(response_handle);
+    std::unique_ptr<session_response_handle_cpp_t> handle_edge(response_handle);
     std::vector<std::pair<std::string, std::string>> headers;
     headers.reserve(headers_size);
 
@@ -997,7 +997,7 @@ LIBSESSION_C_API void session_network_callbacks_respond(
     if (body_len > 0)
         body.emplace(body_, body_len);
 
-    handle_guard->cpp_callback(success, timeout, status_code, std::move(headers), std::move(body));
+    handle_edge->cpp_callback(success, timeout, status_code, std::move(headers), std::move(body));
 }
 
 LIBSESSION_C_API CONNECTION_STATUS session_network_get_status(network_object* network) {

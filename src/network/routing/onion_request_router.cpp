@@ -81,11 +81,11 @@ OnionRequestRouter::OnionRequestRouter(
     log::trace(cat, "[OnionRequestRouter] Initializing.");
 
     _request_queues[RequestCategory::standard] =
-            std::make_shared<detail::RequestQueue>(loop, _config.request_timeout_check_frequency);
+            std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
     _request_queues[RequestCategory::upload] =
-            std::make_shared<detail::RequestQueue>(loop, _config.request_timeout_check_frequency);
+            std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
     _request_queues[RequestCategory::download] =
-            std::make_shared<detail::RequestQueue>(loop, _config.request_timeout_check_frequency);
+            std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
 
     _loop->call_soon([this] {
         auto snode_pool = _snode_pool.lock();
@@ -243,7 +243,7 @@ void OnionRequestRouter::_close_connections() {
                     "Network is suspended.");
     }
 
-    // Remove any failure listeners for the guard nodes of the current paths
+    // Remove any failure listeners for the edge nodes of the current paths
     if (auto transport = _transport.lock())
         for (const auto& [category, path_list] : _paths)
             for (const auto& p : path_list)
@@ -490,15 +490,15 @@ void OnionRequestRouter::_build_path(
         return;
     }
 
-    // Attempty to verify connectivity to the guard node
+    // Attempty to verify connectivity to the edge node
     _pending_paths[path_id] = path_nodes;
-    auto guard_node = path_nodes.front();
+    auto edge_node = path_nodes.front();
     log::debug(
             cat,
-            "[OnionRouter Request {} Path {}]: Testing connectivity to guard node {}.",
+            "[OnionRouter Request {} Path {}]: Testing connectivity to edge node {}.",
             req_id_log,
             path_id,
-            guard_node.to_string());
+            edge_node.to_string());
 
     auto transport = _transport.lock();
     if (!transport) {
@@ -507,17 +507,17 @@ void OnionRequestRouter::_build_path(
     }
 
     transport->verify_connectivity(
-            guard_node,
+            edge_node,
             3s,
             "{} - Path Build {}"_format(req_id_log, path_id),
             [weak_self = weak_from_this(), path_id, category, initiating_req_id](bool success) {
                 if (auto self = weak_self.lock())
-                    self->_on_guard_connectivity_response(
+                    self->_on_edge_connectivity_response(
                             path_id, category, initiating_req_id, success);
             });
 }
 
-void OnionRequestRouter::_on_guard_connectivity_response(
+void OnionRequestRouter::_on_edge_connectivity_response(
         const std::string& path_id,
         RequestCategory category,
         std::optional<std::string> initiating_req_id,
@@ -539,23 +539,23 @@ void OnionRequestRouter::_on_guard_connectivity_response(
     auto path_nodes = std::move(pending_it->second);
     _pending_paths.erase(pending_it);
 
-    const auto& guard_node = path_nodes.front();
+    const auto& edge_node = path_nodes.front();
 
     if (_in_progress_path_builds[category] > 0)
         _in_progress_path_builds[category]--;
 
     if (!success) {
-        // The guard node failed so record the failure and try to build a new path to replace this
-        // failed one (excluding the failed guard node from the next attempt)
+        // The edge node failed so record the failure and try to build a new path to replace this
+        // failed one (excluding the failed edge node from the next attempt)
         log::warning(
                 cat,
-                "[OnionRouter Request {} Path {}]: Failed to verify connectivity to guard node {}, "
+                "[OnionRouter Request {} Path {}]: Failed to verify connectivity to edge node {}, "
                 "retrying path build.",
                 req_id_log,
                 path_id,
-                guard_node.to_string());
+                edge_node.to_string());
         if (auto snode_pool = _snode_pool.lock())
-            snode_pool->record_node_failure(guard_node);
+            snode_pool->record_node_failure(edge_node);
 
         int& retries = _path_build_retries[path_id];
         retries++;
@@ -611,9 +611,9 @@ void OnionRequestRouter::_on_guard_connectivity_response(
 
         _loop->call_later(
                 delay,
-                [weak_self = weak_from_this(), path_id, category, initiating_req_id, guard_node] {
+                [weak_self = weak_from_this(), path_id, category, initiating_req_id, edge_node] {
                     if (auto self = weak_self.lock())
-                        self->_build_path(category, initiating_req_id, {guard_node}, path_id);
+                        self->_build_path(category, initiating_req_id, {edge_node}, path_id);
                 });
         return;
     }
@@ -711,7 +711,7 @@ void OnionRequestRouter::_on_guard_connectivity_response(
         return;
 
     transport->add_failure_listener(
-            ed25519_pubkey::from_bytes(guard_node.view_remote_key()),
+            ed25519_pubkey::from_bytes(edge_node.view_remote_key()),
             [weak_self = weak_from_this(), pid = path_id, category] {
                 auto self = weak_self.lock();
                 if (!self)
@@ -735,7 +735,7 @@ void OnionRequestRouter::_on_guard_connectivity_response(
                 if (path_it != active_paths.end())
                     path_it->failure_count = self->_config.path_failure_threshold;
 
-                self->_handle_path_failure(pid, category, "Guard connection lost");
+                self->_handle_path_failure(pid, category, "Edge connection lost");
             });
 }
 
@@ -848,7 +848,7 @@ void OnionRequestRouter::_send_on_path(
                                                  : std::nullopt);
     Request onion_request{
             request.request_id,
-            network_destination{path.nodes.front()},  // Send to guard node
+            network_destination{path.nodes.front()},  // Send to edge node
             std::string{"onion_req"},                 // Send to onion request handling endpoint
             std::move(encrypted_blob),                // Encrypted payload
             request.category,

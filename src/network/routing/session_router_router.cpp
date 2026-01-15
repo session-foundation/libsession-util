@@ -299,6 +299,10 @@ void SessionRouter::_send_request_internal(Request request, network_response_cal
                 if (!response)
                     return cb(success, timeout, status_code_, headers, response);
 
+                // If the response isn't JSON then just return it directly
+                if (!nlohmann::json::accept(*response))
+                    return cb(success, timeout, status_code_, headers, *response);
+
                 try {
                     nlohmann::json response_json = nlohmann::json::parse(*response);
 
@@ -633,7 +637,7 @@ void SessionRouter::_send_via_tunnel(
     // auto test_key =
     // oxenc::from_base64("1n+DAM9hKyJhtXSPR5L/HdemIKPiHs8dZsPn2kEQuMs="); auto test_key
     // = oxenc::from_base32z("55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo");
-    auto router_target = oxen::quic::RemoteAddress{test_key, "127.0.0.1", tunnel.local_port};
+    auto router_target = oxen::quic::RemoteAddress{test_key, "::1", tunnel.local_port};
 
     // Construct the actual request to send
     std::optional<std::chrono::milliseconds> remaining_overall_timeout =

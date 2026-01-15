@@ -118,6 +118,10 @@ void DirectRouter::_handle_transport_response(
     if (!response_body)
         return callback(success, timeout, status_code_, headers, response_body);
 
+    // If the response isn't JSON then just return it directly
+    if (!nlohmann::json::accept(*response_body))
+        return callback(success, timeout, status_code_, headers, *response_body);
+
     // Otherwise the response will be a json array of [{status_code}, {body}]
     try {
         nlohmann::json response_json = nlohmann::json::parse(*response_body);

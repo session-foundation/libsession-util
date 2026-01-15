@@ -282,7 +282,7 @@ namespace opt {
 
     /// Can be used to override the default (3) number of times a specific node in a path can
     /// receive an error before it is removed from the path and replaced by a new node (or the path
-    /// is rebuilt if it happens to be the guard node).
+    /// is rebuilt if it happens to be the edge node).
     struct cache_node_failure_threshold : base {
         uint16_t count;
         explicit cache_node_failure_threshold(uint16_t count) : count{count} {}

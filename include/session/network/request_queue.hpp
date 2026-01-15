@@ -23,7 +23,7 @@ class RequestQueue : public std::enable_shared_from_this<RequestQueue> {
   public:
     RequestQueue(
             std::shared_ptr<oxen::quic::Loop> loop, std::chrono::milliseconds check_frequency) :
-            _loop{loop}, _check_frequency{check_frequency} {};
+            _loop{std::move(loop)}, _check_frequency{check_frequency} {};
     ~RequestQueue();
 
     bool is_empty() const { return _queue.empty(); };

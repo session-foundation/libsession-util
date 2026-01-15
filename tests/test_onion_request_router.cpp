@@ -3,7 +3,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
-#include <llarp/contact/router_id.hpp>
 #include <nlohmann/json.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
 #include <session/curve25519.hpp>

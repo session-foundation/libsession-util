@@ -19,7 +19,6 @@ namespace {
     inline auto cat = log::Cat("network");
 }
 
-// TODO: Should the `ALPN` be changed to an argument passed into the `connect` function?
 constexpr auto ALPN = "oxenstorage";
 
 QuicTransport::QuicTransport(
@@ -135,8 +134,7 @@ void QuicTransport::send_request(Request request, network_response_callback_t ca
 void QuicTransport::_recreate_endpoint() {
     _endpoint = quic::Endpoint::endpoint(
             *_loop,
-            quic::Address{"0.0.0.0", 0},
-            quic::opt::alpns{ALPN},
+            quic::Address{"::", 0},
             (_config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
                                            : std::nullopt));
 }
@@ -297,6 +295,7 @@ void QuicTransport::_establish_connection(
         _endpoint->connect(
                 address,
                 creds,
+                oxen::quic::opt::outbound_alpns{ALPN},
                 oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
                 [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](

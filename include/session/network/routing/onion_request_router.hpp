@@ -90,7 +90,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
             std::optional<std::string> initiating_req_id,
             const std::vector<service_node>& nodes_to_exclude,
             std::optional<std::string> original_path_id = std::nullopt);
-    void _on_guard_connectivity_response(
+    void _on_edge_connectivity_response(
             const std::string& path_id,
             RequestCategory category,
             std::optional<std::string> initiating_req_id,
