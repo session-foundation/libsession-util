@@ -157,7 +157,7 @@ if(CMAKE_CROSSCOMPILING)
     set(openssl_extra_opts no-asm)
     set(openssl_extra_env SYSTEM=Linux)
     set(deps_CFLAGS "${deps_CFLAGS} --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot")
-    if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64)
+    if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64 OR CMAKE_ANDROID_ARCH_ABI MATCHES x86)
         # NOTE: Sysroot isn't sufficient to find the asm/ folder sitting in the host-tagged folder
         #  /usr/lib/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/linux/types.h:9:10: fatal error: 'asm/types.h' file not found
         # At
@@ -176,7 +176,8 @@ build_external(openssl
       no-shared no-capieng no-dso no-dtls1 no-ec_nistp_64_gcc_128 no-gost
       no-heartbeats no-md2 no-rc5 no-rdrand no-rfc3779 no-sctp no-ssl-trace no-ssl2 no-ssl3
       no-static-engine no-tests no-weak-ssl-ciphers no-zlib no-zlib-dynamic
-  INSTALL_COMMAND make install_sw
+  BUILD_COMMAND make build_libs
+  INSTALL_COMMAND make install_dev
   BUILD_BYPRODUCTS
     ${DEPS_DESTDIR}/lib/libssl.a ${DEPS_DESTDIR}/lib/libcrypto.a
     ${DEPS_DESTDIR}/include/openssl/ssl.h ${DEPS_DESTDIR}/include/openssl/crypto.h
