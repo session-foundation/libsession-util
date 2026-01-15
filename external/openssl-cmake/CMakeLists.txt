@@ -164,7 +164,7 @@ if(CMAKE_CROSSCOMPILING)
         #  /usr/lib/android-ndk/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include/x86_64-linux-android/asm/
         if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64)
             set(deps_CFLAGS "${deps_CFLAGS} -I${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr/include/x86_64-linux-android")
-        elseif()
+        else()
             set(deps_CFLAGS "${deps_CFLAGS} -I${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr/include/i686-linux-android")
         endif()
     endif()
