@@ -129,9 +129,8 @@ else()
         # NOTE: SQLCipher seems to have trouble finding liblog and libm which is in this folder here
         # in the sysroot
         # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -L${ANDROID_TOOLCHAIN_ROOT}/sysroot/usr/lib/${android_toolchain_prefix}-${android_toolchain_suffix}/${ANDROID_PLATFORM_LEVEL}")
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lm -llog")
         set(sqlcipher_cflags  "${sqlcipher_cflags} --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot")
+        set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
     endif()
 
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL -I${OPENSSL_INCLUDE_DIRS}")
