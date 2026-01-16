@@ -33,9 +33,6 @@ if(CMAKE_CROSSCOMPILING)
 endif()
 
 set(deps_cc ${CMAKE_C_COMPILER})
-if(CMAKE_C_COMPILER_LAUNCHER)
-  set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")
-endif()
 if(ANDROID)
   set(android_toolchain_suffix linux-android)
   set(android_compiler_suffix linux-android${ANDROID_PLATFORM_LEVEL})
@@ -67,6 +64,10 @@ if(ANDROID)
     message(FATAL_ERROR "unknown android arch: ${CMAKE_ANDROID_ARCH_ABI}")
   endif()
   set(deps_cc "${ANDROID_TOOLCHAIN_ROOT}/bin/${android_compiler_prefix}-${android_compiler_suffix}-clang")
+endif()
+
+if(CMAKE_C_COMPILER_LAUNCHER)
+  set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")
 endif()
 
 set(deps_CFLAGS "-O2")
@@ -119,27 +120,7 @@ if(APPLE)
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
     set(sqlcipher_ldflags "${sqlcipher_ldflags} -framework Security -framework Foundation -framework CoreFoundation")
 else()
-    if(WIN32)
-        # TODO: I'm unable to stop SQLCipher from building sqlite3.exe in the mingw cross-compile
-        # so we need to augment that executable with some Window's libraries to get us through...
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lws2_32 -lcrypt32")
-    endif()
-
-    if(ANDROID)
-        # NOTE: SQLCipher seems to have trouble finding liblog and libm which is in this folder here
-        # in the sysroot
-        # NOTE: SQLite uses __android_log_print and __android_log_write which is in their liblog library
-        set(sqlcipher_cflags  "${sqlcipher_cflags} --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot")
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -llog")
-    endif()
-
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_OPENSSL -I${OPENSSL_INCLUDE_DIRS}")
-    if (TARGET openssl_external)
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -L${OPENSSL_ROOT_DIR}/lib -lcrypto -lssl")
-    else()
-        set(sqlcipher_ldflags "${sqlcipher_ldflags} -lcrypto -lssl")
-    endif()
-
 endif()
 
 ExternalProject_Add(sqlcipher_external

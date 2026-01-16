@@ -28,31 +28,30 @@ include_directories(BEFORE SYSTEM ${DEPS_DESTDIR}/include)
 file(MAKE_DIRECTORY ${DEPS_DESTDIR}/include)
 
 set(deps_cc "${CMAKE_C_COMPILER}")
-set(deps_cxx "${CMAKE_CXX_COMPILER}")
 if (ANDROID)
   if(NOT ANDROID_TOOLCHAIN_NAME)
     message(FATAL_ERROR "ANDROID_TOOLCHAIN_NAME not set; did you run with the proper android toolchain options?")
   endif()
   if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64)
     set(android_clang x86_64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
+    set(cross_host android-x86_64)
   elseif(CMAKE_ANDROID_ARCH_ABI MATCHES x86)
     set(android_clang i686-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
+    set(cross_host android-x86)
   elseif(CMAKE_ANDROID_ARCH_ABI MATCHES armeabi-v7a)
     set(android_clang armv7a-linux-androideabi${ANDROID_PLATFORM_LEVEL}-clang)
+    set(cross_host android-arm)
   elseif(CMAKE_ANDROID_ARCH_ABI MATCHES arm64-v8a)
     set(android_clang aarch64-linux-android${ANDROID_PLATFORM_LEVEL}-clang)
+    set(cross_host android-arm64)
   else()
     message(FATAL_ERROR "Don't know how to build for android arch abi ${CMAKE_ANDROID_ARCH_ABI}")
   endif()
   set(deps_cc "${ANDROID_TOOLCHAIN_ROOT}/bin/${android_clang}")
-  set(deps_cxx "${deps_cc}++")
 endif()
 
 if(CMAKE_C_COMPILER_LAUNCHER)
   set(deps_cc "${CMAKE_C_COMPILER_LAUNCHER} ${deps_cc}")
-endif()
-if(CMAKE_CXX_COMPILER_LAUNCHER)
-  set(deps_cxx "${CMAKE_CXX_COMPILER_LAUNCHER} ${deps_cxx}")
 endif()
 
 function(expand_urls output source_file)
@@ -80,22 +79,15 @@ else()
   set(flto "")
 endif()
 
-set(cross_host "")
 set(cross_extra "")
-if (ANDROID)
-  set(cross_host "--host=${CMAKE_LIBRARY_ARCHITECTURE}")
-  set(cross_extra "LD=${ANDROID_TOOLCHAIN_ROOT}/bin/${CMAKE_LIBRARY_ARCHITECTURE}-ld" "RANLIB=${CMAKE_RANLIB}" "AR=${CMAKE_AR}")
-elseif(CMAKE_CROSSCOMPILING)
-  set(cross_host "--host=${ARCH_TRIPLET}")
+if(CMAKE_CROSSCOMPILING)
+  set(cross_host "${ARCH_TRIPLET}")
   if (ARCH_TRIPLET MATCHES mingw AND CMAKE_RC_COMPILER)
     set(cross_extra "WINDRES=${CMAKE_RC_COMPILER}")
   endif()
 endif()
 
 set(deps_CFLAGS "-O2 ${flto}")
-set(deps_CXXFLAGS "-O2 ${flto}")
-set(deps_noarch_CFLAGS "${deps_CFLAGS}")
-set(deps_noarch_CXXFLAGS "${deps_CXXFLAGS}")
 
 # Builds a target; takes the target name (e.g. "readline") and builds it in an external project with
 # target name suffixed with `_external`.  Its upper-case value is used to get the download details
@@ -103,8 +95,8 @@ set(deps_noarch_CXXFLAGS "${deps_CXXFLAGS}")
 # ExternalProject_Add if specified.  If omitted, these defaults are used:
 set(build_def_DEPENDS "")
 set(build_def_PATCH_COMMAND "")
-set(build_def_CONFIGURE_COMMAND ./configure ${sane_cross_host} --disable-shared --prefix=${DEPS_DESTDIR} --with-pic
-    "CC=${deps_cc}" "CXX=${deps_cxx}" "CFLAGS=${deps_CFLAGS}" "CXXFLAGS=${deps_CXXFLAGS}" ${cross_extra})
+set(build_def_CONFIGURE_COMMAND ./configure ${cross_host} --disable-shared --prefix=${DEPS_DESTDIR} --with-pic
+    "CC=${deps_cc}" "CFLAGS=${deps_CFLAGS}" ${cross_extra})
 set(build_def_BUILD_COMMAND make)
 set(build_def_INSTALL_COMMAND make install)
 set(build_def_BUILD_BYPRODUCTS ${DEPS_DESTDIR}/lib/lib___TARGET___.a ${DEPS_DESTDIR}/include/___TARGET___.h)
@@ -148,14 +140,14 @@ endfunction()
 
 if(CMAKE_CROSSCOMPILING)
   if(ARCH_TRIPLET STREQUAL x86_64-w64-mingw32)
-    set(openssl_extra_opts mingw64)
+    set(cross_host mingw64)
     set(openssl_extra_env RC=${CMAKE_RC_COMPILER})
   elseif(ARCH_TRIPLET STREQUAL i686-w64-mingw32)
-    set(openssl_extra_opts mingw)
+    set(cross_host mingw)
     set(openssl_extra_env RC=${CMAKE_RC_COMPILER})
   elseif(ANDROID)
-    set(openssl_extra_opts no-asm)
-    set(openssl_extra_env SYSTEM=Linux)
+    set(openssl_extra_opts -D__ANDROID_API__=${ANDROID_PLATFORM_LEVEL} no-asm)
+    set(openssl_extra_env "ANDROID_NDK_ROOT=${CMAKE_ANDROID_NDK} PATH=${ANDROID_TOOLCHAIN_ROOT}/bin")
     set(deps_CFLAGS "${deps_CFLAGS} --sysroot=${ANDROID_TOOLCHAIN_ROOT}/sysroot")
     if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64 OR CMAKE_ANDROID_ARCH_ABI MATCHES x86)
         # NOTE: Sysroot isn't sufficient to find the asm/ folder sitting in the host-tagged folder
@@ -176,11 +168,11 @@ build_external(openssl
     CFLAGS=${deps_CFLAGS}
     ${openssl_extra_env}
     ${cross_extra}
-    ./Configure --prefix=${DEPS_DESTDIR} --libdir=lib ${openssl_extra_opts}
-      no-shared no-capieng no-dso no-dtls1 no-ec_nistp_64_gcc_128 no-gost
-      no-heartbeats no-md2 no-rc5 no-rdrand no-rfc3779 no-sctp no-ssl-trace no-ssl2 no-ssl3
+    ./Configure ${cross_host} --prefix=${DEPS_DESTDIR}
+      --libdir=lib ${openssl_extra_opts} no-shared no-capieng no-dso no-dtls1 no-ec_nistp_64_gcc_128
+      no-gost no-heartbeats no-md2 no-rc5 no-rdrand no-rfc3779 no-sctp no-ssl-trace no-ssl2 no-ssl3
       no-static-engine no-tests no-weak-ssl-ciphers no-zlib no-zlib-dynamic
-  BUILD_COMMAND make build_libs
+  BUILD_COMMAND ${CMAKE_COMMAND} -E env ${openssl_extra_env} make build_libs
   INSTALL_COMMAND make install_dev
   BUILD_BYPRODUCTS
     ${DEPS_DESTDIR}/lib/libssl.a ${DEPS_DESTDIR}/lib/libcrypto.a
