@@ -162,6 +162,25 @@ if(CMAKE_CROSSCOMPILING)
     endif()
   endif()
 endif()
+
+# NOTE: Running the configure step with OpenSSL on linux/armhf defaults to aarch64 instead of armv4
+# so we must set the cross-host value to force it to do the right thing. We detect that platform
+# here and do so accordingly.
+include(CheckCSourceCompiles)
+check_c_source_compiles("
+#if !(defined(__arm__) || defined(__TARGET_ARCH_ARM) || defined(_M_ARM))
+  #error Not 32-bit ARM
+#endif
+#if defined(__aarch64__) || defined(__ARM64__) || defined(_M_ARM64)
+  #error 64-bit ARM
+#endif
+int main() { return 0; }
+" IS_ARM32)
+
+if(IS_ARM32 AND CMAKE_SIZEOF_VOID_P EQUAL 4)
+  set(cross_host "linux-armv4")
+endif()
+
 build_external(openssl
   CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
     CC=${deps_cc}
