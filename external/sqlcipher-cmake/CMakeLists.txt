@@ -114,7 +114,7 @@ elseif(cross_host STREQUAL "" AND CMAKE_LIBRARY_ARCHITECTURE)
 endif()
 
 set(sqlcipher_ldflags "-L${LIBICU_LIBDIR} -licudata")
-set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT=sqlcipher_extra_init -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown -DSQLITE_ENABLE_ICU")
+set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT=sqlcipher_extra_init -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown -DSQLITE_ENABLE_ICU -I${CMAKE_BINARY_DIR}/static-deps/include")
 
 if(APPLE)
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
