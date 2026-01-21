@@ -146,6 +146,7 @@ set_target_properties(sqlcipher::sqlcipher PROPERTIES
     IMPORTED_LOCATION ${SQLCIPHER_LIBDIR}/libsqlite3.a
     INTERFACE_INCLUDE_DIRECTORIES ${SQLCIPHER_INCLUDEDIR}
 )
+
 target_compile_definitions(sqlcipher::sqlcipher INTERFACE SQLITE_HAS_CODEC)
 target_link_libraries(sqlcipher::sqlcipher INTERFACE libicu::libicu)
 if(APPLE)

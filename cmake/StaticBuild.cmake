@@ -226,7 +226,8 @@ add_static_target(libicu::libicutest libicu_external libicutest.a)
 add_static_target(libicu::libicutu   libicu_external libicutu.a)
 add_static_target(libicu::libicuuc   libicu_external libicuuc.a)
 
+find_package(Threads REQUIRED) # NOTE: Libicu uses synchronisation primitives
 add_library(libicu::libicu INTERFACE IMPORTED GLOBAL)
 add_dependencies(libicu::libicu libicu_external)
 set_target_properties(libicu::libicu PROPERTIES INTERFACE_INCLUDE_DIRECTORIES ${DEPS_DESTDIR}/include)
-target_link_libraries(libicu::libicu INTERFACE libicu::libicui18n libicu::libicuuc libicu::libicudata)
+target_link_libraries(libicu::libicu INTERFACE libicu::libicui18n libicu::libicuuc libicu::libicudata Threads::Threads)
