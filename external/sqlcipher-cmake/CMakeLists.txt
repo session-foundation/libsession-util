@@ -10,9 +10,9 @@ file(MAKE_DIRECTORY ${SQLCIPHER_INCLUDEDIR})
 
 # NOTE: Detect if openssl is being built locally for libsession, if so this build step depends on
 # that first before proceeding
-set(sqlcipher_depends)
-if (NOT APPLE AND TARGET openssl_external)
-    set(sqlcipher_depends openssl_external)
+set(sqlcipher_depends libicu_external)
+if (TARGET openssl_external)
+    set(sqlcipher_depends ${sqlcipher_depends} openssl_external)
 endif()
 
 set(sqlcipher_cflags "${sqlcipher_cflags} -O2")
@@ -113,8 +113,8 @@ elseif(cross_host STREQUAL "" AND CMAKE_LIBRARY_ARCHITECTURE)
     set(cross_host "--build=${CMAKE_LIBRARY_ARCHITECTURE}")
 endif()
 
-set(sqlcipher_ldflags "")
-set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT=sqlcipher_extra_init -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown")
+set(sqlcipher_ldflags "-L${LIBICU_LIBDIR} -licudata")
+set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLITE_HAS_CODEC -DSQLITE_EXTRA_INIT=sqlcipher_extra_init -DSQLITE_EXTRA_SHUTDOWN=sqlcipher_extra_shutdown -DSQLITE_ENABLE_ICU")
 
 if(APPLE)
     set(sqlcipher_cflags "${sqlcipher_cflags} -DSQLCIPHER_CRYPTO_CC")
@@ -147,6 +147,7 @@ set_target_properties(sqlcipher::sqlcipher PROPERTIES
     INTERFACE_INCLUDE_DIRECTORIES ${SQLCIPHER_INCLUDEDIR}
 )
 target_compile_definitions(sqlcipher::sqlcipher INTERFACE SQLITE_HAS_CODEC)
+target_link_libraries(sqlcipher::sqlcipher INTERFACE libicu::libicu)
 if(APPLE)
     target_link_libraries(sqlcipher::sqlcipher INTERFACE "-framework Security" "-framework Foundation" "-framework CoreFoundation")
 else()

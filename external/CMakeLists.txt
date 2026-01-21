@@ -149,6 +149,11 @@ simdutf_subdir()
 libsession_static_bundle(simdutf)
 
 if(ENABLE_DATABASE)
+    function(do_static_deps)
+        include(../cmake/StaticBuild.cmake)
+    endfunction()
+
+    do_static_deps()
     libsession_system_or_submodule(OPENSSL openssl openssl>=3.5.4 openssl-cmake)
     libsession_system_or_submodule(SQLCIPHER sqlcipher sqlcipher>=4.12.0 sqlcipher-cmake)
 endif()
