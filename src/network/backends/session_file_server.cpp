@@ -42,7 +42,7 @@ Request upload(
             },
             ENDPOINT_FILE,
             std::move(data),
-            RequestCategory::upload,
+            RequestCategory::file,
             request_timeout,
             overall_timeout,
             UploadInfo{std::move(file_name)}};
@@ -63,7 +63,7 @@ Request download(
             },
             "{}/{}"_format(ENDPOINT_FILE, file_id),
             std::nullopt,
-            RequestCategory::download,
+            RequestCategory::file,
             request_timeout,
             overall_timeout};
 }
@@ -112,7 +112,7 @@ Request get_client_version(
             },
             std::move(endpoint),
             std::nullopt,
-            RequestCategory::standard,
+            RequestCategory::file_small,
             request_timeout,
             overall_timeout};
 }

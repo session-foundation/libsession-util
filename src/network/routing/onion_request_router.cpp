@@ -24,29 +24,23 @@ namespace {
     constexpr auto node_not_found_prefix = "502 Bad Gateway\n\nNext node not found: "sv;
     constexpr auto node_not_found_prefix_no_status = "Next node not found: "sv;
 
-    enum class PathSelectionBehaviour {
-        random,
-        new_or_least_busy,
-    };
-
-    inline std::string to_string(RequestCategory category, bool single_path_mode) {
+    inline std::string to_string(PathCategory category, bool single_path_mode) {
         if (single_path_mode)
             return "single_path";
 
         return to_string(category);
     }
 
-    PathSelectionBehaviour get_path_selection_behaviour(RequestCategory category) {
+    inline RequestCategory to_small_request_category(PathCategory category) {
         switch (category) {
-            case RequestCategory::standard: return PathSelectionBehaviour::random;
-            case RequestCategory::upload: return PathSelectionBehaviour::new_or_least_busy;
-            case RequestCategory::download: return PathSelectionBehaviour::new_or_least_busy;
+            case PathCategory::standard: return RequestCategory::standard_small;
+            case PathCategory::file: return RequestCategory::file_small;
         }
-        return PathSelectionBehaviour::random;
+        return RequestCategory::standard_small;  // Should not be reached
     }
 
     std::vector<service_node> extract_nodes(
-            const std::unordered_map<RequestCategory, std::vector<OnionPath>>& paths,
+            const std::unordered_map<PathCategory, std::vector<OnionPath>>& paths,
             const std::unordered_map<std::string, std::vector<service_node>>& pending_paths) {
         std::vector<service_node> all_used_nodes;
 
@@ -77,14 +71,15 @@ OnionRequestRouter::OnionRequestRouter(
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)}, _loop{std::move(loop)}, _snode_pool{snode_pool}, _transport{transport} {
+        _config{std::move(config)},
+        _loop{std::move(loop)},
+        _snode_pool{snode_pool},
+        _transport{transport} {
     log::trace(cat, "[OnionRequestRouter] Initializing.");
 
-    _request_queues[RequestCategory::standard] =
+    _request_queues[PathCategory::standard] =
             std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
-    _request_queues[RequestCategory::upload] =
-            std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
-    _request_queues[RequestCategory::download] =
+    _request_queues[PathCategory::file] =
             std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
 
     _loop->call_soon([this] {
@@ -201,7 +196,7 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
     if (!_config.disable_pre_build_paths) {
         log::info(cat, "[OnionRequestRouter] Pre-building initial paths.");
 
-        auto schedule_build = [this](RequestCategory category, int count) {
+        auto schedule_build = [this](PathCategory category, int count) {
             for (int i = 0; i < count; ++i)
                 _build_path(
                         category,
@@ -212,7 +207,7 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
 
         if (_config.single_path_mode) {
             log::debug(cat, "[OnionRequestRouter] Pre-building 1 path for single_path_mode.");
-            schedule_build(RequestCategory::standard, 1);
+            schedule_build(PathCategory::standard, 1);
         } else {
             for (const auto& [category, min_count] : _config.min_path_counts) {
                 if (min_count > 0) {
@@ -269,7 +264,7 @@ void OnionRequestRouter::_update_status() {
     ConnectionStatus new_status = ConnectionStatus::disconnected;
 
     // If we have at least one active "standard" path we are considered connected
-    auto paths_it = _paths.find(RequestCategory::standard);
+    auto paths_it = _paths.find(PathCategory::standard);
     if (paths_it != _paths.end() && !paths_it->second.empty())
         new_status = ConnectionStatus::connected;
     // If we have at least one active non-standard path then considered connecting (not properly
@@ -303,8 +298,9 @@ void OnionRequestRouter::_send_request_internal(
                 {content_type_plain_text},
                 "OnionRequestRouter is suspended.");
 
-    auto initiating_req_category =
-            (_config.single_path_mode ? RequestCategory::standard : request.category);
+    auto path_category_for_initiating_req =
+            (_config.single_path_mode ? PathCategory::standard
+                                      : to_path_category(request.category));
 
     if (!_ready) {
         log::debug(
@@ -313,14 +309,14 @@ void OnionRequestRouter::_send_request_internal(
                 request.request_id);
 
         try {
-            _request_queues.at(initiating_req_category)
+            _request_queues.at(path_category_for_initiating_req)
                     ->add(std::move(request), std::move(callback));
         } catch (const std::exception& e) {
             log::critical(
                     cat,
                     "[OnionRequestRouter] No request queue for category '{}', request {} is being "
                     "dropped.",
-                    to_string(initiating_req_category, _config.single_path_mode),
+                    to_string(path_category_for_initiating_req, _config.single_path_mode),
                     request.request_id);
             return callback(
                     false, false, -1, {content_type_plain_text}, "Unhandled request category");
@@ -333,7 +329,7 @@ void OnionRequestRouter::_send_request_internal(
             cat,
             "[OnionRouter Request {}]: Received request for category '{}', searching for a path.",
             request.request_id,
-            to_string(initiating_req_category, _config.single_path_mode));
+            to_string(path_category_for_initiating_req, _config.single_path_mode));
     OnionPath* path = _find_valid_path(request);
 
     if (path) {
@@ -356,21 +352,23 @@ void OnionRequestRouter::_send_request_internal(
     auto initiating_req_id = request.request_id;
 
     try {
-        _request_queues.at(initiating_req_category)->add(std::move(request), std::move(callback));
+        _request_queues.at(path_category_for_initiating_req)
+                ->add(std::move(request), std::move(callback));
     } catch (const std::exception& e) {
         log::critical(
                 cat,
                 "[OnionRequestRouter] No request queue for category '{}', request {} is being "
                 "dropped.",
-                to_string(initiating_req_category, _config.single_path_mode),
+                to_string(path_category_for_initiating_req, _config.single_path_mode),
                 request.request_id);
         return callback(false, false, -1, {content_type_plain_text}, "Unhandled request category");
     }
 
     // Check if we need to build additional paths
-    const auto current =
-            _paths.count(initiating_req_category) ? _paths.at(initiating_req_category).size() : 0;
-    const auto in_progress = _in_progress_path_builds[initiating_req_category];
+    const auto current = _paths.count(path_category_for_initiating_req)
+                               ? _paths.at(path_category_for_initiating_req).size()
+                               : 0;
+    const auto in_progress = _in_progress_path_builds[path_category_for_initiating_req];
     bool should_build = false;
 
     // In single path mode, we only build if we have zero paths (current or in-progress)
@@ -378,7 +376,7 @@ void OnionRequestRouter::_send_request_internal(
         should_build = (current + in_progress == 0);
     else {
         // In multi-path mode, we build if we are below the min number
-        const auto needed = _config.min_path_counts.at(initiating_req_category);
+        const auto needed = _config.min_path_counts.at(path_category_for_initiating_req);
         should_build = (current + in_progress < needed);
     }
 
@@ -387,14 +385,14 @@ void OnionRequestRouter::_send_request_internal(
                 cat,
                 "[OnionRouter Request {}]: Path count for '{}' is insufficient, building new path.",
                 initiating_req_id,
-                to_string(initiating_req_category, _config.single_path_mode));
+                to_string(path_category_for_initiating_req, _config.single_path_mode));
 
-        _build_path(initiating_req_category, initiating_req_id, {});
+        _build_path(path_category_for_initiating_req, initiating_req_id, {});
     }
 }
 
 void OnionRequestRouter::_build_path(
-        RequestCategory category,
+        PathCategory category,
         std::optional<std::string> initiating_req_id,
         const std::vector<service_node>& nodes_to_exclude_,
         std::optional<std::string> original_path_id) {
@@ -510,6 +508,7 @@ void OnionRequestRouter::_build_path(
             edge_node,
             3s,
             "{} - Path Build {}"_format(req_id_log, path_id),
+            to_small_request_category(category),  // "small" category for reserved stream
             [weak_self = weak_from_this(), path_id, category, initiating_req_id](bool success) {
                 if (auto self = weak_self.lock())
                     self->_on_edge_connectivity_response(
@@ -519,7 +518,7 @@ void OnionRequestRouter::_build_path(
 
 void OnionRequestRouter::_on_edge_connectivity_response(
         const std::string& path_id,
-        RequestCategory category,
+        PathCategory category,
         std::optional<std::string> initiating_req_id,
         bool success) {
     const std::string req_id_log = initiating_req_id.value_or("internal");
@@ -740,7 +739,7 @@ void OnionRequestRouter::_on_edge_connectivity_response(
 }
 
 OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
-    auto it = _paths.find(request.category);
+    auto it = _paths.find(to_path_category(request.category));
     if (it == _paths.end() || it->second.empty())
         return nullptr;
 
@@ -782,38 +781,26 @@ OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
     if (suitable_paths.empty())
         return nullptr;
 
-    PathSelectionBehaviour behaviour = get_path_selection_behaviour(request.category);
+    // Sort by the number of active requests, ascending, randomise the order if equal (stable sort
+    // will maintain the random order from the shuffle)
+    std::shuffle(suitable_paths.begin(), suitable_paths.end(), csrng);
+    std::stable_sort(
+            suitable_paths.begin(),
+            suitable_paths.end(),
+            [](const OnionPath* a, const OnionPath* b) {
+                return a->active_requests < b->active_requests;
+            });
 
-    switch (behaviour) {
-        case PathSelectionBehaviour::new_or_least_busy: {
-            // Sort by the number of pending requests, ascending
-            std::sort(
-                    suitable_paths.begin(),
-                    suitable_paths.end(),
-                    [](const OnionPath* a, const OnionPath* b) {
-                        return a->pending_requests < b->pending_requests;
-                    });
+    OnionPath* best_path = suitable_paths.front();
+    const auto min_paths_for_type = _config.min_path_counts[to_path_category(request.category)];
 
-            OnionPath* best_path = suitable_paths.front();
-            const auto min_paths_for_type = _config.min_path_counts[request.category];
+    // Return the path with the fewest active requests if we had one with no requests, or
+    // already have the minimum number of paths for this type
+    if (best_path->active_requests == 0 || candidate_paths.size() >= min_paths_for_type)
+        return best_path;
 
-            // Return the path with the fewest pending requests if we had one with no requets, or
-            // already have the minimum number of paths for this type
-            if (best_path->pending_requests == 0 || candidate_paths.size() >= min_paths_for_type)
-                return best_path;
-
-            // Otherwise we want to build a new path (for this PathSelectionBehaviour the assuption
-            // is that it'd be faster to build a new path and send the request along that rather
-            // than use an existing path)
-            return nullptr;
-        }
-
-        case PathSelectionBehaviour::random:
-        default:
-            // Shuffle the suitable paths to pick a random one.
-            std::shuffle(suitable_paths.begin(), suitable_paths.end(), csrng);
-            return suitable_paths.front();
-    }
+    // Otherwise we want to build a new path (want to maintain the minimum path count)
+    return nullptr;
 }
 
 void OnionRequestRouter::_send_on_path(
@@ -855,8 +842,8 @@ void OnionRequestRouter::_send_on_path(
             request.time_remaining(),
             remaining_overall_timeout};
 
-    // Increment the `pending_requests` and actually send the `onion_request`
-    path.pending_requests++;
+    // Increment the `active_requests` and actually send the `onion_request`
+    path.active_requests++;
 
     auto transport = _transport.lock();
     if (!transport) {
@@ -989,11 +976,11 @@ void OnionRequestRouter::_handle_transport_response(
                 original_request.request_id,
                 final_status_code,
                 path_id);
-        _handle_path_failure(path_id, original_request.category, decrypted_body);
+        _handle_path_failure(path_id, to_path_category(original_request.category), decrypted_body);
     }
 
     // Clean up paths if needed
-    _decrement_and_cleanup_path(path_id, original_request.category);
+    _decrement_and_cleanup_path(path_id, to_path_category(original_request.category));
 
     // Now we can trigger the callback with the result
     return callback(
@@ -1005,7 +992,7 @@ void OnionRequestRouter::_handle_transport_response(
 }
 
 void OnionRequestRouter::_decrement_and_cleanup_path(
-        const std::string& path_id, RequestCategory category) {
+        const std::string& path_id, PathCategory category) {
     // Check active paths first
     auto& active_paths = _paths[category];
 
@@ -1014,8 +1001,8 @@ void OnionRequestRouter::_decrement_and_cleanup_path(
                 active_paths.end(),
                 [&path_id](const auto& p) { return p.id == path_id; });
         it != active_paths.end()) {
-        if (it->pending_requests > 0)
-            it->pending_requests--;
+        if (it->active_requests > 0)
+            it->active_requests--;
 
         // The path is still active so we don't need to do anything else
         return;
@@ -1028,14 +1015,14 @@ void OnionRequestRouter::_decrement_and_cleanup_path(
                 dying_paths.end(),
                 [&path_id](const auto& p) { return p.id == path_id; });
         it != dying_paths.end()) {
-        if (it->pending_requests > 0)
-            it->pending_requests--;
+        if (it->active_requests > 0)
+            it->active_requests--;
 
         // If this was the last request, we can now safely delete the path
-        if (it->pending_requests == 0) {
+        if (it->active_requests == 0) {
             log::debug(
                     cat,
-                    "[OnionRequestRouter] Retiring path {} as it has no more pending requests.",
+                    "[OnionRequestRouter] Retiring path {} as it has no more active requests.",
                     path_id);
             dying_paths.erase(it);
         }
@@ -1052,9 +1039,9 @@ void OnionRequestRouter::_decrement_and_cleanup_path(
 
 void OnionRequestRouter::_handle_path_failure(
         const std::string& path_id,
-        const RequestCategory& request_category,
+        const PathCategory& category,
         const std::optional<std::string>& error_body) {
-    auto& active_paths = _paths[request_category];
+    auto& active_paths = _paths[category];
     auto path_it =
             std::find_if(active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
                 return p.id == path_id;
@@ -1178,25 +1165,25 @@ void OnionRequestRouter::_handle_path_failure(
         const auto old_path_id = path.id;
         auto nodes_to_exclude = path.nodes;
 
-        if (path.pending_requests == 0) {
+        if (path.active_requests == 0) {
             log::debug(cat, "[OnionRouter Path {}]: Retiring idle path immediately.", old_path_id);
             active_paths.erase(path_it);
             _update_status();
         } else {
             log::debug(
                     cat,
-                    "[OnionRouter Path {}]: Retiring active path ({} pending requests), moving to "
+                    "[OnionRouter Path {}]: Retiring active path ({} active requests), moving to "
                     "pending drop.",
                     old_path_id,
-                    path.pending_requests);
-            _paths_pending_drop[request_category].push_back(std::move(path));
+                    path.active_requests);
+            _paths_pending_drop[category].push_back(std::move(path));
             active_paths.erase(path_it);
             _update_status();
         }
 
         // Automatically rebuild if needed
-        RequestCategory category_to_rebuild =
-                (_config.single_path_mode ? RequestCategory::standard : request_category);
+        PathCategory category_to_rebuild =
+                (_config.single_path_mode ? PathCategory::standard : category);
         const auto min_paths =
                 (_config.single_path_mode ? 1 : _config.min_path_counts.at(category_to_rebuild));
         const auto current_active =
@@ -1208,9 +1195,9 @@ void OnionRequestRouter::_handle_path_failure(
                     cat,
                     "[OnionRequestRouter] Path count for {} is below the minimum {}, building "
                     "replacement.",
-                    to_string(request_category, _config.single_path_mode),
+                    to_string(category, _config.single_path_mode),
                     min_paths);
-            _build_path(request_category, "failure-replacement-" + old_path_id, nodes_to_exclude);
+            _build_path(category, "failure-replacement-" + old_path_id, nodes_to_exclude);
         }
     }
 }

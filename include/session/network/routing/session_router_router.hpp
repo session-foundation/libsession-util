@@ -26,7 +26,6 @@ namespace config {
         std::chrono::milliseconds request_timeout_check_frequency;
 
         uint8_t path_length;
-        uint8_t max_streams;
     };
 }  // namespace config
 
@@ -72,9 +71,13 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     void _send_direct_request(Request request, network_response_callback_t callback);
     void _send_proxy_request(Request request, network_response_callback_t callback);
     void _establish_tunnel(
-            std::span<const unsigned char>& remote_pubkey, const uint16_t remote_port, const std::string& initiating_req_id);
+            std::span<const unsigned char>& remote_pubkey,
+            const uint16_t remote_port,
+            const std::string& initiating_req_id);
     void _send_via_tunnel(
-            session::router::tunnel_info tunnel, Request request, network_response_callback_t callback);
+            session::router::tunnel_info tunnel,
+            Request request,
+            network_response_callback_t callback);
 };
 
 }  // namespace session::network

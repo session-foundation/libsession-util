@@ -2,8 +2,8 @@
 
 #include <fmt/ranges.h>
 #include <fmt/std.h>
-#include <oxenc/base64.h>
 #include <oxenc/base32z.h>
+#include <oxenc/base64.h>
 
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -31,7 +31,9 @@ namespace {
 
         std::visit(
                 [&key]<typename T>(const T& arg) {
-                    if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress> || std::is_same_v<T, service_node>) {
+                    if constexpr (
+                            std::is_same_v<T, oxen::quic::RemoteAddress> ||
+                            std::is_same_v<T, service_node>) {
                         key = oxenc::to_hex(arg.view_remote_key());
                     } else {
                         static_assert(std::is_same_v<T, ServerDestination>);
@@ -85,7 +87,10 @@ SessionRouter::SessionRouter(
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)}, _loop{std::move(loop)}, _snode_pool{snode_pool}, _transport{transport} {
+        _config{std::move(config)},
+        _loop{std::move(loop)},
+        _snode_pool{snode_pool},
+        _transport{transport} {
     log::trace(cat, "[SessionRouter] Initializing.");
 
     // "listen=:0" listens on a random port - this prevents multiple test devices on the same machine from trying to listen on the same port and colliding
@@ -325,7 +330,8 @@ void SessionRouter::_send_direct_request(Request request, network_response_callb
         if (std::holds_alternative<ServerDestination>(request.destination))
             throw std::runtime_error{"Attempted to send server request directly"};
 
-        auto [remote_pubkey, remote_port] = remote_info_for_destination(request.destination, request.request_id);
+        auto [remote_pubkey, remote_port] =
+                remote_info_for_destination(request.destination, request.request_id);
         const auto remote_pubkey_hex = oxenc::to_hex(remote_pubkey);
 
         if (auto it = _active_tunnels.find(remote_pubkey_hex); it != _active_tunnels.end()) {
@@ -489,7 +495,9 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
 }
 
 void SessionRouter::_establish_tunnel(
-        std::span<const unsigned char>& remote_pubkey, const uint16_t remote_port, const std::string& initiating_req_id) {
+        std::span<const unsigned char>& remote_pubkey,
+        const uint16_t remote_port,
+        const std::string& initiating_req_id) {
     auto address_pubkey_hex = oxenc::to_hex(remote_pubkey);
 
     if (address_pubkey_hex.size() != 64) {
@@ -529,7 +537,8 @@ void SessionRouter::_establish_tunnel(
 
     std::string srouter_address;
     srouter_address.reserve(oxenc::to_base32z_size(32UL) + ".snode"sv.size());
-    oxenc::to_base32z(remote_pubkey.begin(), remote_pubkey.begin() + 32, std::back_inserter(srouter_address));
+    oxenc::to_base32z(
+            remote_pubkey.begin(), remote_pubkey.begin() + 32, std::back_inserter(srouter_address));
     srouter_address += ".snode"sv;
 
     // srouter::RouterID router_id{remote_pubkey.first<32>()};
@@ -585,7 +594,8 @@ void SessionRouter::_establish_tunnel(
 
                 log::info(
                         cat,
-                        "[SessionRouter Request {}] Unable to establish session router UDP connection to {}.",
+                        "[SessionRouter Request {}] Unable to establish session router UDP "
+                        "connection to {}.",
                         initiating_req_id,
                         address_pubkey_hex);
 

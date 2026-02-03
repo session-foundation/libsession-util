@@ -215,6 +215,16 @@ void Config::handle_config_opt(opt::quic_disable_mtu_discovery qdmd) {
     log::debug(cat, "Network config disabled MTU discovery for Quic");
 }
 
+void Config::handle_config_opt(opt::quic_max_streams qms) {
+    quic_max_streams.emplace(qms.category, qms.max_count);
+
+    log::debug(
+            cat,
+            "Network config max {} quic streams set to {}",
+            to_string(qms.category),
+            qms.max_count);
+}
+
 // MARK: Onion Request Router Options
 
 void Config::handle_config_opt(opt::onionreq_path_failure_threshold pft) {

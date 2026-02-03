@@ -39,10 +39,8 @@ struct Config {
     // Onion Request Router Options
     uint8_t onionreq_path_failure_threshold = 3;
     uint8_t onionreq_path_build_retry_limit = 10;
-    std::unordered_map<RequestCategory, uint8_t> onionreq_min_path_counts = {
-            {RequestCategory::standard, 2},
-            {RequestCategory::download, 2},
-            {RequestCategory::upload, 2}};
+    std::unordered_map<PathCategory, uint8_t> onionreq_min_path_counts = {
+            {PathCategory::standard, 2}, {PathCategory::file, 2}};
     bool onionreq_single_path_mode = false;
     bool onionreq_disable_pre_build_paths = false;
 
@@ -50,6 +48,8 @@ struct Config {
     std::chrono::milliseconds quic_handshake_timeout{3s};
     std::chrono::seconds quic_keep_alive{10s};
     bool quic_disable_mtu_discovery = false;
+    std::unordered_map<RequestCategory, uint8_t> quic_max_streams = {
+            {RequestCategory::standard, 32}, {RequestCategory::file, 2}};
 
     // Callback Transport Options
     std::optional<opt::transport::network_callback_t> callbacks_callback;
@@ -97,6 +97,7 @@ struct Config {
     void handle_config_opt(opt::quic_handshake_timeout qht);
     void handle_config_opt(opt::quic_keep_alive qka);
     void handle_config_opt(opt::quic_disable_mtu_discovery qdmd);
+    void handle_config_opt(opt::quic_max_streams qms);
 
     // Onion request router options
     void handle_config_opt(opt::onionreq_path_failure_threshold pft);

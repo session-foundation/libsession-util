@@ -72,8 +72,7 @@ typedef struct {
     uint8_t onionreq_path_failure_threshold;
     uint8_t onionreq_path_build_retry_limit;
     uint8_t onionreq_min_path_count_standard;
-    uint8_t onionreq_min_path_count_upload;
-    uint8_t onionreq_min_path_count_download;
+    uint8_t onionreq_min_path_count_file;
     bool onionreq_single_path_mode;
     bool onionreq_disable_pre_build_paths;
 
@@ -81,6 +80,8 @@ typedef struct {
     uint32_t quic_handshake_timeout_seconds;
     uint32_t quic_keep_alive_seconds;
     bool quic_disable_mtu_discovery;
+    uint8_t quic_max_general_streams;
+    uint8_t quic_max_file_streams;
 
     // Callback options (for transport == SESSION_NETWORK_TRANSPORT_CALLBACKS)
     session_network_request_t transport_callback;

@@ -24,7 +24,7 @@ namespace config {
         uint8_t path_build_retry_limit;
         bool disable_pre_build_paths;
         bool single_path_mode;
-        std::unordered_map<RequestCategory, uint8_t> min_path_counts;
+        std::unordered_map<PathCategory, uint8_t> min_path_counts;
     };
 }  // namespace config
 
@@ -32,11 +32,21 @@ struct OnionPath {
     std::string id;
     std::vector<service_node> nodes;
 
-    size_t pending_requests = 0;
+    size_t active_requests = 0;
     uint16_t failure_count = 0;
 
     std::string to_string() const;
 };
+
+inline PathCategory to_path_category(RequestCategory category) {
+    switch (category) {
+        case RequestCategory::standard: return PathCategory::standard;
+        case RequestCategory::standard_small: return PathCategory::standard;
+        case RequestCategory::file: return PathCategory::file;
+        case RequestCategory::file_small: return PathCategory::file;
+    }
+    return PathCategory::standard;  // Should not be reached
+}
 
 class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<OnionRequestRouter> {
   private:
@@ -49,11 +59,11 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     std::weak_ptr<SnodePool> _snode_pool;
     std::weak_ptr<ITransport> _transport;
 
-    std::unordered_map<RequestCategory, std::vector<OnionPath>> _paths;
-    std::unordered_map<RequestCategory, std::vector<OnionPath>> _paths_pending_drop;
-    std::unordered_map<RequestCategory, std::shared_ptr<detail::RequestQueue>> _request_queues;
+    std::unordered_map<PathCategory, std::vector<OnionPath>> _paths;
+    std::unordered_map<PathCategory, std::vector<OnionPath>> _paths_pending_drop;
+    std::unordered_map<PathCategory, std::shared_ptr<detail::RequestQueue>> _request_queues;
 
-    std::unordered_map<RequestCategory, int> _in_progress_path_builds;
+    std::unordered_map<PathCategory, int> _in_progress_path_builds;
     std::unordered_map<std::string, int> _path_build_retries;
     std::unordered_map<std::string, std::vector<service_node>> _pending_paths;
 
@@ -86,13 +96,13 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void _send_request_internal(Request request, network_response_callback_t callback);
 
     void _build_path(
-            RequestCategory category,
+            PathCategory category,
             std::optional<std::string> initiating_req_id,
             const std::vector<service_node>& nodes_to_exclude,
             std::optional<std::string> original_path_id = std::nullopt);
     void _on_edge_connectivity_response(
             const std::string& path_id,
-            RequestCategory category,
+            PathCategory category,
             std::optional<std::string> initiating_req_id,
             bool success);
 
@@ -109,10 +119,10 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
             std::optional<std::string> decrypted_body,
             network_response_callback_t callback);
 
-    void _decrement_and_cleanup_path(const std::string& path_id, RequestCategory category);
+    void _decrement_and_cleanup_path(const std::string& path_id, PathCategory category);
     void _handle_path_failure(
             const std::string& path_id,
-            const RequestCategory& request_category,
+            const PathCategory& category,
             const std::optional<std::string>& error_body);
 };
 

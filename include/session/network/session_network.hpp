@@ -2,8 +2,8 @@
 
 #include <filesystem>
 #include <limits>
-#include <session/router.hpp>
 #include <oxen/quic.hpp>
+#include <session/router.hpp>
 
 #include "session/network/network_config.hpp"
 #include "session/network/routing/network_router.hpp"

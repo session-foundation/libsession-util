@@ -17,7 +17,31 @@ namespace session::network {
 
 namespace {
     inline auto cat = log::Cat("network");
-}
+
+    inline bool max_streams(RequestCategory category, config::QuicTransportConfig config) {
+        RequestCategory target_category = RequestCategory::standard;
+        switch (category) {
+            case RequestCategory::standard: target_category = RequestCategory::standard;
+            case RequestCategory::standard_small: target_category = RequestCategory::standard;
+            case RequestCategory::file: target_category = RequestCategory::file;
+            case RequestCategory::file_small: target_category = RequestCategory::file;
+        }
+
+        return (config.max_streams.contains(target_category)
+                        ? config.max_streams.at(target_category)
+                        : 1);
+    }
+
+    inline bool use_reserved_stream(RequestCategory category) {
+        switch (category) {
+            case RequestCategory::standard: return false;
+            case RequestCategory::standard_small: return true;
+            case RequestCategory::file: return false;
+            case RequestCategory::file_small: return true;
+        }
+        return false;  // Shouldn't happen
+    }
+}  // namespace
 
 constexpr auto ALPN = "oxenstorage";
 
@@ -75,14 +99,16 @@ void QuicTransport::set_node_failure_reporter(node_failure_reporter_t reporter) 
 void QuicTransport::verify_connectivity(
         service_node node,
         std::chrono::milliseconds timeout,
-        const std::string& context_id,
+        const std::string& request_id,
+        const RequestCategory category,
         std::function<void(bool success)> callback) {
     // For Quic, a successful connection IS a successful ping so we can just check for an existing
     // connection and, if one doesn't exist, try to establish one
     _loop->call([weak_self = weak_from_this(),
                  node = std::move(node),
                  cb = std::move(callback),
-                 context_id]() {
+                 request_id,
+                 category]() {
         auto self = weak_self.lock();
         if (!self)
             return;
@@ -100,7 +126,7 @@ void QuicTransport::verify_connectivity(
         if (self->_pending_requests.count(pubkey_hex) == 0 &&
             self->_pending_verification_callbacks.at(pubkey_hex).size() == 1)
             self->_establish_connection(
-                    {node.view_remote_key(), node.host(), node.omq_port}, context_id);
+                    {node.view_remote_key(), node.host(), node.omq_port}, request_id, category);
     });
 }
 
@@ -164,7 +190,7 @@ void QuicTransport::_close_connections() {
     // relaunch
     _ephemeral_connection_ids.clear();
     _active_connection_ids.clear();
-    _active_stream_ids.clear();
+    _reserved_stream_ids.clear();
     _pending_verification_callbacks.clear();
     _pending_requests.clear();
 
@@ -272,11 +298,13 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
             remote_pubkey_hex);
     std::string initiating_req_id = request.request_id;
     _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
-    _establish_connection(*remote, initiating_req_id);
+    _establish_connection(*remote, initiating_req_id, request.category);
 }
 
 void QuicTransport::_establish_connection(
-        const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id) {
+        const oxen::quic::RemoteAddress& address,
+        const std::string& initiating_req_id,
+        const RequestCategory category) {
     const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
     auto conn_key_pair = ed25519::ed25519_key_pair();
     auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
@@ -298,6 +326,7 @@ void QuicTransport::_establish_connection(
                 oxen::quic::opt::outbound_alpns{ALPN},
                 oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
+                oxen::quic::opt::max_streams{static_cast<uint64_t>(max_streams(category, _config))},
                 [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
                         oxen::quic::Connection& conn) {
                     auto self = weak_self.lock();
@@ -341,7 +370,7 @@ void QuicTransport::_establish_connection(
                     } else
                         self->_ephemeral_connection_ids.insert(conn_id);
 
-                    self->_active_stream_ids.insert_or_assign(conn_id, stream_id);
+                    self->_reserved_stream_ids.insert_or_assign(conn_id, stream_id);
 
                     // We had a successful connection so update the status to connected
                     self->_update_status(ConnectionStatus::connected);
@@ -400,7 +429,7 @@ void QuicTransport::_send_on_connection(
                 break;
             }
         }
-        _active_stream_ids.erase(conn_id);
+        _reserved_stream_ids.erase(conn_id);
 
         return callback(
                 false,
@@ -410,9 +439,9 @@ void QuicTransport::_send_on_connection(
                 "Connection died before request could be sent");
     }
 
-    // Then try to get an active stream for this connection
-    auto stream_it = _active_stream_ids.find(conn_id);
-    if (stream_it == _active_stream_ids.end()) {
+    // Ensure this connection has a reserved stream
+    auto stream_it = _reserved_stream_ids.find(conn_id);
+    if (stream_it == _reserved_stream_ids.end()) {
         // Something has gone horribly wrong, lets close the connection and the client can retry
         log::critical(
                 cat,
@@ -429,21 +458,44 @@ void QuicTransport::_send_on_connection(
                 "Internal error: Stream state missing for active connection");
     }
 
-    auto stream_id = stream_it->second;
-    auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id);
-    if (!stream) {
-        // Similar to the above, if the stream is gone then the connection ir probably in a bad
-        // state so we should just close it
-        log::warning(
-                cat,
-                "[QuicTransport Request {}] Stream {} on connection {} has died, closing "
-                "connection.",
-                request.request_id,
-                stream_id,
-                conn_id.to_string());
-        conn->close_connection();
-        return callback(
-                false, false, -1, {content_type_plain_text}, "Connection stream was closed");
+    // Determine whether we want to use the "reserved" stream (ie. for really small requests) or
+    // create a new stream (to maximise concurrency based on the configuration limits)
+    std::__1::shared_ptr<oxen::quic::BTRequestStream> target_stream;
+
+    if (use_reserved_stream(request.category)) {
+        auto stream_id = stream_it->second;
+        target_stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id);
+
+        if (!target_stream) {
+            // If the stream is gone then the connection is probably in a bad state so we should
+            // just close it
+            log::warning(
+                    cat,
+                    "[QuicTransport Request {}] Stream {} on connection {} has died, closing "
+                    "connection.",
+                    request.request_id,
+                    stream_id,
+                    conn_id.to_string());
+            conn->close_connection();
+            return callback(
+                    false, false, -1, {content_type_plain_text}, "Connection stream was closed");
+        }
+    } else {
+        target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
+
+        if (!target_stream) {
+            // If we couldn't open a streamthen the connection is probably in a bad state so we
+            // should just close it
+            log::warning(
+                    cat,
+                    "[QuicTransport Request {}] Unable to create stream on connection {}, closing "
+                    "connection.",
+                    request.request_id,
+                    conn_id.to_string());
+            conn->close_connection();
+            return callback(
+                    false, false, -1, {content_type_plain_text}, "Connection stream was closed");
+        }
     }
 
     // If the request has already timedout at this point then just fail it immediately
@@ -456,7 +508,7 @@ void QuicTransport::_send_on_connection(
             cat,
             "[QuicTransport Request {}] Sending on stream {} with conn {}",
             request.request_id,
-            stream_id,
+            target_stream->stream_id(),
             conn_id.to_string());
 
     std::span<const std::byte> payload{};
@@ -464,14 +516,13 @@ void QuicTransport::_send_on_connection(
     if (request.body)
         payload = to_span<std::byte>(*request.body);
 
-    stream->command(
+    target_stream->command(
             request.endpoint,
             payload,
             timeout,
             [weak_self = weak_from_this(),
              cb = std::move(callback),
              conn_id,
-             stream_id,
              req_id = request.request_id](quic::message resp) {
                 auto self = weak_self.lock();
                 if (!self)
@@ -483,7 +534,7 @@ void QuicTransport::_send_on_connection(
                 // want to keep it alive longer than needed)
                 if (self->_ephemeral_connection_ids.count(conn_id)) {
                     self->_ephemeral_connection_ids.erase(conn_id);
-                    self->_active_stream_ids.erase(conn_id);
+                    self->_reserved_stream_ids.erase(conn_id);
 
                     if (auto conn = self->_endpoint->get_conn(conn_id))
                         conn->close_connection();
@@ -584,7 +635,7 @@ void QuicTransport::_fail_connection(
 
     if (conn_id) {
         _ephemeral_connection_ids.erase(*conn_id);
-        _active_stream_ids.erase(*conn_id);
+        _reserved_stream_ids.erase(*conn_id);
     }
 
     // Process any waiting verification requests

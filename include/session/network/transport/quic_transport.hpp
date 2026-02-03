@@ -24,6 +24,7 @@ namespace config {
         std::chrono::seconds keep_alive;
 
         bool disable_mtu_discovery;
+        std::unordered_map<RequestCategory, uint8_t> max_streams;
     };
 }  // namespace config
 
@@ -36,7 +37,7 @@ class QuicTransport : public ITransport, public std::enable_shared_from_this<Qui
 
     std::unordered_set<oxen::quic::ConnectionID> _ephemeral_connection_ids;
     std::unordered_map<std::string, oxen::quic::ConnectionID> _active_connection_ids;
-    std::unordered_map<oxen::quic::ConnectionID, int64_t> _active_stream_ids;
+    std::unordered_map<oxen::quic::ConnectionID, int64_t> _reserved_stream_ids;
     std::unordered_map<std::string, std::vector<std::function<void(bool)>>>
             _pending_verification_callbacks;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
@@ -58,6 +59,7 @@ class QuicTransport : public ITransport, public std::enable_shared_from_this<Qui
             service_node node,
             std::chrono::milliseconds timeout,
             const std::string& request_id,
+            const RequestCategory category,
             std::function<void(bool success)> callback) override;
     void add_failure_listener(
             const ed25519_pubkey& pubkey, std::function<void()> listener) override;
@@ -80,7 +82,9 @@ class QuicTransport : public ITransport, public std::enable_shared_from_this<Qui
     void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _establish_connection(
-            const oxen::quic::RemoteAddress& address, const std::string& initiating_req_id);
+            const oxen::quic::RemoteAddress& address,
+            const std::string& initiating_req_id,
+            const RequestCategory category);
     void _send_on_connection(
             oxen::quic::ConnectionID conn_id,
             Request request,

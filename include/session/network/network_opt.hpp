@@ -310,6 +310,19 @@ namespace opt {
     /// Can be used to disable Quic MTU discovery.
     struct quic_disable_mtu_discovery : base {};
 
+    /// Can be used to override the default (32, 2) max streams that are available for each request
+    /// category when using for Quic connections.
+    ///
+    /// Note: Stream `0` for each category is reserved for very small requests (and is why there are
+    /// 2 file streams by default).
+    struct quic_max_streams : base {
+        RequestCategory category;
+        uint8_t max_count;
+
+        explicit quic_max_streams(RequestCategory category, uint8_t max_count) :
+                category{category}, max_count{max_count} {}
+    };
+
     // MARK: Onion Request Router Options
 
     /// Can be used to override the default (3) number of times a path can receive an error before
@@ -332,10 +345,10 @@ namespace opt {
     /// request category when using onion requests. If `onionreq_single_path_mode` is provided this
     /// will be ignored.
     struct onionreq_min_path_count : base {
-        RequestCategory category;
+        PathCategory category;
         uint8_t min_count;
 
-        explicit onionreq_min_path_count(RequestCategory category, uint8_t min_count) :
+        explicit onionreq_min_path_count(PathCategory category, uint8_t min_count) :
                 category{category}, min_count{min_count} {}
     };
 

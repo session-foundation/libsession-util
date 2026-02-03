@@ -11,8 +11,8 @@
 #include "session/network/network_config.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/network/routing/direct_router.hpp"
-#include "session/network/routing/session_router_router.hpp"
 #include "session/network/routing/onion_request_router.hpp"
+#include "session/network/routing/session_router_router.hpp"
 #include "session/network/session_network.h"
 #include "session/network/session_network_types.hpp"
 #include "session/network/transport/quic_transport.hpp"
@@ -51,12 +51,14 @@ namespace {
     config::QuicTransportConfig build_quic_transport_config(const config::Config& main_config) {
         return {main_config.quic_handshake_timeout,
                 main_config.quic_keep_alive,
-                main_config.quic_disable_mtu_discovery};
+                main_config.quic_disable_mtu_discovery,
+                main_config.quic_max_streams};
     }
 
     config::SessionRouterConfig build_session_router_config(const config::Config& main_config) {
         if (!main_config.cache_directory)
-            throw std::invalid_argument{"Session Router requires a cache_directory to be configured."};
+            throw std::invalid_argument{
+                    "Session Router requires a cache_directory to be configured."};
 
         if (main_config.netid == opt::netid::Target::devnet)
             throw std::invalid_argument{"Session Router does not support devnet."};
@@ -407,13 +409,13 @@ Request Network::_preprocess_request(Request request) {
                     if (!request.body)
                         throw std::invalid_argument("Upload request must have a body.");
 
-                    if (request.category != RequestCategory::upload) {
+                    if (request.category != RequestCategory::file) {
                         log::warning(
                                 cat,
-                                "Request {} has UploadInfo but category is not 'upload', forcing "
-                                "to 'upload'.",
+                                "Request {} has UploadInfo but category is not 'file', forcing "
+                                "to 'file'.",
                                 request.request_id);
-                        request.category = RequestCategory::upload;
+                        request.category = RequestCategory::file;
                     }
 
                     // Add the required headers if they weren't provided
@@ -659,7 +661,8 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     switch (cpp_defaults.router) {
         case opt::router::Type::onion_requests:
             config.router = SESSION_NETWORK_ROUTER_ONION_REQUESTS;
-        case opt::router::Type::session_router: config.router = SESSION_NETWORK_ROUTER_SESSION_ROUTER;
+        case opt::router::Type::session_router:
+            config.router = SESSION_NETWORK_ROUTER_SESSION_ROUTER;
         case opt::router::Type::direct: config.router = SESSION_NETWORK_ROUTER_DIRECT;
         default: config.router = SESSION_NETWORK_ROUTER_ONION_REQUESTS;
     }
@@ -697,11 +700,8 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.onionreq_path_failure_threshold = cpp_defaults.onionreq_path_failure_threshold;
     config.onionreq_path_build_retry_limit = cpp_defaults.onionreq_path_build_retry_limit;
     config.onionreq_min_path_count_standard =
-            cpp_defaults.onionreq_min_path_counts[RequestCategory::standard];
-    config.onionreq_min_path_count_upload =
-            cpp_defaults.onionreq_min_path_counts[RequestCategory::upload];
-    config.onionreq_min_path_count_download =
-            cpp_defaults.onionreq_min_path_counts[RequestCategory::download];
+            cpp_defaults.onionreq_min_path_counts[PathCategory::standard];
+    config.onionreq_min_path_count_file = cpp_defaults.onionreq_min_path_counts[PathCategory::file];
     config.onionreq_single_path_mode = cpp_defaults.onionreq_single_path_mode;
     config.onionreq_disable_pre_build_paths = cpp_defaults.onionreq_disable_pre_build_paths;
 
@@ -711,6 +711,8 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.quic_keep_alive_seconds =
             std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_keep_alive).count();
     config.quic_disable_mtu_discovery = cpp_defaults.quic_disable_mtu_discovery;
+    config.quic_max_general_streams = cpp_defaults.quic_max_streams[RequestCategory::standard];
+    config.quic_max_file_streams = cpp_defaults.quic_max_streams[RequestCategory::file];
 
     config.transport_callback = nullptr;
     config.transport_callback_ctx = nullptr;
@@ -847,15 +849,11 @@ LIBSESSION_C_API bool session_network_init(
 
                 if (config->onionreq_min_path_count_standard > 0)
                     cpp_opts.emplace_back(opt::onionreq_min_path_count{
-                            RequestCategory::standard, config->onionreq_min_path_count_standard});
+                            PathCategory::standard, config->onionreq_min_path_count_standard});
 
-                if (config->onionreq_min_path_count_upload > 0)
+                if (config->onionreq_min_path_count_file > 0)
                     cpp_opts.emplace_back(opt::onionreq_min_path_count{
-                            RequestCategory::upload, config->onionreq_min_path_count_upload});
-
-                if (config->onionreq_min_path_count_download > 0)
-                    cpp_opts.emplace_back(opt::onionreq_min_path_count{
-                            RequestCategory::download, config->onionreq_min_path_count_download});
+                            PathCategory::file, config->onionreq_min_path_count_file});
 
                 if (config->onionreq_single_path_mode)
                     cpp_opts.emplace_back(opt::onionreq_single_path_mode{});
@@ -886,6 +884,14 @@ LIBSESSION_C_API bool session_network_init(
 
                 if (config->quic_disable_mtu_discovery)
                     cpp_opts.emplace_back(opt::quic_disable_mtu_discovery{});
+
+                if (config->quic_max_general_streams > 0)
+                    cpp_opts.emplace_back(opt::quic_max_streams{
+                            RequestCategory::standard, config->quic_max_general_streams});
+
+                if (config->quic_max_file_streams > 0)
+                    cpp_opts.emplace_back(opt::quic_max_streams{
+                            RequestCategory::file, config->quic_max_file_streams});
 
                 break;
 
@@ -1074,8 +1080,7 @@ LIBSESSION_C_API void session_network_get_active_paths(
                             auto* meta = reinterpret_cast<session_onion_path_metadata*>(
                                     current_metadata_ptr);
                             new (meta) session_onion_path_metadata{};
-                            meta->category =
-                                    static_cast<SESSION_NETWORK_REQUEST_CATEGORY>(m.category);
+                            meta->category = static_cast<SESSION_NETWORK_PATH_CATEGORY>(m.category);
                             c_path.onion_metadata = meta;
                             current_metadata_ptr += sizeof(session_onion_path_metadata);
                         } else {

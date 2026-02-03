@@ -39,15 +39,30 @@ enum class ConnectionStatus {
 
 enum class RequestCategory {
     standard = SESSION_NETWORK_REQUEST_CATEGORY_STANDARD,
-    upload = SESSION_NETWORK_REQUEST_CATEGORY_UPLOAD,
-    download = SESSION_NETWORK_REQUEST_CATEGORY_DOWNLOAD,
+    standard_small = SESSION_NETWORK_REQUEST_CATEGORY_STANDARD_SMALL,
+    file = SESSION_NETWORK_REQUEST_CATEGORY_FILE,
+    file_small = SESSION_NETWORK_REQUEST_CATEGORY_FILE_SMALL,
+};
+
+enum class PathCategory {
+    standard = SESSION_NETWORK_PATH_CATEGORY_STANDARD,
+    file = SESSION_NETWORK_PATH_CATEGORY_FILE,
 };
 
 inline std::string to_string(RequestCategory category) {
     switch (category) {
         case RequestCategory::standard: return "standard";
-        case RequestCategory::upload: return "upload";
-        case RequestCategory::download: return "download";
+        case RequestCategory::standard_small: return "standard_small";
+        case RequestCategory::file: return "file";
+        case RequestCategory::file_small: return "file_small";
+    }
+    return "unknown";  // Should not be reached
+}
+
+inline std::string to_string(PathCategory category) {
+    switch (category) {
+        case PathCategory::standard: return "standard";
+        case PathCategory::file: return "file";
     }
     return "unknown";  // Should not be reached
 }
@@ -160,7 +175,7 @@ struct Response {
 };
 
 struct OnionPathMetadata {
-    RequestCategory category;
+    PathCategory category;
 };
 struct SessionRouterTunnelMetadata {
     std::string destination_pubkey;
