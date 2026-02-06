@@ -347,11 +347,6 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     auto info = data["1"][session_id_to_bytes(c.session_id)];
     set_base(c, info);
 
-    // If the base values weren't stored it means the data was too old so the record shouldn't be
-    // added
-    if (auto* d = info.dict(); !d || d->empty())
-        return;
-
     auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
     if (pro_expiry > 0 && c.pro_gen_index_hash) {
         set_nonzero_int(info["e"], pro_expiry);
@@ -382,7 +377,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
 
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)
-        if (!it->unread && it->last_read < cutoff)
+        if (!it->unread && !it->pro_gen_index_hash.has_value() && it->last_read < cutoff)
             stale.push_back(it->session_id);
     for (const auto& sid : stale)
         erase_1to1(sid);
@@ -393,6 +388,13 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
             stale.push_back(it->id);
     for (const auto& id : stale)
         erase_legacy_group(id);
+
+    stale.clear();
+    for (auto it = begin_blinded_1to1(); it != end(); ++it)
+        if (!it->unread && !it->pro_gen_index_hash.has_value() && it->last_read < cutoff)
+            stale.push_back(it->blinded_session_id);
+    for (const auto& id : stale)
+        erase_blinded_1to1(id);
 
     std::vector<std::pair<std::string, std::string>> stale_comms;
     for (auto it = begin_communities(); it != end(); ++it)
@@ -432,11 +434,6 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
 
     auto info = data["b"][pubkey];
     set_base(c, info);
-
-    // If the base values weren't stored it means the data was too old so the record shouldn't be
-    // added
-    if (auto* d = info.dict(); !d || d->empty())
-        return;
 
     set_nonzero_int(info["y"], c.legacy_blinding);
 

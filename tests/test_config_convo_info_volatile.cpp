@@ -621,12 +621,14 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
             if (i % 5 == 0)
                 c.unread = true;
 
-            c.pro_expiry_unix_ts =
-                    std::chrono::time_point_cast<std::chrono::milliseconds>(now + 24h);
+            if (i % 7 == 0) {
+                c.pro_expiry_unix_ts =
+                        std::chrono::time_point_cast<std::chrono::milliseconds>(now + 24h);
 
-            session::array_uc32 hash{};
-            std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(i % 256));
-            c.pro_gen_index_hash = hash;
+                session::array_uc32 hash{};
+                std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(i % 256));
+                c.pro_gen_index_hash = hash;
+            }
 
             convos.set(c);
         } else if (i % 3 == 1) {
@@ -647,7 +649,8 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
 
     // 0, 3, 6, ..., 30 == 11 not-too-old last_read entries
     // 45, 60 have unread flags
-    CHECK(convos.size_1to1() == 11 + 2);
+    // 7, 21 have pro proof
+    CHECK(convos.size_1to1() == 11 + 2 + 2);
     // 1, 4, 7, ..., 28 == 10 last_read's
     // 40, 55 = 2 unread flags
     CHECK(convos.size_legacy_groups() == 10 + 2);
@@ -656,7 +659,8 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     CHECK(convos.size_communities() == 10 + 3);
     // 31 (0-30) were recent enough to be kept
     // 5 more (35, 40, 45, 50, 55) have `unread` set.
-    CHECK(convos.size() == 38);
+    // 2 more (7, 21) have pro proof.
+    CHECK(convos.size() == 40);
 
     // Now we deliberately set some values in the internals that are too old to see that they get
     // properly pruned when we push.  (This is only for testing, clients should never touch the
@@ -671,14 +675,14 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     convos.data["1"][oxenc::from_hex(some_session_id(84))]["r"] = unix_timestamp(46);
     convos.data["1"][oxenc::from_hex(some_session_id(85))]["r"] = unix_timestamp(1000);
 
-    CHECK(convos.size_1to1() == 19);
+    CHECK(convos.size_1to1() == 21);
     int count = 0;
     for (auto it = convos.begin_1to1(); it != convos.end(); it++) {
         count++;
     }
-    CHECK(count == 19);
+    CHECK(count == 21);
 
-    CHECK(convos.size() == 44);
+    CHECK(convos.size() == 46);
     auto [seqno, push_data, obs] = convos.push();
     CHECK(convos.size() == 41);
 }
