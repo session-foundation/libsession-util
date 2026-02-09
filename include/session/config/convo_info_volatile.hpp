@@ -109,6 +109,11 @@ namespace convo {
         // Internal ctor/method for C API implementations:
         one_to_one(const struct convo_info_volatile_1to1& c);  // From c struct
         void into(convo_info_volatile_1to1& c) const;          // Into c struct
+
+    protected:
+        void load(const dict& info_dict);
+        friend class session::config::val_loader;
+        friend class session::config::ConvoInfoVolatile;
     };
 
     struct community : config::community, base {
@@ -198,6 +203,11 @@ namespace convo {
         // Internal ctor/method for C API implementations:
         blinded_one_to_one(const struct convo_info_volatile_blinded_1to1& c);  // From c struct
         void into(convo_info_volatile_blinded_1to1& c) const;                  // Into c struct
+
+    protected:
+        void load(const dict& info_dict);
+        friend class session::config::val_loader;
+        friend class session::config::ConvoInfoVolatile;
     };
 
     using any = std::variant<one_to_one, community, group, legacy_group, blinded_one_to_one>;

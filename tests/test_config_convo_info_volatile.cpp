@@ -4,6 +4,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
+#include <iostream>
 #include <session/config/convo_info_volatile.hpp>
 #include <session/types.hpp>
 #include <string_view>
@@ -614,6 +615,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                        (now - days_ago * 24h).time_since_epoch())
                 .count();
     };
+
     for (int i = 0; i <= 65; i++) {
         if (i % 3 == 0) {
             auto c = convos.get_or_construct_1to1(some_session_id(i));
@@ -622,8 +624,9 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                 c.unread = true;
 
             if (i % 7 == 0) {
-                c.pro_expiry_unix_ts =
-                        std::chrono::time_point_cast<std::chrono::milliseconds>(now + 24h);
+                c.pro_expiry_unix_ts = std::chrono::sys_time {
+                    std::chrono::milliseconds { unix_timestamp(i) }
+                };
 
                 session::array_uc32 hash{};
                 std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(i % 256));
@@ -647,10 +650,11 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
         }
     }
 
-    // 0, 3, 6, ..., 30 == 11 not-too-old last_read entries
-    // 45, 60 have unread flags
-    // 7, 21 have pro proof
-    CHECK(convos.size_1to1() == 11 + 2 + 2);
+    // (15, 30, 45, 60) == 4 have `unread` set.
+    // (21, 42, 63) == 3 have pro proof.
+    // (0) == 1 has both unread and pro proof.
+    // (3, 6, 9, 12, 18, 24, 27) == 7 are recent enough.
+    CHECK(convos.size_1to1() == 4 + 3 + 1 + 7);
     // 1, 4, 7, ..., 28 == 10 last_read's
     // 40, 55 = 2 unread flags
     CHECK(convos.size_legacy_groups() == 10 + 2);
@@ -658,8 +662,8 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     // 35, 50, 65 = 3 unread flags
     CHECK(convos.size_communities() == 10 + 3);
     // 31 (0-30) were recent enough to be kept
-    // 5 more (35, 40, 45, 50, 55) have `unread` set.
-    // 2 more (7, 21) have pro proof.
+    // 6 more (35, 40, 45, 50, 55, 60) have `unread` set.
+    // 3 more (21, 42, 63) have pro proof.
     CHECK(convos.size() == 40);
 
     // Now we deliberately set some values in the internals that are too old to see that they get
@@ -675,6 +679,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     convos.data["1"][oxenc::from_hex(some_session_id(84))]["r"] = unix_timestamp(46);
     convos.data["1"][oxenc::from_hex(some_session_id(85))]["r"] = unix_timestamp(1000);
 
+    // 6 additional 1-to-1s got added unconditionally
     CHECK(convos.size_1to1() == 21);
     int count = 0;
     for (auto it = convos.begin_1to1(); it != convos.end(); it++) {
@@ -683,8 +688,15 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
     CHECK(count == 21);
 
     CHECK(convos.size() == 46);
+
+    // Push and confirm the pruned
     auto [seqno, push_data, obs] = convos.push();
-    CHECK(convos.size() == 41);
+
+    // The push should have pruned these:
+    // 63 - where pro proof is too old
+    // 83, 84, 85 - where last_read is too old
+    CHECK(convos.size_1to1() == 17);
+    CHECK(convos.size() == 42);
 }
 
 TEST_CASE("Conversation dump/load state bug", "[config][conversations][dump-load]") {
