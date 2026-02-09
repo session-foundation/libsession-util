@@ -4,7 +4,6 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <chrono>
-#include <iostream>
 #include <session/config/convo_info_volatile.hpp>
 #include <session/types.hpp>
 #include <string_view>
