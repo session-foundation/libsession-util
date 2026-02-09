@@ -110,7 +110,7 @@ namespace convo {
         one_to_one(const struct convo_info_volatile_1to1& c);  // From c struct
         void into(convo_info_volatile_1to1& c) const;          // Into c struct
 
-    protected:
+      protected:
         void load(const dict& info_dict);
         friend class session::config::val_loader;
         friend class session::config::ConvoInfoVolatile;
@@ -204,7 +204,7 @@ namespace convo {
         blinded_one_to_one(const struct convo_info_volatile_blinded_1to1& c);  // From c struct
         void into(convo_info_volatile_blinded_1to1& c) const;                  // Into c struct
 
-    protected:
+      protected:
         void load(const dict& info_dict);
         friend class session::config::val_loader;
         friend class session::config::ConvoInfoVolatile;
