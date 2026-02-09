@@ -35,6 +35,9 @@ namespace fs = std::filesystem;
 
 namespace {
     inline auto cat = log::Cat("snode_pool");
+
+    const std::chrono::seconds STRIKE_EXPIRY = 48h;
+    const std::chrono::seconds SAVE_THROTTLE = 5min;
 }  // namespace
 
 SnodePool::SnodePool(
@@ -60,6 +63,7 @@ SnodePool::SnodePool(
         }
 
         _snode_cache_file_path = *_config.cache_directory / cache_file_name;
+        _strikes_file_path = *_config.cache_directory / (cache_file_name + "_strikes");
         _load_from_disk();
         _disk_write_thread = std::thread{&SnodePool::_disk_write_loop, this};
     }
@@ -160,7 +164,7 @@ void SnodePool::_disk_write_loop() {
 
     while (!_shut_down_disk_thread) {
         _disk_write_cv.wait(lock, [this] {
-            return _need_write || _need_clear_cache || _shut_down_disk_thread;
+            return _need_write || _strikes_dirty || _need_clear_cache || _shut_down_disk_thread;
         });
 
         // Shutdown if needed
@@ -221,6 +225,7 @@ void SnodePool::_disk_write_loop() {
 
                         std::ofstream file(tmp_path, std::ios::binary);
                         file.write(output_buffer.data(), output_buffer.size());
+                        file.close();
                     }
 
                     fs::rename(tmp_path, path_to_write);
@@ -231,6 +236,75 @@ void SnodePool::_disk_write_loop() {
             }
             lock.lock();
             _need_write = false;
+        }
+
+        if (_strikes_dirty) {
+            // Just in case
+            if (_strikes_file_path.empty()) {
+                _strikes_dirty = false;
+                continue;
+            }
+
+            auto strikes_copy = _snode_strikes;
+            auto strikes_path = _strikes_file_path;
+
+            lock.unlock();
+
+            try {
+                uint64_t expiry_threshold = std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY).count();
+                std::vector<char> buffer;
+                
+                // Simple binary format: [Count(4)][Key(32)][NumStamps(2)][Stamp(8)]...
+                uint32_t entry_count = 0;
+                buffer.resize(sizeof(uint32_t)); 
+
+                for (auto& [key, timestamps] : strikes_copy) {
+                    std::vector<uint64_t> valid_stamps;
+                    for(auto t : timestamps)
+                        if (t > expiry_threshold)
+                            valid_stamps.push_back(t);
+
+                    // Drop node if no active strikes
+                    if (valid_stamps.empty())
+                        continue;
+
+                    entry_count++;
+
+                    // Write Key (32 bytes)
+                    auto key_bytes = reinterpret_cast<const char*>(key.data());
+                    buffer.insert(buffer.end(), key_bytes, key_bytes + key.size());
+
+                    // Write Timestamp Count (2 bytes)
+                    uint16_t t_count = static_cast<uint16_t>(valid_stamps.size());
+                    const char* t_count_ptr = reinterpret_cast<const char*>(&t_count);
+                    buffer.insert(buffer.end(), t_count_ptr, t_count_ptr + sizeof(uint16_t));
+
+                    // Write Timestamps (8 bytes each)
+                    const char* stamps_ptr = reinterpret_cast<const char*>(valid_stamps.data());
+                    buffer.insert(buffer.end(), stamps_ptr, stamps_ptr + (valid_stamps.size() * sizeof(uint64_t)));
+                }
+
+                // Patch total count at the beginning
+                std::memcpy(buffer.data(), &entry_count, sizeof(uint32_t));
+
+                // Save the strikes to disk
+                auto tmp_path = strikes_path;
+                tmp_path += u8"_new";
+
+                {
+                    std::ofstream file(tmp_path, std::ios::binary);
+                    file.write(buffer.data(), buffer.size());
+                }
+
+                fs::rename(tmp_path, strikes_path);
+                log::debug(cat, "Saved {} strike entries to disk.", entry_count);
+
+            } catch (const std::exception& e) {
+                log::error(cat, "Failed to write strikes: {}", e.what());
+            }
+            lock.lock();
+            _strikes_dirty = false;
         }
     }
 }
@@ -648,7 +722,6 @@ void SnodePool::_on_refresh_complete(
         _last_snode_cache_update = std::chrono::system_clock::now();
 
         // Reset all failure and refresh-in-progress state
-        _snode_failure_counts.clear();
         _current_snode_cache_refresh_id.reset();
         _snode_refresh_results.clear();
         _refresh_candidate_nodes.clear();
@@ -682,6 +755,13 @@ void SnodePool::_on_refresh_complete(
 void SnodePool::suspend() {
     std::unique_lock lock{_cache_mutex};
     _suspended = true;
+
+    // Force a write immediately if we have dirty data
+    if (_strikes_dirty) {
+        _need_write = true;
+        _disk_write_cv.notify_one();
+    }
+
     log::info(cat, "Suspended.");
 }
 
@@ -720,13 +800,40 @@ void SnodePool::record_node_failure(const service_node& node, bool permanent) {
 
 void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
     std::lock_guard lock{_cache_mutex};
-    _snode_failure_counts[key] =
-            (permanent ? _config.cache_node_failure_threshold : _snode_failure_counts[key] += 1);
+
+    uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+
+    if (permanent) {
+        for (int i = 0; i < _config.cache_node_failure_threshold; ++i) {
+             _snode_strikes[key].push_back(now);
+        }
+    } else {
+        _snode_strikes[key].push_back(now);
+    }
+
+    _strikes_dirty = true;
     log::trace(
             cat,
-            "Recorded failure for node {}, total failures: {}",
+            "Recorded strike for node {}, total: {}",
             key.hex(),
-            _snode_failure_counts[key]);
+            _snode_strikes[key].size());
+
+    // Throttle persisting the strikes to disk to at most every X minutes
+    if (!_strikes_flush_scheduled && !_shut_down_disk_thread) {
+        _strikes_flush_scheduled = true;
+        
+        _loop->call_later(SAVE_THROTTLE, [weak_self = weak_from_this()] {
+            if (auto self = weak_self.lock()) {
+                std::lock_guard lock{self->_cache_mutex};
+                
+                if (self->_strikes_dirty) {
+                    self->_disk_write_cv.notify_one();
+                }
+                self->_strikes_flush_scheduled = false;
+            }
+        });
+    }
 }
 
 uint16_t SnodePool::node_failure_count(const service_node& node) {
@@ -735,15 +842,30 @@ uint16_t SnodePool::node_failure_count(const service_node& node) {
 
 uint16_t SnodePool::node_failure_count(const ed25519_pubkey& key) {
     std::lock_guard lock{_cache_mutex};
-    if (_snode_failure_counts.contains(key))
-        return _snode_failure_counts.at(key);
+    if (!_snode_strikes.contains(key))
+        return 0;
+    
+    const auto& stamps = _snode_strikes.at(key);
 
-    return 0;
+    uint64_t threshold = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY).count();
+
+    uint16_t count = 0;
+    for (auto t : stamps)
+        if (t > threshold)
+            count++;
+    
+    return count;
 }
 
-void SnodePool::clear_node_failure_counts() {
+void SnodePool::clear_node_strikes() {
     std::lock_guard lock{_cache_mutex};
-    _snode_failure_counts.clear();
+    _snode_strikes.clear();
+
+    // Immediately write to disk after clearing the snode strikes
+    _strikes_dirty = true;
+    _disk_write_cv.notify_one();
+    _strikes_flush_scheduled = false;
 }
 
 void SnodePool::refresh_if_needed(
@@ -778,9 +900,9 @@ void SnodePool::refresh_if_needed(
 
                 for (const auto& node : _snode_cache) {
                     auto pubkey = ed25519_pubkey::from_bytes(node.view_remote_key());
-                    auto it = _snode_failure_counts.find(pubkey);
-                    if (it != _snode_failure_counts.end() &&
-                        it->second >= _config.cache_node_failure_threshold)
+                    auto it = _snode_strikes.find(pubkey);
+                    if (it != _snode_strikes.end() &&
+                        it->second.size() >= _config.cache_node_failure_threshold)
                         continue;
 
                     // If the caller considers the node as already in use then it wouldn't be
@@ -870,8 +992,8 @@ std::vector<service_node> SnodePool::get_unused_nodes(
             continue;
 
         // Skip nodes with too many failures
-        auto it = _snode_failure_counts.find(current_key);
-        if (it != _snode_failure_counts.end() && it->second >= _config.cache_node_failure_threshold)
+        auto it = _snode_strikes.find(current_key);
+        if (it != _snode_strikes.end() && it->second.size() >= _config.cache_node_failure_threshold)
             continue;
 
         // Skip nodes whos IP addresses are in the exclusion list

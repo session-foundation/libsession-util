@@ -63,7 +63,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     virtual void record_node_failure(const ed25519_pubkey& key, bool permanent = false);
     uint16_t node_failure_count(const service_node& node);
     uint16_t node_failure_count(const ed25519_pubkey& key);
-    void clear_node_failure_counts();
+    void clear_node_strikes();
 
     // Checks if the pool is empty or stale and triggers a refresh if needed
     virtual void refresh_if_needed(
@@ -92,14 +92,17 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     std::vector<std::pair<swarm::swarm_id_t, std::vector<service_node>>> _all_swarms;
     std::unordered_map<x25519_pubkey, std::pair<swarm::swarm_id_t, std::vector<service_node>>>
             _swarm_cache;
-    std::unordered_map<ed25519_pubkey, uint16_t> _snode_failure_counts;
+    std::map<ed25519_pubkey, std::vector<uint64_t>> _snode_strikes;
 
     // Disk I/O
     std::filesystem::path _snode_cache_file_path;
+    std::filesystem::path _strikes_file_path;
     std::thread _disk_write_thread;
     std::condition_variable _disk_write_cv;
     std::mutex _cache_mutex;
     bool _need_write = false;
+    bool _strikes_dirty = false;
+    bool _strikes_flush_scheduled = false;
     bool _need_clear_cache = false;
     bool _shut_down_disk_thread = false;
 

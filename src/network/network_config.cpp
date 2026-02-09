@@ -40,6 +40,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::quic_handshake_timeout);
         HANDLE_TYPE(opt::quic_keep_alive);
         HANDLE_TYPE(opt::quic_disable_mtu_discovery);
+        HANDLE_TYPE(opt::quic_max_streams);
 
         // Onion request router options
         HANDLE_TYPE(opt::onionreq_path_failure_threshold);
