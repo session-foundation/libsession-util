@@ -1,5 +1,6 @@
 #include "session/ed25519.hpp"
 
+#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 #include <sodium/crypto_sign_ed25519.h>
 
@@ -8,13 +9,35 @@
 #include "session/export.h"
 #include "session/sodium_array.hpp"
 
-namespace session::ed25519 {
-
 template <size_t N>
-using cleared_array = sodium_cleared<std::array<unsigned char, N>>;
-
 using uc32 = std::array<unsigned char, 32>;
-using cleared_uc64 = cleared_array<64>;
+using uc64 = std::array<unsigned char, 64>;
+
+namespace {
+uc64 derived_ed25519_privkey(std::span<const unsigned char> ed25519_seed, std::string_view key) {
+    if (ed25519_seed.size() != 32 && ed25519_seed.size() != 64)
+        throw std::invalid_argument{
+                "Invalid ed25519_seed: expected 32 bytes or libsodium style 64 bytes seed"};
+
+    // Construct seed for derived key
+    //   new_seed = Blake2b32(ed25519_seed, key=<key>)
+    //   b/B      = Ed25519FromSeed(new_seed)
+    session::cleared_uc32 s2 = {};
+    int hash_result = crypto_generichash_blake2b(
+            s2.data(),
+            s2.size(),
+            ed25519_seed.data(),
+            ed25519_seed.size(),
+            reinterpret_cast<const unsigned char*>(key.data()),
+            key.size());
+    assert(hash_result == 0);  // This function can't return 0 unless misused
+
+    auto [pubkey, privkey] = session::ed25519::ed25519_key_pair(s2);
+    return privkey;
+}
+}  // namespace
+
+namespace session::ed25519 {
 
 std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_key_pair() {
     std::array<unsigned char, 32> ed_pk;
@@ -86,6 +109,11 @@ bool verify(
             crypto_sign_ed25519_verify_detached(sig.data(), msg.data(), msg.size(), pubkey.data()));
 }
 
+std::array<unsigned char, 64> ed25519_pro_privkey_for_ed25519_seed(
+        std::span<const unsigned char> ed25519_seed) {
+    auto result = derived_ed25519_privkey(ed25519_seed, "SessionProRandom");
+    return result;
+}
 }  // namespace session::ed25519
 
 using namespace session;
@@ -156,4 +184,16 @@ LIBSESSION_C_API bool session_ed25519_verify(
             std::span<const unsigned char>{sig, 64},
             std::span<const unsigned char>{pubkey, 32},
             std::span<const unsigned char>{msg, msg_len});
+}
+
+LIBSESSION_C_API bool session_ed25519_pro_privkey_for_ed25519_seed(
+        const unsigned char* ed25519_seed, unsigned char* ed25519_sk_out) {
+    try {
+        auto seed = std::span<const unsigned char>(ed25519_seed, 32);
+        uc64 sk = session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed);
+        std::memcpy(ed25519_sk_out, sk.data(), sk.size());
+        return true;
+    } catch (...) {
+        return false;
+    }
 }

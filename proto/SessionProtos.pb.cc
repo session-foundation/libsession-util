@@ -24,6 +24,7 @@ PROTOBUF_CONSTEXPR Envelope::Envelope(
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.source_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.content_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.prosig_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.timestamp_)*/uint64_t{0u}
   , /*decltype(_impl_.servertimestamp_)*/uint64_t{0u}
   , /*decltype(_impl_.sourcedevice_)*/0u
@@ -87,15 +88,19 @@ PROTOBUF_CONSTEXPR Content::Content(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.prosigforcommunitymessageonly_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
   , /*decltype(_impl_.datamessage_)*/nullptr
   , /*decltype(_impl_.callmessage_)*/nullptr
   , /*decltype(_impl_.receiptmessage_)*/nullptr
   , /*decltype(_impl_.typingmessage_)*/nullptr
-  , /*decltype(_impl_.configurationmessage_)*/nullptr
   , /*decltype(_impl_.dataextractionnotification_)*/nullptr
   , /*decltype(_impl_.unsendrequest_)*/nullptr
   , /*decltype(_impl_.messagerequestresponse_)*/nullptr
-  , /*decltype(_impl_.sharedconfigmessage_)*/nullptr} {}
+  , /*decltype(_impl_.sharedconfigmessage_)*/nullptr
+  , /*decltype(_impl_.promessage_)*/nullptr
+  , /*decltype(_impl_.expirationtype_)*/0
+  , /*decltype(_impl_.expirationtimer_)*/0u
+  , /*decltype(_impl_.sigtimestamp_)*/uint64_t{0u}} {}
 struct ContentDefaultTypeInternal {
   PROTOBUF_CONSTEXPR ContentDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -158,7 +163,8 @@ PROTOBUF_CONSTEXPR LokiProfile::LokiProfile(
     /*decltype(_impl_._has_bits_)*/{}
   , /*decltype(_impl_._cached_size_)*/{}
   , /*decltype(_impl_.displayname_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.profilepicture_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}} {}
+  , /*decltype(_impl_.profilepicture_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.lastupdateseconds_)*/uint64_t{0u}} {}
 struct LokiProfileDefaultTypeInternal {
   PROTOBUF_CONSTEXPR LokiProfileDefaultTypeInternal()
       : _instance(::_pbi::ConstantInitialized{}) {}
@@ -250,42 +256,6 @@ struct DataMessage_OpenGroupInvitationDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DataMessage_OpenGroupInvitationDefaultTypeInternal _DataMessage_OpenGroupInvitation_default_instance_;
-PROTOBUF_CONSTEXPR DataMessage_ClosedGroupControlMessage_KeyPairWrapper::DataMessage_ClosedGroupControlMessage_KeyPairWrapper(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_._has_bits_)*/{}
-  , /*decltype(_impl_._cached_size_)*/{}
-  , /*decltype(_impl_.publickey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.encryptedkeypair_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}} {}
-struct DataMessage_ClosedGroupControlMessage_KeyPairWrapperDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR DataMessage_ClosedGroupControlMessage_KeyPairWrapperDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~DataMessage_ClosedGroupControlMessage_KeyPairWrapperDefaultTypeInternal() {}
-  union {
-    DataMessage_ClosedGroupControlMessage_KeyPairWrapper _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DataMessage_ClosedGroupControlMessage_KeyPairWrapperDefaultTypeInternal _DataMessage_ClosedGroupControlMessage_KeyPairWrapper_default_instance_;
-PROTOBUF_CONSTEXPR DataMessage_ClosedGroupControlMessage::DataMessage_ClosedGroupControlMessage(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_._has_bits_)*/{}
-  , /*decltype(_impl_._cached_size_)*/{}
-  , /*decltype(_impl_.members_)*/{}
-  , /*decltype(_impl_.admins_)*/{}
-  , /*decltype(_impl_.wrappers_)*/{}
-  , /*decltype(_impl_.publickey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.encryptionkeypair_)*/nullptr
-  , /*decltype(_impl_.expirationtimer_)*/0u
-  , /*decltype(_impl_.type_)*/1} {}
-struct DataMessage_ClosedGroupControlMessageDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR DataMessage_ClosedGroupControlMessageDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~DataMessage_ClosedGroupControlMessageDefaultTypeInternal() {}
-  union {
-    DataMessage_ClosedGroupControlMessage _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DataMessage_ClosedGroupControlMessageDefaultTypeInternal _DataMessage_ClosedGroupControlMessage_default_instance_;
 PROTOBUF_CONSTEXPR DataMessage::DataMessage(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_._has_bits_)*/{}
@@ -299,10 +269,9 @@ PROTOBUF_CONSTEXPR DataMessage::DataMessage(
   , /*decltype(_impl_.reaction_)*/nullptr
   , /*decltype(_impl_.profile_)*/nullptr
   , /*decltype(_impl_.opengroupinvitation_)*/nullptr
-  , /*decltype(_impl_.closedgroupcontrolmessage_)*/nullptr
-  , /*decltype(_impl_.flags_)*/0u
-  , /*decltype(_impl_.expiretimer_)*/0u
+  , /*decltype(_impl_.groupupdatemessage_)*/nullptr
   , /*decltype(_impl_.timestamp_)*/uint64_t{0u}
+  , /*decltype(_impl_.flags_)*/0u
   , /*decltype(_impl_.blockscommunitymessagerequests_)*/false} {}
 struct DataMessageDefaultTypeInternal {
   PROTOBUF_CONSTEXPR DataMessageDefaultTypeInternal()
@@ -313,64 +282,6 @@ struct DataMessageDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 DataMessageDefaultTypeInternal _DataMessage_default_instance_;
-PROTOBUF_CONSTEXPR ConfigurationMessage_ClosedGroup::ConfigurationMessage_ClosedGroup(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_._has_bits_)*/{}
-  , /*decltype(_impl_._cached_size_)*/{}
-  , /*decltype(_impl_.members_)*/{}
-  , /*decltype(_impl_.admins_)*/{}
-  , /*decltype(_impl_.publickey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.encryptionkeypair_)*/nullptr
-  , /*decltype(_impl_.expirationtimer_)*/0u} {}
-struct ConfigurationMessage_ClosedGroupDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR ConfigurationMessage_ClosedGroupDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~ConfigurationMessage_ClosedGroupDefaultTypeInternal() {}
-  union {
-    ConfigurationMessage_ClosedGroup _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ConfigurationMessage_ClosedGroupDefaultTypeInternal _ConfigurationMessage_ClosedGroup_default_instance_;
-PROTOBUF_CONSTEXPR ConfigurationMessage_Contact::ConfigurationMessage_Contact(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_._has_bits_)*/{}
-  , /*decltype(_impl_._cached_size_)*/{}
-  , /*decltype(_impl_.publickey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.profilepicture_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.profilekey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.isapproved_)*/false
-  , /*decltype(_impl_.isblocked_)*/false
-  , /*decltype(_impl_.didapproveme_)*/false} {}
-struct ConfigurationMessage_ContactDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR ConfigurationMessage_ContactDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~ConfigurationMessage_ContactDefaultTypeInternal() {}
-  union {
-    ConfigurationMessage_Contact _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ConfigurationMessage_ContactDefaultTypeInternal _ConfigurationMessage_Contact_default_instance_;
-PROTOBUF_CONSTEXPR ConfigurationMessage::ConfigurationMessage(
-    ::_pbi::ConstantInitialized): _impl_{
-    /*decltype(_impl_._has_bits_)*/{}
-  , /*decltype(_impl_._cached_size_)*/{}
-  , /*decltype(_impl_.closedgroups_)*/{}
-  , /*decltype(_impl_.opengroups_)*/{}
-  , /*decltype(_impl_.contacts_)*/{}
-  , /*decltype(_impl_.displayname_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.profilepicture_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
-  , /*decltype(_impl_.profilekey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}} {}
-struct ConfigurationMessageDefaultTypeInternal {
-  PROTOBUF_CONSTEXPR ConfigurationMessageDefaultTypeInternal()
-      : _instance(::_pbi::ConstantInitialized{}) {}
-  ~ConfigurationMessageDefaultTypeInternal() {}
-  union {
-    ConfigurationMessage _instance;
-  };
-};
-PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ConfigurationMessageDefaultTypeInternal _ConfigurationMessage_default_instance_;
 PROTOBUF_CONSTEXPR ReceiptMessage::ReceiptMessage(
     ::_pbi::ConstantInitialized): _impl_{
     /*decltype(_impl_._has_bits_)*/{}
@@ -427,6 +338,181 @@ struct SharedConfigMessageDefaultTypeInternal {
   };
 };
 PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 SharedConfigMessageDefaultTypeInternal _SharedConfigMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateMessage::GroupUpdateMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.invitemessage_)*/nullptr
+  , /*decltype(_impl_.infochangemessage_)*/nullptr
+  , /*decltype(_impl_.memberchangemessage_)*/nullptr
+  , /*decltype(_impl_.promotemessage_)*/nullptr
+  , /*decltype(_impl_.memberleftmessage_)*/nullptr
+  , /*decltype(_impl_.inviteresponse_)*/nullptr
+  , /*decltype(_impl_.deletemembercontent_)*/nullptr
+  , /*decltype(_impl_.memberleftnotificationmessage_)*/nullptr} {}
+struct GroupUpdateMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateMessageDefaultTypeInternal _GroupUpdateMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateInviteMessage::GroupUpdateInviteMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.groupsessionid_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.memberauthdata_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.adminsignature_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}} {}
+struct GroupUpdateInviteMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateInviteMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateInviteMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateInviteMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateInviteMessageDefaultTypeInternal _GroupUpdateInviteMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdatePromoteMessage::GroupUpdatePromoteMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.groupidentityseed_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.name_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}} {}
+struct GroupUpdatePromoteMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdatePromoteMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdatePromoteMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdatePromoteMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdatePromoteMessageDefaultTypeInternal _GroupUpdatePromoteMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateInfoChangeMessage::GroupUpdateInfoChangeMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.updatedname_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.adminsignature_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.updatedexpiration_)*/0u
+  , /*decltype(_impl_.type_)*/1} {}
+struct GroupUpdateInfoChangeMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateInfoChangeMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateInfoChangeMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateInfoChangeMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateInfoChangeMessageDefaultTypeInternal _GroupUpdateInfoChangeMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateMemberChangeMessage::GroupUpdateMemberChangeMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.membersessionids_)*/{}
+  , /*decltype(_impl_.adminsignature_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.historyshared_)*/false
+  , /*decltype(_impl_.type_)*/1} {}
+struct GroupUpdateMemberChangeMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateMemberChangeMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateMemberChangeMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateMemberChangeMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateMemberChangeMessageDefaultTypeInternal _GroupUpdateMemberChangeMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateMemberLeftMessage::GroupUpdateMemberLeftMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._cached_size_)*/{}} {}
+struct GroupUpdateMemberLeftMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateMemberLeftMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateMemberLeftMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateMemberLeftMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateMemberLeftMessageDefaultTypeInternal _GroupUpdateMemberLeftMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateMemberLeftNotificationMessage::GroupUpdateMemberLeftNotificationMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._cached_size_)*/{}} {}
+struct GroupUpdateMemberLeftNotificationMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateMemberLeftNotificationMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateMemberLeftNotificationMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateMemberLeftNotificationMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateMemberLeftNotificationMessageDefaultTypeInternal _GroupUpdateMemberLeftNotificationMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateInviteResponseMessage::GroupUpdateInviteResponseMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.isapproved_)*/false} {}
+struct GroupUpdateInviteResponseMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateInviteResponseMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateInviteResponseMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateInviteResponseMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateInviteResponseMessageDefaultTypeInternal _GroupUpdateInviteResponseMessage_default_instance_;
+PROTOBUF_CONSTEXPR GroupUpdateDeleteMemberContentMessage::GroupUpdateDeleteMemberContentMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.membersessionids_)*/{}
+  , /*decltype(_impl_.messagehashes_)*/{}
+  , /*decltype(_impl_.adminsignature_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}} {}
+struct GroupUpdateDeleteMemberContentMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR GroupUpdateDeleteMemberContentMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~GroupUpdateDeleteMemberContentMessageDefaultTypeInternal() {}
+  union {
+    GroupUpdateDeleteMemberContentMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 GroupUpdateDeleteMemberContentMessageDefaultTypeInternal _GroupUpdateDeleteMemberContentMessage_default_instance_;
+PROTOBUF_CONSTEXPR ProProof::ProProof(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.genindexhash_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.rotatingpublickey_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.sig_)*/{&::_pbi::fixed_address_empty_string, ::_pbi::ConstantInitialized{}}
+  , /*decltype(_impl_.expiryunixts_)*/uint64_t{0u}
+  , /*decltype(_impl_.version_)*/0u} {}
+struct ProProofDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ProProofDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ProProofDefaultTypeInternal() {}
+  union {
+    ProProof _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ProProofDefaultTypeInternal _ProProof_default_instance_;
+PROTOBUF_CONSTEXPR ProMessage::ProMessage(
+    ::_pbi::ConstantInitialized): _impl_{
+    /*decltype(_impl_._has_bits_)*/{}
+  , /*decltype(_impl_._cached_size_)*/{}
+  , /*decltype(_impl_.proof_)*/nullptr
+  , /*decltype(_impl_.profilebitset_)*/uint64_t{0u}
+  , /*decltype(_impl_.msgbitset_)*/uint64_t{0u}} {}
+struct ProMessageDefaultTypeInternal {
+  PROTOBUF_CONSTEXPR ProMessageDefaultTypeInternal()
+      : _instance(::_pbi::ConstantInitialized{}) {}
+  ~ProMessageDefaultTypeInternal() {}
+  union {
+    ProMessage _instance;
+  };
+};
+PROTOBUF_ATTRIBUTE_NO_DESTROY PROTOBUF_CONSTINIT PROTOBUF_ATTRIBUTE_INIT_PRIORITY1 ProMessageDefaultTypeInternal _ProMessage_default_instance_;
 }  // namespace SessionProtos
 namespace SessionProtos {
 bool Envelope_Type_IsValid(int value) {
@@ -544,6 +630,69 @@ constexpr TypingMessage_Action TypingMessage::STOPPED;
 constexpr TypingMessage_Action TypingMessage::Action_MIN;
 constexpr TypingMessage_Action TypingMessage::Action_MAX;
 constexpr int TypingMessage::Action_ARRAYSIZE;
+#endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
+bool Content_ExpirationType_IsValid(int value) {
+  switch (value) {
+    case 0:
+    case 1:
+    case 2:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> Content_ExpirationType_strings[3] = {};
+
+static const char Content_ExpirationType_names[] =
+  "DELETE_AFTER_READ"
+  "DELETE_AFTER_SEND"
+  "UNKNOWN";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry Content_ExpirationType_entries[] = {
+  { {Content_ExpirationType_names + 0, 17}, 1 },
+  { {Content_ExpirationType_names + 17, 17}, 2 },
+  { {Content_ExpirationType_names + 34, 7}, 0 },
+};
+
+static const int Content_ExpirationType_entries_by_number[] = {
+  2, // 0 -> UNKNOWN
+  0, // 1 -> DELETE_AFTER_READ
+  1, // 2 -> DELETE_AFTER_SEND
+};
+
+const std::string& Content_ExpirationType_Name(
+    Content_ExpirationType value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          Content_ExpirationType_entries,
+          Content_ExpirationType_entries_by_number,
+          3, Content_ExpirationType_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      Content_ExpirationType_entries,
+      Content_ExpirationType_entries_by_number,
+      3, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     Content_ExpirationType_strings[idx].get();
+}
+bool Content_ExpirationType_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, Content_ExpirationType* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      Content_ExpirationType_entries, 3, name, &int_value);
+  if (success) {
+    *value = static_cast<Content_ExpirationType>(int_value);
+  }
+  return success;
+}
+#if (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
+constexpr Content_ExpirationType Content::UNKNOWN;
+constexpr Content_ExpirationType Content::DELETE_AFTER_READ;
+constexpr Content_ExpirationType Content::DELETE_AFTER_SEND;
+constexpr Content_ExpirationType Content::ExpirationType_MIN;
+constexpr Content_ExpirationType Content::ExpirationType_MAX;
+constexpr int Content::ExpirationType_ARRAYSIZE;
 #endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
 bool CallMessage_Type_IsValid(int value) {
   switch (value) {
@@ -792,89 +941,6 @@ constexpr DataMessage_Reaction_Action DataMessage_Reaction::Action_MIN;
 constexpr DataMessage_Reaction_Action DataMessage_Reaction::Action_MAX;
 constexpr int DataMessage_Reaction::Action_ARRAYSIZE;
 #endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
-bool DataMessage_ClosedGroupControlMessage_Type_IsValid(int value) {
-  switch (value) {
-    case 1:
-    case 3:
-    case 4:
-    case 5:
-    case 6:
-    case 7:
-    case 8:
-      return true;
-    default:
-      return false;
-  }
-}
-
-static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> DataMessage_ClosedGroupControlMessage_Type_strings[7] = {};
-
-static const char DataMessage_ClosedGroupControlMessage_Type_names[] =
-  "ENCRYPTION_KEY_PAIR"
-  "ENCRYPTION_KEY_PAIR_REQUEST"
-  "MEMBERS_ADDED"
-  "MEMBERS_REMOVED"
-  "MEMBER_LEFT"
-  "NAME_CHANGE"
-  "NEW";
-
-static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry DataMessage_ClosedGroupControlMessage_Type_entries[] = {
-  { {DataMessage_ClosedGroupControlMessage_Type_names + 0, 19}, 3 },
-  { {DataMessage_ClosedGroupControlMessage_Type_names + 19, 27}, 8 },
-  { {DataMessage_ClosedGroupControlMessage_Type_names + 46, 13}, 5 },
-  { {DataMessage_ClosedGroupControlMessage_Type_names + 59, 15}, 6 },
-  { {DataMessage_ClosedGroupControlMessage_Type_names + 74, 11}, 7 },
-  { {DataMessage_ClosedGroupControlMessage_Type_names + 85, 11}, 4 },
-  { {DataMessage_ClosedGroupControlMessage_Type_names + 96, 3}, 1 },
-};
-
-static const int DataMessage_ClosedGroupControlMessage_Type_entries_by_number[] = {
-  6, // 1 -> NEW
-  0, // 3 -> ENCRYPTION_KEY_PAIR
-  5, // 4 -> NAME_CHANGE
-  2, // 5 -> MEMBERS_ADDED
-  3, // 6 -> MEMBERS_REMOVED
-  4, // 7 -> MEMBER_LEFT
-  1, // 8 -> ENCRYPTION_KEY_PAIR_REQUEST
-};
-
-const std::string& DataMessage_ClosedGroupControlMessage_Type_Name(
-    DataMessage_ClosedGroupControlMessage_Type value) {
-  static const bool dummy =
-      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
-          DataMessage_ClosedGroupControlMessage_Type_entries,
-          DataMessage_ClosedGroupControlMessage_Type_entries_by_number,
-          7, DataMessage_ClosedGroupControlMessage_Type_strings);
-  (void) dummy;
-  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
-      DataMessage_ClosedGroupControlMessage_Type_entries,
-      DataMessage_ClosedGroupControlMessage_Type_entries_by_number,
-      7, value);
-  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
-                     DataMessage_ClosedGroupControlMessage_Type_strings[idx].get();
-}
-bool DataMessage_ClosedGroupControlMessage_Type_Parse(
-    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, DataMessage_ClosedGroupControlMessage_Type* value) {
-  int int_value;
-  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
-      DataMessage_ClosedGroupControlMessage_Type_entries, 7, name, &int_value);
-  if (success) {
-    *value = static_cast<DataMessage_ClosedGroupControlMessage_Type>(int_value);
-  }
-  return success;
-}
-#if (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::NEW;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::ENCRYPTION_KEY_PAIR;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::NAME_CHANGE;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::MEMBERS_ADDED;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::MEMBERS_REMOVED;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::MEMBER_LEFT;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::ENCRYPTION_KEY_PAIR_REQUEST;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::Type_MIN;
-constexpr DataMessage_ClosedGroupControlMessage_Type DataMessage_ClosedGroupControlMessage::Type_MAX;
-constexpr int DataMessage_ClosedGroupControlMessage::Type_ARRAYSIZE;
-#endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
 bool DataMessage_Flags_IsValid(int value) {
   switch (value) {
     case 2:
@@ -1107,6 +1173,132 @@ constexpr SharedConfigMessage_Kind SharedConfigMessage::Kind_MIN;
 constexpr SharedConfigMessage_Kind SharedConfigMessage::Kind_MAX;
 constexpr int SharedConfigMessage::Kind_ARRAYSIZE;
 #endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
+bool GroupUpdateInfoChangeMessage_Type_IsValid(int value) {
+  switch (value) {
+    case 1:
+    case 2:
+    case 3:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> GroupUpdateInfoChangeMessage_Type_strings[3] = {};
+
+static const char GroupUpdateInfoChangeMessage_Type_names[] =
+  "AVATAR"
+  "DISAPPEARING_MESSAGES"
+  "NAME";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry GroupUpdateInfoChangeMessage_Type_entries[] = {
+  { {GroupUpdateInfoChangeMessage_Type_names + 0, 6}, 2 },
+  { {GroupUpdateInfoChangeMessage_Type_names + 6, 21}, 3 },
+  { {GroupUpdateInfoChangeMessage_Type_names + 27, 4}, 1 },
+};
+
+static const int GroupUpdateInfoChangeMessage_Type_entries_by_number[] = {
+  2, // 1 -> NAME
+  0, // 2 -> AVATAR
+  1, // 3 -> DISAPPEARING_MESSAGES
+};
+
+const std::string& GroupUpdateInfoChangeMessage_Type_Name(
+    GroupUpdateInfoChangeMessage_Type value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          GroupUpdateInfoChangeMessage_Type_entries,
+          GroupUpdateInfoChangeMessage_Type_entries_by_number,
+          3, GroupUpdateInfoChangeMessage_Type_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      GroupUpdateInfoChangeMessage_Type_entries,
+      GroupUpdateInfoChangeMessage_Type_entries_by_number,
+      3, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     GroupUpdateInfoChangeMessage_Type_strings[idx].get();
+}
+bool GroupUpdateInfoChangeMessage_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, GroupUpdateInfoChangeMessage_Type* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      GroupUpdateInfoChangeMessage_Type_entries, 3, name, &int_value);
+  if (success) {
+    *value = static_cast<GroupUpdateInfoChangeMessage_Type>(int_value);
+  }
+  return success;
+}
+#if (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
+constexpr GroupUpdateInfoChangeMessage_Type GroupUpdateInfoChangeMessage::NAME;
+constexpr GroupUpdateInfoChangeMessage_Type GroupUpdateInfoChangeMessage::AVATAR;
+constexpr GroupUpdateInfoChangeMessage_Type GroupUpdateInfoChangeMessage::DISAPPEARING_MESSAGES;
+constexpr GroupUpdateInfoChangeMessage_Type GroupUpdateInfoChangeMessage::Type_MIN;
+constexpr GroupUpdateInfoChangeMessage_Type GroupUpdateInfoChangeMessage::Type_MAX;
+constexpr int GroupUpdateInfoChangeMessage::Type_ARRAYSIZE;
+#endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
+bool GroupUpdateMemberChangeMessage_Type_IsValid(int value) {
+  switch (value) {
+    case 1:
+    case 2:
+    case 3:
+      return true;
+    default:
+      return false;
+  }
+}
+
+static ::PROTOBUF_NAMESPACE_ID::internal::ExplicitlyConstructed<std::string> GroupUpdateMemberChangeMessage_Type_strings[3] = {};
+
+static const char GroupUpdateMemberChangeMessage_Type_names[] =
+  "ADDED"
+  "PROMOTED"
+  "REMOVED";
+
+static const ::PROTOBUF_NAMESPACE_ID::internal::EnumEntry GroupUpdateMemberChangeMessage_Type_entries[] = {
+  { {GroupUpdateMemberChangeMessage_Type_names + 0, 5}, 1 },
+  { {GroupUpdateMemberChangeMessage_Type_names + 5, 8}, 3 },
+  { {GroupUpdateMemberChangeMessage_Type_names + 13, 7}, 2 },
+};
+
+static const int GroupUpdateMemberChangeMessage_Type_entries_by_number[] = {
+  0, // 1 -> ADDED
+  2, // 2 -> REMOVED
+  1, // 3 -> PROMOTED
+};
+
+const std::string& GroupUpdateMemberChangeMessage_Type_Name(
+    GroupUpdateMemberChangeMessage_Type value) {
+  static const bool dummy =
+      ::PROTOBUF_NAMESPACE_ID::internal::InitializeEnumStrings(
+          GroupUpdateMemberChangeMessage_Type_entries,
+          GroupUpdateMemberChangeMessage_Type_entries_by_number,
+          3, GroupUpdateMemberChangeMessage_Type_strings);
+  (void) dummy;
+  int idx = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumName(
+      GroupUpdateMemberChangeMessage_Type_entries,
+      GroupUpdateMemberChangeMessage_Type_entries_by_number,
+      3, value);
+  return idx == -1 ? ::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString() :
+                     GroupUpdateMemberChangeMessage_Type_strings[idx].get();
+}
+bool GroupUpdateMemberChangeMessage_Type_Parse(
+    ::PROTOBUF_NAMESPACE_ID::ConstStringParam name, GroupUpdateMemberChangeMessage_Type* value) {
+  int int_value;
+  bool success = ::PROTOBUF_NAMESPACE_ID::internal::LookUpEnumValue(
+      GroupUpdateMemberChangeMessage_Type_entries, 3, name, &int_value);
+  if (success) {
+    *value = static_cast<GroupUpdateMemberChangeMessage_Type>(int_value);
+  }
+  return success;
+}
+#if (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
+constexpr GroupUpdateMemberChangeMessage_Type GroupUpdateMemberChangeMessage::ADDED;
+constexpr GroupUpdateMemberChangeMessage_Type GroupUpdateMemberChangeMessage::REMOVED;
+constexpr GroupUpdateMemberChangeMessage_Type GroupUpdateMemberChangeMessage::PROMOTED;
+constexpr GroupUpdateMemberChangeMessage_Type GroupUpdateMemberChangeMessage::Type_MIN;
+constexpr GroupUpdateMemberChangeMessage_Type GroupUpdateMemberChangeMessage::Type_MAX;
+constexpr int GroupUpdateMemberChangeMessage::Type_ARRAYSIZE;
+#endif  // (__cplusplus < 201703) && (!defined(_MSC_VER) || (_MSC_VER >= 1900 && _MSC_VER < 1912))
 
 // ===================================================================
 
@@ -1114,25 +1306,28 @@ class Envelope::_Internal {
  public:
   using HasBits = decltype(std::declval<Envelope>()._impl_._has_bits_);
   static void set_has_type(HasBits* has_bits) {
-    (*has_bits)[0] |= 32u;
+    (*has_bits)[0] |= 64u;
   }
   static void set_has_source(HasBits* has_bits) {
     (*has_bits)[0] |= 1u;
   }
   static void set_has_sourcedevice(HasBits* has_bits) {
-    (*has_bits)[0] |= 16u;
+    (*has_bits)[0] |= 32u;
   }
   static void set_has_timestamp(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
+    (*has_bits)[0] |= 8u;
   }
   static void set_has_content(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
   static void set_has_servertimestamp(HasBits* has_bits) {
-    (*has_bits)[0] |= 8u;
+    (*has_bits)[0] |= 16u;
+  }
+  static void set_has_prosig(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
   }
   static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000024) ^ 0x00000024) != 0;
+    return ((has_bits[0] & 0x00000048) ^ 0x00000048) != 0;
   }
 };
 
@@ -1150,6 +1345,7 @@ Envelope::Envelope(const Envelope& from)
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.source_){}
     , decltype(_impl_.content_){}
+    , decltype(_impl_.prosig_){}
     , decltype(_impl_.timestamp_){}
     , decltype(_impl_.servertimestamp_){}
     , decltype(_impl_.sourcedevice_){}
@@ -1172,6 +1368,14 @@ Envelope::Envelope(const Envelope& from)
     _this->_impl_.content_.Set(from._internal_content(), 
       _this->GetArenaForAllocation());
   }
+  _impl_.prosig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosig_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_prosig()) {
+    _this->_impl_.prosig_.Set(from._internal_prosig(), 
+      _this->GetArenaForAllocation());
+  }
   ::memcpy(&_impl_.timestamp_, &from._impl_.timestamp_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.type_) -
     reinterpret_cast<char*>(&_impl_.timestamp_)) + sizeof(_impl_.type_));
@@ -1187,6 +1391,7 @@ inline void Envelope::SharedCtor(
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.source_){}
     , decltype(_impl_.content_){}
+    , decltype(_impl_.prosig_){}
     , decltype(_impl_.timestamp_){uint64_t{0u}}
     , decltype(_impl_.servertimestamp_){uint64_t{0u}}
     , decltype(_impl_.sourcedevice_){0u}
@@ -1199,6 +1404,10 @@ inline void Envelope::SharedCtor(
   _impl_.content_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
     _impl_.content_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.prosig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosig_.Set("", GetArenaForAllocation());
   #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
@@ -1215,6 +1424,7 @@ inline void Envelope::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
   _impl_.source_.Destroy();
   _impl_.content_.Destroy();
+  _impl_.prosig_.Destroy();
 }
 
 void Envelope::SetCachedSize(int size) const {
@@ -1228,15 +1438,18 @@ void Envelope::Clear() {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     if (cached_has_bits & 0x00000001u) {
       _impl_.source_.ClearNonDefaultToEmpty();
     }
     if (cached_has_bits & 0x00000002u) {
       _impl_.content_.ClearNonDefaultToEmpty();
     }
+    if (cached_has_bits & 0x00000004u) {
+      _impl_.prosig_.ClearNonDefaultToEmpty();
+    }
   }
-  if (cached_has_bits & 0x0000003cu) {
+  if (cached_has_bits & 0x00000078u) {
     ::memset(&_impl_.timestamp_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&_impl_.sourcedevice_) -
         reinterpret_cast<char*>(&_impl_.timestamp_)) + sizeof(_impl_.sourcedevice_));
@@ -1311,6 +1524,15 @@ const char* Envelope::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx)
         } else
           goto handle_unusual;
         continue;
+      // optional bytes proSig = 11;
+      case 11:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
+          auto str = _internal_mutable_prosig();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
       default:
         goto handle_unusual;
     }  // switch
@@ -1343,7 +1565,7 @@ uint8_t* Envelope::_InternalSerialize(
 
   cached_has_bits = _impl_._has_bits_[0];
   // required .SessionProtos.Envelope.Type type = 1;
-  if (cached_has_bits & 0x00000020u) {
+  if (cached_has_bits & 0x00000040u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteEnumToArray(
       1, this->_internal_type(), target);
@@ -1356,13 +1578,13 @@ uint8_t* Envelope::_InternalSerialize(
   }
 
   // required uint64 timestamp = 5;
-  if (cached_has_bits & 0x00000004u) {
+  if (cached_has_bits & 0x00000008u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(5, this->_internal_timestamp(), target);
   }
 
   // optional uint32 sourceDevice = 7;
-  if (cached_has_bits & 0x00000010u) {
+  if (cached_has_bits & 0x00000020u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt32ToArray(7, this->_internal_sourcedevice(), target);
   }
@@ -1374,9 +1596,15 @@ uint8_t* Envelope::_InternalSerialize(
   }
 
   // optional uint64 serverTimestamp = 10;
-  if (cached_has_bits & 0x00000008u) {
+  if (cached_has_bits & 0x00000010u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(10, this->_internal_servertimestamp(), target);
+  }
+
+  // optional bytes proSig = 11;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->WriteBytesMaybeAliased(
+        11, this->_internal_prosig(), target);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -1408,7 +1636,7 @@ size_t Envelope::ByteSizeLong() const {
 // @@protoc_insertion_point(message_byte_size_start:SessionProtos.Envelope)
   size_t total_size = 0;
 
-  if (((_impl_._has_bits_[0] & 0x00000024) ^ 0x00000024) == 0) {  // All required fields are present.
+  if (((_impl_._has_bits_[0] & 0x00000048) ^ 0x00000048) == 0) {  // All required fields are present.
     // required uint64 timestamp = 5;
     total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_timestamp());
 
@@ -1424,7 +1652,7 @@ size_t Envelope::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     // optional string source = 2;
     if (cached_has_bits & 0x00000001u) {
       total_size += 1 +
@@ -1439,15 +1667,22 @@ size_t Envelope::ByteSizeLong() const {
           this->_internal_content());
     }
 
+    // optional bytes proSig = 11;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_prosig());
+    }
+
   }
-  if (cached_has_bits & 0x00000018u) {
+  if (cached_has_bits & 0x00000030u) {
     // optional uint64 serverTimestamp = 10;
-    if (cached_has_bits & 0x00000008u) {
+    if (cached_has_bits & 0x00000010u) {
       total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_servertimestamp());
     }
 
     // optional uint32 sourceDevice = 7;
-    if (cached_has_bits & 0x00000010u) {
+    if (cached_has_bits & 0x00000020u) {
       total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_sourcedevice());
     }
 
@@ -1474,7 +1709,7 @@ void Envelope::MergeFrom(const Envelope& from) {
   (void) cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000003fu) {
+  if (cached_has_bits & 0x0000007fu) {
     if (cached_has_bits & 0x00000001u) {
       _this->_internal_set_source(from._internal_source());
     }
@@ -1482,15 +1717,18 @@ void Envelope::MergeFrom(const Envelope& from) {
       _this->_internal_set_content(from._internal_content());
     }
     if (cached_has_bits & 0x00000004u) {
-      _this->_impl_.timestamp_ = from._impl_.timestamp_;
+      _this->_internal_set_prosig(from._internal_prosig());
     }
     if (cached_has_bits & 0x00000008u) {
-      _this->_impl_.servertimestamp_ = from._impl_.servertimestamp_;
+      _this->_impl_.timestamp_ = from._impl_.timestamp_;
     }
     if (cached_has_bits & 0x00000010u) {
-      _this->_impl_.sourcedevice_ = from._impl_.sourcedevice_;
+      _this->_impl_.servertimestamp_ = from._impl_.servertimestamp_;
     }
     if (cached_has_bits & 0x00000020u) {
+      _this->_impl_.sourcedevice_ = from._impl_.sourcedevice_;
+    }
+    if (cached_has_bits & 0x00000040u) {
       _this->_impl_.type_ = from._impl_.type_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -1523,6 +1761,10 @@ void Envelope::InternalSwap(Envelope* other) {
   ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
       &_impl_.content_, lhs_arena,
       &other->_impl_.content_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.prosig_, lhs_arena,
+      &other->_impl_.prosig_, rhs_arena
   );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
       PROTOBUF_FIELD_OFFSET(Envelope, _impl_.sourcedevice_)
@@ -2385,22 +2627,18 @@ class Content::_Internal {
   using HasBits = decltype(std::declval<Content>()._impl_._has_bits_);
   static const ::SessionProtos::DataMessage& datamessage(const Content* msg);
   static void set_has_datamessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 1u;
+    (*has_bits)[0] |= 2u;
   }
   static const ::SessionProtos::CallMessage& callmessage(const Content* msg);
   static void set_has_callmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
+    (*has_bits)[0] |= 4u;
   }
   static const ::SessionProtos::ReceiptMessage& receiptmessage(const Content* msg);
   static void set_has_receiptmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
+    (*has_bits)[0] |= 8u;
   }
   static const ::SessionProtos::TypingMessage& typingmessage(const Content* msg);
   static void set_has_typingmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 8u;
-  }
-  static const ::SessionProtos::ConfigurationMessage& configurationmessage(const Content* msg);
-  static void set_has_configurationmessage(HasBits* has_bits) {
     (*has_bits)[0] |= 16u;
   }
   static const ::SessionProtos::DataExtractionNotification& dataextractionnotification(const Content* msg);
@@ -2418,6 +2656,22 @@ class Content::_Internal {
   static const ::SessionProtos::SharedConfigMessage& sharedconfigmessage(const Content* msg);
   static void set_has_sharedconfigmessage(HasBits* has_bits) {
     (*has_bits)[0] |= 256u;
+  }
+  static void set_has_expirationtype(HasBits* has_bits) {
+    (*has_bits)[0] |= 1024u;
+  }
+  static void set_has_expirationtimer(HasBits* has_bits) {
+    (*has_bits)[0] |= 2048u;
+  }
+  static void set_has_sigtimestamp(HasBits* has_bits) {
+    (*has_bits)[0] |= 4096u;
+  }
+  static const ::SessionProtos::ProMessage& promessage(const Content* msg);
+  static void set_has_promessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 512u;
+  }
+  static void set_has_prosigforcommunitymessageonly(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
   }
 };
 
@@ -2437,10 +2691,6 @@ const ::SessionProtos::TypingMessage&
 Content::_Internal::typingmessage(const Content* msg) {
   return *msg->_impl_.typingmessage_;
 }
-const ::SessionProtos::ConfigurationMessage&
-Content::_Internal::configurationmessage(const Content* msg) {
-  return *msg->_impl_.configurationmessage_;
-}
 const ::SessionProtos::DataExtractionNotification&
 Content::_Internal::dataextractionnotification(const Content* msg) {
   return *msg->_impl_.dataextractionnotification_;
@@ -2457,6 +2707,10 @@ const ::SessionProtos::SharedConfigMessage&
 Content::_Internal::sharedconfigmessage(const Content* msg) {
   return *msg->_impl_.sharedconfigmessage_;
 }
+const ::SessionProtos::ProMessage&
+Content::_Internal::promessage(const Content* msg) {
+  return *msg->_impl_.promessage_;
+}
 Content::Content(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
   : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
@@ -2469,17 +2723,29 @@ Content::Content(const Content& from)
   new (&_impl_) Impl_{
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.prosigforcommunitymessageonly_){}
     , decltype(_impl_.datamessage_){nullptr}
     , decltype(_impl_.callmessage_){nullptr}
     , decltype(_impl_.receiptmessage_){nullptr}
     , decltype(_impl_.typingmessage_){nullptr}
-    , decltype(_impl_.configurationmessage_){nullptr}
     , decltype(_impl_.dataextractionnotification_){nullptr}
     , decltype(_impl_.unsendrequest_){nullptr}
     , decltype(_impl_.messagerequestresponse_){nullptr}
-    , decltype(_impl_.sharedconfigmessage_){nullptr}};
+    , decltype(_impl_.sharedconfigmessage_){nullptr}
+    , decltype(_impl_.promessage_){nullptr}
+    , decltype(_impl_.expirationtype_){}
+    , decltype(_impl_.expirationtimer_){}
+    , decltype(_impl_.sigtimestamp_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.prosigforcommunitymessageonly_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosigforcommunitymessageonly_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_prosigforcommunitymessageonly()) {
+    _this->_impl_.prosigforcommunitymessageonly_.Set(from._internal_prosigforcommunitymessageonly(), 
+      _this->GetArenaForAllocation());
+  }
   if (from._internal_has_datamessage()) {
     _this->_impl_.datamessage_ = new ::SessionProtos::DataMessage(*from._impl_.datamessage_);
   }
@@ -2491,9 +2757,6 @@ Content::Content(const Content& from)
   }
   if (from._internal_has_typingmessage()) {
     _this->_impl_.typingmessage_ = new ::SessionProtos::TypingMessage(*from._impl_.typingmessage_);
-  }
-  if (from._internal_has_configurationmessage()) {
-    _this->_impl_.configurationmessage_ = new ::SessionProtos::ConfigurationMessage(*from._impl_.configurationmessage_);
   }
   if (from._internal_has_dataextractionnotification()) {
     _this->_impl_.dataextractionnotification_ = new ::SessionProtos::DataExtractionNotification(*from._impl_.dataextractionnotification_);
@@ -2507,6 +2770,12 @@ Content::Content(const Content& from)
   if (from._internal_has_sharedconfigmessage()) {
     _this->_impl_.sharedconfigmessage_ = new ::SessionProtos::SharedConfigMessage(*from._impl_.sharedconfigmessage_);
   }
+  if (from._internal_has_promessage()) {
+    _this->_impl_.promessage_ = new ::SessionProtos::ProMessage(*from._impl_.promessage_);
+  }
+  ::memcpy(&_impl_.expirationtype_, &from._impl_.expirationtype_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.sigtimestamp_) -
+    reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.sigtimestamp_));
   // @@protoc_insertion_point(copy_constructor:SessionProtos.Content)
 }
 
@@ -2517,16 +2786,24 @@ inline void Content::SharedCtor(
   new (&_impl_) Impl_{
       decltype(_impl_._has_bits_){}
     , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.prosigforcommunitymessageonly_){}
     , decltype(_impl_.datamessage_){nullptr}
     , decltype(_impl_.callmessage_){nullptr}
     , decltype(_impl_.receiptmessage_){nullptr}
     , decltype(_impl_.typingmessage_){nullptr}
-    , decltype(_impl_.configurationmessage_){nullptr}
     , decltype(_impl_.dataextractionnotification_){nullptr}
     , decltype(_impl_.unsendrequest_){nullptr}
     , decltype(_impl_.messagerequestresponse_){nullptr}
     , decltype(_impl_.sharedconfigmessage_){nullptr}
+    , decltype(_impl_.promessage_){nullptr}
+    , decltype(_impl_.expirationtype_){0}
+    , decltype(_impl_.expirationtimer_){0u}
+    , decltype(_impl_.sigtimestamp_){uint64_t{0u}}
   };
+  _impl_.prosigforcommunitymessageonly_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.prosigforcommunitymessageonly_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
 }
 
 Content::~Content() {
@@ -2540,15 +2817,16 @@ Content::~Content() {
 
 inline void Content::SharedDtor() {
   GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.prosigforcommunitymessageonly_.Destroy();
   if (this != internal_default_instance()) delete _impl_.datamessage_;
   if (this != internal_default_instance()) delete _impl_.callmessage_;
   if (this != internal_default_instance()) delete _impl_.receiptmessage_;
   if (this != internal_default_instance()) delete _impl_.typingmessage_;
-  if (this != internal_default_instance()) delete _impl_.configurationmessage_;
   if (this != internal_default_instance()) delete _impl_.dataextractionnotification_;
   if (this != internal_default_instance()) delete _impl_.unsendrequest_;
   if (this != internal_default_instance()) delete _impl_.messagerequestresponse_;
   if (this != internal_default_instance()) delete _impl_.sharedconfigmessage_;
+  if (this != internal_default_instance()) delete _impl_.promessage_;
 }
 
 void Content::SetCachedSize(int size) const {
@@ -2564,24 +2842,23 @@ void Content::Clear() {
   cached_has_bits = _impl_._has_bits_[0];
   if (cached_has_bits & 0x000000ffu) {
     if (cached_has_bits & 0x00000001u) {
+      _impl_.prosigforcommunitymessageonly_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
       GOOGLE_DCHECK(_impl_.datamessage_ != nullptr);
       _impl_.datamessage_->Clear();
     }
-    if (cached_has_bits & 0x00000002u) {
+    if (cached_has_bits & 0x00000004u) {
       GOOGLE_DCHECK(_impl_.callmessage_ != nullptr);
       _impl_.callmessage_->Clear();
     }
-    if (cached_has_bits & 0x00000004u) {
+    if (cached_has_bits & 0x00000008u) {
       GOOGLE_DCHECK(_impl_.receiptmessage_ != nullptr);
       _impl_.receiptmessage_->Clear();
     }
-    if (cached_has_bits & 0x00000008u) {
+    if (cached_has_bits & 0x00000010u) {
       GOOGLE_DCHECK(_impl_.typingmessage_ != nullptr);
       _impl_.typingmessage_->Clear();
-    }
-    if (cached_has_bits & 0x00000010u) {
-      GOOGLE_DCHECK(_impl_.configurationmessage_ != nullptr);
-      _impl_.configurationmessage_->Clear();
     }
     if (cached_has_bits & 0x00000020u) {
       GOOGLE_DCHECK(_impl_.dataextractionnotification_ != nullptr);
@@ -2596,9 +2873,20 @@ void Content::Clear() {
       _impl_.messagerequestresponse_->Clear();
     }
   }
-  if (cached_has_bits & 0x00000100u) {
-    GOOGLE_DCHECK(_impl_.sharedconfigmessage_ != nullptr);
-    _impl_.sharedconfigmessage_->Clear();
+  if (cached_has_bits & 0x00000300u) {
+    if (cached_has_bits & 0x00000100u) {
+      GOOGLE_DCHECK(_impl_.sharedconfigmessage_ != nullptr);
+      _impl_.sharedconfigmessage_->Clear();
+    }
+    if (cached_has_bits & 0x00000200u) {
+      GOOGLE_DCHECK(_impl_.promessage_ != nullptr);
+      _impl_.promessage_->Clear();
+    }
+  }
+  if (cached_has_bits & 0x00001c00u) {
+    ::memset(&_impl_.expirationtype_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.sigtimestamp_) -
+        reinterpret_cast<char*>(&_impl_.expirationtype_)) + sizeof(_impl_.sigtimestamp_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -2643,14 +2931,6 @@ const char* Content::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) 
         } else
           goto handle_unusual;
         continue;
-      // optional .SessionProtos.ConfigurationMessage configurationMessage = 7;
-      case 7:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 58)) {
-          ptr = ctx->ParseMessage(_internal_mutable_configurationmessage(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
       // optional .SessionProtos.DataExtractionNotification dataExtractionNotification = 8;
       case 8:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
@@ -2679,6 +2959,54 @@ const char* Content::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) 
       case 11:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 90)) {
           ptr = ctx->ParseMessage(_internal_mutable_sharedconfigmessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.Content.ExpirationType expirationType = 12;
+      case 12:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 96)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::SessionProtos::Content_ExpirationType_IsValid(val))) {
+            _internal_set_expirationtype(static_cast<::SessionProtos::Content_ExpirationType>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(12, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint32 expirationTimer = 13;
+      case 13:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 104)) {
+          _Internal::set_has_expirationtimer(&has_bits);
+          _impl_.expirationtimer_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint64 sigTimestamp = 15;
+      case 15:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 120)) {
+          _Internal::set_has_sigtimestamp(&has_bits);
+          _impl_.sigtimestamp_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.ProMessage proMessage = 16;
+      case 16:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 130)) {
+          ptr = ctx->ParseMessage(_internal_mutable_promessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bytes proSigForCommunityMessageOnly = 17;
+      case 17:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 138)) {
+          auto str = _internal_mutable_prosigforcommunitymessageonly();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -2715,38 +3043,31 @@ uint8_t* Content::_InternalSerialize(
 
   cached_has_bits = _impl_._has_bits_[0];
   // optional .SessionProtos.DataMessage dataMessage = 1;
-  if (cached_has_bits & 0x00000001u) {
+  if (cached_has_bits & 0x00000002u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(1, _Internal::datamessage(this),
         _Internal::datamessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.CallMessage callMessage = 3;
-  if (cached_has_bits & 0x00000002u) {
+  if (cached_has_bits & 0x00000004u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(3, _Internal::callmessage(this),
         _Internal::callmessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.ReceiptMessage receiptMessage = 5;
-  if (cached_has_bits & 0x00000004u) {
+  if (cached_has_bits & 0x00000008u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(5, _Internal::receiptmessage(this),
         _Internal::receiptmessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.TypingMessage typingMessage = 6;
-  if (cached_has_bits & 0x00000008u) {
+  if (cached_has_bits & 0x00000010u) {
     target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
       InternalWriteMessage(6, _Internal::typingmessage(this),
         _Internal::typingmessage(this).GetCachedSize(), target, stream);
-  }
-
-  // optional .SessionProtos.ConfigurationMessage configurationMessage = 7;
-  if (cached_has_bits & 0x00000010u) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(7, _Internal::configurationmessage(this),
-        _Internal::configurationmessage(this).GetCachedSize(), target, stream);
   }
 
   // optional .SessionProtos.DataExtractionNotification dataExtractionNotification = 8;
@@ -2777,6 +3098,38 @@ uint8_t* Content::_InternalSerialize(
         _Internal::sharedconfigmessage(this).GetCachedSize(), target, stream);
   }
 
+  // optional .SessionProtos.Content.ExpirationType expirationType = 12;
+  if (cached_has_bits & 0x00000400u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      12, this->_internal_expirationtype(), target);
+  }
+
+  // optional uint32 expirationTimer = 13;
+  if (cached_has_bits & 0x00000800u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(13, this->_internal_expirationtimer(), target);
+  }
+
+  // optional uint64 sigTimestamp = 15;
+  if (cached_has_bits & 0x00001000u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(15, this->_internal_sigtimestamp(), target);
+  }
+
+  // optional .SessionProtos.ProMessage proMessage = 16;
+  if (cached_has_bits & 0x00000200u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(16, _Internal::promessage(this),
+        _Internal::promessage(this).GetCachedSize(), target, stream);
+  }
+
+  // optional bytes proSigForCommunityMessageOnly = 17;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        17, this->_internal_prosigforcommunitymessageonly(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -2795,39 +3148,39 @@ size_t Content::ByteSizeLong() const {
 
   cached_has_bits = _impl_._has_bits_[0];
   if (cached_has_bits & 0x000000ffu) {
-    // optional .SessionProtos.DataMessage dataMessage = 1;
+    // optional bytes proSigForCommunityMessageOnly = 17;
     if (cached_has_bits & 0x00000001u) {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_prosigforcommunitymessageonly());
+    }
+
+    // optional .SessionProtos.DataMessage dataMessage = 1;
+    if (cached_has_bits & 0x00000002u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.datamessage_);
     }
 
     // optional .SessionProtos.CallMessage callMessage = 3;
-    if (cached_has_bits & 0x00000002u) {
+    if (cached_has_bits & 0x00000004u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.callmessage_);
     }
 
     // optional .SessionProtos.ReceiptMessage receiptMessage = 5;
-    if (cached_has_bits & 0x00000004u) {
+    if (cached_has_bits & 0x00000008u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
           *_impl_.receiptmessage_);
     }
 
     // optional .SessionProtos.TypingMessage typingMessage = 6;
-    if (cached_has_bits & 0x00000008u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.typingmessage_);
-    }
-
-    // optional .SessionProtos.ConfigurationMessage configurationMessage = 7;
     if (cached_has_bits & 0x00000010u) {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.configurationmessage_);
+          *_impl_.typingmessage_);
     }
 
     // optional .SessionProtos.DataExtractionNotification dataExtractionNotification = 8;
@@ -2852,13 +3205,38 @@ size_t Content::ByteSizeLong() const {
     }
 
   }
-  // optional .SessionProtos.SharedConfigMessage sharedConfigMessage = 11;
-  if (cached_has_bits & 0x00000100u) {
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-        *_impl_.sharedconfigmessage_);
-  }
+  if (cached_has_bits & 0x00001f00u) {
+    // optional .SessionProtos.SharedConfigMessage sharedConfigMessage = 11;
+    if (cached_has_bits & 0x00000100u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.sharedconfigmessage_);
+    }
 
+    // optional .SessionProtos.ProMessage proMessage = 16;
+    if (cached_has_bits & 0x00000200u) {
+      total_size += 2 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.promessage_);
+    }
+
+    // optional .SessionProtos.Content.ExpirationType expirationType = 12;
+    if (cached_has_bits & 0x00000400u) {
+      total_size += 1 +
+        ::_pbi::WireFormatLite::EnumSize(this->_internal_expirationtype());
+    }
+
+    // optional uint32 expirationTimer = 13;
+    if (cached_has_bits & 0x00000800u) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_expirationtimer());
+    }
+
+    // optional uint64 sigTimestamp = 15;
+    if (cached_has_bits & 0x00001000u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_sigtimestamp());
+    }
+
+  }
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
   }
@@ -2883,24 +3261,23 @@ void Content::MergeFrom(const Content& from) {
   cached_has_bits = from._impl_._has_bits_[0];
   if (cached_has_bits & 0x000000ffu) {
     if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_prosigforcommunitymessageonly(from._internal_prosigforcommunitymessageonly());
+    }
+    if (cached_has_bits & 0x00000002u) {
       _this->_internal_mutable_datamessage()->::SessionProtos::DataMessage::MergeFrom(
           from._internal_datamessage());
     }
-    if (cached_has_bits & 0x00000002u) {
+    if (cached_has_bits & 0x00000004u) {
       _this->_internal_mutable_callmessage()->::SessionProtos::CallMessage::MergeFrom(
           from._internal_callmessage());
     }
-    if (cached_has_bits & 0x00000004u) {
+    if (cached_has_bits & 0x00000008u) {
       _this->_internal_mutable_receiptmessage()->::SessionProtos::ReceiptMessage::MergeFrom(
           from._internal_receiptmessage());
     }
-    if (cached_has_bits & 0x00000008u) {
+    if (cached_has_bits & 0x00000010u) {
       _this->_internal_mutable_typingmessage()->::SessionProtos::TypingMessage::MergeFrom(
           from._internal_typingmessage());
-    }
-    if (cached_has_bits & 0x00000010u) {
-      _this->_internal_mutable_configurationmessage()->::SessionProtos::ConfigurationMessage::MergeFrom(
-          from._internal_configurationmessage());
     }
     if (cached_has_bits & 0x00000020u) {
       _this->_internal_mutable_dataextractionnotification()->::SessionProtos::DataExtractionNotification::MergeFrom(
@@ -2915,9 +3292,25 @@ void Content::MergeFrom(const Content& from) {
           from._internal_messagerequestresponse());
     }
   }
-  if (cached_has_bits & 0x00000100u) {
-    _this->_internal_mutable_sharedconfigmessage()->::SessionProtos::SharedConfigMessage::MergeFrom(
-        from._internal_sharedconfigmessage());
+  if (cached_has_bits & 0x00001f00u) {
+    if (cached_has_bits & 0x00000100u) {
+      _this->_internal_mutable_sharedconfigmessage()->::SessionProtos::SharedConfigMessage::MergeFrom(
+          from._internal_sharedconfigmessage());
+    }
+    if (cached_has_bits & 0x00000200u) {
+      _this->_internal_mutable_promessage()->::SessionProtos::ProMessage::MergeFrom(
+          from._internal_promessage());
+    }
+    if (cached_has_bits & 0x00000400u) {
+      _this->_impl_.expirationtype_ = from._impl_.expirationtype_;
+    }
+    if (cached_has_bits & 0x00000800u) {
+      _this->_impl_.expirationtimer_ = from._impl_.expirationtimer_;
+    }
+    if (cached_has_bits & 0x00001000u) {
+      _this->_impl_.sigtimestamp_ = from._impl_.sigtimestamp_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
@@ -2942,9 +3335,6 @@ bool Content::IsInitialized() const {
   if (_internal_has_typingmessage()) {
     if (!_impl_.typingmessage_->IsInitialized()) return false;
   }
-  if (_internal_has_configurationmessage()) {
-    if (!_impl_.configurationmessage_->IsInitialized()) return false;
-  }
   if (_internal_has_dataextractionnotification()) {
     if (!_impl_.dataextractionnotification_->IsInitialized()) return false;
   }
@@ -2962,11 +3352,17 @@ bool Content::IsInitialized() const {
 
 void Content::InternalSwap(Content* other) {
   using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
   _internal_metadata_.InternalSwap(&other->_internal_metadata_);
   swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.prosigforcommunitymessageonly_, lhs_arena,
+      &other->_impl_.prosigforcommunitymessageonly_, rhs_arena
+  );
   ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(Content, _impl_.sharedconfigmessage_)
-      + sizeof(Content::_impl_.sharedconfigmessage_)
+      PROTOBUF_FIELD_OFFSET(Content, _impl_.sigtimestamp_)
+      + sizeof(Content::_impl_.sigtimestamp_)
       - PROTOBUF_FIELD_OFFSET(Content, _impl_.datamessage_)>(
           reinterpret_cast<char*>(&_impl_.datamessage_),
           reinterpret_cast<char*>(&other->_impl_.datamessage_));
@@ -3907,6 +4303,9 @@ class LokiProfile::_Internal {
   static void set_has_profilepicture(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
+  static void set_has_lastupdateseconds(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
 };
 
 LokiProfile::LokiProfile(::PROTOBUF_NAMESPACE_ID::Arena* arena,
@@ -3922,7 +4321,8 @@ LokiProfile::LokiProfile(const LokiProfile& from)
       decltype(_impl_._has_bits_){from._impl_._has_bits_}
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.displayname_){}
-    , decltype(_impl_.profilepicture_){}};
+    , decltype(_impl_.profilepicture_){}
+    , decltype(_impl_.lastupdateseconds_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
   _impl_.displayname_.InitDefault();
@@ -3941,6 +4341,7 @@ LokiProfile::LokiProfile(const LokiProfile& from)
     _this->_impl_.profilepicture_.Set(from._internal_profilepicture(), 
       _this->GetArenaForAllocation());
   }
+  _this->_impl_.lastupdateseconds_ = from._impl_.lastupdateseconds_;
   // @@protoc_insertion_point(copy_constructor:SessionProtos.LokiProfile)
 }
 
@@ -3953,6 +4354,7 @@ inline void LokiProfile::SharedCtor(
     , /*decltype(_impl_._cached_size_)*/{}
     , decltype(_impl_.displayname_){}
     , decltype(_impl_.profilepicture_){}
+    , decltype(_impl_.lastupdateseconds_){uint64_t{0u}}
   };
   _impl_.displayname_.InitDefault();
   #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
@@ -3998,6 +4400,7 @@ void LokiProfile::Clear() {
       _impl_.profilepicture_.ClearNonDefaultToEmpty();
     }
   }
+  _impl_.lastupdateseconds_ = uint64_t{0u};
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
 }
@@ -4023,6 +4426,15 @@ const char* LokiProfile::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
           auto str = _internal_mutable_profilepicture();
           ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint64 lastUpdateSeconds = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _Internal::set_has_lastupdateseconds(&has_bits);
+          _impl_.lastupdateseconds_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -4070,6 +4482,12 @@ uint8_t* LokiProfile::_InternalSerialize(
         2, this->_internal_profilepicture(), target);
   }
 
+  // optional uint64 lastUpdateSeconds = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_lastupdateseconds(), target);
+  }
+
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
     target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
         static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
@@ -4087,7 +4505,7 @@ size_t LokiProfile::ByteSizeLong() const {
   (void) cached_has_bits;
 
   cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     // optional string displayName = 1;
     if (cached_has_bits & 0x00000001u) {
       total_size += 1 +
@@ -4100,6 +4518,11 @@ size_t LokiProfile::ByteSizeLong() const {
       total_size += 1 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
           this->_internal_profilepicture());
+    }
+
+    // optional uint64 lastUpdateSeconds = 3;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_lastupdateseconds());
     }
 
   }
@@ -4125,13 +4548,17 @@ void LokiProfile::MergeFrom(const LokiProfile& from) {
   (void) cached_has_bits;
 
   cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
+  if (cached_has_bits & 0x00000007u) {
     if (cached_has_bits & 0x00000001u) {
       _this->_internal_set_displayname(from._internal_displayname());
     }
     if (cached_has_bits & 0x00000002u) {
       _this->_internal_set_profilepicture(from._internal_profilepicture());
     }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_impl_.lastupdateseconds_ = from._impl_.lastupdateseconds_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
   }
   _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
 }
@@ -4161,6 +4588,7 @@ void LokiProfile::InternalSwap(LokiProfile* other) {
       &_impl_.profilepicture_, lhs_arena,
       &other->_impl_.profilepicture_, rhs_arena
   );
+  swap(_impl_.lastupdateseconds_, other->_impl_.lastupdateseconds_);
 }
 
 std::string LokiProfile::GetTypeName() const {
@@ -5875,802 +6303,6 @@ std::string DataMessage_OpenGroupInvitation::GetTypeName() const {
 
 // ===================================================================
 
-class DataMessage_ClosedGroupControlMessage_KeyPairWrapper::_Internal {
- public:
-  using HasBits = decltype(std::declval<DataMessage_ClosedGroupControlMessage_KeyPairWrapper>()._impl_._has_bits_);
-  static void set_has_publickey(HasBits* has_bits) {
-    (*has_bits)[0] |= 1u;
-  }
-  static void set_has_encryptedkeypair(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
-  }
-  static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000003) ^ 0x00000003) != 0;
-  }
-};
-
-DataMessage_ClosedGroupControlMessage_KeyPairWrapper::DataMessage_ClosedGroupControlMessage_KeyPairWrapper(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-}
-DataMessage_ClosedGroupControlMessage_KeyPairWrapper::DataMessage_ClosedGroupControlMessage_KeyPairWrapper(const DataMessage_ClosedGroupControlMessage_KeyPairWrapper& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  DataMessage_ClosedGroupControlMessage_KeyPairWrapper* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){from._impl_._has_bits_}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.encryptedkeypair_){}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_publickey()) {
-    _this->_impl_.publickey_.Set(from._internal_publickey(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.encryptedkeypair_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.encryptedkeypair_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_encryptedkeypair()) {
-    _this->_impl_.encryptedkeypair_.Set(from._internal_encryptedkeypair(), 
-      _this->GetArenaForAllocation());
-  }
-  // @@protoc_insertion_point(copy_constructor:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-}
-
-inline void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.encryptedkeypair_){}
-  };
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.encryptedkeypair_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.encryptedkeypair_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-}
-
-DataMessage_ClosedGroupControlMessage_KeyPairWrapper::~DataMessage_ClosedGroupControlMessage_KeyPairWrapper() {
-  // @@protoc_insertion_point(destructor:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.publickey_.Destroy();
-  _impl_.encryptedkeypair_.Destroy();
-}
-
-void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::Clear() {
-// @@protoc_insertion_point(message_clear_start:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
-    if (cached_has_bits & 0x00000001u) {
-      _impl_.publickey_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _impl_.encryptedkeypair_.ClearNonDefaultToEmpty();
-    }
-  }
-  _impl_._has_bits_.Clear();
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* DataMessage_ClosedGroupControlMessage_KeyPairWrapper::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  _Internal::HasBits has_bits{};
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // required bytes publicKey = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
-          auto str = _internal_mutable_publickey();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // required bytes encryptedKeyPair = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
-          auto str = _internal_mutable_encryptedkeypair();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  _impl_._has_bits_.Or(has_bits);
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* DataMessage_ClosedGroupControlMessage_KeyPairWrapper::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  cached_has_bits = _impl_._has_bits_[0];
-  // required bytes publicKey = 1;
-  if (cached_has_bits & 0x00000001u) {
-    target = stream->WriteBytesMaybeAliased(
-        1, this->_internal_publickey(), target);
-  }
-
-  // required bytes encryptedKeyPair = 2;
-  if (cached_has_bits & 0x00000002u) {
-    target = stream->WriteBytesMaybeAliased(
-        2, this->_internal_encryptedkeypair(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  return target;
-}
-
-size_t DataMessage_ClosedGroupControlMessage_KeyPairWrapper::RequiredFieldsByteSizeFallback() const {
-// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  size_t total_size = 0;
-
-  if (_internal_has_publickey()) {
-    // required bytes publicKey = 1;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_publickey());
-  }
-
-  if (_internal_has_encryptedkeypair()) {
-    // required bytes encryptedKeyPair = 2;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_encryptedkeypair());
-  }
-
-  return total_size;
-}
-size_t DataMessage_ClosedGroupControlMessage_KeyPairWrapper::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  size_t total_size = 0;
-
-  if (((_impl_._has_bits_[0] & 0x00000003) ^ 0x00000003) == 0) {  // All required fields are present.
-    // required bytes publicKey = 1;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_publickey());
-
-    // required bytes encryptedKeyPair = 2;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_encryptedkeypair());
-
-  } else {
-    total_size += RequiredFieldsByteSizeFallback();
-  }
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const DataMessage_ClosedGroupControlMessage_KeyPairWrapper*>(
-      &from));
-}
-
-void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::MergeFrom(const DataMessage_ClosedGroupControlMessage_KeyPairWrapper& from) {
-  DataMessage_ClosedGroupControlMessage_KeyPairWrapper* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000003u) {
-    if (cached_has_bits & 0x00000001u) {
-      _this->_internal_set_publickey(from._internal_publickey());
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _this->_internal_set_encryptedkeypair(from._internal_encryptedkeypair());
-    }
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::CopyFrom(const DataMessage_ClosedGroupControlMessage_KeyPairWrapper& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool DataMessage_ClosedGroupControlMessage_KeyPairWrapper::IsInitialized() const {
-  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
-  return true;
-}
-
-void DataMessage_ClosedGroupControlMessage_KeyPairWrapper::InternalSwap(DataMessage_ClosedGroupControlMessage_KeyPairWrapper* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.publickey_, lhs_arena,
-      &other->_impl_.publickey_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.encryptedkeypair_, lhs_arena,
-      &other->_impl_.encryptedkeypair_, rhs_arena
-  );
-}
-
-std::string DataMessage_ClosedGroupControlMessage_KeyPairWrapper::GetTypeName() const {
-  return "SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper";
-}
-
-
-// ===================================================================
-
-class DataMessage_ClosedGroupControlMessage::_Internal {
- public:
-  using HasBits = decltype(std::declval<DataMessage_ClosedGroupControlMessage>()._impl_._has_bits_);
-  static void set_has_type(HasBits* has_bits) {
-    (*has_bits)[0] |= 16u;
-  }
-  static void set_has_publickey(HasBits* has_bits) {
-    (*has_bits)[0] |= 1u;
-  }
-  static void set_has_name(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
-  }
-  static const ::SessionProtos::KeyPair& encryptionkeypair(const DataMessage_ClosedGroupControlMessage* msg);
-  static void set_has_encryptionkeypair(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
-  }
-  static void set_has_expirationtimer(HasBits* has_bits) {
-    (*has_bits)[0] |= 8u;
-  }
-  static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000010) ^ 0x00000010) != 0;
-  }
-};
-
-const ::SessionProtos::KeyPair&
-DataMessage_ClosedGroupControlMessage::_Internal::encryptionkeypair(const DataMessage_ClosedGroupControlMessage* msg) {
-  return *msg->_impl_.encryptionkeypair_;
-}
-DataMessage_ClosedGroupControlMessage::DataMessage_ClosedGroupControlMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:SessionProtos.DataMessage.ClosedGroupControlMessage)
-}
-DataMessage_ClosedGroupControlMessage::DataMessage_ClosedGroupControlMessage(const DataMessage_ClosedGroupControlMessage& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  DataMessage_ClosedGroupControlMessage* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){from._impl_._has_bits_}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.members_){from._impl_.members_}
-    , decltype(_impl_.admins_){from._impl_.admins_}
-    , decltype(_impl_.wrappers_){from._impl_.wrappers_}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.name_){}
-    , decltype(_impl_.encryptionkeypair_){nullptr}
-    , decltype(_impl_.expirationtimer_){}
-    , decltype(_impl_.type_){}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_publickey()) {
-    _this->_impl_.publickey_.Set(from._internal_publickey(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_name()) {
-    _this->_impl_.name_.Set(from._internal_name(), 
-      _this->GetArenaForAllocation());
-  }
-  if (from._internal_has_encryptionkeypair()) {
-    _this->_impl_.encryptionkeypair_ = new ::SessionProtos::KeyPair(*from._impl_.encryptionkeypair_);
-  }
-  ::memcpy(&_impl_.expirationtimer_, &from._impl_.expirationtimer_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.type_) -
-    reinterpret_cast<char*>(&_impl_.expirationtimer_)) + sizeof(_impl_.type_));
-  // @@protoc_insertion_point(copy_constructor:SessionProtos.DataMessage.ClosedGroupControlMessage)
-}
-
-inline void DataMessage_ClosedGroupControlMessage::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.members_){arena}
-    , decltype(_impl_.admins_){arena}
-    , decltype(_impl_.wrappers_){arena}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.name_){}
-    , decltype(_impl_.encryptionkeypair_){nullptr}
-    , decltype(_impl_.expirationtimer_){0u}
-    , decltype(_impl_.type_){1}
-  };
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-}
-
-DataMessage_ClosedGroupControlMessage::~DataMessage_ClosedGroupControlMessage() {
-  // @@protoc_insertion_point(destructor:SessionProtos.DataMessage.ClosedGroupControlMessage)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void DataMessage_ClosedGroupControlMessage::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.members_.~RepeatedPtrField();
-  _impl_.admins_.~RepeatedPtrField();
-  _impl_.wrappers_.~RepeatedPtrField();
-  _impl_.publickey_.Destroy();
-  _impl_.name_.Destroy();
-  if (this != internal_default_instance()) delete _impl_.encryptionkeypair_;
-}
-
-void DataMessage_ClosedGroupControlMessage::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void DataMessage_ClosedGroupControlMessage::Clear() {
-// @@protoc_insertion_point(message_clear_start:SessionProtos.DataMessage.ClosedGroupControlMessage)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  _impl_.members_.Clear();
-  _impl_.admins_.Clear();
-  _impl_.wrappers_.Clear();
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
-    if (cached_has_bits & 0x00000001u) {
-      _impl_.publickey_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _impl_.name_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000004u) {
-      GOOGLE_DCHECK(_impl_.encryptionkeypair_ != nullptr);
-      _impl_.encryptionkeypair_->Clear();
-    }
-  }
-  if (cached_has_bits & 0x00000018u) {
-    _impl_.expirationtimer_ = 0u;
-    _impl_.type_ = 1;
-  }
-  _impl_._has_bits_.Clear();
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* DataMessage_ClosedGroupControlMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  _Internal::HasBits has_bits{};
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // required .SessionProtos.DataMessage.ClosedGroupControlMessage.Type type = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
-          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-          if (PROTOBUF_PREDICT_TRUE(::SessionProtos::DataMessage_ClosedGroupControlMessage_Type_IsValid(val))) {
-            _internal_set_type(static_cast<::SessionProtos::DataMessage_ClosedGroupControlMessage_Type>(val));
-          } else {
-            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(1, val, mutable_unknown_fields());
-          }
-        } else
-          goto handle_unusual;
-        continue;
-      // optional bytes publicKey = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
-          auto str = _internal_mutable_publickey();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional string name = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
-          auto str = _internal_mutable_name();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional .SessionProtos.KeyPair encryptionKeyPair = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
-          ptr = ctx->ParseMessage(_internal_mutable_encryptionkeypair(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // repeated bytes members = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            auto str = _internal_add_members();
-            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<42>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // repeated bytes admins = 6;
-      case 6:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 50)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            auto str = _internal_add_admins();
-            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<50>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // repeated .SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper wrappers = 7;
-      case 7:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 58)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            ptr = ctx->ParseMessage(_internal_add_wrappers(), ptr);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<58>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // optional uint32 expirationTimer = 8;
-      case 8:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 64)) {
-          _Internal::set_has_expirationtimer(&has_bits);
-          _impl_.expirationtimer_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  _impl_._has_bits_.Or(has_bits);
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* DataMessage_ClosedGroupControlMessage::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.DataMessage.ClosedGroupControlMessage)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  cached_has_bits = _impl_._has_bits_[0];
-  // required .SessionProtos.DataMessage.ClosedGroupControlMessage.Type type = 1;
-  if (cached_has_bits & 0x00000010u) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteEnumToArray(
-      1, this->_internal_type(), target);
-  }
-
-  // optional bytes publicKey = 2;
-  if (cached_has_bits & 0x00000001u) {
-    target = stream->WriteBytesMaybeAliased(
-        2, this->_internal_publickey(), target);
-  }
-
-  // optional string name = 3;
-  if (cached_has_bits & 0x00000002u) {
-    target = stream->WriteStringMaybeAliased(
-        3, this->_internal_name(), target);
-  }
-
-  // optional .SessionProtos.KeyPair encryptionKeyPair = 4;
-  if (cached_has_bits & 0x00000004u) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(4, _Internal::encryptionkeypair(this),
-        _Internal::encryptionkeypair(this).GetCachedSize(), target, stream);
-  }
-
-  // repeated bytes members = 5;
-  for (int i = 0, n = this->_internal_members_size(); i < n; i++) {
-    const auto& s = this->_internal_members(i);
-    target = stream->WriteBytes(5, s, target);
-  }
-
-  // repeated bytes admins = 6;
-  for (int i = 0, n = this->_internal_admins_size(); i < n; i++) {
-    const auto& s = this->_internal_admins(i);
-    target = stream->WriteBytes(6, s, target);
-  }
-
-  // repeated .SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper wrappers = 7;
-  for (unsigned i = 0,
-      n = static_cast<unsigned>(this->_internal_wrappers_size()); i < n; i++) {
-    const auto& repfield = this->_internal_wrappers(i);
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-        InternalWriteMessage(7, repfield, repfield.GetCachedSize(), target, stream);
-  }
-
-  // optional uint32 expirationTimer = 8;
-  if (cached_has_bits & 0x00000008u) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(8, this->_internal_expirationtimer(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.DataMessage.ClosedGroupControlMessage)
-  return target;
-}
-
-size_t DataMessage_ClosedGroupControlMessage::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:SessionProtos.DataMessage.ClosedGroupControlMessage)
-  size_t total_size = 0;
-
-  // required .SessionProtos.DataMessage.ClosedGroupControlMessage.Type type = 1;
-  if (_internal_has_type()) {
-    total_size += 1 +
-      ::_pbi::WireFormatLite::EnumSize(this->_internal_type());
-  }
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // repeated bytes members = 5;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.members_.size());
-  for (int i = 0, n = _impl_.members_.size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-      _impl_.members_.Get(i));
-  }
-
-  // repeated bytes admins = 6;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.admins_.size());
-  for (int i = 0, n = _impl_.admins_.size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-      _impl_.admins_.Get(i));
-  }
-
-  // repeated .SessionProtos.DataMessage.ClosedGroupControlMessage.KeyPairWrapper wrappers = 7;
-  total_size += 1UL * this->_internal_wrappers_size();
-  for (const auto& msg : this->_impl_.wrappers_) {
-    total_size +=
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
-  }
-
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
-    // optional bytes publicKey = 2;
-    if (cached_has_bits & 0x00000001u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-          this->_internal_publickey());
-    }
-
-    // optional string name = 3;
-    if (cached_has_bits & 0x00000002u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-          this->_internal_name());
-    }
-
-    // optional .SessionProtos.KeyPair encryptionKeyPair = 4;
-    if (cached_has_bits & 0x00000004u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.encryptionkeypair_);
-    }
-
-    // optional uint32 expirationTimer = 8;
-    if (cached_has_bits & 0x00000008u) {
-      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_expirationtimer());
-    }
-
-  }
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void DataMessage_ClosedGroupControlMessage::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const DataMessage_ClosedGroupControlMessage*>(
-      &from));
-}
-
-void DataMessage_ClosedGroupControlMessage::MergeFrom(const DataMessage_ClosedGroupControlMessage& from) {
-  DataMessage_ClosedGroupControlMessage* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.DataMessage.ClosedGroupControlMessage)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  _this->_impl_.members_.MergeFrom(from._impl_.members_);
-  _this->_impl_.admins_.MergeFrom(from._impl_.admins_);
-  _this->_impl_.wrappers_.MergeFrom(from._impl_.wrappers_);
-  cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000001fu) {
-    if (cached_has_bits & 0x00000001u) {
-      _this->_internal_set_publickey(from._internal_publickey());
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _this->_internal_set_name(from._internal_name());
-    }
-    if (cached_has_bits & 0x00000004u) {
-      _this->_internal_mutable_encryptionkeypair()->::SessionProtos::KeyPair::MergeFrom(
-          from._internal_encryptionkeypair());
-    }
-    if (cached_has_bits & 0x00000008u) {
-      _this->_impl_.expirationtimer_ = from._impl_.expirationtimer_;
-    }
-    if (cached_has_bits & 0x00000010u) {
-      _this->_impl_.type_ = from._impl_.type_;
-    }
-    _this->_impl_._has_bits_[0] |= cached_has_bits;
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void DataMessage_ClosedGroupControlMessage::CopyFrom(const DataMessage_ClosedGroupControlMessage& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.DataMessage.ClosedGroupControlMessage)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool DataMessage_ClosedGroupControlMessage::IsInitialized() const {
-  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
-  if (!::PROTOBUF_NAMESPACE_ID::internal::AllAreInitialized(_impl_.wrappers_))
-    return false;
-  if (_internal_has_encryptionkeypair()) {
-    if (!_impl_.encryptionkeypair_->IsInitialized()) return false;
-  }
-  return true;
-}
-
-void DataMessage_ClosedGroupControlMessage::InternalSwap(DataMessage_ClosedGroupControlMessage* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
-  _impl_.members_.InternalSwap(&other->_impl_.members_);
-  _impl_.admins_.InternalSwap(&other->_impl_.admins_);
-  _impl_.wrappers_.InternalSwap(&other->_impl_.wrappers_);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.publickey_, lhs_arena,
-      &other->_impl_.publickey_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.name_, lhs_arena,
-      &other->_impl_.name_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(DataMessage_ClosedGroupControlMessage, _impl_.expirationtimer_)
-      + sizeof(DataMessage_ClosedGroupControlMessage::_impl_.expirationtimer_)
-      - PROTOBUF_FIELD_OFFSET(DataMessage_ClosedGroupControlMessage, _impl_.encryptionkeypair_)>(
-          reinterpret_cast<char*>(&_impl_.encryptionkeypair_),
-          reinterpret_cast<char*>(&other->_impl_.encryptionkeypair_));
-  swap(_impl_.type_, other->_impl_.type_);
-}
-
-std::string DataMessage_ClosedGroupControlMessage::GetTypeName() const {
-  return "SessionProtos.DataMessage.ClosedGroupControlMessage";
-}
-
-
-// ===================================================================
-
 class DataMessage::_Internal {
  public:
   using HasBits = decltype(std::declval<DataMessage>()._impl_._has_bits_);
@@ -6678,16 +6310,13 @@ class DataMessage::_Internal {
     (*has_bits)[0] |= 1u;
   }
   static void set_has_flags(HasBits* has_bits) {
-    (*has_bits)[0] |= 256u;
-  }
-  static void set_has_expiretimer(HasBits* has_bits) {
     (*has_bits)[0] |= 512u;
   }
   static void set_has_profilekey(HasBits* has_bits) {
     (*has_bits)[0] |= 2u;
   }
   static void set_has_timestamp(HasBits* has_bits) {
-    (*has_bits)[0] |= 1024u;
+    (*has_bits)[0] |= 256u;
   }
   static const ::SessionProtos::DataMessage_Quote& quote(const DataMessage* msg);
   static void set_has_quote(HasBits* has_bits) {
@@ -6705,15 +6334,15 @@ class DataMessage::_Internal {
   static void set_has_opengroupinvitation(HasBits* has_bits) {
     (*has_bits)[0] |= 64u;
   }
-  static const ::SessionProtos::DataMessage_ClosedGroupControlMessage& closedgroupcontrolmessage(const DataMessage* msg);
-  static void set_has_closedgroupcontrolmessage(HasBits* has_bits) {
-    (*has_bits)[0] |= 128u;
-  }
   static void set_has_synctarget(HasBits* has_bits) {
     (*has_bits)[0] |= 4u;
   }
   static void set_has_blockscommunitymessagerequests(HasBits* has_bits) {
-    (*has_bits)[0] |= 2048u;
+    (*has_bits)[0] |= 1024u;
+  }
+  static const ::SessionProtos::GroupUpdateMessage& groupupdatemessage(const DataMessage* msg);
+  static void set_has_groupupdatemessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 128u;
   }
 };
 
@@ -6733,9 +6362,9 @@ const ::SessionProtos::DataMessage_OpenGroupInvitation&
 DataMessage::_Internal::opengroupinvitation(const DataMessage* msg) {
   return *msg->_impl_.opengroupinvitation_;
 }
-const ::SessionProtos::DataMessage_ClosedGroupControlMessage&
-DataMessage::_Internal::closedgroupcontrolmessage(const DataMessage* msg) {
-  return *msg->_impl_.closedgroupcontrolmessage_;
+const ::SessionProtos::GroupUpdateMessage&
+DataMessage::_Internal::groupupdatemessage(const DataMessage* msg) {
+  return *msg->_impl_.groupupdatemessage_;
 }
 DataMessage::DataMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
                          bool is_message_owned)
@@ -6758,10 +6387,9 @@ DataMessage::DataMessage(const DataMessage& from)
     , decltype(_impl_.reaction_){nullptr}
     , decltype(_impl_.profile_){nullptr}
     , decltype(_impl_.opengroupinvitation_){nullptr}
-    , decltype(_impl_.closedgroupcontrolmessage_){nullptr}
-    , decltype(_impl_.flags_){}
-    , decltype(_impl_.expiretimer_){}
+    , decltype(_impl_.groupupdatemessage_){nullptr}
     , decltype(_impl_.timestamp_){}
+    , decltype(_impl_.flags_){}
     , decltype(_impl_.blockscommunitymessagerequests_){}};
 
   _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
@@ -6801,12 +6429,12 @@ DataMessage::DataMessage(const DataMessage& from)
   if (from._internal_has_opengroupinvitation()) {
     _this->_impl_.opengroupinvitation_ = new ::SessionProtos::DataMessage_OpenGroupInvitation(*from._impl_.opengroupinvitation_);
   }
-  if (from._internal_has_closedgroupcontrolmessage()) {
-    _this->_impl_.closedgroupcontrolmessage_ = new ::SessionProtos::DataMessage_ClosedGroupControlMessage(*from._impl_.closedgroupcontrolmessage_);
+  if (from._internal_has_groupupdatemessage()) {
+    _this->_impl_.groupupdatemessage_ = new ::SessionProtos::GroupUpdateMessage(*from._impl_.groupupdatemessage_);
   }
-  ::memcpy(&_impl_.flags_, &from._impl_.flags_,
+  ::memcpy(&_impl_.timestamp_, &from._impl_.timestamp_,
     static_cast<size_t>(reinterpret_cast<char*>(&_impl_.blockscommunitymessagerequests_) -
-    reinterpret_cast<char*>(&_impl_.flags_)) + sizeof(_impl_.blockscommunitymessagerequests_));
+    reinterpret_cast<char*>(&_impl_.timestamp_)) + sizeof(_impl_.blockscommunitymessagerequests_));
   // @@protoc_insertion_point(copy_constructor:SessionProtos.DataMessage)
 }
 
@@ -6826,10 +6454,9 @@ inline void DataMessage::SharedCtor(
     , decltype(_impl_.reaction_){nullptr}
     , decltype(_impl_.profile_){nullptr}
     , decltype(_impl_.opengroupinvitation_){nullptr}
-    , decltype(_impl_.closedgroupcontrolmessage_){nullptr}
-    , decltype(_impl_.flags_){0u}
-    , decltype(_impl_.expiretimer_){0u}
+    , decltype(_impl_.groupupdatemessage_){nullptr}
     , decltype(_impl_.timestamp_){uint64_t{0u}}
+    , decltype(_impl_.flags_){0u}
     , decltype(_impl_.blockscommunitymessagerequests_){false}
   };
   _impl_.body_.InitDefault();
@@ -6866,7 +6493,7 @@ inline void DataMessage::SharedDtor() {
   if (this != internal_default_instance()) delete _impl_.reaction_;
   if (this != internal_default_instance()) delete _impl_.profile_;
   if (this != internal_default_instance()) delete _impl_.opengroupinvitation_;
-  if (this != internal_default_instance()) delete _impl_.closedgroupcontrolmessage_;
+  if (this != internal_default_instance()) delete _impl_.groupupdatemessage_;
 }
 
 void DataMessage::SetCachedSize(int size) const {
@@ -6909,14 +6536,14 @@ void DataMessage::Clear() {
       _impl_.opengroupinvitation_->Clear();
     }
     if (cached_has_bits & 0x00000080u) {
-      GOOGLE_DCHECK(_impl_.closedgroupcontrolmessage_ != nullptr);
-      _impl_.closedgroupcontrolmessage_->Clear();
+      GOOGLE_DCHECK(_impl_.groupupdatemessage_ != nullptr);
+      _impl_.groupupdatemessage_->Clear();
     }
   }
-  if (cached_has_bits & 0x00000f00u) {
-    ::memset(&_impl_.flags_, 0, static_cast<size_t>(
+  if (cached_has_bits & 0x00000700u) {
+    ::memset(&_impl_.timestamp_, 0, static_cast<size_t>(
         reinterpret_cast<char*>(&_impl_.blockscommunitymessagerequests_) -
-        reinterpret_cast<char*>(&_impl_.flags_)) + sizeof(_impl_.blockscommunitymessagerequests_));
+        reinterpret_cast<char*>(&_impl_.timestamp_)) + sizeof(_impl_.blockscommunitymessagerequests_));
   }
   _impl_._has_bits_.Clear();
   _internal_metadata_.Clear<std::string>();
@@ -6956,15 +6583,6 @@ const char* DataMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
           _Internal::set_has_flags(&has_bits);
           _impl_.flags_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional uint32 expireTimer = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
-          _Internal::set_has_expiretimer(&has_bits);
-          _impl_.expiretimer_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -7032,14 +6650,6 @@ const char* DataMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         } else
           goto handle_unusual;
         continue;
-      // optional .SessionProtos.DataMessage.ClosedGroupControlMessage closedGroupControlMessage = 104;
-      case 104:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
-          ptr = ctx->ParseMessage(_internal_mutable_closedgroupcontrolmessage(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
       // optional string syncTarget = 105;
       case 105:
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 74)) {
@@ -7054,6 +6664,14 @@ const char* DataMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* c
         if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 80)) {
           _Internal::set_has_blockscommunitymessagerequests(&has_bits);
           _impl_.blockscommunitymessagerequests_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdateMessage groupUpdateMessage = 120;
+      case 120:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 194)) {
+          ptr = ctx->ParseMessage(_internal_mutable_groupupdatemessage(), ptr);
           CHK_(ptr);
         } else
           goto handle_unusual;
@@ -7104,15 +6722,9 @@ uint8_t* DataMessage::_InternalSerialize(
   }
 
   // optional uint32 flags = 4;
-  if (cached_has_bits & 0x00000100u) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(4, this->_internal_flags(), target);
-  }
-
-  // optional uint32 expireTimer = 5;
   if (cached_has_bits & 0x00000200u) {
     target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(5, this->_internal_expiretimer(), target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(4, this->_internal_flags(), target);
   }
 
   // optional bytes profileKey = 6;
@@ -7122,7 +6734,7 @@ uint8_t* DataMessage::_InternalSerialize(
   }
 
   // optional uint64 timestamp = 7;
-  if (cached_has_bits & 0x00000400u) {
+  if (cached_has_bits & 0x00000100u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteUInt64ToArray(7, this->_internal_timestamp(), target);
   }
@@ -7163,13 +6775,6 @@ uint8_t* DataMessage::_InternalSerialize(
         _Internal::opengroupinvitation(this).GetCachedSize(), target, stream);
   }
 
-  // optional .SessionProtos.DataMessage.ClosedGroupControlMessage closedGroupControlMessage = 104;
-  if (cached_has_bits & 0x00000080u) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(104, _Internal::closedgroupcontrolmessage(this),
-        _Internal::closedgroupcontrolmessage(this).GetCachedSize(), target, stream);
-  }
-
   // optional string syncTarget = 105;
   if (cached_has_bits & 0x00000004u) {
     target = stream->WriteStringMaybeAliased(
@@ -7177,9 +6782,16 @@ uint8_t* DataMessage::_InternalSerialize(
   }
 
   // optional bool blocksCommunityMessageRequests = 106;
-  if (cached_has_bits & 0x00000800u) {
+  if (cached_has_bits & 0x00000400u) {
     target = stream->EnsureSpace(target);
     target = ::_pbi::WireFormatLite::WriteBoolToArray(106, this->_internal_blockscommunitymessagerequests(), target);
+  }
+
+  // optional .SessionProtos.GroupUpdateMessage groupUpdateMessage = 120;
+  if (cached_has_bits & 0x00000080u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(120, _Internal::groupupdatemessage(this),
+        _Internal::groupupdatemessage(this).GetCachedSize(), target, stream);
   }
 
   if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
@@ -7263,32 +6875,27 @@ size_t DataMessage::ByteSizeLong() const {
           *_impl_.opengroupinvitation_);
     }
 
-    // optional .SessionProtos.DataMessage.ClosedGroupControlMessage closedGroupControlMessage = 104;
+    // optional .SessionProtos.GroupUpdateMessage groupUpdateMessage = 120;
     if (cached_has_bits & 0x00000080u) {
       total_size += 2 +
         ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.closedgroupcontrolmessage_);
+          *_impl_.groupupdatemessage_);
     }
 
   }
-  if (cached_has_bits & 0x00000f00u) {
-    // optional uint32 flags = 4;
-    if (cached_has_bits & 0x00000100u) {
-      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
-    }
-
-    // optional uint32 expireTimer = 5;
-    if (cached_has_bits & 0x00000200u) {
-      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_expiretimer());
-    }
-
+  if (cached_has_bits & 0x00000700u) {
     // optional uint64 timestamp = 7;
-    if (cached_has_bits & 0x00000400u) {
+    if (cached_has_bits & 0x00000100u) {
       total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_timestamp());
     }
 
+    // optional uint32 flags = 4;
+    if (cached_has_bits & 0x00000200u) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_flags());
+    }
+
     // optional bool blocksCommunityMessageRequests = 106;
-    if (cached_has_bits & 0x00000800u) {
+    if (cached_has_bits & 0x00000400u) {
       total_size += 2 + 1;
     }
 
@@ -7344,21 +6951,18 @@ void DataMessage::MergeFrom(const DataMessage& from) {
           from._internal_opengroupinvitation());
     }
     if (cached_has_bits & 0x00000080u) {
-      _this->_internal_mutable_closedgroupcontrolmessage()->::SessionProtos::DataMessage_ClosedGroupControlMessage::MergeFrom(
-          from._internal_closedgroupcontrolmessage());
+      _this->_internal_mutable_groupupdatemessage()->::SessionProtos::GroupUpdateMessage::MergeFrom(
+          from._internal_groupupdatemessage());
     }
   }
-  if (cached_has_bits & 0x00000f00u) {
+  if (cached_has_bits & 0x00000700u) {
     if (cached_has_bits & 0x00000100u) {
-      _this->_impl_.flags_ = from._impl_.flags_;
-    }
-    if (cached_has_bits & 0x00000200u) {
-      _this->_impl_.expiretimer_ = from._impl_.expiretimer_;
-    }
-    if (cached_has_bits & 0x00000400u) {
       _this->_impl_.timestamp_ = from._impl_.timestamp_;
     }
-    if (cached_has_bits & 0x00000800u) {
+    if (cached_has_bits & 0x00000200u) {
+      _this->_impl_.flags_ = from._impl_.flags_;
+    }
+    if (cached_has_bits & 0x00000400u) {
       _this->_impl_.blockscommunitymessagerequests_ = from._impl_.blockscommunitymessagerequests_;
     }
     _this->_impl_._has_bits_[0] |= cached_has_bits;
@@ -7387,8 +6991,8 @@ bool DataMessage::IsInitialized() const {
   if (_internal_has_opengroupinvitation()) {
     if (!_impl_.opengroupinvitation_->IsInitialized()) return false;
   }
-  if (_internal_has_closedgroupcontrolmessage()) {
-    if (!_impl_.closedgroupcontrolmessage_->IsInitialized()) return false;
+  if (_internal_has_groupupdatemessage()) {
+    if (!_impl_.groupupdatemessage_->IsInitialized()) return false;
   }
   return true;
 }
@@ -7423,1351 +7027,6 @@ void DataMessage::InternalSwap(DataMessage* other) {
 
 std::string DataMessage::GetTypeName() const {
   return "SessionProtos.DataMessage";
-}
-
-
-// ===================================================================
-
-class ConfigurationMessage_ClosedGroup::_Internal {
- public:
-  using HasBits = decltype(std::declval<ConfigurationMessage_ClosedGroup>()._impl_._has_bits_);
-  static void set_has_publickey(HasBits* has_bits) {
-    (*has_bits)[0] |= 1u;
-  }
-  static void set_has_name(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
-  }
-  static const ::SessionProtos::KeyPair& encryptionkeypair(const ConfigurationMessage_ClosedGroup* msg);
-  static void set_has_encryptionkeypair(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
-  }
-  static void set_has_expirationtimer(HasBits* has_bits) {
-    (*has_bits)[0] |= 8u;
-  }
-};
-
-const ::SessionProtos::KeyPair&
-ConfigurationMessage_ClosedGroup::_Internal::encryptionkeypair(const ConfigurationMessage_ClosedGroup* msg) {
-  return *msg->_impl_.encryptionkeypair_;
-}
-ConfigurationMessage_ClosedGroup::ConfigurationMessage_ClosedGroup(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:SessionProtos.ConfigurationMessage.ClosedGroup)
-}
-ConfigurationMessage_ClosedGroup::ConfigurationMessage_ClosedGroup(const ConfigurationMessage_ClosedGroup& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  ConfigurationMessage_ClosedGroup* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){from._impl_._has_bits_}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.members_){from._impl_.members_}
-    , decltype(_impl_.admins_){from._impl_.admins_}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.name_){}
-    , decltype(_impl_.encryptionkeypair_){nullptr}
-    , decltype(_impl_.expirationtimer_){}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_publickey()) {
-    _this->_impl_.publickey_.Set(from._internal_publickey(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_name()) {
-    _this->_impl_.name_.Set(from._internal_name(), 
-      _this->GetArenaForAllocation());
-  }
-  if (from._internal_has_encryptionkeypair()) {
-    _this->_impl_.encryptionkeypair_ = new ::SessionProtos::KeyPair(*from._impl_.encryptionkeypair_);
-  }
-  _this->_impl_.expirationtimer_ = from._impl_.expirationtimer_;
-  // @@protoc_insertion_point(copy_constructor:SessionProtos.ConfigurationMessage.ClosedGroup)
-}
-
-inline void ConfigurationMessage_ClosedGroup::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.members_){arena}
-    , decltype(_impl_.admins_){arena}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.name_){}
-    , decltype(_impl_.encryptionkeypair_){nullptr}
-    , decltype(_impl_.expirationtimer_){0u}
-  };
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-}
-
-ConfigurationMessage_ClosedGroup::~ConfigurationMessage_ClosedGroup() {
-  // @@protoc_insertion_point(destructor:SessionProtos.ConfigurationMessage.ClosedGroup)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void ConfigurationMessage_ClosedGroup::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.members_.~RepeatedPtrField();
-  _impl_.admins_.~RepeatedPtrField();
-  _impl_.publickey_.Destroy();
-  _impl_.name_.Destroy();
-  if (this != internal_default_instance()) delete _impl_.encryptionkeypair_;
-}
-
-void ConfigurationMessage_ClosedGroup::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void ConfigurationMessage_ClosedGroup::Clear() {
-// @@protoc_insertion_point(message_clear_start:SessionProtos.ConfigurationMessage.ClosedGroup)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  _impl_.members_.Clear();
-  _impl_.admins_.Clear();
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
-    if (cached_has_bits & 0x00000001u) {
-      _impl_.publickey_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _impl_.name_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000004u) {
-      GOOGLE_DCHECK(_impl_.encryptionkeypair_ != nullptr);
-      _impl_.encryptionkeypair_->Clear();
-    }
-  }
-  _impl_.expirationtimer_ = 0u;
-  _impl_._has_bits_.Clear();
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* ConfigurationMessage_ClosedGroup::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  _Internal::HasBits has_bits{};
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // optional bytes publicKey = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
-          auto str = _internal_mutable_publickey();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional string name = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
-          auto str = _internal_mutable_name();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional .SessionProtos.KeyPair encryptionKeyPair = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
-          ptr = ctx->ParseMessage(_internal_mutable_encryptionkeypair(), ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // repeated bytes members = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            auto str = _internal_add_members();
-            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<34>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // repeated bytes admins = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            auto str = _internal_add_admins();
-            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<42>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // optional uint32 expirationTimer = 6;
-      case 6:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
-          _Internal::set_has_expirationtimer(&has_bits);
-          _impl_.expirationtimer_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  _impl_._has_bits_.Or(has_bits);
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* ConfigurationMessage_ClosedGroup::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ConfigurationMessage.ClosedGroup)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  cached_has_bits = _impl_._has_bits_[0];
-  // optional bytes publicKey = 1;
-  if (cached_has_bits & 0x00000001u) {
-    target = stream->WriteBytesMaybeAliased(
-        1, this->_internal_publickey(), target);
-  }
-
-  // optional string name = 2;
-  if (cached_has_bits & 0x00000002u) {
-    target = stream->WriteStringMaybeAliased(
-        2, this->_internal_name(), target);
-  }
-
-  // optional .SessionProtos.KeyPair encryptionKeyPair = 3;
-  if (cached_has_bits & 0x00000004u) {
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-      InternalWriteMessage(3, _Internal::encryptionkeypair(this),
-        _Internal::encryptionkeypair(this).GetCachedSize(), target, stream);
-  }
-
-  // repeated bytes members = 4;
-  for (int i = 0, n = this->_internal_members_size(); i < n; i++) {
-    const auto& s = this->_internal_members(i);
-    target = stream->WriteBytes(4, s, target);
-  }
-
-  // repeated bytes admins = 5;
-  for (int i = 0, n = this->_internal_admins_size(); i < n; i++) {
-    const auto& s = this->_internal_admins(i);
-    target = stream->WriteBytes(5, s, target);
-  }
-
-  // optional uint32 expirationTimer = 6;
-  if (cached_has_bits & 0x00000008u) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(6, this->_internal_expirationtimer(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ConfigurationMessage.ClosedGroup)
-  return target;
-}
-
-size_t ConfigurationMessage_ClosedGroup::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ConfigurationMessage.ClosedGroup)
-  size_t total_size = 0;
-
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // repeated bytes members = 4;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.members_.size());
-  for (int i = 0, n = _impl_.members_.size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-      _impl_.members_.Get(i));
-  }
-
-  // repeated bytes admins = 5;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.admins_.size());
-  for (int i = 0, n = _impl_.admins_.size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-      _impl_.admins_.Get(i));
-  }
-
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
-    // optional bytes publicKey = 1;
-    if (cached_has_bits & 0x00000001u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-          this->_internal_publickey());
-    }
-
-    // optional string name = 2;
-    if (cached_has_bits & 0x00000002u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-          this->_internal_name());
-    }
-
-    // optional .SessionProtos.KeyPair encryptionKeyPair = 3;
-    if (cached_has_bits & 0x00000004u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
-          *_impl_.encryptionkeypair_);
-    }
-
-    // optional uint32 expirationTimer = 6;
-    if (cached_has_bits & 0x00000008u) {
-      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_expirationtimer());
-    }
-
-  }
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void ConfigurationMessage_ClosedGroup::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const ConfigurationMessage_ClosedGroup*>(
-      &from));
-}
-
-void ConfigurationMessage_ClosedGroup::MergeFrom(const ConfigurationMessage_ClosedGroup& from) {
-  ConfigurationMessage_ClosedGroup* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ConfigurationMessage.ClosedGroup)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  _this->_impl_.members_.MergeFrom(from._impl_.members_);
-  _this->_impl_.admins_.MergeFrom(from._impl_.admins_);
-  cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
-    if (cached_has_bits & 0x00000001u) {
-      _this->_internal_set_publickey(from._internal_publickey());
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _this->_internal_set_name(from._internal_name());
-    }
-    if (cached_has_bits & 0x00000004u) {
-      _this->_internal_mutable_encryptionkeypair()->::SessionProtos::KeyPair::MergeFrom(
-          from._internal_encryptionkeypair());
-    }
-    if (cached_has_bits & 0x00000008u) {
-      _this->_impl_.expirationtimer_ = from._impl_.expirationtimer_;
-    }
-    _this->_impl_._has_bits_[0] |= cached_has_bits;
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void ConfigurationMessage_ClosedGroup::CopyFrom(const ConfigurationMessage_ClosedGroup& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ConfigurationMessage.ClosedGroup)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool ConfigurationMessage_ClosedGroup::IsInitialized() const {
-  if (_internal_has_encryptionkeypair()) {
-    if (!_impl_.encryptionkeypair_->IsInitialized()) return false;
-  }
-  return true;
-}
-
-void ConfigurationMessage_ClosedGroup::InternalSwap(ConfigurationMessage_ClosedGroup* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
-  _impl_.members_.InternalSwap(&other->_impl_.members_);
-  _impl_.admins_.InternalSwap(&other->_impl_.admins_);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.publickey_, lhs_arena,
-      &other->_impl_.publickey_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.name_, lhs_arena,
-      &other->_impl_.name_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ConfigurationMessage_ClosedGroup, _impl_.expirationtimer_)
-      + sizeof(ConfigurationMessage_ClosedGroup::_impl_.expirationtimer_)
-      - PROTOBUF_FIELD_OFFSET(ConfigurationMessage_ClosedGroup, _impl_.encryptionkeypair_)>(
-          reinterpret_cast<char*>(&_impl_.encryptionkeypair_),
-          reinterpret_cast<char*>(&other->_impl_.encryptionkeypair_));
-}
-
-std::string ConfigurationMessage_ClosedGroup::GetTypeName() const {
-  return "SessionProtos.ConfigurationMessage.ClosedGroup";
-}
-
-
-// ===================================================================
-
-class ConfigurationMessage_Contact::_Internal {
- public:
-  using HasBits = decltype(std::declval<ConfigurationMessage_Contact>()._impl_._has_bits_);
-  static void set_has_publickey(HasBits* has_bits) {
-    (*has_bits)[0] |= 1u;
-  }
-  static void set_has_name(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
-  }
-  static void set_has_profilepicture(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
-  }
-  static void set_has_profilekey(HasBits* has_bits) {
-    (*has_bits)[0] |= 8u;
-  }
-  static void set_has_isapproved(HasBits* has_bits) {
-    (*has_bits)[0] |= 16u;
-  }
-  static void set_has_isblocked(HasBits* has_bits) {
-    (*has_bits)[0] |= 32u;
-  }
-  static void set_has_didapproveme(HasBits* has_bits) {
-    (*has_bits)[0] |= 64u;
-  }
-  static bool MissingRequiredFields(const HasBits& has_bits) {
-    return ((has_bits[0] & 0x00000003) ^ 0x00000003) != 0;
-  }
-};
-
-ConfigurationMessage_Contact::ConfigurationMessage_Contact(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:SessionProtos.ConfigurationMessage.Contact)
-}
-ConfigurationMessage_Contact::ConfigurationMessage_Contact(const ConfigurationMessage_Contact& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  ConfigurationMessage_Contact* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){from._impl_._has_bits_}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.name_){}
-    , decltype(_impl_.profilepicture_){}
-    , decltype(_impl_.profilekey_){}
-    , decltype(_impl_.isapproved_){}
-    , decltype(_impl_.isblocked_){}
-    , decltype(_impl_.didapproveme_){}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_publickey()) {
-    _this->_impl_.publickey_.Set(from._internal_publickey(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_name()) {
-    _this->_impl_.name_.Set(from._internal_name(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.profilepicture_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilepicture_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_profilepicture()) {
-    _this->_impl_.profilepicture_.Set(from._internal_profilepicture(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.profilekey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilekey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_profilekey()) {
-    _this->_impl_.profilekey_.Set(from._internal_profilekey(), 
-      _this->GetArenaForAllocation());
-  }
-  ::memcpy(&_impl_.isapproved_, &from._impl_.isapproved_,
-    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.didapproveme_) -
-    reinterpret_cast<char*>(&_impl_.isapproved_)) + sizeof(_impl_.didapproveme_));
-  // @@protoc_insertion_point(copy_constructor:SessionProtos.ConfigurationMessage.Contact)
-}
-
-inline void ConfigurationMessage_Contact::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.publickey_){}
-    , decltype(_impl_.name_){}
-    , decltype(_impl_.profilepicture_){}
-    , decltype(_impl_.profilekey_){}
-    , decltype(_impl_.isapproved_){false}
-    , decltype(_impl_.isblocked_){false}
-    , decltype(_impl_.didapproveme_){false}
-  };
-  _impl_.publickey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.publickey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.name_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.name_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.profilepicture_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilepicture_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.profilekey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilekey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-}
-
-ConfigurationMessage_Contact::~ConfigurationMessage_Contact() {
-  // @@protoc_insertion_point(destructor:SessionProtos.ConfigurationMessage.Contact)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void ConfigurationMessage_Contact::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.publickey_.Destroy();
-  _impl_.name_.Destroy();
-  _impl_.profilepicture_.Destroy();
-  _impl_.profilekey_.Destroy();
-}
-
-void ConfigurationMessage_Contact::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void ConfigurationMessage_Contact::Clear() {
-// @@protoc_insertion_point(message_clear_start:SessionProtos.ConfigurationMessage.Contact)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000000fu) {
-    if (cached_has_bits & 0x00000001u) {
-      _impl_.publickey_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _impl_.name_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000004u) {
-      _impl_.profilepicture_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000008u) {
-      _impl_.profilekey_.ClearNonDefaultToEmpty();
-    }
-  }
-  ::memset(&_impl_.isapproved_, 0, static_cast<size_t>(
-      reinterpret_cast<char*>(&_impl_.didapproveme_) -
-      reinterpret_cast<char*>(&_impl_.isapproved_)) + sizeof(_impl_.didapproveme_));
-  _impl_._has_bits_.Clear();
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* ConfigurationMessage_Contact::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  _Internal::HasBits has_bits{};
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // required bytes publicKey = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
-          auto str = _internal_mutable_publickey();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // required string name = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
-          auto str = _internal_mutable_name();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional string profilePicture = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
-          auto str = _internal_mutable_profilepicture();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional bytes profileKey = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
-          auto str = _internal_mutable_profilekey();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional bool isApproved = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 40)) {
-          _Internal::set_has_isapproved(&has_bits);
-          _impl_.isapproved_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional bool isBlocked = 6;
-      case 6:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 48)) {
-          _Internal::set_has_isblocked(&has_bits);
-          _impl_.isblocked_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional bool didApproveMe = 7;
-      case 7:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 56)) {
-          _Internal::set_has_didapproveme(&has_bits);
-          _impl_.didapproveme_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  _impl_._has_bits_.Or(has_bits);
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* ConfigurationMessage_Contact::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ConfigurationMessage.Contact)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  cached_has_bits = _impl_._has_bits_[0];
-  // required bytes publicKey = 1;
-  if (cached_has_bits & 0x00000001u) {
-    target = stream->WriteBytesMaybeAliased(
-        1, this->_internal_publickey(), target);
-  }
-
-  // required string name = 2;
-  if (cached_has_bits & 0x00000002u) {
-    target = stream->WriteStringMaybeAliased(
-        2, this->_internal_name(), target);
-  }
-
-  // optional string profilePicture = 3;
-  if (cached_has_bits & 0x00000004u) {
-    target = stream->WriteStringMaybeAliased(
-        3, this->_internal_profilepicture(), target);
-  }
-
-  // optional bytes profileKey = 4;
-  if (cached_has_bits & 0x00000008u) {
-    target = stream->WriteBytesMaybeAliased(
-        4, this->_internal_profilekey(), target);
-  }
-
-  // optional bool isApproved = 5;
-  if (cached_has_bits & 0x00000010u) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteBoolToArray(5, this->_internal_isapproved(), target);
-  }
-
-  // optional bool isBlocked = 6;
-  if (cached_has_bits & 0x00000020u) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteBoolToArray(6, this->_internal_isblocked(), target);
-  }
-
-  // optional bool didApproveMe = 7;
-  if (cached_has_bits & 0x00000040u) {
-    target = stream->EnsureSpace(target);
-    target = ::_pbi::WireFormatLite::WriteBoolToArray(7, this->_internal_didapproveme(), target);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ConfigurationMessage.Contact)
-  return target;
-}
-
-size_t ConfigurationMessage_Contact::RequiredFieldsByteSizeFallback() const {
-// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.ConfigurationMessage.Contact)
-  size_t total_size = 0;
-
-  if (_internal_has_publickey()) {
-    // required bytes publicKey = 1;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_publickey());
-  }
-
-  if (_internal_has_name()) {
-    // required string name = 2;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->_internal_name());
-  }
-
-  return total_size;
-}
-size_t ConfigurationMessage_Contact::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ConfigurationMessage.Contact)
-  size_t total_size = 0;
-
-  if (((_impl_._has_bits_[0] & 0x00000003) ^ 0x00000003) == 0) {  // All required fields are present.
-    // required bytes publicKey = 1;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-        this->_internal_publickey());
-
-    // required string name = 2;
-    total_size += 1 +
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-        this->_internal_name());
-
-  } else {
-    total_size += RequiredFieldsByteSizeFallback();
-  }
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000007cu) {
-    // optional string profilePicture = 3;
-    if (cached_has_bits & 0x00000004u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-          this->_internal_profilepicture());
-    }
-
-    // optional bytes profileKey = 4;
-    if (cached_has_bits & 0x00000008u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-          this->_internal_profilekey());
-    }
-
-    // optional bool isApproved = 5;
-    if (cached_has_bits & 0x00000010u) {
-      total_size += 1 + 1;
-    }
-
-    // optional bool isBlocked = 6;
-    if (cached_has_bits & 0x00000020u) {
-      total_size += 1 + 1;
-    }
-
-    // optional bool didApproveMe = 7;
-    if (cached_has_bits & 0x00000040u) {
-      total_size += 1 + 1;
-    }
-
-  }
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void ConfigurationMessage_Contact::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const ConfigurationMessage_Contact*>(
-      &from));
-}
-
-void ConfigurationMessage_Contact::MergeFrom(const ConfigurationMessage_Contact& from) {
-  ConfigurationMessage_Contact* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ConfigurationMessage.Contact)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x0000007fu) {
-    if (cached_has_bits & 0x00000001u) {
-      _this->_internal_set_publickey(from._internal_publickey());
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _this->_internal_set_name(from._internal_name());
-    }
-    if (cached_has_bits & 0x00000004u) {
-      _this->_internal_set_profilepicture(from._internal_profilepicture());
-    }
-    if (cached_has_bits & 0x00000008u) {
-      _this->_internal_set_profilekey(from._internal_profilekey());
-    }
-    if (cached_has_bits & 0x00000010u) {
-      _this->_impl_.isapproved_ = from._impl_.isapproved_;
-    }
-    if (cached_has_bits & 0x00000020u) {
-      _this->_impl_.isblocked_ = from._impl_.isblocked_;
-    }
-    if (cached_has_bits & 0x00000040u) {
-      _this->_impl_.didapproveme_ = from._impl_.didapproveme_;
-    }
-    _this->_impl_._has_bits_[0] |= cached_has_bits;
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void ConfigurationMessage_Contact::CopyFrom(const ConfigurationMessage_Contact& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ConfigurationMessage.Contact)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool ConfigurationMessage_Contact::IsInitialized() const {
-  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
-  return true;
-}
-
-void ConfigurationMessage_Contact::InternalSwap(ConfigurationMessage_Contact* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.publickey_, lhs_arena,
-      &other->_impl_.publickey_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.name_, lhs_arena,
-      &other->_impl_.name_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.profilepicture_, lhs_arena,
-      &other->_impl_.profilepicture_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.profilekey_, lhs_arena,
-      &other->_impl_.profilekey_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
-      PROTOBUF_FIELD_OFFSET(ConfigurationMessage_Contact, _impl_.didapproveme_)
-      + sizeof(ConfigurationMessage_Contact::_impl_.didapproveme_)
-      - PROTOBUF_FIELD_OFFSET(ConfigurationMessage_Contact, _impl_.isapproved_)>(
-          reinterpret_cast<char*>(&_impl_.isapproved_),
-          reinterpret_cast<char*>(&other->_impl_.isapproved_));
-}
-
-std::string ConfigurationMessage_Contact::GetTypeName() const {
-  return "SessionProtos.ConfigurationMessage.Contact";
-}
-
-
-// ===================================================================
-
-class ConfigurationMessage::_Internal {
- public:
-  using HasBits = decltype(std::declval<ConfigurationMessage>()._impl_._has_bits_);
-  static void set_has_displayname(HasBits* has_bits) {
-    (*has_bits)[0] |= 1u;
-  }
-  static void set_has_profilepicture(HasBits* has_bits) {
-    (*has_bits)[0] |= 2u;
-  }
-  static void set_has_profilekey(HasBits* has_bits) {
-    (*has_bits)[0] |= 4u;
-  }
-};
-
-ConfigurationMessage::ConfigurationMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
-                         bool is_message_owned)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
-  SharedCtor(arena, is_message_owned);
-  // @@protoc_insertion_point(arena_constructor:SessionProtos.ConfigurationMessage)
-}
-ConfigurationMessage::ConfigurationMessage(const ConfigurationMessage& from)
-  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
-  ConfigurationMessage* const _this = this; (void)_this;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){from._impl_._has_bits_}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.closedgroups_){from._impl_.closedgroups_}
-    , decltype(_impl_.opengroups_){from._impl_.opengroups_}
-    , decltype(_impl_.contacts_){from._impl_.contacts_}
-    , decltype(_impl_.displayname_){}
-    , decltype(_impl_.profilepicture_){}
-    , decltype(_impl_.profilekey_){}};
-
-  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-  _impl_.displayname_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.displayname_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_displayname()) {
-    _this->_impl_.displayname_.Set(from._internal_displayname(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.profilepicture_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilepicture_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_profilepicture()) {
-    _this->_impl_.profilepicture_.Set(from._internal_profilepicture(), 
-      _this->GetArenaForAllocation());
-  }
-  _impl_.profilekey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilekey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  if (from._internal_has_profilekey()) {
-    _this->_impl_.profilekey_.Set(from._internal_profilekey(), 
-      _this->GetArenaForAllocation());
-  }
-  // @@protoc_insertion_point(copy_constructor:SessionProtos.ConfigurationMessage)
-}
-
-inline void ConfigurationMessage::SharedCtor(
-    ::_pb::Arena* arena, bool is_message_owned) {
-  (void)arena;
-  (void)is_message_owned;
-  new (&_impl_) Impl_{
-      decltype(_impl_._has_bits_){}
-    , /*decltype(_impl_._cached_size_)*/{}
-    , decltype(_impl_.closedgroups_){arena}
-    , decltype(_impl_.opengroups_){arena}
-    , decltype(_impl_.contacts_){arena}
-    , decltype(_impl_.displayname_){}
-    , decltype(_impl_.profilepicture_){}
-    , decltype(_impl_.profilekey_){}
-  };
-  _impl_.displayname_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.displayname_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.profilepicture_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilepicture_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-  _impl_.profilekey_.InitDefault();
-  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
-    _impl_.profilekey_.Set("", GetArenaForAllocation());
-  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
-}
-
-ConfigurationMessage::~ConfigurationMessage() {
-  // @@protoc_insertion_point(destructor:SessionProtos.ConfigurationMessage)
-  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
-  (void)arena;
-    return;
-  }
-  SharedDtor();
-}
-
-inline void ConfigurationMessage::SharedDtor() {
-  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
-  _impl_.closedgroups_.~RepeatedPtrField();
-  _impl_.opengroups_.~RepeatedPtrField();
-  _impl_.contacts_.~RepeatedPtrField();
-  _impl_.displayname_.Destroy();
-  _impl_.profilepicture_.Destroy();
-  _impl_.profilekey_.Destroy();
-}
-
-void ConfigurationMessage::SetCachedSize(int size) const {
-  _impl_._cached_size_.Set(size);
-}
-
-void ConfigurationMessage::Clear() {
-// @@protoc_insertion_point(message_clear_start:SessionProtos.ConfigurationMessage)
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  _impl_.closedgroups_.Clear();
-  _impl_.opengroups_.Clear();
-  _impl_.contacts_.Clear();
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
-    if (cached_has_bits & 0x00000001u) {
-      _impl_.displayname_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _impl_.profilepicture_.ClearNonDefaultToEmpty();
-    }
-    if (cached_has_bits & 0x00000004u) {
-      _impl_.profilekey_.ClearNonDefaultToEmpty();
-    }
-  }
-  _impl_._has_bits_.Clear();
-  _internal_metadata_.Clear<std::string>();
-}
-
-const char* ConfigurationMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
-#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
-  _Internal::HasBits has_bits{};
-  while (!ctx->Done(&ptr)) {
-    uint32_t tag;
-    ptr = ::_pbi::ReadTag(ptr, &tag);
-    switch (tag >> 3) {
-      // repeated .SessionProtos.ConfigurationMessage.ClosedGroup closedGroups = 1;
-      case 1:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            ptr = ctx->ParseMessage(_internal_add_closedgroups(), ptr);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<10>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // repeated string openGroups = 2;
-      case 2:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            auto str = _internal_add_opengroups();
-            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      // optional string displayName = 3;
-      case 3:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
-          auto str = _internal_mutable_displayname();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional string profilePicture = 4;
-      case 4:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
-          auto str = _internal_mutable_profilepicture();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // optional bytes profileKey = 5;
-      case 5:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
-          auto str = _internal_mutable_profilekey();
-          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
-          CHK_(ptr);
-        } else
-          goto handle_unusual;
-        continue;
-      // repeated .SessionProtos.ConfigurationMessage.Contact contacts = 6;
-      case 6:
-        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 50)) {
-          ptr -= 1;
-          do {
-            ptr += 1;
-            ptr = ctx->ParseMessage(_internal_add_contacts(), ptr);
-            CHK_(ptr);
-            if (!ctx->DataAvailable(ptr)) break;
-          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<50>(ptr));
-        } else
-          goto handle_unusual;
-        continue;
-      default:
-        goto handle_unusual;
-    }  // switch
-  handle_unusual:
-    if ((tag == 0) || ((tag & 7) == 4)) {
-      CHK_(ptr);
-      ctx->SetLastTag(tag);
-      goto message_done;
-    }
-    ptr = UnknownFieldParse(
-        tag,
-        _internal_metadata_.mutable_unknown_fields<std::string>(),
-        ptr, ctx);
-    CHK_(ptr != nullptr);
-  }  // while
-message_done:
-  _impl_._has_bits_.Or(has_bits);
-  return ptr;
-failure:
-  ptr = nullptr;
-  goto message_done;
-#undef CHK_
-}
-
-uint8_t* ConfigurationMessage::_InternalSerialize(
-    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
-  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ConfigurationMessage)
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  // repeated .SessionProtos.ConfigurationMessage.ClosedGroup closedGroups = 1;
-  for (unsigned i = 0,
-      n = static_cast<unsigned>(this->_internal_closedgroups_size()); i < n; i++) {
-    const auto& repfield = this->_internal_closedgroups(i);
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-        InternalWriteMessage(1, repfield, repfield.GetCachedSize(), target, stream);
-  }
-
-  // repeated string openGroups = 2;
-  for (int i = 0, n = this->_internal_opengroups_size(); i < n; i++) {
-    const auto& s = this->_internal_opengroups(i);
-    target = stream->WriteString(2, s, target);
-  }
-
-  cached_has_bits = _impl_._has_bits_[0];
-  // optional string displayName = 3;
-  if (cached_has_bits & 0x00000001u) {
-    target = stream->WriteStringMaybeAliased(
-        3, this->_internal_displayname(), target);
-  }
-
-  // optional string profilePicture = 4;
-  if (cached_has_bits & 0x00000002u) {
-    target = stream->WriteStringMaybeAliased(
-        4, this->_internal_profilepicture(), target);
-  }
-
-  // optional bytes profileKey = 5;
-  if (cached_has_bits & 0x00000004u) {
-    target = stream->WriteBytesMaybeAliased(
-        5, this->_internal_profilekey(), target);
-  }
-
-  // repeated .SessionProtos.ConfigurationMessage.Contact contacts = 6;
-  for (unsigned i = 0,
-      n = static_cast<unsigned>(this->_internal_contacts_size()); i < n; i++) {
-    const auto& repfield = this->_internal_contacts(i);
-    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
-        InternalWriteMessage(6, repfield, repfield.GetCachedSize(), target, stream);
-  }
-
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
-        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
-  }
-  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ConfigurationMessage)
-  return target;
-}
-
-size_t ConfigurationMessage::ByteSizeLong() const {
-// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ConfigurationMessage)
-  size_t total_size = 0;
-
-  uint32_t cached_has_bits = 0;
-  // Prevent compiler warnings about cached_has_bits being unused
-  (void) cached_has_bits;
-
-  // repeated .SessionProtos.ConfigurationMessage.ClosedGroup closedGroups = 1;
-  total_size += 1UL * this->_internal_closedgroups_size();
-  for (const auto& msg : this->_impl_.closedgroups_) {
-    total_size +=
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
-  }
-
-  // repeated string openGroups = 2;
-  total_size += 1 *
-      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.opengroups_.size());
-  for (int i = 0, n = _impl_.opengroups_.size(); i < n; i++) {
-    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-      _impl_.opengroups_.Get(i));
-  }
-
-  // repeated .SessionProtos.ConfigurationMessage.Contact contacts = 6;
-  total_size += 1UL * this->_internal_contacts_size();
-  for (const auto& msg : this->_impl_.contacts_) {
-    total_size +=
-      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(msg);
-  }
-
-  cached_has_bits = _impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
-    // optional string displayName = 3;
-    if (cached_has_bits & 0x00000001u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-          this->_internal_displayname());
-    }
-
-    // optional string profilePicture = 4;
-    if (cached_has_bits & 0x00000002u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
-          this->_internal_profilepicture());
-    }
-
-    // optional bytes profileKey = 5;
-    if (cached_has_bits & 0x00000004u) {
-      total_size += 1 +
-        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
-          this->_internal_profilekey());
-    }
-
-  }
-  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
-    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
-  }
-  int cached_size = ::_pbi::ToCachedSize(total_size);
-  SetCachedSize(cached_size);
-  return total_size;
-}
-
-void ConfigurationMessage::CheckTypeAndMergeFrom(
-    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
-  MergeFrom(*::_pbi::DownCast<const ConfigurationMessage*>(
-      &from));
-}
-
-void ConfigurationMessage::MergeFrom(const ConfigurationMessage& from) {
-  ConfigurationMessage* const _this = this;
-  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ConfigurationMessage)
-  GOOGLE_DCHECK_NE(&from, _this);
-  uint32_t cached_has_bits = 0;
-  (void) cached_has_bits;
-
-  _this->_impl_.closedgroups_.MergeFrom(from._impl_.closedgroups_);
-  _this->_impl_.opengroups_.MergeFrom(from._impl_.opengroups_);
-  _this->_impl_.contacts_.MergeFrom(from._impl_.contacts_);
-  cached_has_bits = from._impl_._has_bits_[0];
-  if (cached_has_bits & 0x00000007u) {
-    if (cached_has_bits & 0x00000001u) {
-      _this->_internal_set_displayname(from._internal_displayname());
-    }
-    if (cached_has_bits & 0x00000002u) {
-      _this->_internal_set_profilepicture(from._internal_profilepicture());
-    }
-    if (cached_has_bits & 0x00000004u) {
-      _this->_internal_set_profilekey(from._internal_profilekey());
-    }
-  }
-  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
-}
-
-void ConfigurationMessage::CopyFrom(const ConfigurationMessage& from) {
-// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ConfigurationMessage)
-  if (&from == this) return;
-  Clear();
-  MergeFrom(from);
-}
-
-bool ConfigurationMessage::IsInitialized() const {
-  if (!::PROTOBUF_NAMESPACE_ID::internal::AllAreInitialized(_impl_.closedgroups_))
-    return false;
-  if (!::PROTOBUF_NAMESPACE_ID::internal::AllAreInitialized(_impl_.contacts_))
-    return false;
-  return true;
-}
-
-void ConfigurationMessage::InternalSwap(ConfigurationMessage* other) {
-  using std::swap;
-  auto* lhs_arena = GetArenaForAllocation();
-  auto* rhs_arena = other->GetArenaForAllocation();
-  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
-  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
-  _impl_.closedgroups_.InternalSwap(&other->_impl_.closedgroups_);
-  _impl_.opengroups_.InternalSwap(&other->_impl_.opengroups_);
-  _impl_.contacts_.InternalSwap(&other->_impl_.contacts_);
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.displayname_, lhs_arena,
-      &other->_impl_.displayname_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.profilepicture_, lhs_arena,
-      &other->_impl_.profilepicture_, rhs_arena
-  );
-  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
-      &_impl_.profilekey_, lhs_arena,
-      &other->_impl_.profilekey_, rhs_arena
-  );
-}
-
-std::string ConfigurationMessage::GetTypeName() const {
-  return "SessionProtos.ConfigurationMessage";
 }
 
 
@@ -10010,6 +8269,3407 @@ std::string SharedConfigMessage::GetTypeName() const {
 }
 
 
+// ===================================================================
+
+class GroupUpdateMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<GroupUpdateMessage>()._impl_._has_bits_);
+  static const ::SessionProtos::GroupUpdateInviteMessage& invitemessage(const GroupUpdateMessage* msg);
+  static void set_has_invitemessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static const ::SessionProtos::GroupUpdateInfoChangeMessage& infochangemessage(const GroupUpdateMessage* msg);
+  static void set_has_infochangemessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static const ::SessionProtos::GroupUpdateMemberChangeMessage& memberchangemessage(const GroupUpdateMessage* msg);
+  static void set_has_memberchangemessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+  static const ::SessionProtos::GroupUpdatePromoteMessage& promotemessage(const GroupUpdateMessage* msg);
+  static void set_has_promotemessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
+  }
+  static const ::SessionProtos::GroupUpdateMemberLeftMessage& memberleftmessage(const GroupUpdateMessage* msg);
+  static void set_has_memberleftmessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 16u;
+  }
+  static const ::SessionProtos::GroupUpdateInviteResponseMessage& inviteresponse(const GroupUpdateMessage* msg);
+  static void set_has_inviteresponse(HasBits* has_bits) {
+    (*has_bits)[0] |= 32u;
+  }
+  static const ::SessionProtos::GroupUpdateDeleteMemberContentMessage& deletemembercontent(const GroupUpdateMessage* msg);
+  static void set_has_deletemembercontent(HasBits* has_bits) {
+    (*has_bits)[0] |= 64u;
+  }
+  static const ::SessionProtos::GroupUpdateMemberLeftNotificationMessage& memberleftnotificationmessage(const GroupUpdateMessage* msg);
+  static void set_has_memberleftnotificationmessage(HasBits* has_bits) {
+    (*has_bits)[0] |= 128u;
+  }
+};
+
+const ::SessionProtos::GroupUpdateInviteMessage&
+GroupUpdateMessage::_Internal::invitemessage(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.invitemessage_;
+}
+const ::SessionProtos::GroupUpdateInfoChangeMessage&
+GroupUpdateMessage::_Internal::infochangemessage(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.infochangemessage_;
+}
+const ::SessionProtos::GroupUpdateMemberChangeMessage&
+GroupUpdateMessage::_Internal::memberchangemessage(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.memberchangemessage_;
+}
+const ::SessionProtos::GroupUpdatePromoteMessage&
+GroupUpdateMessage::_Internal::promotemessage(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.promotemessage_;
+}
+const ::SessionProtos::GroupUpdateMemberLeftMessage&
+GroupUpdateMessage::_Internal::memberleftmessage(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.memberleftmessage_;
+}
+const ::SessionProtos::GroupUpdateInviteResponseMessage&
+GroupUpdateMessage::_Internal::inviteresponse(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.inviteresponse_;
+}
+const ::SessionProtos::GroupUpdateDeleteMemberContentMessage&
+GroupUpdateMessage::_Internal::deletemembercontent(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.deletemembercontent_;
+}
+const ::SessionProtos::GroupUpdateMemberLeftNotificationMessage&
+GroupUpdateMessage::_Internal::memberleftnotificationmessage(const GroupUpdateMessage* msg) {
+  return *msg->_impl_.memberleftnotificationmessage_;
+}
+GroupUpdateMessage::GroupUpdateMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateMessage)
+}
+GroupUpdateMessage::GroupUpdateMessage(const GroupUpdateMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.invitemessage_){nullptr}
+    , decltype(_impl_.infochangemessage_){nullptr}
+    , decltype(_impl_.memberchangemessage_){nullptr}
+    , decltype(_impl_.promotemessage_){nullptr}
+    , decltype(_impl_.memberleftmessage_){nullptr}
+    , decltype(_impl_.inviteresponse_){nullptr}
+    , decltype(_impl_.deletemembercontent_){nullptr}
+    , decltype(_impl_.memberleftnotificationmessage_){nullptr}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  if (from._internal_has_invitemessage()) {
+    _this->_impl_.invitemessage_ = new ::SessionProtos::GroupUpdateInviteMessage(*from._impl_.invitemessage_);
+  }
+  if (from._internal_has_infochangemessage()) {
+    _this->_impl_.infochangemessage_ = new ::SessionProtos::GroupUpdateInfoChangeMessage(*from._impl_.infochangemessage_);
+  }
+  if (from._internal_has_memberchangemessage()) {
+    _this->_impl_.memberchangemessage_ = new ::SessionProtos::GroupUpdateMemberChangeMessage(*from._impl_.memberchangemessage_);
+  }
+  if (from._internal_has_promotemessage()) {
+    _this->_impl_.promotemessage_ = new ::SessionProtos::GroupUpdatePromoteMessage(*from._impl_.promotemessage_);
+  }
+  if (from._internal_has_memberleftmessage()) {
+    _this->_impl_.memberleftmessage_ = new ::SessionProtos::GroupUpdateMemberLeftMessage(*from._impl_.memberleftmessage_);
+  }
+  if (from._internal_has_inviteresponse()) {
+    _this->_impl_.inviteresponse_ = new ::SessionProtos::GroupUpdateInviteResponseMessage(*from._impl_.inviteresponse_);
+  }
+  if (from._internal_has_deletemembercontent()) {
+    _this->_impl_.deletemembercontent_ = new ::SessionProtos::GroupUpdateDeleteMemberContentMessage(*from._impl_.deletemembercontent_);
+  }
+  if (from._internal_has_memberleftnotificationmessage()) {
+    _this->_impl_.memberleftnotificationmessage_ = new ::SessionProtos::GroupUpdateMemberLeftNotificationMessage(*from._impl_.memberleftnotificationmessage_);
+  }
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateMessage)
+}
+
+inline void GroupUpdateMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.invitemessage_){nullptr}
+    , decltype(_impl_.infochangemessage_){nullptr}
+    , decltype(_impl_.memberchangemessage_){nullptr}
+    , decltype(_impl_.promotemessage_){nullptr}
+    , decltype(_impl_.memberleftmessage_){nullptr}
+    , decltype(_impl_.inviteresponse_){nullptr}
+    , decltype(_impl_.deletemembercontent_){nullptr}
+    , decltype(_impl_.memberleftnotificationmessage_){nullptr}
+  };
+}
+
+GroupUpdateMessage::~GroupUpdateMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  if (this != internal_default_instance()) delete _impl_.invitemessage_;
+  if (this != internal_default_instance()) delete _impl_.infochangemessage_;
+  if (this != internal_default_instance()) delete _impl_.memberchangemessage_;
+  if (this != internal_default_instance()) delete _impl_.promotemessage_;
+  if (this != internal_default_instance()) delete _impl_.memberleftmessage_;
+  if (this != internal_default_instance()) delete _impl_.inviteresponse_;
+  if (this != internal_default_instance()) delete _impl_.deletemembercontent_;
+  if (this != internal_default_instance()) delete _impl_.memberleftnotificationmessage_;
+}
+
+void GroupUpdateMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x000000ffu) {
+    if (cached_has_bits & 0x00000001u) {
+      GOOGLE_DCHECK(_impl_.invitemessage_ != nullptr);
+      _impl_.invitemessage_->Clear();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      GOOGLE_DCHECK(_impl_.infochangemessage_ != nullptr);
+      _impl_.infochangemessage_->Clear();
+    }
+    if (cached_has_bits & 0x00000004u) {
+      GOOGLE_DCHECK(_impl_.memberchangemessage_ != nullptr);
+      _impl_.memberchangemessage_->Clear();
+    }
+    if (cached_has_bits & 0x00000008u) {
+      GOOGLE_DCHECK(_impl_.promotemessage_ != nullptr);
+      _impl_.promotemessage_->Clear();
+    }
+    if (cached_has_bits & 0x00000010u) {
+      GOOGLE_DCHECK(_impl_.memberleftmessage_ != nullptr);
+      _impl_.memberleftmessage_->Clear();
+    }
+    if (cached_has_bits & 0x00000020u) {
+      GOOGLE_DCHECK(_impl_.inviteresponse_ != nullptr);
+      _impl_.inviteresponse_->Clear();
+    }
+    if (cached_has_bits & 0x00000040u) {
+      GOOGLE_DCHECK(_impl_.deletemembercontent_ != nullptr);
+      _impl_.deletemembercontent_->Clear();
+    }
+    if (cached_has_bits & 0x00000080u) {
+      GOOGLE_DCHECK(_impl_.memberleftnotificationmessage_ != nullptr);
+      _impl_.memberleftnotificationmessage_->Clear();
+    }
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // optional .SessionProtos.GroupUpdateInviteMessage inviteMessage = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          ptr = ctx->ParseMessage(_internal_mutable_invitemessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdateInfoChangeMessage infoChangeMessage = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr = ctx->ParseMessage(_internal_mutable_infochangemessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdateMemberChangeMessage memberChangeMessage = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          ptr = ctx->ParseMessage(_internal_mutable_memberchangemessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdatePromoteMessage promoteMessage = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          ptr = ctx->ParseMessage(_internal_mutable_promotemessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdateMemberLeftMessage memberLeftMessage = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          ptr = ctx->ParseMessage(_internal_mutable_memberleftmessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdateInviteResponseMessage inviteResponse = 6;
+      case 6:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 50)) {
+          ptr = ctx->ParseMessage(_internal_mutable_inviteresponse(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdateDeleteMemberContentMessage deleteMemberContent = 7;
+      case 7:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 58)) {
+          ptr = ctx->ParseMessage(_internal_mutable_deletemembercontent(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional .SessionProtos.GroupUpdateMemberLeftNotificationMessage memberLeftNotificationMessage = 8;
+      case 8:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 66)) {
+          ptr = ctx->ParseMessage(_internal_mutable_memberleftnotificationmessage(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // optional .SessionProtos.GroupUpdateInviteMessage inviteMessage = 1;
+  if (cached_has_bits & 0x00000001u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(1, _Internal::invitemessage(this),
+        _Internal::invitemessage(this).GetCachedSize(), target, stream);
+  }
+
+  // optional .SessionProtos.GroupUpdateInfoChangeMessage infoChangeMessage = 2;
+  if (cached_has_bits & 0x00000002u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(2, _Internal::infochangemessage(this),
+        _Internal::infochangemessage(this).GetCachedSize(), target, stream);
+  }
+
+  // optional .SessionProtos.GroupUpdateMemberChangeMessage memberChangeMessage = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(3, _Internal::memberchangemessage(this),
+        _Internal::memberchangemessage(this).GetCachedSize(), target, stream);
+  }
+
+  // optional .SessionProtos.GroupUpdatePromoteMessage promoteMessage = 4;
+  if (cached_has_bits & 0x00000008u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(4, _Internal::promotemessage(this),
+        _Internal::promotemessage(this).GetCachedSize(), target, stream);
+  }
+
+  // optional .SessionProtos.GroupUpdateMemberLeftMessage memberLeftMessage = 5;
+  if (cached_has_bits & 0x00000010u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(5, _Internal::memberleftmessage(this),
+        _Internal::memberleftmessage(this).GetCachedSize(), target, stream);
+  }
+
+  // optional .SessionProtos.GroupUpdateInviteResponseMessage inviteResponse = 6;
+  if (cached_has_bits & 0x00000020u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(6, _Internal::inviteresponse(this),
+        _Internal::inviteresponse(this).GetCachedSize(), target, stream);
+  }
+
+  // optional .SessionProtos.GroupUpdateDeleteMemberContentMessage deleteMemberContent = 7;
+  if (cached_has_bits & 0x00000040u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(7, _Internal::deletemembercontent(this),
+        _Internal::deletemembercontent(this).GetCachedSize(), target, stream);
+  }
+
+  // optional .SessionProtos.GroupUpdateMemberLeftNotificationMessage memberLeftNotificationMessage = 8;
+  if (cached_has_bits & 0x00000080u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(8, _Internal::memberleftnotificationmessage(this),
+        _Internal::memberleftnotificationmessage(this).GetCachedSize(), target, stream);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateMessage)
+  return target;
+}
+
+size_t GroupUpdateMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateMessage)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x000000ffu) {
+    // optional .SessionProtos.GroupUpdateInviteMessage inviteMessage = 1;
+    if (cached_has_bits & 0x00000001u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.invitemessage_);
+    }
+
+    // optional .SessionProtos.GroupUpdateInfoChangeMessage infoChangeMessage = 2;
+    if (cached_has_bits & 0x00000002u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.infochangemessage_);
+    }
+
+    // optional .SessionProtos.GroupUpdateMemberChangeMessage memberChangeMessage = 3;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.memberchangemessage_);
+    }
+
+    // optional .SessionProtos.GroupUpdatePromoteMessage promoteMessage = 4;
+    if (cached_has_bits & 0x00000008u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.promotemessage_);
+    }
+
+    // optional .SessionProtos.GroupUpdateMemberLeftMessage memberLeftMessage = 5;
+    if (cached_has_bits & 0x00000010u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.memberleftmessage_);
+    }
+
+    // optional .SessionProtos.GroupUpdateInviteResponseMessage inviteResponse = 6;
+    if (cached_has_bits & 0x00000020u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.inviteresponse_);
+    }
+
+    // optional .SessionProtos.GroupUpdateDeleteMemberContentMessage deleteMemberContent = 7;
+    if (cached_has_bits & 0x00000040u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.deletemembercontent_);
+    }
+
+    // optional .SessionProtos.GroupUpdateMemberLeftNotificationMessage memberLeftNotificationMessage = 8;
+    if (cached_has_bits & 0x00000080u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.memberleftnotificationmessage_);
+    }
+
+  }
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateMessage*>(
+      &from));
+}
+
+void GroupUpdateMessage::MergeFrom(const GroupUpdateMessage& from) {
+  GroupUpdateMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x000000ffu) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_mutable_invitemessage()->::SessionProtos::GroupUpdateInviteMessage::MergeFrom(
+          from._internal_invitemessage());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_internal_mutable_infochangemessage()->::SessionProtos::GroupUpdateInfoChangeMessage::MergeFrom(
+          from._internal_infochangemessage());
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_internal_mutable_memberchangemessage()->::SessionProtos::GroupUpdateMemberChangeMessage::MergeFrom(
+          from._internal_memberchangemessage());
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _this->_internal_mutable_promotemessage()->::SessionProtos::GroupUpdatePromoteMessage::MergeFrom(
+          from._internal_promotemessage());
+    }
+    if (cached_has_bits & 0x00000010u) {
+      _this->_internal_mutable_memberleftmessage()->::SessionProtos::GroupUpdateMemberLeftMessage::MergeFrom(
+          from._internal_memberleftmessage());
+    }
+    if (cached_has_bits & 0x00000020u) {
+      _this->_internal_mutable_inviteresponse()->::SessionProtos::GroupUpdateInviteResponseMessage::MergeFrom(
+          from._internal_inviteresponse());
+    }
+    if (cached_has_bits & 0x00000040u) {
+      _this->_internal_mutable_deletemembercontent()->::SessionProtos::GroupUpdateDeleteMemberContentMessage::MergeFrom(
+          from._internal_deletemembercontent());
+    }
+    if (cached_has_bits & 0x00000080u) {
+      _this->_internal_mutable_memberleftnotificationmessage()->::SessionProtos::GroupUpdateMemberLeftNotificationMessage::MergeFrom(
+          from._internal_memberleftnotificationmessage());
+    }
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateMessage::CopyFrom(const GroupUpdateMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateMessage::IsInitialized() const {
+  if (_internal_has_invitemessage()) {
+    if (!_impl_.invitemessage_->IsInitialized()) return false;
+  }
+  if (_internal_has_infochangemessage()) {
+    if (!_impl_.infochangemessage_->IsInitialized()) return false;
+  }
+  if (_internal_has_memberchangemessage()) {
+    if (!_impl_.memberchangemessage_->IsInitialized()) return false;
+  }
+  if (_internal_has_promotemessage()) {
+    if (!_impl_.promotemessage_->IsInitialized()) return false;
+  }
+  if (_internal_has_inviteresponse()) {
+    if (!_impl_.inviteresponse_->IsInitialized()) return false;
+  }
+  return true;
+}
+
+void GroupUpdateMessage::InternalSwap(GroupUpdateMessage* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(GroupUpdateMessage, _impl_.memberleftnotificationmessage_)
+      + sizeof(GroupUpdateMessage::_impl_.memberleftnotificationmessage_)
+      - PROTOBUF_FIELD_OFFSET(GroupUpdateMessage, _impl_.invitemessage_)>(
+          reinterpret_cast<char*>(&_impl_.invitemessage_),
+          reinterpret_cast<char*>(&other->_impl_.invitemessage_));
+}
+
+std::string GroupUpdateMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdateInviteMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<GroupUpdateInviteMessage>()._impl_._has_bits_);
+  static void set_has_groupsessionid(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static void set_has_name(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static void set_has_memberauthdata(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+  static void set_has_adminsignature(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x0000000f) ^ 0x0000000f) != 0;
+  }
+};
+
+GroupUpdateInviteMessage::GroupUpdateInviteMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateInviteMessage)
+}
+GroupUpdateInviteMessage::GroupUpdateInviteMessage(const GroupUpdateInviteMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateInviteMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.groupsessionid_){}
+    , decltype(_impl_.name_){}
+    , decltype(_impl_.memberauthdata_){}
+    , decltype(_impl_.adminsignature_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.groupsessionid_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.groupsessionid_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_groupsessionid()) {
+    _this->_impl_.groupsessionid_.Set(from._internal_groupsessionid(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_name()) {
+    _this->_impl_.name_.Set(from._internal_name(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.memberauthdata_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.memberauthdata_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_memberauthdata()) {
+    _this->_impl_.memberauthdata_.Set(from._internal_memberauthdata(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_adminsignature()) {
+    _this->_impl_.adminsignature_.Set(from._internal_adminsignature(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateInviteMessage)
+}
+
+inline void GroupUpdateInviteMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.groupsessionid_){}
+    , decltype(_impl_.name_){}
+    , decltype(_impl_.memberauthdata_){}
+    , decltype(_impl_.adminsignature_){}
+  };
+  _impl_.groupsessionid_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.groupsessionid_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.memberauthdata_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.memberauthdata_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GroupUpdateInviteMessage::~GroupUpdateInviteMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateInviteMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateInviteMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.groupsessionid_.Destroy();
+  _impl_.name_.Destroy();
+  _impl_.memberauthdata_.Destroy();
+  _impl_.adminsignature_.Destroy();
+}
+
+void GroupUpdateInviteMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateInviteMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateInviteMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x0000000fu) {
+    if (cached_has_bits & 0x00000001u) {
+      _impl_.groupsessionid_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _impl_.name_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _impl_.memberauthdata_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _impl_.adminsignature_.ClearNonDefaultToEmpty();
+    }
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateInviteMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required string groupSessionId = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_groupsessionid();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required string name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required bytes memberAuthData = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_memberauthdata();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required bytes adminSignature = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_adminsignature();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateInviteMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateInviteMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required string groupSessionId = 1;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteStringMaybeAliased(
+        1, this->_internal_groupsessionid(), target);
+  }
+
+  // required string name = 2;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_name(), target);
+  }
+
+  // required bytes memberAuthData = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_memberauthdata(), target);
+  }
+
+  // required bytes adminSignature = 4;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->WriteBytesMaybeAliased(
+        4, this->_internal_adminsignature(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateInviteMessage)
+  return target;
+}
+
+size_t GroupUpdateInviteMessage::RequiredFieldsByteSizeFallback() const {
+// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.GroupUpdateInviteMessage)
+  size_t total_size = 0;
+
+  if (_internal_has_groupsessionid()) {
+    // required string groupSessionId = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_groupsessionid());
+  }
+
+  if (_internal_has_name()) {
+    // required string name = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_name());
+  }
+
+  if (_internal_has_memberauthdata()) {
+    // required bytes memberAuthData = 3;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_memberauthdata());
+  }
+
+  if (_internal_has_adminsignature()) {
+    // required bytes adminSignature = 4;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_adminsignature());
+  }
+
+  return total_size;
+}
+size_t GroupUpdateInviteMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateInviteMessage)
+  size_t total_size = 0;
+
+  if (((_impl_._has_bits_[0] & 0x0000000f) ^ 0x0000000f) == 0) {  // All required fields are present.
+    // required string groupSessionId = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_groupsessionid());
+
+    // required string name = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_name());
+
+    // required bytes memberAuthData = 3;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_memberauthdata());
+
+    // required bytes adminSignature = 4;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_adminsignature());
+
+  } else {
+    total_size += RequiredFieldsByteSizeFallback();
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateInviteMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateInviteMessage*>(
+      &from));
+}
+
+void GroupUpdateInviteMessage::MergeFrom(const GroupUpdateInviteMessage& from) {
+  GroupUpdateInviteMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateInviteMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x0000000fu) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_groupsessionid(from._internal_groupsessionid());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_internal_set_name(from._internal_name());
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_internal_set_memberauthdata(from._internal_memberauthdata());
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _this->_internal_set_adminsignature(from._internal_adminsignature());
+    }
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateInviteMessage::CopyFrom(const GroupUpdateInviteMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateInviteMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateInviteMessage::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  return true;
+}
+
+void GroupUpdateInviteMessage::InternalSwap(GroupUpdateInviteMessage* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.groupsessionid_, lhs_arena,
+      &other->_impl_.groupsessionid_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.name_, lhs_arena,
+      &other->_impl_.name_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.memberauthdata_, lhs_arena,
+      &other->_impl_.memberauthdata_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.adminsignature_, lhs_arena,
+      &other->_impl_.adminsignature_, rhs_arena
+  );
+}
+
+std::string GroupUpdateInviteMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateInviteMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdatePromoteMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<GroupUpdatePromoteMessage>()._impl_._has_bits_);
+  static void set_has_groupidentityseed(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static void set_has_name(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x00000003) ^ 0x00000003) != 0;
+  }
+};
+
+GroupUpdatePromoteMessage::GroupUpdatePromoteMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdatePromoteMessage)
+}
+GroupUpdatePromoteMessage::GroupUpdatePromoteMessage(const GroupUpdatePromoteMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdatePromoteMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.groupidentityseed_){}
+    , decltype(_impl_.name_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.groupidentityseed_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.groupidentityseed_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_groupidentityseed()) {
+    _this->_impl_.groupidentityseed_.Set(from._internal_groupidentityseed(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_name()) {
+    _this->_impl_.name_.Set(from._internal_name(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdatePromoteMessage)
+}
+
+inline void GroupUpdatePromoteMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.groupidentityseed_){}
+    , decltype(_impl_.name_){}
+  };
+  _impl_.groupidentityseed_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.groupidentityseed_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.name_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.name_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GroupUpdatePromoteMessage::~GroupUpdatePromoteMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdatePromoteMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdatePromoteMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.groupidentityseed_.Destroy();
+  _impl_.name_.Destroy();
+}
+
+void GroupUpdatePromoteMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdatePromoteMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdatePromoteMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000003u) {
+    if (cached_has_bits & 0x00000001u) {
+      _impl_.groupidentityseed_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _impl_.name_.ClearNonDefaultToEmpty();
+    }
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdatePromoteMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required bytes groupIdentitySeed = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          auto str = _internal_mutable_groupidentityseed();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required string name = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_name();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdatePromoteMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdatePromoteMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required bytes groupIdentitySeed = 1;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        1, this->_internal_groupidentityseed(), target);
+  }
+
+  // required string name = 2;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_name(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdatePromoteMessage)
+  return target;
+}
+
+size_t GroupUpdatePromoteMessage::RequiredFieldsByteSizeFallback() const {
+// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.GroupUpdatePromoteMessage)
+  size_t total_size = 0;
+
+  if (_internal_has_groupidentityseed()) {
+    // required bytes groupIdentitySeed = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_groupidentityseed());
+  }
+
+  if (_internal_has_name()) {
+    // required string name = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_name());
+  }
+
+  return total_size;
+}
+size_t GroupUpdatePromoteMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdatePromoteMessage)
+  size_t total_size = 0;
+
+  if (((_impl_._has_bits_[0] & 0x00000003) ^ 0x00000003) == 0) {  // All required fields are present.
+    // required bytes groupIdentitySeed = 1;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_groupidentityseed());
+
+    // required string name = 2;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_name());
+
+  } else {
+    total_size += RequiredFieldsByteSizeFallback();
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdatePromoteMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdatePromoteMessage*>(
+      &from));
+}
+
+void GroupUpdatePromoteMessage::MergeFrom(const GroupUpdatePromoteMessage& from) {
+  GroupUpdatePromoteMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdatePromoteMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000003u) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_groupidentityseed(from._internal_groupidentityseed());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_internal_set_name(from._internal_name());
+    }
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdatePromoteMessage::CopyFrom(const GroupUpdatePromoteMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdatePromoteMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdatePromoteMessage::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  return true;
+}
+
+void GroupUpdatePromoteMessage::InternalSwap(GroupUpdatePromoteMessage* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.groupidentityseed_, lhs_arena,
+      &other->_impl_.groupidentityseed_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.name_, lhs_arena,
+      &other->_impl_.name_, rhs_arena
+  );
+}
+
+std::string GroupUpdatePromoteMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdatePromoteMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdateInfoChangeMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<GroupUpdateInfoChangeMessage>()._impl_._has_bits_);
+  static void set_has_type(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
+  }
+  static void set_has_updatedname(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static void set_has_updatedexpiration(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+  static void set_has_adminsignature(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x0000000a) ^ 0x0000000a) != 0;
+  }
+};
+
+GroupUpdateInfoChangeMessage::GroupUpdateInfoChangeMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateInfoChangeMessage)
+}
+GroupUpdateInfoChangeMessage::GroupUpdateInfoChangeMessage(const GroupUpdateInfoChangeMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateInfoChangeMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.updatedname_){}
+    , decltype(_impl_.adminsignature_){}
+    , decltype(_impl_.updatedexpiration_){}
+    , decltype(_impl_.type_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.updatedname_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.updatedname_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_updatedname()) {
+    _this->_impl_.updatedname_.Set(from._internal_updatedname(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_adminsignature()) {
+    _this->_impl_.adminsignature_.Set(from._internal_adminsignature(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.updatedexpiration_, &from._impl_.updatedexpiration_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.type_) -
+    reinterpret_cast<char*>(&_impl_.updatedexpiration_)) + sizeof(_impl_.type_));
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateInfoChangeMessage)
+}
+
+inline void GroupUpdateInfoChangeMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.updatedname_){}
+    , decltype(_impl_.adminsignature_){}
+    , decltype(_impl_.updatedexpiration_){0u}
+    , decltype(_impl_.type_){1}
+  };
+  _impl_.updatedname_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.updatedname_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GroupUpdateInfoChangeMessage::~GroupUpdateInfoChangeMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateInfoChangeMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateInfoChangeMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.updatedname_.Destroy();
+  _impl_.adminsignature_.Destroy();
+}
+
+void GroupUpdateInfoChangeMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateInfoChangeMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateInfoChangeMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000003u) {
+    if (cached_has_bits & 0x00000001u) {
+      _impl_.updatedname_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _impl_.adminsignature_.ClearNonDefaultToEmpty();
+    }
+  }
+  if (cached_has_bits & 0x0000000cu) {
+    _impl_.updatedexpiration_ = 0u;
+    _impl_.type_ = 1;
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateInfoChangeMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required .SessionProtos.GroupUpdateInfoChangeMessage.Type type = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::SessionProtos::GroupUpdateInfoChangeMessage_Type_IsValid(val))) {
+            _internal_set_type(static_cast<::SessionProtos::GroupUpdateInfoChangeMessage_Type>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(1, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // optional string updatedName = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_updatedname();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint32 updatedExpiration = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _Internal::set_has_updatedexpiration(&has_bits);
+          _impl_.updatedexpiration_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required bytes adminSignature = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_adminsignature();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateInfoChangeMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateInfoChangeMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required .SessionProtos.GroupUpdateInfoChangeMessage.Type type = 1;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      1, this->_internal_type(), target);
+  }
+
+  // optional string updatedName = 2;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteStringMaybeAliased(
+        2, this->_internal_updatedname(), target);
+  }
+
+  // optional uint32 updatedExpiration = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(3, this->_internal_updatedexpiration(), target);
+  }
+
+  // required bytes adminSignature = 4;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->WriteBytesMaybeAliased(
+        4, this->_internal_adminsignature(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateInfoChangeMessage)
+  return target;
+}
+
+size_t GroupUpdateInfoChangeMessage::RequiredFieldsByteSizeFallback() const {
+// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.GroupUpdateInfoChangeMessage)
+  size_t total_size = 0;
+
+  if (_internal_has_adminsignature()) {
+    // required bytes adminSignature = 4;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_adminsignature());
+  }
+
+  if (_internal_has_type()) {
+    // required .SessionProtos.GroupUpdateInfoChangeMessage.Type type = 1;
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_type());
+  }
+
+  return total_size;
+}
+size_t GroupUpdateInfoChangeMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateInfoChangeMessage)
+  size_t total_size = 0;
+
+  if (((_impl_._has_bits_[0] & 0x0000000a) ^ 0x0000000a) == 0) {  // All required fields are present.
+    // required bytes adminSignature = 4;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_adminsignature());
+
+    // required .SessionProtos.GroupUpdateInfoChangeMessage.Type type = 1;
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_type());
+
+  } else {
+    total_size += RequiredFieldsByteSizeFallback();
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // optional string updatedName = 2;
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+        this->_internal_updatedname());
+  }
+
+  // optional uint32 updatedExpiration = 3;
+  if (cached_has_bits & 0x00000004u) {
+    total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_updatedexpiration());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateInfoChangeMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateInfoChangeMessage*>(
+      &from));
+}
+
+void GroupUpdateInfoChangeMessage::MergeFrom(const GroupUpdateInfoChangeMessage& from) {
+  GroupUpdateInfoChangeMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateInfoChangeMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x0000000fu) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_updatedname(from._internal_updatedname());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_internal_set_adminsignature(from._internal_adminsignature());
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_impl_.updatedexpiration_ = from._impl_.updatedexpiration_;
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _this->_impl_.type_ = from._impl_.type_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateInfoChangeMessage::CopyFrom(const GroupUpdateInfoChangeMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateInfoChangeMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateInfoChangeMessage::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  return true;
+}
+
+void GroupUpdateInfoChangeMessage::InternalSwap(GroupUpdateInfoChangeMessage* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.updatedname_, lhs_arena,
+      &other->_impl_.updatedname_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.adminsignature_, lhs_arena,
+      &other->_impl_.adminsignature_, rhs_arena
+  );
+  swap(_impl_.updatedexpiration_, other->_impl_.updatedexpiration_);
+  swap(_impl_.type_, other->_impl_.type_);
+}
+
+std::string GroupUpdateInfoChangeMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateInfoChangeMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdateMemberChangeMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<GroupUpdateMemberChangeMessage>()._impl_._has_bits_);
+  static void set_has_type(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+  static void set_has_historyshared(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static void set_has_adminsignature(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x00000005) ^ 0x00000005) != 0;
+  }
+};
+
+GroupUpdateMemberChangeMessage::GroupUpdateMemberChangeMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateMemberChangeMessage)
+}
+GroupUpdateMemberChangeMessage::GroupUpdateMemberChangeMessage(const GroupUpdateMemberChangeMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateMemberChangeMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.membersessionids_){from._impl_.membersessionids_}
+    , decltype(_impl_.adminsignature_){}
+    , decltype(_impl_.historyshared_){}
+    , decltype(_impl_.type_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_adminsignature()) {
+    _this->_impl_.adminsignature_.Set(from._internal_adminsignature(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.historyshared_, &from._impl_.historyshared_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.type_) -
+    reinterpret_cast<char*>(&_impl_.historyshared_)) + sizeof(_impl_.type_));
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateMemberChangeMessage)
+}
+
+inline void GroupUpdateMemberChangeMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.membersessionids_){arena}
+    , decltype(_impl_.adminsignature_){}
+    , decltype(_impl_.historyshared_){false}
+    , decltype(_impl_.type_){1}
+  };
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GroupUpdateMemberChangeMessage::~GroupUpdateMemberChangeMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateMemberChangeMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateMemberChangeMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.membersessionids_.~RepeatedPtrField();
+  _impl_.adminsignature_.Destroy();
+}
+
+void GroupUpdateMemberChangeMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateMemberChangeMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateMemberChangeMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.membersessionids_.Clear();
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    _impl_.adminsignature_.ClearNonDefaultToEmpty();
+  }
+  if (cached_has_bits & 0x00000006u) {
+    _impl_.historyshared_ = false;
+    _impl_.type_ = 1;
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateMemberChangeMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required .SessionProtos.GroupUpdateMemberChangeMessage.Type type = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          uint64_t val = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+          if (PROTOBUF_PREDICT_TRUE(::SessionProtos::GroupUpdateMemberChangeMessage_Type_IsValid(val))) {
+            _internal_set_type(static_cast<::SessionProtos::GroupUpdateMemberChangeMessage_Type>(val));
+          } else {
+            ::PROTOBUF_NAMESPACE_ID::internal::WriteVarint(1, val, mutable_unknown_fields());
+          }
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated string memberSessionIds = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_membersessionids();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bool historyShared = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _Internal::set_has_historyshared(&has_bits);
+          _impl_.historyshared_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // required bytes adminSignature = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 34)) {
+          auto str = _internal_mutable_adminsignature();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateMemberChangeMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateMemberChangeMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required .SessionProtos.GroupUpdateMemberChangeMessage.Type type = 1;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteEnumToArray(
+      1, this->_internal_type(), target);
+  }
+
+  // repeated string memberSessionIds = 2;
+  for (int i = 0, n = this->_internal_membersessionids_size(); i < n; i++) {
+    const auto& s = this->_internal_membersessionids(i);
+    target = stream->WriteString(2, s, target);
+  }
+
+  // optional bool historyShared = 3;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(3, this->_internal_historyshared(), target);
+  }
+
+  // required bytes adminSignature = 4;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        4, this->_internal_adminsignature(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateMemberChangeMessage)
+  return target;
+}
+
+size_t GroupUpdateMemberChangeMessage::RequiredFieldsByteSizeFallback() const {
+// @@protoc_insertion_point(required_fields_byte_size_fallback_start:SessionProtos.GroupUpdateMemberChangeMessage)
+  size_t total_size = 0;
+
+  if (_internal_has_adminsignature()) {
+    // required bytes adminSignature = 4;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_adminsignature());
+  }
+
+  if (_internal_has_type()) {
+    // required .SessionProtos.GroupUpdateMemberChangeMessage.Type type = 1;
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_type());
+  }
+
+  return total_size;
+}
+size_t GroupUpdateMemberChangeMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateMemberChangeMessage)
+  size_t total_size = 0;
+
+  if (((_impl_._has_bits_[0] & 0x00000005) ^ 0x00000005) == 0) {  // All required fields are present.
+    // required bytes adminSignature = 4;
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_adminsignature());
+
+    // required .SessionProtos.GroupUpdateMemberChangeMessage.Type type = 1;
+    total_size += 1 +
+      ::_pbi::WireFormatLite::EnumSize(this->_internal_type());
+
+  } else {
+    total_size += RequiredFieldsByteSizeFallback();
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // repeated string memberSessionIds = 2;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.membersessionids_.size());
+  for (int i = 0, n = _impl_.membersessionids_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      _impl_.membersessionids_.Get(i));
+  }
+
+  // optional bool historyShared = 3;
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000002u) {
+    total_size += 1 + 1;
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateMemberChangeMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateMemberChangeMessage*>(
+      &from));
+}
+
+void GroupUpdateMemberChangeMessage::MergeFrom(const GroupUpdateMemberChangeMessage& from) {
+  GroupUpdateMemberChangeMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateMemberChangeMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_impl_.membersessionids_.MergeFrom(from._impl_.membersessionids_);
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000007u) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_adminsignature(from._internal_adminsignature());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_impl_.historyshared_ = from._impl_.historyshared_;
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_impl_.type_ = from._impl_.type_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateMemberChangeMessage::CopyFrom(const GroupUpdateMemberChangeMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateMemberChangeMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateMemberChangeMessage::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  return true;
+}
+
+void GroupUpdateMemberChangeMessage::InternalSwap(GroupUpdateMemberChangeMessage* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  _impl_.membersessionids_.InternalSwap(&other->_impl_.membersessionids_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.adminsignature_, lhs_arena,
+      &other->_impl_.adminsignature_, rhs_arena
+  );
+  swap(_impl_.historyshared_, other->_impl_.historyshared_);
+  swap(_impl_.type_, other->_impl_.type_);
+}
+
+std::string GroupUpdateMemberChangeMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateMemberChangeMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdateMemberLeftMessage::_Internal {
+ public:
+};
+
+GroupUpdateMemberLeftMessage::GroupUpdateMemberLeftMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateMemberLeftMessage)
+}
+GroupUpdateMemberLeftMessage::GroupUpdateMemberLeftMessage(const GroupUpdateMemberLeftMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateMemberLeftMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateMemberLeftMessage)
+}
+
+inline void GroupUpdateMemberLeftMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GroupUpdateMemberLeftMessage::~GroupUpdateMemberLeftMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateMemberLeftMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateMemberLeftMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void GroupUpdateMemberLeftMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateMemberLeftMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateMemberLeftMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateMemberLeftMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateMemberLeftMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateMemberLeftMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateMemberLeftMessage)
+  return target;
+}
+
+size_t GroupUpdateMemberLeftMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateMemberLeftMessage)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateMemberLeftMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateMemberLeftMessage*>(
+      &from));
+}
+
+void GroupUpdateMemberLeftMessage::MergeFrom(const GroupUpdateMemberLeftMessage& from) {
+  GroupUpdateMemberLeftMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateMemberLeftMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateMemberLeftMessage::CopyFrom(const GroupUpdateMemberLeftMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateMemberLeftMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateMemberLeftMessage::IsInitialized() const {
+  return true;
+}
+
+void GroupUpdateMemberLeftMessage::InternalSwap(GroupUpdateMemberLeftMessage* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+}
+
+std::string GroupUpdateMemberLeftMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateMemberLeftMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdateMemberLeftNotificationMessage::_Internal {
+ public:
+};
+
+GroupUpdateMemberLeftNotificationMessage::GroupUpdateMemberLeftNotificationMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+}
+GroupUpdateMemberLeftNotificationMessage::GroupUpdateMemberLeftNotificationMessage(const GroupUpdateMemberLeftNotificationMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateMemberLeftNotificationMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+}
+
+inline void GroupUpdateMemberLeftNotificationMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      /*decltype(_impl_._cached_size_)*/{}
+  };
+}
+
+GroupUpdateMemberLeftNotificationMessage::~GroupUpdateMemberLeftNotificationMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateMemberLeftNotificationMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void GroupUpdateMemberLeftNotificationMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateMemberLeftNotificationMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateMemberLeftNotificationMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateMemberLeftNotificationMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+  return target;
+}
+
+size_t GroupUpdateMemberLeftNotificationMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateMemberLeftNotificationMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateMemberLeftNotificationMessage*>(
+      &from));
+}
+
+void GroupUpdateMemberLeftNotificationMessage::MergeFrom(const GroupUpdateMemberLeftNotificationMessage& from) {
+  GroupUpdateMemberLeftNotificationMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateMemberLeftNotificationMessage::CopyFrom(const GroupUpdateMemberLeftNotificationMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateMemberLeftNotificationMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateMemberLeftNotificationMessage::IsInitialized() const {
+  return true;
+}
+
+void GroupUpdateMemberLeftNotificationMessage::InternalSwap(GroupUpdateMemberLeftNotificationMessage* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+}
+
+std::string GroupUpdateMemberLeftNotificationMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateMemberLeftNotificationMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdateInviteResponseMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<GroupUpdateInviteResponseMessage>()._impl_._has_bits_);
+  static void set_has_isapproved(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static bool MissingRequiredFields(const HasBits& has_bits) {
+    return ((has_bits[0] & 0x00000001) ^ 0x00000001) != 0;
+  }
+};
+
+GroupUpdateInviteResponseMessage::GroupUpdateInviteResponseMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateInviteResponseMessage)
+}
+GroupUpdateInviteResponseMessage::GroupUpdateInviteResponseMessage(const GroupUpdateInviteResponseMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateInviteResponseMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.isapproved_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _this->_impl_.isapproved_ = from._impl_.isapproved_;
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateInviteResponseMessage)
+}
+
+inline void GroupUpdateInviteResponseMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.isapproved_){false}
+  };
+}
+
+GroupUpdateInviteResponseMessage::~GroupUpdateInviteResponseMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateInviteResponseMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateInviteResponseMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+}
+
+void GroupUpdateInviteResponseMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateInviteResponseMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateInviteResponseMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.isapproved_ = false;
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateInviteResponseMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // required bool isApproved = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _Internal::set_has_isapproved(&has_bits);
+          _impl_.isapproved_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateInviteResponseMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateInviteResponseMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // required bool isApproved = 1;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteBoolToArray(1, this->_internal_isapproved(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateInviteResponseMessage)
+  return target;
+}
+
+size_t GroupUpdateInviteResponseMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateInviteResponseMessage)
+  size_t total_size = 0;
+
+  // required bool isApproved = 1;
+  if (_internal_has_isapproved()) {
+    total_size += 1 + 1;
+  }
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateInviteResponseMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateInviteResponseMessage*>(
+      &from));
+}
+
+void GroupUpdateInviteResponseMessage::MergeFrom(const GroupUpdateInviteResponseMessage& from) {
+  GroupUpdateInviteResponseMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateInviteResponseMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  if (from._internal_has_isapproved()) {
+    _this->_internal_set_isapproved(from._internal_isapproved());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateInviteResponseMessage::CopyFrom(const GroupUpdateInviteResponseMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateInviteResponseMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateInviteResponseMessage::IsInitialized() const {
+  if (_Internal::MissingRequiredFields(_impl_._has_bits_)) return false;
+  return true;
+}
+
+void GroupUpdateInviteResponseMessage::InternalSwap(GroupUpdateInviteResponseMessage* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  swap(_impl_.isapproved_, other->_impl_.isapproved_);
+}
+
+std::string GroupUpdateInviteResponseMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateInviteResponseMessage";
+}
+
+
+// ===================================================================
+
+class GroupUpdateDeleteMemberContentMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<GroupUpdateDeleteMemberContentMessage>()._impl_._has_bits_);
+  static void set_has_adminsignature(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+};
+
+GroupUpdateDeleteMemberContentMessage::GroupUpdateDeleteMemberContentMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+}
+GroupUpdateDeleteMemberContentMessage::GroupUpdateDeleteMemberContentMessage(const GroupUpdateDeleteMemberContentMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  GroupUpdateDeleteMemberContentMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.membersessionids_){from._impl_.membersessionids_}
+    , decltype(_impl_.messagehashes_){from._impl_.messagehashes_}
+    , decltype(_impl_.adminsignature_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_adminsignature()) {
+    _this->_impl_.adminsignature_.Set(from._internal_adminsignature(), 
+      _this->GetArenaForAllocation());
+  }
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+}
+
+inline void GroupUpdateDeleteMemberContentMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.membersessionids_){arena}
+    , decltype(_impl_.messagehashes_){arena}
+    , decltype(_impl_.adminsignature_){}
+  };
+  _impl_.adminsignature_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.adminsignature_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+GroupUpdateDeleteMemberContentMessage::~GroupUpdateDeleteMemberContentMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void GroupUpdateDeleteMemberContentMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.membersessionids_.~RepeatedPtrField();
+  _impl_.messagehashes_.~RepeatedPtrField();
+  _impl_.adminsignature_.Destroy();
+}
+
+void GroupUpdateDeleteMemberContentMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void GroupUpdateDeleteMemberContentMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  _impl_.membersessionids_.Clear();
+  _impl_.messagehashes_.Clear();
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    _impl_.adminsignature_.ClearNonDefaultToEmpty();
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* GroupUpdateDeleteMemberContentMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // repeated string memberSessionIds = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_membersessionids();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<10>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // repeated string messageHashes = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          ptr -= 1;
+          do {
+            ptr += 1;
+            auto str = _internal_add_messagehashes();
+            ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+            CHK_(ptr);
+            if (!ctx->DataAvailable(ptr)) break;
+          } while (::PROTOBUF_NAMESPACE_ID::internal::ExpectTag<18>(ptr));
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bytes adminSignature = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_adminsignature();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* GroupUpdateDeleteMemberContentMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  // repeated string memberSessionIds = 1;
+  for (int i = 0, n = this->_internal_membersessionids_size(); i < n; i++) {
+    const auto& s = this->_internal_membersessionids(i);
+    target = stream->WriteString(1, s, target);
+  }
+
+  // repeated string messageHashes = 2;
+  for (int i = 0, n = this->_internal_messagehashes_size(); i < n; i++) {
+    const auto& s = this->_internal_messagehashes(i);
+    target = stream->WriteString(2, s, target);
+  }
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // optional bytes adminSignature = 3;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_adminsignature(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+  return target;
+}
+
+size_t GroupUpdateDeleteMemberContentMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  // repeated string memberSessionIds = 1;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.membersessionids_.size());
+  for (int i = 0, n = _impl_.membersessionids_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      _impl_.membersessionids_.Get(i));
+  }
+
+  // repeated string messageHashes = 2;
+  total_size += 1 *
+      ::PROTOBUF_NAMESPACE_ID::internal::FromIntSize(_impl_.messagehashes_.size());
+  for (int i = 0, n = _impl_.messagehashes_.size(); i < n; i++) {
+    total_size += ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::StringSize(
+      _impl_.messagehashes_.Get(i));
+  }
+
+  // optional bytes adminSignature = 3;
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    total_size += 1 +
+      ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+        this->_internal_adminsignature());
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void GroupUpdateDeleteMemberContentMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const GroupUpdateDeleteMemberContentMessage*>(
+      &from));
+}
+
+void GroupUpdateDeleteMemberContentMessage::MergeFrom(const GroupUpdateDeleteMemberContentMessage& from) {
+  GroupUpdateDeleteMemberContentMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  _this->_impl_.membersessionids_.MergeFrom(from._impl_.membersessionids_);
+  _this->_impl_.messagehashes_.MergeFrom(from._impl_.messagehashes_);
+  if (from._internal_has_adminsignature()) {
+    _this->_internal_set_adminsignature(from._internal_adminsignature());
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void GroupUpdateDeleteMemberContentMessage::CopyFrom(const GroupUpdateDeleteMemberContentMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.GroupUpdateDeleteMemberContentMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool GroupUpdateDeleteMemberContentMessage::IsInitialized() const {
+  return true;
+}
+
+void GroupUpdateDeleteMemberContentMessage::InternalSwap(GroupUpdateDeleteMemberContentMessage* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  _impl_.membersessionids_.InternalSwap(&other->_impl_.membersessionids_);
+  _impl_.messagehashes_.InternalSwap(&other->_impl_.messagehashes_);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.adminsignature_, lhs_arena,
+      &other->_impl_.adminsignature_, rhs_arena
+  );
+}
+
+std::string GroupUpdateDeleteMemberContentMessage::GetTypeName() const {
+  return "SessionProtos.GroupUpdateDeleteMemberContentMessage";
+}
+
+
+// ===================================================================
+
+class ProProof::_Internal {
+ public:
+  using HasBits = decltype(std::declval<ProProof>()._impl_._has_bits_);
+  static void set_has_version(HasBits* has_bits) {
+    (*has_bits)[0] |= 16u;
+  }
+  static void set_has_genindexhash(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static void set_has_rotatingpublickey(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static void set_has_expiryunixts(HasBits* has_bits) {
+    (*has_bits)[0] |= 8u;
+  }
+  static void set_has_sig(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+};
+
+ProProof::ProProof(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.ProProof)
+}
+ProProof::ProProof(const ProProof& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ProProof* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.genindexhash_){}
+    , decltype(_impl_.rotatingpublickey_){}
+    , decltype(_impl_.sig_){}
+    , decltype(_impl_.expiryunixts_){}
+    , decltype(_impl_.version_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  _impl_.genindexhash_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.genindexhash_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_genindexhash()) {
+    _this->_impl_.genindexhash_.Set(from._internal_genindexhash(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.rotatingpublickey_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.rotatingpublickey_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_rotatingpublickey()) {
+    _this->_impl_.rotatingpublickey_.Set(from._internal_rotatingpublickey(), 
+      _this->GetArenaForAllocation());
+  }
+  _impl_.sig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.sig_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  if (from._internal_has_sig()) {
+    _this->_impl_.sig_.Set(from._internal_sig(), 
+      _this->GetArenaForAllocation());
+  }
+  ::memcpy(&_impl_.expiryunixts_, &from._impl_.expiryunixts_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.version_) -
+    reinterpret_cast<char*>(&_impl_.expiryunixts_)) + sizeof(_impl_.version_));
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.ProProof)
+}
+
+inline void ProProof::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.genindexhash_){}
+    , decltype(_impl_.rotatingpublickey_){}
+    , decltype(_impl_.sig_){}
+    , decltype(_impl_.expiryunixts_){uint64_t{0u}}
+    , decltype(_impl_.version_){0u}
+  };
+  _impl_.genindexhash_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.genindexhash_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.rotatingpublickey_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.rotatingpublickey_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+  _impl_.sig_.InitDefault();
+  #ifdef PROTOBUF_FORCE_COPY_DEFAULT_STRING
+    _impl_.sig_.Set("", GetArenaForAllocation());
+  #endif // PROTOBUF_FORCE_COPY_DEFAULT_STRING
+}
+
+ProProof::~ProProof() {
+  // @@protoc_insertion_point(destructor:SessionProtos.ProProof)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ProProof::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  _impl_.genindexhash_.Destroy();
+  _impl_.rotatingpublickey_.Destroy();
+  _impl_.sig_.Destroy();
+}
+
+void ProProof::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ProProof::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.ProProof)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000007u) {
+    if (cached_has_bits & 0x00000001u) {
+      _impl_.genindexhash_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _impl_.rotatingpublickey_.ClearNonDefaultToEmpty();
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _impl_.sig_.ClearNonDefaultToEmpty();
+    }
+  }
+  if (cached_has_bits & 0x00000018u) {
+    ::memset(&_impl_.expiryunixts_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.version_) -
+        reinterpret_cast<char*>(&_impl_.expiryunixts_)) + sizeof(_impl_.version_));
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ProProof::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // optional uint32 version = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 8)) {
+          _Internal::set_has_version(&has_bits);
+          _impl_.version_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint32(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bytes genIndexHash = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 18)) {
+          auto str = _internal_mutable_genindexhash();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bytes rotatingPublicKey = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 26)) {
+          auto str = _internal_mutable_rotatingpublickey();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint64 expiryUnixTs = 4;
+      case 4:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 32)) {
+          _Internal::set_has_expiryunixts(&has_bits);
+          _impl_.expiryunixts_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional bytes sig = 5;
+      case 5:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 42)) {
+          auto str = _internal_mutable_sig();
+          ptr = ::_pbi::InlineGreedyStringParser(str, ptr, ctx);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ProProof::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ProProof)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // optional uint32 version = 1;
+  if (cached_has_bits & 0x00000010u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt32ToArray(1, this->_internal_version(), target);
+  }
+
+  // optional bytes genIndexHash = 2;
+  if (cached_has_bits & 0x00000001u) {
+    target = stream->WriteBytesMaybeAliased(
+        2, this->_internal_genindexhash(), target);
+  }
+
+  // optional bytes rotatingPublicKey = 3;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->WriteBytesMaybeAliased(
+        3, this->_internal_rotatingpublickey(), target);
+  }
+
+  // optional uint64 expiryUnixTs = 4;
+  if (cached_has_bits & 0x00000008u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(4, this->_internal_expiryunixts(), target);
+  }
+
+  // optional bytes sig = 5;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->WriteBytesMaybeAliased(
+        5, this->_internal_sig(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ProProof)
+  return target;
+}
+
+size_t ProProof::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ProProof)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x0000001fu) {
+    // optional bytes genIndexHash = 2;
+    if (cached_has_bits & 0x00000001u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_genindexhash());
+    }
+
+    // optional bytes rotatingPublicKey = 3;
+    if (cached_has_bits & 0x00000002u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_rotatingpublickey());
+    }
+
+    // optional bytes sig = 5;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::BytesSize(
+          this->_internal_sig());
+    }
+
+    // optional uint64 expiryUnixTs = 4;
+    if (cached_has_bits & 0x00000008u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_expiryunixts());
+    }
+
+    // optional uint32 version = 1;
+    if (cached_has_bits & 0x00000010u) {
+      total_size += ::_pbi::WireFormatLite::UInt32SizePlusOne(this->_internal_version());
+    }
+
+  }
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ProProof::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ProProof*>(
+      &from));
+}
+
+void ProProof::MergeFrom(const ProProof& from) {
+  ProProof* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ProProof)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x0000001fu) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_set_genindexhash(from._internal_genindexhash());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_internal_set_rotatingpublickey(from._internal_rotatingpublickey());
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_internal_set_sig(from._internal_sig());
+    }
+    if (cached_has_bits & 0x00000008u) {
+      _this->_impl_.expiryunixts_ = from._impl_.expiryunixts_;
+    }
+    if (cached_has_bits & 0x00000010u) {
+      _this->_impl_.version_ = from._impl_.version_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ProProof::CopyFrom(const ProProof& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ProProof)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ProProof::IsInitialized() const {
+  return true;
+}
+
+void ProProof::InternalSwap(ProProof* other) {
+  using std::swap;
+  auto* lhs_arena = GetArenaForAllocation();
+  auto* rhs_arena = other->GetArenaForAllocation();
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.genindexhash_, lhs_arena,
+      &other->_impl_.genindexhash_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.rotatingpublickey_, lhs_arena,
+      &other->_impl_.rotatingpublickey_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::ArenaStringPtr::InternalSwap(
+      &_impl_.sig_, lhs_arena,
+      &other->_impl_.sig_, rhs_arena
+  );
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ProProof, _impl_.version_)
+      + sizeof(ProProof::_impl_.version_)
+      - PROTOBUF_FIELD_OFFSET(ProProof, _impl_.expiryunixts_)>(
+          reinterpret_cast<char*>(&_impl_.expiryunixts_),
+          reinterpret_cast<char*>(&other->_impl_.expiryunixts_));
+}
+
+std::string ProProof::GetTypeName() const {
+  return "SessionProtos.ProProof";
+}
+
+
+// ===================================================================
+
+class ProMessage::_Internal {
+ public:
+  using HasBits = decltype(std::declval<ProMessage>()._impl_._has_bits_);
+  static const ::SessionProtos::ProProof& proof(const ProMessage* msg);
+  static void set_has_proof(HasBits* has_bits) {
+    (*has_bits)[0] |= 1u;
+  }
+  static void set_has_profilebitset(HasBits* has_bits) {
+    (*has_bits)[0] |= 2u;
+  }
+  static void set_has_msgbitset(HasBits* has_bits) {
+    (*has_bits)[0] |= 4u;
+  }
+};
+
+const ::SessionProtos::ProProof&
+ProMessage::_Internal::proof(const ProMessage* msg) {
+  return *msg->_impl_.proof_;
+}
+ProMessage::ProMessage(::PROTOBUF_NAMESPACE_ID::Arena* arena,
+                         bool is_message_owned)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite(arena, is_message_owned) {
+  SharedCtor(arena, is_message_owned);
+  // @@protoc_insertion_point(arena_constructor:SessionProtos.ProMessage)
+}
+ProMessage::ProMessage(const ProMessage& from)
+  : ::PROTOBUF_NAMESPACE_ID::MessageLite() {
+  ProMessage* const _this = this; (void)_this;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){from._impl_._has_bits_}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.proof_){nullptr}
+    , decltype(_impl_.profilebitset_){}
+    , decltype(_impl_.msgbitset_){}};
+
+  _internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+  if (from._internal_has_proof()) {
+    _this->_impl_.proof_ = new ::SessionProtos::ProProof(*from._impl_.proof_);
+  }
+  ::memcpy(&_impl_.profilebitset_, &from._impl_.profilebitset_,
+    static_cast<size_t>(reinterpret_cast<char*>(&_impl_.msgbitset_) -
+    reinterpret_cast<char*>(&_impl_.profilebitset_)) + sizeof(_impl_.msgbitset_));
+  // @@protoc_insertion_point(copy_constructor:SessionProtos.ProMessage)
+}
+
+inline void ProMessage::SharedCtor(
+    ::_pb::Arena* arena, bool is_message_owned) {
+  (void)arena;
+  (void)is_message_owned;
+  new (&_impl_) Impl_{
+      decltype(_impl_._has_bits_){}
+    , /*decltype(_impl_._cached_size_)*/{}
+    , decltype(_impl_.proof_){nullptr}
+    , decltype(_impl_.profilebitset_){uint64_t{0u}}
+    , decltype(_impl_.msgbitset_){uint64_t{0u}}
+  };
+}
+
+ProMessage::~ProMessage() {
+  // @@protoc_insertion_point(destructor:SessionProtos.ProMessage)
+  if (auto *arena = _internal_metadata_.DeleteReturnArena<std::string>()) {
+  (void)arena;
+    return;
+  }
+  SharedDtor();
+}
+
+inline void ProMessage::SharedDtor() {
+  GOOGLE_DCHECK(GetArenaForAllocation() == nullptr);
+  if (this != internal_default_instance()) delete _impl_.proof_;
+}
+
+void ProMessage::SetCachedSize(int size) const {
+  _impl_._cached_size_.Set(size);
+}
+
+void ProMessage::Clear() {
+// @@protoc_insertion_point(message_clear_start:SessionProtos.ProMessage)
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000001u) {
+    GOOGLE_DCHECK(_impl_.proof_ != nullptr);
+    _impl_.proof_->Clear();
+  }
+  if (cached_has_bits & 0x00000006u) {
+    ::memset(&_impl_.profilebitset_, 0, static_cast<size_t>(
+        reinterpret_cast<char*>(&_impl_.msgbitset_) -
+        reinterpret_cast<char*>(&_impl_.profilebitset_)) + sizeof(_impl_.msgbitset_));
+  }
+  _impl_._has_bits_.Clear();
+  _internal_metadata_.Clear<std::string>();
+}
+
+const char* ProMessage::_InternalParse(const char* ptr, ::_pbi::ParseContext* ctx) {
+#define CHK_(x) if (PROTOBUF_PREDICT_FALSE(!(x))) goto failure
+  _Internal::HasBits has_bits{};
+  while (!ctx->Done(&ptr)) {
+    uint32_t tag;
+    ptr = ::_pbi::ReadTag(ptr, &tag);
+    switch (tag >> 3) {
+      // optional .SessionProtos.ProProof proof = 1;
+      case 1:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 10)) {
+          ptr = ctx->ParseMessage(_internal_mutable_proof(), ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint64 profileBitset = 2;
+      case 2:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 16)) {
+          _Internal::set_has_profilebitset(&has_bits);
+          _impl_.profilebitset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      // optional uint64 msgBitset = 3;
+      case 3:
+        if (PROTOBUF_PREDICT_TRUE(static_cast<uint8_t>(tag) == 24)) {
+          _Internal::set_has_msgbitset(&has_bits);
+          _impl_.msgbitset_ = ::PROTOBUF_NAMESPACE_ID::internal::ReadVarint64(&ptr);
+          CHK_(ptr);
+        } else
+          goto handle_unusual;
+        continue;
+      default:
+        goto handle_unusual;
+    }  // switch
+  handle_unusual:
+    if ((tag == 0) || ((tag & 7) == 4)) {
+      CHK_(ptr);
+      ctx->SetLastTag(tag);
+      goto message_done;
+    }
+    ptr = UnknownFieldParse(
+        tag,
+        _internal_metadata_.mutable_unknown_fields<std::string>(),
+        ptr, ctx);
+    CHK_(ptr != nullptr);
+  }  // while
+message_done:
+  _impl_._has_bits_.Or(has_bits);
+  return ptr;
+failure:
+  ptr = nullptr;
+  goto message_done;
+#undef CHK_
+}
+
+uint8_t* ProMessage::_InternalSerialize(
+    uint8_t* target, ::PROTOBUF_NAMESPACE_ID::io::EpsCopyOutputStream* stream) const {
+  // @@protoc_insertion_point(serialize_to_array_start:SessionProtos.ProMessage)
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  // optional .SessionProtos.ProProof proof = 1;
+  if (cached_has_bits & 0x00000001u) {
+    target = ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::
+      InternalWriteMessage(1, _Internal::proof(this),
+        _Internal::proof(this).GetCachedSize(), target, stream);
+  }
+
+  // optional uint64 profileBitset = 2;
+  if (cached_has_bits & 0x00000002u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(2, this->_internal_profilebitset(), target);
+  }
+
+  // optional uint64 msgBitset = 3;
+  if (cached_has_bits & 0x00000004u) {
+    target = stream->EnsureSpace(target);
+    target = ::_pbi::WireFormatLite::WriteUInt64ToArray(3, this->_internal_msgbitset(), target);
+  }
+
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    target = stream->WriteRaw(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).data(),
+        static_cast<int>(_internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size()), target);
+  }
+  // @@protoc_insertion_point(serialize_to_array_end:SessionProtos.ProMessage)
+  return target;
+}
+
+size_t ProMessage::ByteSizeLong() const {
+// @@protoc_insertion_point(message_byte_size_start:SessionProtos.ProMessage)
+  size_t total_size = 0;
+
+  uint32_t cached_has_bits = 0;
+  // Prevent compiler warnings about cached_has_bits being unused
+  (void) cached_has_bits;
+
+  cached_has_bits = _impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000007u) {
+    // optional .SessionProtos.ProProof proof = 1;
+    if (cached_has_bits & 0x00000001u) {
+      total_size += 1 +
+        ::PROTOBUF_NAMESPACE_ID::internal::WireFormatLite::MessageSize(
+          *_impl_.proof_);
+    }
+
+    // optional uint64 profileBitset = 2;
+    if (cached_has_bits & 0x00000002u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_profilebitset());
+    }
+
+    // optional uint64 msgBitset = 3;
+    if (cached_has_bits & 0x00000004u) {
+      total_size += ::_pbi::WireFormatLite::UInt64SizePlusOne(this->_internal_msgbitset());
+    }
+
+  }
+  if (PROTOBUF_PREDICT_FALSE(_internal_metadata_.have_unknown_fields())) {
+    total_size += _internal_metadata_.unknown_fields<std::string>(::PROTOBUF_NAMESPACE_ID::internal::GetEmptyString).size();
+  }
+  int cached_size = ::_pbi::ToCachedSize(total_size);
+  SetCachedSize(cached_size);
+  return total_size;
+}
+
+void ProMessage::CheckTypeAndMergeFrom(
+    const ::PROTOBUF_NAMESPACE_ID::MessageLite& from) {
+  MergeFrom(*::_pbi::DownCast<const ProMessage*>(
+      &from));
+}
+
+void ProMessage::MergeFrom(const ProMessage& from) {
+  ProMessage* const _this = this;
+  // @@protoc_insertion_point(class_specific_merge_from_start:SessionProtos.ProMessage)
+  GOOGLE_DCHECK_NE(&from, _this);
+  uint32_t cached_has_bits = 0;
+  (void) cached_has_bits;
+
+  cached_has_bits = from._impl_._has_bits_[0];
+  if (cached_has_bits & 0x00000007u) {
+    if (cached_has_bits & 0x00000001u) {
+      _this->_internal_mutable_proof()->::SessionProtos::ProProof::MergeFrom(
+          from._internal_proof());
+    }
+    if (cached_has_bits & 0x00000002u) {
+      _this->_impl_.profilebitset_ = from._impl_.profilebitset_;
+    }
+    if (cached_has_bits & 0x00000004u) {
+      _this->_impl_.msgbitset_ = from._impl_.msgbitset_;
+    }
+    _this->_impl_._has_bits_[0] |= cached_has_bits;
+  }
+  _this->_internal_metadata_.MergeFrom<std::string>(from._internal_metadata_);
+}
+
+void ProMessage::CopyFrom(const ProMessage& from) {
+// @@protoc_insertion_point(class_specific_copy_from_start:SessionProtos.ProMessage)
+  if (&from == this) return;
+  Clear();
+  MergeFrom(from);
+}
+
+bool ProMessage::IsInitialized() const {
+  return true;
+}
+
+void ProMessage::InternalSwap(ProMessage* other) {
+  using std::swap;
+  _internal_metadata_.InternalSwap(&other->_internal_metadata_);
+  swap(_impl_._has_bits_[0], other->_impl_._has_bits_[0]);
+  ::PROTOBUF_NAMESPACE_ID::internal::memswap<
+      PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.msgbitset_)
+      + sizeof(ProMessage::_impl_.msgbitset_)
+      - PROTOBUF_FIELD_OFFSET(ProMessage, _impl_.proof_)>(
+          reinterpret_cast<char*>(&_impl_.proof_),
+          reinterpret_cast<char*>(&other->_impl_.proof_));
+}
+
+std::string ProMessage::GetTypeName() const {
+  return "SessionProtos.ProMessage";
+}
+
+
 // @@protoc_insertion_point(namespace_scope)
 }  // namespace SessionProtos
 PROTOBUF_NAMESPACE_OPEN
@@ -10069,29 +11729,9 @@ template<> PROTOBUF_NOINLINE ::SessionProtos::DataMessage_OpenGroupInvitation*
 Arena::CreateMaybeMessage< ::SessionProtos::DataMessage_OpenGroupInvitation >(Arena* arena) {
   return Arena::CreateMessageInternal< ::SessionProtos::DataMessage_OpenGroupInvitation >(arena);
 }
-template<> PROTOBUF_NOINLINE ::SessionProtos::DataMessage_ClosedGroupControlMessage_KeyPairWrapper*
-Arena::CreateMaybeMessage< ::SessionProtos::DataMessage_ClosedGroupControlMessage_KeyPairWrapper >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::SessionProtos::DataMessage_ClosedGroupControlMessage_KeyPairWrapper >(arena);
-}
-template<> PROTOBUF_NOINLINE ::SessionProtos::DataMessage_ClosedGroupControlMessage*
-Arena::CreateMaybeMessage< ::SessionProtos::DataMessage_ClosedGroupControlMessage >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::SessionProtos::DataMessage_ClosedGroupControlMessage >(arena);
-}
 template<> PROTOBUF_NOINLINE ::SessionProtos::DataMessage*
 Arena::CreateMaybeMessage< ::SessionProtos::DataMessage >(Arena* arena) {
   return Arena::CreateMessageInternal< ::SessionProtos::DataMessage >(arena);
-}
-template<> PROTOBUF_NOINLINE ::SessionProtos::ConfigurationMessage_ClosedGroup*
-Arena::CreateMaybeMessage< ::SessionProtos::ConfigurationMessage_ClosedGroup >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::SessionProtos::ConfigurationMessage_ClosedGroup >(arena);
-}
-template<> PROTOBUF_NOINLINE ::SessionProtos::ConfigurationMessage_Contact*
-Arena::CreateMaybeMessage< ::SessionProtos::ConfigurationMessage_Contact >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::SessionProtos::ConfigurationMessage_Contact >(arena);
-}
-template<> PROTOBUF_NOINLINE ::SessionProtos::ConfigurationMessage*
-Arena::CreateMaybeMessage< ::SessionProtos::ConfigurationMessage >(Arena* arena) {
-  return Arena::CreateMessageInternal< ::SessionProtos::ConfigurationMessage >(arena);
 }
 template<> PROTOBUF_NOINLINE ::SessionProtos::ReceiptMessage*
 Arena::CreateMaybeMessage< ::SessionProtos::ReceiptMessage >(Arena* arena) {
@@ -10104,6 +11744,50 @@ Arena::CreateMaybeMessage< ::SessionProtos::AttachmentPointer >(Arena* arena) {
 template<> PROTOBUF_NOINLINE ::SessionProtos::SharedConfigMessage*
 Arena::CreateMaybeMessage< ::SessionProtos::SharedConfigMessage >(Arena* arena) {
   return Arena::CreateMessageInternal< ::SessionProtos::SharedConfigMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateInviteMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateInviteMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateInviteMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdatePromoteMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdatePromoteMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdatePromoteMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateInfoChangeMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateInfoChangeMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateInfoChangeMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateMemberChangeMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateMemberChangeMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateMemberChangeMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateMemberLeftMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateMemberLeftMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateMemberLeftMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateMemberLeftNotificationMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateMemberLeftNotificationMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateMemberLeftNotificationMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateInviteResponseMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateInviteResponseMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateInviteResponseMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::GroupUpdateDeleteMemberContentMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::GroupUpdateDeleteMemberContentMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::GroupUpdateDeleteMemberContentMessage >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::ProProof*
+Arena::CreateMaybeMessage< ::SessionProtos::ProProof >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::ProProof >(arena);
+}
+template<> PROTOBUF_NOINLINE ::SessionProtos::ProMessage*
+Arena::CreateMaybeMessage< ::SessionProtos::ProMessage >(Arena* arena) {
+  return Arena::CreateMessageInternal< ::SessionProtos::ProMessage >(arena);
 }
 PROTOBUF_NAMESPACE_CLOSE
 

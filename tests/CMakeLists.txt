@@ -5,6 +5,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
+    test_attachment_encrypt.cpp
     test_blinding.cpp
     test_bt_merge.cpp
     test_bugs.cpp
@@ -15,6 +16,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_config_contacts.cpp
     test_config_convo_info_volatile.cpp
     test_config_local.cpp
+    test_config_pro.cpp
     test_curve25519.cpp
     test_ed25519.cpp
     test_encrypt.cpp
@@ -25,10 +27,13 @@ set(LIB_SESSION_UTESTS_SOURCES
     #test_logging.cpp  # Handled separately, see below
     test_multi_encrypt.cpp
     test_proto.cpp
+    test_pro_backend.cpp
     test_random.cpp
     test_session_encrypt.cpp
     test_utils.cpp
+    test_session_protocol.cpp
     test_xed25519.cpp
+    test_unicode_operations.cpp
 
     case_logger.cpp
 )
@@ -58,6 +63,14 @@ add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
 target_link_libraries(testAll PRIVATE
     test_libs
     Catch2::Catch2)
+
+option(TEST_PRO_BACKEND_WITH_DEV_SERVER "Run the Pro Backend tests relying on a SESH_PRO_BACKEND_DEV=1 enabled server at the specified string with CURL" OFF)
+if (TEST_PRO_BACKEND_WITH_DEV_SERVER)
+    find_package(CURL REQUIRED)
+    target_link_libraries(testAll PRIVATE CURL::libcurl)
+    target_compile_definitions(testAll PRIVATE TEST_PRO_BACKEND_WITH_DEV_SERVER)
+endif()
+
 
 # This one is compiled to a separate binary because it manipulates the logging level and sinks, and
 # thus breaks logging in any tests that would run after it if bundled into the main testAll:

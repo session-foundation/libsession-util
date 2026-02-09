@@ -8,7 +8,6 @@
 #include <cstdint>
 #include <cstring>
 #include <iterator>
-#include <memory>
 #include <optional>
 #include <span>
 #include <type_traits>
@@ -21,9 +20,13 @@ namespace session {
 using namespace oxenc;
 
 // Helper functions to convert to/from spans
-template <typename OutChar = unsigned char, typename InChar>
-inline std::span<const OutChar> as_span(const std::span<const InChar>& sp) {
-    return {reinterpret_cast<const OutChar*>(sp.data()), sp.size()};
+template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+inline std::span<const OutChar, Extent> as_span(std::span<const InChar, Extent> sp) {
+    return std::span<const OutChar, Extent>{reinterpret_cast<const OutChar*>(sp.data()), sp.size()};
+}
+template <oxenc::basic_char OutChar = unsigned char, oxenc::basic_char InChar, size_t Extent>
+inline std::span<OutChar, Extent> as_span(std::span<InChar, Extent> sp) {
+    return std::span<OutChar, Extent>{reinterpret_cast<OutChar*>(sp.data()), sp.size()};
 }
 
 template <typename OutChar = unsigned char, oxenc::bt_input_string T>
@@ -249,6 +252,15 @@ inline std::string utf8_truncate(std::string val, size_t n) {
     return val;
 }
 
+/// Truncates an utf-16 encoded string to at most `codepoint_len` codepoints long, taking care to
+/// not truncate in the middle of a surrogate pair. Notes that if the input string contains invalid
+/// UTF-16 sequences (e.g. unpaired surrogates) the behavior here is undefined.
+size_t utf16_count_truncated_to_codepoints(
+        std::span<const char16_t> utf16_string, size_t codepoint_len);
+
+/// Returns the number of unicode codepoints in a utf-16 encoded string.
+size_t utf16_count(std::span<const char16_t> utf16_string);
+
 // Helper function to transform a timestamp provided in seconds, milliseconds or microseconds to
 // seconds
 inline int64_t to_epoch_seconds(int64_t timestamp) {
@@ -276,4 +288,15 @@ static_assert(std::is_same_v<
               std::chrono::seconds,
               decltype(std::declval<std::chrono::sys_seconds>().time_since_epoch())>);
 
+/// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
+/// serious error.
+std::vector<unsigned char> zstd_compress(
+        std::span<const unsigned char> data,
+        int level = 1,
+        std::span<const unsigned char> prefix = {});
+
+/// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
+/// then this returns nullopt if the decompressed size would exceed that limit.
+std::optional<std::vector<unsigned char>> zstd_decompress(
+        std::span<const unsigned char> data, size_t max_size = 0);
 }  // namespace session

@@ -2,8 +2,8 @@
 
 #include <fmt/format.h>
 #include <oxenc/hex.h>
+#include <sodium/crypto_sign_ed25519.h>
 
-#include <array>
 #include <chrono>
 #include <cstddef>
 #include <oxen/log.hpp>
@@ -11,10 +11,8 @@
 #include <set>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <vector>
 
-#include "session/config/base.h"
 #include "session/types.hpp"
 #include "session/util.hpp"
 
@@ -205,3 +203,79 @@ template <typename... T>
 std::set<std::common_type_t<T...>> make_set(T&&... args) {
     return {std::forward<T>(args)...};
 }
+
+struct TestKeys {
+    session::array_uc32 seed0;
+    session::array_uc64 ed_sk0;
+    session::array_uc32 ed_pk0;
+    session::array_uc32 curve_pk0;
+    session::array_uc33 session_pk0;
+
+    session::array_uc32 seed1;
+    session::array_uc64 ed_sk1;
+    session::array_uc32 ed_pk1;
+    session::array_uc32 curve_pk1;
+    session::array_uc33 session_pk1;
+};
+
+static inline TestKeys get_deterministic_test_keys() {
+    TestKeys result = {};
+
+    // clang-format off
+    // Key 0
+    {
+        // Seed
+        auto seed0 = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+        std::memcpy(result.seed0.data(), seed0.data(), seed0.size());
+
+        // Ed25519
+        crypto_sign_ed25519_seed_keypair(result.ed_pk0.data(), result.ed_sk0.data(), result.seed0.data());
+
+        // X25519
+        bool converted = crypto_sign_ed25519_pk_to_curve25519(result.curve_pk0.data(), result.ed_pk0.data()) == 0;
+        assert(converted);
+
+        // Session PK
+        result.session_pk0[0] = 0x05;
+        std::memcpy(result.session_pk0.data() + 1, result.curve_pk0.data(), result.curve_pk0.size());
+    }
+
+    // Key 1
+    {
+        // Seed
+        auto seed1 = "00112233445566778899aabbccddeeff00000000000000000000000000000000"_hexbytes;
+        std::memcpy(result.seed1.data(), seed1.data(), seed1.size());
+
+        // Ed25519
+        crypto_sign_ed25519_seed_keypair(result.ed_pk1.data(), result.ed_sk1.data(), result.seed1.data());
+
+        // X25519
+        bool converted = crypto_sign_ed25519_pk_to_curve25519(result.curve_pk1.data(), result.ed_pk1.data()) == 0;
+        assert(converted);
+
+        // Session PK
+        result.session_pk1[0] = 0x05;
+        std::memcpy(result.session_pk1.data() + 1, result.curve_pk1.data(), result.curve_pk1.size());
+    }
+
+    assert(oxenc::to_hex(result.ed_sk0.begin(), result.ed_sk0.data() + crypto_sign_ed25519_SEEDBYTES) == oxenc::to_hex(result.seed0));
+    assert(oxenc::to_hex(result.ed_pk0)      ==   "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    assert(oxenc::to_hex(result.curve_pk0)   ==   "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+    assert(oxenc::to_hex(result.session_pk0) == "05d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
+
+    assert(oxenc::to_hex(result.ed_sk1.begin(), result.ed_sk1.data() + crypto_sign_ed25519_SEEDBYTES) == oxenc::to_hex(result.seed1));
+    assert(oxenc::to_hex(result.ed_pk1)      ==   "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876");
+    assert(oxenc::to_hex(result.curve_pk1)   ==   "aa654f00fc39fc69fd0db829410ca38177d7732a8d2f0934ab3872ac56d5aa74");
+    assert(oxenc::to_hex(result.session_pk1) == "05aa654f00fc39fc69fd0db829410ca38177d7732a8d2f0934ab3872ac56d5aa74");
+    // clang-format on
+    return result;
+}
+
+struct scope_exit {
+    explicit scope_exit(std::function<void()> func) : cleanup(func) {}
+    std::function<void()> cleanup;
+    ~scope_exit() {
+        if (cleanup)
+            cleanup();
+    }
+};

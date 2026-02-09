@@ -201,3 +201,15 @@ if(ENABLE_NETWORKING)
     add_static_subdirectory(session-router EXCLUDE_FROM_ALL)
     libsession_static_bundle(session-router::libsessionrouter)
 endif()
+
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
+
+function(simdutf_subdir)
+    set(SIMDUTF_TESTS OFF CACHE BOOL "")
+    set(SIMDUTF_TOOLS OFF CACHE BOOL "")
+    set(BUILD_SHARED_LIBS OFF)
+    add_subdirectory(simdutf)
+endfunction()
+simdutf_subdir()
+libsession_static_bundle(simdutf)

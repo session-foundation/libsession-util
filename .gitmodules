@@ -16,3 +16,9 @@
 [submodule "external/session-router"]
 	path = external/session-router
 	url = https://github.com/session-foundation/session-router.git
+[submodule "external/oxen-logging"]
+	path = external/oxen-logging
+	url = https://github.com/oxen-io/oxen-logging.git
+[submodule "external/simdutf"]
+	path = external/simdutf
+	url = https://github.com/simdutf/simdutf.git

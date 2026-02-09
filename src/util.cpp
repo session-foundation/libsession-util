@@ -1,4 +1,10 @@
+#include <assert.h>
+#include <session/util.h>
+#include <simdutf.h>
+#include <zstd.h>
+
 #include <charconv>
+#include <memory>
 #include <session/util.hpp>
 
 namespace session {
@@ -91,4 +97,141 @@ static_assert(std::is_same_v<
               std::chrono::seconds,
               decltype(std::declval<std::chrono::sys_seconds>().time_since_epoch())>);
 
+namespace {
+    struct zstd_decomp_freer {
+        void operator()(ZSTD_DStream* z) const { ZSTD_freeDStream(z); }
+    };
+
+    using zstd_decomp_ptr = std::unique_ptr<ZSTD_DStream, zstd_decomp_freer>;
+}  // namespace
+
+std::vector<unsigned char> zstd_compress(
+        std::span<const unsigned char> data, int level, std::span<const unsigned char> prefix) {
+    std::vector<unsigned char> compressed;
+    if (prefix.empty())
+        compressed.resize(ZSTD_compressBound(data.size()));
+    else {
+        compressed.resize(prefix.size() + ZSTD_compressBound(data.size()));
+        std::copy(prefix.begin(), prefix.end(), compressed.begin());
+    }
+    auto size = ZSTD_compress(
+            compressed.data() + prefix.size(),
+            compressed.size() - prefix.size(),
+            data.data(),
+            data.size(),
+            level);
+    if (ZSTD_isError(size))
+        throw std::runtime_error{"Compression failed: " + std::string{ZSTD_getErrorName(size)}};
+
+    compressed.resize(prefix.size() + size);
+    return compressed;
+}
+
+std::optional<std::vector<unsigned char>> zstd_decompress(
+        std::span<const unsigned char> data, size_t max_size) {
+    zstd_decomp_ptr z_decompressor{ZSTD_createDStream()};
+    auto* zds = z_decompressor.get();
+
+    ZSTD_initDStream(zds);
+    ZSTD_inBuffer input{/*.src=*/data.data(), /*.size=*/data.size(), /*.pos=*/0};
+    std::array<unsigned char, 4096> out_buf;
+    ZSTD_outBuffer output{/*.dst=*/out_buf.data(), /*.size=*/out_buf.size(), /*.pos=*/0};
+
+    std::vector<unsigned char> decompressed;
+
+    size_t ret;
+    do {
+        output.pos = 0;
+        if (ret = ZSTD_decompressStream(zds, &output, &input); ZSTD_isError(ret))
+            return std::nullopt;
+
+        if (max_size > 0 && decompressed.size() + output.pos > max_size)
+            return std::nullopt;
+
+        decompressed.insert(decompressed.end(), out_buf.begin(), out_buf.begin() + output.pos);
+    } while (ret > 0 || input.pos < input.size);
+
+    return decompressed;
+}
+
+inline bool is_utf16_low_surrogate(char16_t c) {
+    return c >= 0xDC00 && c <= 0xDFFF;
+}
+
+inline bool is_utf16_high_surrogate(char16_t c) {
+    return c >= 0xD800 && c <= 0xDBFF;
+}
+
+size_t utf16_count_truncated_to_codepoints(
+        std::span<const char16_t> utf16_string, size_t codepoint_len) {
+    // If the requested codepoint length is longer than the UTF-16 string length,
+    // we can safely assume the entire string is needed.
+    if (utf16_string.size() <= codepoint_len) {
+        return utf16_string.size();
+    }
+
+    if (codepoint_len == 0) {
+        return 0;
+    }
+
+    // Call simdutf to count the codepoint for the entirety of the UTF-16 string.
+    // This is an optimistic optimisation: if we don't need to do the truncation, we can leverage
+    // simdutf's optimized counting.
+    // However if the truncation is needed, we will fall back to a slower version that
+    // iterates through the UTF-16 string properly handling surrogate pairs.
+    //
+    // Hence the overall cost to pay for the optimization:
+    // * Truncation not needed: fast simdutf counting.
+    // * Truncation needed: fast simdutf counting + slower iteration.
+    auto current_codepoint_len = simdutf::count_utf16(utf16_string.data(), utf16_string.size());
+    if (current_codepoint_len <= codepoint_len) {
+        return utf16_string.size();
+    }
+
+    // Fallback: iterate through the UTF-16 string and count codepoints properly
+    size_t counted_codepoints = 0;
+    bool expecting_low_surrogate = false;
+    for (size_t i = 0; i < utf16_string.size(); ++i) {
+        if (const char16_t c = utf16_string[i]; is_utf16_high_surrogate(c)) {
+            assert(!expecting_low_surrogate);
+
+            // Start of a surrogate pair. Only count the codepoint when we see the low surrogate.
+            expecting_low_surrogate = true;
+        } else if (is_utf16_low_surrogate(c)) {
+            assert(expecting_low_surrogate);
+
+            counted_codepoints++;
+            expecting_low_surrogate = false;
+        } else {
+            // Regular BMP character
+            assert(!expecting_low_surrogate);
+            counted_codepoints++;
+        }
+
+        if (counted_codepoints == codepoint_len) {
+            return i + 1;
+        }
+    }
+
+    // Should not be here, as the case of codepoint_len >= actual codepoint count should have
+    // been handled at the start of the function. As this indicates an invalid UTF-16 string,
+    // we will treat it as UB and return the whole string length.
+    return utf16_string.size();
+}
+
+size_t utf16_count(std::span<const char16_t> utf16_string) {
+    return simdutf::count_utf16(utf16_string.data(), utf16_string.size());
+}
+
 }  // namespace session
+
+LIBSESSION_C_API size_t utf16_count_truncated_to_codepoints(
+        const uint16_t* utf16_string, size_t utf16_string_len, size_t codepoint_len) {
+    return session::utf16_count_truncated_to_codepoints(
+            {reinterpret_cast<const char16_t*>(utf16_string), utf16_string_len}, codepoint_len);
+}
+
+LIBSESSION_C_API size_t utf16_count(const uint16_t* utf16_string, size_t utf16_string_len) {
+    return session::utf16_count(
+            {reinterpret_cast<const char16_t*>(utf16_string), utf16_string_len});
+}

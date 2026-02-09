@@ -95,6 +95,23 @@ LIBSESSION_EXPORT bool session_ed25519_verify(
         const unsigned char* msg,
         size_t msg_len);
 
+/// API: crypto/session_ed25519_pro_privkey_for_ed25519_seed
+///
+/// Generate the deterministic Master Session Pro key for signing requests to interact with the
+/// Session Pro features of the protocol.
+///
+/// Inputs:
+/// - `ed25519_seed` -- [in] the seed to the long-term key for the Session account to derive the
+///   deterministic key from.
+/// - `ed25519_sk_out` -- [out] pointer to a buffer of 64 bytes where the private key will be
+///   written.
+///
+/// Outputs:
+/// - `bool` -- True if the key pair was successfully derived, false if failed.
+LIBSESSION_EXPORT bool session_ed25519_pro_privkey_for_ed25519_seed(
+        const unsigned char* ed25519_seed, /* 32 bytes */
+        unsigned char* ed25519_sk_out /*64 byte output buffer*/);
+
 #ifdef __cplusplus
 }
 #endif
