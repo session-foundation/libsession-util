@@ -77,10 +77,8 @@ OnionRequestRouter::OnionRequestRouter(
         _transport{transport} {
     log::trace(cat, "[OnionRequestRouter] Initializing.");
 
-    _request_queues[PathCategory::standard] =
-            std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
-    _request_queues[PathCategory::file] =
-            std::make_shared<detail::RequestQueue>(_loop, _config.request_timeout_check_frequency);
+    _request_queues[PathCategory::standard] = std::make_shared<detail::RequestQueue>(_loop);
+    _request_queues[PathCategory::file] = std::make_shared<detail::RequestQueue>(_loop);
 
     _loop->call_soon([this] {
         auto snode_pool = _snode_pool.lock();

@@ -120,7 +120,7 @@ struct Request {
 
     /// The time the request was created, this is used primarily for determining whether the
     /// `overall_timeout` has been exceeded.
-    std::chrono::system_clock::time_point creation_time = std::chrono::system_clock::now();
+    std::chrono::steady_clock::time_point creation_time = std::chrono::steady_clock::now();
 
     // If true, the transport should not cache/pool the connection used for this request, this is
     // for one-shot requests like bootstrapping.
@@ -153,7 +153,7 @@ struct Request {
             return request_timeout;
 
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::system_clock::now() - creation_time);
+                std::chrono::steady_clock::now() - creation_time);
         auto remaining = *overall_timeout - elapsed;
 
         return (remaining > std::chrono::milliseconds::zero() ? remaining

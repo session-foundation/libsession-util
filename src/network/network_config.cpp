@@ -26,7 +26,6 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::disable_subnet_diversity);
         HANDLE_TYPE(opt::redirect_retry_count);
         HANDLE_TYPE(opt::retry_delay);
-        HANDLE_TYPE(opt::request_timeout_check_frequency);
 
         // Snode pool options
         HANDLE_TYPE(opt::cache_directory);
@@ -138,14 +137,6 @@ void Config::handle_config_opt(opt::retry_delay rd) {
             "Network config retry delay set to min: {}ms, max: {}ms",
             retry_delay.base_delay.count(),
             retry_delay.max_delay.count());
-}
-
-void Config::handle_config_opt(opt::request_timeout_check_frequency rtcf) {
-    request_timeout_check_frequency = rtcf.frequency;
-    log::debug(
-            cat,
-            "Network config request timeout check frequency set to: {}ms",
-            rtcf.frequency.count());
 }
 
 // MARK: Snode Pool Options

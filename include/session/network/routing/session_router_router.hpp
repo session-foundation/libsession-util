@@ -23,7 +23,6 @@ namespace config {
     struct SessionRouterConfig {
         opt::netid::Target netid;
         fs::path cache_directory;
-        std::chrono::milliseconds request_timeout_check_frequency;
 
         uint8_t path_length;
     };

@@ -4,6 +4,7 @@
 #include <deque>
 #include <memory>
 #include <oxen/quic/loop.hpp>
+#include <oxen/quic/utils.hpp>
 
 #include "session/network/session_network_types.hpp"
 #include "session/network/transport/network_transport.hpp"
@@ -15,18 +16,17 @@ class RequestQueue : public std::enable_shared_from_this<RequestQueue> {
     friend class TestRequestQueue;
 
     std::shared_ptr<oxen::quic::Loop> _loop;
-    std::chrono::milliseconds _check_frequency;
+    oxen::quic::event_ptr _timeout;
 
-    std::deque<std::pair<Request, network_response_callback_t>> _queue;
-    bool _checker_active = false;
+    std::deque<std::string> _queue;
+    std::unordered_map<std::string, std::pair<Request, network_response_callback_t>> _requests;
+    std::multimap<std::chrono::steady_clock::time_point, std::string> _req_expiries;
 
   public:
-    RequestQueue(
-            std::shared_ptr<oxen::quic::Loop> loop, std::chrono::milliseconds check_frequency) :
-            _loop{std::move(loop)}, _check_frequency{check_frequency} {};
+    RequestQueue(std::shared_ptr<oxen::quic::Loop> loop) : _loop{std::move(loop)} {};
     ~RequestQueue();
 
-    bool is_empty() const { return _queue.empty(); };
+    bool is_empty() const { return _requests.empty(); };
 
     virtual void add(Request request, network_response_callback_t callback);
     virtual void add_front(std::pair<Request, network_response_callback_t> req_pair);
@@ -34,7 +34,8 @@ class RequestQueue : public std::enable_shared_from_this<RequestQueue> {
     virtual std::deque<std::pair<Request, network_response_callback_t>> pop_all();
 
   private:
-    virtual void check_timeouts();
+    virtual void check_timeouts(std::optional<std::chrono::steady_clock::time_point> now);
+    virtual void update_timeout();
 };
 
 }  // namespace session::network::detail

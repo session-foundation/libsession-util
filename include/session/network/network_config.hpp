@@ -22,7 +22,6 @@ struct Config {
     bool enforce_subnet_diversity = true;
     uint8_t redirect_retry_count = 1;
     opt::retry_delay retry_delay = opt::retry_delay(200ms, 5s);
-    std::chrono::milliseconds request_timeout_check_frequency = 250ms;
 
     // Netid Options
     std::vector<service_node> seed_nodes;
@@ -82,7 +81,6 @@ struct Config {
     void handle_config_opt(opt::disable_subnet_diversity dsd);
     void handle_config_opt(opt::redirect_retry_count rrc);
     void handle_config_opt(opt::retry_delay rd);
-    void handle_config_opt(opt::request_timeout_check_frequency rtcf);
 
     // Snode pool options
     void handle_config_opt(opt::cache_directory dir);

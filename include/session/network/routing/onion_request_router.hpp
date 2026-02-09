@@ -17,7 +17,6 @@ namespace session::network {
 namespace config {
     struct OnionRequestRouterConfig {
         network::opt::retry_delay retry_delay;
-        std::chrono::milliseconds request_timeout_check_frequency;
 
         uint8_t path_length;
         uint8_t path_failure_threshold;

@@ -63,16 +63,12 @@ namespace {
         if (main_config.netid == opt::netid::Target::devnet)
             throw std::invalid_argument{"Session Router does not support devnet."};
 
-        return {main_config.netid,
-                *main_config.cache_directory,
-                main_config.request_timeout_check_frequency,
-                main_config.path_length};
+        return {main_config.netid, *main_config.cache_directory, main_config.path_length};
     }
 
     config::OnionRequestRouterConfig build_onion_request_router_config(
             const config::Config& main_config) {
         return {main_config.retry_delay,
-                main_config.request_timeout_check_frequency,
                 main_config.path_length,
                 main_config.onionreq_path_failure_threshold,
                 main_config.onionreq_path_build_retry_limit,
@@ -679,8 +675,6 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.redirect_retry_count = cpp_defaults.redirect_retry_count;
     config.min_retry_delay_ms = cpp_defaults.retry_delay.base_delay.count();
     config.max_retry_delay_ms = cpp_defaults.retry_delay.max_delay.count();
-    config.request_timeout_check_frequency_ms =
-            cpp_defaults.request_timeout_check_frequency.count();
 
     config.devnet_seed_nodes = nullptr;
     config.devnet_seed_nodes_size = 0;
@@ -801,10 +795,6 @@ LIBSESSION_C_API bool session_network_init(
 
         // A `0` value is valid for this option
         cpp_opts.emplace_back(opt::redirect_retry_count{config->redirect_retry_count});
-
-        if (config->request_timeout_check_frequency_ms > 0)
-            cpp_opts.emplace_back(opt::request_timeout_check_frequency{
-                    std::chrono::milliseconds{config->request_timeout_check_frequency_ms}});
 
         // Snode cache
         if (config->cache_dir)

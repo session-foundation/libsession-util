@@ -228,13 +228,6 @@ namespace opt {
         }
     };
 
-    /// Can be used to override the default (250ms) fequency that is used to check if queued
-    /// requests have timed out due to transport/router setup.
-    struct request_timeout_check_frequency : base {
-        std::chrono::milliseconds frequency;
-        explicit request_timeout_check_frequency(std::chrono::milliseconds f) : frequency{f} {}
-    };
-
     // MARK: Snode Pool Options
 
     /// Can be used to override the default ('.') path the network uses to cache files (eg. snode
