@@ -18,13 +18,13 @@ using namespace oxen::log::literals;
 namespace session::network {
 
 namespace {
-    auto cat = oxen::log::Cat("network");
+    auto cat = oxen::log::Cat("direct-router");
 }  // namespace
 
 DirectRouter::DirectRouter(
         std::shared_ptr<oxen::quic::Loop> loop, std::weak_ptr<ITransport> transport) :
         _loop{std::move(loop)}, _transport{transport} {
-    log::trace(cat, "[DirectRouter] Initializing.");
+    log::trace(cat, "Initializing.");
     _update_status(ConnectionStatus::connected);
 }
 
@@ -32,7 +32,7 @@ DirectRouter::~DirectRouter() {
     // Use 'call_get' to force this to be synchronous
     if (_loop)
         _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
-    log::debug(cat, "[DirectRouter] Destroyed.");
+    log::debug(cat, "Destroyed.");
 }
 
 // MARK: IRouter
@@ -41,7 +41,7 @@ void DirectRouter::suspend() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         _suspended = true;
-        log::info(cat, "[DirectRouter] Suspended.");
+        log::info(cat, "Suspended.");
     });
 }
 
@@ -52,7 +52,7 @@ void DirectRouter::resume(bool automatically_reconnect) {
             return;
 
         _suspended = false;
-        log::info(cat, "[DirectRouter] Resumed.");
+        log::info(cat, "Resumed.");
     });
 }
 
@@ -88,7 +88,7 @@ void DirectRouter::_send_request_internal(Request request, network_response_call
 
     auto transport = _transport.lock();
     if (!transport) {
-        log::critical(cat, "[DirectRouter] Transport was destroyed, cannot send request.");
+        log::critical(cat, "Transport was destroyed, cannot send request.");
         return;
     }
 

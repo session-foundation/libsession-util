@@ -16,7 +16,7 @@ using namespace oxen::log::literals;
 namespace session::network {
 
 namespace {
-    inline auto cat = log::Cat("network");
+    inline auto cat = log::Cat("quic-transport");
 
     inline bool max_streams(RequestCategory category, config::QuicTransportConfig config) {
         RequestCategory target_category = RequestCategory::standard;
@@ -48,7 +48,7 @@ constexpr auto ALPN = "oxenstorage";
 QuicTransport::QuicTransport(
         config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop) :
         _config{std::move(config)}, _loop{std::move(loop)} {
-    log::trace(cat, "[QuicTransport] Initializing.");
+    log::trace(cat, "Initializing.");
     _recreate_endpoint();
 }
 
@@ -56,7 +56,7 @@ QuicTransport::~QuicTransport() {
     // Use 'call_get' to force this to be synchronous
     if (_loop)
         _loop->call_get([this] { _close_connections(); });
-    log::debug(cat, "[QuicTransport] Destroyed.");
+    log::debug(cat, "Destroyed.");
 }
 
 // MARK: ITransport
@@ -69,7 +69,7 @@ void QuicTransport::suspend() {
 
         _suspended = true;
         _close_connections();
-        log::info(cat, "[QuicTransport] Suspended.");
+        log::info(cat, "Suspended.");
     });
 }
 
@@ -80,7 +80,7 @@ void QuicTransport::resume(bool automatically_reconnect) {
         // something will try to use it before we are ready
         _recreate_endpoint();
         _suspended = false;
-        log::info(cat, "[QuicTransport] Resumed.");
+        log::info(cat, "Resumed.");
     });
 }
 
@@ -148,7 +148,7 @@ void QuicTransport::remove_failure_listeners(const ed25519_pubkey& pubkey) {
 }
 
 void QuicTransport::send_request(Request request, network_response_callback_t callback) {
-    log::trace(cat, "[QuicTransport] Dispatching request {} to loop.", request.request_id);
+    log::trace(cat, "Dispatching request {} to loop.", request.request_id);
     _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
         if (auto self = weak_self.lock())
             self->_send_request_internal(std::move(req), std::move(cb));
@@ -195,7 +195,7 @@ void QuicTransport::_close_connections() {
     _pending_requests.clear();
 
     _update_status(ConnectionStatus::disconnected);
-    log::info(cat, "[QuicTransport] Closed all connections.");
+    log::info(cat, "Closed all connections.");
 }
 
 void QuicTransport::_update_status(ConnectionStatus new_status) {
@@ -241,15 +241,12 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
     std::visit(
             [&remote, request_id = request.request_id]<typename T>(const T& arg) {
                 if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
-                    log::trace(
-                            cat,
-                            "[QuicTransport Request {}]: Using pre-resolved RemoteAddress.",
-                            request_id);
+                    log::trace(cat, "[Request {}]: Using pre-resolved RemoteAddress.", request_id);
                     remote = arg;
                 } else if constexpr (std::is_same_v<T, service_node>) {
                     log::trace(
                             cat,
-                            "[QuicTransport Request {}]: Resolving service_node to RemoteAddress.",
+                            "[Request {}]: Resolving service_node to RemoteAddress.",
                             request_id);
                     remote.emplace(arg.view_remote_key(), arg.host(), arg.omq_port);
                 }
@@ -257,8 +254,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
             request.destination);
 
     if (!remote) {
-        log::critical(
-                cat, "[QuicTransport Request {}] Invalid destination type!", request.request_id);
+        log::critical(cat, "[Request {}] Invalid destination type!", request.request_id);
         return callback(
                 false,
                 false,
@@ -272,8 +268,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
     // If an active connection exists then we can send the request over that
     if (auto it = _active_connection_ids.find(remote_pubkey_hex);
         it != _active_connection_ids.end()) {
-        log::trace(
-                cat, "[QuicTransport Request {}] Found active connection ID.", request.request_id);
+        log::trace(cat, "[Request {}] Found active connection ID.", request.request_id);
         _send_on_connection(it->second, std::move(request), std::move(callback));
         return;
     }
@@ -283,7 +278,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
     if (_pending_requests.count(remote_pubkey_hex)) {
         log::debug(
                 cat,
-                "[QuicTransport Request {}] Connection to {} is pending, queueing request.",
+                "[Request {}] Connection to {} is pending, queueing request.",
                 request.request_id,
                 remote_pubkey_hex);
         _pending_requests[remote_pubkey_hex].emplace_back(std::move(request), std::move(callback));
@@ -293,7 +288,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
     // No connection exists so we need to start a new one and queue the request
     log::info(
             cat,
-            "[QuicTransport Request {}] No connection to {}, initiating new connection.",
+            "[Request {}] No connection to {}, initiating new connection.",
             request.request_id,
             remote_pubkey_hex);
     std::string initiating_req_id = request.request_id;
@@ -316,7 +311,7 @@ void QuicTransport::_establish_connection(
 
     log::debug(
             cat,
-            "[QuicTransport Request {}] Establishing new connection to {}.",
+            "[Request {}] Establishing new connection to {}.",
             initiating_req_id,
             address_pubkey_hex);
     try {
@@ -335,8 +330,7 @@ void QuicTransport::_establish_connection(
 
                     log::info(
                             cat,
-                            "[QuicTransport Request {}] Successfully established connection to "
-                            "{}.",
+                            "[Request {}] Successfully established connection to {}.",
                             initiating_req_id,
                             address_pubkey_hex);
 
@@ -381,10 +375,7 @@ void QuicTransport::_establish_connection(
                     if (!requests_to_process.empty()) {
                         log::debug(
                                 cat,
-                                "[QuicTransport] Processing {} pending requests on new stream "
-                                "{} "
-                                "with "
-                                "conn {}.",
+                                "Processing {} pending requests on new stream {} with conn {}.",
                                 requests_to_process.size(),
                                 stream_id,
                                 conn_id.to_string());
@@ -416,8 +407,7 @@ void QuicTransport::_send_on_connection(
     if (!conn) {
         log::warning(
                 cat,
-                "[QuicTransport Request {}] Attempted to send on a connection (ID {}) that no "
-                "longer exists.",
+                "[Request {}] Attempted to send on a connection (ID {}) that no longer exists.",
                 request.request_id,
                 conn_id.to_string());
 
@@ -445,8 +435,7 @@ void QuicTransport::_send_on_connection(
         // Something has gone horribly wrong, lets close the connection and the client can retry
         log::critical(
                 cat,
-                "[QuicTransport Request {}] No stream ID found for active connection {}, closing "
-                "connection.",
+                "[Request {}] No stream ID found for active connection {}, closing connection.",
                 request.request_id,
                 conn_id.to_string());
         conn->close_connection();
@@ -471,8 +460,7 @@ void QuicTransport::_send_on_connection(
             // just close it
             log::warning(
                     cat,
-                    "[QuicTransport Request {}] Stream {} on connection {} has died, closing "
-                    "connection.",
+                    "[Request {}] Stream {} on connection {} has died, closing connection.",
                     request.request_id,
                     stream_id,
                     conn_id.to_string());
@@ -488,8 +476,7 @@ void QuicTransport::_send_on_connection(
             // should just close it
             log::warning(
                     cat,
-                    "[QuicTransport Request {}] Unable to create stream on connection {}, closing "
-                    "connection.",
+                    "[Request {}] Unable to create stream on connection {}, closing connection.",
                     request.request_id,
                     conn_id.to_string());
             conn->close_connection();
@@ -506,7 +493,7 @@ void QuicTransport::_send_on_connection(
     // We have a valid connection and stream so we can send the request
     log::debug(
             cat,
-            "[QuicTransport Request {}] Sending on stream {} with conn {}",
+            "[Request {}] Sending on stream {} with conn {}",
             request.request_id,
             target_stream->stream_id(),
             conn_id.to_string());
@@ -528,7 +515,7 @@ void QuicTransport::_send_on_connection(
                 if (!self)
                     return;
 
-                log::trace(cat, "[QuicTransport Request {}] Received response.", req_id);
+                log::trace(cat, "[Request {}] Received response.", req_id);
 
                 // If this connection was an ephemeral connection then we should close it (don't
                 // want to keep it alive longer than needed)
@@ -542,7 +529,7 @@ void QuicTransport::_send_on_connection(
 
                 // Trigger the callback based on the response we got
                 if (resp.timed_out) {
-                    log::debug(cat, "[QuicTransport Request {}] Timed out.", req_id);
+                    log::debug(cat, "[Request {}] Timed out.", req_id);
                     return cb(false, true, 408, {content_type_plain_text}, "Request timed out");
                 }
 
@@ -561,11 +548,7 @@ void QuicTransport::_send_on_connection(
                         final_timeout = result->second;
                     }
 
-                    log::debug(
-                            cat,
-                            "[QuicTransport Request {}] Failed with QUIC error: {}.",
-                            req_id,
-                            err_body);
+                    log::debug(cat, "[Request {}] Failed with QUIC error: {}.", req_id, err_body);
                     return cb(
                             false,
                             final_timeout,
@@ -574,8 +557,7 @@ void QuicTransport::_send_on_connection(
                             err_body);
                 }
 
-                log::debug(
-                        cat, "[QuicTransport Request {}] Received raw success response.", req_id);
+                log::debug(cat, "[Request {}] Received raw success response.", req_id);
                 cb(true, false, 200, {}, std::string{resp.body()});
             });
 }
@@ -589,13 +571,13 @@ void QuicTransport::_fail_connection(
     if (error_code == NGTCP2_NO_ERROR)
         log::info(
                 cat,
-                "[QuicTransport Request {}] Connection to {} closed gracefully.",
+                "[Request {}] Connection to {} closed gracefully.",
                 initiating_req_id,
                 address_pubkey_hex);
     else if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT)) {
         log::warning(
                 cat,
-                "[QuicTransport Request {}] Handshake timeout when connecting to {}. "
+                "[Request {}] Handshake timeout when connecting to {}. "
                 "The node is likely unreachable.",
                 initiating_req_id,
                 address_pubkey_hex);
@@ -609,24 +591,22 @@ void QuicTransport::_fail_connection(
     } else if (error_code == quic::CONN_SEND_FAIL) {
         log::warning(
                 cat,
-                "[QuicTransport Request {}] Connection to {} failed as we were unable to send it a "
-                "packet (error: {})",
+                "[Request {}] Connection to {} failed as we were unable to send it a packet "
+                "(error: {})",
                 initiating_req_id,
                 address_pubkey_hex,
                 *error_code);
     } else if (error_code)
         log::warning(
                 cat,
-                "[QuicTransport Request {}] Connection to {} failed or was closed with "
-                "error code: {}",
+                "[Request {}] Connection to {} failed or was closed with error code: {}",
                 initiating_req_id,
                 address_pubkey_hex,
                 *error_code);
     else
         log::error(
                 cat,
-                "[QuicTransport Request {}] Connection to {} failed or was closed due to error: "
-                "{}.",
+                "[Request {}] Connection to {} failed or was closed due to error: {}.",
                 initiating_req_id,
                 address_pubkey_hex,
                 custom_error.value_or("Unknown error"));
@@ -655,11 +635,7 @@ void QuicTransport::_fail_connection(
         if (error_code == static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
             failure_reason += " (handshake timeout)";
 
-        log::error(
-                cat,
-                "[QuicTransport] Failing {} pending request(s) due to connection "
-                "failure.",
-                to_fail.size());
+        log::error(cat, "Failing {} pending request(s) due to connection failure.", to_fail.size());
 
         for (auto& [req, cb] : to_fail)
             cb(false, false, -1, {content_type_plain_text}, failure_reason);

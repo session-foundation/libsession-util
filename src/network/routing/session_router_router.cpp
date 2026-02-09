@@ -22,7 +22,7 @@ using namespace oxen::log::literals;
 namespace session::network {
 
 namespace {
-    auto cat = oxen::log::Cat("network");
+    auto cat = oxen::log::Cat("session-router");
 
     static constexpr std::string_view PROXIED_REQUESTS_KEY{"proxied_requests"};
 
@@ -56,15 +56,12 @@ namespace {
                 [&result, &request_id]<typename T>(const T& arg) {
                     if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
                         log::trace(
-                                cat,
-                                "[SessionRouter Request {}]: Using pre-resolved RemoteAddress.",
-                                request_id);
+                                cat, "[Request {}]: Using pre-resolved RemoteAddress.", request_id);
                         result.emplace(arg.view_remote_key(), arg.port());
                     } else if constexpr (std::is_same_v<T, service_node>) {
                         log::trace(
                                 cat,
-                                "[SessionRouter Request {}]: Resolving service_node to "
-                                "RemoteAddress.",
+                                "[Request {}]: Resolving service_node to RemoteAddress.",
                                 request_id);
                         result.emplace(arg.view_remote_key(), arg.omq_port);
                     }
@@ -91,7 +88,7 @@ SessionRouter::SessionRouter(
         _loop{std::move(loop)},
         _snode_pool{snode_pool},
         _transport{transport} {
-    log::trace(cat, "[SessionRouter] Initializing.");
+    log::trace(cat, "Initializing.");
 
     // "listen=:0" listens on a random port - this prevents multiple test devices on the same machine from trying to listen on the same port and colliding
     auto test_ini = R"(
@@ -133,7 +130,7 @@ SessionRouter::SessionRouter(
                 self->_finish_setup();
         }, /*with_path*/true, /*persist*/false);
     } catch (const std::exception& e) {
-        log::error(cat, "[SessionRouter] Failed to start ({}).", e.what());
+        log::error(cat, "Failed to start ({}).", e.what());
         _update_status(ConnectionStatus::disconnected);
         throw;
     }
@@ -143,7 +140,7 @@ SessionRouter::~SessionRouter() {
     // Use 'call_get' to force this to be synchronous
     if (_loop)
         _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
-    log::debug(cat, "[SessionRouter] Destroyed.");
+    log::debug(cat, "Destroyed.");
 }
 
 // MARK: IRouter
@@ -153,7 +150,7 @@ void SessionRouter::suspend() {
     _loop->call_get([this] {
         _suspended = true;
         _close_connections();
-        log::info(cat, "[SessionRouter] Suspended.");
+        log::info(cat, "Suspended.");
     });
 }
 
@@ -164,7 +161,7 @@ void SessionRouter::resume(bool automatically_reconnect) {
             return;
 
         _suspended = false;
-        log::info(cat, "[SessionRouter] Resumed.");
+        log::info(cat, "Resumed.");
     });
 }
 
@@ -194,7 +191,7 @@ void SessionRouter::send_request(Request request, network_response_callback_t ca
 void SessionRouter::_finish_setup() {
     // Start processing requests
     _ready = true;
-    log::debug(cat, "[SessionRouter] Finishing setup, router is now ready.");
+    log::debug(cat, "Finishing setup, router is now ready.");
 
     auto requests_to_process = std::move(_pending_requests);
     if (requests_to_process.empty())
@@ -203,16 +200,13 @@ void SessionRouter::_finish_setup() {
     // Process any requests that were queued before we were ready
     log::debug(
             cat,
-            "[SessionRouter] Processing {} requests queued during initialization.",
+            "Processing {} requests queued during initialization.",
             requests_to_process.size());
 
     for (auto& [address, requests] : requests_to_process) {
         if (!requests.empty()) {
             log::debug(
-                    cat,
-                    "[SessionRouter] Processing {} queued requests for address {}.",
-                    requests.size(),
-                    address);
+                    cat, "Processing {} queued requests for address {}.", requests.size(), address);
 
             for (auto&& [req, cb] : std::move(requests))
                 _send_request_internal(std::move(req), std::move(cb));
@@ -238,7 +232,7 @@ void SessionRouter::_close_connections() {
     _active_tunnels.clear();
     _pending_requests.clear();
     _update_status(ConnectionStatus::disconnected);
-    log::info(cat, "[SessionRouter] Closed all connections.");
+    log::info(cat, "Closed all connections.");
 }
 
 void SessionRouter::_update_status(ConnectionStatus new_status) {
@@ -266,10 +260,7 @@ void SessionRouter::_send_request_internal(Request request, network_response_cal
     auto key = pending_request_key(request.destination);
 
     if (!_ready) {
-        log::debug(
-                cat,
-                "[SessionRouter Request {}]: Router not ready, queueing request.",
-                request.request_id);
+        log::debug(cat, "[Request {}]: Router not ready, queueing request.", request.request_id);
 
         // Queue the request if not ready. We need the pubkey hex as the key.
         try {
@@ -277,7 +268,7 @@ void SessionRouter::_send_request_internal(Request request, network_response_cal
         } catch (const std::exception& e) {
             log::critical(
                     cat,
-                    "[SessionRouter Request {}]: Dropping after failure to queue due to error: {}.",
+                    "[Request {}]: Dropping after failure to queue due to error: {}.",
                     request.request_id,
                     e.what());
             return callback(false, false, -1, {content_type_plain_text}, e.what());
@@ -290,7 +281,7 @@ void SessionRouter::_send_request_internal(Request request, network_response_cal
     if (std::holds_alternative<ServerDestination>(request.destination)) {
         log::debug(
                 cat,
-                "[SessionRouter Request {}]: Destination is a server, finding a proxy node.",
+                "[Request {}]: Destination is a server, finding a proxy node.",
                 request.request_id);
         _send_proxy_request(std::move(request), std::move(callback));
         return;
@@ -335,7 +326,7 @@ void SessionRouter::_send_direct_request(Request request, network_response_callb
         const auto remote_pubkey_hex = oxenc::to_hex(remote_pubkey);
 
         if (auto it = _active_tunnels.find(remote_pubkey_hex); it != _active_tunnels.end()) {
-            log::trace(cat, "[SessionRouter Request {}] Found active tunnel.", request.request_id);
+            log::trace(cat, "[Request {}] Found active tunnel.", request.request_id);
             _send_via_tunnel(it->second, std::move(request), std::move(callback));
             return;
         }
@@ -349,20 +340,20 @@ void SessionRouter::_send_direct_request(Request request, network_response_callb
         if (_pending_requests.at(remote_pubkey_hex).size() == 1) {
             log::info(
                     cat,
-                    "[SessionRouter Request {}] No tunnel to {}, initiating new tunnel.",
+                    "[Request {}] No tunnel to {}, initiating new tunnel.",
                     initiating_req_id,
                     remote_pubkey_hex);
             _establish_tunnel(remote_pubkey, remote_port, initiating_req_id);
         } else
             log::debug(
                     cat,
-                    "[SessionRouter Request {}] Tunnel to {} is pending, queueing request.",
+                    "[Request {}] Tunnel to {} is pending, queueing request.",
                     initiating_req_id,
                     remote_pubkey_hex);
     } catch (const std::exception& e) {
         log::error(
                 cat,
-                "[SessionRouter Request {}] Failed to send request due to error: {}",
+                "[Request {}] Failed to send request due to error: {}",
                 request.request_id,
                 e.what());
         return callback(
@@ -390,8 +381,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     if (proxy_nodes.empty()) {
         log::warning(
                 cat,
-                "[SessionRouter Request {}]: No available proxy nodes, waiting for SnodePool "
-                "refresh.",
+                "[Request {}]: No available proxy nodes, waiting for SnodePool refresh.",
                 request.request_id);
 
         snode_pool->refresh_if_needed(
@@ -422,8 +412,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
 
                     log::info(
                             cat,
-                            "[SessionRouter Request {}]: SnodePool refresh complete, retrying "
-                            "proxy selection.",
+                            "[Request {}]: SnodePool refresh complete, retrying proxy selection.",
                             req.request_id);
                     self->_send_proxy_request(std::move(req), std::move(cb));
                 });
@@ -434,10 +423,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     std::vector<unsigned char> encrypted_blob;
     std::shared_ptr<onionreq::ResponseParser> parser;
     log::debug(
-            cat,
-            "[SessionRouter Request {}]: Selected {} as proxy.",
-            request.request_id,
-            proxy_node.to_string());
+            cat, "[Request {}]: Selected {} as proxy.", request.request_id, proxy_node.to_string());
 
     try {
         std::vector<service_node> proxy_path = {proxy_node};
@@ -447,7 +433,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     } catch (const std::exception& e) {
         log::warning(
                 cat,
-                "[SessionRouter Request {}]: Failed to build proxy request payload: {}",
+                "[Request {}]: Failed to build proxy request payload: {}",
                 request.request_id,
                 e.what());
         return callback(
@@ -503,8 +489,7 @@ void SessionRouter::_establish_tunnel(
     if (address_pubkey_hex.size() != 64) {
         log::critical(
                 cat,
-                "[SessionRouter] Destination had an invalid remote key, request {} is being "
-                "dropped.",
+                "Destination had an invalid remote key, request {} is being dropped.",
                 initiating_req_id);
         // Fail all the pending requests for this connection
         if (auto it = _pending_requests.find(address_pubkey_hex); it != _pending_requests.end()) {
@@ -512,7 +497,7 @@ void SessionRouter::_establish_tunnel(
             _pending_requests.erase(it);
             log::error(
                     cat,
-                    "[SessionRouter] Failing {} pending request(s) due to connection failure.",
+                    "Failing {} pending request(s) due to connection failure.",
                     to_fail.size());
 
             for (auto& [req, cb] : to_fail)
@@ -550,7 +535,7 @@ void SessionRouter::_establish_tunnel(
 
     log::debug(
             cat,
-            "[SessionRouter Request {}] Establishing new tunnel to {}.",
+            "[Request {}] Establishing new tunnel to {}.",
             initiating_req_id,
             address_pubkey_hex);
     srouter->establish_udp(
@@ -564,7 +549,7 @@ void SessionRouter::_establish_tunnel(
 
                 log::info(
                         cat,
-                        "[SessionRouter Request {}] Tunnel to remote {} established.",
+                        "[Request {}] Tunnel to remote {} established.",
                         initiating_req_id,
                         address_pubkey_hex);
 
@@ -578,8 +563,7 @@ void SessionRouter::_establish_tunnel(
                 if (!requests_to_process.empty()) {
                     log::debug(
                             cat,
-                            "[SessionRouter] Processing {} pending requests on new tunnel to "
-                            "{}.",
+                            "Processing {} pending requests on new tunnel to {}.",
                             requests_to_process.size(),
                             info.remote);
 
@@ -594,8 +578,7 @@ void SessionRouter::_establish_tunnel(
 
                 log::info(
                         cat,
-                        "[SessionRouter Request {}] Unable to establish session router UDP "
-                        "connection to {}.",
+                        "[Request {}] Unable to establish session router UDP connection to {}.",
                         initiating_req_id,
                         address_pubkey_hex);
 
@@ -609,8 +592,7 @@ void SessionRouter::_establish_tunnel(
 
                     log::error(
                             cat,
-                            "[SessionRouter] Failing {} pending requests due to UDP connection "
-                            "failure.",
+                            "Failing {} pending requests due to UDP connection failure.",
                             to_fail.size());
 
                     for (auto& [req, cb] : to_fail)
@@ -634,12 +616,12 @@ void SessionRouter::_send_via_tunnel(
 
     auto transport = _transport.lock();
     if (!transport) {
-        log::critical(cat, "[SessionRouter] Transport was destroyed, cannot send request.");
+        log::critical(cat, "Transport was destroyed, cannot send request.");
         return;
     }
 
     // We have a valid connection and stream so we can send the request
-    log::debug(cat, "[SessionRouter Request {}] Sending to {}.", request.request_id, tunnel.remote);
+    log::debug(cat, "[Request {}] Sending to {}.", request.request_id, tunnel.remote);
 
     auto [remote_pubkey, _] = remote_info_for_destination(request.destination, request.request_id);
     const auto remote_pubkey_hex = oxenc::to_hex(remote_pubkey);

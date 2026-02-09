@@ -251,17 +251,19 @@ void SnodePool::_disk_write_loop() {
             lock.unlock();
 
             try {
-                uint64_t expiry_threshold = std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY).count();
+                uint64_t expiry_threshold =
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                                std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
+                                .count();
                 std::vector<char> buffer;
-                
+
                 // Simple binary format: [Count(4)][Key(32)][NumStamps(2)][Stamp(8)]...
                 uint32_t entry_count = 0;
-                buffer.resize(sizeof(uint32_t)); 
+                buffer.resize(sizeof(uint32_t));
 
                 for (auto& [key, timestamps] : strikes_copy) {
                     std::vector<uint64_t> valid_stamps;
-                    for(auto t : timestamps)
+                    for (auto t : timestamps)
                         if (t > expiry_threshold)
                             valid_stamps.push_back(t);
 
@@ -282,7 +284,10 @@ void SnodePool::_disk_write_loop() {
 
                     // Write Timestamps (8 bytes each)
                     const char* stamps_ptr = reinterpret_cast<const char*>(valid_stamps.data());
-                    buffer.insert(buffer.end(), stamps_ptr, stamps_ptr + (valid_stamps.size() * sizeof(uint64_t)));
+                    buffer.insert(
+                            buffer.end(),
+                            stamps_ptr,
+                            stamps_ptr + (valid_stamps.size() * sizeof(uint64_t)));
                 }
 
                 // Patch total count at the beginning
@@ -802,11 +807,12 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
     std::lock_guard lock{_cache_mutex};
 
     uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
 
     if (permanent) {
         for (int i = 0; i < _config.cache_node_failure_threshold; ++i) {
-             _snode_strikes[key].push_back(now);
+            _snode_strikes[key].push_back(now);
         }
     } else {
         _snode_strikes[key].push_back(now);
@@ -814,19 +820,16 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
 
     _strikes_dirty = true;
     log::trace(
-            cat,
-            "Recorded strike for node {}, total: {}",
-            key.hex(),
-            _snode_strikes[key].size());
+            cat, "Recorded strike for node {}, total: {}", key.hex(), _snode_strikes[key].size());
 
     // Throttle persisting the strikes to disk to at most every X minutes
     if (!_strikes_flush_scheduled && !_shut_down_disk_thread) {
         _strikes_flush_scheduled = true;
-        
+
         _loop->call_later(SAVE_THROTTLE, [weak_self = weak_from_this()] {
             if (auto self = weak_self.lock()) {
                 std::lock_guard lock{self->_cache_mutex};
-                
+
                 if (self->_strikes_dirty) {
                     self->_disk_write_cv.notify_one();
                 }
@@ -844,17 +847,19 @@ uint16_t SnodePool::node_failure_count(const ed25519_pubkey& key) {
     std::lock_guard lock{_cache_mutex};
     if (!_snode_strikes.contains(key))
         return 0;
-    
+
     const auto& stamps = _snode_strikes.at(key);
 
-    uint64_t threshold = std::chrono::duration_cast<std::chrono::seconds>(
-        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY).count();
+    uint64_t threshold =
+            std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
+                    .count();
 
     uint16_t count = 0;
     for (auto t : stamps)
         if (t > threshold)
             count++;
-    
+
     return count;
 }
 

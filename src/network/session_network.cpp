@@ -201,7 +201,7 @@ Network::~Network() {
 
         _update_status(ConnectionStatus::disconnected);
     });
-    log::debug(cat, "[Network] Destroyed.");
+    log::debug(cat, "Destroyed.");
 }
 
 void Network::clear_cache() {
