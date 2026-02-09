@@ -623,9 +623,8 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                 c.unread = true;
 
             if (i % 7 == 0) {
-                c.pro_expiry_unix_ts = std::chrono::sys_time {
-                    std::chrono::milliseconds { unix_timestamp(i) }
-                };
+                c.pro_expiry_unix_ts =
+                        std::chrono::sys_time{std::chrono::milliseconds{unix_timestamp(i)}};
 
                 session::array_uc32 hash{};
                 std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(i % 256));

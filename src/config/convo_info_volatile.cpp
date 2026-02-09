@@ -188,7 +188,6 @@ namespace convo {
                     maybe_pro_gen_index_hash->data(),
                     pro_gen_index_hash->size());
         }
-
     }
 
     void base::load(const dict& info_dict) {
@@ -377,8 +376,9 @@ void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
     set_flag(info["u"], c.unread);
 }
 
-static bool is_stale(const convo::one_to_one & c, int64_t cutoff_ms) {
-    if (c.unread) return false;
+static bool is_stale(const convo::one_to_one& c, int64_t cutoff_ms) {
+    if (c.unread)
+        return false;
 
     if (c.pro_gen_index_hash.has_value() &&
         c.pro_expiry_unix_ts.time_since_epoch().count() >= cutoff_ms) {
@@ -389,7 +389,8 @@ static bool is_stale(const convo::one_to_one & c, int64_t cutoff_ms) {
 }
 
 static bool is_stale(const convo::blinded_one_to_one& c, int64_t cutoff_ms) {
-    if (c.unread) return false;
+    if (c.unread)
+        return false;
 
     if (c.pro_gen_index_hash.has_value() &&
         c.pro_expiry_unix_ts.time_since_epoch().count() >= cutoff_ms) {
@@ -399,15 +400,15 @@ static bool is_stale(const convo::blinded_one_to_one& c, int64_t cutoff_ms) {
     return c.last_read < cutoff_ms;
 }
 
-static bool is_stale(const convo::legacy_group & c, int64_t cutoff_ms) {
+static bool is_stale(const convo::legacy_group& c, int64_t cutoff_ms) {
     return !c.unread && c.last_read < cutoff_ms;
 }
 
-static bool is_stale(const convo::community & c, int64_t cutoff_ms) {
+static bool is_stale(const convo::community& c, int64_t cutoff_ms) {
     return !c.unread && c.last_read < cutoff_ms;
 }
 
-static bool is_stale(const convo::group & c, int64_t cutoff_ms) {
+static bool is_stale(const convo::group& c, int64_t cutoff_ms) {
     return !c.unread && c.last_read < cutoff_ms;
 }
 
@@ -418,32 +419,37 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
 
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)
-        if (is_stale(*it, cutoff)) stale.push_back(it->session_id);
+        if (is_stale(*it, cutoff))
+            stale.push_back(it->session_id);
 
     for (const auto& sid : stale)
         erase_1to1(sid);
 
     stale.clear();
     for (auto it = begin_legacy_groups(); it != end(); ++it)
-        if (is_stale(*it, cutoff)) stale.push_back(it->id);
+        if (is_stale(*it, cutoff))
+            stale.push_back(it->id);
     for (const auto& id : stale)
         erase_legacy_group(id);
 
     stale.clear();
     for (auto it = begin_blinded_1to1(); it != end(); ++it)
-        if (is_stale(*it, cutoff)) stale.push_back(it->blinded_session_id);
+        if (is_stale(*it, cutoff))
+            stale.push_back(it->blinded_session_id);
     for (const auto& id : stale)
         erase_blinded_1to1(id);
 
     stale.clear();
     for (auto it = begin_groups(); it != end(); ++it)
-        if (is_stale(*it, cutoff)) stale.push_back(it->id);
+        if (is_stale(*it, cutoff))
+            stale.push_back(it->id);
     for (const auto& id : stale)
         erase_group(id);
 
     std::vector<std::pair<std::string, std::string>> stale_comms;
     for (auto it = begin_communities(); it != end(); ++it)
-        if (is_stale(*it, cutoff)) stale_comms.emplace_back(it->base_url(), it->room());
+        if (is_stale(*it, cutoff))
+            stale_comms.emplace_back(it->base_url(), it->room());
     for (const auto& [base, room] : stale_comms)
         erase_community(base, room);
 }
