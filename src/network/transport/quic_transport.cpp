@@ -301,20 +301,27 @@ void QuicTransport::_establish_connection(
         const std::string& initiating_req_id,
         const RequestCategory category) {
     const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
-    auto conn_key_pair = ed25519::ed25519_key_pair();
-    auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
 
-    // If we are starting a connection attempt then transition to the "connecting" state
-    if (_status.load() == ConnectionStatus::unknown ||
-        _status.load() == ConnectionStatus::disconnected)
-        _update_status(ConnectionStatus::connecting);
-
-    log::debug(
-            cat,
-            "[Request {}] Establishing new connection to {}.",
-            initiating_req_id,
-            address_pubkey_hex);
     try {
+        if (_suspended)
+            throw std::runtime_error{"QuickTransport is suspended"};
+        if (!_endpoint)
+            throw std::runtime_error{"Network is invalid"};
+
+        auto conn_key_pair = ed25519::ed25519_key_pair();
+        auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
+
+        // If we are starting a connection attempt then transition to the "connecting" state
+        if (_status.load() == ConnectionStatus::unknown ||
+            _status.load() == ConnectionStatus::disconnected)
+            _update_status(ConnectionStatus::connecting);
+
+        log::debug(
+                cat,
+                "[Request {}] Establishing new connection to {}.",
+                initiating_req_id,
+                address_pubkey_hex);
+
         _endpoint->connect(
                 address,
                 creds,
@@ -402,6 +409,9 @@ void QuicTransport::_establish_connection(
 
 void QuicTransport::_send_on_connection(
         oxen::quic::ConnectionID conn_id, Request request, network_response_callback_t callback) {
+    if (!_endpoint)
+        return callback(false, false, -1, {content_type_plain_text}, "Network is invalid");
+
     // Try to retrieve the active connection first
     auto conn = _endpoint->get_conn(conn_id);
     if (!conn) {
@@ -523,7 +533,7 @@ void QuicTransport::_send_on_connection(
                     self->_ephemeral_connection_ids.erase(conn_id);
                     self->_reserved_stream_ids.erase(conn_id);
 
-                    if (auto conn = self->_endpoint->get_conn(conn_id))
+                    if (self->_endpoint; auto conn = self->_endpoint->get_conn(conn_id))
                         conn->close_connection();
                 }
 
