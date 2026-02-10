@@ -29,7 +29,7 @@ namespace convo {
         check_session_id(session_id);
     }
     one_to_one::one_to_one(const convo_info_volatile_1to1& c) :
-            base{c.last_read, c.unread}, session_id{c.session_id, 66} {
+            pro_base(c.last_read, c.unread), session_id{c.session_id, 66} {
         if (c.has_pro_gen_index_hash) {
             pro_gen_index_hash.emplace();
             std::memcpy(
@@ -38,23 +38,6 @@ namespace convo {
                     pro_gen_index_hash->size());
             pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
                     std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
-        }
-    }
-
-    void one_to_one::load(const dict& info_dict) {
-        base::load(info_dict);
-
-        auto pro_expiry = int_or_0(info_dict, "e");
-        std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
-                maybe_vector(info_dict, "g");
-        if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
-            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                    std::chrono::milliseconds(pro_expiry));
-            pro_gen_index_hash.emplace();
-            std::memcpy(
-                    pro_gen_index_hash->data(),
-                    maybe_pro_gen_index_hash->data(),
-                    pro_gen_index_hash->size());
         }
     }
 
@@ -79,7 +62,7 @@ namespace convo {
 
     community::community(const convo_info_volatile_community& c) :
             config::community{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}},
-            base{c.last_read, c.unread} {}
+            base(c.last_read, c.unread) {}
 
     void community::into(convo_info_volatile_community& c) const {
         static_assert(sizeof(c.base_url) == BASE_URL_MAX_LENGTH + 1);
@@ -98,7 +81,7 @@ namespace convo {
         check_session_id(id, "03");
     }
     group::group(const convo_info_volatile_group& c) :
-            base{c.last_read, c.unread}, id{c.group_id, 66} {}
+            base(c.last_read, c.unread), id{c.group_id, 66} {}
 
     void group::into(convo_info_volatile_group& c) const {
         std::memcpy(c.group_id, id.c_str(), 67);
@@ -113,7 +96,7 @@ namespace convo {
         check_session_id(id);
     }
     legacy_group::legacy_group(const convo_info_volatile_legacy_group& c) :
-            base{c.last_read, c.unread}, id{c.group_id, 66} {}
+            base(c.last_read, c.unread), id{c.group_id, 66} {}
 
     void legacy_group::into(convo_info_volatile_legacy_group& c) const {
         std::memcpy(c.group_id, id.data(), 67);
@@ -140,7 +123,7 @@ namespace convo {
                     "Invalid blinded ID: Expected '15' or '25' prefix; got " + blinded_session_id};
     }
     blinded_one_to_one::blinded_one_to_one(const convo_info_volatile_blinded_1to1& c) :
-            base{c.last_read, c.unread},
+            pro_base(c.last_read, c.unread),
             blinded_session_id{c.blinded_session_id, 66},
             legacy_blinding{c.legacy_blinding} {
         if (c.has_pro_gen_index_hash) {
@@ -173,7 +156,7 @@ namespace convo {
         }
     }
 
-    void blinded_one_to_one::load(const dict& info_dict) {
+    void pro_base::load(const dict& info_dict) {
         base::load(info_dict);
 
         auto pro_expiry = int_or_0(info_dict, "e");
