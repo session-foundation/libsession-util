@@ -160,7 +160,7 @@ void QuicTransport::send_request(Request request, network_response_callback_t ca
 void QuicTransport::_recreate_endpoint() {
     _endpoint = quic::Endpoint::endpoint(
             *_loop,
-            quic::Address{"::", 0},
+            quic::Address{},
             (_config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
                                            : std::nullopt));
 }
