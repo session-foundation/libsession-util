@@ -38,6 +38,11 @@ namespace {
 
     const std::chrono::seconds STRIKE_EXPIRY = 48h;
     const std::chrono::seconds SAVE_THROTTLE = 5min;
+
+    class empty_file_exception : public std::runtime_error {
+      public:
+        empty_file_exception() : std::runtime_error("Empty file") {}
+    };
 }  // namespace
 
 SnodePool::SnodePool(
@@ -91,10 +96,8 @@ void SnodePool::_load_from_disk() {
 
     // Load the cache if present
     try {
-        if (!fs::exists(_snode_cache_file_path)) {
-            log::info(cat, "No existing snode cache, will rebuild.");
-            return;
-        }
+        if (!fs::exists(_snode_cache_file_path))
+            throw empty_file_exception{};
 
         auto ftime = fs::last_write_time(_snode_cache_file_path);
         _last_snode_cache_update =
@@ -151,11 +154,96 @@ void SnodePool::_load_from_disk() {
                 "Loaded cache of {} snodes, {} swarms.",
                 _snode_cache.size(),
                 _all_swarms.size());
+    } catch (const empty_file_exception) {
+        log::info(cat, "No existing snode cache, will rebuild.");
     } catch (const std::exception& e) {
         log::error(cat, "Failed to load snode cache, will rebuild ({}).", e.what());
 
         if (fs::exists(_snode_cache_file_path))
             fs::remove_all(_snode_cache_file_path);
+    }
+
+    // Load the strikes if present
+    try {
+        if (!fs::exists(_strikes_file_path))
+            throw empty_file_exception{};
+
+        std::vector<std::byte> loaded_strikes_data = read_whole_file(_strikes_file_path);
+
+        if (loaded_strikes_data.empty())
+            throw empty_file_exception{};
+
+        // We want to filter on load so we don't start the app with expired strikes
+        uint64_t threshold = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY).count();
+        std::map<ed25519_pubkey, std::vector<uint64_t>> loaded_strikes;
+        auto invalid_entries = 0;
+
+        const char* ptr = reinterpret_cast<const char*>(loaded_strikes_data.data());
+        const char* end = ptr + loaded_strikes_data.size();
+
+        if (ptr + sizeof(uint32_t) > end) 
+            throw std::runtime_error{"Strikes file too short for header"};
+
+        uint32_t entry_count;
+        std::memcpy(&entry_count, ptr, sizeof(uint32_t));
+        ptr += sizeof(uint32_t);
+
+        for (uint32_t i = 0; i < entry_count; ++i) {
+            // Check bounds: Key (32) + Count (2)
+            if (ptr + 32 + sizeof(uint16_t) > end) {
+                invalid_entries++;
+                break; // Stop parsing if truncated
+            }
+
+            // Read key
+            std::array<unsigned char, 32> key_bytes;
+            std::memcpy(key_bytes.data(), ptr, 32);
+            ptr += 32;
+
+            // Read timestamp count
+            uint16_t num_stamps;
+            std::memcpy(&num_stamps, ptr, sizeof(uint16_t));
+            ptr += sizeof(uint16_t);
+
+            // Check timestamp bounds (count * 8)
+            if (ptr + (num_stamps * sizeof(uint64_t)) > end) {
+                invalid_entries++;
+                break; // Stop parsing if truncated
+            }
+
+            std::vector<uint64_t> valid_stamps;
+            valid_stamps.reserve(num_stamps);
+
+            // Read timestamps
+            for (int j = 0; j < num_stamps; ++j) {
+                uint64_t ts;
+                std::memcpy(&ts, ptr, sizeof(uint64_t));
+                ptr += sizeof(uint64_t);
+
+                // Filter rxpired
+                if (ts > threshold)
+                    valid_stamps.push_back(ts);
+            }
+
+            // Only add node if it still has active strikes
+            if (!valid_stamps.empty()) {
+                auto key = ed25519_pubkey::from_bytes(key_bytes);
+                loaded_strikes[key] = std::move(valid_stamps);
+            }
+        }
+
+        if (invalid_entries > 0)
+            log::warning(cat, "Skipped {} truncated/invalid entries in strikes file.", invalid_entries);
+
+        _snode_strikes = std::move(loaded_strikes);
+        log::info(cat, "Loaded {} active strike entries from disk.", _snode_strikes.size());
+    } catch (const empty_file_exception) {
+    } catch (const std::exception& e) {
+        log::error(cat, "Failed to load snode cache, will rebuild ({}).", e.what());
+
+        if (fs::exists(_strikes_file_path))
+            fs::remove_all(_strikes_file_path);
     }
 }
 

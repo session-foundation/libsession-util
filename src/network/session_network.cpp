@@ -272,7 +272,9 @@ std::vector<PathInfo> Network::get_active_paths() {
 void Network::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
-    _snode_pool->get_swarm(std::move(swarm_pubkey), std::move(callback));
+    _loop->call([this, pubkey = std::move(swarm_pubkey), cb = std::move(callback)] {
+        _snode_pool->get_swarm(std::move(pubkey), std::move(cb));
+    });
 }
 
 void Network::get_random_nodes(
