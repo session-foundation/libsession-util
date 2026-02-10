@@ -359,40 +359,15 @@ void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
     set_flag(info["u"], c.unread);
 }
 
-static bool is_stale(const convo::one_to_one& c, int64_t cutoff_ms) {
+template <std::derived_from<convo::base> C>
+static bool is_stale(const C& c, int64_t cutoff_ms) {
     if (c.unread)
         return false;
-
-    if (c.pro_gen_index_hash.has_value() &&
-        c.pro_expiry_unix_ts.time_since_epoch().count() >= cutoff_ms) {
-        return false;
-    }
-
+    if constexpr (std::derived_from<C, convo::pro_base>)
+        if (c.pro_gen_index_hash.has_value() &&
+            c.pro_expiry_unix_ts.time_since_epoch().count() >= cutoff_ms)
+            return false;
     return c.last_read < cutoff_ms;
-}
-
-static bool is_stale(const convo::blinded_one_to_one& c, int64_t cutoff_ms) {
-    if (c.unread)
-        return false;
-
-    if (c.pro_gen_index_hash.has_value() &&
-        c.pro_expiry_unix_ts.time_since_epoch().count() >= cutoff_ms) {
-        return false;
-    }
-
-    return c.last_read < cutoff_ms;
-}
-
-static bool is_stale(const convo::legacy_group& c, int64_t cutoff_ms) {
-    return !c.unread && c.last_read < cutoff_ms;
-}
-
-static bool is_stale(const convo::community& c, int64_t cutoff_ms) {
-    return !c.unread && c.last_read < cutoff_ms;
-}
-
-static bool is_stale(const convo::group& c, int64_t cutoff_ms) {
-    return !c.unread && c.last_read < cutoff_ms;
 }
 
 void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
