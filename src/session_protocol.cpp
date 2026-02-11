@@ -445,6 +445,8 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
     bool is_1o1 = dest_type == DestinationType::SyncOr1o1;
     bool is_community_inbox = dest_type == DestinationType::CommunityInbox;
     bool is_community = dest_type == DestinationType::Community;
+    bool is_community_envelope = dest_type == DestinationType::EnvelopeCommunityInbox ||
+                                 dest_type == DestinationType::EnvelopeCommunityInbox;
     if (!is_community) {
         assert(ed25519_privkey.size() == crypto_sign_ed25519_SECRETKEYBYTES ||
                ed25519_privkey.size() == crypto_sign_ed25519_SEEDBYTES);
@@ -474,8 +476,12 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
 
     EncryptedForDestinationInternal result = {};
     switch (dest_type) {
-        case DestinationType::Group: /*FALLTHRU*/
+        case DestinationType::EnvelopeCommunity:      /*FALLTHRU*/
+        case DestinationType::EnvelopeCommunityInbox: /*FALLTHRU*/
+        case DestinationType::Group:                  /*FALLTHRU*/
         case DestinationType::SyncOr1o1: {
+            assert(is_group || is_1o1 || is_community_envelope);
+
             if (is_group &&
                 dest_group_ed25519_pubkey[0] != static_cast<uint8_t>(SessionIDPrefix::group)) {
                 // Legacy groups which have a 05 prefixed key
@@ -484,13 +490,22 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                         "no longer supported"};
             }
 
-            // For Sync or 1o1 mesasges, we need to pad the contents to 160 bytes, see:
-            //   https://github.com/session-foundation/session-desktop/blob/a04e62427034a6b6fee39dcff7dbabf0d0131b13/ts/session/crypto/BufferPadding.ts#L49
             std::vector<uint8_t> tmp_content_buffer;
-            if (is_1o1) {  // Encrypt the padded output
+            if (is_1o1) {
+                // For Sync or 1o1 mesasges, we need to pad the contents to 160 bytes, see:
+                //   https://github.com/session-foundation/session-desktop/blob/a04e62427034a6b6fee39dcff7dbabf0d0131b13/ts/session/crypto/BufferPadding.ts#L49
                 std::vector<uint8_t> padded_payload = pad_message(content);
+
+                // Encrypt the padded output
                 tmp_content_buffer = encrypt_for_recipient_deterministic(
                         ed25519_privkey, dest_recipient_pubkey, padded_payload);
+                content = tmp_content_buffer;
+            } else if (dest_type == DestinationType::EnvelopeCommunityInbox) {
+                // For community messages we only pad the content if it's an inbox message (e.g. DMs
+                // require encryption in a community, so we pad to avoid leakage of metadata of the
+                // kind of message being sent being inferred from the size of the payload).
+                assert(is_community_envelope);
+                tmp_content_buffer = pad_message(content);
                 content = tmp_content_buffer;
             }
 
@@ -499,9 +514,11 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Utilities/MessageWrapper.swift#L57
             SessionProtos::Envelope envelope = {};
             envelope.set_type(
-                    is_1o1 ? SessionProtos::Envelope_Type_SESSION_MESSAGE
-                           : SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE);
-            envelope.set_sourcedevice(1);
+                    (is_1o1 || is_community_envelope)
+                            ? SessionProtos::Envelope_Type_SESSION_MESSAGE
+                            : SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE);
+            if (!is_community_envelope)
+                envelope.set_sourcedevice(1);
             envelope.set_timestamp(dest_sent_timestamp_ms.count());
             envelope.set_content(content.data(), content.size());
 
@@ -540,7 +557,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 } else {
                     result.ciphertext_cpp = std::move(ciphertext);
                 }
-            } else {
+            } else if (is_1o1) {
                 // 1o1, Wrap in websocket message
                 WebSocketProtos::WebSocketMessage msg = {};
                 msg.set_type(WebSocketProtos::WebSocketMessage_Type::WebSocketMessage_Type_REQUEST);
@@ -564,6 +581,35 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                             result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
                 }
                 assert(serialized);
+            } else {
+                assert(is_community_envelope);
+                if (dest_type == DestinationType::EnvelopeCommunityInbox) {
+                    std::string bytes = envelope.SerializeAsString();
+                    std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
+                            ed25519_privkey,
+                            dest_community_inbox_server_pubkey,
+                            dest_recipient_pubkey,  // recipient blinded pubkey
+                            to_span(bytes));
+
+                    if (use_malloc == UseMalloc::Yes) {
+                        result.ciphertext_c =
+                                span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
+                    } else {
+                        result.ciphertext_cpp = std::move(ciphertext);
+                    }
+                } else {
+                    [[maybe_unused]] bool serialized = false;
+                    if (use_malloc == UseMalloc::Yes) {
+                        result.ciphertext_c = span_u8_alloc_or_throw(envelope.ByteSizeLong());
+                        serialized = envelope.SerializeToArray(
+                                result.ciphertext_c.data, result.ciphertext_c.size);
+                    } else {
+                        result.ciphertext_cpp.resize(envelope.ByteSizeLong());
+                        envelope.SerializeToArray(
+                                result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
+                    }
+                    assert(serialized);
+                }
             }
         } break;
 
@@ -573,19 +619,19 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             std::vector<uint8_t> tmp_content_buffer;
 
             // Sign the message with the Session Pro key if given and then pad the message (both
-            // community message types require it)
+            // community message types require it for old-style content messages)
             //   https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L398
             if (dest_pro_rotating_ed25519_privkey.size()) {
                 // Key should be verified by the time we hit this branch
                 assert(dest_pro_rotating_ed25519_privkey.size() ==
                        crypto_sign_ed25519_SECRETKEYBYTES);
 
-                // TODO: Sub-optimal, but we parse the content again to make sure it's valid. Sign
-                // the blob then, fill in the signature in-place as part of the transitioning of
-                // open groups messages to envelopes. As part of that, libsession is going to take
-                // responsibility of constructing community messages so that eventually all
-                // platforms switch over to envelopes and we can change the implementation across
-                // all platforms in one swoop and remove this.
+                // TODO: Sub-optimal, but we parse the content again to make sure it's valid.
+                // Sign the blob then, fill in the signature in-place as part of the
+                // transitioning of open groups messages to envelopes. As part of that,
+                // libsession is going to take responsibility of constructing community messages
+                // so that eventually all platforms switch over to envelopes and we can change
+                // the implementation across all platforms in one swoop and remove this.
                 //
                 // Parse the content blob
                 SessionProtos::Content content_w_sig = {};
@@ -608,9 +654,9 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                                           dest_pro_rotating_ed25519_privkey.data()) == 0;
                 assert(was_signed);
 
-                // Now assign the community specific pro signature field, reserialize it and we have
-                // to, yes, pad it again. This is all temporary wasted work whilst transitioning
-                // open groups.
+                // Now assign the community specific pro signature field, reserialize it and we
+                // have to, yes, pad it again. This is all temporary wasted work whilst
+                // transitioning open groups.
                 content_w_sig.set_prosigforcommunitymessageonly(pro_sig.data(), pro_sig.size());
                 tmp_content_buffer.resize(content_w_sig.ByteSizeLong());
                 bool serialized = content_w_sig.SerializeToArray(
@@ -623,10 +669,6 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 tmp_content_buffer = pad_message(to_span(content));
                 content = tmp_content_buffer;
             }
-
-            // TODO: We don't need to actually pad the community message since that's unencrypted,
-            // there's no need to make the message sizes uniform but we need it for backwards
-            // compat. We can remove this eventually, first step is to unify the clients.
 
             if (is_community_inbox) {
                 std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
@@ -868,6 +910,8 @@ DecodedEnvelope decode_envelope(
         static_assert(sizeof(result.envelope.pro_sig) == crypto_sign_ed25519_BYTES);
         std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
+        // We only care about verifying the pro-signature if the content has pro data populated,
+        // otherwise we assume that it's a dummy signature for preventing metadata leakage.
         if (content.has_promessage()) {
             if (!content.sigtimestamp())
                 throw std::runtime_error{fmt::format(
@@ -1007,9 +1051,10 @@ DecodedCommunityMessage decode_for_community(
     std::span<const uint8_t> unpadded_content = unpad_message(result.content_plaintext);
     SessionProtos::Content content = {};
     if (!content.ParseFromArray(unpadded_content.data(), unpadded_content.size()))
-        throw std::runtime_error{
-                "Decoding community message failed, could not interpret blob as content or "
-                "envelope"};
+        throw std::runtime_error{fmt::format(
+                "Decoding community message failed, could not interpret blob as {}: {}b",
+                result.envelope ? "envelope" : "content",
+                unpadded_content.size())};
 
     // Extract the pro signature from content if it was present
     if (content.has_prosigforcommunitymessageonly()) {
@@ -1117,6 +1162,21 @@ DecodedCommunityMessage decode_for_community(
     // caller without padding as we no longer have a need for it.
     result.content_plaintext.resize(unpadded_content.size());
 
+    return result;
+}
+
+DecodedCommunityMessage decode_for_community_inbox(
+        std::span<const unsigned char> ed25519_privkey,
+        std::span<const unsigned char> community_pubkey,
+        std::span<const unsigned char> sender_id,
+        std::span<const unsigned char> recipient_id,
+        std::span<const unsigned char> ciphertext,
+        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        const array_uc32& pro_backend_pubkey) {
+    auto [decrypted_blob, session_id] = decrypt_from_blinded_recipient(
+            ed25519_privkey, community_pubkey, sender_id, recipient_id, ciphertext);
+    DecodedCommunityMessage result =
+            decode_for_community(decrypted_blob, unix_ts, pro_backend_pubkey);
     return result;
 }
 
@@ -1458,6 +1518,85 @@ LIBSESSION_C_API void session_protocol_encode_for_destination_free(
     }
 }
 
+static session_protocol_decoded_community_message
+session_protocol_decoded_community_message_from_cpp(const DecodedCommunityMessage& decoded) {
+    session_protocol_decoded_community_message result = {};
+    result.has_envelope = decoded.envelope.has_value();
+    if (result.has_envelope)
+        result.envelope = envelope_from_cpp(*decoded.envelope);
+    result.content_plaintext = session::span_u8_copy_or_throw(
+            decoded.content_plaintext.data(), decoded.content_plaintext.size());
+    result.has_pro = decoded.pro.has_value();
+    if (decoded.pro_sig)
+        std::memcpy(result.pro_sig.data, decoded.pro_sig->data(), decoded.pro_sig->max_size());
+    if (decoded.pro)
+        result.pro = decoded_pro_from_cpp(*decoded.pro);
+    result.success = true;
+    return result;
+}
+
+LIBSESSION_C_API session_protocol_decoded_community_message
+session_protocol_decode_for_community_inbox(
+        const unsigned char* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        const unsigned char* community_pubkey,
+        size_t community_pubkey_len,
+        const unsigned char* sender_id,
+        size_t sender_id_len,
+        const unsigned char* recipient_id,
+        size_t recipient_id_len,
+        const unsigned char* ciphertext,
+        size_t ciphertext_len,
+        uint64_t unix_ts_ms,
+        OPTIONAL const void* pro_backend_pubkey,
+        OPTIONAL size_t pro_backend_pubkey_len,
+        OPTIONAL char* error,
+        size_t error_len) {
+    std::span<const unsigned char> ed25519_privkey_span = {ed25519_privkey, ed25519_privkey_len};
+    std::span<const unsigned char> community_pubkey_span = {community_pubkey, community_pubkey_len};
+    std::span<const unsigned char> sender_id_span = {sender_id, sender_id_len};
+    std::span<const unsigned char> recipient_id_span = {recipient_id, recipient_id_len};
+    std::span<const unsigned char> ciphertext_span = {ciphertext, ciphertext_len};
+    auto unix_ts =
+            std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(unix_ts_ms));
+
+    session_protocol_decoded_community_message result = {};
+    array_uc32_from_ptr_result pro_backend_pubkey_cpp =
+            array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    if (!pro_backend_pubkey_cpp.success) {
+        result.error_len_incl_null_terminator = snprintf_clamped(
+                                                        error,
+                                                        error_len,
+                                                        "Invalid pro_backend_pubkey: Key was "
+                                                        "set but was not 32 bytes, was: %zu",
+                                                        pro_backend_pubkey_len) +
+                                                1;
+        return result;
+    }
+
+    try {
+        DecodedCommunityMessage decoded = decode_for_community_inbox(
+                ed25519_privkey_span,
+                community_pubkey_span,
+                sender_id_span,
+                recipient_id_span,
+                ciphertext_span,
+                unix_ts,
+                pro_backend_pubkey_cpp.data);
+        result = session_protocol_decoded_community_message_from_cpp(decoded);
+    } catch (const std::exception& e) {
+        std::string error_cpp = e.what();
+        result.error_len_incl_null_terminator = snprintf_clamped(
+                                                        error,
+                                                        error_len,
+                                                        "%.*s",
+                                                        static_cast<int>(error_cpp.size()),
+                                                        error_cpp.data()) +
+                                                1;
+    }
+    return result;
+}
+
 LIBSESSION_C_API
 session_protocol_decoded_envelope session_protocol_decode_envelope(
         const session_protocol_decode_envelope_keys* keys,
@@ -1597,17 +1736,7 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
     try {
         DecodedCommunityMessage decoded = decode_for_community(
                 content_or_envelope_payload_span, unix_ts, pro_backend_pubkey_cpp.data);
-        result.has_envelope = decoded.envelope.has_value();
-        if (result.has_envelope)
-            result.envelope = envelope_from_cpp(*decoded.envelope);
-        result.content_plaintext = session::span_u8_copy_or_throw(
-                decoded.content_plaintext.data(), decoded.content_plaintext.size());
-        result.has_pro = decoded.pro.has_value();
-        if (decoded.pro_sig)
-            std::memcpy(result.pro_sig.data, decoded.pro_sig->data(), decoded.pro_sig->max_size());
-        if (decoded.pro)
-            result.pro = decoded_pro_from_cpp(*decoded.pro);
-        result.success = true;
+        result = session_protocol_decoded_community_message_from_cpp(decoded);
     } catch (const std::exception& e) {
         std::string error_cpp = e.what();
         result.success = false;

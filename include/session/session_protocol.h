@@ -139,8 +139,16 @@ typedef enum SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS {  // See session::Pro
 typedef enum SESSION_PROTOCOL_DESTINATION_TYPE {  // See session::DestinationType
     SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1,
     SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
+
+    // Old-style community messages that is content encrypted using the blinding protocol or
+    // plaintext content respectively (inbox vs non-inbox).
     SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
     SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY,
+
+    // New-style community messages that are sent as envelopes, encrypted using the blinding
+    // protocol or plaintext content respectively (inbox vs non-inbox).
+    SESSION_PROTOCOL_DESTINATION_TYPE_ENVELOPE_COMMUNITY_INBOX,
+    SESSION_PROTOCOL_DESTINATION_TYPE_ENVELOPE_COMMUNITY,
 } SESSION_PROTOCOL_DESTINATION_TYPE;
 
 typedef struct session_protocol_destination session_protocol_destination;
@@ -708,6 +716,32 @@ session_protocol_encoded_for_destination session_protocol_encode_for_destination
 ///   be used after it is freed.
 LIBSESSION_EXPORT void session_protocol_encode_for_destination_free(
         session_protocol_encoded_for_destination* encrypt);
+
+/// API: session_protocol/decode_for_community_inbox
+///
+/// Given a blinded encrypted content or envelope payload extract the content and any associated pro
+/// metadata if there was any in the message.
+///
+/// This function is the same as calling `decrypt_from_blinded_recipient` to decrypt the payload and
+/// then decode with `decode_for_community`. See those functions for more information. On failure
+/// this function throws as per `decrypt_from_blinded_recipient`
+LIBSESSION_EXPORT session_protocol_decoded_community_message
+session_protocol_decode_for_community_inbox(
+        const unsigned char* ed25519_privkey,
+        size_t ed25519_privkey_len,
+        const unsigned char* community_pubkey,
+        size_t community_pubkey_len,
+        const unsigned char* sender_id,
+        size_t sender_id_len,
+        const unsigned char* recipient_id,
+        size_t recipient_id_len,
+        const unsigned char* ciphertext,
+        size_t ciphertext_len,
+        uint64_t unix_ts_ms,
+        OPTIONAL const void* pro_backend_pubkey,
+        OPTIONAL size_t pro_backend_pubkey_len,
+        OPTIONAL char* error,
+        size_t error_len);
 
 /// API: session_protocol/session_protocol_decode_envelope
 ///

@@ -109,7 +109,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     // Do tests that require no setup
-    SECTION("Ensure get pro fetaures detects large message") {
+    SECTION("Ensure get pro features detects large message") {
         // Try a message below the size threshold
         {
             auto msg = std::string(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT, 'a');
@@ -847,36 +847,37 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         REQUIRE(decoded.pro.status == SESSION_PROTOCOL_PRO_STATUS_VALID);
     }
 
+    // NOTE: Setup some keys for community inbox testing
+    const auto community_seed =
+            "0123456789abcdef0123456789abcdeff00baadeadb33f000000000000000000"_hexbytes;
+    array_uc64 community_sk = {};
+    array_uc32 community_pk = {};
+    crypto_sign_ed25519_seed_keypair(
+            community_pk.data(), community_sk.data(), community_seed.data());
+
+    bytes32 session_blind15_sk0 = {};
+    bytes33 session_blind15_pk0 = {};
+    session_blind15_pk0.data[0] = 0x15;
+    session_blind15_key_pair(
+            keys.ed_sk0.data(),
+            community_pk.data(),
+            session_blind15_pk0.data + 1,
+            session_blind15_sk0.data);
+
+    bytes32 session_blind15_sk1 = {};
+    bytes33 session_blind15_pk1 = {};
+    session_blind15_pk1.data[0] = 0x15;
+    session_blind15_key_pair(
+            keys.ed_sk1.data(),
+            community_pk.data(),
+            session_blind15_pk1.data + 1,
+            session_blind15_sk1.data);
+
+    bytes33 recipient_pubkey = session_blind15_pk1;
+    bytes32 community_pubkey = {};
+    std::memcpy(community_pubkey.data, community_pk.data(), community_pk.size());
+
     SECTION("Encode/decode for community inbox (content message)") {
-        const auto community_seed =
-                "0123456789abcdef0123456789abcdeff00baadeadb33f000000000000000000"_hexbytes;
-        array_uc64 community_sk = {};
-        array_uc32 community_pk = {};
-        crypto_sign_ed25519_seed_keypair(
-                community_pk.data(), community_sk.data(), community_seed.data());
-
-        bytes32 session_blind15_sk0 = {};
-        bytes33 session_blind15_pk0 = {};
-        session_blind15_pk0.data[0] = 0x15;
-        session_blind15_key_pair(
-                keys.ed_sk0.data(),
-                community_pk.data(),
-                session_blind15_pk0.data + 1,
-                session_blind15_sk0.data);
-
-        bytes32 session_blind15_sk1 = {};
-        bytes33 session_blind15_pk1 = {};
-        session_blind15_pk1.data[0] = 0x15;
-        session_blind15_key_pair(
-                keys.ed_sk1.data(),
-                community_pk.data(),
-                session_blind15_pk1.data + 1,
-                session_blind15_sk1.data);
-
-        bytes33 recipient_pubkey = session_blind15_pk1;
-        bytes32 community_pubkey = {};
-        std::memcpy(community_pubkey.data, community_pk.data(), community_pk.size());
-
         session_protocol_encoded_for_destination encoded =
                 session_protocol_encode_for_community_inbox(
                         protobuf_content.plaintext.data(),
@@ -892,22 +893,178 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         sizeof(error));
         scope_exit encoded_free{[&]() { session_protocol_encode_for_destination_free(&encoded); }};
 
-        auto [decrypted_cipher, sender_id] = session::decrypt_from_blinded_recipient(
-                keys.ed_sk1,
-                community_pk,
-                {session_blind15_pk0.data, sizeof(session_blind15_pk0.data)},
-                {session_blind15_pk1.data, sizeof(session_blind15_pk1.data)},
-                {encoded.ciphertext.data, encoded.ciphertext.size});
-
-        session_protocol_decoded_community_message decoded = session_protocol_decode_for_community(
-                decrypted_cipher.data(),
-                decrypted_cipher.size(),
-                timestamp_ms.time_since_epoch().count(),
-                pro_backend_ed_pk.data(),
-                pro_backend_ed_pk.size(),
-                error,
-                sizeof(error));
+        session_protocol_decoded_community_message decoded =
+                session_protocol_decode_for_community_inbox(
+                        keys.ed_sk1.data(),
+                        keys.ed_sk1.size(),
+                        community_pk.data(),
+                        community_pk.size(),
+                        /*sender*/ session_blind15_pk0.data,
+                        sizeof(session_blind15_pk0.data),
+                        /*recipient*/ session_blind15_pk1.data,
+                        sizeof(session_blind15_pk1.data),
+                        encoded.ciphertext.data,
+                        encoded.ciphertext.size,
+                        timestamp_ms.time_since_epoch().count(),
+                        pro_backend_ed_pk.data(),
+                        pro_backend_ed_pk.size(),
+                        error,
+                        sizeof(error));
+        INFO(error);
+        REQUIRE(decoded.error_len_incl_null_terminator == 0);
+        REQUIRE(decoded.success);
         scope_exit decoded_free{[&]() { session_protocol_decode_for_community_free(&decoded); }};
         REQUIRE(!decoded.has_pro);
+    }
+
+    SECTION("Encode/decode for community inbox (content message+pro)") {
+        session_protocol_encoded_for_destination encoded =
+                session_protocol_encode_for_community_inbox(
+                        protobuf_content.plaintext.data(),
+                        protobuf_content.plaintext.size(),
+                        keys.ed_sk0.data(),
+                        keys.ed_sk0.size(),
+                        timestamp_ms.time_since_epoch().count(),
+                        &recipient_pubkey,
+                        &community_pubkey,
+                        user_pro_ed_sk.data(),
+                        user_pro_ed_sk.size(),
+                        error,
+                        sizeof(error));
+        scope_exit encoded_free{[&]() { session_protocol_encode_for_destination_free(&encoded); }};
+
+        session_protocol_decoded_community_message decoded =
+                session_protocol_decode_for_community_inbox(
+                        keys.ed_sk1.data(),
+                        keys.ed_sk1.size(),
+                        community_pk.data(),
+                        community_pk.size(),
+                        /*sender*/ session_blind15_pk0.data,
+                        sizeof(session_blind15_pk0.data),
+                        /*recipient*/ session_blind15_pk1.data,
+                        sizeof(session_blind15_pk1.data),
+                        encoded.ciphertext.data,
+                        encoded.ciphertext.size,
+                        timestamp_ms.time_since_epoch().count(),
+                        pro_backend_ed_pk.data(),
+                        pro_backend_ed_pk.size(),
+                        error,
+                        sizeof(error));
+        INFO(error);
+        REQUIRE(decoded.error_len_incl_null_terminator == 0);
+        REQUIRE(decoded.success);
+        scope_exit decoded_free{[&]() { session_protocol_decode_for_community_free(&decoded); }};
+        REQUIRE(decoded.has_pro);
+        REQUIRE(decoded.pro.status == SESSION_PROTOCOL_PRO_STATUS_VALID);
+    }
+
+    SECTION("Encode/decode for community inbox (envelope)") {
+        // TODO: For these tests we call directly into the encode for destination function. The
+        // public helper-functions that wrap over this lower level function construct content
+        // community messages. This is the default behaviour before we transition to envelopes for
+        // community messages.
+        //
+        // To test envelope construction for communities we bypass that function as we need to set
+        // the type to Envelope community inbox.
+        session_protocol_destination dest = {};
+        dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_ENVELOPE_COMMUNITY_INBOX;
+        dest.sent_timestamp_ms = timestamp_ms.time_since_epoch().count();
+        dest.recipient_pubkey = session_blind15_pk1;
+        dest.community_inbox_server_pubkey = community_pubkey;
+
+        // Build content without pro attached
+        std::string plaintext;
+        {
+            SessionProtos::Content content = {};
+            content.set_sigtimestamp(timestamp_ms.time_since_epoch().count());
+
+            SessionProtos::DataMessage* data = content.mutable_datamessage();
+            data->set_body(std::string(data_body));
+            plaintext = content.SerializeAsString();
+            REQUIRE(plaintext.size() > data_body.size());
+        }
+
+        memset(error, 0, sizeof(error));
+        session_protocol_encoded_for_destination encoded = session_protocol_encode_for_destination(
+                plaintext.data(),
+                plaintext.size(),
+                keys.ed_sk0.data(),
+                keys.ed_sk0.size(),
+                &dest,
+                error,
+                sizeof(error));
+        scope_exit encoded_free{[&]() { session_protocol_encode_for_destination_free(&encoded); }};
+        REQUIRE(encoded.success);
+
+        memset(error, 0, sizeof(error));
+        session_protocol_decoded_community_message decoded =
+                session_protocol_decode_for_community_inbox(
+                        keys.ed_sk1.data(),
+                        keys.ed_sk1.size(),
+                        community_pk.data(),
+                        community_pk.size(),
+                        /*sender*/ session_blind15_pk0.data,
+                        sizeof(session_blind15_pk0.data),
+                        /*recipient*/ session_blind15_pk1.data,
+                        sizeof(session_blind15_pk1.data),
+                        encoded.ciphertext.data,
+                        encoded.ciphertext.size,
+                        timestamp_ms.time_since_epoch().count(),
+                        nullptr,
+                        0,
+                        error,
+                        sizeof(error));
+        INFO("ERROR: " << error << ", cipher was: " << encoded.ciphertext.size << "b");
+        REQUIRE(decoded.error_len_incl_null_terminator == 0);
+        REQUIRE(decoded.success);
+        scope_exit decoded_free{[&]() { session_protocol_decode_for_community_free(&decoded); }};
+        REQUIRE(!decoded.has_pro);
+    }
+
+    SECTION("Encode/decode for community inbox (envelope+pro)") {
+        session_protocol_destination dest = {};
+        dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_ENVELOPE_COMMUNITY_INBOX;
+        dest.pro_rotating_ed25519_privkey = user_pro_ed_sk.data();
+        dest.pro_rotating_ed25519_privkey_len = user_pro_ed_sk.size();
+        dest.sent_timestamp_ms = timestamp_ms.time_since_epoch().count();
+        dest.recipient_pubkey = session_blind15_pk1;
+        dest.community_inbox_server_pubkey = community_pubkey;
+
+        memset(error, 0, sizeof(error));
+        session_protocol_encoded_for_destination encoded = session_protocol_encode_for_destination(
+                protobuf_content.plaintext.data(),
+                protobuf_content.plaintext.size(),
+                keys.ed_sk0.data(),
+                keys.ed_sk0.size(),
+                &dest,
+                error,
+                sizeof(error));
+        scope_exit encoded_free{[&]() { session_protocol_encode_for_destination_free(&encoded); }};
+        REQUIRE(encoded.success);
+
+        memset(error, 0, sizeof(error));
+        session_protocol_decoded_community_message decoded =
+                session_protocol_decode_for_community_inbox(
+                        keys.ed_sk1.data(),
+                        keys.ed_sk1.size(),
+                        community_pk.data(),
+                        community_pk.size(),
+                        /*sender*/ session_blind15_pk0.data,
+                        sizeof(session_blind15_pk0.data),
+                        /*recipient*/ session_blind15_pk1.data,
+                        sizeof(session_blind15_pk1.data),
+                        encoded.ciphertext.data,
+                        encoded.ciphertext.size,
+                        timestamp_ms.time_since_epoch().count(),
+                        pro_backend_ed_pk.data(),
+                        pro_backend_ed_pk.size(),
+                        error,
+                        sizeof(error));
+        INFO("ERROR: " << error << ", cipher was: " << encoded.ciphertext.size << "b");
+        REQUIRE(decoded.error_len_incl_null_terminator == 0);
+        REQUIRE(decoded.success);
+        scope_exit decoded_free{[&]() { session_protocol_decode_for_community_free(&decoded); }};
+        REQUIRE(decoded.has_pro);
+        REQUIRE(decoded.pro.status == SESSION_PROTOCOL_PRO_STATUS_VALID);
     }
 }
