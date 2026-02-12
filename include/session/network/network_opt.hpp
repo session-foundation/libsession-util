@@ -276,9 +276,9 @@ namespace opt {
     /// Can be used to override the default (3) number of times a specific node in a path can
     /// receive an error before it is removed from the path and replaced by a new node (or the path
     /// is rebuilt if it happens to be the edge node).
-    struct cache_node_failure_threshold : base {
+    struct cache_node_strike_threshold : base {
         uint16_t count;
-        explicit cache_node_failure_threshold(uint16_t count) : count{count} {}
+        explicit cache_node_strike_threshold(uint16_t count) : count{count} {}
     };
 
     /// Can be used to make the snode cache use the legacy endpoint when refreshing.
@@ -320,10 +320,10 @@ namespace opt {
 
     /// Can be used to override the default (3) number of times a path can receive an error before
     /// it is dropped and replaced by a new path.
-    struct onionreq_path_failure_threshold : base {
+    struct onionreq_path_strike_threshold : base {
         uint16_t count;
 
-        explicit onionreq_path_failure_threshold(uint16_t count) : count{count} {}
+        explicit onionreq_path_strike_threshold(uint16_t count) : count{count} {}
     };
 
     /// Can be used to override the default (3) number of times a path can receive an error before

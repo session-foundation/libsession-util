@@ -21,7 +21,7 @@ class TestSnodePool : public SnodePool {
     void reset_state_with_cache(std::vector<service_node> cache) {
         std::unique_lock lock{_cache_mutex};
         _snode_cache = cache;
-        _snode_failure_counts.clear();
+        _snode_strikes.clear();
     }
 
     void refresh_if_needed(
@@ -43,7 +43,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             {},
             0,
             0,
-            3,  // cache_node_failure_threshold
+            3,  // cache_node_strike_threshold
             false};
     auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hexbytes;
     auto ed_pk2 = "5ea34e72bb044654a6a23675690ef5ffaaf1656b02f93fb76655f9cbdbe89876"_hexbytes;
@@ -139,7 +139,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             {},
             0,
             0,
-            3,  // cache_node_failure_threshold
+            3,  // cache_node_strike_threshold
             false};
     snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
     snode_pool->reset_state_with_cache(snode_cache);

@@ -19,8 +19,9 @@ namespace config {
         network::opt::retry_delay retry_delay;
 
         uint8_t path_length;
-        uint8_t path_failure_threshold;
+        uint8_t path_strike_threshold;
         uint8_t path_build_retry_limit;
+        uint8_t node_strike_threshold;
         bool disable_pre_build_paths;
         bool single_path_mode;
         std::unordered_map<PathCategory, uint8_t> min_path_counts;
@@ -32,7 +33,7 @@ struct OnionPath {
     std::vector<service_node> nodes;
 
     size_t active_requests = 0;
-    uint16_t failure_count = 0;
+    uint16_t strike_count = 0;
 
     std::string to_string() const;
 };
@@ -103,7 +104,8 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
             const std::string& path_id,
             PathCategory category,
             std::optional<std::string> initiating_req_id,
-            bool success);
+            bool success,
+            std::optional<uint64_t> error_code);
 
     OnionPath* _find_valid_path(const Request& request);
 
@@ -122,7 +124,11 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void _handle_path_failure(
             const std::string& path_id,
             const PathCategory& category,
-            const std::optional<std::string>& error_body);
+            const std::unordered_set<ed25519_pubkey>& already_penalized_nodes);
+    void _try_repair_path(
+            const std::string& path_id,
+            const PathCategory& category,
+            const ed25519_pubkey& bad_node_pubkey);
 };
 
 }  // namespace session::network

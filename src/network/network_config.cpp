@@ -33,7 +33,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::cache_min_lifetime);
         HANDLE_TYPE(opt::cache_min_size);
         HANDLE_TYPE(opt::cache_num_nodes_to_use_for_refresh);
-        HANDLE_TYPE(opt::cache_node_failure_threshold);
+        HANDLE_TYPE(opt::cache_node_strike_threshold);
         HANDLE_TYPE(opt::cache_refresh_using_legacy_endpoint);
 
         // Quic transport options
@@ -43,7 +43,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::quic_max_streams);
 
         // Onion request router options
-        HANDLE_TYPE(opt::onionreq_path_failure_threshold);
+        HANDLE_TYPE(opt::onionreq_path_strike_threshold);
         HANDLE_TYPE(opt::onionreq_path_build_retry_limit);
         HANDLE_TYPE(opt::onionreq_min_path_count);
         HANDLE_TYPE(opt::onionreq_disable_pre_build_paths);
@@ -180,9 +180,9 @@ void Config::handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr) {
             (nnr.count > 0 ? "" : ", refreshes will always use a random seed node"));
 }
 
-void Config::handle_config_opt(opt::cache_node_failure_threshold nft) {
-    cache_node_failure_threshold = nft.count;
-    log::debug(cat, "Network config snode pool node failure threshold set to {}", nft.count);
+void Config::handle_config_opt(opt::cache_node_strike_threshold nst) {
+    cache_node_strike_threshold = nst.count;
+    log::debug(cat, "Network config snode pool node strike threshold set to {}", nst.count);
 }
 
 void Config::handle_config_opt(opt::cache_refresh_using_legacy_endpoint rule) {
@@ -219,9 +219,9 @@ void Config::handle_config_opt(opt::quic_max_streams qms) {
 
 // MARK: Onion Request Router Options
 
-void Config::handle_config_opt(opt::onionreq_path_failure_threshold pft) {
-    onionreq_path_failure_threshold = pft.count;
-    log::debug(cat, "Network config onion request path failure threshold set to {}", pft.count);
+void Config::handle_config_opt(opt::onionreq_path_strike_threshold pst) {
+    onionreq_path_strike_threshold = pst.count;
+    log::debug(cat, "Network config onion request path strike threshold set to {}", pst.count);
 }
 
 void Config::handle_config_opt(opt::onionreq_path_build_retry_limit pbrl) {

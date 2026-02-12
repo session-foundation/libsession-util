@@ -29,7 +29,7 @@ namespace config {
 
         size_t cache_min_size;
         uint8_t cache_num_nodes_to_use_for_refresh;
-        uint16_t cache_node_failure_threshold;
+        uint16_t cache_node_strike_threshold;
         bool cache_refresh_using_legacy_endpoint;
     };
 }  // namespace config
@@ -61,8 +61,8 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     // Records that a specific node has failed a request
     virtual void record_node_failure(const service_node& node, bool permanent = false);
     virtual void record_node_failure(const ed25519_pubkey& key, bool permanent = false);
-    uint16_t node_failure_count(const service_node& node);
-    uint16_t node_failure_count(const ed25519_pubkey& key);
+    uint16_t node_strike_count(const service_node& node);
+    uint16_t node_strike_count(const ed25519_pubkey& key);
     void clear_node_strikes();
 
     // Checks if the pool is empty or stale and triggers a refresh if needed

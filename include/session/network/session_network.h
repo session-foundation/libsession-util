@@ -63,12 +63,12 @@ typedef struct {
     uint64_t cache_min_lifetime_ms;
     size_t cache_min_size;
     uint8_t cache_num_nodes_to_use_for_refresh;
-    uint8_t cache_node_failure_threshold;
+    uint8_t cache_node_strike_threshold;
     bool cache_refresh_using_legacy_endpoint;
 
     // Onion request router options (only used when router ==
     // SESSION_NETWORK_ROUTER_ONION_REQUESTS)
-    uint8_t onionreq_path_failure_threshold;
+    uint8_t onionreq_path_strike_threshold;
     uint8_t onionreq_path_build_retry_limit;
     uint8_t onionreq_min_path_count_standard;
     uint8_t onionreq_min_path_count_file;

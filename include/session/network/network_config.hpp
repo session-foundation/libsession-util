@@ -32,11 +32,11 @@ struct Config {
     std::chrono::milliseconds cache_min_lifetime = 2s;
     size_t cache_min_size = 12;
     uint8_t cache_num_nodes_to_use_for_refresh = 3;
-    uint8_t cache_node_failure_threshold = 3;
+    uint8_t cache_node_strike_threshold = 3;
     bool cache_refresh_using_legacy_endpoint = false;
 
     // Onion Request Router Options
-    uint8_t onionreq_path_failure_threshold = 3;
+    uint8_t onionreq_path_strike_threshold = 3;
     uint8_t onionreq_path_build_retry_limit = 10;
     std::unordered_map<PathCategory, uint8_t> onionreq_min_path_counts = {
             {PathCategory::standard, 2}, {PathCategory::file, 2}};
@@ -88,7 +88,7 @@ struct Config {
     void handle_config_opt(opt::cache_min_lifetime mcl);
     void handle_config_opt(opt::cache_min_size mcs);
     void handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr);
-    void handle_config_opt(opt::cache_node_failure_threshold nft);
+    void handle_config_opt(opt::cache_node_strike_threshold nst);
     void handle_config_opt(opt::cache_refresh_using_legacy_endpoint rule);
 
     // Quic transport options
@@ -98,7 +98,7 @@ struct Config {
     void handle_config_opt(opt::quic_max_streams qms);
 
     // Onion request router options
-    void handle_config_opt(opt::onionreq_path_failure_threshold pft);
+    void handle_config_opt(opt::onionreq_path_strike_threshold pst);
     void handle_config_opt(opt::onionreq_path_build_retry_limit pbrl);
     void handle_config_opt(opt::onionreq_min_path_count mpc);
     void handle_config_opt(opt::onionreq_single_path_mode spm);

@@ -174,15 +174,17 @@ void SnodePool::_load_from_disk() {
             throw empty_file_exception{};
 
         // We want to filter on load so we don't start the app with expired strikes
-        uint64_t threshold = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY).count();
+        uint64_t threshold =
+                std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
+                        .count();
         std::map<ed25519_pubkey, std::vector<uint64_t>> loaded_strikes;
         auto invalid_entries = 0;
 
         const char* ptr = reinterpret_cast<const char*>(loaded_strikes_data.data());
         const char* end = ptr + loaded_strikes_data.size();
 
-        if (ptr + sizeof(uint32_t) > end) 
+        if (ptr + sizeof(uint32_t) > end)
             throw std::runtime_error{"Strikes file too short for header"};
 
         uint32_t entry_count;
@@ -193,7 +195,7 @@ void SnodePool::_load_from_disk() {
             // Check bounds: Key (32) + Count (2)
             if (ptr + 32 + sizeof(uint16_t) > end) {
                 invalid_entries++;
-                break; // Stop parsing if truncated
+                break;  // Stop parsing if truncated
             }
 
             // Read key
@@ -209,7 +211,7 @@ void SnodePool::_load_from_disk() {
             // Check timestamp bounds (count * 8)
             if (ptr + (num_stamps * sizeof(uint64_t)) > end) {
                 invalid_entries++;
-                break; // Stop parsing if truncated
+                break;  // Stop parsing if truncated
             }
 
             std::vector<uint64_t> valid_stamps;
@@ -234,7 +236,8 @@ void SnodePool::_load_from_disk() {
         }
 
         if (invalid_entries > 0)
-            log::warning(cat, "Skipped {} truncated/invalid entries in strikes file.", invalid_entries);
+            log::warning(
+                    cat, "Skipped {} truncated/invalid entries in strikes file.", invalid_entries);
 
         _snode_strikes = std::move(loaded_strikes);
         log::info(cat, "Loaded {} active strike entries from disk.", _snode_strikes.size());
@@ -899,7 +902,7 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
                            .count();
 
     if (permanent) {
-        for (int i = 0; i < _config.cache_node_failure_threshold; ++i) {
+        for (int i = 0; i < _config.cache_node_strike_threshold; ++i) {
             _snode_strikes[key].push_back(now);
         }
     } else {
@@ -927,11 +930,11 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
     }
 }
 
-uint16_t SnodePool::node_failure_count(const service_node& node) {
-    return node_failure_count(ed25519_pubkey::from_bytes(node.view_remote_key()));
+uint16_t SnodePool::node_strike_count(const service_node& node) {
+    return node_strike_count(ed25519_pubkey::from_bytes(node.view_remote_key()));
 }
 
-uint16_t SnodePool::node_failure_count(const ed25519_pubkey& key) {
+uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
     std::lock_guard lock{_cache_mutex};
     if (!_snode_strikes.contains(key))
         return 0;
@@ -995,7 +998,7 @@ void SnodePool::refresh_if_needed(
                     auto pubkey = ed25519_pubkey::from_bytes(node.view_remote_key());
                     auto it = _snode_strikes.find(pubkey);
                     if (it != _snode_strikes.end() &&
-                        it->second.size() >= _config.cache_node_failure_threshold)
+                        it->second.size() >= _config.cache_node_strike_threshold)
                         continue;
 
                     // If the caller considers the node as already in use then it wouldn't be
@@ -1086,7 +1089,7 @@ std::vector<service_node> SnodePool::get_unused_nodes(
 
         // Skip nodes with too many failures
         auto it = _snode_strikes.find(current_key);
-        if (it != _snode_strikes.end() && it->second.size() >= _config.cache_node_failure_threshold)
+        if (it != _snode_strikes.end() && it->second.size() >= _config.cache_node_strike_threshold)
             continue;
 
         // Skip nodes whos IP addresses are in the exclusion list

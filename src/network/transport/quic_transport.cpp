@@ -101,7 +101,7 @@ void QuicTransport::verify_connectivity(
         std::chrono::milliseconds timeout,
         const std::string& request_id,
         const RequestCategory category,
-        std::function<void(bool success)> callback) {
+        std::function<void(bool success, std::optional<uint64_t> error_code)> callback) {
     // For Quic, a successful connection IS a successful ping so we can just check for an existing
     // connection and, if one doesn't exist, try to establish one
     _loop->call([weak_self = weak_from_this(),
@@ -118,7 +118,7 @@ void QuicTransport::verify_connectivity(
         // If we already have a connection we can stop here
         if (self->_active_connection_ids.count(pubkey_hex) ||
             self->_pending_requests.count(pubkey_hex))
-            return cb(true);
+            return cb(true, std::nullopt);
 
         self->_pending_verification_callbacks[pubkey_hex].push_back(std::move(cb));
 
@@ -174,7 +174,7 @@ void QuicTransport::_close_connections() {
     // Cancel any pending verifications (they can't succeed once the connection is closed)
     for (const auto& [pubkey, callbacks] : _pending_verification_callbacks)
         for (const auto& callback : callbacks)
-            callback(false);
+            callback(false, -1);
 
     // Cancel any pending requests (they can't succeed once the connection is closed)
     for (const auto& [pubkey, pupkey_requests] : _pending_requests)
@@ -377,7 +377,7 @@ void QuicTransport::_establish_connection(
                     self->_update_status(ConnectionStatus::connected);
 
                     for (const auto& pending_cb : verification_callbacks)
-                        pending_cb(true);
+                        pending_cb(true, std::nullopt);
 
                     if (!requests_to_process.empty()) {
                         log::debug(
@@ -594,10 +594,9 @@ void QuicTransport::_fail_connection(
 
         // If the connection failed with a handshake timeout then the node is
         // unreachable, either due to a device network issue or because the node is down
-        // so permanently fail the node so it won't be used for subsequent requests
-        // (until the next cache refresh)
+        // so report a failure to disincentivise use of the node in case it's not a network issue
         if (_report_node_failure)
-            (*_report_node_failure)(ed25519_pubkey::from_hex(address_pubkey_hex), true);
+            (*_report_node_failure)(ed25519_pubkey::from_hex(address_pubkey_hex), false);
     } else if (error_code == quic::CONN_SEND_FAIL) {
         log::warning(
                 cat,
@@ -632,7 +631,7 @@ void QuicTransport::_fail_connection(
     if (auto it = _pending_verification_callbacks.find(address_pubkey_hex);
         it != _pending_verification_callbacks.end()) {
         for (const auto& pending_cb : it->second)
-            pending_cb(false);
+            pending_cb(false, error_code);
         _pending_verification_callbacks.erase(it);
     }
 

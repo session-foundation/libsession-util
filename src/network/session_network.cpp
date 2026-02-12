@@ -44,7 +44,7 @@ namespace {
                 main_config.seed_nodes,
                 main_config.cache_min_size,
                 main_config.cache_num_nodes_to_use_for_refresh,
-                main_config.cache_node_failure_threshold,
+                main_config.cache_node_strike_threshold,
                 main_config.cache_refresh_using_legacy_endpoint};
     }
 
@@ -70,8 +70,9 @@ namespace {
             const config::Config& main_config) {
         return {main_config.retry_delay,
                 main_config.path_length,
-                main_config.onionreq_path_failure_threshold,
+                main_config.onionreq_path_strike_threshold,
                 main_config.onionreq_path_build_retry_limit,
+                main_config.cache_node_strike_threshold,
                 main_config.onionreq_disable_pre_build_paths,
                 main_config.onionreq_single_path_mode,
                 main_config.onionreq_min_path_counts};
@@ -690,10 +691,10 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     ;
     config.cache_min_size = cpp_defaults.cache_min_size;
     config.cache_num_nodes_to_use_for_refresh = cpp_defaults.cache_num_nodes_to_use_for_refresh;
-    config.cache_node_failure_threshold = cpp_defaults.cache_node_failure_threshold;
+    config.cache_node_strike_threshold = cpp_defaults.cache_node_strike_threshold;
     config.cache_refresh_using_legacy_endpoint = cpp_defaults.cache_refresh_using_legacy_endpoint;
 
-    config.onionreq_path_failure_threshold = cpp_defaults.onionreq_path_failure_threshold;
+    config.onionreq_path_strike_threshold = cpp_defaults.onionreq_path_strike_threshold;
     config.onionreq_path_build_retry_limit = cpp_defaults.onionreq_path_build_retry_limit;
     config.onionreq_min_path_count_standard =
             cpp_defaults.onionreq_min_path_counts[PathCategory::standard];
@@ -817,9 +818,9 @@ LIBSESSION_C_API bool session_network_init(
         cpp_opts.emplace_back(opt::cache_num_nodes_to_use_for_refresh{
                 config->cache_num_nodes_to_use_for_refresh});
 
-        if (config->cache_node_failure_threshold > 0)
+        if (config->cache_node_strike_threshold > 0)
             cpp_opts.emplace_back(
-                    opt::cache_node_failure_threshold{config->cache_node_failure_threshold});
+                    opt::cache_node_strike_threshold{config->cache_node_strike_threshold});
 
         if (config->cache_refresh_using_legacy_endpoint)
             cpp_opts.emplace_back(opt::cache_refresh_using_legacy_endpoint{});
@@ -831,9 +832,9 @@ LIBSESSION_C_API bool session_network_init(
                 if (config->path_length > 0)
                     cpp_opts.emplace_back(opt::path_length{config->path_length});
 
-                if (config->onionreq_path_failure_threshold > 0)
-                    cpp_opts.emplace_back(opt::onionreq_path_failure_threshold{
-                            config->onionreq_path_failure_threshold});
+                if (config->onionreq_path_strike_threshold > 0)
+                    cpp_opts.emplace_back(opt::onionreq_path_strike_threshold{
+                            config->onionreq_path_strike_threshold});
 
                 if (config->onionreq_path_build_retry_limit > 0)
                     cpp_opts.emplace_back(opt::onionreq_path_build_retry_limit{

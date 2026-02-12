@@ -21,8 +21,185 @@ namespace session::network {
 namespace {
     auto cat = oxen::log::Cat("onion-request-router");
 
-    constexpr auto node_not_found_prefix = "502 Bad Gateway\n\nNext node not found: "sv;
-    constexpr auto node_not_found_prefix_no_status = "Next node not found: "sv;
+    class pre_decryption_exception : public std::runtime_error {
+      public:
+        pre_decryption_exception(std::string message) : std::runtime_error(message) {}
+    };
+
+    enum class ErrorType {
+        IntermediateNodeUnreachable,  // 502, node in path
+        DestinationUnreachable,       // 502, destination node
+        SnodeNotReady,                // 503, specific snode
+        EdgeNotReady,                 // 503, edge node
+        PathTimedOut,                 // 504
+        InvalidHopResponse,           // 500
+        UnparseableData,              // 502 from decrypted payload
+        DestinationNotReady,          // 503 from decrypted payload
+        ClockOutOfSync,               // 406/425
+        SnodeNotInSwarm               // 421
+    };
+
+    struct ErrorBehaviour {
+        uint16_t code;
+        std::string_view body_pattern;
+        ErrorType error_type;
+
+        /// Penalty flags - can be combined
+        bool penalize_extracted_node = false;
+        bool penalize_destination = false;
+        bool penalize_edge = false;
+        bool penalize_path = false;
+
+        bool force_remove_node = false;  // true = permanent failure, false = single strike
+        bool extract_pubkey = false;     // true if `body_pattern` is followed by a node pubkey
+    };
+
+    constexpr std::array error_patterns = {
+            ErrorBehaviour{
+                    .code = 502,
+                    .body_pattern = "Next node not found: "sv,
+                    .error_type = ErrorType::IntermediateNodeUnreachable,
+                    .penalize_extracted_node = true,
+                    .penalize_path = true,  // also penalise the path to prevent attempted path
+                                            // control via error manipulation
+                    .force_remove_node = true,
+                    .extract_pubkey = true},
+
+            ErrorBehaviour{
+                    .code = 502,
+                    .body_pattern = "Next node is currently unreachable: "sv,
+                    .error_type = ErrorType::IntermediateNodeUnreachable,
+                    .penalize_extracted_node = true,
+                    .penalize_path = true,  // also penalise the path to prevent attempted path
+                                            // control via error manipulation
+                    .force_remove_node = true,
+                    .extract_pubkey = true},
+
+            ErrorBehaviour{
+                    .code = 502,
+                    .body_pattern = "Next node not found: "sv,
+                    .error_type = ErrorType::DestinationUnreachable,
+                    .penalize_destination = true,
+                    .force_remove_node = true,
+                    .extract_pubkey = true},
+
+            ErrorBehaviour{
+                    .code = 502,
+                    .body_pattern = "Next node is currently unreachable: "sv,
+                    .error_type = ErrorType::DestinationUnreachable,
+                    .penalize_destination = true,
+                    .force_remove_node = true,
+                    .extract_pubkey = true},
+
+            ErrorBehaviour{
+                    .code = 502,
+                    .body_pattern = "oxend returned unparsable data"sv,
+                    .error_type = ErrorType::UnparseableData,
+                    .penalize_destination = true,
+                    .force_remove_node = true},
+
+            ErrorBehaviour{
+                    .code = 503,
+                    .body_pattern = "Snode not ready: "sv,
+                    .error_type = ErrorType::SnodeNotReady,
+                    .penalize_extracted_node = true,
+                    .extract_pubkey = true},
+
+            ErrorBehaviour{
+                    .code = 503,
+                    .body_pattern = "Service node is not ready: "sv,
+                    .error_type = ErrorType::EdgeNotReady,
+                    .penalize_edge = true},
+
+            ErrorBehaviour{
+                    .code = 503,
+                    .body_pattern = "Server busy, try again later"sv,
+                    .error_type = ErrorType::EdgeNotReady,
+                    .penalize_edge = true},
+
+            ErrorBehaviour{
+                    .code = 504,
+                    .body_pattern = "Request time out"sv,
+                    .error_type = ErrorType::PathTimedOut,
+                    .penalize_path = true},
+
+            ErrorBehaviour{
+                    .code = 500,
+                    .body_pattern = "Invalid response from snode"sv,
+                    .error_type = ErrorType::InvalidHopResponse,
+                    .penalize_path = true},
+
+            // Cases with custom handling
+
+            ErrorBehaviour{
+                    .code = 406, .body_pattern = ""sv, .error_type = ErrorType::ClockOutOfSync},
+
+            ErrorBehaviour{
+                    .code = 421, .body_pattern = ""sv, .error_type = ErrorType::SnodeNotInSwarm},
+    };
+
+    std::optional<std::pair<ErrorBehaviour, std::optional<std::string_view>>> parse_error_response(
+            uint16_t status_code,
+            const std::optional<std::string>& error_body,
+            std::optional<std::span<const unsigned char>> destination_pubkey) {
+        for (const auto& pattern : error_patterns) {
+            if (pattern.code != status_code)
+                continue;
+
+            // If no body pattern specified (empty string), just match on status code
+            std::string_view body_view =
+                    (error_body ? std::string_view{*error_body} : std::string_view{});
+
+            if (pattern.body_pattern.empty() ||
+                (!body_view.empty() && body_view.find(pattern.body_pattern) != std::string::npos)) {
+                std::optional<std::string_view> extracted_pubkey;
+
+                // Extract pubkey if needed
+                if (pattern.extract_pubkey && !body_view.empty()) {
+                    auto pos = body_view.find(pattern.body_pattern);
+
+                    if (pos != std::string::npos) {
+                        auto start = pos + pattern.body_pattern.size();
+                        auto end = body_view.find_first_of(" \n\r\t", start);
+                        extracted_pubkey =
+                                (end != std::string::npos ? body_view.substr(start, end - start)
+                                                          : body_view.substr(start));
+                    }
+                }
+
+                // If we matched on an `IntermediateNodeUnreachable` error then we need to check if
+                // it's actually a `DestinationUnreachable` error
+                if (pattern.error_type == ErrorType::IntermediateNodeUnreachable &&
+                    extracted_pubkey && destination_pubkey && extracted_pubkey->size() == 64 &&
+                    oxenc::is_hex(*extracted_pubkey)) {
+                    try {
+                        auto extracted_key = ed25519_pubkey::from_hex(*extracted_pubkey);
+                        auto extracted_span = to_span(extracted_key.view());
+
+                        if (std::equal(
+                                    extracted_span.begin(),
+                                    extracted_span.end(),
+                                    destination_pubkey->begin(),
+                                    destination_pubkey->end())) {
+                            // It's the destination - find and return the `DestinationUnreachable`
+                            // pattern with the same `body_pattern`
+                            for (const auto& dest_pattern : error_patterns) {
+                                if (dest_pattern.error_type == ErrorType::DestinationUnreachable &&
+                                    dest_pattern.body_pattern == pattern.body_pattern) {
+                                    return std::pair{dest_pattern, extracted_pubkey};
+                                }
+                            }
+                        }
+                    } catch (...) {
+                    }
+                }
+
+                return std::pair{pattern, extracted_pubkey};
+            }
+        }
+
+        return std::nullopt;
+    }
 
     inline std::string to_string(PathCategory category, bool single_path_mode) {
         if (single_path_mode)
@@ -491,10 +668,11 @@ void OnionRequestRouter::_build_path(
             3s,
             "{} - Path Build {}"_format(req_id_log, path_id),
             to_small_request_category(category),  // "small" category for reserved stream
-            [weak_self = weak_from_this(), path_id, category, initiating_req_id](bool success) {
+            [weak_self = weak_from_this(), path_id, category, initiating_req_id](
+                    bool success, std::optional<uint64_t> error_code) {
                 if (auto self = weak_self.lock())
                     self->_on_edge_connectivity_response(
-                            path_id, category, initiating_req_id, success);
+                            path_id, category, initiating_req_id, success, error_code);
             });
 }
 
@@ -502,7 +680,8 @@ void OnionRequestRouter::_on_edge_connectivity_response(
         const std::string& path_id,
         PathCategory category,
         std::optional<std::string> initiating_req_id,
-        bool success) {
+        bool success,
+        std::optional<uint64_t> error_code) {
     const std::string req_id_log = initiating_req_id.value_or("internal");
 
     auto pending_it = _pending_paths.find(path_id);
@@ -535,8 +714,11 @@ void OnionRequestRouter::_on_edge_connectivity_response(
                 req_id_log,
                 path_id,
                 edge_node.to_string());
-        if (auto snode_pool = _snode_pool.lock())
-            snode_pool->record_node_failure(edge_node);
+
+        // The "handshake timeout" error already records a node failure, so don't record another
+        if (error_code && *error_code != static_cast<uint64_t>(NGTCP2_ERR_HANDSHAKE_TIMEOUT))
+            if (auto snode_pool = _snode_pool.lock())
+                snode_pool->record_node_failure(edge_node);
 
         int& retries = _path_build_retries[path_id];
         retries++;
@@ -700,7 +882,7 @@ void OnionRequestRouter::_on_edge_connectivity_response(
                         "[Path {}]: Transport reported connection failure, retiring path.",
                         pid);
 
-                // Set the failure_count of the path to the max value and report the error
+                // Set the strike_count of the path to the max value and report the error
                 // to trigger a rebuild
                 auto& active_paths = self->_paths[category];
                 auto path_it = std::find_if(
@@ -709,9 +891,9 @@ void OnionRequestRouter::_on_edge_connectivity_response(
                         });
 
                 if (path_it != active_paths.end())
-                    path_it->failure_count = self->_config.path_failure_threshold;
+                    path_it->strike_count = self->_config.path_strike_threshold;
 
-                self->_handle_path_failure(pid, category, "Edge connection lost");
+                self->_handle_path_failure(pid, category, {});
             });
 }
 
@@ -728,7 +910,7 @@ OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
 
     for (OnionPath& path : candidate_paths) {
         // Ignore failed paths (these should have been removed from the list but better to be safe)
-        if (path.failure_count >= _config.path_failure_threshold)
+        if (path.strike_count >= _config.path_strike_threshold)
             continue;
 
         // Filter by destination conflict
@@ -886,11 +1068,9 @@ void OnionRequestRouter::_handle_transport_response(
         std::optional<std::string> decrypted_body,
         network_response_callback_t callback) {
     auto final_success = success;
-    auto final_timeout = timeout;
     auto final_status_code = status_code;
-    std::vector<std::pair<std::string, std::string>> final_headers = headers;
-    bool should_penalize_path = false;
-    bool is_server_dest = std::holds_alternative<ServerDestination>(original_request.destination);
+    auto destination_snode = std::get_if<service_node>(&original_request.destination);
+    std::unordered_set<ed25519_pubkey> penalized_nodes;
 
     if (decrypted_body)
         if (auto uniform_error = Response::find_uniform_batch_error(*decrypted_body))
@@ -900,58 +1080,158 @@ void OnionRequestRouter::_handle_transport_response(
         final_success = (final_status_code >= 200 && final_status_code <= 299);
 
     if (!final_success) {
-        switch (final_status_code) {
-            // These errors that are NEVER the path's fault
-            case 400:  // Bad Request
-            case 403:  // Forbidden
-            case 404:  // Not Found
-            case 406:  // Not Acceptable (clock skew)
-            case 425:  // Too Early (also clock skew)
-                // These are application-level or client-side errors. Do nothing to
-                // the path.
-                log::trace(
-                        cat,
-                        "[Request {}]: Received benign error {}, path is considered healthy.",
-                        original_request.request_id,
-                        final_status_code);
-                break;
-
-            // These errors are only the path's fault if the destination is not a
-            // server
-            case 500:  // Internal Server Error
-                if (!is_server_dest)
-                    should_penalize_path = true;
-                break;
-
-            case 504:  // Gateway Timeout
-                final_timeout = true;
-
-                if (!is_server_dest)
-                    should_penalize_path = true;
-                break;
-
-            // A status of -1 generally indicates either a timeout or some internal error
-            case -1: break;
-
-            // Any other non-success code is treated as a potential path issue.
-            default: should_penalize_path = true; break;
-        }
-    }
-
-    // If we got a timeout and the destination wasn't a server then we need to
-    // assume it was from a path node
-    if (!is_server_dest && timeout)
-        should_penalize_path = true;
-
-    // Handle the failure if needed
-    if (should_penalize_path) {
-        log::debug(
-                cat,
-                "[Request {}]: Received error {} on path {}, handling failure.",
-                original_request.request_id,
+        auto parsed_error = parse_error_response(
                 final_status_code,
-                path_id);
-        _handle_path_failure(path_id, to_path_category(original_request.category), decrypted_body);
+                decrypted_body,
+                (destination_snode ? std::optional{destination_snode->view_remote_key()}
+                                   : std::nullopt));
+
+        if (parsed_error) {
+            const auto& [pattern, extracted_pubkey] = *parsed_error;
+
+            log::debug(
+                    cat,
+                    "[Request {}]: Mmatched error type {} on path {}.",
+                    original_request.request_id,
+                    static_cast<int>(pattern.error_type),
+                    path_id);
+
+            // Apply penalties based on the pattern
+            auto snode_pool = _snode_pool.lock();
+
+            if (pattern.penalize_extracted_node && extracted_pubkey && snode_pool) {
+                try {
+                    auto pubkey = ed25519_pubkey::from_hex(*extracted_pubkey);
+                    snode_pool->record_node_failure(pubkey, pattern.force_remove_node);
+                    penalized_nodes.insert(pubkey);
+                    log::debug(
+                            cat,
+                            "[Request {}]: Penalized extracted node {} ({} strikes).",
+                            original_request.request_id,
+                            pubkey.hex(),
+                            pattern.force_remove_node ? "permanent" : "1");
+                } catch (...) {
+                    log::warning(
+                            cat,
+                            "[Request {}]: Invalid extracted pubkey.",
+                            original_request.request_id);
+                }
+            }
+
+            if (pattern.penalize_destination && destination_snode && snode_pool) {
+                auto dest_key = ed25519_pubkey::from_bytes(destination_snode->view_remote_key());
+                snode_pool->record_node_failure(*destination_snode, pattern.force_remove_node);
+                penalized_nodes.insert(dest_key);
+                log::debug(
+                        cat,
+                        "[Request {}]: Penalized destination node ({} strikes).",
+                        original_request.request_id,
+                        pattern.force_remove_node ? "permanent" : "1");
+            }
+
+            // Generally this shouldn't happen (as we would have failed to establish a QUIC
+            // connection), but may as well keep it just to be safe
+            if (pattern.penalize_edge && snode_pool) {
+                auto& active_paths = _paths[to_path_category(original_request.category)];
+                auto path_it = std::find_if(
+                        active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
+                            return p.id == path_id;
+                        });
+
+                if (path_it != active_paths.end() && !path_it->nodes.empty()) {
+                    const auto& edge_node = path_it->nodes.front();
+                    auto edge_key = ed25519_pubkey::from_bytes(edge_node.view_remote_key());
+                    snode_pool->record_node_failure(edge_node, pattern.force_remove_node);
+                    penalized_nodes.insert(edge_key);
+                    log::debug(
+                            cat,
+                            "[Request {}]: Penalized edge node ({} strikes).",
+                            original_request.request_id,
+                            pattern.force_remove_node ? "permanent" : "1");
+                }
+            }
+
+            // Now that we have applied snode penalties, check if any node in the path has hit the
+            // threshold and try to repair the path if needed
+            if (snode_pool) {
+                auto& active_paths = _paths[to_path_category(original_request.category)];
+                auto path_it = std::find_if(
+                        active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
+                            return p.id == path_id;
+                        });
+                std::vector<ed25519_pubkey> nodes_to_repair;
+
+                if (path_it != active_paths.end()) {
+                    for (const auto& node : path_it->nodes) {
+                        auto node_key = ed25519_pubkey::from_bytes(node.view_remote_key());
+
+                        if (snode_pool->node_strike_count(node_key) >=
+                            _config.node_strike_threshold) {
+                            nodes_to_repair.push_back(node_key);
+                        }
+                    }
+                }
+
+                // Repair any bad nodes in the path
+                if (!nodes_to_repair.empty()) {
+                    if (nodes_to_repair.size() == 1) {
+                        log::debug(
+                                cat,
+                                "[Request {} Path {}]: Node {} has hit the strike threshold, "
+                                "attempting repair.",
+                                original_request.request_id,
+                                path_id,
+                                nodes_to_repair[0].hex());
+                    } else {
+                        log::debug(
+                                cat,
+                                "[Request {} Path {}]: {} node(s) have hit the strike threshold, "
+                                "attempting repair.",
+                                original_request.request_id,
+                                path_id,
+                                nodes_to_repair.size());
+                    }
+
+                    for (const auto& node_key : nodes_to_repair) {
+                        _try_repair_path(
+                                path_id, to_path_category(original_request.category), node_key);
+                    }
+                }
+            }
+
+            // It's possible for a path to have maxed out it's strikes if `_try_repair_path` was
+            // called with the edge node, in that case we need to call `_handle_path_failure` to
+            // drop the path
+            bool path_died_during_repair = false;
+            auto& active_paths = _paths[to_path_category(original_request.category)];
+            auto path_check_it = std::find_if(
+                    active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
+                        return p.id == path_id;
+                    });
+
+            if (path_check_it != active_paths.end() &&
+                path_check_it->strike_count >= _config.path_strike_threshold)
+                path_died_during_repair = true;
+
+            // Penalise the path if desired
+            if (pattern.penalize_path || path_died_during_repair) {
+                log::debug(
+                        cat,
+                        "[Request {}]: Received error {} on path {}, handling failure.",
+                        original_request.request_id,
+                        final_status_code,
+                        path_id);
+                _handle_path_failure(
+                        path_id, to_path_category(original_request.category), penalized_nodes);
+            }
+        } else {
+            log::warning(
+                    cat,
+                    "[Request {}]: Received unhandled error {} on path {}.",
+                    original_request.request_id,
+                    final_status_code,
+                    path_id);
+        }
     }
 
     // Clean up paths if needed
@@ -960,7 +1240,7 @@ void OnionRequestRouter::_handle_transport_response(
     // Now we can trigger the callback with the result
     return callback(
             final_success,
-            final_timeout,
+            timeout,
             final_status_code,
             std::move(headers),
             std::move(decrypted_body));
@@ -996,6 +1276,12 @@ void OnionRequestRouter::_decrement_and_cleanup_path(
         // If this was the last request, we can now safely delete the path
         if (it->active_requests == 0) {
             log::debug(cat, "Retiring path {} as it has no more active requests.", path_id);
+
+            if (auto transport = _transport.lock())
+                if (!it->nodes.empty())
+                    transport->remove_failure_listeners(
+                            ed25519_pubkey::from_bytes(it->nodes[0].view_remote_key()));
+
             dying_paths.erase(it);
         }
 
@@ -1009,7 +1295,7 @@ void OnionRequestRouter::_decrement_and_cleanup_path(
 void OnionRequestRouter::_handle_path_failure(
         const std::string& path_id,
         const PathCategory& category,
-        const std::optional<std::string>& error_body) {
+        const std::unordered_set<ed25519_pubkey>& already_penalized_nodes) {
     auto& active_paths = _paths[category];
     auto path_it =
             std::find_if(active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
@@ -1022,101 +1308,45 @@ void OnionRequestRouter::_handle_path_failure(
         return;
     }
 
-    // Increment the `failure_count` on the path
+    // Increment the `strike_count` on the path
     OnionPath& path = *path_it;
-    path.failure_count++;
 
-    // If the path is still potentially valid then check if the response has one of the
-    // 'node_not_found' prefixes
-    if (path.failure_count < _config.path_failure_threshold) {
-        std::optional<std::string_view> ed25519PublicKey;
-
-        if (error_body) {
-            if (error_body->starts_with(node_not_found_prefix))
-                ed25519PublicKey = {error_body->data() + node_not_found_prefix.size()};
-            else if (error_body->starts_with(node_not_found_prefix_no_status))
-                ed25519PublicKey = {error_body->data() + node_not_found_prefix_no_status.size()};
-        }
-
-        // If we found a result then try to extract the pubkey and replace that node in the path. We
-        // do still want to increment the `failure_count` on the path in this case to prevent a
-        // rogue relay from using this error as a mechanism to take full control of the path
-        if (ed25519PublicKey && ed25519PublicKey->size() == 64 &&
-            oxenc::is_hex(*ed25519PublicKey)) {
-            try {
-                session::network::ed25519_pubkey bad_node_pk =
-                        session::network::ed25519_pubkey::from_hex(*ed25519PublicKey);
-                auto edpk_view = to_span(bad_node_pk.view());
-
-                auto bad_node_it = std::find_if(
-                        path.nodes.begin(), path.nodes.end(), [&edpk_view](const auto& node) {
-                            return to_string_view(node.view_remote_key()) ==
-                                   to_string_view(edpk_view);
-                        });
-
-                if (bad_node_it != path.nodes.end()) {
-                    log::debug(
-                            cat,
-                            "[Path {}]: Failure identified for specific node {}.",
-                            path.id,
-                            bad_node_pk.view());
-                    std::vector<service_node> replacements;
-
-                    auto snode_pool = _snode_pool.lock();
-                    if (!snode_pool) {
-                        log::critical(
-                                cat,
-                                "Cannot repair path as SnodePool was destroyed, dropping instead.");
-                        path.failure_count = _config.path_failure_threshold;
-                        return;
-                    }
-
-                    // Flag the bad node as permanently failed until the next cache refresh
-                    snode_pool->record_node_failure(*bad_node_it, true);
-
-                    auto used_nodes = extract_nodes(_paths, _pending_paths);
-                    replacements = snode_pool->get_unused_nodes(1, used_nodes);
-
-                    // If we found a replacement node then swap out the bad one and reset the
-                    // path failure count (assume the bad node was the cause of any failures),
-                    // we can then stop here (the path is repaired so no need to continue)
-                    if (!replacements.empty()) {
-                        log::info(
-                                cat,
-                                "[Path {}]: Repairing path by replacing node {} with {}.",
-                                path.id,
-                                bad_node_it->to_string(),
-                                replacements[0].to_string());
-                        *bad_node_it = replacements[0];
-                    } else {
-                        log::warning(
-                                cat,
-                                "[Path {}]: Cannot repair path due to lack of replacement node, "
-                                "dropping instead.",
-                                path.id);
-                        path.failure_count = _config.path_failure_threshold;
-                    }
-                }
-            } catch (...) { /* Invalid pubkey, fall through to general failure */
-            }
-        }
-    }
+    if (path.strike_count < _config.path_strike_threshold)
+        path.strike_count++;
 
     log::debug(
             cat,
             "[Path {}]: Recorded failure, total failures: {}/{}",
             path.id,
-            path.failure_count,
-            _config.path_failure_threshold);
+            path.strike_count,
+            _config.path_strike_threshold);
 
-    // If the path has exceeded its failure threshold, retire it.
-    if (path.failure_count >= _config.path_failure_threshold) {
-        log::warning(cat, "[Path {}]: Path has exceeded its failure threshold.", path.id);
+    // If the path has exceeded its strike threshold, retire it.
+    if (path.strike_count >= _config.path_strike_threshold) {
+        log::warning(cat, "[Path {}]: Path has exceeded its strike threshold.", path.id);
 
         // Tell the SnodePool that all nodes on this path are now suspect
         if (auto snode_pool = _snode_pool.lock())
-            for (const auto& node : path.nodes)
+            for (const auto& node : path.nodes) {
+                auto node_key = ed25519_pubkey::from_bytes(node.view_remote_key());
+
+                // Skip nodes we already penalized to avoid double-penalizing
+                if (already_penalized_nodes.count(node_key)) {
+                    log::trace(
+                            cat,
+                            "[Path {}]: Skipping penalty for node {} (already penalized).",
+                            path.id,
+                            node_key.hex());
+                    continue;
+                }
+
                 snode_pool->record_node_failure(node);
+                log::debug(
+                        cat,
+                        "[Path {}]: Penalized path node {} due to path failure.",
+                        path.id,
+                        node_key.hex());
+            }
 
         // Remove failure listeners for the path
         if (auto transport = _transport.lock())
@@ -1160,6 +1390,83 @@ void OnionRequestRouter::_handle_path_failure(
                     min_paths);
             _build_path(category, "failure-replacement-" + old_path_id, nodes_to_exclude);
         }
+    }
+}
+
+void OnionRequestRouter::_try_repair_path(
+        const std::string& path_id,
+        const PathCategory& category,
+        const ed25519_pubkey& bad_node_pubkey) {
+    auto& active_paths = _paths[category];
+    auto path_it =
+            std::find_if(active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
+                return p.id == path_id;
+            });
+
+    // If the path is no longer in the active list then no need to do anything
+    if (path_it == active_paths.end())
+        return;
+
+    try {
+        OnionPath& path = *path_it;
+        auto bad_node_it = std::find_if(
+                path.nodes.begin(), path.nodes.end(), [&bad_node_pubkey](const auto& node) {
+                    return to_string_view(node.view_remote_key()) == bad_node_pubkey.view();
+                });
+
+        if (bad_node_it == path.nodes.end())
+            return;
+
+        if (bad_node_it == path.nodes.begin()) {
+            log::warning(
+                    cat,
+                    "[Path {}]: Edge node {} failed, dropping path.",
+                    path.id,
+                    bad_node_pubkey.hex());
+            path.strike_count = _config.path_strike_threshold;
+            return;
+        }
+
+        log::debug(
+                cat,
+                "[Path {}]: Attempting to repair path by replacing node {}.",
+                path.id,
+                bad_node_pubkey.hex());
+
+        auto snode_pool = _snode_pool.lock();
+        if (!snode_pool) {
+            log::critical(
+                    cat,
+                    "[Path {}]: Cannot repair path as SnodePool was destroyed, dropping instead.",
+                    path.id);
+            path.strike_count = _config.path_strike_threshold;
+            return;
+        }
+
+        // The bad node should have already been penalised at this point
+        auto used_nodes = extract_nodes(_paths, _pending_paths);
+        auto replacements = snode_pool->get_unused_nodes(1, used_nodes);
+
+        // If we found a replacement node then swap out the bad one if we have a replacement node,
+        // if we don't then we need to drop the path (and rely on path rebuilding to give us a full
+        // replacement path)
+        if (!replacements.empty()) {
+            log::info(
+                    cat,
+                    "[Path {}]: Repaired path by replacing node {} with {}.",
+                    path.id,
+                    bad_node_it->to_string(),
+                    replacements[0].to_string());
+            *bad_node_it = replacements[0];
+        } else {
+            log::warning(
+                    cat,
+                    "[Path {}]: Cannot repair path due to lack of replacement node, "
+                    "dropping instead.",
+                    path.id);
+            path.strike_count = _config.path_strike_threshold;
+        }
+    } catch (...) {
     }
 }
 
