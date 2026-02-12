@@ -32,6 +32,7 @@ struct Config {
     std::chrono::milliseconds cache_min_lifetime = 2s;
     size_t cache_min_size = 12;
     uint8_t cache_num_nodes_to_use_for_refresh = 3;
+    uint8_t cache_min_num_refresh_presence_to_include_node = 2;
     uint8_t cache_node_strike_threshold = 3;
     bool cache_refresh_using_legacy_endpoint = false;
 
@@ -88,6 +89,7 @@ struct Config {
     void handle_config_opt(opt::cache_min_lifetime mcl);
     void handle_config_opt(opt::cache_min_size mcs);
     void handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr);
+    void handle_config_opt(opt::cache_min_num_refresh_presence_to_include_node mnrp);
     void handle_config_opt(opt::cache_node_strike_threshold nst);
     void handle_config_opt(opt::cache_refresh_using_legacy_endpoint rule);
 

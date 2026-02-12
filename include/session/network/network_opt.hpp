@@ -273,6 +273,16 @@ namespace opt {
         explicit cache_num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
     };
 
+    /// Can be used to override the default (2) number of refresh requests a node must be present in
+    /// to be included in the cache.
+    ///
+    /// Note: This does not apply when refreshing from seed nodes. A value of `0` is equivalet to a
+    /// value of `1`.
+    struct cache_min_num_refresh_presence_to_include_node : base {
+        uint8_t count;
+        explicit cache_min_num_refresh_presence_to_include_node(uint8_t count) : count{count} {}
+    };
+
     /// Can be used to override the default (3) number of times a specific node in a path can
     /// receive an error before it is removed from the path and replaced by a new node (or the path
     /// is rebuilt if it happens to be the edge node).

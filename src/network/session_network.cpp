@@ -44,6 +44,7 @@ namespace {
                 main_config.seed_nodes,
                 main_config.cache_min_size,
                 main_config.cache_num_nodes_to_use_for_refresh,
+                main_config.cache_min_num_refresh_presence_to_include_node,
                 main_config.cache_node_strike_threshold,
                 main_config.cache_refresh_using_legacy_endpoint};
     }
@@ -691,6 +692,8 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     ;
     config.cache_min_size = cpp_defaults.cache_min_size;
     config.cache_num_nodes_to_use_for_refresh = cpp_defaults.cache_num_nodes_to_use_for_refresh;
+    config.cache_min_num_refresh_presence_to_include_node =
+            cpp_defaults.cache_min_num_refresh_presence_to_include_node;
     config.cache_node_strike_threshold = cpp_defaults.cache_node_strike_threshold;
     config.cache_refresh_using_legacy_endpoint = cpp_defaults.cache_refresh_using_legacy_endpoint;
 
@@ -814,9 +817,11 @@ LIBSESSION_C_API bool session_network_init(
         if (config->cache_min_size > 0)
             cpp_opts.emplace_back(opt::cache_min_size{config->cache_min_size});
 
-        // A `0` value is valid for this option
+        // A `0` value is valid for these options
         cpp_opts.emplace_back(opt::cache_num_nodes_to_use_for_refresh{
                 config->cache_num_nodes_to_use_for_refresh});
+        cpp_opts.emplace_back(opt::cache_min_num_refresh_presence_to_include_node{
+                config->cache_min_num_refresh_presence_to_include_node});
 
         if (config->cache_node_strike_threshold > 0)
             cpp_opts.emplace_back(

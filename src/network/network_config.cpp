@@ -33,6 +33,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::cache_min_lifetime);
         HANDLE_TYPE(opt::cache_min_size);
         HANDLE_TYPE(opt::cache_num_nodes_to_use_for_refresh);
+        HANDLE_TYPE(opt::cache_min_num_refresh_presence_to_include_node);
         HANDLE_TYPE(opt::cache_node_strike_threshold);
         HANDLE_TYPE(opt::cache_refresh_using_legacy_endpoint);
 
@@ -178,6 +179,16 @@ void Config::handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr) {
             "set to {}{}",
             nnr.count,
             (nnr.count > 0 ? "" : ", refreshes will always use a random seed node"));
+}
+
+void Config::handle_config_opt(opt::cache_min_num_refresh_presence_to_include_node mnrp) {
+    cache_min_num_refresh_presence_to_include_node = mnrp.count;
+    log::debug(
+            cat,
+            "Network config minimum number of refresh responses a node needs to be present in to "
+            "be included in the snode pool cache set to {}{}",
+            mnrp.count,
+            (mnrp.count > 1 ? "" : ", nodes will always be included"));
 }
 
 void Config::handle_config_opt(opt::cache_node_strike_threshold nst) {

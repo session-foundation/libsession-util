@@ -787,18 +787,59 @@ void SnodePool::_on_refresh_complete(
         }
     }
 
-    auto nodes = processed_nodes[0];
+    // If we triggered multiple requests then filter to nodes that appear in the minimum number of
+    // results
+    std::vector<service_node> nodes;
 
-    // If we triggered multiple requests then get the intersection of all vectors
-    for (size_t i = 1; i < processed_nodes.size(); ++i) {
-        std::vector<service_node> intersection;
-        std::set_intersection(
-                nodes.begin(),
-                nodes.end(),
-                processed_nodes[i].begin(),
-                processed_nodes[i].end(),
-                std::back_inserter(intersection));
-        nodes = std::move(intersection);
+    if (processed_nodes.size() == 1)
+        nodes = processed_nodes[0];
+    else if (processed_nodes.size() > 1) {
+        const size_t required_count = _config.cache_min_num_refresh_presence_to_include_node;
+
+        struct Cursor {
+            const std::vector<service_node>* vec;
+            size_t index;
+        };
+
+        auto cmp = [](const Cursor& a, const Cursor& b) {
+            return (*a.vec)[a.index] > (*b.vec)[b.index];  // min-heap
+        };
+        std::priority_queue<Cursor, std::vector<Cursor>, decltype(cmp)> heap(cmp);
+
+        // Initialise heap with first element of each set
+        for (const auto& vec : processed_nodes)
+            if (!vec.empty())
+                heap.push(Cursor{&vec, 0});
+
+        while (!heap.empty()) {
+            service_node current = (*heap.top().vec)[heap.top().index];
+            size_t count = 0;
+
+            std::vector<Cursor> same;
+
+            // Pop all equal elements
+            while (!heap.empty()) {
+                const auto& top = heap.top();
+                const service_node& val = (*top.vec)[top.index];
+
+                if (val < current || current < val)
+                    break;
+
+                same.push_back(top);
+                heap.pop();
+            }
+
+            if (same.size() >= required_count)
+                nodes.push_back(current);
+
+            // Advance all matching cursors
+            for (auto& cur : same) {
+                size_t next_index = cur.index + 1;
+
+                if (next_index < cur.vec->size())
+                    heap.push(Cursor{cur.vec, next_index});
+            }
+        }
     }
 
     // Shuffle the nodes so we don't have a specific order
