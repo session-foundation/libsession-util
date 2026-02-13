@@ -496,13 +496,15 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
 
     // Kick off the concurrent requests (if there are any)
     for (uint8_t i = 0; i < num_nodes_for_refresh; ++i)
-        _launch_next_refresh_request(request_id, !use_routed_fetcher, num_nodes_for_refresh);
+        _launch_next_refresh_request(request_id, i, !use_routed_fetcher, num_nodes_for_refresh);
 }
 
 void SnodePool::_launch_next_refresh_request(
         const std::string& request_id,
+        const uint8_t index,
         const bool use_direct_fetcher,
         const uint8_t total_requests) {
+    const auto target_request_id = "{}-{}"_format(request_id, index);
     service_node target_node;
     session::network::SnodePool::network_fetcher_t fetcher_to_use;
     bool use_legacy_endpoint = false;
@@ -523,7 +525,7 @@ void SnodePool::_launch_next_refresh_request(
                     cat,
                     "[Request {}] Ran out of nodes for refresh, discarding partial results and "
                     "trying again in {}ms.",
-                    request_id,
+                    target_request_id,
                     delay.count());
             _loop->call_later(delay, [weak_self = weak_from_this()] {
                 // We need to wait until after the `call_later` to reset the `refresh_id` (and clear
@@ -553,7 +555,8 @@ void SnodePool::_launch_next_refresh_request(
     // If we somehow got into '_launch_next_refresh_request' for a routed request then we need to
     // make sure '_routed_fetcher' was set before we try to use it
     if (!fetcher_to_use) {
-        log::critical(cat, "[Request {}] No fetcher available, aborting refresh.", request_id);
+        log::critical(
+                cat, "[Request {}] No fetcher available, aborting refresh.", target_request_id);
         std::unique_lock lock{_cache_mutex};
         _current_snode_cache_refresh_id.reset();
         _refresh_candidate_nodes.clear();
@@ -563,11 +566,11 @@ void SnodePool::_launch_next_refresh_request(
     log::debug(
             cat,
             "[Request {}] Launching {} refresh request to {}",
-            request_id,
+            target_request_id,
             (use_direct_fetcher ? "direct" : "routed"),
             target_node.to_string());
     const Request request =
-            [this, &request_id, &target_node, use_direct_fetcher, use_legacy_endpoint]() {
+            [this, &target_request_id, &target_node, use_direct_fetcher, use_legacy_endpoint]() {
                 // A mandatory service node upgrade needs to go out to support calling
                 // `active_nodes_bin` via onion requests so if the `use_legacy_endpoint` setting is
                 // set then we should use the legacy endpoint to refresh the cache
@@ -586,7 +589,7 @@ void SnodePool::_launch_next_refresh_request(
                     };
 
                     return Request{
-                            request_id,
+                            target_request_id,
                             network_destination{target_node},
                             std::string{"oxend_request"},
                             to_vector(body.dump()),
@@ -599,7 +602,7 @@ void SnodePool::_launch_next_refresh_request(
                 }
 
                 return Request{
-                        request_id,
+                        target_request_id,
                         network_destination{target_node},
                         std::string{"active_nodes_bin"},
                         std::nullopt,
@@ -613,7 +616,13 @@ void SnodePool::_launch_next_refresh_request(
 
     fetcher_to_use(
             request,
-            [this, request_id, use_direct_fetcher, total_requests, use_legacy_endpoint](
+            [this,
+             request_id,
+             index,
+             target_request_id,
+             use_direct_fetcher,
+             total_requests,
+             use_legacy_endpoint](
                     bool success,
                     bool timeout,
                     int16_t status_code,
@@ -625,7 +634,10 @@ void SnodePool::_launch_next_refresh_request(
                 // If the refresh was cancelled or completed while we were in-flight, do nothing
                 if (!_current_snode_cache_refresh_id ||
                     *_current_snode_cache_refresh_id != request_id) {
-                    log::debug(cat, "[Request {}] Ignoring stale refresh response.", request_id);
+                    log::debug(
+                            cat,
+                            "[Request {}] Ignoring stale refresh response.",
+                            target_request_id);
                     return;
                 }
 
@@ -660,11 +672,12 @@ void SnodePool::_launch_next_refresh_request(
                             delay,
                             [weak_self = weak_from_this(),
                              request_id,
+                             index,
                              use_direct_fetcher,
                              total_requests] {
                                 if (auto self = weak_self.lock())
                                     self->_retry_refresh_request(
-                                            request_id, use_direct_fetcher, total_requests);
+                                            request_id, index, use_direct_fetcher, total_requests);
                             });
                     return;
                 }
@@ -673,7 +686,7 @@ void SnodePool::_launch_next_refresh_request(
                 log::info(
                         cat,
                         "[Request {}] Received refresh response {}/{}.",
-                        request_id,
+                        target_request_id,
                         _snode_refresh_results.size(),
                         total_requests);
 
@@ -695,9 +708,10 @@ void SnodePool::_launch_next_refresh_request(
 
 void SnodePool::_retry_refresh_request(
         const std::string& request_id,
+        const uint8_t index,
         const bool use_direct_fetcher,
         const uint8_t total_requests) {
-    _launch_next_refresh_request(request_id, use_direct_fetcher, total_requests);
+    _launch_next_refresh_request(request_id, index, use_direct_fetcher, total_requests);
 }
 
 void SnodePool::_on_refresh_complete(
@@ -781,7 +795,7 @@ void SnodePool::_on_refresh_complete(
                         if (auto self = weak_self.lock())
                             for (uint8_t i = 0; i < total_requests; ++i)
                                 self->_launch_next_refresh_request(
-                                        refresh_id, use_direct_fetcher, total_requests);
+                                        refresh_id, i, use_direct_fetcher, total_requests);
                     });
             return;
         }

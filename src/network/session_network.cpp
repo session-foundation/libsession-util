@@ -10,6 +10,7 @@
 #include "session/blinding.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/network_opt.hpp"
+#include "session/network/request_queue.hpp"
 #include "session/network/routing/direct_router.hpp"
 #include "session/network/routing/onion_request_router.hpp"
 #include "session/network/routing/session_router_router.hpp"
@@ -33,6 +34,7 @@ namespace {
     constexpr auto file_server = "filev2.getsession.org"sv;
     constexpr auto file_server_pubkey =
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
+    constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
     config::SnodePoolConfig build_snode_pool_config(const config::Config& main_config) {
         return {main_config.cache_directory,
@@ -188,6 +190,9 @@ Network::Network(config::Config config) : config{config} {
     // Add hooks to update the connection status
     _router->on_status_changed = [this] { _recalculate_status(); };
     _transport->on_status_changed = [this] { _recalculate_status(); };
+
+    // Perform a clock resync
+    _loop->call_soon([this] { _resync_clock(std::nullopt, std::nullopt); });
 }
 
 Network::~Network() {
@@ -248,6 +253,20 @@ void Network::resume(bool automatically_reconnect) {
         if (_router)
             _router->resume(automatically_reconnect);
 
+        // When resuming we may need to resync the clock but don't want to do so if the last resync
+        // was too recent (eg. if a user backgrounds and foregrounds the app frequently)
+        auto time_since_last_resync =
+                std::chrono::steady_clock::now() - _last_successful_clock_resync;
+
+        if (time_since_last_resync >= config.min_resume_clock_resync_interval) {
+            _loop->call_soon([this] {
+                log::info(
+                        cat,
+                        "Performing clock resync as enough time has passed since the last resync.");
+                _resync_clock(std::nullopt, std::nullopt);
+            });
+        }
+
         _suspended = false;
         log::info(cat, "Resumed.");
     });
@@ -275,6 +294,14 @@ void Network::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
     _loop->call([this, pubkey = std::move(swarm_pubkey), cb = std::move(callback)] {
+        if (!_snode_pool) {
+            log::warning(
+                    cat,
+                    "Attempted to get swarm for {} but SnodePool has been destroyed.",
+                    pubkey.hex());
+            return cb(INVALID_SWARM_ID, {});
+        }
+
         _snode_pool->get_swarm(std::move(pubkey), std::move(cb));
     });
 }
@@ -282,6 +309,14 @@ void Network::get_swarm(
 void Network::get_random_nodes(
         uint16_t count, std::function<void(std::vector<service_node> nodes)> callback) {
     _loop->call([this, count, cb = std::move(callback)] {
+        if (!_snode_pool) {
+            log::warning(
+                    cat,
+                    "Attempted to get {} random nodes(s) but SnodePool has been destroyed.",
+                    count);
+            return cb({});
+        }
+
         auto unused_nodes = _snode_pool->get_unused_nodes(count);
 
         // If we don't have sufficient nodes then we need to refresh the snode cache
@@ -297,6 +332,15 @@ void Network::get_random_nodes(
 }
 
 void Network::send_request(Request request, network_response_callback_t callback) {
+    if (_suspended) {
+        callback(
+                false,
+                false,
+                ERROR_NETWORK_SUSPENDED,
+                {content_type_plain_text},
+                "Network is suspended.");
+        return;
+    }
     if (!_transport)
         return callback(
                 false, false, -1, {content_type_plain_text}, "No transport layer configured");
@@ -308,13 +352,15 @@ void Network::send_request(Request request, network_response_callback_t callback
         auto router_callback =
                 [this, original_req = processed_request, cb = std::move(callback)](
                         bool success, bool timeout, int16_t status_code, auto headers, auto body) {
+                    const auto dest_is_snode =
+                            std::holds_alternative<service_node>(original_req.destination);
+
                     // If we got a successful response (with a body) and the request was sent to a
                     // service node then we should update the network state based on the response
                     // (Note: we don't want to do this for server requests because they could
                     // include values in different formats, eg. the "Session Network" API returns
                     // `t` in seconds)
-                    if (success && body &&
-                        std::holds_alternative<service_node>(original_req.destination))
+                    if (success && body && dest_is_snode)
                         _update_network_state(*body);
 
                     int16_t final_status_code = status_code;
@@ -322,6 +368,14 @@ void Network::send_request(Request request, network_response_callback_t callback
                     if (body)
                         if (auto uniform_error = Response::find_uniform_batch_error(*body))
                             final_status_code = *uniform_error;
+
+                    // If we got a 406 from a snode, or a 425 from a server, then the device clock
+                    // is out of sync so we need to kick off a clock resync request
+                    if ((final_status_code == 406 && dest_is_snode) ||
+                        (final_status_code == 425 && !dest_is_snode)) {
+                        _resync_clock(std::move(original_req), std::move(cb));
+                        return;
+                    }
 
                     // If we got a 421 then our swarm info is out of data so we need to refresh our
                     // cache, the original request might succeed after this refresh so we should
@@ -482,22 +536,9 @@ void Network::_update_network_state(const std::string& body) {
                 target_json = latest_body;
         }
 
-        auto old_offset = _network_time_offset.load();
+        // Update hardfork/softfork versions
         auto old_versions = _fork_versions.load();
 
-        // Update time offset
-        if (target_json->contains("t") && (*target_json)["t"].is_number()) {
-            auto server_timestamp_ms = (*target_json)["t"].get<int64_t>();
-            auto server_time = std::chrono::time_point<std::chrono::system_clock>(
-                    std::chrono::milliseconds{server_timestamp_ms});
-            auto now = std::chrono::system_clock::now();
-            _network_time_offset =
-                    std::chrono::duration_cast<std::chrono::milliseconds>(server_time - now);
-
-            log::trace(cat, "Network offset set to: {}", (server_time - now).count());
-        }
-
-        // Update hardfork/softfork versions
         if (target_json->contains("hf") && (*target_json)["hf"].is_array() &&
             (*target_json)["hf"].size() >= 2) {
             std::pair<uint16_t, uint16_t> new_versions = {
@@ -525,16 +566,18 @@ void Network::_update_network_state(const std::string& body) {
 
         // If the network info changed then call the callback
         if (on_network_info_changed) {
-            auto new_offset = _network_time_offset.load();
             auto new_versions = _fork_versions.load();
 
-            if (new_offset != old_offset || new_versions != old_versions)
-                on_network_info_changed(new_offset, new_versions.hardfork, new_versions.softfork);
+            if (new_versions != old_versions)
+                on_network_info_changed(
+                        _network_time_offset.load(), new_versions.hardfork, new_versions.softfork);
         }
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to parse network state from response: {}", e.what());
     }
 }
+
+// MARK: Specific Error Handling
 
 void Network::_handle_421_retry(
         Request original_request, network_response_callback_t final_callback) {
@@ -614,6 +657,225 @@ void Network::_handle_421_retry(
             });
 }
 
+void Network::_resync_clock(
+        std::optional<Request> original_request,
+        std::optional<network_response_callback_t> request_callback) {
+    if (_suspended) {
+        log::info(cat, "Ignoring clock resync attempt as network is suspended.");
+        if (request_callback)
+            (*request_callback)(
+                    false,
+                    false,
+                    ERROR_NETWORK_SUSPENDED,
+                    {content_type_plain_text},
+                    "Network is suspended.");
+        return;
+    }
+
+    // Add the request to the request queue, we do this so we can trigger it's callback after the
+    // resync completes as it would likely fail with another clock out of sync error if it gets
+    // retried immediately
+    if (original_request && request_callback) {
+        // If we don't have a resync request queue then create one
+        if (!_clock_resync_request_queue)
+            _clock_resync_request_queue = std::make_shared<detail::RequestQueue>(_loop);
+
+        _clock_resync_request_queue->add(
+                std::move(*original_request), std::move(*request_callback));
+    }
+
+    // Only allow a single clock resync at a time
+    if (_current_clock_resync_id) {
+        log::debug(
+                cat,
+                "A resync is already in progress ({}), adding request to be processed after "
+                "result.",
+                *_current_clock_resync_id);
+        return;
+    }
+
+    const auto request_id = "CoS-" + random::random_base32(4);
+    log::info(cat, "[Request {}] Starting clock resync.", request_id);
+    _current_clock_resync_id = request_id;
+    _clock_resync_results.clear();
+
+    // Pick the random nodes we want to use for retrying (these won't change for this resync
+    // attempt)
+    auto resync_nodes = _snode_pool->get_unused_nodes(config.num_nodes_to_check_for_network_offset);
+
+    for (uint8_t i = 0; i < resync_nodes.size(); ++i)
+        _launch_next_clock_out_of_sync_request(
+                request_id, i, resync_nodes[i], config.num_nodes_to_check_for_network_offset);
+}
+
+void Network::_launch_next_clock_out_of_sync_request(
+        const std::string& request_id,
+        const uint8_t index,
+        const service_node& node,
+        const uint8_t total_requests) {
+    if (!_current_clock_resync_id)
+        return;
+
+    const auto target_request_id = "{}-{}"_format(request_id, index);
+    log::info(
+            cat,
+            "[Request {}] Launching clock resync request to {}",
+            target_request_id,
+            node.to_string());
+    const Request request = Request{
+            target_request_id,
+            network_destination{node},
+            std::string{"info"},
+            std::nullopt,
+            RequestCategory::standard,
+            10s,
+            std::nullopt,      // overall_timeout
+            std::monostate{},  // details
+            false              // ephemeral_connection
+    };
+
+    auto start = std::chrono::steady_clock::now();
+    send_request(
+            std::move(request),
+            [this, request_id, target_request_id, total_requests, start](
+                    bool success,
+                    bool timeout,
+                    int16_t status_code,
+                    std::vector<std::pair<std::string, std::string>> headers,
+                    std::optional<std::string> response) {
+                auto end_steady = std::chrono::steady_clock::now();
+                auto end_system = std::chrono::system_clock::now();
+
+                // If the resync was cancelled or completed while we were in-flight, do nothing
+                if (!_current_clock_resync_id || *_current_clock_resync_id != request_id) {
+                    log::info(
+                            cat,
+                            "[Request {}] Ignoring stale clock resync response.",
+                            target_request_id);
+                    return;
+                }
+
+                try {
+                    if (!success || timeout || !response)
+                        throw std::runtime_error{response.value_or("Unknown error.")};
+
+                    if (status_code < 200 || status_code > 299)
+                        throw status_code_exception{
+                                status_code,
+                                {content_type_plain_text},
+                                "Request failed with status code: {}, error: {}"_format(
+                                        status_code, response.value_or("Unknown error."))};
+
+                    auto json = nlohmann::json::parse(*response);
+
+                    if (!json.contains("t") || !json["t"].is_number())
+                        throw std::runtime_error{"Response didn't contain a 't' value"};
+
+                    auto server_timestamp_ms = json["t"].get<int64_t>();
+                    auto server_time = std::chrono::time_point<std::chrono::system_clock>(
+                            std::chrono::milliseconds{server_timestamp_ms});
+                    auto latency = ((end_steady - start) / 2);
+                    auto tmp = latency.count();
+                    auto offset = std::chrono::duration_cast<std::chrono::milliseconds>(
+                            (server_time - end_system) - latency);
+                    _clock_resync_results.push_back(std::move(offset));
+
+                    log::info(
+                            cat,
+                            "[Request {}] Received clock resync response {}/{} with offset: {}ms.",
+                            target_request_id,
+                            _clock_resync_results.size(),
+                            total_requests,
+                            offset.count());
+                } catch (const std::exception& e) {
+                    // If one of the requests fails then don't worry about it (we still get the
+                    // median, and if this happens to result in subsequent clock out of sync errors
+                    // then we will trigger another resync)
+                    _clock_resync_results.push_back(std::nullopt);
+
+                    log::warning(
+                            cat,
+                            "[Request {}] Clock resync attempt {}/{} failed: {}.",
+                            target_request_id,
+                            _clock_resync_results.size(),
+                            total_requests,
+                            e.what());
+                }
+
+                // If we've received all the results then we need to process them and complete the
+                // resync
+                if (_clock_resync_results.size() >= total_requests) {
+                    auto final_results = std::move(_clock_resync_results);
+                    auto refresh_id = *_current_clock_resync_id;
+                    _on_clock_resync_complete(refresh_id, final_results, total_requests);
+                }
+            });
+}
+
+void Network::_on_clock_resync_complete(
+        std::string refresh_id,
+        std::vector<std::optional<std::chrono::milliseconds>> raw_results,
+        const uint8_t total_requests) {
+    log::info(
+            cat,
+            "[Request {}] Have {} responses, processing and finalizing clock resync.",
+            refresh_id,
+            raw_results.size());
+
+    // Filter and sort the offsets and find the median
+    std::vector<std::chrono::milliseconds> result;
+
+    for (const auto& opt : raw_results)
+        if (opt)
+            result.push_back(*opt);
+
+    const auto count = result.size();
+
+    // If we got a successful response then we should update the network offset
+    if (count > 0) {
+        std::chrono::milliseconds median_offset;
+        std::sort(result.begin(), result.end());
+
+        if (count % 2 == 1)
+            median_offset = result[count / 2];
+        else {
+            auto mid_index = (count / 2);
+            auto middle_values_sum = (result[mid_index - 1] + result[mid_index]);
+            median_offset = (middle_values_sum / 2);
+        }
+
+        _network_time_offset = median_offset;
+        _last_successful_clock_resync = std::chrono::steady_clock::now();
+        log::info(
+                cat, "[Request {}] Network offset set to: {}ms", refresh_id, median_offset.count());
+
+        // Trigger the network info changed callback to update the client
+        if (on_network_info_changed) {
+            auto versions = _fork_versions.load();
+
+            on_network_info_changed(median_offset, versions.hardfork, versions.softfork);
+        }
+    }
+
+    // Now that the clock resync is complete (regardless of whether it was successful or not) we can
+    // fail any requests which received clock out of sync errors while waiting for the resync to
+    // complete (we can't automatically retry as libSession can't currently reconstruct the requests
+    // with updated timestamps)
+    if (_clock_resync_request_queue && !_clock_resync_request_queue->is_empty()) {
+        auto pending = _clock_resync_request_queue->pop_all();
+        log::debug(cat, "Failing {} requests queued during clock resync.", pending.size());
+
+        for (auto& [req, cb] : pending) {
+            const auto dest_is_snode = std::holds_alternative<service_node>(req.destination);
+            cb(false,
+               false,
+               (dest_is_snode ? 406 : 425),
+               {content_type_plain_text},
+               clock_out_of_sync_error);
+        }
+    }
+}
+
 }  // namespace session::network
 
 // MARK: C API
@@ -679,6 +941,12 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.redirect_retry_count = cpp_defaults.redirect_retry_count;
     config.min_retry_delay_ms = cpp_defaults.retry_delay.base_delay.count();
     config.max_retry_delay_ms = cpp_defaults.retry_delay.max_delay.count();
+    config.num_nodes_to_check_for_network_offset =
+            cpp_defaults.num_nodes_to_check_for_network_offset;
+    config.min_resume_clock_resync_interval_minutes =
+            std::chrono::duration_cast<std::chrono::minutes>(
+                    cpp_defaults.min_resume_clock_resync_interval)
+                    .count();
 
     config.devnet_seed_nodes = nullptr;
     config.devnet_seed_nodes_size = 0;
@@ -801,6 +1069,14 @@ LIBSESSION_C_API bool session_network_init(
 
         // A `0` value is valid for this option
         cpp_opts.emplace_back(opt::redirect_retry_count{config->redirect_retry_count});
+
+        if (config->num_nodes_to_check_for_network_offset > 0)
+            cpp_opts.emplace_back(opt::num_nodes_to_check_for_network_offset{
+                    config->num_nodes_to_check_for_network_offset});
+
+        if (config->min_resume_clock_resync_interval_minutes > 0)
+            cpp_opts.emplace_back(opt::min_resume_clock_resync_interval{
+                    std::chrono::minutes{config->min_resume_clock_resync_interval_minutes}});
 
         // Snode cache
         if (config->cache_dir)

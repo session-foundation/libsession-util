@@ -2,6 +2,7 @@
 
 #include <filesystem>
 #include <limits>
+#include <optional>
 #include <oxen/quic.hpp>
 #include <session/router.hpp>
 
@@ -14,6 +15,10 @@
 
 namespace session::network {
 
+namespace detail {
+    class RequestQueue;
+}
+
 namespace fs = std::filesystem;
 
 class Network {
@@ -24,6 +29,11 @@ class Network {
     std::shared_ptr<ITransport> _transport;
     std::shared_ptr<IRouter> _router;
     bool _suspended = false;
+
+    std::chrono::steady_clock::time_point _last_successful_clock_resync;
+    std::optional<std::string> _current_clock_resync_id;
+    std::vector<std::optional<std::chrono::milliseconds>> _clock_resync_results;
+    std::shared_ptr<detail::RequestQueue> _clock_resync_request_queue;
 
   public:
     // Hook to be notified whenever the network connection status changes.
@@ -92,6 +102,20 @@ class Network {
     void _update_status(ConnectionStatus new_status);
     void _update_network_state(const std::string& body);
     void _handle_421_retry(Request original_request, network_response_callback_t final_callback);
+
+    void _resync_clock(
+            std::optional<Request> original_request,
+            std::optional<network_response_callback_t> request_callback);
+    void _launch_next_clock_out_of_sync_request(
+            const std::string& request_id,
+            const uint8_t index,
+            const service_node& node,
+            const uint8_t total_requests);
+    void _on_clock_resync_complete(
+            std::string refresh_id,
+            std::vector<std::optional<std::chrono::milliseconds>> raw_results,
+            const uint8_t total_requests);
+
     Request _preprocess_request(Request request);
 };
 

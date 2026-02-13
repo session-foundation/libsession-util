@@ -123,10 +123,12 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);
     void _launch_next_refresh_request(
             const std::string& request_id,
+            const uint8_t index,
             const bool use_direct_fetcher,
             const uint8_t total_requests);
     void _retry_refresh_request(
             const std::string& request_id,
+            const uint8_t index,
             const bool use_direct_fetcher,
             const uint8_t total_requests);
     void _on_refresh_complete(

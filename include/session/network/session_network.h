@@ -52,6 +52,8 @@ typedef struct {
     uint8_t redirect_retry_count;
     uint64_t min_retry_delay_ms;
     uint64_t max_retry_delay_ms;
+    uint8_t num_nodes_to_check_for_network_offset;
+    uint32_t min_resume_clock_resync_interval_minutes;
 
     // Devnet options (only used when netid_target == SESSION_NETWORK_DEVNET)
     const network_service_node* devnet_seed_nodes;

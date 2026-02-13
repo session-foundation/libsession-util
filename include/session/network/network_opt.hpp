@@ -228,6 +228,23 @@ namespace opt {
         }
     };
 
+    /// Can be used to override the default (3) number of nodes to fetch from when determining the
+    /// median network offset from the local device time.
+    struct num_nodes_to_check_for_network_offset : base {
+        uint8_t count;
+
+        explicit num_nodes_to_check_for_network_offset(uint8_t count) : count{count} {}
+    };
+
+    /// Can be used to override the default (10min) minimum duration that needs to pass before a
+    /// clock resync after resuming the network.
+    struct min_resume_clock_resync_interval : base {
+        std::chrono::minutes duration;
+
+        explicit min_resume_clock_resync_interval(std::chrono::minutes duration) :
+                duration{duration} {}
+    };
+
     // MARK: Snode Pool Options
 
     /// Can be used to override the default ('.') path the network uses to cache files (eg. snode

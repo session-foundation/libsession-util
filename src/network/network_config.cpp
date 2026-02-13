@@ -26,6 +26,8 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::disable_subnet_diversity);
         HANDLE_TYPE(opt::redirect_retry_count);
         HANDLE_TYPE(opt::retry_delay);
+        HANDLE_TYPE(opt::num_nodes_to_check_for_network_offset);
+        HANDLE_TYPE(opt::min_resume_clock_resync_interval);
 
         // Snode pool options
         HANDLE_TYPE(opt::cache_directory);
@@ -139,6 +141,23 @@ void Config::handle_config_opt(opt::retry_delay rd) {
             "Network config retry delay set to min: {}ms, max: {}ms",
             retry_delay.base_delay.count(),
             retry_delay.max_delay.count());
+}
+
+void Config::handle_config_opt(opt::num_nodes_to_check_for_network_offset nncno) {
+    num_nodes_to_check_for_network_offset = nncno.count;
+    log::debug(
+            cat,
+            "Network config number of nodes to be used for calculating median network offset set "
+            "to {}",
+            nncno.count);
+}
+
+void Config::handle_config_opt(opt::min_resume_clock_resync_interval mrcri) {
+    min_resume_clock_resync_interval = mrcri.duration;
+    log::debug(
+            cat,
+            "Network config minimum interval between clock resyncs after resuming set to {}min",
+            mrcri.duration.count());
 }
 
 // MARK: Snode Pool Options
