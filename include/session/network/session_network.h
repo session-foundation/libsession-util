@@ -64,6 +64,7 @@ typedef struct {
     uint32_t cache_expiration_minutes;
     uint64_t cache_min_lifetime_ms;
     size_t cache_min_size;
+    size_t cache_min_swarm_size;
     uint8_t cache_num_nodes_to_use_for_refresh;
     uint8_t cache_min_num_refresh_presence_to_include_node;
     uint8_t cache_node_strike_threshold;
@@ -77,6 +78,8 @@ typedef struct {
     uint8_t onionreq_min_path_count_file;
     bool onionreq_single_path_mode;
     bool onionreq_disable_pre_build_paths;
+    uint32_t onionreq_path_rotation_frequency_minutes;
+    uint8_t onionreq_edge_node_cache_duration_days;
 
     // Quic transport options (for transport == SESSION_NETWORK_TRANSPORT_QUIC)
     uint32_t quic_handshake_timeout_seconds;
@@ -181,6 +184,7 @@ LIBSESSION_EXPORT void session_network_paths_free(session_path_info* paths);
 LIBSESSION_EXPORT void session_network_get_swarm(
         network_object* network,
         const char* swarm_pubkey_hex,
+        bool ignore_strike_count,
         void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
         void* ctx);
 

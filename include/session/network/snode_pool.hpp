@@ -9,6 +9,7 @@
 #include <thread>
 #include <vector>
 
+#include "session/network/disk_manager.hpp"
 #include "session/network/key_types.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/service_node.hpp"
@@ -28,6 +29,7 @@ namespace config {
         std::vector<service_node> seed_nodes;
 
         size_t cache_min_size;
+        size_t cache_min_swarm_size;
         uint8_t cache_num_nodes_to_use_for_refresh;
         uint8_t cache_min_num_refresh_presence_to_include_node;
         uint16_t cache_node_strike_threshold;
@@ -43,8 +45,9 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     SnodePool(
             config::SnodePoolConfig config,
             std::shared_ptr<oxen::quic::Loop> loop,
+            std::shared_ptr<DiskManager> disk_manager,
             network_fetcher_t direct_fetcher);
-    ~SnodePool();
+    ~SnodePool() = default;
 
     void suspend();
     void resume();
@@ -73,6 +76,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
 
     virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
+            bool ignore_strike_count,
             std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback);
 
     virtual std::vector<service_node> get_unused_nodes(
@@ -84,30 +88,24 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     bool _suspended = false;
     config::SnodePoolConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
+    std::shared_ptr<DiskManager> _disk_manager;
     network_fetcher_t _direct_fetcher;
     std::optional<network_fetcher_t> _routed_fetcher;
     std::optional<fetcher_connectivity_check_t> _routed_fetcher_connectivity_check;
 
-    // Data (protected by '_cache_mutex')
+    // Data
     std::vector<service_node> _snode_cache;
     std::vector<std::pair<swarm::swarm_id_t, std::vector<service_node>>> _all_swarms;
     std::unordered_map<x25519_pubkey, std::pair<swarm::swarm_id_t, std::vector<service_node>>>
             _swarm_cache;
     std::map<ed25519_pubkey, std::vector<uint64_t>> _snode_strikes;
+    bool _strikes_flush_scheduled = false;
 
     // Disk I/O
     std::filesystem::path _snode_cache_file_path;
     std::filesystem::path _strikes_file_path;
-    std::thread _disk_write_thread;
-    std::condition_variable _disk_write_cv;
-    std::mutex _cache_mutex;
-    bool _need_write = false;
-    bool _strikes_dirty = false;
-    bool _strikes_flush_scheduled = false;
-    bool _need_clear_cache = false;
-    bool _shut_down_disk_thread = false;
 
-    // Refresh logic (protected by '_cache_mutex')
+    // Refresh logic
     std::chrono::system_clock::time_point _last_snode_cache_update;
     std::optional<std::string> _current_snode_cache_refresh_id;
     int _snode_cache_refresh_failure_count = 0;
@@ -117,7 +115,10 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
 
     // Disk I/O functions
     void _load_from_disk();
-    void _disk_write_loop();
+    static void _clear_disk_cache(std::filesystem::path path);
+    static void _perform_cache_write(std::filesystem::path path, std::vector<service_node> cache);
+    static void _perform_strikes_write(
+            std::filesystem::path path, std::map<ed25519_pubkey, std::vector<uint64_t>> strikes);
 
     // Refresh functions
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);

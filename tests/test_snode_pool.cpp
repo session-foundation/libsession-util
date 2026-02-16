@@ -15,13 +15,19 @@ class TestSnodePool : public SnodePool {
     TestSnodePool(
             config::SnodePoolConfig config,
             std::shared_ptr<oxen::quic::Loop> loop,
+            std::shared_ptr<DiskManager> disk_manager,
             network_fetcher_t direct_fetcher = [](Request, network_response_callback_t) {}) :
-            SnodePool(std::move(config), std::move(loop), std::move(direct_fetcher)) {}
+            SnodePool(
+                    std::move(config),
+                    std::move(loop),
+                    std::move(disk_manager),
+                    std::move(direct_fetcher)) {}
 
     void reset_state_with_cache(std::vector<service_node> cache) {
-        std::unique_lock lock{_cache_mutex};
-        _snode_cache = cache;
-        _snode_strikes.clear();
+        _loop->call_get([this, cache] {
+            _snode_cache = cache;
+            _snode_strikes.clear();
+        });
     }
 
     void refresh_if_needed(
@@ -54,28 +60,28 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
 
     for (uint16_t i = 0; i < 5; ++i) {
         snode_cache.emplace_back(service_node{
-                ed_pk,
+                ed25519_pubkey::from_bytes(ed_pk),
                 oxen::quic::ipv4{"192.168.0.{}"_format(i)},
                 static_cast<uint16_t>(20000 + i),
                 static_cast<uint16_t>(30000 + i),
                 {2, 11, 0},
                 0});
         snode_cache.emplace_back(service_node{
-                ed_pk2,
+                ed25519_pubkey::from_bytes(ed_pk2),
                 oxen::quic::ipv4{"192.168.1.{}"_format(i)},
                 static_cast<uint16_t>(20100 + i),
                 static_cast<uint16_t>(30100 + i),
                 {2, 11, 0},
                 1});
         snode_cache.emplace_back(service_node{
-                ed_pk3,
+                ed25519_pubkey::from_bytes(ed_pk3),
                 oxen::quic::ipv4{"192.168.2.{}"_format(i)},
                 static_cast<uint16_t>(20200 + i),
                 static_cast<uint16_t>(30200 + i),
                 {2, 11, 0},
                 2});
         snode_cache.emplace_back(service_node{
-                ed_pk4,
+                ed25519_pubkey::from_bytes(ed_pk4),
                 oxen::quic::ipv4{"192.168.3.{}"_format(i)},
                 static_cast<uint16_t>(20300 + i),
                 static_cast<uint16_t>(30300 + i),
@@ -85,7 +91,8 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     std::sort(snode_cache.begin(), snode_cache.end());
 
     auto loop = std::make_shared<oxen::quic::Loop>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
+    auto disk_manager = std::make_shared<DiskManager>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_manager);
     snode_pool->reset_state_with_cache(snode_cache);
 
     // Should return a result in a different order (since this is random, it's possible that it
@@ -141,7 +148,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    snode_pool = std::make_shared<TestSnodePool>(pool_config, loop);
+    snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_manager);
     snode_pool->reset_state_with_cache(snode_cache);
     unused_nodes = snode_pool->get_unused_nodes(20);
     std::sort(unused_nodes.begin(), unused_nodes.end());

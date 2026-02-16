@@ -47,7 +47,7 @@ constexpr auto ALPN = "oxenstorage";
 
 QuicTransport::QuicTransport(
         config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop) :
-        _config{std::move(config)}, _loop{std::move(loop)} {
+        _config{std::move(config)}, _loop{loop} {
     log::trace(cat, "Initializing.");
     _recreate_endpoint();
 }
@@ -113,7 +113,7 @@ void QuicTransport::verify_connectivity(
         if (!self)
             return;
 
-        const auto pubkey_hex = oxenc::to_hex(node.view_remote_key());
+        const auto pubkey_hex = node.remote_pubkey.hex();
 
         // If we already have a connection we can stop here
         if (self->_active_connection_ids.count(pubkey_hex) ||
@@ -126,7 +126,7 @@ void QuicTransport::verify_connectivity(
         if (self->_pending_requests.count(pubkey_hex) == 0 &&
             self->_pending_verification_callbacks.at(pubkey_hex).size() == 1)
             self->_establish_connection(
-                    {node.view_remote_key(), node.host(), node.omq_port}, request_id, category);
+                    {node.remote_pubkey, node.host(), node.omq_port}, request_id, category);
     });
 }
 
@@ -248,7 +248,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
                             cat,
                             "[Request {}]: Resolving service_node to RemoteAddress.",
                             request_id);
-                    remote.emplace(arg.view_remote_key(), arg.host(), arg.omq_port);
+                    remote.emplace(arg.remote_pubkey, arg.host(), arg.omq_port);
                 }
             },
             request.destination);

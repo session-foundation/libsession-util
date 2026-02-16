@@ -37,7 +37,7 @@ struct fork_versions {
 };
 
 struct service_node {
-    std::vector<unsigned char> _remote_pubkey;
+    ed25519_pubkey remote_pubkey;
     oxen::quic::ipv4 ip;
     uint16_t https_port;
     uint16_t omq_port;
@@ -45,14 +45,14 @@ struct service_node {
     swarm_id_t swarm_id;
 
     oxen::quic::RemoteAddress to_https_address() const {
-        return oxen::quic::RemoteAddress{_remote_pubkey, ip, https_port};
+        return oxen::quic::RemoteAddress{remote_pubkey, ip, https_port};
     }
 
     oxen::quic::RemoteAddress to_omq_address() const {
-        return oxen::quic::RemoteAddress{_remote_pubkey, ip, omq_port};
+        return oxen::quic::RemoteAddress{remote_pubkey, ip, omq_port};
     }
 
-    std::span<const unsigned char> view_remote_key() const { return _remote_pubkey; }
+    std::span<const unsigned char> view_remote_key() const { return remote_pubkey; }
     std::string host() const { return ip.to_string(); }
     session::network::x25519_pubkey swarm_pubkey() const;
 
@@ -68,7 +68,7 @@ struct service_node {
         fmt::format_to(
                 out,
                 "{}|{}|{}|{}|{}.{}.{}|{}\n",
-                oxenc::to_hex(view_remote_key()),
+                remote_pubkey.hex(),
                 host(),
                 https_port,
                 omq_port,

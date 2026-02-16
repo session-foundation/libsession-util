@@ -23,7 +23,7 @@ namespace {
 
 DirectRouter::DirectRouter(
         std::shared_ptr<oxen::quic::Loop> loop, std::weak_ptr<ITransport> transport) :
-        _loop{std::move(loop)}, _transport{transport} {
+        _loop{loop}, _transport{transport} {
     log::trace(cat, "Initializing.");
     _update_status(ConnectionStatus::connected);
 }

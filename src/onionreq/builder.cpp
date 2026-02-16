@@ -39,7 +39,7 @@ namespace session::onionreq {
 namespace detail {
     session::network::x25519_pubkey pubkey_for_destination(network_destination destination) {
         if (auto* dest = std::get_if<network::service_node>(&destination))
-            return network::compute_x25519_pubkey(dest->view_remote_key());
+            return network::compute_x25519_pubkey(dest->remote_pubkey);
 
         if (auto* dest = std::get_if<ServerDestination>(&destination))
             return dest->x25519_pubkey;
@@ -85,7 +85,7 @@ Builder::Builder(
         destination_x25519_public_key_{detail::pubkey_for_destination(destination)} {
     set_destination(destination);
     for (auto& n : nodes)
-        add_hop(n.view_remote_key());
+        add_hop(n.remote_pubkey);
 }
 
 void Builder::add_hop(std::span<const unsigned char> remote_key) {
@@ -99,7 +99,7 @@ void Builder::set_destination(network_destination destination) {
 
     if (auto* dest = std::get_if<session::network::service_node>(&destination)) {
         is_v4_request = false;
-        ed25519_public_key_.emplace(network::ed25519_pubkey::from_bytes(dest->view_remote_key()));
+        ed25519_public_key_.emplace(network::ed25519_pubkey::from_bytes(dest->remote_pubkey));
     } else if (auto* dest = std::get_if<ServerDestination>(&destination)) {
         is_v4_request = true;
         host_.emplace(dest->host);
@@ -362,7 +362,7 @@ LIBSESSION_C_API void onion_request_builder_set_snode_destination(
     oxenc::from_hex(ed25519_pubkey, ed25519_pubkey + 64, std::back_inserter(pubkey));
 
     unbox(builder).set_destination(session::network::service_node{
-            pubkey,
+            session::network::ed25519_pubkey::from_bytes(pubkey),
             oxen::quic::ipv4{std::span<const uint8_t, 4>(ip, 4)},
             0,
             quic_port,

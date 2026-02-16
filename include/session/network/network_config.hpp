@@ -33,6 +33,7 @@ struct Config {
     std::chrono::minutes cache_expiration = 2h;
     std::chrono::milliseconds cache_min_lifetime = 2s;
     size_t cache_min_size = 12;
+    size_t cache_min_swarm_size = 3;
     uint8_t cache_num_nodes_to_use_for_refresh = 3;
     uint8_t cache_min_num_refresh_presence_to_include_node = 2;
     uint8_t cache_node_strike_threshold = 3;
@@ -45,6 +46,8 @@ struct Config {
             {PathCategory::standard, 2}, {PathCategory::file, 2}};
     bool onionreq_single_path_mode = false;
     bool onionreq_disable_pre_build_paths = false;
+    std::chrono::minutes onionreq_path_rotation_frequency{10min};
+    std::chrono::days onionreq_edge_node_cache_duration = std::chrono::days{10};
 
     // Quic Transport Options
     std::chrono::milliseconds quic_handshake_timeout{3s};
@@ -92,6 +95,7 @@ struct Config {
     void handle_config_opt(opt::cache_expiration ce);
     void handle_config_opt(opt::cache_min_lifetime mcl);
     void handle_config_opt(opt::cache_min_size mcs);
+    void handle_config_opt(opt::cache_min_swarm_size mss);
     void handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr);
     void handle_config_opt(opt::cache_min_num_refresh_presence_to_include_node mnrp);
     void handle_config_opt(opt::cache_node_strike_threshold nst);
@@ -109,6 +113,8 @@ struct Config {
     void handle_config_opt(opt::onionreq_min_path_count mpc);
     void handle_config_opt(opt::onionreq_single_path_mode spm);
     void handle_config_opt(opt::onionreq_disable_pre_build_paths dpbp);
+    void handle_config_opt(opt::onionreq_path_rotation_frequency prf);
+    void handle_config_opt(opt::onionreq_edge_node_cache_duration encd);
 
     template <typename Opt>
     void handle_config_opt(std::optional<Opt> option) {

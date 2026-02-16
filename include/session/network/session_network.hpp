@@ -6,6 +6,7 @@
 #include <oxen/quic.hpp>
 #include <session/router.hpp>
 
+#include "session/network/disk_manager.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
@@ -25,6 +26,7 @@ class Network {
   private:
     const config::Config config;
     std::shared_ptr<oxen::quic::Loop> _loop;
+    std::shared_ptr<DiskManager> _disk_manager;
     std::shared_ptr<SnodePool> _snode_pool;
     std::shared_ptr<ITransport> _transport;
     std::shared_ptr<IRouter> _router;
@@ -70,10 +72,13 @@ class Network {
     ///
     /// Inputs:
     /// - 'swarm_pubkey' - [in] public key for the swarm.
+    /// - 'ignore_strike_count' - [in] flag indicating whether node strikes should be ignored when
+    /// retrieving the swarm.
     /// - 'callback' - [in] callback to be called with the retrieved swarm (in the case of an error
     /// the callback will be called with an empty list).
     void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
+            bool ignore_strike_count,
             std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback);
 
     /// API: network/get_random_nodes

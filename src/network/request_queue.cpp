@@ -160,7 +160,7 @@ void RequestQueue::update_timeout() {
     }
 
     auto expires_in = std::chrono::ceil<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - _req_expiries.begin()->first);
+            _req_expiries.begin()->first - std::chrono::steady_clock::now());
     if (expires_in < 0us)
         expires_in = 0us;
 #ifdef _WIN32

@@ -34,6 +34,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::cache_expiration);
         HANDLE_TYPE(opt::cache_min_lifetime);
         HANDLE_TYPE(opt::cache_min_size);
+        HANDLE_TYPE(opt::cache_min_swarm_size);
         HANDLE_TYPE(opt::cache_num_nodes_to_use_for_refresh);
         HANDLE_TYPE(opt::cache_min_num_refresh_presence_to_include_node);
         HANDLE_TYPE(opt::cache_node_strike_threshold);
@@ -46,8 +47,10 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::quic_max_streams);
 
         // Onion request router options
+        HANDLE_TYPE(opt::onionreq_edge_node_cache_duration);
         HANDLE_TYPE(opt::onionreq_path_strike_threshold);
         HANDLE_TYPE(opt::onionreq_path_build_retry_limit);
+        HANDLE_TYPE(opt::onionreq_path_rotation_frequency);
         HANDLE_TYPE(opt::onionreq_min_path_count);
         HANDLE_TYPE(opt::onionreq_disable_pre_build_paths);
 
@@ -190,6 +193,11 @@ void Config::handle_config_opt(opt::cache_min_size mcs) {
     log::debug(cat, "Network config min snode pool cache size set to {}", mcs.size);
 }
 
+void Config::handle_config_opt(opt::cache_min_swarm_size mss) {
+    cache_min_swarm_size = mss.size;
+    log::debug(cat, "Network config min swarm size set to {}", mss.size);
+}
+
 void Config::handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr) {
     cache_num_nodes_to_use_for_refresh = nnr.count;
     log::debug(
@@ -277,6 +285,22 @@ void Config::handle_config_opt(opt::onionreq_single_path_mode spm) {
 void Config::handle_config_opt(opt::onionreq_disable_pre_build_paths dpbp) {
     onionreq_disable_pre_build_paths = true;
     log::debug(cat, "Network config disabled pre-building onion request paths");
+}
+
+void Config::handle_config_opt(opt::onionreq_path_rotation_frequency prf) {
+    onionreq_path_rotation_frequency = prf.duration;
+    log::debug(
+            cat,
+            "Network config onion request path rotation frequency set to {}min",
+            prf.duration.count());
+}
+
+void Config::handle_config_opt(opt::onionreq_edge_node_cache_duration encd) {
+    onionreq_edge_node_cache_duration = encd.duration;
+    log::debug(
+            cat,
+            "Network config onion request edge node cache duration set to {}d",
+            encd.duration.count());
 }
 
 }  // namespace session::network::config

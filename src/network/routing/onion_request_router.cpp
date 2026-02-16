@@ -1,10 +1,14 @@
 #include "session/network/routing/onion_request_router.hpp"
 
+#include <event2/event.h>
 #include <fmt/ranges.h>
 
+#include <fstream>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 
+#include "session/file.hpp"
+#include "session/hash.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/response_parser.hpp"
@@ -18,8 +22,12 @@ using namespace oxen::log::literals;
 
 namespace session::network {
 
+namespace fs = std::filesystem;
+
 namespace {
     auto cat = oxen::log::Cat("onion-request-router");
+
+    constexpr auto io_key_write_edge_nodes = "write_edge_nodes"sv;
 
     class pre_decryption_exception : public std::runtime_error {
       public:
@@ -218,15 +226,22 @@ namespace {
 
     std::vector<service_node> extract_nodes(
             const std::unordered_map<PathCategory, std::vector<OnionPath>>& paths,
-            const std::unordered_map<std::string, std::vector<service_node>>& pending_paths) {
+            const std::unordered_map<
+                    std::string,
+                    std::pair<
+                            std::vector<service_node>,
+                            std::optional<std::chrono::system_clock::time_point>>>& pending_paths) {
         std::vector<service_node> all_used_nodes;
 
         for (const auto& [pt, path_list] : paths)
             for (const auto& p : path_list)
                 all_used_nodes.insert(all_used_nodes.end(), p.nodes.begin(), p.nodes.end());
 
-        for (const auto& [pid, nodes] : pending_paths)
-            all_used_nodes.insert(all_used_nodes.end(), nodes.begin(), nodes.end());
+        for (const auto& [pid, nodes_and_timestamp] : pending_paths)
+            all_used_nodes.insert(
+                    all_used_nodes.end(),
+                    nodes_and_timestamp.first.begin(),
+                    nodes_and_timestamp.first.end());
 
         return all_used_nodes;
     }
@@ -243,19 +258,66 @@ std::string OnionPath::to_string() const {
     return "{}"_format(fmt::join(node_descriptions, ", "));
 }
 
+cached_edge_node cached_edge_node::from_disk(std::string_view str) {
+    auto parts = split(str, "|");
+    if (parts.size() >= 7)  // Support old format without timestamp
+        throw std::invalid_argument("Invalid cached edge node serialisation: {}"_format(str));
+
+    // Parse the service_node (first 6 parts)
+    auto value = fmt::format("{}", fmt::join(std::span(parts.begin(), parts.begin() + 6), "|"));
+    auto node = service_node::from_disk(value);
+
+    // Parse timestamp if present, otherwise use current time
+    std::chrono::system_clock::time_point cached_at;
+    if (parts.size() >= 7) {
+        int64_t timestamp;
+        if (quic::parse_int(parts[6], timestamp))
+            cached_at = std::chrono::system_clock::from_time_t(static_cast<time_t>(timestamp));
+        else
+            cached_at = std::chrono::system_clock::now();
+    } else {
+        cached_at = std::chrono::system_clock::now();  // Old format, assume cached now
+    }
+
+    return {std::move(node), cached_at};
+}
+
 OnionRequestRouter::OnionRequestRouter(
         config::OnionRequestRouterConfig config,
         std::shared_ptr<oxen::quic::Loop> loop,
+        std::shared_ptr<DiskManager> disk_manager,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
         _config{std::move(config)},
-        _loop{std::move(loop)},
+        _loop{loop},
+        _disk_manager{disk_manager},
         _snode_pool{snode_pool},
         _transport{transport} {
     log::trace(cat, "Initializing.");
 
     _request_queues[PathCategory::standard] = std::make_shared<detail::RequestQueue>(_loop);
     _request_queues[PathCategory::file] = std::make_shared<detail::RequestQueue>(_loop);
+
+    if (_config.cache_directory) {
+        std::string cache_file_name;
+
+        switch (_config.netid) {
+            case opt::netid::Target::mainnet: cache_file_name = "edge_nodes"; break;
+            case opt::netid::Target::testnet: cache_file_name = "edge_nodes_testnet"; break;
+            case opt::netid::Target::devnet:
+                std::string seed_node_data;
+
+                for (const auto& node : _config.seed_nodes)
+                    node.to_disk(std::back_inserter(seed_node_data));
+
+                auto hash_bytes = session::hash::hash(32, session::to_span(seed_node_data));
+                cache_file_name = "edge_nodes_devnet_" + oxenc::to_hex(hash_bytes);
+                break;
+        }
+
+        _edge_node_cache_file_path = *_config.cache_directory / cache_file_name;
+        _load_from_disk();
+    }
 
     _loop->call_soon([this] {
         auto snode_pool = _snode_pool.lock();
@@ -284,12 +346,151 @@ OnionRequestRouter::~OnionRequestRouter() {
     log::debug(cat, "Destroyed.");
 }
 
+// MARK: Disk I/O Functions
+
+void OnionRequestRouter::_load_from_disk() {
+    if (_edge_node_cache_file_path.empty()) {
+        log::error(cat, "Tried to load cache from disk without a cache file path.");
+        return;
+    }
+
+    // Load the cache if present
+    try {
+        if (!fs::exists(_edge_node_cache_file_path))
+            throw empty_file_exception{};
+
+        std::vector<std::byte> loaded_edge_node_data = read_whole_file(_edge_node_cache_file_path);
+        std::vector<cached_edge_node> loaded_edge_nodes;
+        auto invalid_entries = 0;
+        auto expired_entries = 0;
+
+        auto now = std::chrono::system_clock::now();
+        auto edge_node_expiration_timestamp = (now - _config.edge_node_cache_duration);
+        std::string_view data_view(
+                reinterpret_cast<const char*>(loaded_edge_node_data.data()),
+                loaded_edge_node_data.size());
+        loaded_edge_nodes.reserve(
+                (data_view.size() / cached_edge_node_disk_format::MAX_LINE_SIZE) +
+                1);  // +1 for safety
+
+        size_t start = 0;
+        while (start < data_view.size()) {
+            // Find either \n or \r
+            size_t end = data_view.find_first_of("\n\r", start);
+            if (end == std::string_view::npos)
+                end = data_view.size();
+
+            if (end > start) {  // Skip empty lines
+                std::string_view line = data_view.substr(start, end - start);
+
+                try {
+                    auto edge_node = cached_edge_node::from_disk(line);
+
+                    if (edge_node.first_connected_at > edge_node_expiration_timestamp)
+                        loaded_edge_nodes.push_back(cached_edge_node::from_disk(line));
+                    else
+                        ++expired_entries;
+                } catch (...) {
+                    ++invalid_entries;
+                }
+            }
+
+            // Skip past any line ending characters (\n, \r, or both in any order)
+            start = end;
+            while (start < data_view.size() &&
+                   (data_view[start] == '\n' || data_view[start] == '\r')) {
+                ++start;
+            }
+        }
+
+        if (loaded_edge_node_data.size() > 0 && loaded_edge_nodes.size() == 0 &&
+            invalid_entries > 0)
+            throw std::runtime_error{"Edge node cache has invalid format"};
+
+        if (expired_entries > 0)
+            log::warning(cat, "Skipped {} expired entries in edge node cache.", expired_entries);
+
+        if (invalid_entries > 0)
+            log::warning(cat, "Skipped {} invalid entries in edge node cache.", invalid_entries);
+
+        std::shuffle(loaded_edge_nodes.begin(), loaded_edge_nodes.end(), csrng);
+
+        log::info(cat, "Loaded cache of {} edge nodes.", _cached_edge_nodes.size());
+    } catch (const empty_file_exception) {
+        log::info(cat, "No existing edge node cache.");
+    } catch (const std::exception& e) {
+        log::error(cat, "Failed to load edge node cache ({}).", e.what());
+
+        if (fs::exists(_edge_node_cache_file_path))
+            fs::remove_all(_edge_node_cache_file_path);
+    }
+}
+
+void OnionRequestRouter::_clear_disk_cache(std::filesystem::path file_path) {
+    try {
+        if (!file_path.empty() && fs::exists(file_path))
+            fs::remove_all(file_path);
+        log::info(cat, "Cleared edge node cache from disk.");
+    } catch (const std::exception& e) {
+        log::error(cat, "Failed to clear edge node cache file: {}", e.what());
+    }
+}
+
+void OnionRequestRouter::_perform_edge_node_write(
+        std::filesystem::path file_path, std::vector<cached_edge_node> edge_nodes) {
+    if (file_path.empty())
+        return;
+
+    try {
+        // Create the cache directories if needed
+        fs::create_directories(file_path.parent_path());
+
+        // Save the edge nodes to disk
+        auto tmp_path = file_path;
+        tmp_path += u8"_new";
+
+        {
+            std::string output_buffer;
+            output_buffer.reserve(edge_nodes.size() * cached_edge_node_disk_format::MAX_LINE_SIZE);
+
+            for (const auto& edge_node : edge_nodes)
+                edge_node.to_disk(std::back_inserter(output_buffer));
+
+            std::ofstream file(tmp_path, std::ios::binary);
+            file.write(output_buffer.data(), output_buffer.size());
+            file.close();
+        }
+
+        fs::rename(tmp_path, file_path);
+        log::debug(cat, "Finished writing snode cache to disk.");
+    } catch (const std::exception& e) {
+        log::error(cat, "Failed to write snode cache: {}", e.what());
+    }
+}
+
 // MARK: IRouter
 
 void OnionRequestRouter::suspend() {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         _suspended = true;
+
+        // Write the edge nodes to disk before suspension completes
+        if (_disk_manager) {
+            std::vector<cached_edge_node> edge_nodes;
+
+            for (const auto& [_, path_list] : _paths)
+                for (const auto& path : path_list)
+                    if (!path.nodes.empty())
+                        edge_nodes.emplace_back(path.nodes[0], path.edge_first_connected_at);
+
+            _disk_manager->trigger(
+                    io_key_write_edge_nodes, [path = _edge_node_cache_file_path, edge_nodes] {
+                        OnionRequestRouter::_perform_edge_node_write(
+                                std::move(path), std::move(edge_nodes));
+                    });
+        }
+
         _close_connections();
         log::info(cat, "Suspended.");
     });
@@ -369,27 +570,50 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
     if (!_config.disable_pre_build_paths) {
         log::info(cat, "Pre-building initial paths.");
 
-        auto schedule_build = [this](PathCategory category, int count) {
+        auto schedule_build = [this](PathCategory category,
+                                     int count,
+                                     std::optional<cached_edge_node> cached_edge_node) {
             for (int i = 0; i < count; ++i)
                 _build_path(
                         category,
                         "pre-build-{}-{}"_format(
                                 to_string(category, _config.single_path_mode), i + 1),
-                        {});
+                        {},
+                        std::nullopt,
+                        cached_edge_node->node,
+                        cached_edge_node->first_connected_at);
         };
 
+        std::vector<cached_edge_node> edge_nodes = _cached_edge_nodes;
+
         if (_config.single_path_mode) {
-            log::debug(cat, "Pre-building 1 path for single_path_mode.");
-            schedule_build(PathCategory::standard, 1);
+            std::optional<cached_edge_node> edge_node = std::nullopt;
+            if (!edge_nodes.empty()) {
+                edge_node = edge_nodes.back();
+                edge_nodes.pop_back();
+            }
+
+            log::debug(
+                    cat,
+                    "Pre-building 1 path for single_path_mode{}.",
+                    (!edge_node.has_value() ? " with cached edge node" : ""));
+            schedule_build(PathCategory::standard, 1, edge_node);
         } else {
             for (const auto& [category, min_count] : _config.min_path_counts) {
                 if (min_count > 0) {
+                    std::optional<cached_edge_node> edge_node = std::nullopt;
+                    if (!edge_nodes.empty()) {
+                        edge_node = edge_nodes.back();
+                        edge_nodes.pop_back();
+                    }
+
                     log::debug(
                             cat,
-                            "Pre-building {} path(s) for category '{}'.",
+                            "Pre-building {} path(s) for category '{}'{}.",
                             min_count,
-                            to_string(category, _config.single_path_mode));
-                    schedule_build(category, min_count);
+                            to_string(category, _config.single_path_mode),
+                            (!edge_node.has_value() ? " with cached edge node" : ""));
+                    schedule_build(category, min_count, edge_node);
                 }
             }
         }
@@ -411,6 +635,12 @@ void OnionRequestRouter::_close_connections() {
                     "Network is suspended.");
     }
 
+    // Stop any pending path rotations
+    if (_path_rotation_timer) {
+        event_del(_path_rotation_timer.get());
+        _path_rotation_timer.reset();
+    }
+
     // Remove any failure listeners for the edge nodes of the current paths
     if (auto transport = _transport.lock())
         for (const auto& [category, path_list] : _paths)
@@ -429,6 +659,8 @@ void OnionRequestRouter::_close_connections() {
     _in_progress_path_builds.clear();
     _path_build_retries.clear();
     _pending_paths.clear();
+    _path_rotation_schedule.clear();
+    _pending_rotation_paths.clear();
     _update_status();
     log::info(cat, "Closed all connections.");
 }
@@ -557,7 +789,9 @@ void OnionRequestRouter::_build_path(
         PathCategory category,
         std::optional<std::string> initiating_req_id,
         const std::vector<service_node>& nodes_to_exclude_,
-        std::optional<std::string> original_path_id) {
+        std::optional<std::string> original_path_id,
+        std::optional<service_node> specific_edge_node,
+        std::optional<std::chrono::system_clock::time_point> edge_node_first_connection_at) {
     if (_suspended) {
         log::info(cat, "Ignoring build_path call as network is suspended.");
         return;
@@ -609,15 +843,19 @@ void OnionRequestRouter::_build_path(
     nodes_to_exclude.insert(
             nodes_to_exclude.end(), nodes_to_exclude_.begin(), nodes_to_exclude_.end());
 
-    std::vector<service_node> path_nodes;
-
     auto snode_pool = _snode_pool.lock();
     if (!snode_pool) {
         log::critical(cat, "SnodePool was destroyed, cannot build path.");
         return;
     }
 
-    path_nodes = snode_pool->get_unused_nodes(_config.path_length, nodes_to_exclude);
+    // Get enough nodes for the path (use the specified edge-node if provided)
+    auto path_nodes = snode_pool->get_unused_nodes(
+            (specific_edge_node.has_value() ? _config.path_length - 1 : _config.path_length),
+            nodes_to_exclude);
+
+    if (specific_edge_node)
+        path_nodes.insert(path_nodes.begin(), *specific_edge_node);
 
     // If we don't have enough nodes to build a path then we should try to refresh the snode pool
     if (path_nodes.size() < _config.path_length) {
@@ -648,7 +886,7 @@ void OnionRequestRouter::_build_path(
     }
 
     // Attempty to verify connectivity to the edge node
-    _pending_paths[path_id] = path_nodes;
+    _pending_paths[path_id] = std::make_pair(path_nodes, edge_node_first_connection_at);
     auto edge_node = path_nodes.front();
     log::debug(
             cat,
@@ -696,7 +934,7 @@ void OnionRequestRouter::_on_edge_connectivity_response(
     }
 
     // Extract the pending path nodes and remove it from the pending list
-    auto path_nodes = std::move(pending_it->second);
+    auto [path_nodes, edge_node_first_connection_at] = std::move(pending_it->second);
     _pending_paths.erase(pending_it);
 
     const auto& edge_node = path_nodes.front();
@@ -778,7 +1016,13 @@ void OnionRequestRouter::_on_edge_connectivity_response(
         return;
     }
 
-    OnionPath new_path{path_id, std::move(path_nodes)};
+    auto created_at = std::chrono::system_clock::now();
+    auto edge_first_connected_at =
+            (edge_node_first_connection_at.has_value() ? *edge_node_first_connection_at
+                                                       : created_at);
+    auto rotate_at = (std::chrono::steady_clock::now() + _config.path_rotation_frequency);
+
+    OnionPath new_path{path_id, std::move(path_nodes), created_at, edge_first_connected_at};
     log::info(
             cat,
             "[Request {} Path {}]: New {} path is active with nodes: [{}].",
@@ -788,6 +1032,7 @@ void OnionRequestRouter::_on_edge_connectivity_response(
             new_path.to_string());
     _paths[category].push_back(std::move(new_path));
     _path_build_retries.erase(path_id);
+    _schedule_path_rotation(path_id, category, rotate_at);
     _update_status();
 
     // Now, check the queue for any requests that were waiting for this path.
@@ -1151,50 +1396,48 @@ void OnionRequestRouter::_handle_transport_response(
                 }
             }
 
-            // Now that we have applied snode penalties, check if any node in the path has hit the
-            // threshold and try to repair the path if needed
+            // Now that we have applied snode penalties, check if any node in any path has hit the
+            // threshold and try to repair the path if needed (we need to check all paths because
+            // it's possible the failed node was a "destination" node which just happens to be in
+            // a different path from the one this request was sent along)
             if (snode_pool) {
-                auto& active_paths = _paths[to_path_category(original_request.category)];
-                auto path_it = std::find_if(
-                        active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
-                            return p.id == path_id;
-                        });
-                std::vector<ed25519_pubkey> nodes_to_repair;
+                for (auto& [path_cat, paths] : _paths) {
+                    for (auto& path : paths) {
+                        std::vector<ed25519_pubkey> nodes_to_repair;
 
-                if (path_it != active_paths.end()) {
-                    for (const auto& node : path_it->nodes) {
-                        auto node_key = ed25519_pubkey::from_bytes(node.view_remote_key());
+                        for (const auto& node : path.nodes) {
+                            auto node_key = ed25519_pubkey::from_bytes(node.view_remote_key());
 
-                        if (snode_pool->node_strike_count(node_key) >=
-                            _config.node_strike_threshold) {
-                            nodes_to_repair.push_back(node_key);
+                            if (snode_pool->node_strike_count(node_key) >=
+                                _config.node_strike_threshold)
+                                nodes_to_repair.push_back(node_key);
                         }
-                    }
-                }
 
-                // Repair any bad nodes in the path
-                if (!nodes_to_repair.empty()) {
-                    if (nodes_to_repair.size() == 1) {
-                        log::debug(
-                                cat,
-                                "[Request {} Path {}]: Node {} has hit the strike threshold, "
-                                "attempting repair.",
-                                original_request.request_id,
-                                path_id,
-                                nodes_to_repair[0].hex());
-                    } else {
-                        log::debug(
-                                cat,
-                                "[Request {} Path {}]: {} node(s) have hit the strike threshold, "
-                                "attempting repair.",
-                                original_request.request_id,
-                                path_id,
-                                nodes_to_repair.size());
-                    }
+                        // Repair any bad nodes in the path
+                        if (!nodes_to_repair.empty()) {
+                            if (nodes_to_repair.size() == 1) {
+                                log::debug(
+                                        cat,
+                                        "[Request {} Path {}]: Node {} has hit the strike "
+                                        "threshold, "
+                                        "attempting repair.",
+                                        original_request.request_id,
+                                        path.id,
+                                        nodes_to_repair[0].hex());
+                            } else {
+                                log::debug(
+                                        cat,
+                                        "[Request {} Path {}]: {} node(s) have hit the strike "
+                                        "threshold, "
+                                        "attempting repair.",
+                                        original_request.request_id,
+                                        path.id,
+                                        nodes_to_repair.size());
+                            }
 
-                    for (const auto& node_key : nodes_to_repair) {
-                        _try_repair_path(
-                                path_id, to_path_category(original_request.category), node_key);
+                            for (const auto& node_key : nodes_to_repair)
+                                _try_repair_path(path_id, path_cat, node_key);
+                        }
                     }
                 }
             }
@@ -1202,27 +1445,32 @@ void OnionRequestRouter::_handle_transport_response(
             // It's possible for a path to have maxed out it's strikes if `_try_repair_path` was
             // called with the edge node, in that case we need to call `_handle_path_failure` to
             // drop the path
-            bool path_died_during_repair = false;
-            auto& active_paths = _paths[to_path_category(original_request.category)];
-            auto path_check_it = std::find_if(
-                    active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
-                        return p.id == path_id;
-                    });
+            struct PathToFail {
+                PathCategory cat;
+                std::string id;
+            };
+            std::vector<PathToFail> paths_to_retire;
 
-            if (path_check_it != active_paths.end() &&
-                path_check_it->strike_count >= _config.path_strike_threshold)
-                path_died_during_repair = true;
+            for (auto& [path_cat, paths] : _paths) {
+                for (auto& path : paths) {
+                    bool failed_locally =
+                            (path_cat == to_path_category(original_request.category) &&
+                             path.id == path_id && pattern.penalize_path);
+                    bool failed_globally = (path.strike_count >= _config.path_strike_threshold);
 
-            // Penalise the path if desired
-            if (pattern.penalize_path || path_died_during_repair) {
+                    if (failed_locally || failed_globally)
+                        paths_to_retire.push_back({path_cat, path.id});
+                }
+            }
+
+            for (const auto& path : paths_to_retire) {
                 log::debug(
                         cat,
-                        "[Request {}]: Received error {} on path {}, handling failure.",
+                        "[Request {}]: Received error {} resuling in path {} failure.",
                         original_request.request_id,
                         final_status_code,
-                        path_id);
-                _handle_path_failure(
-                        path_id, to_path_category(original_request.category), penalized_nodes);
+                        path.id);
+                _handle_path_failure(path.id, path.cat, penalized_nodes);
             }
         } else {
             log::warning(
@@ -1468,6 +1716,234 @@ void OnionRequestRouter::_try_repair_path(
         }
     } catch (...) {
     }
+}
+
+void OnionRequestRouter::_schedule_path_rotation(
+        const std::string& path_id,
+        PathCategory category,
+        std::chrono::steady_clock::time_point rotate_at) {
+    _path_rotation_schedule.emplace(rotate_at, std::make_pair(path_id, category));
+    _update_rotation_timer();
+}
+
+void OnionRequestRouter::_check_path_rotations(
+        std::optional<std::chrono::steady_clock::time_point> now) {
+    if (!now)
+        now = std::chrono::steady_clock::now();
+
+    std::list<std::pair<std::string, PathCategory>> to_rotate;
+    auto it = _path_rotation_schedule.begin();
+
+    for (; it != _path_rotation_schedule.end() && it->first <= *now; ++it)
+        to_rotate.push_back(it->second);
+
+    _path_rotation_schedule.erase(_path_rotation_schedule.begin(), it);
+
+    for (auto& [path_id, category] : to_rotate) {
+        try {
+            _rotate_path(path_id, category);
+        } catch (const std::exception& e) {
+            log::error(cat, "Uncaught exception from path rotation: {}", e.what());
+        }
+    }
+}
+
+void OnionRequestRouter::_update_rotation_timer() {
+    if (_path_rotation_schedule.empty()) {
+        if (_path_rotation_timer)
+            event_del(_path_rotation_timer.get());
+        return;
+    }
+
+    if (!_path_rotation_timer) {
+        // If this is the first request timeout then set up the timeout event timer:
+        _path_rotation_timer.reset(event_new(
+                _loop->get_event_base(),
+                -1,          // Not attached to an actual socket
+                EV_TIMEOUT,  // Stays active (i.e. repeats) once fired
+                [](evutil_socket_t, short, void* self) {
+                    auto* me = static_cast<OnionRequestRouter*>(self);
+                    me->_check_path_rotations(std::chrono::steady_clock::now());
+                    me->_update_rotation_timer();
+                },
+                this));
+    }
+
+    auto rotates_in = std::chrono::ceil<std::chrono::microseconds>(
+            _path_rotation_schedule.begin()->first - std::chrono::steady_clock::now());
+    if (rotates_in < 0us)
+        rotates_in = 0us;
+#ifdef _WIN32
+    using suseconds_t = long;
+#endif
+    timeval rotate_interval{
+            .tv_sec = static_cast<time_t>(rotates_in / 1s),
+            .tv_usec = static_cast<suseconds_t>((rotates_in % 1s).count())};
+
+    event_add(_path_rotation_timer.get(), &rotate_interval);
+}
+
+void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory category) {
+    auto& active_paths = _paths[category];
+    auto path_it =
+            std::find_if(active_paths.begin(), active_paths.end(), [&path_id](const auto& p) {
+                return p.id == path_id;
+            });
+
+    if (path_it == active_paths.end()) {
+        log::debug(cat, "[Path {}]: Path no longer exists, skipping rotation.", path_id);
+        return;
+    }
+
+    OnionPath& path = *path_it;
+
+    if (path.rotation_in_progress) {
+        log::debug(cat, "[Path {}]: Rotation already in progress, skipping.", path_id);
+        return;
+    }
+
+    log::info(cat, "[Path {}]: Starting path rotation.", path_id);
+    path.rotation_in_progress = true;
+
+    std::string new_path_id = "R-" + random::random_base32(4);
+    service_node edge_node = path.nodes.front();
+    auto nodes_to_exclude = extract_nodes(_paths, _pending_paths);
+
+    auto snode_pool = _snode_pool.lock();
+    if (!snode_pool) {
+        log::critical(cat, "SnodePool was destroyed, cannot rotate path.");
+        return;
+    }
+
+    // Get enough nodes for the path (if the edge node has been used for longer than the cache
+    // duration then we should create an entirely new path, otherwise we should try to reuse the
+    // edge node)
+    auto now = std::chrono::system_clock::now();
+    auto rotate_at = (std::chrono::steady_clock::now() + _config.path_rotation_frequency);
+    std::vector<service_node> rotated_path_nodes;
+
+    if (now > path.edge_first_connected_at + _config.edge_node_cache_duration)
+        rotated_path_nodes = snode_pool->get_unused_nodes(_config.path_length, nodes_to_exclude);
+    else {
+        rotated_path_nodes =
+                snode_pool->get_unused_nodes(_config.path_length - 1, nodes_to_exclude);
+        rotated_path_nodes.insert(rotated_path_nodes.begin(), edge_node);
+    }
+
+    // Also need a 'destination' to varify path reachability
+    nodes_to_exclude.insert(
+            nodes_to_exclude.end(), rotated_path_nodes.begin(), rotated_path_nodes.end());
+    auto target_node = snode_pool->get_unused_nodes(1, nodes_to_exclude);
+
+    if (rotated_path_nodes.size() < _config.path_length || target_node.empty()) {
+        log::warning(
+                cat,
+                "[Path {}]: Failed to get enough nodes for rotation, retrying later.",
+                path_id);
+        path.rotation_in_progress = false;
+        _schedule_path_rotation(path_id, category, std::chrono::steady_clock::now() + 1min);
+        return;
+    }
+
+    OnionPath new_path{
+            new_path_id, std::move(rotated_path_nodes), now, path.edge_first_connected_at};
+
+    // Send /info request to verify path before rotating
+    Request info_request{
+            "path-rotation-verify-" + new_path_id,
+            network_destination{target_node.front()},
+            std::string{"info"},
+            std::vector<unsigned char>{},
+            to_small_request_category(category),
+            10s,
+            std::nullopt};
+
+    _pending_rotation_paths[new_path_id] = {path_id, category, std::move(new_path)};
+    auto& pending_rotation = _pending_rotation_paths[new_path_id];
+
+    _send_on_path(
+            pending_rotation.new_path,
+            std::move(info_request),
+            [weak_self = weak_from_this(), new_path_id, rotate_at = std::move(rotate_at)](
+                    bool success, bool timeout, int16_t status, auto headers, auto response) {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                self->_on_rotation_verification_response(new_path_id, success, timeout, rotate_at);
+            });
+}
+
+void OnionRequestRouter::_on_rotation_verification_response(
+        const std::string& new_path_id,
+        bool success,
+        bool timeout,
+        std::chrono::steady_clock::time_point rotate_at) {
+    auto pending_it = _pending_rotation_paths.find(new_path_id);
+    if (pending_it == _pending_rotation_paths.end()) {
+        log::warning(
+                cat, "[Path {}]: Rotation verification response for unknown path.", new_path_id);
+        return;
+    }
+
+    auto [old_path_id, category, new_path] = std::move(pending_it->second);
+    _pending_rotation_paths.erase(pending_it);
+
+    auto& active_paths = _paths[category];
+    auto old_path_it =
+            std::find_if(active_paths.begin(), active_paths.end(), [&old_path_id](const auto& p) {
+                return p.id == old_path_id;
+            });
+
+    if (old_path_it == active_paths.end()) {
+        log::warning(cat, "[Path {}]: Old path disappeared during rotation.", old_path_id);
+        return;
+    }
+
+    if (!success || timeout) {
+        log::warning(
+                cat,
+                "[Path {}]: Verification /info request failed, discarding rotation path {}.",
+                old_path_id,
+                new_path_id);
+
+        // Clear rotation_in_progress and retry later
+        old_path_it->rotation_in_progress = false;
+        _schedule_path_rotation(old_path_id, category, std::chrono::steady_clock::now() + 1min);
+        return;
+    }
+
+    log::info(
+            cat,
+            "[Path {}]: Verification successful, completing rotation to path {} with nodes: [{}].",
+            old_path_id,
+            new_path_id,
+            new_path.to_string());
+
+    _schedule_path_rotation(new_path_id, category, rotate_at);
+    _paths[category].push_back(std::move(new_path));
+
+    // Retire the old path
+    if (old_path_it->active_requests == 0) {
+        log::info(
+                cat, "[Path {}]: Retiring old path immediately (no active requests).", old_path_id);
+        active_paths.erase(old_path_it);
+    } else {
+        log::info(
+                cat,
+                "[Path {}]: Moving old path to pending drop ({} active requests).",
+                old_path_id,
+                old_path_it->active_requests);
+        _paths_pending_drop[category].push_back(std::move(*old_path_it));
+        active_paths.erase(old_path_it);
+    }
+
+    log::info(
+            cat,
+            "[Path {}]: Rotation complete, new path {} is now active.",
+            old_path_id,
+            new_path_id);
+    _update_status();
 }
 
 }  // namespace session::network

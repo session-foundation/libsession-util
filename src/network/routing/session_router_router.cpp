@@ -63,7 +63,7 @@ namespace {
                                 cat,
                                 "[Request {}]: Resolving service_node to RemoteAddress.",
                                 request_id);
-                        result.emplace(arg.view_remote_key(), arg.omq_port);
+                        result.emplace(arg.remote_pubkey, arg.omq_port);
                     }
                 },
                 dest);
@@ -84,13 +84,11 @@ SessionRouter::SessionRouter(
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)},
-        _loop{std::move(loop)},
-        _snode_pool{snode_pool},
-        _transport{transport} {
+        _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport} {
     log::trace(cat, "Initializing.");
 
-    // "listen=:0" listens on a random port - this prevents multiple test devices on the same machine from trying to listen on the same port and colliding
+    // "listen=:0" listens on a random port - this prevents multiple test devices on the same
+    // machine from trying to listen on the same port and colliding
     auto test_ini = R"(
     [router]
     netid={}

@@ -36,20 +36,23 @@ namespace fs = std::filesystem;
 namespace {
     inline auto cat = log::Cat("snode_pool");
 
+    constexpr auto io_key_clear_cache = "clear_snode_cache"sv;
+    constexpr auto io_key_write_cache = "write_snode_cache"sv;
+    constexpr auto io_key_write_strikes = "write_snode_strikes"sv;
+
     const std::chrono::seconds STRIKE_EXPIRY = 48h;
     const std::chrono::seconds SAVE_THROTTLE = 5min;
-
-    class empty_file_exception : public std::runtime_error {
-      public:
-        empty_file_exception() : std::runtime_error("Empty file") {}
-    };
 }  // namespace
 
 SnodePool::SnodePool(
         config::SnodePoolConfig config,
         std::shared_ptr<oxen::quic::Loop> loop,
+        std::shared_ptr<DiskManager> disk_manager,
         network_fetcher_t direct_fetcher) :
-        _config{config}, _loop{loop}, _direct_fetcher{std::move(direct_fetcher)} {
+        _config{std::move(config)},
+        _loop{loop},
+        _disk_manager{disk_manager},
+        _direct_fetcher{std::move(direct_fetcher)} {
     if (_config.cache_directory) {
         std::string cache_file_name;
 
@@ -70,19 +73,6 @@ SnodePool::SnodePool(
         _snode_cache_file_path = *_config.cache_directory / cache_file_name;
         _strikes_file_path = *_config.cache_directory / (cache_file_name + "_strikes");
         _load_from_disk();
-        _disk_write_thread = std::thread{&SnodePool::_disk_write_loop, this};
-    }
-}
-
-SnodePool::~SnodePool() {
-    if (_disk_write_thread.joinable()) {
-        {
-            std::unique_lock lock{_cache_mutex};
-            _shut_down_disk_thread = true;
-        }
-
-        _disk_write_cv.notify_one();
-        _disk_write_thread.join();
     }
 }
 
@@ -250,175 +240,130 @@ void SnodePool::_load_from_disk() {
     }
 }
 
-void SnodePool::_disk_write_loop() {
-    std::unique_lock lock{_cache_mutex};
+void SnodePool::_clear_disk_cache(std::filesystem::path path) {
+    try {
+        if (!path.empty() && fs::exists(path))
+            fs::remove_all(path);
+        log::info(cat, "Cleared snode cache from disk.");
+    } catch (const std::exception& e) {
+        log::error(cat, "Failed to clear snode cache file: {}", e.what());
+    }
+}
 
-    while (!_shut_down_disk_thread) {
-        _disk_write_cv.wait(lock, [this] {
-            return _need_write || _strikes_dirty || _need_clear_cache || _shut_down_disk_thread;
-        });
+void SnodePool::_perform_cache_write(std::filesystem::path path, std::vector<service_node> cache) {
+    if (path.empty())
+        return;
 
-        // Shutdown if needed
-        if (_shut_down_disk_thread)
-            break;
+    try {
+        if (cache.empty())
+            throw std::runtime_error{"cache was empty."};
 
-        // Clear cache if needed
-        if (_need_clear_cache) {
-            _snode_cache = {};
-            _all_swarms = {};
-            _swarm_cache = {};
+        // Create the cache directories if needed
+        fs::create_directories(path.parent_path());
 
-            auto path_to_clear = _snode_cache_file_path;
-            lock.unlock();
-            try {
-                if (!path_to_clear.empty() && fs::exists(path_to_clear))
-                    fs::remove_all(path_to_clear);
-                log::info(cat, "Cleared snode cache from disk.");
-            } catch (const std::exception& e) {
-                log::error(cat, "Failed to clear snode cache file: {}", e.what());
-            }
-            lock.lock();
-            _need_clear_cache = false;
+        // Save the snode pool to disk
+        auto tmp_path = path;
+        tmp_path += u8"_new";
+
+        {
+            std::string output_buffer;
+            output_buffer.reserve(cache.size() * service_node_disk_format::MAX_LINE_SIZE);
+
+            for (const auto& snode : cache)
+                snode.to_disk(std::back_inserter(output_buffer));
+
+            std::ofstream file(tmp_path, std::ios::binary);
+            file.write(output_buffer.data(), output_buffer.size());
+            file.close();
         }
 
-        if (_need_write) {
-            // Just in case
-            if (_snode_cache_file_path.empty()) {
-                _need_write = false;
+        fs::rename(tmp_path, path);
+        log::debug(cat, "Finished writing snode cache to disk.");
+    } catch (const std::exception& e) {
+        log::error(cat, "Failed to write snode cache: {}", e.what());
+    }
+}
+
+void SnodePool::_perform_strikes_write(
+        std::filesystem::path path, std::map<ed25519_pubkey, std::vector<uint64_t>> strikes) {
+    if (path.empty())
+        return;
+
+    try {
+        uint64_t expiry_threshold =
+                std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
+                        .count();
+        std::vector<char> buffer;
+
+        // Simple binary format: [Count(4)][Key(32)][NumStamps(2)][Stamp(8)]...
+        uint32_t entry_count = 0;
+        buffer.resize(sizeof(uint32_t));
+
+        for (auto& [key, timestamps] : strikes) {
+            std::vector<uint64_t> valid_stamps;
+            for (auto t : timestamps)
+                if (t > expiry_threshold)
+                    valid_stamps.push_back(t);
+
+            // Drop node if no active strikes
+            if (valid_stamps.empty())
                 continue;
-            }
 
-            // Make a local copy so that we can release the lock and not
-            // worry about other threads wanting to change things
-            auto path_to_write = _snode_cache_file_path;
-            auto snode_cache_write = _snode_cache;
+            entry_count++;
 
-            lock.unlock();
-            {
-                try {
-                    if (snode_cache_write.empty())
-                        throw std::runtime_error{"cache was empty."};
+            // Write Key (32 bytes)
+            auto key_bytes = reinterpret_cast<const char*>(key.data());
+            buffer.insert(buffer.end(), key_bytes, key_bytes + key.size());
 
-                    // Create the cache directories if needed
-                    fs::create_directories(path_to_write.parent_path());
+            // Write Timestamp Count (2 bytes)
+            uint16_t t_count = static_cast<uint16_t>(valid_stamps.size());
+            const char* t_count_ptr = reinterpret_cast<const char*>(&t_count);
+            buffer.insert(buffer.end(), t_count_ptr, t_count_ptr + sizeof(uint16_t));
 
-                    // Save the snode pool to disk
-                    auto tmp_path = path_to_write;
-                    tmp_path += u8"_new";
-
-                    {
-                        std::string output_buffer;
-                        output_buffer.reserve(
-                                snode_cache_write.size() * service_node_disk_format::MAX_LINE_SIZE);
-
-                        for (const auto& snode : snode_cache_write)
-                            snode.to_disk(std::back_inserter(output_buffer));
-
-                        std::ofstream file(tmp_path, std::ios::binary);
-                        file.write(output_buffer.data(), output_buffer.size());
-                        file.close();
-                    }
-
-                    fs::rename(tmp_path, path_to_write);
-                    log::debug(cat, "Finished writing snode cache to disk.");
-                } catch (const std::exception& e) {
-                    log::error(cat, "Failed to write snode cache: {}", e.what());
-                }
-            }
-            lock.lock();
-            _need_write = false;
+            // Write Timestamps (8 bytes each)
+            const char* stamps_ptr = reinterpret_cast<const char*>(valid_stamps.data());
+            buffer.insert(
+                    buffer.end(),
+                    stamps_ptr,
+                    stamps_ptr + (valid_stamps.size() * sizeof(uint64_t)));
         }
 
-        if (_strikes_dirty) {
-            // Just in case
-            if (_strikes_file_path.empty()) {
-                _strikes_dirty = false;
-                continue;
-            }
+        // Patch total count at the beginning
+        std::memcpy(buffer.data(), &entry_count, sizeof(uint32_t));
 
-            auto strikes_copy = _snode_strikes;
-            auto strikes_path = _strikes_file_path;
+        // Create the cache directories if needed
+        fs::create_directories(path.parent_path());
 
-            lock.unlock();
+        // Save the strikes to disk
+        auto tmp_path = path;
+        tmp_path += u8"_new";
 
-            try {
-                uint64_t expiry_threshold =
-                        std::chrono::duration_cast<std::chrono::seconds>(
-                                std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
-                                .count();
-                std::vector<char> buffer;
-
-                // Simple binary format: [Count(4)][Key(32)][NumStamps(2)][Stamp(8)]...
-                uint32_t entry_count = 0;
-                buffer.resize(sizeof(uint32_t));
-
-                for (auto& [key, timestamps] : strikes_copy) {
-                    std::vector<uint64_t> valid_stamps;
-                    for (auto t : timestamps)
-                        if (t > expiry_threshold)
-                            valid_stamps.push_back(t);
-
-                    // Drop node if no active strikes
-                    if (valid_stamps.empty())
-                        continue;
-
-                    entry_count++;
-
-                    // Write Key (32 bytes)
-                    auto key_bytes = reinterpret_cast<const char*>(key.data());
-                    buffer.insert(buffer.end(), key_bytes, key_bytes + key.size());
-
-                    // Write Timestamp Count (2 bytes)
-                    uint16_t t_count = static_cast<uint16_t>(valid_stamps.size());
-                    const char* t_count_ptr = reinterpret_cast<const char*>(&t_count);
-                    buffer.insert(buffer.end(), t_count_ptr, t_count_ptr + sizeof(uint16_t));
-
-                    // Write Timestamps (8 bytes each)
-                    const char* stamps_ptr = reinterpret_cast<const char*>(valid_stamps.data());
-                    buffer.insert(
-                            buffer.end(),
-                            stamps_ptr,
-                            stamps_ptr + (valid_stamps.size() * sizeof(uint64_t)));
-                }
-
-                // Patch total count at the beginning
-                std::memcpy(buffer.data(), &entry_count, sizeof(uint32_t));
-
-                // Save the strikes to disk
-                auto tmp_path = strikes_path;
-                tmp_path += u8"_new";
-
-                {
-                    std::ofstream file(tmp_path, std::ios::binary);
-                    file.write(buffer.data(), buffer.size());
-                }
-
-                fs::rename(tmp_path, strikes_path);
-                log::debug(cat, "Saved {} strike entries to disk.", entry_count);
-
-            } catch (const std::exception& e) {
-                log::error(cat, "Failed to write strikes: {}", e.what());
-            }
-            lock.lock();
-            _strikes_dirty = false;
+        {
+            std::ofstream file(tmp_path, std::ios::binary);
+            file.write(buffer.data(), buffer.size());
         }
+
+        fs::rename(tmp_path, path);
+        log::debug(cat, "Finished writing {} strike entries to disk.", entry_count);
+
+    } catch (const std::exception& e) {
+        log::error(cat, "Failed to write strikes: {}", e.what());
     }
 }
 
 // MARK: Refresh Functions
 
 void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) {
-    const auto request_id = request_id_opt.value_or("RSC-" + random::random_base32(4));
-    bool use_routed_fetcher = true;
-    uint8_t num_nodes_for_refresh = 0;
-
-    {
-        std::unique_lock lock{_cache_mutex};
-
+    _loop->call([this, request_id_opt] {
         if (_suspended) {
             log::info(cat, "Ignoring refresh as pool is suspended.");
             return;
         }
+
+        const auto request_id = request_id_opt.value_or("RSC-" + random::random_base32(4));
+        bool use_routed_fetcher = true;
+        uint8_t num_nodes_for_refresh = 0;
 
         // Only allow a single cache refresh at a time
         if (_current_snode_cache_refresh_id) {
@@ -492,11 +437,11 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
             _current_snode_cache_refresh_id.reset();
             return;
         }
-    }
 
-    // Kick off the concurrent requests (if there are any)
-    for (uint8_t i = 0; i < num_nodes_for_refresh; ++i)
-        _launch_next_refresh_request(request_id, i, !use_routed_fetcher, num_nodes_for_refresh);
+        // Kick off the concurrent requests (if there are any)
+        for (uint8_t i = 0; i < num_nodes_for_refresh; ++i)
+            _launch_next_refresh_request(request_id, i, !use_routed_fetcher, num_nodes_for_refresh);
+    });
 }
 
 void SnodePool::_launch_next_refresh_request(
@@ -504,16 +449,11 @@ void SnodePool::_launch_next_refresh_request(
         const uint8_t index,
         const bool use_direct_fetcher,
         const uint8_t total_requests) {
-    const auto target_request_id = "{}-{}"_format(request_id, index);
-    service_node target_node;
-    session::network::SnodePool::network_fetcher_t fetcher_to_use;
-    bool use_legacy_endpoint = false;
-
-    {
-        std::unique_lock lock{_cache_mutex};
-
+    _loop->call([this, request_id, index, use_direct_fetcher, total_requests] {
         if (!_current_snode_cache_refresh_id)
             return;
+
+        const auto target_request_id = "{}-{}"_format(request_id, index);
 
         if (_refresh_candidate_nodes.empty()) {
             // If we run out of candidate nodes then we should fail this refresh request and start a
@@ -535,175 +475,174 @@ void SnodePool::_launch_next_refresh_request(
                 if (!self)
                     return;
 
-                {
-                    std::unique_lock lock{self->_cache_mutex};
-                    self->_current_snode_cache_refresh_id.reset();
-                    self->_snode_refresh_results.clear();
-                }
-
+                self->_current_snode_cache_refresh_id.reset();
+                self->_snode_refresh_results.clear();
                 self->_refresh_snode_cache();
             });
             return;
         }
 
-        target_node = _refresh_candidate_nodes.back();
+        auto target_node = _refresh_candidate_nodes.back();
         _refresh_candidate_nodes.pop_back();
-        fetcher_to_use = (use_direct_fetcher ? _direct_fetcher : *_routed_fetcher);
-        use_legacy_endpoint = (!use_direct_fetcher && _config.cache_refresh_using_legacy_endpoint);
-    }
+        auto fetcher_to_use = (use_direct_fetcher ? _direct_fetcher : *_routed_fetcher);
+        auto use_legacy_endpoint =
+                (!use_direct_fetcher && _config.cache_refresh_using_legacy_endpoint);
 
-    // If we somehow got into '_launch_next_refresh_request' for a routed request then we need to
-    // make sure '_routed_fetcher' was set before we try to use it
-    if (!fetcher_to_use) {
-        log::critical(
-                cat, "[Request {}] No fetcher available, aborting refresh.", target_request_id);
-        std::unique_lock lock{_cache_mutex};
-        _current_snode_cache_refresh_id.reset();
-        _refresh_candidate_nodes.clear();
-        return;
-    }
+        // If we somehow got into '_launch_next_refresh_request' for a routed request then we need
+        // to make sure '_routed_fetcher' was set before we try to use it
+        if (!fetcher_to_use) {
+            log::critical(
+                    cat, "[Request {}] No fetcher available, aborting refresh.", target_request_id);
+            _current_snode_cache_refresh_id.reset();
+            _refresh_candidate_nodes.clear();
+            return;
+        }
 
-    log::debug(
-            cat,
-            "[Request {}] Launching {} refresh request to {}",
-            target_request_id,
-            (use_direct_fetcher ? "direct" : "routed"),
-            target_node.to_string());
-    const Request request =
-            [this, &target_request_id, &target_node, use_direct_fetcher, use_legacy_endpoint]() {
-                // A mandatory service node upgrade needs to go out to support calling
-                // `active_nodes_bin` via onion requests so if the `use_legacy_endpoint` setting is
-                // set then we should use the legacy endpoint to refresh the cache
-                if (use_legacy_endpoint) {
-                    nlohmann::json body{
-                            {"endpoint", "get_service_nodes"},
-                            {"params",
-                             {{"active_only", true},
-                              {"fields",
-                               {{"pubkey_ed25519", true},
-                                {"public_ip", true},
-                                {"storage_port", true},
-                                {"storage_lmq_port", true},
-                                {"storage_server_version", true},
-                                {"swarm_id", true}}}}},
-                    };
-
-                    return Request{
-                            target_request_id,
-                            network_destination{target_node},
-                            std::string{"oxend_request"},
-                            to_vector(body.dump()),
-                            RequestCategory::standard,
-                            10s,
-                            std::nullopt,      // overall_timeout
-                            std::monostate{},  // details
-                            true               // ephemeral_connection
-                    };
-                }
+        log::debug(
+                cat,
+                "[Request {}] Launching {} refresh request to {}",
+                target_request_id,
+                (use_direct_fetcher ? "direct" : "routed"),
+                target_node.to_string());
+        const Request request = [this,
+                                 &target_request_id,
+                                 &target_node,
+                                 use_direct_fetcher,
+                                 use_legacy_endpoint]() {
+            // A mandatory service node upgrade needs to go out to support calling
+            // `active_nodes_bin` via onion requests so if the `use_legacy_endpoint` setting is
+            // set then we should use the legacy endpoint to refresh the cache
+            if (use_legacy_endpoint) {
+                nlohmann::json body{
+                        {"endpoint", "get_service_nodes"},
+                        {"params",
+                         {{"active_only", true},
+                          {"fields",
+                           {{"pubkey_ed25519", true},
+                            {"public_ip", true},
+                            {"storage_port", true},
+                            {"storage_lmq_port", true},
+                            {"storage_server_version", true},
+                            {"swarm_id", true}}}}},
+                };
 
                 return Request{
                         target_request_id,
                         network_destination{target_node},
-                        std::string{"active_nodes_bin"},
-                        std::nullopt,
+                        std::string{"oxend_request"},
+                        to_vector(body.dump()),
                         RequestCategory::standard,
                         10s,
                         std::nullopt,      // overall_timeout
                         std::monostate{},  // details
                         true               // ephemeral_connection
                 };
-            }();
+            }
 
-    fetcher_to_use(
-            request,
-            [this,
-             request_id,
-             index,
-             target_request_id,
-             use_direct_fetcher,
-             total_requests,
-             use_legacy_endpoint](
-                    bool success,
-                    bool timeout,
-                    int16_t status_code,
-                    std::vector<std::pair<std::string, std::string>> headers,
-                    std::optional<std::string> response) {
-                // This callback runs on the network loop so acquire a lock
-                std::unique_lock lock{_cache_mutex};
+            return Request{
+                    target_request_id,
+                    network_destination{target_node},
+                    std::string{"active_nodes_bin"},
+                    std::nullopt,
+                    RequestCategory::standard,
+                    10s,
+                    std::nullopt,      // overall_timeout
+                    std::monostate{},  // details
+                    true               // ephemeral_connection
+            };
+        }();
 
-                // If the refresh was cancelled or completed while we were in-flight, do nothing
-                if (!_current_snode_cache_refresh_id ||
-                    *_current_snode_cache_refresh_id != request_id) {
-                    log::debug(
+        fetcher_to_use(
+                request,
+                [this,
+                 request_id,
+                 index,
+                 target_request_id,
+                 use_direct_fetcher,
+                 total_requests,
+                 use_legacy_endpoint](
+                        bool success,
+                        bool timeout,
+                        int16_t status_code,
+                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::optional<std::string> response) {
+                    // If the refresh was cancelled or completed while we were in-flight, do nothing
+                    if (!_current_snode_cache_refresh_id ||
+                        *_current_snode_cache_refresh_id != request_id) {
+                        log::debug(
+                                cat,
+                                "[Request {}] Ignoring stale refresh response.",
+                                target_request_id);
+                        return;
+                    }
+
+                    std::vector<std::byte> result;
+
+                    try {
+                        if (!success || timeout || !response)
+                            throw std::runtime_error{response.value_or("Unknown error.")};
+
+                        if (status_code < 200 || status_code > 299)
+                            throw status_code_exception{
+                                    status_code,
+                                    {content_type_plain_text},
+                                    "Request failed with status code: {}, error: {}"_format(
+                                            status_code, response.value_or("Unknown error."))};
+
+                        result.assign(
+                                reinterpret_cast<const std::byte*>(response->data()),
+                                reinterpret_cast<const std::byte*>(
+                                        response->data() + response->length()));
+                    } catch (const std::exception& e) {
+                        _snode_cache_refresh_failure_count++;
+                        auto delay =
+                                _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
+
+                        log::warning(
+                                cat,
+                                "Failed to refresh cache from one node: {}. Trying another in "
+                                "{}ms.",
+                                e.what(),
+                                delay.count());
+                        _loop->call_later(
+                                delay,
+                                [weak_self = weak_from_this(),
+                                 request_id,
+                                 index,
+                                 use_direct_fetcher,
+                                 total_requests] {
+                                    if (auto self = weak_self.lock())
+                                        self->_retry_refresh_request(
+                                                request_id,
+                                                index,
+                                                use_direct_fetcher,
+                                                total_requests);
+                                });
+                        return;
+                    }
+
+                    _snode_refresh_results.push_back(std::move(result));
+                    log::info(
                             cat,
-                            "[Request {}] Ignoring stale refresh response.",
-                            target_request_id);
-                    return;
-                }
+                            "[Request {}] Received refresh response {}/{}.",
+                            target_request_id,
+                            _snode_refresh_results.size(),
+                            total_requests);
 
-                std::vector<std::byte> result;
-
-                try {
-                    if (!success || timeout || !response)
-                        throw std::runtime_error{response.value_or("Unknown error.")};
-
-                    if (status_code < 200 || status_code > 299)
-                        throw status_code_exception{
-                                status_code,
-                                {content_type_plain_text},
-                                "Request failed with status code: {}, error: {}"_format(
-                                        status_code, response.value_or("Unknown error."))};
-
-                    result.assign(
-                            reinterpret_cast<const std::byte*>(response->data()),
-                            reinterpret_cast<const std::byte*>(
-                                    response->data() + response->length()));
-                } catch (const std::exception& e) {
-                    _snode_cache_refresh_failure_count++;
-                    auto delay =
-                            _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
-
-                    log::warning(
-                            cat,
-                            "Failed to refresh cache from one node: {}. Trying another in {}ms.",
-                            e.what(),
-                            delay.count());
-                    _loop->call_later(
-                            delay,
-                            [weak_self = weak_from_this(),
-                             request_id,
-                             index,
-                             use_direct_fetcher,
-                             total_requests] {
-                                if (auto self = weak_self.lock())
-                                    self->_retry_refresh_request(
-                                            request_id, index, use_direct_fetcher, total_requests);
-                            });
-                    return;
-                }
-
-                _snode_refresh_results.push_back(std::move(result));
-                log::info(
-                        cat,
-                        "[Request {}] Received refresh response {}/{}.",
-                        target_request_id,
-                        _snode_refresh_results.size(),
-                        total_requests);
-
-                // If we've received all the results then we need to process them and complete the
-                // refresh
-                if (_snode_refresh_results.size() >= total_requests) {
-                    auto final_results = std::move(_snode_refresh_results);
-                    auto refresh_id = *_current_snode_cache_refresh_id;
-                    lock.unlock();  // Unlock so `_on_refresh_complete` can get it's own lock
-                    _on_refresh_complete(
-                            refresh_id,
-                            final_results,
-                            use_direct_fetcher,
-                            total_requests,
-                            use_legacy_endpoint);
-                }
-            });
+                    // If we've received all the results then we need to process them and complete
+                    // the refresh
+                    if (_snode_refresh_results.size() >= total_requests) {
+                        auto final_results = std::move(_snode_refresh_results);
+                        auto refresh_id = *_current_snode_cache_refresh_id;
+                        _on_refresh_complete(
+                                refresh_id,
+                                final_results,
+                                use_direct_fetcher,
+                                total_requests,
+                                use_legacy_endpoint);
+                    }
+                });
+    });
 }
 
 void SnodePool::_retry_refresh_request(
@@ -726,144 +665,149 @@ void SnodePool::_on_refresh_complete(
             refresh_id,
             raw_results.size());
 
-    // Sort the vectors (so make it easier to find the intersection)
-    std::vector<std::vector<service_node>> processed_nodes;
-    processed_nodes.reserve(raw_results.size());
-    for (size_t i = 0; i < raw_results.size(); ++i) {
-        try {
-            auto& nodes_bin = raw_results[i];
-            std::pair<std::vector<service_node>, int> result;
-            auto& [nodes, invalid_count] = result;
+    _loop->call([this,
+                 refresh_id,
+                 raw_results,
+                 use_direct_fetcher,
+                 total_requests,
+                 from_legacy_endpoint] {
+        // Sort the vectors (so make it easier to find the intersection)
+        std::vector<std::vector<service_node>> processed_nodes;
+        processed_nodes.reserve(raw_results.size());
+        for (size_t i = 0; i < raw_results.size(); ++i) {
+            try {
+                auto& nodes_bin = raw_results[i];
+                std::pair<std::vector<service_node>, int> result;
+                auto& [nodes, invalid_count] = result;
 
-            // Due to how onion requests work they need to return JSON data which means the data
-            // could be base64-encoded, so handle that case if needed
-            if (from_legacy_endpoint) {
-                nlohmann::json response_json = nlohmann::json::parse(to_string_view(nodes_bin));
+                // Due to how onion requests work they need to return JSON data which means the data
+                // could be base64-encoded, so handle that case if needed
+                if (from_legacy_endpoint) {
+                    nlohmann::json response_json = nlohmann::json::parse(to_string_view(nodes_bin));
 
-                if (!response_json.contains("result") || !response_json["result"].is_object())
-                    throw std::runtime_error{"JSON missing result field."};
+                    if (!response_json.contains("result") || !response_json["result"].is_object())
+                        throw std::runtime_error{"JSON missing result field."};
 
-                nlohmann::json result_json = response_json["result"];
-                if (!result_json.contains("service_node_states") ||
-                    !result_json["service_node_states"].is_array())
-                    throw std::runtime_error{"JSON missing service_node_states field."};
+                    nlohmann::json result_json = response_json["result"];
+                    if (!result_json.contains("service_node_states") ||
+                        !result_json["service_node_states"].is_array())
+                        throw std::runtime_error{"JSON missing service_node_states field."};
 
-                for (auto& snode : result_json["service_node_states"])
-                    try {
-                        nodes.emplace_back(service_node::legacy_from_json(snode));
-                    } catch (...) {
-                        invalid_count++;
-                    }
-            } else if (!use_direct_fetcher && oxenc::is_base64(nodes_bin)) {
-                std::vector<std::byte> converted_nodes;
-                oxenc::from_base64(
-                        nodes_bin.begin(), nodes_bin.end(), std::back_inserter(converted_nodes));
-                result = service_node::process_snode_cache_bin(converted_nodes);
-            } else
-                result = service_node::process_snode_cache_bin(nodes_bin);
+                    for (auto& snode : result_json["service_node_states"])
+                        try {
+                            nodes.emplace_back(service_node::legacy_from_json(snode));
+                        } catch (...) {
+                            invalid_count++;
+                        }
+                } else if (!use_direct_fetcher && oxenc::is_base64(nodes_bin)) {
+                    std::vector<std::byte> converted_nodes;
+                    oxenc::from_base64(
+                            nodes_bin.begin(),
+                            nodes_bin.end(),
+                            std::back_inserter(converted_nodes));
+                    result = service_node::process_snode_cache_bin(converted_nodes);
+                } else
+                    result = service_node::process_snode_cache_bin(nodes_bin);
 
-            log::info(
-                    cat,
-                    "[Request {}] Refresh response #{} included {} nodes, {} invalid.",
-                    refresh_id,
-                    (i + 1),
-                    nodes.size(),
-                    invalid_count);
-            std::stable_sort(nodes.begin(), nodes.end());
-            processed_nodes.emplace_back(std::move(nodes));
-        } catch (const std::exception& e) {
-            std::chrono::milliseconds delay;
-
-            {
-                std::unique_lock lock{_cache_mutex};
+                log::info(
+                        cat,
+                        "[Request {}] Refresh response #{} included {} nodes, {} invalid.",
+                        refresh_id,
+                        (i + 1),
+                        nodes.size(),
+                        invalid_count);
+                std::stable_sort(nodes.begin(), nodes.end());
+                processed_nodes.emplace_back(std::move(nodes));
+            } catch (const std::exception& e) {
                 _snode_refresh_results.clear();
                 _snode_cache_refresh_failure_count++;
-                delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
+                auto delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
+
+                log::error(
+                        cat,
+                        "[Request {}] Discarding responses and retrying after {}ms due to invalid "
+                        "response #{}: {}.",
+                        refresh_id,
+                        delay.count(),
+                        (i + 1),
+                        e.what());
+                _loop->call_later(
+                        delay,
+                        [weak_self = weak_from_this(),
+                         refresh_id,
+                         use_direct_fetcher,
+                         total_requests] {
+                            if (auto self = weak_self.lock())
+                                for (uint8_t i = 0; i < total_requests; ++i)
+                                    self->_launch_next_refresh_request(
+                                            refresh_id, i, use_direct_fetcher, total_requests);
+                        });
+                return;
             }
-
-            log::error(
-                    cat,
-                    "[Request {}] Discarding responses and retrying after {}ms due to invalid "
-                    "response #{}: {}.",
-                    refresh_id,
-                    delay.count(),
-                    (i + 1),
-                    e.what());
-            _loop->call_later(
-                    delay,
-                    [weak_self = weak_from_this(), refresh_id, use_direct_fetcher, total_requests] {
-                        if (auto self = weak_self.lock())
-                            for (uint8_t i = 0; i < total_requests; ++i)
-                                self->_launch_next_refresh_request(
-                                        refresh_id, i, use_direct_fetcher, total_requests);
-                    });
-            return;
         }
-    }
 
-    // If we triggered multiple requests then filter to nodes that appear in the minimum number of
-    // results
-    std::vector<service_node> nodes;
+        // If we triggered multiple requests then filter to nodes that appear in the minimum number
+        // of results
+        std::vector<service_node> nodes;
 
-    if (processed_nodes.size() == 1)
-        nodes = processed_nodes[0];
-    else if (processed_nodes.size() > 1) {
-        const size_t required_count = _config.cache_min_num_refresh_presence_to_include_node;
+        if (processed_nodes.size() == 1)
+            nodes = processed_nodes[0];
+        else if (processed_nodes.size() > 1) {
+            const size_t required_count = _config.cache_min_num_refresh_presence_to_include_node;
 
-        struct Cursor {
-            const std::vector<service_node>* vec;
-            size_t index;
-        };
+            struct Cursor {
+                const std::vector<service_node>* vec;
+                size_t index;
+            };
 
-        auto cmp = [](const Cursor& a, const Cursor& b) {
-            return (*a.vec)[a.index] > (*b.vec)[b.index];  // min-heap
-        };
-        std::priority_queue<Cursor, std::vector<Cursor>, decltype(cmp)> heap(cmp);
+            auto cmp = [](const Cursor& a, const Cursor& b) {
+                return (*a.vec)[a.index] > (*b.vec)[b.index];  // min-heap
+            };
+            std::priority_queue<Cursor, std::vector<Cursor>, decltype(cmp)> heap(cmp);
 
-        // Initialise heap with first element of each set
-        for (const auto& vec : processed_nodes)
-            if (!vec.empty())
-                heap.push(Cursor{&vec, 0});
+            // Initialise heap with first element of each set
+            for (const auto& vec : processed_nodes)
+                if (!vec.empty())
+                    heap.push(Cursor{&vec, 0});
 
-        while (!heap.empty()) {
-            service_node current = (*heap.top().vec)[heap.top().index];
-            size_t count = 0;
-
-            std::vector<Cursor> same;
-
-            // Pop all equal elements
             while (!heap.empty()) {
-                const auto& top = heap.top();
-                const service_node& val = (*top.vec)[top.index];
+                service_node current = (*heap.top().vec)[heap.top().index];
+                size_t count = 0;
 
-                if (val < current || current < val)
-                    break;
+                std::vector<Cursor> same;
 
-                same.push_back(top);
-                heap.pop();
-            }
+                // Pop all equal elements
+                while (!heap.empty()) {
+                    const auto& top = heap.top();
+                    const service_node& val = (*top.vec)[top.index];
 
-            if (same.size() >= required_count)
-                nodes.push_back(current);
+                    if (val < current || current < val)
+                        break;
 
-            // Advance all matching cursors
-            for (auto& cur : same) {
-                size_t next_index = cur.index + 1;
+                    same.push_back(top);
+                    heap.pop();
+                }
 
-                if (next_index < cur.vec->size())
-                    heap.push(Cursor{cur.vec, next_index});
+                if (same.size() >= required_count)
+                    nodes.push_back(current);
+
+                // Advance all matching cursors
+                for (auto& cur : same) {
+                    size_t next_index = cur.index + 1;
+
+                    if (next_index < cur.vec->size())
+                        heap.push(Cursor{cur.vec, next_index});
+                }
             }
         }
-    }
 
-    // Shuffle the nodes so we don't have a specific order
-    std::shuffle(nodes.begin(), nodes.end(), csrng);
-    log::info(cat, "[Request {}] Cache refresh complete with {} nodes.", refresh_id, nodes.size());
-
-    std::vector<std::function<void()>> after_refresh;
-
-    {
-        std::unique_lock lock{_cache_mutex};
+        // Shuffle the nodes so we don't have a specific order
+        std::shuffle(nodes.begin(), nodes.end(), csrng);
+        log::info(
+                cat,
+                "[Request {}] Cache refresh complete with {} nodes.",
+                refresh_id,
+                nodes.size());
 
         // Update the in-memory caches and, since the swarm cache could now be invalid, clear it and
         // re-generate `_all_swarms`
@@ -878,160 +822,184 @@ void SnodePool::_on_refresh_complete(
         _refresh_candidate_nodes.clear();
         _snode_cache_refresh_failure_count = 0;
 
-        // Move any callbacks (so they can be called after the lock is freed)
-        after_refresh = std::move(_after_snode_cache_refresh);
+        if (_disk_manager)
+            _disk_manager->trigger(
+                    io_key_write_cache, [path = _snode_cache_file_path, cache = _snode_cache] {
+                        SnodePool::_perform_cache_write(std::move(path), std::move(cache));
+                    });
 
-        // Flag that we need to write the updated cache to disk
-        _need_write = true;
-    }
+        // Trigger any callbacks
+        if (!_after_snode_cache_refresh.empty()) {
+            log::debug(
+                    cat, "Executing {} post-refresh callbacks.", _after_snode_cache_refresh.size());
 
-    _disk_write_cv.notify_one();
-
-    // Trigger any callbacks
-    if (!after_refresh.empty()) {
-        log::debug(cat, "Executing {} post-refresh callbacks.", after_refresh.size());
-
-        for (const auto& cb : after_refresh) {
-            try {
-                cb();
-            } catch (const std::exception& e) {
-                log::error(cat, "Exception thrown in a post-refresh callback: {}", e.what());
+            for (const auto& cb : _after_snode_cache_refresh) {
+                try {
+                    cb();
+                } catch (const std::exception& e) {
+                    log::error(cat, "Exception thrown in a post-refresh callback: {}", e.what());
+                }
             }
+
+            // Clear the callbacks
+            _after_snode_cache_refresh.clear();
         }
-    }
+    });
 }
 
 // MARK: Public Functions
 
 void SnodePool::suspend() {
-    std::unique_lock lock{_cache_mutex};
-    _suspended = true;
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _suspended = true;
 
-    // Force a write immediately if we have dirty data
-    if (_strikes_dirty) {
-        _need_write = true;
-        _disk_write_cv.notify_one();
-    }
+        // Force a strike write immediately if we had one scheduled
+        if (_strikes_flush_scheduled && _disk_manager)
+            _disk_manager->trigger(
+                    io_key_write_strikes, [path = _strikes_file_path, strikes = _snode_strikes] {
+                        SnodePool::_perform_strikes_write(std::move(path), std::move(strikes));
+                    });
 
-    log::info(cat, "Suspended.");
+        log::info(cat, "Suspended.");
+    });
 }
 
 void SnodePool::resume() {
-    std::unique_lock lock{_cache_mutex};
-    if (!_suspended)
-        return;
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        if (!_suspended)
+            return;
 
-    _suspended = false;
-    log::info(cat, "Resumed.");
+        _suspended = false;
+        log::info(cat, "Resumed.");
+    });
 }
 
 void SnodePool::set_routed_fetcher(
         network_fetcher_t routed_fetcher, fetcher_connectivity_check_t connectivity_check) {
-    std::unique_lock lock{_cache_mutex};
-    _routed_fetcher = std::move(routed_fetcher);
-    _routed_fetcher_connectivity_check = std::move(connectivity_check);
+    _loop->call([this, rf = std::move(routed_fetcher), cc = std::move(connectivity_check)] {
+        _routed_fetcher = std::move(rf);
+        _routed_fetcher_connectivity_check = std::move(cc);
+    });
 }
 
 size_t SnodePool::size() {
-    std::lock_guard lock{_cache_mutex};
-    return _snode_cache.size();
+    return _loop->call_get([this] { return _snode_cache.size(); });
 }
 
 void SnodePool::clear_cache() {
-    {
-        std::lock_guard lock{_cache_mutex};
-        _need_clear_cache = true;
-    }
-    _disk_write_cv.notify_one();
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _snode_cache = {};
+        _all_swarms = {};
+        _swarm_cache = {};
+
+        if (_disk_manager)
+            _disk_manager->trigger(io_key_clear_cache, [path = _snode_cache_file_path] {
+                SnodePool::_clear_disk_cache(std::move(path));
+            });
+    });
 }
 
 void SnodePool::record_node_failure(const service_node& node, bool permanent) {
-    record_node_failure(ed25519_pubkey::from_bytes(node.view_remote_key()), permanent);
+    record_node_failure(node.remote_pubkey, permanent);
 }
 
 void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
-    std::lock_guard lock{_cache_mutex};
+    _loop->call([this, key, permanent] {
+        uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
+                               std::chrono::system_clock::now().time_since_epoch())
+                               .count();
 
-    uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
-                           std::chrono::system_clock::now().time_since_epoch())
-                           .count();
-
-    if (permanent) {
-        for (int i = 0; i < _config.cache_node_strike_threshold; ++i) {
+        if (permanent) {
+            for (int i = 0; i < _config.cache_node_strike_threshold; ++i) {
+                _snode_strikes[key].push_back(now);
+            }
+        } else {
             _snode_strikes[key].push_back(now);
         }
-    } else {
-        _snode_strikes[key].push_back(now);
-    }
 
-    _strikes_dirty = true;
-    log::trace(
-            cat, "Recorded strike for node {}, total: {}", key.hex(), _snode_strikes[key].size());
+        log::trace(
+                cat,
+                "Recorded strike for node {}, total: {}",
+                key.hex(),
+                _snode_strikes[key].size());
 
-    // Throttle persisting the strikes to disk to at most every X minutes
-    if (!_strikes_flush_scheduled && !_shut_down_disk_thread) {
-        _strikes_flush_scheduled = true;
+        // Throttle persisting the strikes to disk to at most every X minutes
+        if (!_strikes_flush_scheduled && !_suspended) {
+            _strikes_flush_scheduled = true;
 
-        _loop->call_later(SAVE_THROTTLE, [weak_self = weak_from_this()] {
-            if (auto self = weak_self.lock()) {
-                std::lock_guard lock{self->_cache_mutex};
+            _loop->call_later(SAVE_THROTTLE, [weak_self = weak_from_this()] {
+                if (auto self = weak_self.lock()) {
+                    self->_strikes_flush_scheduled = false;
 
-                if (self->_strikes_dirty) {
-                    self->_disk_write_cv.notify_one();
+                    if (self->_suspended)
+                        return;
+
+                    if (self->_disk_manager)
+                        self->_disk_manager->trigger(
+                                io_key_write_strikes,
+                                [path = self->_strikes_file_path, strikes = self->_snode_strikes] {
+                                    SnodePool::_perform_strikes_write(
+                                            std::move(path), std::move(strikes));
+                                });
                 }
-                self->_strikes_flush_scheduled = false;
-            }
-        });
-    }
+            });
+        }
+    });
 }
 
 uint16_t SnodePool::node_strike_count(const service_node& node) {
-    return node_strike_count(ed25519_pubkey::from_bytes(node.view_remote_key()));
+    return node_strike_count(node.remote_pubkey);
 }
 
 uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
-    std::lock_guard lock{_cache_mutex};
-    if (!_snode_strikes.contains(key))
-        return 0;
+    return _loop->call_get([this, &key] {
+        if (!_snode_strikes.contains(key))
+            return uint16_t{0};
 
-    const auto& stamps = _snode_strikes.at(key);
+        const auto& stamps = _snode_strikes.at(key);
 
-    uint64_t threshold =
-            std::chrono::duration_cast<std::chrono::seconds>(
-                    std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
-                    .count();
+        uint64_t threshold =
+                std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
+                        .count();
 
-    uint16_t count = 0;
-    for (auto t : stamps)
-        if (t > threshold)
-            count++;
+        uint16_t count = 0;
+        for (auto t : stamps)
+            if (t > threshold)
+                count++;
 
-    return count;
+        return count;
+    });
 }
 
 void SnodePool::clear_node_strikes() {
-    std::lock_guard lock{_cache_mutex};
-    _snode_strikes.clear();
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _snode_strikes.clear();
+        _strikes_flush_scheduled = false;
 
-    // Immediately write to disk after clearing the snode strikes
-    _strikes_dirty = true;
-    _disk_write_cv.notify_one();
-    _strikes_flush_scheduled = false;
+        // Immediately write to disk after clearing the snode strikes
+        if (_disk_manager)
+            _disk_manager->trigger(io_key_write_strikes, [path = _strikes_file_path] {
+                SnodePool::_perform_strikes_write(std::move(path), {});
+            });
+    });
 }
 
 void SnodePool::refresh_if_needed(
         const std::vector<service_node>& in_use_nodes, std::function<void()> on_refresh_complete) {
-    bool needs_to_start_refresh = false;
-    bool already_running = false;
-    std::optional<std::chrono::milliseconds> delay;
-
-    {
-        std::lock_guard lock{_cache_mutex};
-
+    _loop->call([this, in_use_nodes, cb = std::move(on_refresh_complete)] {
         if (_suspended) {
             log::info(cat, "Ignoring refresh as pool is suspended.");
             return;
         }
+
+        bool needs_to_start_refresh = false;
+        bool already_running = false;
+        std::optional<std::chrono::milliseconds> delay;
 
         // Don't bother if we are alread doing a refresh
         if (_current_snode_cache_refresh_id)
@@ -1047,11 +1015,10 @@ void SnodePool::refresh_if_needed(
 
                 std::unordered_set<ed25519_pubkey> in_use_keys;
                 for (const auto& node : in_use_nodes)
-                    in_use_keys.insert(ed25519_pubkey::from_bytes(node.view_remote_key()));
+                    in_use_keys.insert(node.remote_pubkey);
 
                 for (const auto& node : _snode_cache) {
-                    auto pubkey = ed25519_pubkey::from_bytes(node.view_remote_key());
-                    auto it = _snode_strikes.find(pubkey);
+                    auto it = _snode_strikes.find(node.remote_pubkey);
                     if (it != _snode_strikes.end() &&
                         it->second.size() >= _config.cache_node_strike_threshold)
                         continue;
@@ -1059,7 +1026,7 @@ void SnodePool::refresh_if_needed(
                     // If the caller considers the node as already in use then it wouldn't be
                     // considered usable so ignore it for the purpose of determining whether we have
                     // enough nodes to avoid a refresh
-                    if (in_use_keys.count(pubkey))
+                    if (in_use_keys.count(node.remote_pubkey))
                         continue;
 
                     usable_nodes_count++;
@@ -1078,22 +1045,22 @@ void SnodePool::refresh_if_needed(
         }
 
         // If a refresh is needed or already running, queue the callback
-        if ((needs_to_start_refresh || already_running) && on_refresh_complete)
-            _after_snode_cache_refresh.push_back(std::move(on_refresh_complete));
-    }
+        if ((needs_to_start_refresh || already_running) && cb)
+            _after_snode_cache_refresh.push_back(std::move(cb));
 
-    // Kick off a refresh if needed (if none was needed then we should trigger the
-    // on_refresh_complete callback immediately)
-    if (needs_to_start_refresh)
-        if (delay) {
-            _loop->call_later(*delay, [weak_self = weak_from_this()] {
-                if (auto self = weak_self.lock())
-                    self->_refresh_snode_cache();
-            });
-        } else
-            _refresh_snode_cache();
-    else if (!already_running && on_refresh_complete)
-        on_refresh_complete();
+        // Kick off a refresh if needed (if none was needed then we should trigger the
+        // on_refresh_complete callback immediately)
+        if (needs_to_start_refresh)
+            if (delay) {
+                _loop->call_later(*delay, [weak_self = weak_from_this()] {
+                    if (auto self = weak_self.lock())
+                        self->_refresh_snode_cache();
+                });
+            } else
+                _refresh_snode_cache();
+        else if (!already_running && cb)
+            cb();
+    });
 }
 
 std::vector<service_node> SnodePool::get_unused_nodes(
@@ -1106,126 +1073,178 @@ std::vector<service_node> SnodePool::get_unused_nodes(
             self->refresh_if_needed(exclude_nodes);
     });
 
-    // Then try to get the desired number of nodes from the current cache
-    std::vector<service_node> result;
-    result.reserve(count);
-
-    std::unordered_set<ed25519_pubkey> exclusion_keys;
-    exclusion_keys.reserve(exclude_nodes.size());
-    for (const auto& node : exclude_nodes)
-        exclusion_keys.insert(ed25519_pubkey::from_bytes(node.view_remote_key()));
-
-    std::unordered_set<oxen::quic::ipv4> used_subnets;
-    if (_config.enforce_subnet_diversity)
-        for (const auto& node : exclude_nodes)
-            used_subnets.insert(node.ip.to_base(24));
-
-    std::lock_guard lock{_cache_mutex};
-
-    if (_snode_cache.empty()) {
-        log::warning(cat, "Cannot get unused nodes: snode cache is empty.");
-        return result;
-    }
-
-    // Pick a random starting index to start checking for unused nodes
-    size_t start_index = random::get_uniform_distribution<size_t>(0, _snode_cache.size() - 1);
-
-    for (size_t i = 0; i < _snode_cache.size(); ++i) {
-        if (result.size() >= count)
-            break;
-
-        const size_t current_index = (start_index + i) % _snode_cache.size();
-        const auto& node = _snode_cache[current_index];
-        auto current_key = ed25519_pubkey::from_bytes(node.view_remote_key());
-
-        // Skip nodes explicitly excluded (needed in case subnet diversity is disabled)
-        if (exclusion_keys.count(current_key))
-            continue;
-
-        // Skip nodes with too many failures
-        auto it = _snode_strikes.find(current_key);
-        if (it != _snode_strikes.end() && it->second.size() >= _config.cache_node_strike_threshold)
-            continue;
-
-        // Skip nodes whos IP addresses are in the exclusion list
-        if (_config.enforce_subnet_diversity) {
-            auto subnet = node.ip.to_base(24);
-            if (used_subnets.count(subnet))
-                continue;
+    return _loop->call_get([this, count, exclude_nodes] {
+        if (_snode_cache.empty()) {
+            log::warning(cat, "Cannot get unused nodes: snode cache is empty.");
+            return std::vector<service_node>{};
         }
 
-        result.push_back(node);
+        // Then try to get the desired number of nodes from the current cache
+        std::vector<service_node> result;
+        result.reserve(count);
 
+        std::unordered_set<ed25519_pubkey> exclusion_keys;
+        exclusion_keys.reserve(exclude_nodes.size());
+        for (const auto& node : exclude_nodes)
+            exclusion_keys.insert(node.remote_pubkey);
+
+        std::unordered_set<oxen::quic::ipv4> used_subnets;
         if (_config.enforce_subnet_diversity)
-            used_subnets.insert(node.ip.to_base(24));
-    }
+            for (const auto& node : exclude_nodes)
+                used_subnets.insert(node.ip.to_base(24));
 
-    if (result.size() < count)
-        log::warning(cat, "Could only find {}/{} suitable unused nodes.", result.size(), count);
+        // Pick a random starting index to start checking for unused nodes
+        size_t start_index = random::get_uniform_distribution<size_t>(0, _snode_cache.size() - 1);
 
-    return result;
+        for (size_t i = 0; i < _snode_cache.size(); ++i) {
+            if (result.size() >= count)
+                break;
+
+            const size_t current_index = (start_index + i) % _snode_cache.size();
+            const auto& node = _snode_cache[current_index];
+
+            // Skip nodes explicitly excluded (needed in case subnet diversity is disabled)
+            if (exclusion_keys.count(node.remote_pubkey))
+                continue;
+
+            // Skip nodes with too many failures
+            auto it = _snode_strikes.find(node.remote_pubkey);
+            if (it != _snode_strikes.end() &&
+                it->second.size() >= _config.cache_node_strike_threshold)
+                continue;
+
+            // Skip nodes whos IP addresses are in the exclusion list
+            if (_config.enforce_subnet_diversity) {
+                auto subnet = node.ip.to_base(24);
+                if (used_subnets.count(subnet))
+                    continue;
+            }
+
+            result.push_back(node);
+
+            if (_config.enforce_subnet_diversity)
+                used_subnets.insert(node.ip.to_base(24));
+        }
+
+        if (result.size() < count)
+            log::warning(cat, "Could only find {}/{} suitable unused nodes.", result.size(), count);
+
+        return result;
+    });
 }
 
 void SnodePool::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
+        bool ignore_strike_count,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
     log::trace(cat, "{} called for {}.", __PRETTY_FUNCTION__, swarm_pubkey.hex());
 
-    std::unique_lock lock{_cache_mutex};
+    _loop->call([this, swarm_pubkey, ignore_strike_count, cb = std::move(callback)] {
+        auto filter_by_strikes =
+                [this](std::vector<service_node> nodes) -> std::vector<service_node> {
+            auto get_strike_count = [this](const ed25519_pubkey& key) -> size_t {
+                auto it = _snode_strikes.find(key);
+                return (it != _snode_strikes.end() ? it->second.size() : 0);
+            };
 
-    // Check the in-memory swarm cache first
-    if (auto it = _swarm_cache.find(swarm_pubkey); it != _swarm_cache.end())
-        return callback(it->second.first, it->second.second);
+            std::vector<service_node> under_threshold;
+            std::vector<service_node> over_threshold;
 
-    // If we have no snode cache or no swarms then we need to rebuild the cache (which will also
-    // rebuild the swarms) and run this request again
-    if (_snode_cache.empty() || _all_swarms.empty()) {
-        log::debug(cat, "Cache is empty, deferring get_swarm until refresh is complete.");
+            for (const auto& node : nodes) {
+                auto strikes = get_strike_count(node.remote_pubkey);
 
-        // Queue this entire function call to be re-run after the refresh.
-        _after_snode_cache_refresh.push_back([this, swarm_pubkey, cb = std::move(callback)]() {
-            this->get_swarm(swarm_pubkey, std::move(cb));
+                if (strikes < _config.cache_node_strike_threshold)
+                    under_threshold.emplace_back(node);
+                else
+                    over_threshold.emplace_back(node);
+            }
+
+            std::shuffle(under_threshold.begin(), under_threshold.end(), csrng);
+
+            // Only include nodes that are over the strike threshold if we need to
+            if (over_threshold.empty() || under_threshold.size() >= _config.cache_min_swarm_size)
+                return under_threshold;
+
+            // Shuffle nodes with the same strike count
+            std::sort(
+                    over_threshold.begin(),
+                    over_threshold.end(),
+                    [&](const auto& a, const auto& b) {
+                        return get_strike_count(a.remote_pubkey) <
+                               get_strike_count(b.remote_pubkey);
+                    });
+
+            auto start = over_threshold.begin();
+            while (start != over_threshold.end()) {
+                auto strike_count = get_strike_count(start->remote_pubkey);
+                auto end = std::find_if(start, over_threshold.end(), [&](const auto& node) {
+                    return get_strike_count(node.remote_pubkey) != strike_count;
+                });
+                std::shuffle(start, end, csrng);
+                start = end;
+            }
+
+            size_t needed = (_config.cache_min_swarm_size - under_threshold.size());
+            size_t available = std::min(needed, over_threshold.size());
+            std::vector<service_node> result;
+            result.reserve(under_threshold.size() + available);
+            result.insert(
+                    result.end(),
+                    std::make_move_iterator(under_threshold.begin()),
+                    std::make_move_iterator(under_threshold.end()));
+            result.insert(
+                    result.end(),
+                    std::make_move_iterator(over_threshold.begin()),
+                    std::make_move_iterator(over_threshold.begin() + available));
+
+            return result;
+        };
+
+        // Check the in-memory swarm cache first
+        if (auto it = _swarm_cache.find(swarm_pubkey); it != _swarm_cache.end()) {
+            const auto& swarm_nodes = it->second.second;
+
+            return cb(
+                    it->second.first,
+                    (ignore_strike_count ? swarm_nodes : filter_by_strikes(swarm_nodes)));
+        }
+
+        // If we have no snode cache or no swarms then we need to rebuild the cache (which will also
+        // rebuild the swarms) and run this request again
+        if (_snode_cache.empty() || _all_swarms.empty()) {
+            log::debug(cat, "Cache is empty, deferring get_swarm until refresh is complete.");
+
+            // Queue this entire function call to be re-run after the refresh.
+            _after_snode_cache_refresh.push_back(
+                    [this, swarm_pubkey, ignore_strike_count, cb = std::move(cb)]() {
+                        this->get_swarm(swarm_pubkey, ignore_strike_count, std::move(cb));
+                    });
+
+            // If a refresh isn't already running we need to start one
+            if (!_current_snode_cache_refresh_id)
+                _refresh_snode_cache();
+
+            return;
+        }
+
+        // Trigger a non-blocking background refresh if the data is stale
+        _loop->call_soon([weak_self = weak_from_this()] {
+            if (auto self = weak_self.lock())
+                self->refresh_if_needed({});
         });
 
-        // Check if a refresh is already running. If not, we need to start one.
-        bool needs_to_start_refresh = !_current_snode_cache_refresh_id;
-
-        // We MUST unlock before calling '_refresh_snode_cache' as it acquires a lock itself
-        lock.unlock();
-
-        // Start the refresh if we're the ones who decided it was needed
-        if (needs_to_start_refresh)
-            _refresh_snode_cache();
-
-        return;
-    }
-
-    // Copy the required data and release the lock so we don't hold it during calculation
-    auto all_swarms_copy = _all_swarms;
-    lock.unlock();
-
-    // Trigger a non-blocking background refresh if the data is stale
-    _loop->call_soon([weak_self = weak_from_this()] {
-        if (auto self = weak_self.lock())
-            self->refresh_if_needed({});
-    });
-
-    // Perform the swarm calculation using our local copy of the data
-    auto swarm = swarm::get_swarm(swarm_pubkey, all_swarms_copy);
-    log::info(
-            cat,
-            "Found swarm with {} nodes for {}, adding to cache.",
-            swarm.second.size(),
-            swarm_pubkey.hex());
-
-    // Update our in-memory cache (need to re-acquire the lock to do so)
-    {
-        std::lock_guard write_lock{_cache_mutex};
+        // Perform the swarm calculation using our local copy of the data
+        auto swarm = swarm::get_swarm(swarm_pubkey, _all_swarms);
         _swarm_cache[swarm_pubkey] = swarm;
-    }
 
-    // Trigger the callback with the swarm we found
-    callback(swarm.first, swarm.second);
+        log::info(
+                cat,
+                "Found swarm with {} nodes for {}, adding to cache.",
+                swarm.second.size(),
+                swarm_pubkey.hex());
+
+        cb(swarm.first, (ignore_strike_count ? swarm.second : filter_by_strikes(swarm.second)));
+    });
 }
 
 }  // namespace session::network

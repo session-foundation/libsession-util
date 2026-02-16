@@ -45,6 +45,7 @@ namespace {
                 main_config.netid,
                 main_config.seed_nodes,
                 main_config.cache_min_size,
+                main_config.cache_min_swarm_size,
                 main_config.cache_num_nodes_to_use_for_refresh,
                 main_config.cache_min_num_refresh_presence_to_include_node,
                 main_config.cache_node_strike_threshold,
@@ -71,10 +72,15 @@ namespace {
 
     config::OnionRequestRouterConfig build_onion_request_router_config(
             const config::Config& main_config) {
-        return {main_config.retry_delay,
+        return {main_config.cache_directory,
+                main_config.onionreq_edge_node_cache_duration,
+                main_config.netid,
+                main_config.seed_nodes,
+                main_config.retry_delay,
                 main_config.path_length,
                 main_config.onionreq_path_strike_threshold,
                 main_config.onionreq_path_build_retry_limit,
+                main_config.onionreq_path_rotation_frequency,
                 main_config.cache_node_strike_threshold,
                 main_config.onionreq_disable_pre_build_paths,
                 main_config.onionreq_single_path_mode,
@@ -112,6 +118,7 @@ Network::Network(config::Config config) : config{config} {
 
     // Now we can properly do any setup needed
     _loop = std::make_shared<quic::Loop>();
+    _disk_manager = std::make_shared<DiskManager>();
 
     // Setup the transport layer
     switch (config.transport) {
@@ -137,7 +144,7 @@ Network::Network(config::Config config) : config{config} {
                     "Transport provided to the SnodePool bootstrap fetcher has been destroyed.");
     };
     _snode_pool = std::make_shared<SnodePool>(
-            std::move(build_snode_pool_config(config)), _loop, bootstrap_fetcher);
+            std::move(build_snode_pool_config(config)), _loop, _disk_manager, bootstrap_fetcher);
 
     // Additional transport configuration
     _transport->set_node_failure_reporter(
@@ -152,6 +159,7 @@ Network::Network(config::Config config) : config{config} {
             _router = std::make_unique<OnionRequestRouter>(
                     std::move(build_onion_request_router_config(config)),
                     _loop,
+                    _disk_manager,
                     _snode_pool,
                     _transport);
             break;
@@ -292,8 +300,12 @@ std::vector<PathInfo> Network::get_active_paths() {
 
 void Network::get_swarm(
         session::network::x25519_pubkey swarm_pubkey,
+        bool ignore_strike_count,
         std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback) {
-    _loop->call([this, pubkey = std::move(swarm_pubkey), cb = std::move(callback)] {
+    _loop->call([this,
+                 pubkey = std::move(swarm_pubkey),
+                 ignore_strike_count,
+                 cb = std::move(callback)] {
         if (!_snode_pool) {
             log::warning(
                     cat,
@@ -302,7 +314,7 @@ void Network::get_swarm(
             return cb(INVALID_SWARM_ID, {});
         }
 
-        _snode_pool->get_swarm(std::move(pubkey), std::move(cb));
+        _snode_pool->get_swarm(std::move(pubkey), ignore_strike_count, std::move(cb));
     });
 }
 
@@ -621,6 +633,7 @@ void Network::_handle_421_retry(
 
                 _snode_pool->get_swarm(
                         swarm_pubkey,
+                        false,
                         [this,
                          req_to_retry = std::move(req_to_retry),
                          cb = std::move(cb),
@@ -957,8 +970,9 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.cache_min_lifetime_ms =
             std::chrono::duration_cast<std::chrono::milliseconds>(cpp_defaults.cache_min_lifetime)
                     .count();
-    ;
+
     config.cache_min_size = cpp_defaults.cache_min_size;
+    config.cache_min_swarm_size = cpp_defaults.cache_min_swarm_size;
     config.cache_num_nodes_to_use_for_refresh = cpp_defaults.cache_num_nodes_to_use_for_refresh;
     config.cache_min_num_refresh_presence_to_include_node =
             cpp_defaults.cache_min_num_refresh_presence_to_include_node;
@@ -972,6 +986,10 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.onionreq_min_path_count_file = cpp_defaults.onionreq_min_path_counts[PathCategory::file];
     config.onionreq_single_path_mode = cpp_defaults.onionreq_single_path_mode;
     config.onionreq_disable_pre_build_paths = cpp_defaults.onionreq_disable_pre_build_paths;
+    config.onionreq_path_rotation_frequency_minutes =
+            cpp_defaults.onionreq_path_rotation_frequency.count();
+    config.onionreq_edge_node_cache_duration_days =
+            cpp_defaults.onionreq_edge_node_cache_duration.count();
 
     config.quic_handshake_timeout_seconds =
             std::chrono::duration_cast<std::chrono::seconds>(cpp_defaults.quic_handshake_timeout)
@@ -1093,6 +1111,9 @@ LIBSESSION_C_API bool session_network_init(
         if (config->cache_min_size > 0)
             cpp_opts.emplace_back(opt::cache_min_size{config->cache_min_size});
 
+        if (config->cache_min_swarm_size > 0)
+            cpp_opts.emplace_back(opt::cache_min_swarm_size{config->cache_min_swarm_size});
+
         // A `0` value is valid for these options
         cpp_opts.emplace_back(opt::cache_num_nodes_to_use_for_refresh{
                 config->cache_num_nodes_to_use_for_refresh});
@@ -1134,6 +1155,15 @@ LIBSESSION_C_API bool session_network_init(
 
                 if (config->onionreq_disable_pre_build_paths)
                     cpp_opts.emplace_back(opt::onionreq_disable_pre_build_paths{});
+
+                if (config->onionreq_path_rotation_frequency_minutes > 0)
+                    cpp_opts.emplace_back(
+                            opt::onionreq_path_rotation_frequency{std::chrono::minutes{
+                                    config->onionreq_path_rotation_frequency_minutes}});
+
+                if (config->onionreq_edge_node_cache_duration_days > 0)
+                    cpp_opts.emplace_back(opt::onionreq_edge_node_cache_duration{
+                            std::chrono::days{config->onionreq_edge_node_cache_duration_days}});
                 break;
 
             case SESSION_NETWORK_ROUTER_SESSION_ROUTER:
@@ -1394,11 +1424,13 @@ LIBSESSION_C_API void session_network_paths_free(session_path_info* paths) {
 LIBSESSION_C_API void session_network_get_swarm(
         network_object* network,
         const char* swarm_pubkey_hex,
+        bool ignore_strike_count,
         void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
         void* ctx) {
     assert(swarm_pubkey_hex && callback);
     unbox(network).get_swarm(
             x25519_pubkey::from_hex({swarm_pubkey_hex, 64}),
+            ignore_strike_count,
             [cb = std::move(callback), ctx](swarm_id_t, std::vector<service_node> nodes) {
                 auto c_nodes = network::detail::convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);

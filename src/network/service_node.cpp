@@ -12,11 +12,11 @@ using namespace oxen::log::literals;
 namespace session::network {
 
 session::network::x25519_pubkey service_node::swarm_pubkey() const {
-    return session::network::compute_x25519_pubkey(view_remote_key());
+    return session::network::compute_x25519_pubkey(remote_pubkey);
 }
 
 std::string service_node::to_string() const {
-    return oxenc::to_hex(_remote_pubkey);
+    return remote_pubkey.hex();
 }
 
 std::string service_node::to_https_string() const {
@@ -28,12 +28,7 @@ std::string service_node::to_omq_string() const {
 }
 
 service_node service_node::from(const network_service_node& node) {
-    std::vector<unsigned char> pubkey;
-    pubkey.reserve(32);
-    oxenc::from_hex(
-            node.ed25519_pubkey_hex, node.ed25519_pubkey_hex + 64, std::back_inserter(pubkey));
-
-    return {std::move(pubkey),
+    return {ed25519_pubkey::from_hex(node.ed25519_pubkey_hex),
             oxen::quic::ipv4{std::span<const uint8_t, 4>(node.ip, 4)},
             node.https_port,
             node.omq_port,
@@ -42,7 +37,7 @@ service_node service_node::from(const network_service_node& node) {
 }
 
 void service_node::into(network_service_node& n) const {
-    auto ed25519_pubkey_hex = oxenc::to_hex(view_remote_key());
+    auto ed25519_pubkey_hex = remote_pubkey.hex();
     strncpy(n.ed25519_pubkey_hex, ed25519_pubkey_hex.c_str(), 64);
     n.ed25519_pubkey_hex[64] = '\0';  // Ensure null termination
     n.ip[0] = (ip.addr >> 24) & 0xFF;
@@ -125,7 +120,12 @@ service_node service_node::legacy_from_json(nlohmann::json json) {
     if (json.contains("swarm_id"))
         swarm_id = json["swarm_id"].get<swarm_id_t>();
 
-    return {pubkey, quic::ipv4{ip}, https_port, omq_port, storage_server_version, swarm_id};
+    return {ed25519_pubkey::from_bytes(pubkey),
+            quic::ipv4{ip},
+            https_port,
+            omq_port,
+            storage_server_version,
+            swarm_id};
 }
 
 service_node service_node::legacy_from_disk(std::string_view str) {
@@ -156,24 +156,18 @@ service_node service_node::legacy_from_disk(std::string_view str) {
     swarm_id_t swarm_id = INVALID_SWARM_ID;
     quic::parse_int(parts[4], swarm_id);
 
-    std::vector<unsigned char> pubkey;
-    pubkey.reserve(32);
-    oxenc::from_hex(parts[3].begin(), parts[3].end(), std::back_inserter(pubkey));
-
     return {
-            pubkey,                             // ed25519_pubkey
-            quic::ipv4{std::string{parts[0]}},  // ip
-            0,                                  // https_port
-            port,                               // omq_port
-            version_array,                      // storage_server_version
-            swarm_id                            // swarm_id
+            ed25519_pubkey::from_hex(parts[3]),  // ed25519_pubkey
+            quic::ipv4{std::string{parts[0]}},   // ip
+            0,                                   // https_port
+            port,                                // omq_port
+            version_array,                       // storage_server_version
+            swarm_id                             // swarm_id
     };
 }
 
 std::string service_node::legacy_to_disk() const {
     // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
-    auto ed25519_pubkey_hex = oxenc::to_hex(view_remote_key());
-
     return fmt::format(
             "{}|{}|{}.{}.{}|{}|{}",
             host(),
@@ -181,7 +175,7 @@ std::string service_node::legacy_to_disk() const {
             storage_server_version[0],
             storage_server_version[1],
             storage_server_version[2],
-            ed25519_pubkey_hex,
+            remote_pubkey.hex(),
             swarm_id);
 }
 
@@ -193,10 +187,6 @@ service_node service_node::from_disk(std::string_view str) {
     if (parts[0].size() != 64 || !oxenc::is_hex(parts[0]))
         throw std::invalid_argument{
                 "Invalid service node serialisation: pubkey is not hex or has wrong size"};
-
-    std::vector<unsigned char> pubkey;
-    pubkey.reserve(32);
-    oxenc::from_hex(parts[0].begin(), parts[0].end(), std::back_inserter(pubkey));
 
     uint16_t https_port, omq_port;
     if (!quic::parse_int(parts[2], https_port))
@@ -219,7 +209,7 @@ service_node service_node::from_disk(std::string_view str) {
     swarm_id_t swarm_id = INVALID_SWARM_ID;
     quic::parse_int(parts[5], swarm_id);
 
-    return {pubkey,
+    return {ed25519_pubkey::from_hex(parts[0]),
             quic::ipv4{std::string{parts[1]}},
             https_port,
             omq_port,
@@ -308,7 +298,7 @@ std::pair<std::vector<service_node>, int> service_node::process_snode_cache_bin(
             note_ptr += VERSION_SIZE;
 
             nodes.emplace_back(
-                    std::move(pubkey),
+                    ed25519_pubkey::from_bytes(std::move(pubkey)),
                     ip,
                     https_port,
                     quic_port,
