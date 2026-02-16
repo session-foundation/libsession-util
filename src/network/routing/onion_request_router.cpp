@@ -260,7 +260,7 @@ std::string OnionPath::to_string() const {
 
 cached_edge_node cached_edge_node::from_disk(std::string_view str) {
     auto parts = split(str, "|");
-    if (parts.size() >= 7)  // Support old format without timestamp
+    if (parts.size() < 7)
         throw std::invalid_argument("Invalid cached edge node serialisation: {}"_format(str));
 
     // Parse the service_node (first 6 parts)
@@ -269,16 +269,12 @@ cached_edge_node cached_edge_node::from_disk(std::string_view str) {
 
     // Parse timestamp if present, otherwise use current time
     std::chrono::system_clock::time_point cached_at;
-    if (parts.size() >= 7) {
-        int64_t timestamp;
-        if (quic::parse_int(parts[6], timestamp))
-            cached_at = std::chrono::system_clock::from_time_t(static_cast<time_t>(timestamp));
-        else
-            cached_at = std::chrono::system_clock::now();
-    } else {
-        cached_at = std::chrono::system_clock::now();  // Old format, assume cached now
-    }
-
+    int64_t timestamp;
+    if (quic::parse_int(parts[6], timestamp))
+        cached_at = std::chrono::system_clock::from_time_t(static_cast<time_t>(timestamp));
+    else
+        cached_at = std::chrono::system_clock::now();
+    
     return {std::move(node), cached_at};
 }
 
@@ -414,6 +410,7 @@ void OnionRequestRouter::_load_from_disk() {
             log::warning(cat, "Skipped {} invalid entries in edge node cache.", invalid_entries);
 
         std::shuffle(loaded_edge_nodes.begin(), loaded_edge_nodes.end(), csrng);
+        _cached_edge_nodes = std::move(loaded_edge_nodes);
 
         log::info(cat, "Loaded cache of {} edge nodes.", _cached_edge_nodes.size());
     } catch (const empty_file_exception) {
@@ -462,9 +459,9 @@ void OnionRequestRouter::_perform_edge_node_write(
         }
 
         fs::rename(tmp_path, file_path);
-        log::debug(cat, "Finished writing snode cache to disk.");
+        log::debug(cat, "Finished writing edge node cache to disk.");
     } catch (const std::exception& e) {
-        log::error(cat, "Failed to write snode cache: {}", e.what());
+        log::error(cat, "Failed to write edge node cache: {}", e.what());
     }
 }
 
@@ -485,9 +482,9 @@ void OnionRequestRouter::suspend() {
                         edge_nodes.emplace_back(path.nodes[0], path.edge_first_connected_at);
 
             _disk_manager->trigger(
-                    io_key_write_edge_nodes, [path = _edge_node_cache_file_path, edge_nodes] {
+                    io_key_write_edge_nodes, [path = _edge_node_cache_file_path, nodes = std::move(edge_nodes)] {
                         OnionRequestRouter::_perform_edge_node_write(
-                                std::move(path), std::move(edge_nodes));
+                                std::move(path), std::move(nodes));
                     });
         }
 
@@ -569,21 +566,6 @@ void OnionRequestRouter::_finish_setup() {
 void OnionRequestRouter::_pre_build_paths_if_needed() {
     if (!_config.disable_pre_build_paths) {
         log::info(cat, "Pre-building initial paths.");
-
-        auto schedule_build = [this](PathCategory category,
-                                     int count,
-                                     std::optional<cached_edge_node> cached_edge_node) {
-            for (int i = 0; i < count; ++i)
-                _build_path(
-                        category,
-                        "pre-build-{}-{}"_format(
-                                to_string(category, _config.single_path_mode), i + 1),
-                        {},
-                        std::nullopt,
-                        cached_edge_node->node,
-                        cached_edge_node->first_connected_at);
-        };
-
         std::vector<cached_edge_node> edge_nodes = _cached_edge_nodes;
 
         if (_config.single_path_mode) {
@@ -597,10 +579,16 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
                     cat,
                     "Pre-building 1 path for single_path_mode{}.",
                     (!edge_node.has_value() ? " with cached edge node" : ""));
-            schedule_build(PathCategory::standard, 1, edge_node);
+            _build_path(
+                    PathCategory::standard,
+                    "pre-build-{}-{}"_format(to_string(PathCategory::standard, true), 1),
+                    {},
+                    std::nullopt,
+                    (edge_node ? std::optional{edge_node->node} : std::nullopt),
+                    (edge_node ? std::optional{edge_node->first_connected_at} : std::nullopt));
         } else {
             for (const auto& [category, min_count] : _config.min_path_counts) {
-                if (min_count > 0) {
+                for (int i = 0; i < min_count; ++i) {
                     std::optional<cached_edge_node> edge_node = std::nullopt;
                     if (!edge_nodes.empty()) {
                         edge_node = edge_nodes.back();
@@ -613,7 +601,13 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
                             min_count,
                             to_string(category, _config.single_path_mode),
                             (!edge_node.has_value() ? " with cached edge node" : ""));
-                    schedule_build(category, min_count, edge_node);
+                    _build_path(
+                        category,
+                        "pre-build-{}-{}"_format(to_string(category, false), i + 1),
+                        {},
+                        std::nullopt,
+                        (edge_node ? std::optional{edge_node->node} : std::nullopt),
+                        (edge_node ? std::optional{edge_node->first_connected_at} : std::nullopt));
                 }
             }
         }
