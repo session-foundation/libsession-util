@@ -489,7 +489,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             std::vector<uint8_t> tmp_content_buffer;
             if (is_1o1) {  // Encrypt the padded output
                 std::vector<uint8_t> padded_payload = pad_message(content);
-                tmp_content_buffer = encrypt_for_recipient_deterministic(
+                tmp_content_buffer = encrypt_for_recipient(
                         ed25519_privkey, dest_recipient_pubkey, padded_payload);
                 content = tmp_content_buffer;
             }
