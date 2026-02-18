@@ -461,8 +461,8 @@ void ConvoInfoVolatile::extra_data(oxenc::bt_dict_producer&& extra) const {
         else if (const auto* c = std::get_if<convo::legacy_group>(&entry))
             lgroups[session_id_to_bytes(c->id)] = c;
         else if (const auto* c = std::get_if<convo::blinded_one_to_one>(&entry))
-            blindeds[session_id_to_bytes(
-                    c->blinded_session_id, c->legacy_blinding ? "15" : "25")] = c;
+            blindeds[session_id_to_bytes(c->blinded_session_id, c->legacy_blinding ? "15" : "25")] =
+                    c;
         else if (const auto* c = std::get_if<convo::group>(&entry))
             groups[session_id_to_bytes(c->id, "03")] = c;
         else if (const auto* c = std::get_if<convo::community>(&entry))

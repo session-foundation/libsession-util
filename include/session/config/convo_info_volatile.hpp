@@ -4,8 +4,8 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
-#include <vector>
 #include <session/config.hpp>
+#include <vector>
 
 #include "base.hpp"
 #include "community.hpp"
