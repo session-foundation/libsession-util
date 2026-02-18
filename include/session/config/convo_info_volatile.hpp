@@ -515,8 +515,7 @@ class ConvoInfoVolatile : public ConfigBase {
 
   private:
     // Conversations pruned from _config->data() by prune_stale() that should still be kept
-    // locally. Only one_to_one, legacy_group, and community types are ever archived.
-    // Serialized into dump() via extra_data() but never included in push().
+    // locally (all types). Serialized into dump() via extra_data() but never included in push().
     std::vector<convo::any> _archive;
 
   public:

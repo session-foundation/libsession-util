@@ -896,15 +896,24 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
         auto pk = some_pubkey(x);
         return "05" + oxenc::to_hex(pk.begin(), pk.end());
     };
+    auto some_group_id = [&](unsigned char x) -> std::string {
+        auto pk = some_pubkey(x);
+        return "03" + oxenc::to_hex(pk.begin(), pk.end());
+    };
+    auto some_blinded_id = [&](unsigned char x) -> std::string {
+        auto pk = some_pubkey(x);
+        return "25" + oxenc::to_hex(pk.begin(), pk.end());
+    };
 
     session::config::ConvoInfoVolatile convos{std::span<const unsigned char>{seed}, std::nullopt};
 
     // Inject stale conversations directly, bypassing set_base()'s PRUNE_LOW guard.
     // All are > PRUNE_HIGH (45 days) old and will be archived when push() is called.
     convos.data["1"][oxenc::from_hex(some_session_id(1))]["r"] = unix_timestamp(50);  // 1-to-1
-    convos.data["C"][oxenc::from_hex(some_session_id(2))]["r"] =
-            unix_timestamp(50);                                      // legacy_group
-    convos.data["o"]["https://example.org"]["#"] = some_pubkey(10);  // community
+    convos.data["C"][oxenc::from_hex(some_session_id(2))]["r"] = unix_timestamp(50);  // legacy
+    convos.data["g"][oxenc::from_hex(some_group_id(4))]["r"] = unix_timestamp(50);    // group
+    convos.data["b"][oxenc::from_hex(some_blinded_id(5))]["r"] = unix_timestamp(50);  // blinded
+    convos.data["o"]["https://example.org"]["#"] = some_pubkey(10);                   // community
     convos.data["o"]["https://example.org"]["R"]["archiveroom"]["r"] = unix_timestamp(50);
 
     // A fresh (recent) 1-to-1 — should NOT be archived.
@@ -914,6 +923,8 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
 
     REQUIRE(convos.size_1to1() == 2);
     REQUIRE(convos.size_legacy_groups() == 1);
+    REQUIRE(convos.size_groups() == 1);
+    REQUIRE(convos.size_blinded_1to1() == 1);
     REQUIRE(convos.size_communities() == 1);
 
     SECTION("push archives stale conversations instead of deleting them") {
@@ -928,9 +939,13 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
         // Stale entries are pruned from the active config after push
         CHECK(convos.size_1to1() == 1);
         CHECK(convos.size_legacy_groups() == 0);
+        CHECK(convos.size_groups() == 0);
+        CHECK(convos.size_blinded_1to1() == 0);
         CHECK(convos.size_communities() == 0);
         CHECK(convos.get_1to1(some_session_id(1)) == std::nullopt);
         CHECK(convos.get_1to1(some_session_id(3)) != std::nullopt);
+        CHECK(convos.get_group(some_group_id(4)) == std::nullopt);
+        CHECK(convos.get_blinded_1to1(some_blinded_id(5)) == std::nullopt);
 
         // Dump must be larger than an equivalent fresh instance that never had the stale entries:
         // the extra size comes from the archive section in extra_data.
@@ -961,9 +976,13 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
         // Active conversations remain accessible
         CHECK(convos2.size_1to1() == 1);
         CHECK(convos2.size_legacy_groups() == 0);
+        CHECK(convos2.size_groups() == 0);
+        CHECK(convos2.size_blinded_1to1() == 0);
         CHECK(convos2.size_communities() == 0);
         CHECK(convos2.get_1to1(some_session_id(3)) != std::nullopt);
         CHECK(convos2.get_1to1(some_session_id(1)) == std::nullopt);
+        CHECK(convos2.get_group(some_group_id(4)) == std::nullopt);
+        CHECK(convos2.get_blinded_1to1(some_blinded_id(5)) == std::nullopt);
 
         auto dump2 = convos2.dump();
         std::cerr << "dump2 (reloaded from dump1): " << oxenc::to_hex(dump2) << "\n";
@@ -1005,15 +1024,29 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
         WARN("dump3 (reloaded from dump2): " << oxenc::to_hex(dump3));
         CHECK(dump3.size() == dump2.size());
 
-        // Do the same for the community archive entry
-        bool community_was_active = convos2.erase_community("https://example.org", "archiveroom");
-        CHECK_FALSE(community_was_active);
+        // Erase archived group — returns false (not in active config)
+        CHECK_FALSE(convos2.erase_group(some_group_id(4)));
         CHECK(convos2.needs_dump());
 
-        // Each removal shrinks the dump further
         auto dump4 = convos2.dump();
-        WARN("dump4 (after also erasing archived community): " << oxenc::to_hex(dump4));
+        WARN("dump4 (after also erasing archived group): " << oxenc::to_hex(dump4));
         CHECK(dump4.size() < dump2.size());
+
+        // Erase archived blinded — returns false (not in active config)
+        CHECK_FALSE(convos2.erase_blinded_1to1(some_blinded_id(5)));
+        CHECK(convos2.needs_dump());
+
+        auto dump5 = convos2.dump();
+        WARN("dump5 (after also erasing archived blinded): " << oxenc::to_hex(dump5));
+        CHECK(dump5.size() < dump4.size());
+
+        // Erase archived community — returns false (not in active config)
+        CHECK_FALSE(convos2.erase_community("https://example.org", "archiveroom"));
+        CHECK(convos2.needs_dump());
+
+        auto dump6 = convos2.dump();
+        WARN("dump6 (after also erasing archived community): " << oxenc::to_hex(dump6));
+        CHECK(dump6.size() < dump5.size());
     }
 
     SECTION("re-activated conversation is not kept in archive after reload") {
@@ -1045,7 +1078,7 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
 
         session::config::ConvoInfoVolatile convos3{std::span<const unsigned char>{seed}, dump2};
         auto dump3_before_erase = convos3.dump();
-        WARN("dump3 (reloaded from dump2; archive entry for session_id(1) should be gone):\n"
+        WARN("dump3 (reloaded from dump2; archive entry for session_id(1) should be gone): "
              << oxenc::to_hex(dump3_before_erase));
 
         // session_id(1) is in the active config
@@ -1059,7 +1092,7 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
 
         // After removal, dump is smaller than dump2 (no more session_id(1) anywhere)
         auto dump3_after_erase = convos3.dump();
-        WARN("dump3 after erase of session_id(1) from active config:\n"
+        WARN("dump3 after erase of session_id(1) from active config: "
              << oxenc::to_hex(dump3_after_erase));
         CHECK(dump3_after_erase.size() < dump2.size());
     }
