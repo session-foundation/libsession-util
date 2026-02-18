@@ -381,8 +381,9 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
     // existing archive entry for the same ID (deduplication), so after the erase we push_back the
     // fresh snapshot.  This order (snapshot → erase → archive) avoids the erase undoing the
     // archive addition that would happen if we archived before erasing.
+    // Only examine active (non-archived) entries — archived entries have already been pruned.
     std::vector<std::string> stale;
-    for (auto it = begin_1to1(); it != end(); ++it)
+    for (auto it = begin_1to1(false); !it.done(); ++it)
         if (is_stale(*it, cutoff))
             stale.push_back(it->session_id);
     for (const auto& sid : stale) {
@@ -393,7 +394,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
     }
 
     stale.clear();
-    for (auto it = begin_legacy_groups(); it != end(); ++it)
+    for (auto it = begin_legacy_groups(false); !it.done(); ++it)
         if (is_stale(*it, cutoff))
             stale.push_back(it->id);
     for (const auto& id : stale) {
@@ -404,7 +405,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
     }
 
     stale.clear();
-    for (auto it = begin_blinded_1to1(); it != end(); ++it)
+    for (auto it = begin_blinded_1to1(false); !it.done(); ++it)
         if (is_stale(*it, cutoff))
             stale.push_back(it->blinded_session_id);
     for (const auto& id : stale) {
@@ -415,7 +416,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
     }
 
     stale.clear();
-    for (auto it = begin_groups(); it != end(); ++it)
+    for (auto it = begin_groups(false); !it.done(); ++it)
         if (is_stale(*it, cutoff))
             stale.push_back(it->id);
     for (const auto& id : stale) {
@@ -426,7 +427,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
     }
 
     std::vector<std::pair<std::string, std::string>> stale_comms;
-    for (auto it = begin_communities(); it != end(); ++it)
+    for (auto it = begin_communities(false); !it.done(); ++it)
         if (is_stale(*it, cutoff))
             stale_comms.emplace_back(it->base_url(), it->room());
     for (const auto& [base, room] : stale_comms) {
@@ -889,7 +890,15 @@ ConvoInfoVolatile::iterator::iterator(
         bool communities,
         bool groups,
         bool legacy_groups,
-        bool blinded_1to1) {
+        bool blinded_1to1,
+        const std::vector<convo::any>* archive) {
+    _filter_1to1 = oneto1;
+    _filter_communities = communities;
+    _filter_groups = groups;
+    _filter_legacy_groups = legacy_groups;
+    _filter_blinded_1to1 = blinded_1to1;
+    _archive = (archive && !archive->empty()) ? archive : nullptr;
+    _archive_idx = 0;
     if (oneto1)
         if (auto* d = data["1"].dict()) {
             _it_11 = d->begin();
@@ -975,15 +984,45 @@ void ConvoInfoVolatile::iterator::_load_val() {
 
     if (val_loader::load<convo::blinded_one_to_one>(_val, _it_b11, _end_b11, 0x25, 0x15))
         return;
+
+    // Dict phase exhausted — scan archive for matching types
+    if (_archive) {
+        while (_archive_idx < _archive->size()) {
+            const auto& entry = (*_archive)[_archive_idx++];
+            bool matches = std::visit(
+                    [&](const auto& c) -> bool {
+                        using T = std::decay_t<decltype(c)>;
+                        if constexpr (std::is_same_v<T, convo::one_to_one>)
+                            return _filter_1to1;
+                        else if constexpr (std::is_same_v<T, convo::community>)
+                            return _filter_communities;
+                        else if constexpr (std::is_same_v<T, convo::group>)
+                            return _filter_groups;
+                        else if constexpr (std::is_same_v<T, convo::legacy_group>)
+                            return _filter_legacy_groups;
+                        else if constexpr (std::is_same_v<T, convo::blinded_one_to_one>)
+                            return _filter_blinded_1to1;
+                        return false;
+                    },
+                    entry);
+            if (matches) {
+                _val = std::make_shared<convo::any>(entry);
+                return;
+            }
+        }
+        _archive = nullptr;  // exhausted
+    }
 }
 
 bool ConvoInfoVolatile::iterator::operator==(const iterator& other) const {
     return _it_11 == other._it_11 && _it_group == other._it_group && _it_comm == other._it_comm &&
-           _it_lgroup == other._it_lgroup && _it_b11 == other._it_b11;
+           _it_lgroup == other._it_lgroup && _it_b11 == other._it_b11 &&
+           _archive == other._archive;
 }
 
 bool ConvoInfoVolatile::iterator::done() const {
-    return !_it_11 && !_it_group && (!_it_comm || _it_comm->done()) && !_it_lgroup && !_it_b11;
+    return !_it_11 && !_it_group && (!_it_comm || _it_comm->done()) && !_it_lgroup && !_it_b11 &&
+           !_archive;
 }
 
 ConvoInfoVolatile::iterator& ConvoInfoVolatile::iterator::operator++() {
@@ -995,10 +1034,9 @@ ConvoInfoVolatile::iterator& ConvoInfoVolatile::iterator::operator++() {
         _it_comm->advance();
     else if (_it_lgroup)
         ++*_it_lgroup;
-    else {
-        assert(_it_b11);
+    else if (_it_b11)
         ++*_it_b11;
-    }
+    // else: archive phase — _load_val() advances _archive_idx
     _load_val();
     return *this;
 }

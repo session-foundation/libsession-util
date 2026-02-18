@@ -692,7 +692,9 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Outputs:
     /// - `iterator` - Returns an iterator for the beginning of the contacts
-    iterator begin() const { return iterator{data}; }
+    iterator begin(bool include_archived = true) const {
+        return iterator{data, include_archived ? &_archive : nullptr};
+    }
 
     /// API: convo_info_volatile/ConvoInfoVolatile::end
     ///
@@ -708,12 +710,24 @@ class ConvoInfoVolatile : public ConfigBase {
     template <typename ConvoType>
     struct subtype_iterator;
 
-    /// Returns an iterator that iterates only through one type of conversations
-    subtype_iterator<convo::one_to_one> begin_1to1() const { return {data}; }
-    subtype_iterator<convo::community> begin_communities() const { return {data}; }
-    subtype_iterator<convo::group> begin_groups() const { return {data}; }
-    subtype_iterator<convo::legacy_group> begin_legacy_groups() const { return {data}; }
-    subtype_iterator<convo::blinded_one_to_one> begin_blinded_1to1() const { return {data}; }
+    /// Returns an iterator that iterates only through one type of conversations.
+    /// Pass `include_archived = false` to skip archived entries.
+    subtype_iterator<convo::one_to_one> begin_1to1(bool include_archived = true) const {
+        return {data, include_archived ? &_archive : nullptr};
+    }
+    subtype_iterator<convo::community> begin_communities(bool include_archived = true) const {
+        return {data, include_archived ? &_archive : nullptr};
+    }
+    subtype_iterator<convo::group> begin_groups(bool include_archived = true) const {
+        return {data, include_archived ? &_archive : nullptr};
+    }
+    subtype_iterator<convo::legacy_group> begin_legacy_groups(bool include_archived = true) const {
+        return {data, include_archived ? &_archive : nullptr};
+    }
+    subtype_iterator<convo::blinded_one_to_one> begin_blinded_1to1(
+            bool include_archived = true) const {
+        return {data, include_archived ? &_archive : nullptr};
+    }
 
     using iterator_category = std::input_iterator_tag;
     using value_type = std::variant<
@@ -732,6 +746,14 @@ class ConvoInfoVolatile : public ConfigBase {
         std::optional<dict::const_iterator> _it_11, _end_11, _it_group, _end_group, _it_lgroup,
                 _end_lgroup, _it_b11, _end_b11;
         std::optional<comm_iterator_helper> _it_comm;
+        // Archive support: pointer into ConvoInfoVolatile::_archive; null when exhausted.
+        const std::vector<convo::any>* _archive = nullptr;
+        size_t _archive_idx = 0;
+        bool _filter_1to1 = true;
+        bool _filter_communities = true;
+        bool _filter_groups = true;
+        bool _filter_legacy_groups = true;
+        bool _filter_blinded_1to1 = true;
         void _load_val();
         iterator() = default;  // Constructs an end tombstone
         iterator(
@@ -740,9 +762,12 @@ class ConvoInfoVolatile : public ConfigBase {
                 bool communities,
                 bool groups,
                 bool legacy_groups,
-                bool blinded_1to1);
-        explicit iterator(const DictFieldRoot& data) :
-                iterator(data, true, true, true, true, true) {}
+                bool blinded_1to1,
+                const std::vector<convo::any>* archive = nullptr);
+        explicit iterator(
+                const DictFieldRoot& data,
+                const std::vector<convo::any>* archive = nullptr) :
+                iterator(data, true, true, true, true, true, archive) {}
         friend class ConvoInfoVolatile;
 
       public:
@@ -762,14 +787,16 @@ class ConvoInfoVolatile : public ConfigBase {
     template <typename ConvoType>
     struct subtype_iterator : iterator {
       protected:
-        subtype_iterator(const DictFieldRoot& data) :
+        subtype_iterator(
+                const DictFieldRoot& data, const std::vector<convo::any>* archive = nullptr) :
                 iterator(
                         data,
                         std::is_same_v<convo::one_to_one, ConvoType>,
                         std::is_same_v<convo::community, ConvoType>,
                         std::is_same_v<convo::group, ConvoType>,
                         std::is_same_v<convo::legacy_group, ConvoType>,
-                        std::is_same_v<convo::blinded_one_to_one, ConvoType>) {}
+                        std::is_same_v<convo::blinded_one_to_one, ConvoType>,
+                        archive) {}
         friend class ConvoInfoVolatile;
 
       public:

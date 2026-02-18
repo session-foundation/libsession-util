@@ -1096,4 +1096,74 @@ TEST_CASE("Conversation archive", "[config][conversations][archive]") {
              << oxenc::to_hex(dump3_after_erase));
         CHECK(dump3_after_erase.size() < dump2.size());
     }
+
+    SECTION("iterator yields both active and archived conversations") {
+        auto [seqno, push_data, obs] = convos.push();
+        convos.confirm_pushed(seqno, {"hash1"});
+
+        // After push: 1 active 1-to-1 (session_id(3)), 5 archived entries.
+        // The full iterator must yield all 6.
+        size_t total = 0;
+        std::set<std::string> seen_ids;
+        for (const auto& entry : convos) {
+            ++total;
+            if (const auto* c = std::get_if<session::config::convo::one_to_one>(&entry))
+                seen_ids.insert(c->session_id);
+            else if (const auto* c = std::get_if<session::config::convo::community>(&entry))
+                seen_ids.insert(c->base_url() + "/" + c->room_norm());
+            else if (const auto* c = std::get_if<session::config::convo::group>(&entry))
+                seen_ids.insert(c->id);
+            else if (const auto* c = std::get_if<session::config::convo::legacy_group>(&entry))
+                seen_ids.insert(c->id);
+            else if (const auto* c =
+                             std::get_if<session::config::convo::blinded_one_to_one>(&entry))
+                seen_ids.insert(c->blinded_session_id);
+        }
+        CHECK(total == 6);  // 1 active + 5 archived
+        CHECK(seen_ids.count(some_session_id(3)));       // active 1-to-1
+        CHECK(seen_ids.count(some_session_id(1)));       // archived 1-to-1
+        CHECK(seen_ids.count(some_session_id(2)));       // archived legacy_group
+        CHECK(seen_ids.count(some_group_id(4)));         // archived group
+        CHECK(seen_ids.count(some_blinded_id(5)));       // archived blinded
+        CHECK(seen_ids.count("https://example.org/archiveroom"));  // archived community
+
+        // Type-specific iterators also include archived entries of that type.
+        auto count = [](auto it) { size_t n = 0; for (; !it.done(); ++it) ++n; return n; };
+        CHECK(count(convos.begin_1to1()) == 2);
+        CHECK(count(convos.begin_legacy_groups()) == 1);
+        CHECK(count(convos.begin_groups()) == 1);
+        CHECK(count(convos.begin_blinded_1to1()) == 1);
+        CHECK(count(convos.begin_communities()) == 1);
+
+        // With include_archived = false, only active entries are yielded.
+        size_t active_total = 0;
+        for (auto it = convos.begin(false); !it.done(); ++it)
+            ++active_total;
+        CHECK(active_total == 1);  // only session_id(3)
+
+        CHECK(count(convos.begin_1to1(false)) == 1);
+        CHECK(count(convos.begin_legacy_groups(false)) == 0);
+        CHECK(count(convos.begin_groups(false)) == 0);
+        CHECK(count(convos.begin_blinded_1to1(false)) == 0);
+        CHECK(count(convos.begin_communities(false)) == 0);
+
+        // After reload from dump the iterator still works the same way.
+        session::config::ConvoInfoVolatile convos2{
+                std::span<const unsigned char>{seed}, convos.dump()};
+        size_t reloaded_total = 0;
+        for ([[maybe_unused]] const auto& _ : convos2)
+            ++reloaded_total;
+        CHECK(reloaded_total == 6);
+
+        // Verify that archived entry fields are accessible via the iterator.
+        bool found_archived_1to1 = false;
+        for (const auto& entry : convos) {
+            if (const auto* c = std::get_if<session::config::convo::one_to_one>(&entry))
+                if (c->session_id == some_session_id(1)) {
+                    found_archived_1to1 = true;
+                    CHECK(c->last_read == unix_timestamp(50));
+                }
+        }
+        CHECK(found_archived_1to1);
+    }
 }
