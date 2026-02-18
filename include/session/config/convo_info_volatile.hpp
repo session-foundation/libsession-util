@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <vector>
 #include <session/config.hpp>
 
 #include "base.hpp"
@@ -508,6 +509,15 @@ class ConvoInfoVolatile : public ConfigBase {
     // non-nullptr then it will be set to the community's pubkey, if it exists.
     DictFieldProxy community_field(
             const convo::community& og, std::span<const unsigned char>* get_pubkey = nullptr) const;
+
+    void extra_data(oxenc::bt_dict_producer&&) const override;
+    void load_extra_data(oxenc::bt_dict_consumer&&) override;
+
+  private:
+    // Conversations pruned from _config->data() by prune_stale() that should still be kept
+    // locally. Only one_to_one, legacy_group, and community types are ever archived.
+    // Serialized into dump() via extra_data() but never included in push().
+    std::vector<convo::any> _archive;
 
   public:
     /// API: convo_info_volatile/ConvoInfoVolatile::erase_1to1

@@ -5,8 +5,10 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
+#include <algorithm>
 #include <charconv>
 #include <iterator>
+#include <map>
 #include <stdexcept>
 #include <variant>
 
@@ -375,20 +377,31 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
                                    (std::chrono::system_clock::now() - prune).time_since_epoch())
                                    .count();
 
+    // For each stale entry: snapshot it, then erase it.  The erase() overloads also remove any
+    // existing archive entry for the same ID (deduplication), so after the erase we push_back the
+    // fresh snapshot.  This order (snapshot → erase → archive) avoids the erase undoing the
+    // archive addition that would happen if we archived before erasing.
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)
         if (is_stale(*it, cutoff))
             stale.push_back(it->session_id);
-
-    for (const auto& sid : stale)
+    for (const auto& sid : stale) {
+        auto c = get_1to1(sid);
         erase_1to1(sid);
+        if (c)
+            _archive.push_back(convo::any{std::move(*c)});
+    }
 
     stale.clear();
     for (auto it = begin_legacy_groups(); it != end(); ++it)
         if (is_stale(*it, cutoff))
             stale.push_back(it->id);
-    for (const auto& id : stale)
+    for (const auto& id : stale) {
+        auto c = get_legacy_group(id);
         erase_legacy_group(id);
+        if (c)
+            _archive.push_back(convo::any{std::move(*c)});
+    }
 
     stale.clear();
     for (auto it = begin_blinded_1to1(); it != end(); ++it)
@@ -408,8 +421,12 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
     for (auto it = begin_communities(); it != end(); ++it)
         if (is_stale(*it, cutoff))
             stale_comms.emplace_back(it->base_url(), it->room());
-    for (const auto& [base, room] : stale_comms)
+    for (const auto& [base, room] : stale_comms) {
+        auto c = get_community(base, room);
         erase_community(base, room);
+        if (c)
+            _archive.push_back(convo::any{std::move(*c)});
+    }
 }
 
 std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
@@ -419,6 +436,157 @@ ConvoInfoVolatile::push() {
     prune_stale();
 
     return ConfigBase::push();
+}
+
+void ConvoInfoVolatile::extra_data(oxenc::bt_dict_producer&& extra) const {
+    // Collect archived entries by type, sorted by binary key via std::map.
+    std::map<std::string, const convo::one_to_one*> ones;
+    std::map<std::string, const convo::legacy_group*> lgroups;
+    // communities: outer key = base_url (sorted), inner key = room_norm (sorted)
+    std::map<std::string, std::map<std::string, const convo::community*>> communities;
+
+    for (const auto& entry : _archive) {
+        if (const auto* c = std::get_if<convo::one_to_one>(&entry))
+            ones[session_id_to_bytes(c->session_id)] = c;
+        else if (const auto* c = std::get_if<convo::legacy_group>(&entry))
+            lgroups[session_id_to_bytes(c->id)] = c;
+        else if (const auto* c = std::get_if<convo::community>(&entry))
+            communities[c->base_url()][c->room_norm()] = c;
+    }
+
+    // "1" (49) < "C" (67) < "o" (111) — bencode requires sorted keys
+    // one_to_one entry fields sorted: "e" < "g" < "r" < "u"
+    if (!ones.empty()) {
+        auto section = extra.append_dict("1");
+        for (const auto& [key, c] : ones) {
+            auto val = section.append_dict(key);
+            auto pro_expiry = c->pro_expiry_unix_ts.time_since_epoch().count();
+            if (pro_expiry > 0 && c->pro_gen_index_hash) {
+                val.append("e", pro_expiry);
+                val.append(
+                        "g",
+                        std::span<const unsigned char>{
+                                c->pro_gen_index_hash->data(), c->pro_gen_index_hash->size()});
+            }
+            val.append("r", c->last_read);
+            if (c->unread)
+                val.append("u", 1);
+        }
+    }
+
+    // legacy_group entry fields sorted: "r" < "u"
+    if (!lgroups.empty()) {
+        auto section = extra.append_dict("C");
+        for (const auto& [key, c] : lgroups) {
+            auto val = section.append_dict(key);
+            val.append("r", c->last_read);
+            if (c->unread)
+                val.append("u", 1);
+        }
+    }
+
+    // community: server dict keys sorted: "#" (35) < "R" (82); room dict: "r" < "u"
+    if (!communities.empty()) {
+        auto section = extra.append_dict("o");
+        for (const auto& [base_url, rooms] : communities) {
+            auto server = section.append_dict(base_url);
+            const auto* any_comm = rooms.begin()->second;
+            server.append(
+                    "#",
+                    std::span<const unsigned char>{
+                            any_comm->pubkey().data(), any_comm->pubkey().size()});
+            auto rooms_dict = server.append_dict("R");
+            for (const auto& [room, c] : rooms) {
+                auto room_val = rooms_dict.append_dict(room);
+                room_val.append("r", c->last_read);
+                if (c->unread)
+                    room_val.append("u", 1);
+            }
+        }
+    }
+}
+
+void ConvoInfoVolatile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
+    // "1": one_to_one — skip if already in active config (handles re-activation)
+    if (extra.skip_until("1")) {
+        auto section = extra.consume_dict_consumer();
+        while (!section.is_finished()) {
+            auto [key, val] = section.next_dict_consumer();
+            if (key.size() != 33)
+                continue;
+            if (data["1"][std::string{key}].dict())
+                continue;
+            convo::one_to_one c{oxenc::to_hex(key)};
+            if (val.skip_until("e")) {
+                c.pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+                        std::chrono::milliseconds(val.consume_integer<int64_t>()));
+            }
+            if (val.skip_until("g")) {
+                auto g = val.consume_string_view();
+                if (g.size() == 32) {
+                    c.pro_gen_index_hash.emplace();
+                    std::memcpy(c.pro_gen_index_hash->data(), g.data(), 32);
+                }
+            }
+            if (val.skip_until("r"))
+                c.last_read = val.consume_integer<int64_t>();
+            if (val.skip_until("u"))
+                c.unread = (bool)val.consume_integer<int>();
+            _archive.push_back(std::move(c));
+        }
+    }
+
+    // "C": legacy_group
+    if (extra.skip_until("C")) {
+        auto section = extra.consume_dict_consumer();
+        while (!section.is_finished()) {
+            auto [key, val] = section.next_dict_consumer();
+            if (key.size() != 33)
+                continue;
+            if (data["C"][std::string{key}].dict())
+                continue;
+            convo::legacy_group c{oxenc::to_hex(key)};
+            if (val.skip_until("r"))
+                c.last_read = val.consume_integer<int64_t>();
+            if (val.skip_until("u"))
+                c.unread = (bool)val.consume_integer<int>();
+            _archive.push_back(std::move(c));
+        }
+    }
+
+    // "o": community
+    if (extra.skip_until("o")) {
+        auto section = extra.consume_dict_consumer();
+        while (!section.is_finished()) {
+            auto [base_url_sv, server_val] = section.next_dict_consumer();
+            std::string base_url{base_url_sv};
+            if (!server_val.skip_until("#"))
+                continue;
+            auto pk_sv = server_val.consume_string_view();
+            if (pk_sv.size() != 32)
+                continue;
+            std::span<const unsigned char> pubkey{
+                    reinterpret_cast<const unsigned char*>(pk_sv.data()), 32};
+            if (!server_val.skip_until("R"))
+                continue;
+            auto rooms_val = server_val.consume_dict_consumer();
+            while (!rooms_val.is_finished()) {
+                auto [room_sv, room_val] = rooms_val.next_dict_consumer();
+                std::string room{room_sv};
+                if (data["o"][base_url]["R"][room].dict())
+                    continue;
+                try {
+                    convo::community c{base_url, room, pubkey};
+                    if (room_val.skip_until("r"))
+                        c.last_read = room_val.consume_integer<int64_t>();
+                    if (room_val.skip_until("u"))
+                        c.unread = (bool)room_val.consume_integer<int>();
+                    _archive.push_back(std::move(c));
+                } catch (...) { /* invalid url/room format — skip */
+                }
+            }
+        }
+    }
 }
 
 void ConvoInfoVolatile::set(const convo::community& c) {
@@ -460,9 +628,35 @@ static bool erase_impl(Field convo) {
 }
 
 bool ConvoInfoVolatile::erase(const convo::one_to_one& c) {
+    auto before = _archive.size();
+    _archive.erase(
+            std::remove_if(
+                    _archive.begin(),
+                    _archive.end(),
+                    [&](const convo::any& e) {
+                        if (const auto* a = std::get_if<convo::one_to_one>(&e))
+                            return a->session_id == c.session_id;
+                        return false;
+                    }),
+            _archive.end());
+    if (_archive.size() != before)
+        _needs_dump = true;
     return erase_impl(data["1"][session_id_to_bytes(c.session_id)]);
 }
 bool ConvoInfoVolatile::erase(const convo::community& c) {
+    auto before = _archive.size();
+    _archive.erase(
+            std::remove_if(
+                    _archive.begin(),
+                    _archive.end(),
+                    [&](const convo::any& e) {
+                        if (const auto* a = std::get_if<convo::community>(&e))
+                            return a->base_url() == c.base_url() && a->room_norm() == c.room_norm();
+                        return false;
+                    }),
+            _archive.end());
+    if (_archive.size() != before)
+        _needs_dump = true;
     bool gone = erase_impl(community_field(c));
     if (gone) {
         // If this was the last room on the server, also remove the server
@@ -479,6 +673,19 @@ bool ConvoInfoVolatile::erase(const convo::group& c) {
     return erase_impl(data["g"][session_id_to_bytes(c.id, "03")]);
 }
 bool ConvoInfoVolatile::erase(const convo::legacy_group& c) {
+    auto before = _archive.size();
+    _archive.erase(
+            std::remove_if(
+                    _archive.begin(),
+                    _archive.end(),
+                    [&](const convo::any& e) {
+                        if (const auto* a = std::get_if<convo::legacy_group>(&e))
+                            return a->id == c.id;
+                        return false;
+                    }),
+            _archive.end());
+    if (_archive.size() != before)
+        _needs_dump = true;
     return erase_impl(data["C"][session_id_to_bytes(c.id)]);
 }
 bool ConvoInfoVolatile::erase(const convo::blinded_one_to_one& c) {
