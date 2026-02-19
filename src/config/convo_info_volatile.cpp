@@ -5,7 +5,6 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
-#include <algorithm>
 #include <charconv>
 #include <iterator>
 #include <map>
@@ -189,12 +188,17 @@ ConvoInfoVolatile::ConvoInfoVolatile(
     load_key(ed25519_secretkey);
 }
 
-std::optional<convo::one_to_one> ConvoInfoVolatile::get_1to1(std::string_view pubkey_hex) const {
+std::optional<convo::one_to_one> ConvoInfoVolatile::get_1to1(
+        std::string_view pubkey_hex, bool include_archived) const {
     std::string pubkey = session_id_to_bytes(pubkey_hex);
 
     auto* info_dict = data["1"][pubkey].dict();
-    if (!info_dict)
+    if (!info_dict) {
+        if (include_archived)
+            if (auto it = _arch_1to1.find(pubkey); it != _arch_1to1.end())
+                return it->second;
         return std::nullopt;
+    }
 
     auto result = std::make_optional<convo::one_to_one>(std::string{pubkey_hex});
     result->load(*info_dict);
@@ -220,7 +224,7 @@ ConfigBase::DictFieldProxy ConvoInfoVolatile::community_field(
 }
 
 std::optional<convo::community> ConvoInfoVolatile::get_community(
-        std::string_view base_url, std::string_view room) const {
+        std::string_view base_url, std::string_view room, bool include_archived) const {
     convo::community og{base_url, community::canonical_room(room)};
 
     std::span<const unsigned char> pubkey;
@@ -230,13 +234,17 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
             og.set_pubkey(pubkey);
         return og;
     }
+    if (include_archived)
+        if (auto s = _arch_comm.find(og.base_url()); s != _arch_comm.end())
+            if (auto r = s->second.find(og.room_norm()); r != s->second.end())
+                return r->second;
     return std::nullopt;
 }
 
 std::optional<convo::community> ConvoInfoVolatile::get_community(
-        std::string_view partial_url) const {
+        std::string_view partial_url, bool include_archived) const {
     auto [base, room, pubkey] = community::parse_partial_url(partial_url);
-    return get_community(base, room);
+    return get_community(base, room, include_archived);
 }
 
 convo::community ConvoInfoVolatile::get_or_construct_community(
@@ -247,6 +255,11 @@ convo::community ConvoInfoVolatile::get_or_construct_community(
 
     if (auto* info_dict = community_field(result).dict())
         result.load(*info_dict);
+    else if (auto s = _arch_comm.find(result.base_url()); s != _arch_comm.end())
+        if (auto r = s->second.find(result.room_norm()); r != s->second.end()) {
+            result.last_read = r->second.last_read;
+            result.unread = r->second.unread;
+        }
 
     return result;
 }
@@ -262,16 +275,26 @@ convo::community ConvoInfoVolatile::get_or_construct_community(
 
     if (auto* info_dict = community_field(result).dict())
         result.load(*info_dict);
+    else if (auto s = _arch_comm.find(result.base_url()); s != _arch_comm.end())
+        if (auto r = s->second.find(result.room_norm()); r != s->second.end()) {
+            result.last_read = r->second.last_read;
+            result.unread = r->second.unread;
+        }
 
     return result;
 }
 
-std::optional<convo::group> ConvoInfoVolatile::get_group(std::string_view pubkey_hex) const {
+std::optional<convo::group> ConvoInfoVolatile::get_group(
+        std::string_view pubkey_hex, bool include_archived) const {
     std::string pubkey = session_id_to_bytes(pubkey_hex, "03");
 
     auto* info_dict = data["g"][pubkey].dict();
-    if (!info_dict)
+    if (!info_dict) {
+        if (include_archived)
+            if (auto it = _arch_group.find(pubkey); it != _arch_group.end())
+                return it->second;
         return std::nullopt;
+    }
 
     auto result = std::make_optional<convo::group>(std::string{pubkey_hex});
     result->load(*info_dict);
@@ -286,12 +309,16 @@ convo::group ConvoInfoVolatile::get_or_construct_group(std::string_view pubkey_h
 }
 
 std::optional<convo::legacy_group> ConvoInfoVolatile::get_legacy_group(
-        std::string_view pubkey_hex) const {
+        std::string_view pubkey_hex, bool include_archived) const {
     std::string pubkey = session_id_to_bytes(pubkey_hex);
 
     auto* info_dict = data["C"][pubkey].dict();
-    if (!info_dict)
+    if (!info_dict) {
+        if (include_archived)
+            if (auto it = _arch_legacy.find(pubkey); it != _arch_legacy.end())
+                return it->second;
         return std::nullopt;
+    }
 
     auto result = std::make_optional<convo::legacy_group>(std::string{pubkey_hex});
     result->load(*info_dict);
@@ -307,7 +334,7 @@ convo::legacy_group ConvoInfoVolatile::get_or_construct_legacy_group(
 }
 
 std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(
-        std::string_view pubkey_hex) const {
+        std::string_view pubkey_hex, bool include_archived) const {
     auto prefix = get_session_id_prefix(pubkey_hex);
 
     if (prefix != session::SessionIDPrefix::community_blinded &&
@@ -318,8 +345,12 @@ std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(
     std::string pubkey = session_id_to_bytes(pubkey_hex, to_string(prefix));
 
     auto* info_dict = data["b"][pubkey].dict();
-    if (!info_dict)
+    if (!info_dict) {
+        if (include_archived)
+            if (auto it = _arch_blinded.find(pubkey); it != _arch_blinded.end())
+                return it->second;
         return std::nullopt;
+    }
 
     auto result = std::make_optional<convo::blinded_one_to_one>(std::string{pubkey_hex});
     result->load(*info_dict);
@@ -335,30 +366,23 @@ convo::blinded_one_to_one ConvoInfoVolatile::get_or_construct_blinded_1to1(
 }
 
 void ConvoInfoVolatile::set(const convo::one_to_one& c) {
-    auto info = data["1"][session_id_to_bytes(c.session_id)];
-    set_base(c, info);
-
-    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
-    if (pro_expiry > 0 && c.pro_gen_index_hash) {
-        set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_gen_index_hash;
+    auto key = session_id_to_bytes(c.session_id);
+    auto info = data["1"][key];
+    if (set_or_archive(c, info, key, _arch_1to1)) {
+        set_nonzero_int(info["e"], c.pro_expiry_unix_ts.time_since_epoch().count());
+        if (c.pro_gen_index_hash)
+            info["g"] = *c.pro_gen_index_hash;
     }
 }
 
-void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
-    auto r = info["r"];
+bool ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
+    std::chrono::system_clock::time_point last_read{std::chrono::milliseconds{c.last_read}};
+    if (last_read <= std::chrono::system_clock::now() - ARCHIVE_AFTER)
+        return false;  // Stale — caller should route to archive
 
-    // If we're making the last_read value *older* for some reason then ignore the prune cutoff
-    // (because we might be intentionally resetting the value after a deletion, for instance).
-    if (auto* val = r.integer(); val && c.last_read < *val)
-        r = c.last_read;
-    else {
-        std::chrono::system_clock::time_point last_read{std::chrono::milliseconds{c.last_read}};
-        if (last_read > std::chrono::system_clock::now() - PRUNE_LOW)
-            info["r"] = c.last_read;
-    }
-
+    info["r"] = c.last_read;
     set_flag(info["u"], c.unread);
+    return true;
 }
 
 template <std::derived_from<convo::base> C>
@@ -372,16 +396,18 @@ static bool is_stale(const C& c, int64_t cutoff_ms) {
     return c.last_read < cutoff_ms;
 }
 
-void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
-    const int64_t cutoff = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   (std::chrono::system_clock::now() - prune).time_since_epoch())
-                                   .count();
+void ConvoInfoVolatile::archive_stale() {
 
-    // For each stale entry: snapshot it, then erase it.  The erase() overloads also remove any
-    // existing archive entry for the same ID (deduplication), so after the erase we push_back the
-    // fresh snapshot.  This order (snapshot → erase → archive) avoids the erase undoing the
+    const int64_t cutoff =
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                    (std::chrono::system_clock::now() - ARCHIVE_AFTER).time_since_epoch())
+                    .count();
+
+    // For each stale entry found: snapshot it, then erase it.  The erase() overloads also remove
+    // any existing archive entry for the same ID (deduplication), so after the erase we push_back
+    // the fresh snapshot.  This order (snapshot → erase → archive) avoids the erase undoing the
     // archive addition that would happen if we archived before erasing.
-    // Only examine active (non-archived) entries — archived entries have already been pruned.
+    // Only examine active (non-archived) entries
     std::vector<std::string> stale;
     for (auto it = begin_1to1(false); !it.done(); ++it)
         if (is_stale(*it, cutoff))
@@ -390,7 +416,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         auto c = get_1to1(sid);
         erase_1to1(sid);
         if (c)
-            _archive.push_back(convo::any{std::move(*c)});
+            _arch_1to1.insert_or_assign(session_id_to_bytes(c->session_id), std::move(*c));
     }
 
     stale.clear();
@@ -401,7 +427,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         auto c = get_legacy_group(id);
         erase_legacy_group(id);
         if (c)
-            _archive.push_back(convo::any{std::move(*c)});
+            _arch_legacy.insert_or_assign(session_id_to_bytes(c->id), std::move(*c));
     }
 
     stale.clear();
@@ -412,7 +438,9 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         auto c = get_blinded_1to1(id);
         erase_blinded_1to1(id);
         if (c)
-            _archive.push_back(convo::any{std::move(*c)});
+            _arch_blinded.insert_or_assign(
+                    session_id_to_bytes(c->blinded_session_id, c->legacy_blinding ? "15" : "25"),
+                    std::move(*c));
     }
 
     stale.clear();
@@ -423,7 +451,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         auto c = get_group(id);
         erase_group(id);
         if (c)
-            _archive.push_back(convo::any{std::move(*c)});
+            _arch_group.insert_or_assign(session_id_to_bytes(c->id, "03"), std::move(*c));
     }
 
     std::vector<std::pair<std::string, std::string>> stale_comms;
@@ -434,119 +462,134 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         auto c = get_community(base, room);
         erase_community(base, room);
         if (c)
-            _archive.push_back(convo::any{std::move(*c)});
+            _arch_comm[c->base_url()].insert_or_assign(c->room_norm(), std::move(*c));
     }
 }
 
 std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
 ConvoInfoVolatile::push() {
-    // Prune off any conversations with last_read timestamps more than PRUNE_HIGH ago (unless they
+    // Archive any conversations with last_read timestamps more than ARCHIVE_AFTER ago (unless they
     // also have a `unread` flag set, in which case we keep them indefinitely).
-    prune_stale();
+    archive_stale();
 
     return ConfigBase::push();
 }
 
-void ConvoInfoVolatile::extra_data(oxenc::bt_dict_producer&& extra) const {
-    // Collect archived entries by type, sorted by binary key via std::map.
-    // Top-level bencode key order: "1"(49) < "C"(67) < "b"(98) < "g"(103) < "o"(111)
-    std::map<std::string, const convo::one_to_one*> ones;
-    std::map<std::string, const convo::legacy_group*> lgroups;
-    std::map<std::string, const convo::blinded_one_to_one*> blindeds;
-    std::map<std::string, const convo::group*> groups;
-    std::map<std::string, std::map<std::string, const convo::community*>> communities;
+void ConvoInfoVolatile::after_merge() {
+    // After a config merge the active dict may contain entries that are also sitting in one of
+    // the local-only archive maps (e.g. a peer's config re-activated a conversation that had
+    // been archived locally). Remove any such duplicates from the archives so that iteration always
+    // yields each entry exactly once.
+    // Note: manually adding entries to the active dict will still create duplicates.
+    // A call to push will eventually archive those that needs to be archived.
 
-    for (const auto& entry : _archive) {
-        if (const auto* c = std::get_if<convo::one_to_one>(&entry))
-            ones[session_id_to_bytes(c->session_id)] = c;
-        else if (const auto* c = std::get_if<convo::legacy_group>(&entry))
-            lgroups[session_id_to_bytes(c->id)] = c;
-        else if (const auto* c = std::get_if<convo::blinded_one_to_one>(&entry))
-            blindeds[session_id_to_bytes(c->blinded_session_id, c->legacy_blinding ? "15" : "25")] =
-                    c;
-        else if (const auto* c = std::get_if<convo::group>(&entry))
-            groups[session_id_to_bytes(c->id, "03")] = c;
-        else if (const auto* c = std::get_if<convo::community>(&entry))
-            communities[c->base_url()][c->room_norm()] = c;
+    auto cleanup = [](auto& arch, const dict* active) {
+        if (!active)
+            return;
+        for (auto it = arch.begin(); it != arch.end();)
+            it = active->count(it->first) ? arch.erase(it) : std::next(it);
+    };
+
+    cleanup(_arch_1to1, data["1"].dict());
+    cleanup(_arch_legacy, data["C"].dict());
+    cleanup(_arch_blinded, data["b"].dict());
+    cleanup(_arch_group, data["g"].dict());
+
+    // Communities are nested: base_url → room_norm.
+    for (auto sit = _arch_comm.begin(); sit != _arch_comm.end();) {
+        auto& [base_url, rooms] = *sit;
+        if (auto* rd = data["o"][base_url]["R"].dict())
+            for (auto rit = rooms.begin(); rit != rooms.end();)
+                rit = rd->count(rit->first) ? rooms.erase(rit) : std::next(rit);
+        sit = rooms.empty() ? _arch_comm.erase(sit) : std::next(sit);
     }
 
+    this->archive_stale();
+}
+
+void ConvoInfoVolatile::extra_data(oxenc::bt_dict_producer&& extra) const {
+    // Maps are already sorted by binary key; iterate directly.
+    // Top-level bencode key order: "1"(49) < "C"(67) < "b"(98) < "g"(103) < "o"(111)
+
     // "1": one_to_one — entry fields sorted: "e" < "g" < "r" < "u"
-    if (!ones.empty()) {
+    if (!_arch_1to1.empty()) {
         auto section = extra.append_dict("1");
-        for (const auto& [key, c] : ones) {
+        for (const auto& [key, c] : _arch_1to1) {
             auto val = section.append_dict(key);
-            auto pro_expiry = c->pro_expiry_unix_ts.time_since_epoch().count();
-            if (pro_expiry > 0 && c->pro_gen_index_hash) {
+            auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+            if (pro_expiry > 0 && c.pro_gen_index_hash) {
                 val.append("e", pro_expiry);
                 val.append(
                         "g",
                         std::span<const unsigned char>{
-                                c->pro_gen_index_hash->data(), c->pro_gen_index_hash->size()});
+                                c.pro_gen_index_hash->data(), c.pro_gen_index_hash->size()});
             }
-            val.append("r", c->last_read);
-            if (c->unread)
+            val.append("r", c.last_read);
+            if (c.unread)
                 val.append("u", 1);
         }
     }
 
     // "C": legacy_group — entry fields sorted: "r" < "u"
-    if (!lgroups.empty()) {
+    if (!_arch_legacy.empty()) {
         auto section = extra.append_dict("C");
-        for (const auto& [key, c] : lgroups) {
+        for (const auto& [key, c] : _arch_legacy) {
             auto val = section.append_dict(key);
-            val.append("r", c->last_read);
-            if (c->unread)
+            val.append("r", c.last_read);
+            if (c.unread)
                 val.append("u", 1);
         }
     }
 
     // "b": blinded_one_to_one — entry fields sorted: "e" < "g" < "r" < "u" < "y"
-    if (!blindeds.empty()) {
+    if (!_arch_blinded.empty()) {
         auto section = extra.append_dict("b");
-        for (const auto& [key, c] : blindeds) {
+        for (const auto& [key, c] : _arch_blinded) {
             auto val = section.append_dict(key);
-            auto pro_expiry = c->pro_expiry_unix_ts.time_since_epoch().count();
-            if (pro_expiry > 0 && c->pro_gen_index_hash) {
+            auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+            if (pro_expiry > 0 && c.pro_gen_index_hash) {
                 val.append("e", pro_expiry);
                 val.append(
                         "g",
                         std::span<const unsigned char>{
-                                c->pro_gen_index_hash->data(), c->pro_gen_index_hash->size()});
+                                c.pro_gen_index_hash->data(), c.pro_gen_index_hash->size()});
             }
-            val.append("r", c->last_read);
-            if (c->unread)
+            val.append("r", c.last_read);
+            if (c.unread)
                 val.append("u", 1);
-            if (c->legacy_blinding)
+            if (c.legacy_blinding)
                 val.append("y", 1);
         }
     }
 
     // "g": group — entry fields sorted: "r" < "u"
-    if (!groups.empty()) {
+    if (!_arch_group.empty()) {
         auto section = extra.append_dict("g");
-        for (const auto& [key, c] : groups) {
+        for (const auto& [key, c] : _arch_group) {
             auto val = section.append_dict(key);
-            val.append("r", c->last_read);
-            if (c->unread)
+            val.append("r", c.last_read);
+            if (c.unread)
                 val.append("u", 1);
         }
     }
 
     // "o": community — server dict keys sorted: "#"(35) < "R"(82); room dict: "r" < "u"
-    if (!communities.empty()) {
+    if (!_arch_comm.empty()) {
         auto section = extra.append_dict("o");
-        for (const auto& [base_url, rooms] : communities) {
+        for (const auto& [base_url, rooms] : _arch_comm) {
+            if (rooms.empty())
+                continue;
             auto server = section.append_dict(base_url);
-            const auto* any_comm = rooms.begin()->second;
+            const auto& any_comm = rooms.begin()->second;
             server.append(
                     "#",
                     std::span<const unsigned char>{
-                            any_comm->pubkey().data(), any_comm->pubkey().size()});
+                            any_comm.pubkey().data(), any_comm.pubkey().size()});
             auto rooms_dict = server.append_dict("R");
             for (const auto& [room, c] : rooms) {
                 auto room_val = rooms_dict.append_dict(room);
-                room_val.append("r", c->last_read);
-                if (c->unread)
+                room_val.append("r", c.last_read);
+                if (c.unread)
                     room_val.append("u", 1);
             }
         }
@@ -579,7 +622,7 @@ void ConvoInfoVolatile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
                 c.last_read = val.consume_integer<int64_t>();
             if (val.skip_until("u"))
                 c.unread = (bool)val.consume_integer<int>();
-            _archive.push_back(std::move(c));
+            _arch_1to1.insert_or_assign(std::string{key}, std::move(c));
         }
     }
 
@@ -597,7 +640,7 @@ void ConvoInfoVolatile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
                 c.last_read = val.consume_integer<int64_t>();
             if (val.skip_until("u"))
                 c.unread = (bool)val.consume_integer<int>();
-            _archive.push_back(std::move(c));
+            _arch_legacy.insert_or_assign(std::string{key}, std::move(c));
         }
     }
 
@@ -628,7 +671,7 @@ void ConvoInfoVolatile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
                 if (val.skip_until("u"))
                     c.unread = (bool)val.consume_integer<int>();
                 // "y" (legacy_blinding) is derivable from the ID prefix; no need to parse
-                _archive.push_back(std::move(c));
+                _arch_blinded.insert_or_assign(std::string{key}, std::move(c));
             } catch (...) { /* invalid blinded ID — skip */
             }
         }
@@ -649,7 +692,7 @@ void ConvoInfoVolatile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
                     c.last_read = val.consume_integer<int64_t>();
                 if (val.skip_until("u"))
                     c.unread = (bool)val.consume_integer<int>();
-                _archive.push_back(std::move(c));
+                _arch_group.insert_or_assign(std::string{key}, std::move(c));
             } catch (...) { /* invalid group ID — skip */
             }
         }
@@ -682,7 +725,7 @@ void ConvoInfoVolatile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
                         c.last_read = room_val.consume_integer<int64_t>();
                     if (room_val.skip_until("u"))
                         c.unread = (bool)room_val.consume_integer<int>();
-                    _archive.push_back(std::move(c));
+                    _arch_comm[base_url].insert_or_assign(c.room_norm(), std::move(c));
                 } catch (...) { /* invalid url/room format — skip */
                 }
             }
@@ -692,32 +735,38 @@ void ConvoInfoVolatile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
 
 void ConvoInfoVolatile::set(const convo::community& c) {
     auto info = community_field(c);
-    data["o"][c.base_url()]["#"] = c.pubkey();
-    set_base(c, info);
+    if (set_base(c, info)) {
+        if (auto s = _arch_comm.find(c.base_url()); s != _arch_comm.end())
+            if (s->second.erase(c.room_norm()) && s->second.empty())
+                _arch_comm.erase(s);
+        data["o"][c.base_url()]["#"] = c.pubkey();
+    } else {
+        info.erase();  // remove from active dict if present
+        _arch_comm[c.base_url()].insert_or_assign(c.room_norm(), c);
+        _needs_dump = true;
+    }
 }
 
 void ConvoInfoVolatile::set(const convo::group& c) {
-    auto info = data["g"][session_id_to_bytes(c.id, "03")];
-    set_base(c, info);
+    auto key = session_id_to_bytes(c.id, "03");
+    auto info = data["g"][key];
+    set_or_archive(c, info, key, _arch_group);
 }
 
 void ConvoInfoVolatile::set(const convo::legacy_group& c) {
-    auto info = data["C"][session_id_to_bytes(c.id)];
-    set_base(c, info);
+    auto key = session_id_to_bytes(c.id);
+    auto info = data["C"][key];
+    set_or_archive(c, info, key, _arch_legacy);
 }
 
 void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
-    std::string pubkey = session_id_to_bytes(c.blinded_session_id, c.legacy_blinding ? "15" : "25");
-
-    auto info = data["b"][pubkey];
-    set_base(c, info);
-
-    set_nonzero_int(info["y"], c.legacy_blinding);
-
-    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
-    if (pro_expiry > 0 && c.pro_gen_index_hash) {
-        set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_gen_index_hash;
+    auto key = session_id_to_bytes(c.blinded_session_id, c.legacy_blinding ? "15" : "25");
+    auto info = data["b"][key];
+    if (set_or_archive(c, info, key, _arch_blinded)) {
+        set_nonzero_int(info["e"], c.pro_expiry_unix_ts.time_since_epoch().count());
+        if (c.pro_gen_index_hash)
+            info["g"] = *c.pro_gen_index_hash;
+        set_nonzero_int(info["y"], c.legacy_blinding);
     }
 }
 
@@ -729,35 +778,17 @@ static bool erase_impl(Field convo) {
 }
 
 bool ConvoInfoVolatile::erase(const convo::one_to_one& c) {
-    auto before = _archive.size();
-    _archive.erase(
-            std::remove_if(
-                    _archive.begin(),
-                    _archive.end(),
-                    [&](const convo::any& e) {
-                        if (const auto* a = std::get_if<convo::one_to_one>(&e))
-                            return a->session_id == c.session_id;
-                        return false;
-                    }),
-            _archive.end());
-    if (_archive.size() != before)
-        _needs_dump = true;
-    return erase_impl(data["1"][session_id_to_bytes(c.session_id)]);
+    auto key = session_id_to_bytes(c.session_id);
+    return erase_from_both(data["1"][key], key, _arch_1to1);
 }
 bool ConvoInfoVolatile::erase(const convo::community& c) {
-    auto before = _archive.size();
-    _archive.erase(
-            std::remove_if(
-                    _archive.begin(),
-                    _archive.end(),
-                    [&](const convo::any& e) {
-                        if (const auto* a = std::get_if<convo::community>(&e))
-                            return a->base_url() == c.base_url() && a->room_norm() == c.room_norm();
-                        return false;
-                    }),
-            _archive.end());
-    if (_archive.size() != before)
-        _needs_dump = true;
+    if (auto s = _arch_comm.find(c.base_url()); s != _arch_comm.end()) {
+        if (s->second.erase(c.room_norm())) {
+            if (s->second.empty())
+                _arch_comm.erase(s);
+            _needs_dump = true;
+        }
+    }
     bool gone = erase_impl(community_field(c));
     if (gone) {
         // If this was the last room on the server, also remove the server
@@ -771,53 +802,16 @@ bool ConvoInfoVolatile::erase(const convo::community& c) {
     return gone;
 }
 bool ConvoInfoVolatile::erase(const convo::group& c) {
-    auto before = _archive.size();
-    _archive.erase(
-            std::remove_if(
-                    _archive.begin(),
-                    _archive.end(),
-                    [&](const convo::any& e) {
-                        if (const auto* a = std::get_if<convo::group>(&e))
-                            return a->id == c.id;
-                        return false;
-                    }),
-            _archive.end());
-    if (_archive.size() != before)
-        _needs_dump = true;
-    return erase_impl(data["g"][session_id_to_bytes(c.id, "03")]);
+    auto key = session_id_to_bytes(c.id, "03");
+    return erase_from_both(data["g"][key], key, _arch_group);
 }
 bool ConvoInfoVolatile::erase(const convo::legacy_group& c) {
-    auto before = _archive.size();
-    _archive.erase(
-            std::remove_if(
-                    _archive.begin(),
-                    _archive.end(),
-                    [&](const convo::any& e) {
-                        if (const auto* a = std::get_if<convo::legacy_group>(&e))
-                            return a->id == c.id;
-                        return false;
-                    }),
-            _archive.end());
-    if (_archive.size() != before)
-        _needs_dump = true;
-    return erase_impl(data["C"][session_id_to_bytes(c.id)]);
+    auto key = session_id_to_bytes(c.id);
+    return erase_from_both(data["C"][key], key, _arch_legacy);
 }
 bool ConvoInfoVolatile::erase(const convo::blinded_one_to_one& c) {
-    std::string pubkey = session_id_to_bytes(c.blinded_session_id, c.legacy_blinding ? "15" : "25");
-    auto before = _archive.size();
-    _archive.erase(
-            std::remove_if(
-                    _archive.begin(),
-                    _archive.end(),
-                    [&](const convo::any& e) {
-                        if (const auto* a = std::get_if<convo::blinded_one_to_one>(&e))
-                            return a->blinded_session_id == c.blinded_session_id;
-                        return false;
-                    }),
-            _archive.end());
-    if (_archive.size() != before)
-        _needs_dump = true;
-    return erase_impl(data["b"][pubkey]);
+    auto key = session_id_to_bytes(c.blinded_session_id, c.legacy_blinding ? "15" : "25");
+    return erase_from_both(data["b"][key], key, _arch_blinded);
 }
 
 bool ConvoInfoVolatile::erase(const convo::any& c) {
@@ -879,9 +873,37 @@ size_t ConvoInfoVolatile::size_blinded_1to1() const {
     return 0;
 }
 
+size_t ConvoInfoVolatile::size_1to1_archived() const {
+    return _arch_1to1.size();
+}
+
+size_t ConvoInfoVolatile::size_communities_archived() const {
+    size_t n = 0;
+    for (const auto& [_, rooms] : _arch_comm)
+        n += rooms.size();
+    return n;
+}
+
+size_t ConvoInfoVolatile::size_groups_archived() const {
+    return _arch_group.size();
+}
+
+size_t ConvoInfoVolatile::size_legacy_groups_archived() const {
+    return _arch_legacy.size();
+}
+
+size_t ConvoInfoVolatile::size_blinded_1to1_archived() const {
+    return _arch_blinded.size();
+}
+
 size_t ConvoInfoVolatile::size() const {
     return size_1to1() + size_communities() + size_legacy_groups() + size_groups() +
            size_blinded_1to1();
+}
+
+size_t ConvoInfoVolatile::size_archived() const {
+    return size_1to1_archived() + size_communities_archived() + size_legacy_groups_archived() +
+           size_groups_archived() + size_blinded_1to1_archived();
 }
 
 ConvoInfoVolatile::iterator::iterator(
@@ -891,14 +913,34 @@ ConvoInfoVolatile::iterator::iterator(
         bool groups,
         bool legacy_groups,
         bool blinded_1to1,
-        const std::vector<convo::any>* archive) {
-    _filter_1to1 = oneto1;
-    _filter_communities = communities;
-    _filter_groups = groups;
-    _filter_legacy_groups = legacy_groups;
-    _filter_blinded_1to1 = blinded_1to1;
-    _archive = (archive && !archive->empty()) ? archive : nullptr;
-    _archive_idx = 0;
+        const ConvoInfoVolatile::arch_1to1_map_t* arch_1to1,
+        const ConvoInfoVolatile::arch_legacy_map_t* arch_legacy,
+        const ConvoInfoVolatile::arch_blinded_map_t* arch_blinded,
+        const ConvoInfoVolatile::arch_group_map_t* arch_group,
+        const ConvoInfoVolatile::arch_comm_map_t* arch_comm) {
+    _arch_1to1 = (arch_1to1 && !arch_1to1->empty()) ? arch_1to1 : nullptr;
+    _arch_legacy = (arch_legacy && !arch_legacy->empty()) ? arch_legacy : nullptr;
+    _arch_blinded = (arch_blinded && !arch_blinded->empty()) ? arch_blinded : nullptr;
+    _arch_group = (arch_group && !arch_group->empty()) ? arch_group : nullptr;
+    _arch_comm = (arch_comm && !arch_comm->empty()) ? arch_comm : nullptr;
+    _arch_section = (_arch_1to1 || _arch_legacy || _arch_blinded || _arch_group || _arch_comm)
+                          ? ArchPhase::s_1to1
+                          : ArchPhase::done;
+    // Initialise all archive map iterators to begin() upfront; only the one matching
+    // _arch_section is used at any given time, but pre-initialising avoids lazy init in _load_val.
+    if (_arch_1to1)
+        _arch_1to1_it = _arch_1to1->begin();
+    if (_arch_group)
+        _arch_group_it = _arch_group->begin();
+    if (_arch_comm) {
+        _arch_comm_it = _arch_comm->begin();
+        if (_arch_comm_it != _arch_comm->end())
+            _arch_comm_room_it = _arch_comm_it->second.begin();
+    }
+    if (_arch_legacy)
+        _arch_legacy_it = _arch_legacy->begin();
+    if (_arch_blinded)
+        _arch_blinded_it = _arch_blinded->begin();
     if (oneto1)
         if (auto* d = data["1"].dict()) {
             _it_11 = d->begin();
@@ -985,44 +1027,82 @@ void ConvoInfoVolatile::iterator::_load_val() {
     if (val_loader::load<convo::blinded_one_to_one>(_val, _it_b11, _end_b11, 0x25, 0x15))
         return;
 
-    // Dict phase exhausted — scan archive for matching types
-    if (_archive) {
-        while (_archive_idx < _archive->size()) {
-            const auto& entry = (*_archive)[_archive_idx++];
-            bool matches = std::visit(
-                    [&](const auto& c) -> bool {
-                        using T = std::decay_t<decltype(c)>;
-                        if constexpr (std::is_same_v<T, convo::one_to_one>)
-                            return _filter_1to1;
-                        else if constexpr (std::is_same_v<T, convo::community>)
-                            return _filter_communities;
-                        else if constexpr (std::is_same_v<T, convo::group>)
-                            return _filter_groups;
-                        else if constexpr (std::is_same_v<T, convo::legacy_group>)
-                            return _filter_legacy_groups;
-                        else if constexpr (std::is_same_v<T, convo::blinded_one_to_one>)
-                            return _filter_blinded_1to1;
-                        return false;
-                    },
-                    entry);
-            if (matches) {
-                _val = std::make_shared<convo::any>(entry);
-                return;
-            }
+    // Dict phase exhausted — scan typed archive sections in extra_data key order
+    // ("1"<"C"<"b"<"g"<"o").
+    while (_arch_section != ArchPhase::done) {
+        switch (_arch_section) {
+            case ArchPhase::s_1to1:
+                if (_arch_1to1 && _arch_1to1_it != _arch_1to1->end()) {
+                    _val = std::make_shared<convo::any>(_arch_1to1_it->second);
+                    ++_arch_1to1_it;
+                    return;
+                }
+                break;
+            case ArchPhase::s_legacy:
+                if (_arch_legacy && _arch_legacy_it != _arch_legacy->end()) {
+                    _val = std::make_shared<convo::any>(_arch_legacy_it->second);
+                    ++_arch_legacy_it;
+                    return;
+                }
+                break;
+            case ArchPhase::s_blinded:
+                if (_arch_blinded && _arch_blinded_it != _arch_blinded->end()) {
+                    _val = std::make_shared<convo::any>(_arch_blinded_it->second);
+                    ++_arch_blinded_it;
+                    return;
+                }
+                break;
+            case ArchPhase::s_group:
+                if (_arch_group && _arch_group_it != _arch_group->end()) {
+                    _val = std::make_shared<convo::any>(_arch_group_it->second);
+                    ++_arch_group_it;
+                    return;
+                }
+                break;
+            case ArchPhase::s_comm:
+                if (_arch_comm) {
+                    while (_arch_comm_it != _arch_comm->end()) {
+                        if (_arch_comm_room_it != _arch_comm_it->second.end()) {
+                            _val = std::make_shared<convo::any>(_arch_comm_room_it->second);
+                            ++_arch_comm_room_it;
+                            return;
+                        }
+                        ++_arch_comm_it;
+                        if (_arch_comm_it != _arch_comm->end())
+                            _arch_comm_room_it = _arch_comm_it->second.begin();
+                    }
+                }
+                break;
+            case ArchPhase::done: break;
         }
-        _archive = nullptr;  // exhausted
+        _arch_section = static_cast<ArchPhase>(static_cast<uint8_t>(_arch_section) + 1);
     }
 }
 
 bool ConvoInfoVolatile::iterator::operator==(const iterator& other) const {
-    return _it_11 == other._it_11 && _it_group == other._it_group && _it_comm == other._it_comm &&
-           _it_lgroup == other._it_lgroup && _it_b11 == other._it_b11 &&
-           _archive == other._archive;
+    if (_it_11 != other._it_11 || _it_group != other._it_group || _it_comm != other._it_comm ||
+        _it_lgroup != other._it_lgroup || _it_b11 != other._it_b11)
+        return false;
+    if (_arch_section != other._arch_section)
+        return false;
+    switch (_arch_section) {
+        case ArchPhase::s_1to1: return _arch_1to1_it == other._arch_1to1_it;
+        case ArchPhase::s_legacy: return _arch_legacy_it == other._arch_legacy_it;
+        case ArchPhase::s_blinded: return _arch_blinded_it == other._arch_blinded_it;
+        case ArchPhase::s_group: return _arch_group_it == other._arch_group_it;
+        case ArchPhase::s_comm:
+            if (_arch_comm_it != other._arch_comm_it)
+                return false;
+            if (_arch_comm && _arch_comm_it != _arch_comm->end())
+                return _arch_comm_room_it == other._arch_comm_room_it;
+            return true;
+        default: return true;  // ArchPhase::done — both exhausted
+    }
 }
 
 bool ConvoInfoVolatile::iterator::done() const {
     return !_it_11 && !_it_group && (!_it_comm || _it_comm->done()) && !_it_lgroup && !_it_b11 &&
-           !_archive;
+           _arch_section == ArchPhase::done;
 }
 
 ConvoInfoVolatile::iterator& ConvoInfoVolatile::iterator::operator++() {
@@ -1036,7 +1116,7 @@ ConvoInfoVolatile::iterator& ConvoInfoVolatile::iterator::operator++() {
         ++*_it_lgroup;
     else if (_it_b11)
         ++*_it_b11;
-    // else: archive phase — _load_val() advances _archive_idx
+    // else: archive phase — _load_val() advances the map iterator
     _load_val();
     return *this;
 }

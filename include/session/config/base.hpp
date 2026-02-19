@@ -963,6 +963,15 @@ class ConfigBase : public ConfigSig {
     /// - `extra` -- bt_dict_consumer over the extra data subdict.
     virtual void load_extra_data(oxenc::bt_dict_consumer&&) {}
 
+    /// API: base/ConfigBase::after_merge
+    ///
+    /// Called at the end of _merge(), after the active config dict has been updated.  The base
+    /// implementation does nothing.  Subclasses that maintain auxiliary data structures derived
+    /// from the active config (e.g. local-only archive maps) may override this to reconcile those
+    /// structures against the newly merged active dict — for example, removing archive entries
+    /// that have been re-activated by an incoming config from a peer.
+    virtual void after_merge() {}
+
     /// API: base/ConfigBase::load_key
     ///
     /// Called to load an ed25519 key for encryption; this is meant for use by single-ownership

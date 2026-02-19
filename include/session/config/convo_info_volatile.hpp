@@ -254,33 +254,29 @@ class ConvoInfoVolatile : public ConfigBase {
     /// - `const char*` - Will return "ConvoInfoVolatile"
     const char* encryption_domain() const override { return "ConvoInfoVolatile"; }
 
-    /// Our pruning ages.  We ignore added conversations that are more than PRUNE_LOW before now,
-    /// and we actively remove (when doing a new push) any conversations that are more than
-    /// PRUNE_HIGH before now.  Clients can mostly ignore these and just add all conversations; the
-    /// class just transparently ignores (or removes) pruned values.
-    static constexpr auto PRUNE_LOW = 30 * 24h;
-    static constexpr auto PRUNE_HIGH = 45 * 24h;
+    /// Our archiving ages.
+    /// Adding or updating conversations that are older than ARCHIVE_AFTER before now will push them
+    /// to the archived list. Otherwise, they will be added to the active list (and synced between
+    /// devices).
+    ///
+    /// Clients can mostly ignore that value and just add all conversations; the
+    /// class will transparently archive old entries after a `push()` or `merge()`.
+    static constexpr auto ARCHIVE_AFTER = 30 * 24h;
 
-    /// API: convo_info_volatile/ConvoInfoVolatile::prune_stale
+    /// API: convo_info_volatile/ConvoInfoVolatile::archive_stale
     ///
-    /// Prunes any "stale" conversations: that is, ones with a last read more than `prune` ago that
-    /// are not specifically "marked as unread" by the client.
-    ///
-    /// This method is called automatically by `push()` and does not typically need to be invoked
-    /// directly.
-    ///
-    /// Inputs:
-    /// - `prune` the "too old" time; any conversations with a last_read time more than this
-    ///   duration ago will be removed (unless they have the explicit `unread` flag set).  If
-    ///   omitted, defaults to the PRUNE_HIGH constant (45 days).
+    /// Archives any "stale" conversations: that is, ones with a last read more than `ARCHIVE_AFTER`
+    /// ago.
+    /// This method is called automatically by `push()` or `merge()` and does not typically need to
+    /// be invoked directly.
     ///
     /// Outputs:
     /// - returns nothing.
-    void prune_stale(std::chrono::milliseconds prune = PRUNE_HIGH);
+    void archive_stale();
 
     /// API: convo_info_volatile/ConvoInfoVolatile::push
     ///
-    /// Overrides push() to prune stale last-read values before we do the push.
+    /// Overrides push() to archive stale last-read values before we do the push.
     ///
     /// Inputs: None
     ///
@@ -300,10 +296,12 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `session_id` -- Hex string of the Session ID
+    /// - `include_archived` -- Defaults to true, if false, only an active entry is returned
     ///
     /// Outputs:
     /// - `std::optional<convo::one_to_one>` - Returns a contact
-    std::optional<convo::one_to_one> get_1to1(std::string_view session_id) const;
+    std::optional<convo::one_to_one> get_1to1(
+            std::string_view session_id, bool include_archived = true) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_community
     ///
@@ -314,11 +312,12 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Inputs:
     /// - `base_url` -- String of the base URL
     /// - `room` -- String of the room
+    /// - `include_archived` -- Defaults to true, if false, only an active entry is returned
     ///
     /// Outputs:
     /// - `std::optional<convo::community>` - Returns a community
     std::optional<convo::community> get_community(
-            std::string_view base_url, std::string_view room) const;
+            std::string_view base_url, std::string_view room, bool include_archived = true) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_community(partial_url)
     ///
@@ -327,10 +326,12 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `partial_url` -- String of the partial URL
+    /// - `include_archived` -- Defaults to true, if false, only an active entry is returned
     ///
     /// Outputs:
     /// - `std::optional<convo::community>` - Returns a community
-    std::optional<convo::community> get_community(std::string_view partial_url) const;
+    std::optional<convo::community> get_community(
+            std::string_view partial_url, bool include_archived = true) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_group
     ///
@@ -339,10 +340,12 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `pubkey_hex` -- Hex string of the group ID
+    /// - `include_archived` -- Defaults to true, if false, only an active entry is returned
     ///
     /// Outputs:
     /// - `std::optional<convo::group>` - Returns a group
-    std::optional<convo::group> get_group(std::string_view pubkey_hex) const;
+    std::optional<convo::group> get_group(
+            std::string_view pubkey_hex, bool include_archived = true) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_legacy_group
     ///
@@ -352,10 +355,12 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `pubkey_hex` -- Hex string of the legacy group Session ID
+    /// - `include_archived` -- Defaults to true, if false, only an active entry is returned
     ///
     /// Outputs:
     /// - `std::optional<convo::legacy_group>` - Returns a group
-    std::optional<convo::legacy_group> get_legacy_group(std::string_view pubkey_hex) const;
+    std::optional<convo::legacy_group> get_legacy_group(
+            std::string_view pubkey_hex, bool include_archived = true) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_blinded_1to1
     ///
@@ -365,11 +370,12 @@ class ConvoInfoVolatile : public ConfigBase {
     ///
     /// Inputs:
     /// - `blinded_session_id` -- Hex string of the blinded Session ID
+    /// - `include_archived` -- Defaults to true, if false, only an active entry is returned
     ///
     /// Outputs:
     /// - `std::optional<convo::blinded_one_to_one>` - Returns a contact
     std::optional<convo::blinded_one_to_one> get_blinded_1to1(
-            std::string_view blinded_session_id) const;
+            std::string_view blinded_session_id, bool include_archived = true) const;
 
     /// API: convo_info_volatile/ConvoInfoVolatile::get_or_construct_1to1
     ///
@@ -503,7 +509,39 @@ class ConvoInfoVolatile : public ConfigBase {
     void set(const convo::any& c);  // Variant which can be any of the above
 
   protected:
-    void set_base(const convo::base& c, DictFieldProxy& info);
+    /// Sets the base of the convo struct, and returns true if the struct was set (i.e. is active)
+    bool set_base(const convo::base& c, DictFieldProxy& info);
+
+    /// Shared helper for the flat-archive set() overloads.  Calls set_base();
+    /// - on success erases from arch and returns true (so the caller can write extra fields into
+    /// info);
+    /// - on failure inserts into arch, marks `_needs_dump`, and returns false.
+    template <typename C, typename Map>
+    bool set_or_archive(const C& c, DictFieldProxy& info, const std::string& key, Map& arch) {
+        if (set_base(c, info)) {
+            arch.erase(key);
+            return true;
+        }
+        // remove from active dict if present
+        // Note: we consider that we are about to write is more up to date that what is currently in
+        // info (if any)
+        info.erase();
+        arch.insert_or_assign(key, c);
+        _needs_dump = true;
+        return false;
+    }
+
+    /// Shared helper for the flat-archive erase() overloads.  Erases from both the archive map
+    /// (marking _needs_dump if found) and the active dict.  Returns true if the entry existed in
+    /// the active dict.
+    template <typename Map>
+    bool erase_from_both(DictFieldProxy info, const std::string& key, Map& arch) {
+        if (arch.erase(key))
+            _needs_dump = true;
+        bool ret = info.exists();
+        info.erase();
+        return ret;
+    }
 
     // Drills into the nested dicts to access community details; if the second argument is
     // non-nullptr then it will be set to the community's pubkey, if it exists.
@@ -512,11 +550,24 @@ class ConvoInfoVolatile : public ConfigBase {
 
     void extra_data(oxenc::bt_dict_producer&&) const override;
     void load_extra_data(oxenc::bt_dict_consumer&&) override;
+    void after_merge() override;
 
   private:
-    // Conversations pruned from _config->data() by prune_stale() that should still be kept
-    // locally (all types). Serialized into dump() via extra_data() but never included in push().
-    std::vector<convo::any> _archive;
+    // Type aliases for the archive maps (keyed by binary ID, matching the active data dicts).
+    using arch_1to1_map_t = std::map<std::string, convo::one_to_one>;
+    using arch_legacy_map_t = std::map<std::string, convo::legacy_group>;
+    using arch_blinded_map_t = std::map<std::string, convo::blinded_one_to_one>;
+    using arch_group_map_t = std::map<std::string, convo::group>;
+    using arch_comm_rooms_t = std::map<std::string, convo::community>;  // room_norm → community
+    using arch_comm_map_t = std::map<std::string, arch_comm_rooms_t>;   // base_url → rooms
+
+    // Conversations archived from _config->data() by archive_stale() that should still be kept
+    // locally (per type). Serialized into dump() via extra_data() but never included in push().
+    arch_1to1_map_t _arch_1to1;
+    arch_legacy_map_t _arch_legacy;
+    arch_blinded_map_t _arch_blinded;
+    arch_group_map_t _arch_group;
+    arch_comm_map_t _arch_comm;
 
   public:
     /// API: convo_info_volatile/ConvoInfoVolatile::erase_1to1
@@ -626,6 +677,12 @@ class ConvoInfoVolatile : public ConfigBase {
     /// - `size_t` - Returns the number of conversations
     size_t size() const;
 
+    /// Returns the total number of locally-archived conversations across all types.
+    /// Archived entries are conversations that were removed from the active config (by
+    /// archive_stale() or by set() when last_read is older than ARCHIVE_AFTER) but are kept
+    /// locally and never pushed to the network.
+    size_t size_archived() const;
+
     /// Returns the number of 1-to-1, community, group, and legacy group conversations,
     /// respectively.
     size_t size_1to1() const;
@@ -634,6 +691,15 @@ class ConvoInfoVolatile : public ConfigBase {
     size_t size_legacy_groups() const;
     size_t size_blinded_1to1() const;
 
+    /// Returns the number of locally-archived conversations of each type.
+    /// Archived entries were removed from the active config (by archive_stale() or by set() when
+    /// last_read is older than ARCHIVE_AFTER) but are kept locally and never pushed to the network.
+    size_t size_1to1_archived() const;
+    size_t size_communities_archived() const;
+    size_t size_groups_archived() const;
+    size_t size_legacy_groups_archived() const;
+    size_t size_blinded_1to1_archived() const;
+
     /// API: convo_info_volatile/ConvoInfoVolatile::empty
     ///
     /// Returns true if the conversation list is empty.
@@ -641,7 +707,7 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `bool` -- Returns true if the convesation list is empty
+    /// - `bool` -- Returns true if the conversation list is empty
     bool empty() const { return size() == 0; }
 
     bool accepts_protobuf() const override { return true; }
@@ -693,7 +759,18 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Outputs:
     /// - `iterator` - Returns an iterator for the beginning of the contacts
     iterator begin(bool include_archived = true) const {
-        return iterator{data, include_archived ? &_archive : nullptr};
+        return iterator{
+                data,
+                true,
+                true,
+                true,
+                true,
+                true,
+                include_archived ? &_arch_1to1 : nullptr,
+                include_archived ? &_arch_legacy : nullptr,
+                include_archived ? &_arch_blinded : nullptr,
+                include_archived ? &_arch_group : nullptr,
+                include_archived ? &_arch_comm : nullptr};
     }
 
     /// API: convo_info_volatile/ConvoInfoVolatile::end
@@ -713,20 +790,37 @@ class ConvoInfoVolatile : public ConfigBase {
     /// Returns an iterator that iterates only through one type of conversations.
     /// Pass `include_archived = false` to skip archived entries.
     subtype_iterator<convo::one_to_one> begin_1to1(bool include_archived = true) const {
-        return {data, include_archived ? &_archive : nullptr};
+        return {data, include_archived ? &_arch_1to1 : nullptr};
     }
     subtype_iterator<convo::community> begin_communities(bool include_archived = true) const {
-        return {data, include_archived ? &_archive : nullptr};
+        return {data, nullptr, nullptr, nullptr, nullptr, include_archived ? &_arch_comm : nullptr};
     }
     subtype_iterator<convo::group> begin_groups(bool include_archived = true) const {
-        return {data, include_archived ? &_archive : nullptr};
+        return {data, nullptr, nullptr, nullptr, include_archived ? &_arch_group : nullptr};
     }
     subtype_iterator<convo::legacy_group> begin_legacy_groups(bool include_archived = true) const {
-        return {data, include_archived ? &_archive : nullptr};
+        return {data, nullptr, include_archived ? &_arch_legacy : nullptr};
     }
+    /// Returns an iterator that visits only locally-archived entries, in the same order
+    /// as the archive section of begin(true).  Useful for display or debugging.
+    iterator begin_archived() const {
+        return iterator{
+                data,
+                false,
+                false,
+                false,
+                false,
+                false,
+                &_arch_1to1,
+                &_arch_legacy,
+                &_arch_blinded,
+                &_arch_group,
+                &_arch_comm};
+    }
+
     subtype_iterator<convo::blinded_one_to_one> begin_blinded_1to1(
             bool include_archived = true) const {
-        return {data, include_archived ? &_archive : nullptr};
+        return {data, nullptr, nullptr, include_archived ? &_arch_blinded : nullptr};
     }
 
     using iterator_category = std::input_iterator_tag;
@@ -746,14 +840,31 @@ class ConvoInfoVolatile : public ConfigBase {
         std::optional<dict::const_iterator> _it_11, _end_11, _it_group, _end_group, _it_lgroup,
                 _end_lgroup, _it_b11, _end_b11;
         std::optional<comm_iterator_helper> _it_comm;
-        // Archive support: pointer into ConvoInfoVolatile::_archive; null when exhausted.
-        const std::vector<convo::any>* _archive = nullptr;
-        size_t _archive_idx = 0;
-        bool _filter_1to1 = true;
-        bool _filter_communities = true;
-        bool _filter_groups = true;
-        bool _filter_legacy_groups = true;
-        bool _filter_blinded_1to1 = true;
+
+        // Archive support: typed pointers into ConvoInfoVolatile::_arch_* maps.
+        const arch_1to1_map_t* _arch_1to1 = nullptr;
+        const arch_legacy_map_t* _arch_legacy = nullptr;
+        const arch_blinded_map_t* _arch_blinded = nullptr;
+        const arch_group_map_t* _arch_group = nullptr;
+        const arch_comm_map_t* _arch_comm = nullptr;
+        // Archive iteration phase — ordered to match extra_data key order ("1"<"C"<"b"<"g"<"o").
+        enum class ArchPhase : uint8_t {
+            s_1to1 = 0,
+            s_legacy = 1,
+            s_blinded = 2,
+            s_group = 3,
+            s_comm = 4,
+            done = 5
+        };
+        ArchPhase _arch_section = ArchPhase::done;
+
+        // Per-section map iterators; only the one matching _arch_section is meaningful.
+        arch_1to1_map_t::const_iterator _arch_1to1_it;
+        arch_group_map_t::const_iterator _arch_group_it;
+        arch_comm_map_t::const_iterator _arch_comm_it;
+        arch_comm_rooms_t::const_iterator _arch_comm_room_it;
+        arch_legacy_map_t::const_iterator _arch_legacy_it;
+        arch_blinded_map_t::const_iterator _arch_blinded_it;
         void _load_val();
         iterator() = default;  // Constructs an end tombstone
         iterator(
@@ -763,11 +874,30 @@ class ConvoInfoVolatile : public ConfigBase {
                 bool groups,
                 bool legacy_groups,
                 bool blinded_1to1,
-                const std::vector<convo::any>* archive = nullptr);
+                const arch_1to1_map_t* arch_1to1 = nullptr,
+                const arch_legacy_map_t* arch_legacy = nullptr,
+                const arch_blinded_map_t* arch_blinded = nullptr,
+                const arch_group_map_t* arch_group = nullptr,
+                const arch_comm_map_t* arch_comm = nullptr);
         explicit iterator(
                 const DictFieldRoot& data,
-                const std::vector<convo::any>* archive = nullptr) :
-                iterator(data, true, true, true, true, true, archive) {}
+                const arch_1to1_map_t* arch_1to1 = nullptr,
+                const arch_legacy_map_t* arch_legacy = nullptr,
+                const arch_blinded_map_t* arch_blinded = nullptr,
+                const arch_group_map_t* arch_group = nullptr,
+                const arch_comm_map_t* arch_comm = nullptr) :
+                iterator(
+                        data,
+                        true,
+                        true,
+                        true,
+                        true,
+                        true,
+                        arch_1to1,
+                        arch_legacy,
+                        arch_blinded,
+                        arch_group,
+                        arch_comm) {}
         friend class ConvoInfoVolatile;
 
       public:
@@ -788,7 +918,12 @@ class ConvoInfoVolatile : public ConfigBase {
     struct subtype_iterator : iterator {
       protected:
         subtype_iterator(
-                const DictFieldRoot& data, const std::vector<convo::any>* archive = nullptr) :
+                const DictFieldRoot& data,
+                const arch_1to1_map_t* a1to1 = nullptr,
+                const arch_legacy_map_t* a_legacy_group = nullptr,
+                const arch_blinded_map_t* a_blinded = nullptr,
+                const arch_group_map_t* a_group = nullptr,
+                const arch_comm_map_t* a_comm = nullptr) :
                 iterator(
                         data,
                         std::is_same_v<convo::one_to_one, ConvoType>,
@@ -796,7 +931,11 @@ class ConvoInfoVolatile : public ConfigBase {
                         std::is_same_v<convo::group, ConvoType>,
                         std::is_same_v<convo::legacy_group, ConvoType>,
                         std::is_same_v<convo::blinded_one_to_one, ConvoType>,
-                        archive) {}
+                        a1to1,
+                        a_legacy_group,
+                        a_blinded,
+                        a_group,
+                        a_comm) {}
         friend class ConvoInfoVolatile;
 
       public:

@@ -649,6 +649,8 @@ std::unordered_set<std::string> ConfigBase::_merge(
             _config->seqno(),
             old_seqno);
 
+    after_merge();
+
     return good_hashes;
 }
 
