@@ -48,8 +48,8 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url);
 /// - `date_str` -- [in] date header to parse.
 ///
 /// Outputs:
-/// - the parsed `time_point`, or `std::nullopt` if it failed to parse.
-std::optional<std::chrono::system_clock::time_point> parse_http_date(std::string_view date_str);
+/// - the parsed `sys_seconds`, or `std::nullopt` if it failed to parse.
+std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view date_str);
 
 /// API: file_server/to_request
 ///

@@ -108,9 +108,9 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     return info;
 }
 
-std::optional<std::chrono::system_clock::time_point> parse_http_date(std::string_view date_str) {
+std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view date_str) {
 
-    auto t = std::make_optional<std::chrono::system_clock::time_point>();
+    auto t = std::make_optional<std::chrono::sys_seconds>();
     std::istringstream ss{std::string{date_str}};
     ss.imbue(std::locale::classic());
     if (!(ss >> chrono_for_parsing::parse("%a, %d %b %Y %T %Z", *t) >> std::ws) || !ss.eof())
