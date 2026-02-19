@@ -459,7 +459,7 @@ void QuicTransport::_send_on_connection(
 
     // Determine whether we want to use the "reserved" stream (ie. for really small requests) or
     // create a new stream (to maximise concurrency based on the configuration limits)
-    std::__1::shared_ptr<oxen::quic::BTRequestStream> target_stream;
+    std::shared_ptr<oxen::quic::BTRequestStream> target_stream;
 
     if (use_reserved_stream(request.category)) {
         auto stream_id = stream_it->second;
