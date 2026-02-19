@@ -13,6 +13,12 @@
 #include <type_traits>
 #include <vector>
 
+#ifndef _WIN32
+extern "C" {
+#include <sys/resource.h>
+}
+#endif
+
 #include "types.hpp"
 
 namespace session {
@@ -301,4 +307,6 @@ std::optional<std::vector<unsigned char>> zstd_decompress(
         std::span<const unsigned char> data, size_t max_size = 0);
 }  // namespace session
 
-std::tuple<int, rlim_t, rlim_t> fiddle_rlimit_nofile();
+#ifndef _WIN32
+std::tuple<int, rlim_t, rlim_t> fiddle_rlimit_nofile(rlim_t nfiles = 5000);
+#endif

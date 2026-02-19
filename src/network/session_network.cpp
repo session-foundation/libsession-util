@@ -136,6 +136,9 @@ Network::Network(config::Config config) : config{config} {
     // When testing we can run into the NOFILE limit, so try to increase it if the config option is
     // set
     if (config.increase_no_file_limit) {
+#ifdef _WIN32
+        log::debug(cat, "FD limit adjustment is not supported on Windows");
+#else
         auto [rc, rlim_cur, new_lim] = fiddle_rlimit_nofile();
 
         if (rc != 0)
@@ -145,6 +148,7 @@ Network::Network(config::Config config) : config{config} {
                     std::strerror(rc));
         else
             log::warning(cat, "NOFILE limit was only {}; increased to {}", rlim_cur, new_lim);
+#endif
     }
 
     // Start by validating the configuration
