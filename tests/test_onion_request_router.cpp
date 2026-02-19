@@ -219,19 +219,23 @@ namespace {
 }  // namespace
 
 TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
+    const auto node_strike_threshold = 3;
     config::SnodePoolConfig pool_config = {
-            std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
-            false,
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // Node failure threshold
-            false};
+            .cache_directory = std::nullopt,
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 2,
+            .cache_node_strike_threshold = node_strike_threshold,
+            .cache_refresh_using_legacy_endpoint = false};
     config::OnionRequestRouterConfig config = {
+            file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
             opt::netid::Target::testnet,
@@ -241,7 +245,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             3,
             10,
             10min,
-            3,
+            node_strike_threshold,
             true,
             true,
             {{PathCategory::standard, 1}}};
@@ -288,47 +292,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     auto transport = std::make_shared<TestTransport>();
     std::shared_ptr<OnionRequestRouter> router;
 
-    // Check the handling of the codes which make no changes
-    auto codes_with_no_changes = {400, 404, 406, 425};
-
-    for (auto code : codes_with_no_changes) {
-        snode_pool->clear_node_strikes();
-        snode_pool->reset_calls();
-        path.emplace(OnionPath{"Test", {target2, target3, target4}});
-        router = std::make_shared<OnionRequestRouter>(
-                config, loop, disk_manager, snode_pool, transport);
-        TestOnionRequestRouter::set_paths(router, PathCategory::standard, {*path});
-        TestOnionRequestRouter::handle_transport_response(
-                router,
-                "Test",
-                request,
-                false,
-                false,
-                code,
-                {},
-                std::nullopt,
-                [&result](
-                        bool success,
-                        bool timeout,
-                        int16_t status_code,
-                        std::vector<std::pair<std::string, std::string>> headers,
-                        std::optional<std::string> response) {
-                    result = {success, timeout, status_code, headers, response};
-                });
-
-        CHECK_FALSE(result.success);
-        CHECK_FALSE(result.timeout);
-        CHECK(result.status_code == code);
-        CHECK(result.response.value_or("") == "");
-        CHECK(snode_pool->did_not_call("record_node_failure(node)"));
-        CHECK(snode_pool->did_not_call("record_node_failure(key)"));
-        CHECK(snode_pool->node_strike_count(target2) == 0);
-        CHECK(snode_pool->node_strike_count(target3) == 0);
-        CHECK(snode_pool->node_strike_count(target4) == 0);
-        CHECK(TestOnionRequestRouter::strike_count(router, PathCategory::standard, "Test") == 0);
-    }
-
-    // Check general error handling (first failure)
+    // We don't give a node a strike by default (require specific error messages to match)
     snode_pool->clear_node_strikes();
     snode_pool->reset_calls();
     path.emplace(OnionPath{"Test", {target2, target3, target4}});
@@ -352,6 +316,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
                     std::optional<std::string> response) {
                 result = {success, timeout, status_code, headers, response};
             });
+
     CHECK_FALSE(result.success);
     CHECK_FALSE(result.timeout);
     CHECK(result.status_code == 500);
@@ -361,9 +326,44 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     CHECK(snode_pool->node_strike_count(target2) == 0);
     CHECK(snode_pool->node_strike_count(target3) == 0);
     CHECK(snode_pool->node_strike_count(target4) == 0);
+    CHECK(TestOnionRequestRouter::strike_count(router, PathCategory::standard, "Test") == 0);
+
+    // path gets a strike for a handled error
+    snode_pool->clear_node_strikes();
+    snode_pool->reset_calls();
+    path.emplace(OnionPath{"Test", {target2, target3, target4}});
+    router =
+            std::make_shared<OnionRequestRouter>(config, loop, disk_manager, snode_pool, transport);
+    TestOnionRequestRouter::set_paths(router, PathCategory::standard, {*path});
+    TestOnionRequestRouter::handle_transport_response(
+            router,
+            "Test",
+            request,
+            false,
+            false,
+            500,
+            {},
+            "Invalid response from snode",
+            [&result](
+                    bool success,
+                    bool timeout,
+                    int16_t status_code,
+                    std::vector<std::pair<std::string, std::string>> headers,
+                    std::optional<std::string> response) {
+                result = {success, timeout, status_code, headers, response};
+            });
+    CHECK_FALSE(result.success);
+    CHECK_FALSE(result.timeout);
+    CHECK(result.status_code == 500);
+    CHECK(result.response.value_or("") == "Invalid response from snode");
+    CHECK(snode_pool->did_not_call("record_node_failure(node)"));
+    CHECK(snode_pool->did_not_call("record_node_failure(key)"));
+    CHECK(snode_pool->node_strike_count(target2) == 0);
+    CHECK(snode_pool->node_strike_count(target3) == 0);
+    CHECK(snode_pool->node_strike_count(target4) == 0);
     CHECK(TestOnionRequestRouter::strike_count(router, PathCategory::standard, "Test") == 1);
 
-    // Check general error handling with no response (too many path failures)
+    // Path is dropped if it gets too many strikes
     snode_pool->clear_node_strikes();
     REQUIRE(snode_pool->node_strike_count(target2) == 0);
     snode_pool->reset_calls();
@@ -388,7 +388,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             false,
             500,
             {},
-            std::nullopt,
+            "Invalid response from snode",
             [&result](
                     bool success,
                     bool timeout,
@@ -400,7 +400,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     CHECK_FALSE(result.success);
     CHECK_FALSE(result.timeout);
     CHECK(result.status_code == 500);
-    CHECK(result.response.value_or("") == "");
+    CHECK(result.response.value_or("") == "Invalid response from snode");
     CHECK(snode_pool->called("record_node_failure(node)", 3));
     CHECK(snode_pool->node_strike_count(target2) == 1);
     CHECK(snode_pool->node_strike_count(target3) == 1);
@@ -408,7 +408,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     CHECK(TestOnionRequestRouter::strike_count(router, PathCategory::standard, "Test") ==
           0);  // Path dropped and reset
 
-    // Check general error handling with a path and specific node failure
+    // Both node and path get strikes for 502s specifying the node
     snode_pool->clear_node_strikes();
     snode_pool->reset_calls();
     snode_pool->mock_unused_nodes = {target};
@@ -422,7 +422,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             request,
             false,
             false,
-            500,
+            502,
             {},
             "Next node not found: {}"_format(ed25519_pubkey::from_bytes(ed_pk3).hex()),
             [&result](
@@ -435,51 +435,16 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             });
     CHECK_FALSE(result.success);
     CHECK_FALSE(result.timeout);
-    CHECK(result.status_code == 500);
+    CHECK(result.status_code == 502);
     CHECK(result.response.value_or("") ==
           "Next node not found: {}"_format(ed25519_pubkey::from_bytes(ed_pk3).hex()));
-    CHECK(snode_pool->called("record_node_failure(node)", 1));
+    CHECK(snode_pool->called("record_node_failure(key)", 1));
     CHECK(snode_pool->node_strike_count(target2) == 0);
-    CHECK(snode_pool->node_strike_count(target3) == 3);  // Node will have been dropped
+    CHECK(snode_pool->node_strike_count(target3) == node_strike_threshold);  // Node "dropped"
     CHECK(snode_pool->node_strike_count(target4) == 0);
     CHECK(TestOnionRequestRouter::strike_count(router, PathCategory::standard, "Test") == 1);
     CHECK(TestOnionRequestRouter::get_paths(router, PathCategory::standard).front().nodes[1] !=
           target3);
-
-    // Check a 421 doesn't impact the node failure counts
-    snode_pool->clear_node_strikes();
-    snode_pool->reset_calls();
-    path.emplace(OnionPath{"Test", {target2, target3, target4}});
-    router =
-            std::make_shared<OnionRequestRouter>(config, loop, disk_manager, snode_pool, transport);
-    TestOnionRequestRouter::set_paths(router, PathCategory::standard, {*path});
-    TestOnionRequestRouter::handle_transport_response(
-            router,
-            "Test",
-            request,
-            false,
-            false,
-            421,
-            {},
-            std::nullopt,
-            [&result](
-                    bool success,
-                    bool timeout,
-                    int16_t status_code,
-                    std::vector<std::pair<std::string, std::string>> headers,
-                    std::optional<std::string> response) {
-                result = {success, timeout, status_code, headers, response};
-            });
-    CHECK_FALSE(result.success);
-    CHECK_FALSE(result.timeout);
-    CHECK(result.status_code == 421);
-    CHECK(result.response.value_or("") == "");
-    CHECK(snode_pool->did_not_call("record_node_failure(node)"));
-    CHECK(snode_pool->did_not_call("record_node_failure(key)"));
-    CHECK(snode_pool->node_strike_count(target2) == 0);
-    CHECK(snode_pool->node_strike_count(target3) == 0);
-    CHECK(snode_pool->node_strike_count(target4) == 0);
-    CHECK(TestOnionRequestRouter::strike_count(router, PathCategory::standard, "Test") == 1);
 
     // Check a timeout with a server destination doesn't impact the failure counts
     auto server_request =
@@ -530,9 +495,8 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     CHECK(snode_pool->node_strike_count(target4) == 0);
     CHECK(TestOnionRequestRouter::strike_count(router, PathCategory::standard, "Test") == 0);
 
-    // Check the handling of the codes which should be ignored when the request was sent to a server
-    // make no changes
-    auto server_codes_with_no_changes = {500, 504};
+    // 406 and 421 errors don't affect strike counts
+    auto server_codes_with_no_changes = {406, 421};
 
     for (auto code : server_codes_with_no_changes) {
         snode_pool->clear_node_strikes();
@@ -559,7 +523,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
                     result = {success, timeout, status_code, headers, response};
                 });
         CHECK_FALSE(result.success);
-        CHECK(result.timeout == (code == 504));
+        CHECK(result.timeout == false);
         CHECK(result.status_code == code);
         CHECK(result.response.value_or("") == "");
         CHECK(snode_pool->did_not_call("record_node_failure(node)"));
@@ -573,18 +537,21 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
 
 TEST_CASE("Network", "[network][onion_request_router][build_path]") {
     config::SnodePoolConfig pool_config = {
-            std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
-            false,
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // Node failure threshold
-            false};
+            .cache_directory = std::nullopt,
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 2,
+            .cache_node_strike_threshold = 3,
+            .cache_refresh_using_legacy_endpoint = false};
     config::OnionRequestRouterConfig config = {
+            file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
             opt::netid::Target::testnet,
@@ -623,18 +590,21 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
 
 TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
     config::SnodePoolConfig pool_config = {
-            std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
-            false,
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_directory = std::nullopt,
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 2,
+            .cache_node_strike_threshold = 3,
+            .cache_refresh_using_legacy_endpoint = false};
     config::OnionRequestRouterConfig config = {
+            file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
             opt::netid::Target::testnet,
@@ -712,6 +682,7 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
     // In 'single_path_mode' it does allow the path to include the IP of the target (so that
     // requests can still be made)
     config = {
+            file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
             opt::netid::Target::testnet,
@@ -733,18 +704,21 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
 
 TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeouts]") {
     config::SnodePoolConfig pool_config = {
-            std::nullopt,
-            std::chrono::minutes{5},
-            std::chrono::minutes{5},
-            false,
-            network::opt::retry_delay{50ms, 200ms},
-            opt::netid::Target::testnet,
-            {},
-            0,
-            0,
-            3,  // cache_node_strike_threshold
-            false};
+            .cache_directory = std::nullopt,
+            .cache_expiration = std::chrono::minutes{5},
+            .cache_min_lifetime = std::chrono::minutes{5},
+            .enforce_subnet_diversity = false,
+            .retry_delay = network::opt::retry_delay{50ms, 200ms},
+            .netid = opt::netid::Target::testnet,
+            .seed_nodes = {},
+            .cache_min_size = 0,
+            .cache_min_swarm_size = 0,
+            .cache_num_nodes_to_use_for_refresh = 3,
+            .cache_min_num_refresh_presence_to_include_node = 2,
+            .cache_node_strike_threshold = 3,
+            .cache_refresh_using_legacy_endpoint = false};
     config::OnionRequestRouterConfig config = {
+            file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
             opt::netid::Target::testnet,
@@ -825,9 +799,10 @@ TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeou
             });
     CHECK(queue->did_not_call("check_timeouts", 250ms));
 
-    // Test that it does start checking for timeouts when the request has an overall timeout
+    // Test that it does trigger the timeout when an overall timeout is provided (will call
+    // `check_timeouts` at the timeout rather than poll)
     request = Request{
-            "AAAA", target, "info", to_vector("test"), RequestCategory::standard, 1000ms, 1000ms};
+            "AAAA", target, "info", to_vector("test"), RequestCategory::standard, 1000ms, 100ms};
     router =
             std::make_shared<OnionRequestRouter>(config, loop, disk_manager, snode_pool, transport);
     queue = std::make_shared<detail::TestRequestQueue>(loop);

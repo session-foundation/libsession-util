@@ -22,7 +22,7 @@ namespace detail {
 
 namespace fs = std::filesystem;
 
-class Network {
+class Network : public std::enable_shared_from_this<Network> {
   private:
     const config::Config config;
     std::shared_ptr<oxen::quic::Loop> _loop;
@@ -36,6 +36,10 @@ class Network {
     std::optional<std::string> _current_clock_resync_id;
     std::vector<std::optional<std::chrono::milliseconds>> _clock_resync_results;
     std::shared_ptr<detail::RequestQueue> _clock_resync_request_queue;
+    std::shared_ptr<std::vector<std::pair<
+            std::shared_ptr<DownloadRequest>,
+            std::function<void(std::variant<file_metadata, int16_t>, bool)>>>>
+            _clock_resync_download_queue;
 
   public:
     // Hook to be notified whenever the network connection status changes.
@@ -94,6 +98,8 @@ class Network {
             uint16_t count, std::function<void(std::vector<service_node> nodes)> callback);
 
     void send_request(Request request, network_response_callback_t callback);
+    void upload(std::shared_ptr<UploadRequest> request);
+    void download(std::shared_ptr<DownloadRequest> request);
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};

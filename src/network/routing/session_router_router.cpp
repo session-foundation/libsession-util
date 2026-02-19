@@ -12,6 +12,7 @@
 #include "session/network/network_opt.hpp"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/response_parser.hpp"
+#include "session/random.hpp"
 
 using namespace oxen;
 using namespace session;
@@ -79,12 +80,27 @@ namespace {
 
 }  // namespace
 
+std::shared_ptr<SessionRouter> SessionRouter::create(
+        config::SessionRouterConfig config,
+        std::shared_ptr<oxen::quic::Loop> loop,
+        std::weak_ptr<SnodePool> snode_pool,
+        std::weak_ptr<ITransport> transport) {
+    // Need a factory constructor because we want to call `weak_from_this` during the initial set
+    // (which isn't supported during construction), this approach allows us to do so
+    auto result = std::shared_ptr<SessionRouter>(
+            new SessionRouter(std::move(config), loop, snode_pool, transport));
+    result->_init();
+    return result;
+}
+
 SessionRouter::SessionRouter(
         config::SessionRouterConfig config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
-        _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport} {
+        _config{std::move(config)}, _loop{loop}, _snode_pool{snode_pool}, _transport{transport} {}
+
+void SessionRouter::_init() {
     log::trace(cat, "Initializing.");
 
     // "listen=:0" listens on a random port - this prevents multiple test devices on the same
@@ -103,30 +119,33 @@ SessionRouter::SessionRouter(
     try {
         _update_status(ConnectionStatus::connecting);
 
-        srouter = std::make_shared<session::router::SessionRouter>(test_ini, loop);
-         srouter->on_connected([weak_self = weak_from_this()]{
-            auto self = weak_self.lock();
-            if (!self)
-                return;
-
-            auto snode_pool = self->_snode_pool.lock();
-            if (!snode_pool)
-                return;
-
-            if (snode_pool->size() == 0)
-                snode_pool->refresh_if_needed({}, [weak_self] {
+        srouter = std::make_shared<session::router::SessionRouter>(test_ini, _loop);
+        srouter->on_connected(
+                [weak_self = weak_from_this()] {
                     auto self = weak_self.lock();
                     if (!self)
                         return;
-                    
-                    self->_loop->call([weak_self] {
-                        if (auto self = weak_self.lock())
-                            self->_finish_setup();
-                    });
-                });
-            else
-                self->_finish_setup();
-        }, /*with_path*/true, /*persist*/false);
+
+                    auto snode_pool = self->_snode_pool.lock();
+                    if (!snode_pool)
+                        return;
+
+                    if (snode_pool->size() == 0)
+                        snode_pool->refresh_if_needed({}, [weak_self] {
+                            auto self = weak_self.lock();
+                            if (!self)
+                                return;
+
+                            self->_loop->call([weak_self] {
+                                if (auto self = weak_self.lock())
+                                    self->_finish_setup();
+                            });
+                        });
+                    else
+                        self->_finish_setup();
+                },
+                /*with_path*/ true,
+                /*persist*/ false);
     } catch (const std::exception& e) {
         log::error(cat, "Failed to start ({}).", e.what());
         _update_status(ConnectionStatus::disconnected);
@@ -181,6 +200,20 @@ void SessionRouter::send_request(Request request, network_response_callback_t ca
     _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
         if (auto self = weak_self.lock())
             self->_send_request_internal(std::move(req), std::move(cb));
+    });
+}
+
+void SessionRouter::upload(std::shared_ptr<UploadRequest> request) {
+    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
+        if (auto self = weak_self.lock())
+            self->_upload_internal(std::move(req));
+    });
+}
+
+void SessionRouter::download(std::shared_ptr<DownloadRequest> request) {
+    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
+        if (auto self = weak_self.lock())
+            self->_download_internal(std::move(req));
     });
 }
 
@@ -478,6 +511,198 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     _send_direct_request(std::move(proxy_request), std::move(proxy_callback));
 }
 
+void SessionRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
+    // TODO: Update this to use streaming approach
+    const auto upload_id = "UP-" + random::random_base32(4);
+    log::info(cat, "[Upload {}]: Starting upload.", upload_id);
+    _active_uploads[upload_id] = request;
+
+    // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
+    // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
+    // disk should be prioritised)
+    std::thread([weak_self = weak_from_this(),
+                 upload_request = request,
+                 upload_id,
+                 file_server_config = _config.file_server_config] {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        // Onion requests don't support streaming data so we need to load all the data from the
+        // streaming source into memory
+        try {
+            Request request =
+                    file_server::to_request(upload_id, file_server_config, upload_request);
+
+            self->_loop->call([weak_self, upload_request, req = std::move(request), upload_id] {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                if (upload_request->is_cancelled() || !req.body) {
+                    log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
+                    upload_request->on_complete(ERROR_REQUEST_CANCELLED, false);
+                    self->_active_uploads.erase(upload_id);
+                    return;
+                }
+
+                const auto upload_size = req.body->size();
+                log::debug(
+                        cat,
+                        "[Upload {}]: Accumulated {} bytes, building request.",
+                        upload_id,
+                        upload_size);
+
+                self->_send_request_internal(
+                        std::move(req),
+                        [weak_self, upload_id, upload_request, upload_size](
+                                bool success,
+                                bool timeout,
+                                int16_t status_code,
+                                std::vector<std::pair<std::string, std::string>> headers,
+                                std::optional<std::string> body) {
+                            auto self = weak_self.lock();
+                            if (!self)
+                                return;
+
+                            self->_active_uploads.erase(upload_id);
+
+                            try {
+                                if (upload_request->is_cancelled())
+                                    throw cancellation_exception{"Cancelled during request."};
+
+                                if (!success || timeout)
+                                    throw status_code_exception{
+                                            status_code,
+                                            headers,
+                                            fmt::format(
+                                                    "Request failed with status {}, timeout={}.",
+                                                    status_code,
+                                                    timeout)};
+
+                                if (!body)
+                                    throw std::runtime_error{"No response body."};
+
+                                auto metadata =
+                                        file_server::parse_upload_response(*body, upload_size);
+                                log::info(
+                                        cat,
+                                        "[Upload {}]: Successfully uploaded {} bytes as file ID: "
+                                        "{}",
+                                        upload_id,
+                                        metadata.size,
+                                        metadata.id);
+
+                                upload_request->on_complete(std::move(metadata), false);
+                            } catch (const status_code_exception& e) {
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Failure with error: {}",
+                                        upload_id,
+                                        e.what());
+                                upload_request->on_complete(e.status_code, false);
+                            } catch (const std::exception& e) {
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Failure with error: {}",
+                                        upload_id,
+                                        e.what());
+                                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                            }
+                        });
+            });
+        } catch (const std::exception& e) {
+            self->_loop->call([weak_self, upload_request, upload_id, err = e.what()] {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
+                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                self->_active_uploads.erase(upload_id);
+            });
+        }
+    }).detach();
+}
+
+void SessionRouter::_download_internal(std::shared_ptr<DownloadRequest> request) {
+    const auto download_id = "DL-" + random::random_base32(4);
+    log::info(cat, "[Download {}]: Starting download.", download_id);
+    _active_downloads[download_id] = request;
+
+    try {
+        Request req = file_server::to_request(download_id, _config.file_server_config, request);
+
+        send_request(
+                std::move(req),
+                [weak_self = weak_from_this(), download_id, request](
+                        bool success,
+                        bool timeout,
+                        int16_t status_code,
+                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::optional<std::string> body) {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return;
+
+                    self->_active_downloads.erase(download_id);
+
+                    try {
+                        if (request->is_cancelled())
+                            throw cancellation_exception{"Cancelled during request."};
+
+                        if (!success || timeout)
+                            throw status_code_exception{
+                                    status_code,
+                                    headers,
+                                    fmt::format(
+                                            "Request failed with status {}, timeout={}.",
+                                            status_code,
+                                            timeout)};
+
+                        if (!body)
+                            throw std::runtime_error{"No response body."};
+
+                        auto [metadata, data] = file_server::parse_download_response(
+                                request->download_url, headers, *body);
+                        log::info(
+                                cat,
+                                "[Download {}]: Successfully downloaded {} bytes for file ID: {}",
+                                download_id,
+                                data.size(),
+                                metadata.id);
+
+                        if (request->on_data)
+                            request->on_data(metadata, std::move(data));
+
+                        request->on_complete(std::move(metadata), false);
+                    } catch (const status_code_exception& e) {
+                        log::error(
+                                cat,
+                                "[Download {}]: Failure with error: {}",
+                                download_id,
+                                e.what());
+                        request->on_complete(e.status_code, false);
+                    } catch (const std::exception& e) {
+                        log::error(
+                                cat,
+                                "[Download {}]: Failure with error: {}",
+                                download_id,
+                                e.what());
+                        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                    }
+                });
+    } catch (const invalid_url_exception& e) {
+        log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
+        request->on_complete(ERROR_INVALID_DOWNLOAD_URL, false);
+        _active_downloads.erase(download_id);
+    } catch (const std::exception& e) {
+        log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
+        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+        _active_downloads.erase(download_id);
+    }
+}
+
 void SessionRouter::_establish_tunnel(
         std::span<const unsigned char>& remote_pubkey,
         const uint16_t remote_port,
@@ -537,7 +762,7 @@ void SessionRouter::_establish_tunnel(
             initiating_req_id,
             address_pubkey_hex);
     srouter->establish_udp(
-            srouter_address,//.to_string(),
+            srouter_address,
             test_port,
             [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
                     router::tunnel_info info) mutable {

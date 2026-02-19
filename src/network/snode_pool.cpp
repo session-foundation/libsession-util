@@ -912,13 +912,11 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
                                std::chrono::system_clock::now().time_since_epoch())
                                .count();
 
-        if (permanent) {
-            for (int i = 0; i < _config.cache_node_strike_threshold; ++i) {
+        if (permanent)
+            for (int i = 0; i < _config.cache_node_strike_threshold; ++i)
                 _snode_strikes[key].push_back(now);
-            }
-        } else {
+        else
             _snode_strikes[key].push_back(now);
-        }
 
         log::trace(
                 cat,

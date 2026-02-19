@@ -7,6 +7,10 @@
 #include <memory>
 #include <session/util.hpp>
 
+extern "C" {
+#include <sys/resource.h>
+}
+
 namespace session {
 
 std::vector<std::string_view> split(std::string_view str, const std::string_view delim, bool trim) {
@@ -234,4 +238,19 @@ LIBSESSION_C_API size_t utf16_count_truncated_to_codepoints(
 LIBSESSION_C_API size_t utf16_count(const uint16_t* utf16_string, size_t utf16_string_len) {
     return session::utf16_count(
             {reinterpret_cast<const char16_t*>(utf16_string), utf16_string_len});
+}
+
+std::tuple<int, rlim_t, rlim_t> fiddle_rlimit_nofile() {
+    struct rlimit nofile{};
+    auto rc = getrlimit(RLIMIT_NOFILE, &nofile);
+    if (rc != 0) {
+        return {rc, 0, 0};
+        // log about failure
+    } else if (nofile.rlim_cur < 25000 && nofile.rlim_cur < nofile.rlim_max) {
+        auto new_lim = std::min<rlim_t>(25000, nofile.rlim_max);
+        nofile.rlim_cur = new_lim;
+        rc = setrlimit(RLIMIT_NOFILE, &nofile);
+
+        return {rc, nofile.rlim_cur, new_lim};
+    }
 }

@@ -182,6 +182,47 @@ namespace opt {
         }
     };
 
+    /// Can be used to override the default file server scheme.
+    struct file_server_scheme : base {
+        std::string scheme;
+
+        explicit file_server_scheme(std::string scheme) : scheme{scheme} {}
+    };
+
+    /// Can be used to override the default file server host.
+    struct file_server_host : base {
+        std::string host;
+
+        explicit file_server_host(std::string host) : host{host} {}
+    };
+
+    /// Can be used to override the default file server port.
+    struct file_server_port : base {
+        uint16_t port;
+
+        explicit file_server_port(uint16_t port) : port{port} {}
+    };
+
+    /// Can be used to override the default file server pubkey.
+    struct file_server_pubkey_hex : base {
+        std::string pubkey_hex;
+
+        explicit file_server_pubkey_hex(std::string pubkey_hex) : pubkey_hex{pubkey_hex} {}
+    };
+
+    /// Can be used to override the default file server max file size.
+    ///
+    /// Note: This value is limited by the configuration on the file server, changing it will only
+    /// result in checks that prevent requests we know will fail from being made.
+    struct file_server_max_file_size : base {
+        uint64_t max_file_size;
+
+        explicit file_server_max_file_size(uint16_t max_file_size) : max_file_size{max_file_size} {}
+    };
+
+    /// Can be used to attempt to increase the NOFILE limit (can cause issues with automated tests).
+    struct increase_no_file_limit : base {};
+
     /// Can be used to override the default (3) path length used when building onion request or
     /// session router paths.
     struct path_length : base {

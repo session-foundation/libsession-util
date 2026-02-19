@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "session/network/backends/session_file_server.hpp"
 #include "session/network/request_queue.hpp"
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
@@ -21,6 +22,7 @@ namespace session::network {
 
 namespace config {
     struct SessionRouterConfig {
+        FileServerConfig file_server_config;
         opt::netid::Target netid;
         fs::path cache_directory;
 
@@ -41,9 +43,11 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     std::unordered_map<std::string, session::router::tunnel_info> _active_tunnels;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
+    std::unordered_map<std::string, std::shared_ptr<UploadRequest>> _active_uploads;
+    std::unordered_map<std::string, std::shared_ptr<DownloadRequest>> _active_downloads;
 
   public:
-    SessionRouter(
+    static std::shared_ptr<SessionRouter> create(
             config::SessionRouterConfig config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::weak_ptr<SnodePool> snode_pool,
@@ -58,9 +62,18 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     ConnectionStatus get_status() const override { return _status.load(); };
     std::vector<PathInfo> get_active_paths() override;
     void send_request(Request request, network_response_callback_t callback) override;
+    void upload(std::shared_ptr<UploadRequest> request) override;
+    void download(std::shared_ptr<DownloadRequest> request) override;
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
+
+    SessionRouter(
+            config::SessionRouterConfig config,
+            std::shared_ptr<oxen::quic::Loop> loop,
+            std::weak_ptr<SnodePool> snode_pool,
+            std::weak_ptr<ITransport> transport);
+    void _init();
 
     // All of the below functions should only be called from within `_loop`
     void _finish_setup();
@@ -69,6 +82,8 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _send_direct_request(Request request, network_response_callback_t callback);
     void _send_proxy_request(Request request, network_response_callback_t callback);
+    void _upload_internal(std::shared_ptr<UploadRequest> request);
+    void _download_internal(std::shared_ptr<DownloadRequest> request);
     void _establish_tunnel(
             std::span<const unsigned char>& remote_pubkey,
             const uint16_t remote_port,

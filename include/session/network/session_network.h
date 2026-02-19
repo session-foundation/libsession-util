@@ -42,11 +42,21 @@ typedef void (*session_network_request_t)(
         session_response_handle_t* response_handle,
         void* ctx);
 
-typedef struct {
+typedef struct session_network_config {
     // Basic options
     SESSION_NETWORK_NETID netid;
     SESSION_NETWORK_ROUTER router;
     SESSION_NETWORK_TRANSPORT transport;
+
+    // File server options
+    const char* custom_file_server_scheme;
+    const char* custom_file_server_host;
+    uint16_t custom_file_server_port;
+    const char* custom_file_server_pubkey_hex;
+    uint64_t custom_file_server_max_file_size;
+
+    // General options
+    bool increase_no_file_limit;
     uint8_t path_length;
     bool enforce_subnet_diversity;
     uint8_t redirect_retry_count;
@@ -105,6 +115,48 @@ typedef void (*session_network_response_t)(
         const unsigned char* response,
         size_t response_size,
         void* ctx);
+
+typedef struct session_upload_handle_t session_upload_handle_t;
+typedef struct session_download_handle_t session_download_handle_t;
+
+typedef struct session_file_metadata {
+    char file_id[45];  // 44 base64url character (or int64 as a string) + null terminator
+    uint64_t size;
+    int64_t uploaded_timestamp;  // unix timestamp
+    int64_t expiry_timestamp;    // unix timestamp
+} session_file_metadata;
+
+typedef struct session_upload_callbacks {
+    // Called repeatedly to get next chunk of data to upload
+    // Should return number of bytes written to `buffer`, or 0 when done
+    // Return -1 to cancel the upload
+    size_t (*next_data)(unsigned char* buffer, size_t buffer_capacity, void* ctx);
+
+    // Called when upload completes successfully
+    void (*on_success)(const session_file_metadata* metadata, void* ctx);
+
+    // Called when upload fails (status_code) or times out (timeout=true)
+    void (*on_error)(int16_t status_code, bool timeout, void* ctx);
+
+    void* ctx;  // User context passed to all callbacks
+} session_upload_callbacks;
+
+typedef struct session_download_callbacks {
+    // Called as data arrives (may be called multiple times for streaming)
+    void (*on_data)(
+            const session_file_metadata* metadata,
+            const unsigned char* data,
+            size_t data_len,
+            void* ctx);
+
+    // Called when download completes successfully
+    void (*on_success)(const session_file_metadata* metadata, void* ctx);
+
+    // Called when download fails (status_code) or times out (timeout=true)
+    void (*on_error)(int16_t status_code, bool timeout, void* ctx);
+
+    void* ctx;  // User context passed to all callbacks
+} session_download_callbacks;
 
 /// API: network/session_network_default_config
 ///
@@ -199,6 +251,68 @@ LIBSESSION_EXPORT void session_network_send_request(
         const session_request_params* params,
         session_network_response_t callback,
         void* ctx);
+
+/// API: file_server/session_network_upload
+///
+/// Initiates a streaming upload.
+///
+/// The upload will call next_data() repeatedly until it returns 0 (EOF) or -1 (cancel).
+/// For simple in-memory uploads, next_data() can return all data in one call.
+///
+/// Inputs:
+/// - `network` -- [in] network object
+/// - `file_name` -- [in, optional] name of the file being uploaded (null-terminated, can be NULL)
+/// - `callbacks` -- [in] callbacks for data provision and completion
+/// - `stall_timeout_ms` -- [in] timeout if no progress for this duration
+/// - `request_timeout_ms` -- [in] timeout for the request itself
+/// - `overall_timeout_ms` -- [in] timeout including pre-flight operations (0 to ignore)
+///
+/// Returns: handle to the upload, or NULL on error. Caller must free with session_upload_free()
+LIBSESSION_EXPORT session_upload_handle_t* session_network_upload(
+        network_object* network,
+        const char* file_name,
+        const session_upload_callbacks* callbacks,
+        int64_t stall_timeout_ms,
+        int64_t request_timeout_ms,
+        int64_t overall_timeout_ms);
+
+/// API: file_server/session_network_download
+///
+/// Initiates a streaming download.
+///
+/// The download will call on_data() as chunks arrive (for lokinet) or once with all data
+/// (for onion requests).
+///
+/// Inputs:
+/// - `network` -- [in] network object
+/// - `download_url` -- [in] url to download data from (null-terminated)
+/// - `callbacks` -- [in] callbacks for data receipt and completion
+/// - `stall_timeout_ms` -- [in] timeout if no progress for this duration
+/// - `request_timeout_ms` -- [in] timeout for the request itself
+/// - `overall_timeout_ms` -- [in] timeout including pre-flight operations (0 to ignore)
+/// - `partial_min_interval_ms` -- [in] minimum interval between on_data calls (default 250ms)
+///
+/// Returns: handle to the download, or NULL on error. Caller must free with session_download_free()
+LIBSESSION_EXPORT session_download_handle_t* session_network_download(
+        network_object* network,
+        const char* download_url,
+        const session_download_callbacks* callbacks,
+        int64_t stall_timeout_ms,
+        int64_t request_timeout_ms,
+        int64_t overall_timeout_ms,
+        int64_t partial_min_interval_ms);
+
+/// Cancels an in-progress upload
+LIBSESSION_EXPORT void session_network_upload_cancel(session_upload_handle_t* handle);
+
+/// Cancels an in-progress download
+LIBSESSION_EXPORT void session_network_download_cancel(session_download_handle_t* handle);
+
+/// Frees an upload handle (safe to call after completion or cancellation)
+LIBSESSION_EXPORT void session_network_upload_free(session_upload_handle_t* handle);
+
+/// Frees a download handle (safe to call after completion or cancellation)
+LIBSESSION_EXPORT void session_network_download_free(session_download_handle_t* handle);
 
 #ifdef __cplusplus
 }

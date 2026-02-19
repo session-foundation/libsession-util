@@ -22,6 +22,16 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::netid);
         HANDLE_TYPE(opt::router);
         HANDLE_TYPE(opt::transport);
+
+        // File server options
+        HANDLE_TYPE(opt::file_server_scheme);
+        HANDLE_TYPE(opt::file_server_host);
+        HANDLE_TYPE(opt::file_server_port);
+        HANDLE_TYPE(opt::file_server_pubkey_hex);
+        HANDLE_TYPE(opt::file_server_max_file_size);
+
+        // General options
+        HANDLE_TYPE(opt::increase_no_file_limit);
         HANDLE_TYPE(opt::path_length);
         HANDLE_TYPE(opt::disable_subnet_diversity);
         HANDLE_TYPE(opt::redirect_retry_count);
@@ -120,6 +130,41 @@ void Config::handle_config_opt(opt::transport transport_) {
             log::debug(cat, "Network config set to transport requests via Callbacks");
         }
     }
+}
+
+// MARK: File server options
+
+void Config::handle_config_opt(opt::file_server_scheme fss) {
+    custom_file_server_scheme = fss.scheme;
+    log::debug(cat, "Network config custom file server scheme set to {}", fss.scheme);
+}
+
+void Config::handle_config_opt(opt::file_server_host fsh) {
+    custom_file_server_host = fsh.host;
+    log::debug(cat, "Network config custom file server host set to {}", fsh.host);
+}
+
+void Config::handle_config_opt(opt::file_server_port fsp) {
+    custom_file_server_port = fsp.port;
+    log::debug(cat, "Network config custom file server port set to {}", fsp.port);
+}
+
+void Config::handle_config_opt(opt::file_server_pubkey_hex fsph) {
+    custom_file_server_pubkey_hex = fsph.pubkey_hex;
+    log::debug(cat, "Network config custom file server pubkey set to {}", fsph.pubkey_hex);
+}
+
+void Config::handle_config_opt(opt::file_server_max_file_size fsmfs) {
+    custom_file_server_max_file_size = fsmfs.max_file_size;
+    log::debug(
+            cat, "Network config custom file server max file size set to {}", fsmfs.max_file_size);
+}
+
+// MARK: General options
+
+void Config::handle_config_opt(opt::increase_no_file_limit dsd) {
+    increase_no_file_limit = true;
+    log::debug(cat, "Network config will attempt to increase the NOFILE limit");
 }
 
 void Config::handle_config_opt(opt::path_length pl) {

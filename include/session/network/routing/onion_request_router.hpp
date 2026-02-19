@@ -8,6 +8,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "session/network/backends/session_file_server.hpp"
 #include "session/network/disk_manager.hpp"
 #include "session/network/request_queue.hpp"
 #include "session/network/routing/network_router.hpp"
@@ -17,6 +18,7 @@ namespace session::network {
 
 namespace config {
     struct OnionRequestRouterConfig {
+        FileServerConfig file_server_config;
         std::optional<std::filesystem::path> cache_directory;
         std::chrono::days edge_node_cache_duration;
 
@@ -114,6 +116,8 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     std::unordered_map<PathCategory, std::vector<OnionPath>> _paths;
     std::unordered_map<PathCategory, std::vector<OnionPath>> _paths_pending_drop;
     std::unordered_map<PathCategory, std::shared_ptr<detail::RequestQueue>> _request_queues;
+    std::unordered_map<std::string, std::shared_ptr<UploadRequest>> _active_uploads;
+    std::unordered_map<std::string, std::shared_ptr<DownloadRequest>> _active_downloads;
 
     oxen::quic::event_ptr _path_rotation_timer;
     std::unordered_map<PathCategory, int> _in_progress_path_builds;
@@ -149,6 +153,8 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     std::vector<PathInfo> get_active_paths() override;
     std::vector<service_node> get_all_used_nodes() override;
     void send_request(Request request, network_response_callback_t callback) override;
+    void upload(std::shared_ptr<UploadRequest> request) override;
+    void download(std::shared_ptr<DownloadRequest> request) override;
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
@@ -165,6 +171,8 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void _close_connections();
     void _update_status();
     void _send_request_internal(Request request, network_response_callback_t callback);
+    void _upload_internal(std::shared_ptr<UploadRequest> request);
+    void _download_internal(std::shared_ptr<DownloadRequest> request);
 
     void _build_path(
             PathCategory category,

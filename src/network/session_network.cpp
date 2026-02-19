@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "session/blinding.hpp"
+#include "session/network/backends/session_file_server.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/network/request_queue.hpp"
@@ -36,6 +37,24 @@ namespace {
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
     constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
+    config::FileServerConfig build_file_server_config(const config::Config& main_config) {
+        config::FileServerConfig file_server_config = file_server::DEFAULT_CONFIG;
+
+        if (main_config.custom_file_server_scheme)
+            file_server_config.scheme = *main_config.custom_file_server_scheme;
+
+        if (main_config.custom_file_server_host)
+            file_server_config.host = *main_config.custom_file_server_host;
+
+        if (main_config.custom_file_server_port)
+            file_server_config.port = *main_config.custom_file_server_port;
+
+        if (main_config.custom_file_server_max_file_size)
+            file_server_config.max_file_size = *main_config.custom_file_server_max_file_size;
+
+        return file_server_config;
+    }
+
     config::SnodePoolConfig build_snode_pool_config(const config::Config& main_config) {
         return {main_config.cache_directory,
                 main_config.cache_expiration,
@@ -59,6 +78,10 @@ namespace {
                 main_config.quic_max_streams};
     }
 
+    config::DirectRouterConfig build_direct_router_config(const config::Config& main_config) {
+        return {build_file_server_config(main_config)};
+    }
+
     config::SessionRouterConfig build_session_router_config(const config::Config& main_config) {
         if (!main_config.cache_directory)
             throw std::invalid_argument{
@@ -67,12 +90,16 @@ namespace {
         if (main_config.netid == opt::netid::Target::devnet)
             throw std::invalid_argument{"Session Router does not support devnet."};
 
-        return {main_config.netid, *main_config.cache_directory, main_config.path_length};
+        return {build_file_server_config(main_config),
+                main_config.netid,
+                *main_config.cache_directory,
+                main_config.path_length};
     }
 
     config::OnionRequestRouterConfig build_onion_request_router_config(
             const config::Config& main_config) {
-        return {main_config.cache_directory,
+        return {build_file_server_config(main_config),
+                main_config.cache_directory,
                 main_config.onionreq_edge_node_cache_duration,
                 main_config.netid,
                 main_config.seed_nodes,
@@ -106,6 +133,20 @@ namespace detail {
 }  // namespace detail
 
 Network::Network(config::Config config) : config{config} {
+    // When testing we can run into the NOFILE limit, so try to increase it if the config option is
+    // set
+    if (config.increase_no_file_limit) {
+        auto [rc, rlim_cur, new_lim] = fiddle_rlimit_nofile();
+
+        if (rc != 0)
+            log::error(
+                    cat,
+                    "Failed to increase fd limit: {}; connections may fail!",
+                    std::strerror(rc));
+        else
+            log::warning(cat, "NOFILE limit was only {}; increased to {}", rlim_cur, new_lim);
+    }
+
     // Start by validating the configuration
     switch (config.transport) {
         case opt::transport::Type::quic: break;
@@ -165,12 +206,13 @@ Network::Network(config::Config config) : config{config} {
             break;
 
         case opt::router::Type::session_router:
-            _router = std::make_unique<SessionRouter>(
+            _router = SessionRouter::create(
                     std::move(build_session_router_config(config)), _loop, _snode_pool, _transport);
             break;
 
         case opt::router::Type::direct:
-            _router = std::make_unique<DirectRouter>(_loop, _transport);
+            _router = std::make_unique<DirectRouter>(
+                    std::move(build_direct_router_config(config)), _loop, _transport);
             break;
     }
 
@@ -362,8 +404,14 @@ void Network::send_request(Request request, network_response_callback_t callback
     try {
         auto processed_request = _preprocess_request(std::move(request));
         auto router_callback =
-                [this, original_req = processed_request, cb = std::move(callback)](
+                [weak_self = weak_from_this(),
+                 original_req = processed_request,
+                 cb = std::move(callback)](
                         bool success, bool timeout, int16_t status_code, auto headers, auto body) {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return;
+
                     const auto dest_is_snode =
                             std::holds_alternative<service_node>(original_req.destination);
 
@@ -373,7 +421,7 @@ void Network::send_request(Request request, network_response_callback_t callback
                     // include values in different formats, eg. the "Session Network" API returns
                     // `t` in seconds)
                     if (success && body && dest_is_snode)
-                        _update_network_state(*body);
+                        self->_update_network_state(*body);
 
                     int16_t final_status_code = status_code;
 
@@ -385,7 +433,7 @@ void Network::send_request(Request request, network_response_callback_t callback
                     // is out of sync so we need to kick off a clock resync request
                     if ((final_status_code == 406 && dest_is_snode) ||
                         (final_status_code == 425 && !dest_is_snode)) {
-                        _resync_clock(std::move(original_req), std::move(cb));
+                        self->_resync_clock(std::move(original_req), std::move(cb));
                         return;
                     }
 
@@ -393,7 +441,7 @@ void Network::send_request(Request request, network_response_callback_t callback
                     // cache, the original request might succeed after this refresh so we should
                     // just automatically retry
                     if (final_status_code == 421) {
-                        _handle_421_retry(std::move(original_req), std::move(cb));
+                        self->_handle_421_retry(std::move(original_req), std::move(cb));
                         return;
                     }
 
@@ -414,6 +462,105 @@ void Network::send_request(Request request, network_response_callback_t callback
     } catch (const std::exception& e) {
         return callback(false, false, -1, {content_type_plain_text}, e.what());
     }
+}
+
+void Network::upload(std::shared_ptr<UploadRequest> request) {
+    if (_suspended) {
+        if (request->on_complete)
+            request->on_complete(ERROR_NETWORK_SUSPENDED, false);
+        return;
+    }
+    if (!_transport) {
+        if (request->on_complete)
+            request->on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+        return;
+    }
+    if (!_router) {
+        if (request->on_complete)
+            request->on_complete(ERROR_NO_ROUTING_LAYER, false);
+        return;
+    }
+
+    auto user_callback = request->on_complete;
+    request->on_complete = [weak_self = weak_from_this(), user_callback](
+                                   std::variant<file_metadata, int16_t> result, bool timeout) {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        if (auto* status_code = std::get_if<int16_t>(&result)) {
+            // Handle 425 (clock out of sync)
+            // If we got a 425 (no need to handle a 406 as we only ever upload to a server),
+            // then the device clock is out of sync so we need to kick off a clock resync
+            // request
+            if (*status_code == 425) {
+                log::info(cat, "Upload received 425, triggering clock resync.");
+                self->_resync_clock(std::nullopt, std::nullopt);
+
+                // Can't retry an upload as the data stream has already been consumed, so
+                // just return the error
+                if (user_callback)
+                    user_callback(*status_code, timeout);
+                return;
+            }
+        }
+
+        // Forward to user callback
+        if (user_callback)
+            user_callback(std::move(result), timeout);
+    };
+
+    _router->upload(std::move(request));
+}
+
+void Network::download(std::shared_ptr<DownloadRequest> request) {
+    if (_suspended) {
+        if (request->on_complete)
+            request->on_complete(ERROR_NETWORK_SUSPENDED, false);
+        return;
+    }
+    if (!_transport) {
+        if (request->on_complete)
+            request->on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+        return;
+    }
+    if (!_router) {
+        if (request->on_complete)
+            request->on_complete(ERROR_NO_ROUTING_LAYER, false);
+        return;
+    }
+
+    auto user_callback = request->on_complete;
+    request->on_complete = [weak_self = weak_from_this(), user_callback, req = request](
+                                   std::variant<file_metadata, int16_t> result, bool timeout) {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        if (auto* status_code = std::get_if<int16_t>(&result)) {
+            // If we got a 425 (no need to handle a 406 as we only ever download from a server),
+            // then the device clock is out of sync so we need to kick off a clock resync request
+            if (*status_code == 425) {
+                log::info(cat, "Download received 425, triggering clock resync and retrying.");
+
+                // We want to automatically retry the download after the resync so store the request
+                if (!self->_clock_resync_download_queue)
+                    self->_clock_resync_download_queue = std::make_shared<std::vector<std::pair<
+                            std::shared_ptr<DownloadRequest>,
+                            std::function<void(std::variant<file_metadata, int16_t>, bool)>>>>();
+
+                self->_clock_resync_download_queue->emplace_back(req, user_callback);
+                self->_resync_clock(std::nullopt, std::nullopt);
+                return;
+            }
+        }
+
+        // Forward to user callback
+        if (user_callback)
+            user_callback(std::move(result), timeout);
+    };
+
+    _router->download(std::move(request));
 }
 
 // MARK: Internal Logic
@@ -887,6 +1034,21 @@ void Network::_on_clock_resync_complete(
                clock_out_of_sync_error);
         }
     }
+
+    // Retry queued downloads
+    if (_clock_resync_download_queue && !_clock_resync_download_queue->empty()) {
+        log::debug(
+                cat,
+                "Retrying {} downloads after clock resync.",
+                _clock_resync_download_queue->size());
+
+        for (auto& [download_req, cb] : *_clock_resync_download_queue) {
+            // Restore the user's callback and retry
+            download_req->on_complete = cb;
+            download(download_req);
+        }
+        _clock_resync_download_queue->clear();
+    }
 }
 
 }  // namespace session::network
@@ -899,9 +1061,9 @@ struct session_response_handle_cpp_t {
 
 namespace {
 
-inline session::network::Network& unbox(network_object* network_) {
+inline std::shared_ptr<session::network::Network> unbox(network_object* network_) {
     assert(network_ && network_->internals);
-    return *static_cast<session::network::Network*>(network_->internals);
+    return *static_cast<std::shared_ptr<session::network::Network>*>(network_->internals);
 }
 
 inline bool set_error(char* error, const std::exception& e) {
@@ -921,6 +1083,16 @@ extern "C" {
 
 using namespace session;
 using namespace session::network;
+
+struct session_upload_handle_t {
+    std::shared_ptr<UploadRequest> cpp_request;
+    session_upload_callbacks callbacks;
+};
+
+struct session_download_handle_t {
+    std::shared_ptr<DownloadRequest> cpp_request;
+    session_download_callbacks callbacks;
+};
 
 LIBSESSION_C_API session_network_config session_network_config_default() {
     Config cpp_defaults{};
@@ -949,6 +1121,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
         default: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
     }
 
+    config.increase_no_file_limit = cpp_defaults.increase_no_file_limit;
     config.path_length = cpp_defaults.path_length;
     config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
     config.redirect_retry_count = cpp_defaults.redirect_retry_count;
@@ -1077,6 +1250,28 @@ LIBSESSION_C_API bool session_network_init(
                 break;
         }
 
+        // Custom File Server
+        if (config->custom_file_server_scheme)
+            cpp_opts.emplace_back(opt::file_server_scheme(config->custom_file_server_scheme));
+
+        if (config->custom_file_server_host)
+            cpp_opts.emplace_back(opt::file_server_host(config->custom_file_server_host));
+
+        if (config->custom_file_server_port > 0)
+            cpp_opts.emplace_back(opt::file_server_port(config->custom_file_server_port));
+
+        if (config->custom_file_server_pubkey_hex)
+            cpp_opts.emplace_back(
+                    opt::file_server_pubkey_hex(config->custom_file_server_pubkey_hex));
+
+        if (config->custom_file_server_max_file_size > 0)
+            cpp_opts.emplace_back(
+                    opt::file_server_max_file_size(config->custom_file_server_max_file_size));
+
+        // General
+        if (config->increase_no_file_limit)
+            cpp_opts.emplace_back(opt::increase_no_file_limit{});
+
         if (!config->enforce_subnet_diversity)
             cpp_opts.emplace_back(opt::disable_subnet_diversity{});
 
@@ -1204,9 +1399,9 @@ LIBSESSION_C_API bool session_network_init(
 
         // Construct the Network instance
         Config final_config(cpp_opts);
-        auto n = std::make_unique<Network>(std::move(final_config));
+        auto n = std::make_shared<Network>(std::move(final_config));
         auto n_object = std::make_unique<network_object>();
-        n_object->internals = n.release();
+        n_object->internals = new std::shared_ptr<Network>(n);
         *network = n_object.release();
         return true;
     } catch (const std::exception& e) {
@@ -1215,7 +1410,7 @@ LIBSESSION_C_API bool session_network_init(
 }
 
 LIBSESSION_C_API void session_network_free(network_object* network) {
-    delete static_cast<session::network::Network*>(network->internals);
+    delete static_cast<std::shared_ptr<session::network::Network>*>(network->internals);
     delete network;
 }
 
@@ -1225,41 +1420,41 @@ LIBSESSION_C_API void session_request_params_free(session_request_params* params
 }
 
 LIBSESSION_C_API void session_network_suspend(network_object* network) {
-    unbox(network).suspend();
+    unbox(network)->suspend();
 }
 
 LIBSESSION_C_API void session_network_resume(
         network_object* network, bool automatically_reconnect) {
-    unbox(network).resume(automatically_reconnect);
+    unbox(network)->resume(automatically_reconnect);
 }
 
 LIBSESSION_C_API void session_network_close_connections(network_object* network) {
-    unbox(network).close_connections();
+    unbox(network)->close_connections();
 }
 
 LIBSESSION_C_API void session_network_clear_cache(network_object* network) {
-    unbox(network).clear_cache();
+    unbox(network)->clear_cache();
 }
 
 LIBSESSION_C_API int64_t session_network_time_offset(network_object* network) {
-    return unbox(network).network_time_offset().count();
+    return unbox(network)->network_time_offset().count();
 }
 
 LIBSESSION_C_API uint16_t session_network_hardfork(network_object* network) {
-    return unbox(network).hardfork();
+    return unbox(network)->hardfork();
 }
 
 LIBSESSION_C_API uint16_t session_network_softfork(network_object* network) {
-    return unbox(network).softfork();
+    return unbox(network)->softfork();
 }
 
 LIBSESSION_C_API void session_network_set_status_changed_callback(
         network_object* network, void (*callback)(CONNECTION_STATUS status, void* ctx), void* ctx) {
     if (!callback)
-        unbox(network).on_status_changed = nullptr;
+        unbox(network)->on_status_changed = nullptr;
     else
-        unbox(network).on_status_changed = [cb = std::move(callback),
-                                            ctx](ConnectionStatus status) {
+        unbox(network)->on_status_changed = [cb = std::move(callback),
+                                             ctx](ConnectionStatus status) {
             cb(static_cast<CONNECTION_STATUS>(status), ctx);
         };
 }
@@ -1270,9 +1465,9 @@ LIBSESSION_C_API void session_network_set_network_info_changed_callback(
                 int64_t network_time_offset, uint16_t hardfork, uint16_t softfork, void* ctx),
         void* ctx) {
     if (!callback)
-        unbox(network).on_network_info_changed = nullptr;
+        unbox(network)->on_network_info_changed = nullptr;
     else
-        unbox(network).on_network_info_changed =
+        unbox(network)->on_network_info_changed =
                 [cb = std::move(callback), ctx](
                         std::chrono::milliseconds network_time_offset,
                         uint16_t hardfork,
@@ -1314,7 +1509,7 @@ LIBSESSION_C_API CONNECTION_STATUS session_network_get_status(network_object* ne
     if (!network)
         return CONNECTION_STATUS_UNKNOWN;
 
-    return static_cast<CONNECTION_STATUS>(unbox(network).get_status());
+    return static_cast<CONNECTION_STATUS>(unbox(network)->get_status());
 }
 
 LIBSESSION_C_API void session_network_get_active_paths(
@@ -1326,7 +1521,7 @@ LIBSESSION_C_API void session_network_get_active_paths(
     *out_paths_len = 0;
 
     try {
-        std::vector<PathInfo> cpp_paths = unbox(network).get_active_paths();
+        std::vector<PathInfo> cpp_paths = unbox(network)->get_active_paths();
         if (cpp_paths.empty())
             return;
 
@@ -1428,7 +1623,7 @@ LIBSESSION_C_API void session_network_get_swarm(
         void (*callback)(network_service_node* nodes, size_t nodes_len, void*),
         void* ctx) {
     assert(swarm_pubkey_hex && callback);
-    unbox(network).get_swarm(
+    unbox(network)->get_swarm(
             x25519_pubkey::from_hex({swarm_pubkey_hex, 64}),
             ignore_strike_count,
             [cb = std::move(callback), ctx](swarm_id_t, std::vector<service_node> nodes) {
@@ -1443,7 +1638,7 @@ LIBSESSION_C_API void session_network_get_random_nodes(
         void (*callback)(network_service_node*, size_t, void*),
         void* ctx) {
     assert(callback);
-    unbox(network).get_random_nodes(
+    unbox(network)->get_random_nodes(
             count, [cb = std::move(callback), ctx](std::vector<service_node> nodes) {
                 auto c_nodes = network::detail::convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
@@ -1548,7 +1743,7 @@ LIBSESSION_C_API void session_network_send_request(
                  c_ctx);
         };
 
-        unbox(network).send_request(std::move(request), std::move(cpp_callback));
+        unbox(network)->send_request(std::move(request), std::move(cpp_callback));
     } catch (const std::exception& e) {
         callback(
                 false,
@@ -1560,6 +1755,180 @@ LIBSESSION_C_API void session_network_send_request(
                 strlen(e.what()),
                 ctx);
     }
+}
+
+LIBSESSION_C_API session_upload_handle_t* session_network_upload(
+        network_object* network,
+        const char* file_name,
+        const session_upload_callbacks* callbacks,
+        int64_t stall_timeout_ms,
+        int64_t request_timeout_ms,
+        int64_t overall_timeout_ms) {
+
+    if (!network || !callbacks || !callbacks->next_data)
+        return nullptr;
+
+    try {
+        auto handle = std::make_unique<session_upload_handle_t>();
+        handle->callbacks = *callbacks;
+
+        auto cpp_request = std::make_shared<UploadRequest>();
+        cpp_request->file_name = (file_name ? std::optional{std::string{file_name}} : std::nullopt);
+        cpp_request->stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
+        cpp_request->request_timeout = std::chrono::milliseconds{request_timeout_ms};
+        cpp_request->overall_timeout =
+                (overall_timeout_ms > 0
+                         ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}
+                         : std::nullopt);
+
+        cpp_request->next_data = [h = handle.get()]() -> std::vector<unsigned char> {
+            std::vector<unsigned char> buffer(64 * 1024);  // 64KB chunks
+            size_t bytes = h->callbacks.next_data(buffer.data(), buffer.size(), h->callbacks.ctx);
+
+            if (bytes == 0 || bytes == static_cast<size_t>(-1))
+                return {};
+
+            buffer.resize(bytes);
+            return buffer;
+        };
+
+        cpp_request->on_complete = [h = handle.get()](
+                                           std::variant<file_metadata, int16_t> result,
+                                           bool timeout) {
+            std::visit(
+                    [&](auto&& arg) {
+                        using T = std::decay_t<decltype(arg)>;
+                        if constexpr (std::is_same_v<T, file_metadata>) {
+                            session_file_metadata c_meta{};
+                            std::strncpy(
+                                    c_meta.file_id, arg.id.c_str(), sizeof(c_meta.file_id) - 1);
+                            c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
+                            c_meta.size = arg.size;
+                            c_meta.uploaded_timestamp =
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                            arg.uploaded.time_since_epoch())
+                                            .count();
+                            c_meta.expiry_timestamp =
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                            arg.expiry.time_since_epoch())
+                                            .count();
+
+                            h->callbacks.on_success(&c_meta, h->callbacks.ctx);
+                        } else {
+                            // int16_t status code
+                            h->callbacks.on_error(arg, timeout, h->callbacks.ctx);
+                        }
+                    },
+                    result);
+        };
+
+        handle->cpp_request = cpp_request;
+        unbox(network)->upload(cpp_request);
+
+        return handle.release();
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+LIBSESSION_C_API session_download_handle_t* session_network_download(
+        network_object* network,
+        const char* download_url,
+        const session_download_callbacks* callbacks,
+        int64_t stall_timeout_ms,
+        int64_t request_timeout_ms,
+        int64_t overall_timeout_ms,
+        int64_t partial_min_interval_ms) {
+
+    if (!network || !download_url || !callbacks)
+        return nullptr;
+
+    try {
+        auto handle = std::make_unique<session_download_handle_t>();
+        handle->callbacks = *callbacks;
+
+        auto cpp_request = std::make_shared<DownloadRequest>();
+        cpp_request->download_url = download_url;
+        cpp_request->stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
+        cpp_request->request_timeout = std::chrono::milliseconds{request_timeout_ms};
+        cpp_request->overall_timeout =
+                (overall_timeout_ms > 0
+                         ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}
+                         : std::nullopt);
+
+        if (callbacks->on_data)
+            cpp_request->on_data = [h = handle.get()](
+                                           const file_metadata& metadata,
+                                           std::vector<unsigned char> data) {
+                session_file_metadata c_meta{};
+                std::strncpy(c_meta.file_id, metadata.id.c_str(), sizeof(c_meta.file_id) - 1);
+                c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
+                c_meta.size = metadata.size;
+                c_meta.uploaded_timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+                                                    metadata.uploaded.time_since_epoch())
+                                                    .count();
+                c_meta.expiry_timestamp = std::chrono::duration_cast<std::chrono::seconds>(
+                                                  metadata.expiry.time_since_epoch())
+                                                  .count();
+
+                h->callbacks.on_data(&c_meta, data.data(), data.size(), h->callbacks.ctx);
+            };
+
+        cpp_request->on_complete = [h = handle.get()](
+                                           std::variant<file_metadata, int16_t> result,
+                                           bool timeout) {
+            std::visit(
+                    [&](auto&& arg) {
+                        using T = std::decay_t<decltype(arg)>;
+                        if constexpr (std::is_same_v<T, file_metadata>) {
+                            session_file_metadata c_meta{};
+                            std::strncpy(
+                                    c_meta.file_id, arg.id.c_str(), sizeof(c_meta.file_id) - 1);
+                            c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
+                            c_meta.size = arg.size;
+                            c_meta.uploaded_timestamp =
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                            arg.uploaded.time_since_epoch())
+                                            .count();
+                            c_meta.expiry_timestamp =
+                                    std::chrono::duration_cast<std::chrono::seconds>(
+                                            arg.expiry.time_since_epoch())
+                                            .count();
+
+                            h->callbacks.on_success(&c_meta, h->callbacks.ctx);
+                        } else {
+                            // int16_t status code
+                            h->callbacks.on_error(arg, timeout, h->callbacks.ctx);
+                        }
+                    },
+                    result);
+        };
+
+        handle->cpp_request = cpp_request;
+        unbox(network)->download(cpp_request);
+
+        return handle.release();
+    } catch (...) {
+        return nullptr;
+    }
+}
+
+LIBSESSION_C_API void session_network_upload_cancel(session_upload_handle_t* handle) {
+    if (handle && handle->cpp_request && handle->cpp_request->cancellation_token)
+        handle->cpp_request->cancellation_token->cancel();
+}
+
+LIBSESSION_C_API void session_network_download_cancel(session_download_handle_t* handle) {
+    if (handle && handle->cpp_request && handle->cpp_request->cancellation_token)
+        handle->cpp_request->cancellation_token->cancel();
+}
+
+LIBSESSION_C_API void session_network_upload_free(session_upload_handle_t* handle) {
+    delete handle;
+}
+
+LIBSESSION_C_API void session_network_download_free(session_download_handle_t* handle) {
+    delete handle;
 }
 
 }  // extern "C"

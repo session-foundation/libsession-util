@@ -8,20 +8,33 @@
 #include <unordered_map>
 #include <vector>
 
+#include "session/network/backends/session_file_server.hpp"
 #include "session/network/request_queue.hpp"
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
 
 namespace session::network {
 
+namespace config {
+    struct DirectRouterConfig {
+        FileServerConfig file_server_config;
+    };
+}  // namespace config
+
 class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectRouter> {
   private:
     bool _suspended = false;
+    config::DirectRouterConfig _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::weak_ptr<ITransport> _transport;
+    std::unordered_map<std::string, std::shared_ptr<UploadRequest>> _active_uploads;
+    std::unordered_map<std::string, std::shared_ptr<DownloadRequest>> _active_downloads;
 
   public:
-    DirectRouter(std::shared_ptr<oxen::quic::Loop> loop, std::weak_ptr<ITransport> transport);
+    DirectRouter(
+            config::DirectRouterConfig config,
+            std::shared_ptr<oxen::quic::Loop> loop,
+            std::weak_ptr<ITransport> transport);
     ~DirectRouter() override;
 
     void suspend() override;
@@ -31,11 +44,15 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
 
     ConnectionStatus get_status() const override { return _status.load(); };
     void send_request(Request request, network_response_callback_t callback) override;
+    void upload(std::shared_ptr<UploadRequest> request) override;
+    void download(std::shared_ptr<DownloadRequest> request) override;
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
     void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);
+    void _upload_internal(std::shared_ptr<UploadRequest> request);
+    void _download_internal(std::shared_ptr<DownloadRequest> request);
     void _handle_transport_response(
             bool success,
             bool timeout,

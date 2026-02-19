@@ -4,45 +4,117 @@
 #include "session/network/session_network_types.hpp"
 #include "session/platform.hpp"
 
+namespace session::network::config {
+struct FileServerConfig {
+    std::string scheme;
+    std::string host;
+    uint16_t port;
+    std::string pubkey_hex;
+
+    uint64_t max_file_size;
+};
+}  // namespace session::network::config
+
 namespace session::network::file_server {
 
-/// API: file_server/upload
-///
-/// Constructs a request to upload a file to the session file server.
-///
-/// Inputs:
-/// - 'data' - [in] the data to be uploaded to a server.
-/// - `file_name` -- [in, optional] optional name to use for the file.
-/// - `request_timeout` -- [in] timeout in milliseconds to use for the request.  This won't take any
-/// pre-flight operations into account so the request will never timeout if pre-flight operations
-/// never complete.
-/// - `overall_timeout` -- [in] timeout in milliseconds to use for the request and any pre-flight
-/// operations that may need to occur (eg. path building).  This value takes presedence over
-/// `request_timeout` if provided, the request itself will be given a timeout of this value
-/// subtracting however long the pre-flight operations took.
-Request upload(
-        std::vector<unsigned char> data,
-        std::optional<std::string> file_name,
-        std::chrono::milliseconds request_timeout,
-        std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt);
+extern const config::FileServerConfig DEFAULT_CONFIG;
 
-/// API: file_server/download
+extern const std::string_view ENDPOINT_FILE;
+
+struct DownloadInfo {
+    std::string scheme;
+    std::string host;
+    std::string file_id;
+    std::optional<std::string> custom_pubkey_hex;  // If 'p' fragment present
+    bool deterministic;                            // If 'd' fragment present
+};
+
+/// API: file_server/parse_download_url
 ///
-/// Constructs a request to download a file from the session file server.
+/// Parses a url to extract the information required to download the file.
 ///
 /// Inputs:
-/// - `file_id` -- [in] the id of the file to download.
-/// - `request_timeout` -- [in] timeout in milliseconds to use for the request.  This won't take any
-/// pre-flight operations into account so the request will never timeout if pre-flight operations
-/// never complete.
-/// - `overall_timeout` -- [in] timeout in milliseconds to use for the request and any pre-flight
-/// operations that may need to occur (eg. path building).  This value takes presedence over
-/// `request_timeout` if provided, the request itself will be given a timeout of this value
-/// subtracting however long the pre-flight operations took.
-Request download(
-        std::string file_id,
-        std::chrono::milliseconds request_timeout,
-        std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt);
+/// - `url` -- [in] url to parse.
+///
+/// Outputs:
+/// - returns struct containing the information required to download the file.
+std::optional<DownloadInfo> parse_download_url(std::string_view url);
+
+/// API: file_server/parse_http_date
+///
+/// Parses a HTTP date header.
+///
+/// Inputs:
+/// - `date_str` -- [in] date header to parse.
+///
+/// Outputs:
+/// - the parsed `time_point`, or `std::nullopt` if it failed to parse.
+std::optional<std::chrono::system_clock::time_point> parse_http_date(std::string_view date_str);
+
+/// API: file_server/to_request
+///
+/// Accumulates all of the data for an `UploadRequest` and creates a standard `Request` for it.
+///
+/// Inputs:
+/// - `upload_id` -- [in] id for the request.
+/// - `config` -- [in] configuration for the file server that the request should be sent to.
+/// - `upload_request` -- [in] `UploadRequest` to convert into a standard `Request`.
+///
+/// Outputs:
+/// - returns a standard (non streaming) request which can be sent to a file server.
+Request to_request(
+        const std::string& upload_id,
+        const config::FileServerConfig& config,
+        std::shared_ptr<UploadRequest> upload_request);
+
+/// API: file_server/to_request
+///
+/// Accumulates all of the data for an `DownloadRequest` and creates a standard `Request` for it.
+///
+/// Inputs:
+/// - `download_id` -- [in] id for the request.
+/// - `config` -- [in] configuration for the file server that the request should be sent to.
+/// - `download_request` -- [in] `DownloadRequest` to convert into a standard `Request`.
+///
+/// Outputs:
+/// - returns a standard (non streaming) request which can be sent to a file server.
+Request to_request(
+        const std::string& download_id,
+        const config::FileServerConfig& config,
+        std::shared_ptr<DownloadRequest> download_request);
+
+/// API: file_server/parse_upload_response
+///
+/// Parses the JSON response body from a file server upload request into a `file_metadata` struct.
+/// The `upload_size` parameter is used as a fallback if the response does not include a `size`
+/// field.
+///
+/// Inputs:
+/// - `body` -- [in] response body to parse.
+/// - `upload_size` -- [in] fallback size to use if the response does not include one.
+///
+/// Outputs:
+/// - returns the parsed `file_metadata`.
+/// - throws `std::runtime_error` if the response is missing required fields or cannot be parsed.
+file_metadata parse_upload_response(const std::string& body, size_t upload_size);
+
+/// API: file_server/parse_download_response
+///
+/// Parses the headers and body from a file server download response into a `file_metadata` struct,
+/// extracting the `file_id` from the original `download_url`.
+///
+/// Inputs:
+/// - `download_url` -- [in] the original download URL, used to extract the `file_id`.
+/// - `headers` -- [in] response headers.
+/// - `body` -- [in] response body containing the raw file data.
+///
+/// Outputs:
+/// - returns a pair of the parsed `file_metadata` and the raw file data.
+/// - throws `invalid_url_exception` if the URL cannot be parsed.
+std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
+        std::string_view download_url,
+        const std::vector<std::pair<std::string, std::string>>& headers,
+        const std::string& body);
 
 /// API: file_server/get_client_version
 ///

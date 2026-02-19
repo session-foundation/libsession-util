@@ -274,7 +274,7 @@ cached_edge_node cached_edge_node::from_disk(std::string_view str) {
         cached_at = std::chrono::system_clock::from_time_t(static_cast<time_t>(timestamp));
     else
         cached_at = std::chrono::system_clock::now();
-    
+
     return {std::move(node), cached_at};
 }
 
@@ -482,7 +482,8 @@ void OnionRequestRouter::suspend() {
                         edge_nodes.emplace_back(path.nodes[0], path.edge_first_connected_at);
 
             _disk_manager->trigger(
-                    io_key_write_edge_nodes, [path = _edge_node_cache_file_path, nodes = std::move(edge_nodes)] {
+                    io_key_write_edge_nodes,
+                    [path = _edge_node_cache_file_path, nodes = std::move(edge_nodes)] {
                         OnionRequestRouter::_perform_edge_node_write(
                                 std::move(path), std::move(nodes));
                     });
@@ -534,6 +535,20 @@ void OnionRequestRouter::send_request(Request request, network_response_callback
     _loop->call([weak_self = weak_from_this(), req = std::move(request), cb = std::move(callback)] {
         if (auto self = weak_self.lock())
             self->_send_request_internal(std::move(req), std::move(cb));
+    });
+}
+
+void OnionRequestRouter::upload(std::shared_ptr<UploadRequest> request) {
+    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
+        if (auto self = weak_self.lock())
+            self->_upload_internal(std::move(req));
+    });
+}
+
+void OnionRequestRouter::download(std::shared_ptr<DownloadRequest> request) {
+    _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
+        if (auto self = weak_self.lock())
+            self->_download_internal(std::move(req));
     });
 }
 
@@ -602,12 +617,13 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
                             to_string(category, _config.single_path_mode),
                             (!edge_node.has_value() ? " with cached edge node" : ""));
                     _build_path(
-                        category,
-                        "pre-build-{}-{}"_format(to_string(category, false), i + 1),
-                        {},
-                        std::nullopt,
-                        (edge_node ? std::optional{edge_node->node} : std::nullopt),
-                        (edge_node ? std::optional{edge_node->first_connected_at} : std::nullopt));
+                            category,
+                            "pre-build-{}-{}"_format(to_string(category, false), i + 1),
+                            {},
+                            std::nullopt,
+                            (edge_node ? std::optional{edge_node->node} : std::nullopt),
+                            (edge_node ? std::optional{edge_node->first_connected_at}
+                                       : std::nullopt));
                 }
             }
         }
@@ -616,6 +632,26 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
 }
 
 void OnionRequestRouter::_close_connections() {
+    // Cancel any uploads and downloads
+    for (auto& [id, request] : _active_uploads) {
+        if (request && request->cancellation_token)
+            request->cancellation_token->cancel();
+
+        if (request && request->on_complete)
+            request->on_complete(ERROR_CONNECTION_CLOSED, false);
+    }
+
+    for (auto& [id, request] : _active_downloads) {
+        if (request && request->cancellation_token)
+            request->cancellation_token->cancel();
+
+        if (request && request->on_complete)
+            request->on_complete(ERROR_CONNECTION_CLOSED, false);
+    }
+
+    _active_uploads.clear();
+    _active_downloads.clear();
+
     // Cancel any pending requests (they can't succeed once the connection is closed)
     for (auto& [path_type, path_type_queue] : _request_queues) {
         auto to_fail = path_type_queue->pop_all();
@@ -776,6 +812,197 @@ void OnionRequestRouter::_send_request_internal(
                 to_string(path_category_for_initiating_req, _config.single_path_mode));
 
         _build_path(path_category_for_initiating_req, initiating_req_id, {});
+    }
+}
+
+void OnionRequestRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
+    const auto upload_id = "UP-" + random::random_base32(4);
+    log::info(cat, "[Upload {}]: Starting upload.", upload_id);
+    _active_uploads[upload_id] = request;
+
+    // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
+    // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
+    // disk should be prioritised)
+    std::thread([weak_self = weak_from_this(),
+                 upload_request = request,
+                 upload_id,
+                 file_server_config = _config.file_server_config] {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        // Onion requests don't support streaming data so we need to load all the data from the
+        // streaming source into memory
+        try {
+            Request request =
+                    file_server::to_request(upload_id, file_server_config, upload_request);
+
+            self->_loop->call([weak_self, upload_request, req = std::move(request), upload_id] {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                if (upload_request->is_cancelled() || !req.body) {
+                    log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
+                    upload_request->on_complete(ERROR_REQUEST_CANCELLED, false);
+                    self->_active_uploads.erase(upload_id);
+                    return;
+                }
+
+                const auto upload_size = req.body->size();
+                log::debug(
+                        cat,
+                        "[Upload {}]: Accumulated {} bytes, building request.",
+                        upload_id,
+                        upload_size);
+
+                self->_send_request_internal(
+                        std::move(req),
+                        [weak_self, upload_id, upload_request, upload_size](
+                                bool success,
+                                bool timeout,
+                                int16_t status_code,
+                                std::vector<std::pair<std::string, std::string>> headers,
+                                std::optional<std::string> body) {
+                            auto self = weak_self.lock();
+                            if (!self)
+                                return;
+
+                            self->_active_uploads.erase(upload_id);
+
+                            try {
+                                if (upload_request->is_cancelled())
+                                    throw cancellation_exception{"Cancelled during request."};
+
+                                if (!success || timeout)
+                                    throw status_code_exception{
+                                            status_code,
+                                            headers,
+                                            fmt::format(
+                                                    "Request failed with status {}, timeout={}.",
+                                                    status_code,
+                                                    timeout)};
+
+                                if (!body)
+                                    throw std::runtime_error{"No response body."};
+
+                                auto metadata =
+                                        file_server::parse_upload_response(*body, upload_size);
+                                log::info(
+                                        cat,
+                                        "[Upload {}]: Successfully uploaded {} bytes as file ID: "
+                                        "{}",
+                                        upload_id,
+                                        metadata.size,
+                                        metadata.id);
+
+                                upload_request->on_complete(std::move(metadata), false);
+                            } catch (const status_code_exception& e) {
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Failure with error: {}",
+                                        upload_id,
+                                        e.what());
+                                upload_request->on_complete(e.status_code, false);
+                            } catch (const std::exception& e) {
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Failure with error: {}",
+                                        upload_id,
+                                        e.what());
+                                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                            }
+                        });
+            });
+        } catch (const std::exception& e) {
+            self->_loop->call([weak_self, upload_request, upload_id, err = e.what()] {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
+                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                self->_active_uploads.erase(upload_id);
+            });
+        }
+    }).detach();
+}
+
+void OnionRequestRouter::_download_internal(std::shared_ptr<DownloadRequest> request) {
+    const auto download_id = "DL-" + random::random_base32(4);
+    log::info(cat, "[Download {}]: Starting download.", download_id);
+    _active_downloads[download_id] = request;
+
+    try {
+        Request req = file_server::to_request(download_id, _config.file_server_config, request);
+
+        send_request(
+                std::move(req),
+                [weak_self = weak_from_this(), download_id, request](
+                        bool success,
+                        bool timeout,
+                        int16_t status_code,
+                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::optional<std::string> body) {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return;
+
+                    self->_active_downloads.erase(download_id);
+
+                    try {
+                        if (request->is_cancelled())
+                            throw cancellation_exception{"Cancelled during request."};
+
+                        if (!success || timeout)
+                            throw status_code_exception{
+                                    status_code,
+                                    headers,
+                                    fmt::format(
+                                            "Request failed with status {}, timeout={}.",
+                                            status_code,
+                                            timeout)};
+
+                        if (!body)
+                            throw std::runtime_error{"No response body."};
+
+                        auto [metadata, data] = file_server::parse_download_response(
+                                request->download_url, headers, *body);
+                        log::info(
+                                cat,
+                                "[Download {}]: Successfully downloaded {} bytes for file ID: {}",
+                                download_id,
+                                data.size(),
+                                metadata.id);
+
+                        if (request->on_data)
+                            request->on_data(metadata, std::move(data));
+
+                        request->on_complete(std::move(metadata), false);
+                    } catch (const status_code_exception& e) {
+                        log::error(
+                                cat,
+                                "[Download {}]: Failure with error: {}",
+                                download_id,
+                                e.what());
+                        request->on_complete(e.status_code, false);
+                    } catch (const std::exception& e) {
+                        log::error(
+                                cat,
+                                "[Download {}]: Failure with error: {}",
+                                download_id,
+                                e.what());
+                        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                    }
+                });
+    } catch (const invalid_url_exception& e) {
+        log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
+        request->on_complete(ERROR_INVALID_DOWNLOAD_URL, false);
+        _active_downloads.erase(download_id);
+    } catch (const std::exception& e) {
+        log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
+        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+        _active_downloads.erase(download_id);
     }
 }
 
