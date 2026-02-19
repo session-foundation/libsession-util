@@ -26,6 +26,11 @@ const std::pair<std::string, std::string> content_type_plain_text = {
         "Content-Type", "text/plain; charset=UTF-8"};
 const std::pair<std::string, std::string> content_type_json = {"Content-Type", "application/json"};
 
+class cancellation_exception : public std::runtime_error {
+  public:
+    cancellation_exception(std::string message) : std::runtime_error(message) {}
+};
+
 class invalid_url_exception : public std::runtime_error {
   public:
     invalid_url_exception(std::string message) : std::runtime_error(message) {}
