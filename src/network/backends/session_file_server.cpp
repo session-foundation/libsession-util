@@ -11,6 +11,14 @@
 #include "session/network/backends/session_file_server.h"
 #include "session/random.hpp"
 
+#if defined(__APPLE__) || !defined(__cpp_lib_chrono) || __cpp_lib_chrono < 201907L || \
+        (defined(_LIBCPP_VERSION) && _LIBCPP_VERSION < 190000)
+#include <date/date.h>
+namespace chrono_for_parsing = date;
+#else
+namespace chrono_for_parsing = std::chrono;
+#endif
+
 using namespace oxen;
 using namespace std::literals;
 using namespace oxen::log::literals;
@@ -101,23 +109,13 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
 }
 
 std::optional<std::chrono::system_clock::time_point> parse_http_date(std::string_view date_str) {
-    std::tm tm = {};
-    std::istringstream ss(std::string{date_str});
-    ss >> std::get_time(&tm, "%a, %d %b %Y %H:%M:%S");
 
-    if (ss.fail())
-        return std::nullopt;
-
-#ifdef _WIN32
-    auto time_t_utc = _mkgmtime(&tm);
-#else
-    auto time_t_utc = timegm(&tm);
-#endif
-
-    if (time_t_utc == -1)
-        return std::nullopt;
-
-    return std::chrono::system_clock::from_time_t(time_t_utc);
+    auto t = std::make_optional<std::chrono::system_clock::time_point>();
+    std::istringstream ss{std::string{date_str}};
+    ss.imbue(std::locale::classic());
+    if (!(ss >> chrono_for_parsing::parse("%a, %d %b %Y %T %Z", *t) >> std::ws) || !ss.eof())
+        t.reset();
+    return t;
 }
 
 Request to_request(

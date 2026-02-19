@@ -19,3 +19,6 @@
 [submodule "external/simdutf"]
 	path = external/simdutf
 	url = https://github.com/simdutf/simdutf.git
+[submodule "external/date"]
+	path = external/date
+	url = https://github.com/HowardHinnant/date.git

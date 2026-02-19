@@ -30,6 +30,7 @@ if(SUBMODULE_CHECK)
     check_submodule(zstd)
     check_submodule(protobuf)
     check_submodule(session-router)
+    check_submodule(date)
   endif()
 endif()
 
@@ -213,3 +214,13 @@ function(simdutf_subdir)
 endfunction()
 simdutf_subdir()
 libsession_static_bundle(simdutf)
+
+# We need Howard Hinnant's header-only date library for now because the STL implementation of
+# std::chrono::parse() is spotty or broken on:
+# - Apple.  libc++ date parsing is only available when on XCode 16.3+ *and* targetting macOS 15+.
+# - gcc before 13.
+# - clang+libc++ before llvm-19.  (Real 19, not Apple's idiotic PR renumbering).
+#
+# On the plus side, this is header-only so we don't actually compile anything extra if we don't
+# actually use it.
+add_subdirectory(date)

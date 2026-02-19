@@ -137,6 +137,7 @@ if(ENABLE_NETWORKING)
         nlohmann_json::nlohmann_json
         libsodium::sodium-internal
         nettle::nettle
+        date::date
     )
 
     if (BUILD_STATIC_DEPS)
