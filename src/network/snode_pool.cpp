@@ -4,6 +4,7 @@
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
 
+#include <exception>
 #include <fstream>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -36,10 +37,6 @@ namespace fs = std::filesystem;
 namespace {
     inline auto cat = log::Cat("snode_pool");
 
-    constexpr auto io_key_clear_cache = "clear_snode_cache"sv;
-    constexpr auto io_key_write_cache = "write_snode_cache"sv;
-    constexpr auto io_key_write_strikes = "write_snode_strikes"sv;
-
     const std::chrono::seconds STRIKE_EXPIRY = 48h;
     const std::chrono::seconds SAVE_THROTTLE = 5min;
 }  // namespace
@@ -47,11 +44,11 @@ namespace {
 SnodePool::SnodePool(
         config::SnodePool config,
         std::shared_ptr<oxen::quic::Loop> loop,
-        std::shared_ptr<DiskManager> disk_manager,
+        std::shared_ptr<oxen::quic::Loop> disk_loop,
         network_fetcher_t direct_fetcher) :
         _config{std::move(config)},
         _loop{loop},
-        _disk_manager{disk_manager},
+        _disk_loop{disk_loop},
         _direct_fetcher{std::move(direct_fetcher)} {
     if (_config.cache_directory) {
         std::string cache_file_name;
@@ -240,7 +237,7 @@ void SnodePool::_load_from_disk() {
     }
 }
 
-void SnodePool::_clear_disk_cache(std::filesystem::path path) {
+void SnodePool::_clear_disk_cache(const std::filesystem::path& path) {
     try {
         if (!path.empty() && fs::exists(path))
             fs::remove_all(path);
@@ -250,7 +247,8 @@ void SnodePool::_clear_disk_cache(std::filesystem::path path) {
     }
 }
 
-void SnodePool::_perform_cache_write(std::filesystem::path path, std::vector<service_node> cache) {
+void SnodePool::_perform_cache_write(
+        const std::filesystem::path& path, const std::vector<service_node>& cache) {
     if (path.empty())
         return;
 
@@ -285,7 +283,8 @@ void SnodePool::_perform_cache_write(std::filesystem::path path, std::vector<ser
 }
 
 void SnodePool::_perform_strikes_write(
-        std::filesystem::path path, std::map<ed25519_pubkey, std::vector<uint64_t>> strikes) {
+        const std::filesystem::path& path,
+        const std::map<ed25519_pubkey, std::vector<uint64_t>>& strikes) {
     if (path.empty())
         return;
 
@@ -822,11 +821,10 @@ void SnodePool::_on_refresh_complete(
         _refresh_candidate_nodes.clear();
         _snode_cache_refresh_failure_count = 0;
 
-        if (_disk_manager)
-            _disk_manager->trigger(
-                    io_key_write_cache, [path = _snode_cache_file_path, cache = _snode_cache] {
-                        SnodePool::_perform_cache_write(std::move(path), std::move(cache));
-                    });
+        if (_disk_loop)
+            _disk_loop->call([path = _snode_cache_file_path, cache = _snode_cache] {
+                SnodePool::_perform_cache_write(std::move(path), std::move(cache));
+            });
 
         // Trigger any callbacks
         if (!_after_snode_cache_refresh.empty()) {
@@ -855,12 +853,10 @@ void SnodePool::suspend() {
         _suspended = true;
 
         // Force a strike write immediately if we had one scheduled
-        if (_strikes_flush_scheduled && _disk_manager)
-            _disk_manager->trigger(
-                    io_key_write_strikes, [path = _strikes_file_path, strikes = _snode_strikes] {
-                        SnodePool::_perform_strikes_write(std::move(path), std::move(strikes));
-                    });
-
+        if (_strikes_flush_scheduled && _disk_loop)
+            _disk_loop->call([path = _strikes_file_path, strikes = _snode_strikes] {
+                SnodePool::_perform_strikes_write(path, strikes);
+            });
         log::info(cat, "Suspended.");
     });
 }
@@ -895,10 +891,9 @@ void SnodePool::clear_cache() {
         _all_swarms = {};
         _swarm_cache = {};
 
-        if (_disk_manager)
-            _disk_manager->trigger(io_key_clear_cache, [path = _snode_cache_file_path] {
-                SnodePool::_clear_disk_cache(std::move(path));
-            });
+        if (_disk_loop)
+            _disk_loop->call(
+                    [path = _snode_cache_file_path] { SnodePool::_clear_disk_cache(path); });
     });
 }
 
@@ -935,12 +930,10 @@ void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
                     if (self->_suspended)
                         return;
 
-                    if (self->_disk_manager)
-                        self->_disk_manager->trigger(
-                                io_key_write_strikes,
+                    if (self->_disk_loop)
+                        self->_disk_loop->call(
                                 [path = self->_strikes_file_path, strikes = self->_snode_strikes] {
-                                    SnodePool::_perform_strikes_write(
-                                            std::move(path), std::move(strikes));
+                                    SnodePool::_perform_strikes_write(path, strikes);
                                 });
                 }
             });
@@ -980,10 +973,9 @@ void SnodePool::clear_node_strikes() {
         _strikes_flush_scheduled = false;
 
         // Immediately write to disk after clearing the snode strikes
-        if (_disk_manager)
-            _disk_manager->trigger(io_key_write_strikes, [path = _strikes_file_path] {
-                SnodePool::_perform_strikes_write(std::move(path), {});
-            });
+        if (_disk_loop)
+            _disk_loop->call(
+                    [path = _strikes_file_path] { SnodePool::_perform_strikes_write(path, {}); });
     });
 }
 

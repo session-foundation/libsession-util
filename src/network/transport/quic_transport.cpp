@@ -43,7 +43,7 @@ namespace {
     }
 }  // namespace
 
-constexpr auto ALPN = "oxenstorage";
+constexpr auto ALPN = "oxenstorage"sv;
 
 QuicTransport::QuicTransport(config::QuicTransport config, std::shared_ptr<oxen::quic::Loop> loop) :
         _config{std::move(config)}, _loop{loop} {
@@ -324,7 +324,7 @@ void QuicTransport::_establish_connection(
         _endpoint->connect(
                 address,
                 creds,
-                oxen::quic::opt::outbound_alpns{ALPN},
+                oxen::quic::opt::outbound_alpn(ALPN),
                 oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
                 oxen::quic::opt::max_streams{static_cast<uint64_t>(max_streams(category, _config))},

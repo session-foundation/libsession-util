@@ -5,11 +5,8 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <shared_mutex>
-#include <thread>
 #include <vector>
 
-#include "session/network/disk_manager.hpp"
 #include "session/network/key_types.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/service_node.hpp"
@@ -37,6 +34,11 @@ namespace config {
     };
 }  // namespace config
 
+class empty_file_exception : public std::runtime_error {
+  public:
+    empty_file_exception() : std::runtime_error{"Empty file"} {}
+};
+
 class SnodePool : public std::enable_shared_from_this<SnodePool> {
   public:
     using network_fetcher_t = std::function<void(Request, network_response_callback_t)>;
@@ -45,7 +47,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     SnodePool(
             config::SnodePool config,
             std::shared_ptr<oxen::quic::Loop> loop,
-            std::shared_ptr<DiskManager> disk_manager,
+            std::shared_ptr<oxen::quic::Loop> disk_loop,
             network_fetcher_t direct_fetcher);
     ~SnodePool() = default;
 
@@ -88,7 +90,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     bool _suspended = false;
     config::SnodePool _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
-    std::shared_ptr<DiskManager> _disk_manager;
+    std::shared_ptr<oxen::quic::Loop> _disk_loop;
     network_fetcher_t _direct_fetcher;
     std::optional<network_fetcher_t> _routed_fetcher;
     std::optional<fetcher_connectivity_check_t> _routed_fetcher_connectivity_check;
@@ -115,10 +117,12 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
 
     // Disk I/O functions
     void _load_from_disk();
-    static void _clear_disk_cache(std::filesystem::path path);
-    static void _perform_cache_write(std::filesystem::path path, std::vector<service_node> cache);
+    static void _clear_disk_cache(const std::filesystem::path& path);
+    static void _perform_cache_write(
+            const std::filesystem::path& path, const std::vector<service_node>& cache);
     static void _perform_strikes_write(
-            std::filesystem::path path, std::map<ed25519_pubkey, std::vector<uint64_t>> strikes);
+            const std::filesystem::path& path,
+            const std::map<ed25519_pubkey, std::vector<uint64_t>>& strikes);
 
     // Refresh functions
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);

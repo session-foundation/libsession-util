@@ -15,12 +15,12 @@ class TestSnodePool : public SnodePool {
     TestSnodePool(
             config::SnodePool config,
             std::shared_ptr<oxen::quic::Loop> loop,
-            std::shared_ptr<DiskManager> disk_manager,
+            std::shared_ptr<oxen::quic::Loop> disk_loop,
             network_fetcher_t direct_fetcher = [](Request, network_response_callback_t) {}) :
             SnodePool(
                     std::move(config),
                     std::move(loop),
-                    std::move(disk_manager),
+                    std::move(disk_loop),
                     std::move(direct_fetcher)) {}
 
     void reset_state_with_cache(std::vector<service_node> cache) {
@@ -91,8 +91,8 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     std::sort(snode_cache.begin(), snode_cache.end());
 
     auto loop = std::make_shared<oxen::quic::Loop>();
-    auto disk_manager = std::make_shared<DiskManager>();
-    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_manager);
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
 
     // Should return a result in a different order (since this is random, it's possible that it
@@ -148,7 +148,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
             0,
             3,  // cache_node_strike_threshold
             false};
-    snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_manager);
+    snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
     snode_pool->reset_state_with_cache(snode_cache);
     unused_nodes = snode_pool->get_unused_nodes(20);
     std::sort(unused_nodes.begin(), unused_nodes.end());

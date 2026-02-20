@@ -6,7 +6,6 @@
 #include <oxen/quic.hpp>
 #include <session/router.hpp>
 
-#include "session/network/disk_manager.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
@@ -25,8 +24,8 @@ namespace fs = std::filesystem;
 class Network : public std::enable_shared_from_this<Network> {
   private:
     const config::Config config;
-    std::shared_ptr<oxen::quic::Loop> _loop;
-    std::shared_ptr<DiskManager> _disk_manager;
+    std::shared_ptr<oxen::quic::Loop> _loop; // Main loop for network events and syncronization
+    std::shared_ptr<oxen::quic::Loop> _disk_loop; // Auxiliary loop for blocking I/O
     std::shared_ptr<SnodePool> _snode_pool;
     std::shared_ptr<ITransport> _transport;
     std::shared_ptr<IRouter> _router;

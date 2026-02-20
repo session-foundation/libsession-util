@@ -3,8 +3,10 @@
 #include <oxenc/base64.h>
 
 #include <any>
+#include <future>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <oxen/log/level.hpp>
 #include <vector>
 
 #include "session/blinding.hpp"
@@ -163,7 +165,7 @@ Network::Network(config::Config config) : config{config} {
 
     // Now we can properly do any setup needed
     _loop = std::make_shared<quic::Loop>();
-    _disk_manager = std::make_shared<DiskManager>();
+    _disk_loop = std::make_shared<quic::Loop>();
 
     // Setup the transport layer
     switch (config.transport) {
@@ -189,7 +191,7 @@ Network::Network(config::Config config) : config{config} {
                     "Transport provided to the SnodePool bootstrap fetcher has been destroyed.");
     };
     _snode_pool = std::make_shared<SnodePool>(
-            std::move(build_snode_pool_config(config)), _loop, _disk_manager, bootstrap_fetcher);
+            std::move(build_snode_pool_config(config)), _loop, _disk_loop, bootstrap_fetcher);
 
     // Additional transport configuration
     _transport->set_node_failure_reporter(
@@ -204,7 +206,7 @@ Network::Network(config::Config config) : config{config} {
             _router = std::make_unique<OnionRequestRouter>(
                     std::move(build_onion_request_router_config(config)),
                     _loop,
-                    _disk_manager,
+                    _disk_loop,
                     _snode_pool,
                     _transport);
             break;
@@ -278,7 +280,9 @@ void Network::clear_cache() {
 // MARK: Connection
 
 void Network::suspend() {
-    // Use 'call_get' to force this to be synchronous
+    // Use 'call_get' to force this to be synchronous.  Some of these suspend() calls queue things
+    // on the disk loop, but they don't have to worry about synchronizing because we flush queued
+    // disk loop jobs before we finish.
     _loop->call_get([this] {
         _suspended = true;
 
@@ -290,8 +294,25 @@ void Network::suspend() {
             _router->suspend();
 
         _close_connections();
-        log::info(cat, "Suspended.");
     });
+
+    // Flush the disk loop by queuing and waiting on an empty job (any already-pending jobs will get
+    // processed first).  We do this with a promise instead of a call_get just so we can warn if it
+    // takes a long time.
+    std::promise<void> prom;
+    _disk_loop->call_get([&prom] { prom.set_value(); });
+    auto fut = prom.get_future();
+    bool long_wait = false;
+    while (fut.wait_for(1s) != std::future_status::ready) {
+        log::warning(cat, "Writing to disk is taking a long time...");
+        long_wait = true;
+    }
+    log::log(
+            cat,
+            long_wait ? log::Level::warn : log::Level::debug,
+            "Finished pending writes to disk");
+
+    log::info(cat, "Suspended.");
 }
 
 void Network::resume(bool automatically_reconnect) {

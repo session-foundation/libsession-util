@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "session/network/backends/session_file_server.hpp"
-#include "session/network/disk_manager.hpp"
 #include "session/network/request_queue.hpp"
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
@@ -108,7 +107,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     bool _suspended = false;
     config::OnionRequestRouter _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
-    std::shared_ptr<DiskManager> _disk_manager;
+    std::shared_ptr<oxen::quic::Loop> _disk_loop;
     std::weak_ptr<SnodePool> _snode_pool;
     std::weak_ptr<ITransport> _transport;
 
@@ -139,7 +138,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     OnionRequestRouter(
             config::OnionRequestRouter config,
             std::shared_ptr<oxen::quic::Loop> loop,
-            std::shared_ptr<DiskManager> disk_manager,
+            std::shared_ptr<oxen::quic::Loop> disk_loop,
             std::weak_ptr<SnodePool> snode_pool,
             std::weak_ptr<ITransport> transport);
     ~OnionRequestRouter() override;
@@ -161,9 +160,9 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
 
     // Disk I/O functions
     void _load_from_disk();
-    static void _clear_disk_cache(std::filesystem::path file_path);
+    static void _clear_disk_cache(const std::filesystem::path& file_path);
     static void _perform_edge_node_write(
-            std::filesystem::path file_path, std::vector<cached_edge_node> edge_nodes);
+            const std::filesystem::path& file_path, std::span<const cached_edge_node> edge_nodes);
 
     // All of the below functions should only be called from within `_loop`
     void _finish_setup();

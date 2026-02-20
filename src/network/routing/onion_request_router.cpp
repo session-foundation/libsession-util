@@ -3,6 +3,8 @@
 #include <event2/event.h>
 #include <fmt/ranges.h>
 
+#include <chrono>
+#include <exception>
 #include <fstream>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -26,8 +28,6 @@ namespace fs = std::filesystem;
 
 namespace {
     auto cat = oxen::log::Cat("onion-request-router");
-
-    constexpr auto io_key_write_edge_nodes = "write_edge_nodes"sv;
 
     class pre_decryption_exception : public std::runtime_error {
       public:
@@ -281,12 +281,12 @@ cached_edge_node cached_edge_node::from_disk(std::string_view str) {
 OnionRequestRouter::OnionRequestRouter(
         config::OnionRequestRouter config,
         std::shared_ptr<oxen::quic::Loop> loop,
-        std::shared_ptr<DiskManager> disk_manager,
+        std::shared_ptr<oxen::quic::Loop> disk_loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
         _config{std::move(config)},
         _loop{loop},
-        _disk_manager{disk_manager},
+        _disk_loop{disk_loop},
         _snode_pool{snode_pool},
         _transport{transport} {
     log::trace(cat, "Initializing.");
@@ -423,7 +423,7 @@ void OnionRequestRouter::_load_from_disk() {
     }
 }
 
-void OnionRequestRouter::_clear_disk_cache(std::filesystem::path file_path) {
+void OnionRequestRouter::_clear_disk_cache(const std::filesystem::path& file_path) {
     try {
         if (!file_path.empty() && fs::exists(file_path))
             fs::remove_all(file_path);
@@ -434,7 +434,7 @@ void OnionRequestRouter::_clear_disk_cache(std::filesystem::path file_path) {
 }
 
 void OnionRequestRouter::_perform_edge_node_write(
-        std::filesystem::path file_path, std::vector<cached_edge_node> edge_nodes) {
+        const std::filesystem::path& file_path, std::span<const cached_edge_node> edge_nodes) {
     if (file_path.empty())
         return;
 
@@ -473,20 +473,17 @@ void OnionRequestRouter::suspend() {
         _suspended = true;
 
         // Write the edge nodes to disk before suspension completes
-        if (_disk_manager) {
+        if (_disk_loop) {
             std::vector<cached_edge_node> edge_nodes;
 
-            for (const auto& [_, path_list] : _paths)
+            for (const auto& path_list : std::views::values(_paths))
                 for (const auto& path : path_list)
                     if (!path.nodes.empty())
                         edge_nodes.emplace_back(path.nodes[0], path.edge_first_connected_at);
 
-            _disk_manager->trigger(
-                    io_key_write_edge_nodes,
-                    [path = _edge_node_cache_file_path, nodes = std::move(edge_nodes)] {
-                        OnionRequestRouter::_perform_edge_node_write(
-                                std::move(path), std::move(nodes));
-                    });
+            _disk_loop->call([path = _edge_node_cache_file_path, nodes = std::move(edge_nodes)] {
+                OnionRequestRouter::_perform_edge_node_write(path, nodes);
+            });
         }
 
         _close_connections();
