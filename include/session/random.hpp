@@ -7,7 +7,10 @@
 #include "util.hpp"
 
 namespace session {
-/// rng type that uses llarp::randint(), which is cryptographically secure
+/// rng type that uses libsodium's randombytes, which is cryptographically secure.  This object is
+/// stateless and trivial, so you can either construct it on the fly (with no runtime cost --
+/// compilers will be optimize the construction/destruction away), or you can use the slightly less
+/// verbose session::csrng variable.
 struct CSRNG {
     using result_type = uint64_t;
 
@@ -15,14 +18,15 @@ struct CSRNG {
 
     static constexpr uint64_t max() { return std::numeric_limits<uint64_t>::max(); };
 
-    uint64_t operator()() {
+    uint64_t operator()() const {
         uint64_t i;
         randombytes((uint8_t*)&i, sizeof(i));
         return i;
     };
 };
 
-extern CSRNG csrng;
+// Convenience instance.
+inline constexpr CSRNG csrng{};
 
 }  // namespace session
 
