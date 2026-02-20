@@ -989,18 +989,18 @@ void Network::_launch_next_clock_out_of_sync_request(
 
                 // If we've received all the results then we need to process them and complete the
                 // resync
-                if (_clock_resync_results.size() >= total_requests) {
-                    auto final_results = std::move(_clock_resync_results);
-                    auto refresh_id = *_current_clock_resync_id;
-                    _on_clock_resync_complete(refresh_id, final_results, total_requests);
-                }
+                if (_clock_resync_results.size() >= total_requests)
+                    _on_clock_resync_complete(total_requests);
             });
 }
 
-void Network::_on_clock_resync_complete(
-        std::string refresh_id,
-        std::vector<std::optional<std::chrono::milliseconds>> raw_results,
-        const uint8_t total_requests) {
+void Network::_on_clock_resync_complete(const uint8_t total_requests) {
+
+    auto raw_results = std::move(_clock_resync_results);
+    auto refresh_id = std::move(*_current_clock_resync_id);
+    _clock_resync_results.clear();
+    _current_clock_resync_id.reset();
+
     log::info(
             cat,
             "[Request {}] Have {} responses, processing and finalizing clock resync.",
