@@ -223,6 +223,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
             const std::string& new_path_id,
             bool success,
             bool timeout,
+            int16_t status_code,
             std::chrono::steady_clock::time_point rotate_at);
 };
 

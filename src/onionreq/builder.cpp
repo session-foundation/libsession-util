@@ -134,7 +134,7 @@ std::vector<unsigned char> Builder::_generate_payload(
     if (!host_ || !protocol_ || !method_ || !destination_x25519_public_key_) {
         nlohmann::json params_json;
 
-        if (body)
+        if (body && !body->empty())
             params_json = nlohmann::json::parse(*body);
         else
             params_json = nlohmann::json::object();
@@ -170,7 +170,7 @@ std::vector<unsigned char> Builder::_generate_payload(
     std::vector<std::string> payload{request_info.dump()};
 
     // If we were given a body, add it to the payload
-    if (body)
+    if (body && !body->empty())
         payload.emplace_back(session::to_string(*body));
 
     auto result = oxenc::bt_serialize(payload);

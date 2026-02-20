@@ -2074,7 +2074,7 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
             "path-rotation-verify-" + new_path_id,
             network_destination{target_node.front()},
             std::string{"info"},
-            std::vector<unsigned char>{},
+            std::nullopt,
             to_small_request_category(category),
             10s,
             std::nullopt};
@@ -2091,7 +2091,8 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
                 if (!self)
                     return;
 
-                self->_on_rotation_verification_response(new_path_id, success, timeout, rotate_at);
+                self->_on_rotation_verification_response(
+                        new_path_id, success, timeout, status, rotate_at);
             });
 }
 
@@ -2099,6 +2100,7 @@ void OnionRequestRouter::_on_rotation_verification_response(
         const std::string& new_path_id,
         bool success,
         bool timeout,
+        int16_t status_code,
         std::chrono::steady_clock::time_point rotate_at) {
     auto pending_it = _pending_rotation_paths.find(new_path_id);
     if (pending_it == _pending_rotation_paths.end()) {
@@ -2124,8 +2126,11 @@ void OnionRequestRouter::_on_rotation_verification_response(
     if (!success || timeout) {
         log::warning(
                 cat,
-                "[Path {}]: Verification /info request failed, discarding rotation path {}.",
+                "[Path {}]: Verification /info request failed (status: {}, timeout: {}), "
+                "discarding rotation path {}.",
                 old_path_id,
+                status_code,
+                timeout,
                 new_path_id);
 
         // Clear rotation_in_progress and retry later
