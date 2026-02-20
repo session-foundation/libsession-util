@@ -138,6 +138,9 @@ Request to_request(
         headers.emplace_back("Content-Disposition", "attachment");
     }
 
+    if (upload_request->ttl)
+        headers.emplace_back("X-FS-TTL", fmt::format("{}", *upload_request->ttl));
+
     return Request{
             upload_id,
             ServerDestination{

@@ -262,6 +262,7 @@ LIBSESSION_EXPORT void session_network_send_request(
 /// Inputs:
 /// - `network` -- [in] network object
 /// - `file_name` -- [in, optional] name of the file being uploaded (null-terminated, can be NULL)
+/// - `ttl` -- [in] ttl to use for the file (0 to ignore)
 /// - `callbacks` -- [in] callbacks for data provision and completion
 /// - `stall_timeout_ms` -- [in] timeout if no progress for this duration
 /// - `request_timeout_ms` -- [in] timeout for the request itself
@@ -271,6 +272,7 @@ LIBSESSION_EXPORT void session_network_send_request(
 LIBSESSION_EXPORT session_upload_handle_t* session_network_upload(
         network_object* network,
         const char* file_name,
+        uint64_t ttl,
         const session_upload_callbacks* callbacks,
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,

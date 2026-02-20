@@ -1764,6 +1764,7 @@ LIBSESSION_C_API void session_network_send_request(
 LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         network_object* network,
         const char* file_name,
+        uint64_t ttl,
         const session_upload_callbacks* callbacks,
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
@@ -1778,6 +1779,7 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
 
         auto cpp_request = std::make_shared<UploadRequest>();
         cpp_request->file_name = (file_name ? std::optional{std::string{file_name}} : std::nullopt);
+        cpp_request->ttl = (ttl > 0 ? std::optional{ttl} : std::nullopt);
         cpp_request->stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
         cpp_request->request_timeout = std::chrono::milliseconds{request_timeout_ms};
         cpp_request->overall_timeout =

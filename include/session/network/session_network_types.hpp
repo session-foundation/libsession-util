@@ -196,6 +196,7 @@ struct file_metadata {
 struct UploadRequest {
     std::function<std::vector<unsigned char>()> next_data;
     std::optional<std::string> file_name;
+    std::optional<uint64_t> ttl;
     std::chrono::milliseconds stall_timeout;
     std::chrono::milliseconds request_timeout;
     std::optional<std::chrono::milliseconds> overall_timeout;
