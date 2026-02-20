@@ -29,7 +29,7 @@ std::string random_base32(size_t size) {
     do {
         auto bits = csrng();
         for (int i = 0; result.size() < size && i < chars_per_draw; i++) {
-            result.push_back(bits & mask);
+            result.push_back(base32_charset[bits & mask]);
             bits >>= bits_per_char;
         }
     } while (result.size() < size);
