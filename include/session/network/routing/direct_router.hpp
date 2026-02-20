@@ -16,15 +16,15 @@
 namespace session::network {
 
 namespace config {
-    struct DirectRouterConfig {
-        FileServerConfig file_server_config;
+    struct DirectRouter {
+        FileServer file_server_config;
     };
 }  // namespace config
 
 class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectRouter> {
   private:
     bool _suspended = false;
-    config::DirectRouterConfig _config;
+    config::DirectRouter _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::weak_ptr<ITransport> _transport;
     std::unordered_map<std::string, std::shared_ptr<UploadRequest>> _active_uploads;
@@ -32,7 +32,7 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
 
   public:
     DirectRouter(
-            config::DirectRouterConfig config,
+            config::DirectRouter config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::weak_ptr<ITransport> transport);
     ~DirectRouter() override;

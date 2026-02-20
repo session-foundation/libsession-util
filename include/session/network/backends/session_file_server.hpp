@@ -5,7 +5,7 @@
 #include "session/platform.hpp"
 
 namespace session::network::config {
-struct FileServerConfig {
+struct FileServer {
     std::string scheme;
     std::string host;
     uint16_t port;
@@ -17,7 +17,7 @@ struct FileServerConfig {
 
 namespace session::network::file_server {
 
-extern const config::FileServerConfig DEFAULT_CONFIG;
+extern const config::FileServer DEFAULT_CONFIG;
 
 extern const std::string_view ENDPOINT_FILE;
 
@@ -61,10 +61,10 @@ std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view date_st
 /// - `upload_request` -- [in] `UploadRequest` to convert into a standard `Request`.
 ///
 /// Outputs:
-/// - returns a standard (non streaming) request which can be sent to a file server.
+/// - returns a one-shot (non streaming) request which can be sent to a file server.
 Request to_request(
         const std::string& upload_id,
-        const config::FileServerConfig& config,
+        const config::FileServer& config,
         std::shared_ptr<UploadRequest> upload_request);
 
 /// API: file_server/to_request
@@ -77,10 +77,10 @@ Request to_request(
 /// - `download_request` -- [in] `DownloadRequest` to convert into a standard `Request`.
 ///
 /// Outputs:
-/// - returns a standard (non streaming) request which can be sent to a file server.
+/// - returns a one-shot (non streaming) request which can be sent to a file server.
 Request to_request(
         const std::string& download_id,
-        const config::FileServerConfig& config,
+        const config::FileServer& config,
         std::shared_ptr<DownloadRequest> download_request);
 
 /// API: file_server/parse_upload_response

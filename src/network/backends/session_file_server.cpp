@@ -25,7 +25,7 @@ using namespace oxen::log::literals;
 
 namespace session::network::file_server {
 
-const config::FileServerConfig DEFAULT_CONFIG = {
+const config::FileServer DEFAULT_CONFIG = {
         .scheme = "http",
         .host = "filev2.getsession.org",
         .port = 80,
@@ -78,30 +78,14 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
         auto fragments = file_part.substr(fragment_pos + 1);
 
         // Parse fragments (p=... and/or d)
-        size_t pos = 0;
-        while (pos < fragments.size()) {
-            if (fragments[pos] == 'd') {
+        for (auto fragment : split(fragments, "&", true)) {
+            if (fragment == "d"sv)
                 info.deterministic = true;
-                pos++;
-            } else if (fragments.substr(pos).starts_with("p=")) {
-                pos += 2;  // Skip "p="
-                auto end = fragments.find('&', pos);
-                auto pubkey =
-                        (end == std::string_view::npos ? fragments.substr(pos)
-                                                       : fragments.substr(pos, end - pos));
-
-                if (pubkey.size() == 64 && oxenc::is_hex(pubkey)) {
-                    info.custom_pubkey_hex = std::string{pubkey};
-                }
-
-                pos = (end == std::string_view::npos ? fragments.size() : end);
-            } else if (fragments[pos] == '&') {
-                pos++;
-            } else {
-                // Unknown fragment, skip to next &
-                auto next = fragments.find('&', pos);
-                pos = (next == std::string_view::npos ? fragments.size() : next);
-            }
+            else if (
+                    fragment.starts_with("p=") && fragment.size() == 66 &&  // 'p=' + pubkey
+                    oxenc::is_hex(fragment.substr(2)))
+                info.custom_pubkey_hex = fragment.substr(2);
+            // else ignore (unknown or invalid fragment)
         }
     }
 
@@ -120,9 +104,8 @@ std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view date_st
 
 Request to_request(
         const std::string& upload_id,
-        const config::FileServerConfig& config,
+        const config::FileServer& config,
         std::shared_ptr<UploadRequest> upload_request) {
-    const size_t max_chunk_size = 5 * 1024 * 1024;  // 5MB chunks to avoid massive allocations
     std::vector<unsigned char> all_data;
 
     while (true) {
@@ -173,7 +156,7 @@ Request to_request(
 
 Request to_request(
         const std::string& download_id,
-        const config::FileServerConfig& config,
+        const config::FileServer& config,
         std::shared_ptr<DownloadRequest> download_request) {
     auto download_info = file_server::parse_download_url(download_request->download_url);
 

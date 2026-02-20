@@ -19,7 +19,7 @@ struct ConnectionID;
 namespace session::network {
 
 namespace config {
-    struct QuicTransportConfig {
+    struct QuicTransport {
         std::chrono::milliseconds handshake_timeout;
         std::chrono::seconds keep_alive;
 
@@ -31,7 +31,7 @@ namespace config {
 class QuicTransport : public ITransport, public std::enable_shared_from_this<QuicTransport> {
   private:
     bool _suspended = false;
-    config::QuicTransportConfig _config;
+    config::QuicTransport _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<oxen::quic::Endpoint> _endpoint;
 
@@ -45,8 +45,7 @@ class QuicTransport : public ITransport, public std::enable_shared_from_this<Qui
     std::unordered_map<std::string, std::vector<std::function<void()>>> _failure_listeners;
 
   public:
-    explicit QuicTransport(
-            config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop);
+    explicit QuicTransport(config::QuicTransport config, std::shared_ptr<oxen::quic::Loop> loop);
     ~QuicTransport() override;
 
     void suspend() override;

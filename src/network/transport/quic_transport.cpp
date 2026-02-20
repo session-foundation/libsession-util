@@ -18,7 +18,7 @@ namespace session::network {
 namespace {
     inline auto cat = log::Cat("quic-transport");
 
-    inline bool max_streams(RequestCategory category, config::QuicTransportConfig config) {
+    inline bool max_streams(RequestCategory category, config::QuicTransport config) {
         RequestCategory target_category = RequestCategory::standard;
         switch (category) {
             case RequestCategory::standard: target_category = RequestCategory::standard;
@@ -45,8 +45,7 @@ namespace {
 
 constexpr auto ALPN = "oxenstorage";
 
-QuicTransport::QuicTransport(
-        config::QuicTransportConfig config, std::shared_ptr<oxen::quic::Loop> loop) :
+QuicTransport::QuicTransport(config::QuicTransport config, std::shared_ptr<oxen::quic::Loop> loop) :
         _config{std::move(config)}, _loop{loop} {
     log::trace(cat, "Initializing.");
     _recreate_endpoint();
@@ -529,12 +528,12 @@ void QuicTransport::_send_on_connection(
 
                 // If this connection was an ephemeral connection then we should close it (don't
                 // want to keep it alive longer than needed)
-                if (self->_ephemeral_connection_ids.count(conn_id)) {
-                    self->_ephemeral_connection_ids.erase(conn_id);
+                if (self->_ephemeral_connection_ids.erase(conn_id)) {
                     self->_reserved_stream_ids.erase(conn_id);
 
-                    if (self->_endpoint; auto conn = self->_endpoint->get_conn(conn_id))
-                        conn->close_connection();
+                    if (self->_endpoint)
+                        if (auto conn = self->_endpoint->get_conn(conn_id))
+                            conn->close_connection();
                 }
 
                 // Trigger the callback based on the response we got

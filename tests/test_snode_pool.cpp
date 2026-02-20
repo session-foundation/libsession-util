@@ -13,7 +13,7 @@ class TestSnodePool : public SnodePool {
     std::optional<std::vector<service_node>> mock_unused_nodes;
 
     TestSnodePool(
-            config::SnodePoolConfig config,
+            config::SnodePool config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::shared_ptr<DiskManager> disk_manager,
             network_fetcher_t direct_fetcher = [](Request, network_response_callback_t) {}) :
@@ -39,7 +39,7 @@ class TestSnodePool : public SnodePool {
 }  // namespace session::network
 
 TEST_CASE("Network", "[network][get_unused_nodes]") {
-    session::network::config::SnodePoolConfig pool_config = {
+    session::network::config::SnodePool pool_config = {
             std::nullopt,
             std::chrono::minutes{5},
             std::chrono::minutes{5},

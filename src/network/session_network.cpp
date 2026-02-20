@@ -37,8 +37,8 @@ namespace {
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
     constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
-    config::FileServerConfig build_file_server_config(const config::Config& main_config) {
-        config::FileServerConfig file_server_config = file_server::DEFAULT_CONFIG;
+    config::FileServer build_file_server_config(const config::Config& main_config) {
+        config::FileServer file_server_config = file_server::DEFAULT_CONFIG;
 
         if (main_config.custom_file_server_scheme)
             file_server_config.scheme = *main_config.custom_file_server_scheme;
@@ -55,7 +55,7 @@ namespace {
         return file_server_config;
     }
 
-    config::SnodePoolConfig build_snode_pool_config(const config::Config& main_config) {
+    config::SnodePool build_snode_pool_config(const config::Config& main_config) {
         return {main_config.cache_directory,
                 main_config.cache_expiration,
                 main_config.cache_min_lifetime,
@@ -71,18 +71,18 @@ namespace {
                 main_config.cache_refresh_using_legacy_endpoint};
     }
 
-    config::QuicTransportConfig build_quic_transport_config(const config::Config& main_config) {
+    config::QuicTransport build_quic_transport_config(const config::Config& main_config) {
         return {main_config.quic_handshake_timeout,
                 main_config.quic_keep_alive,
                 main_config.quic_disable_mtu_discovery,
                 main_config.quic_max_streams};
     }
 
-    config::DirectRouterConfig build_direct_router_config(const config::Config& main_config) {
+    config::DirectRouter build_direct_router_config(const config::Config& main_config) {
         return {build_file_server_config(main_config)};
     }
 
-    config::SessionRouterConfig build_session_router_config(const config::Config& main_config) {
+    config::SessionRouter build_session_router_config(const config::Config& main_config) {
         if (!main_config.cache_directory)
             throw std::invalid_argument{
                     "Session Router requires a cache_directory to be configured."};
@@ -96,7 +96,7 @@ namespace {
                 main_config.path_length};
     }
 
-    config::OnionRequestRouterConfig build_onion_request_router_config(
+    config::OnionRequestRouter build_onion_request_router_config(
             const config::Config& main_config) {
         return {build_file_server_config(main_config),
                 main_config.cache_directory,

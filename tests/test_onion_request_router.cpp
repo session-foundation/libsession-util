@@ -130,7 +130,7 @@ namespace {
         std::optional<std::vector<service_node>> mock_unused_nodes;
 
         TestSnodePool(
-                config::SnodePoolConfig config,
+                config::SnodePool config,
                 std::shared_ptr<oxen::quic::Loop> loop,
                 std::shared_ptr<DiskManager> disk_manager,
                 network_fetcher_t direct_fetcher = [](Request, network_response_callback_t) {}) :
@@ -220,7 +220,7 @@ namespace {
 
 TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     const auto node_strike_threshold = 3;
-    config::SnodePoolConfig pool_config = {
+    config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
@@ -234,7 +234,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             .cache_min_num_refresh_presence_to_include_node = 2,
             .cache_node_strike_threshold = node_strike_threshold,
             .cache_refresh_using_legacy_endpoint = false};
-    config::OnionRequestRouterConfig config = {
+    config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
@@ -536,7 +536,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
 }
 
 TEST_CASE("Network", "[network][onion_request_router][build_path]") {
-    config::SnodePoolConfig pool_config = {
+    config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
@@ -550,7 +550,7 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
             .cache_min_num_refresh_presence_to_include_node = 2,
             .cache_node_strike_threshold = 3,
             .cache_refresh_using_legacy_endpoint = false};
-    config::OnionRequestRouterConfig config = {
+    config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
@@ -589,7 +589,7 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
 }
 
 TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
-    config::SnodePoolConfig pool_config = {
+    config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
@@ -603,7 +603,7 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
             .cache_min_num_refresh_presence_to_include_node = 2,
             .cache_node_strike_threshold = 3,
             .cache_refresh_using_legacy_endpoint = false};
-    config::OnionRequestRouterConfig config = {
+    config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},
@@ -703,7 +703,7 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
 }
 
 TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeouts]") {
-    config::SnodePoolConfig pool_config = {
+    config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
@@ -717,7 +717,7 @@ TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeou
             .cache_min_num_refresh_presence_to_include_node = 2,
             .cache_node_strike_threshold = 3,
             .cache_refresh_using_legacy_endpoint = false};
-    config::OnionRequestRouterConfig config = {
+    config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,
             std::chrono::days{10},

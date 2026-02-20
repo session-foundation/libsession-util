@@ -45,7 +45,7 @@ namespace {
 }  // namespace
 
 SnodePool::SnodePool(
-        config::SnodePoolConfig config,
+        config::SnodePool config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::shared_ptr<DiskManager> disk_manager,
         network_fetcher_t direct_fetcher) :

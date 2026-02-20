@@ -18,7 +18,7 @@
 namespace session::network {
 
 namespace config {
-    struct SnodePoolConfig {
+    struct SnodePool {
         std::optional<std::filesystem::path> cache_directory;
         std::chrono::minutes cache_expiration;
         std::chrono::milliseconds cache_min_lifetime;
@@ -43,7 +43,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     using fetcher_connectivity_check_t = std::function<bool()>;
 
     SnodePool(
-            config::SnodePoolConfig config,
+            config::SnodePool config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::shared_ptr<DiskManager> disk_manager,
             network_fetcher_t direct_fetcher);
@@ -86,7 +86,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     friend class TestSnodePool;
 
     bool _suspended = false;
-    config::SnodePoolConfig _config;
+    config::SnodePool _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<DiskManager> _disk_manager;
     network_fetcher_t _direct_fetcher;

@@ -17,7 +17,7 @@ class empty_file_exception : public std::runtime_error {
     empty_file_exception() : std::runtime_error("Empty file") {}
 };
 
-namespace {
+namespace disk_manager::details {
     inline auto disk_cat = oxen::log::Cat("disk-manager");
 
     struct TaskEntry {
@@ -30,7 +30,7 @@ namespace {
 
         size_t operator()(std::string_view sv) const { return std::hash<std::string_view>{}(sv); }
     };
-}  // namespace
+}  // namespace disk_manager::details
 
 class DiskManager {
   public:
@@ -71,12 +71,13 @@ class DiskManager {
     std::condition_variable _cv;
     bool _shutdown = false;
 
-    std::deque<TaskEntry> _tasks;
-    std::unordered_set<std::string, string_hash, std::equal_to<>> _pending_tags;
+    std::deque<disk_manager::details::TaskEntry> _tasks;
+    std::unordered_set<std::string, disk_manager::details::string_hash, std::equal_to<>>
+            _pending_tags;
 
     void _loop() {
         while (true) {
-            TaskEntry current;
+            disk_manager::details::TaskEntry current;
             {
                 std::unique_lock lock{_mutex};
                 _cv.wait(lock, [this] { return _shutdown || !_tasks.empty(); });
@@ -92,7 +93,8 @@ class DiskManager {
             try {
                 current.task();
             } catch (const std::exception& e) {
-                oxen::log::error(disk_cat, "Unhandled exception: {}", e.what());
+                oxen::log::error(
+                        disk_manager::details::disk_cat, "Unhandled exception: {}", e.what());
             }
         }
     }

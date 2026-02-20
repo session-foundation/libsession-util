@@ -21,8 +21,8 @@ struct tunnel_info;
 namespace session::network {
 
 namespace config {
-    struct SessionRouterConfig {
-        FileServerConfig file_server_config;
+    struct SessionRouter {
+        FileServer file_server_config;
         opt::netid::Target netid;
         fs::path cache_directory;
 
@@ -34,7 +34,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
   private:
     bool _ready = false;
     bool _suspended = false;
-    config::SessionRouterConfig _config;
+    config::SessionRouter _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<session::router::SessionRouter> srouter;
     std::weak_ptr<SnodePool> _snode_pool;
@@ -48,7 +48,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
 
   public:
     static std::shared_ptr<SessionRouter> create(
-            config::SessionRouterConfig config,
+            config::SessionRouter config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::weak_ptr<SnodePool> snode_pool,
             std::weak_ptr<ITransport> transport);
@@ -69,7 +69,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
 
     SessionRouter(
-            config::SessionRouterConfig config,
+            config::SessionRouter config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::weak_ptr<SnodePool> snode_pool,
             std::weak_ptr<ITransport> transport);

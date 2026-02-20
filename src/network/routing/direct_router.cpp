@@ -23,7 +23,7 @@ namespace {
 }  // namespace
 
 DirectRouter::DirectRouter(
-        config::DirectRouterConfig config,
+        config::DirectRouter config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<ITransport> transport) :
         _config{config}, _loop{loop}, _transport{transport} {

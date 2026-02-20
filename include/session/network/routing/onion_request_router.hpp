@@ -17,8 +17,8 @@
 namespace session::network {
 
 namespace config {
-    struct OnionRequestRouterConfig {
-        FileServerConfig file_server_config;
+    struct OnionRequestRouter {
+        FileServer file_server_config;
         std::optional<std::filesystem::path> cache_directory;
         std::chrono::days edge_node_cache_duration;
 
@@ -106,7 +106,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
 
     bool _ready = false;
     bool _suspended = false;
-    config::OnionRequestRouterConfig _config;
+    config::OnionRequestRouter _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<DiskManager> _disk_manager;
     std::weak_ptr<SnodePool> _snode_pool;
@@ -137,7 +137,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
 
   public:
     OnionRequestRouter(
-            config::OnionRequestRouterConfig config,
+            config::OnionRequestRouter config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::shared_ptr<DiskManager> disk_manager,
             std::weak_ptr<SnodePool> snode_pool,

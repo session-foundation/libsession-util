@@ -279,7 +279,7 @@ cached_edge_node cached_edge_node::from_disk(std::string_view str) {
 }
 
 OnionRequestRouter::OnionRequestRouter(
-        config::OnionRequestRouterConfig config,
+        config::OnionRequestRouter config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::shared_ptr<DiskManager> disk_manager,
         std::weak_ptr<SnodePool> snode_pool,

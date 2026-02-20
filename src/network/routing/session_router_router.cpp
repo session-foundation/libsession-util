@@ -81,7 +81,7 @@ namespace {
 }  // namespace
 
 std::shared_ptr<SessionRouter> SessionRouter::create(
-        config::SessionRouterConfig config,
+        config::SessionRouter config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) {
@@ -94,7 +94,7 @@ std::shared_ptr<SessionRouter> SessionRouter::create(
 }
 
 SessionRouter::SessionRouter(
-        config::SessionRouterConfig config,
+        config::SessionRouter config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
         std::weak_ptr<ITransport> transport) :
