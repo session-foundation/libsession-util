@@ -500,12 +500,12 @@ void SnodePool::_launch_next_refresh_request(
                         {"params",
                          {{"active_only", true},
                           {"fields",
-                           {{"pubkey_ed25519", true},
-                            {"public_ip", true},
-                            {"storage_port", true},
-                            {"storage_lmq_port", true},
-                            {"storage_server_version", true},
-                            {"swarm_id", true}}}}},
+                           {"pubkey_ed25519",
+                            "public_ip",
+                            "storage_port",
+                            "storage_lmq_port",
+                            "storage_server_version",
+                            "swarm_id"}}}},
                 };
 
                 return Request{
