@@ -123,8 +123,21 @@ inline unsigned char* to_unsigned(unsigned char* x) {
     return x;
 }
 
-inline uint64_t get_timestamp() {
-    return std::chrono::steady_clock::now().time_since_epoch().count();
+// The same as std::chrono::system_clock::now(), except that it allows you to get it in a different
+// precision.  E.g. sysclock_now<std::chrono::seconds> gives a timepoint with seconds precision (aka
+// std::chrono::sys_seconds).
+template <typename Precision = std::chrono::system_clock::duration>
+inline std::chrono::sys_time<Precision> sysclock_now() {
+    return std::chrono::floor<Precision>(std::chrono::system_clock::now());
+}
+// Shortcut for sysclock_now<std::chrono::seconds>();
+inline std::chrono::sys_seconds sysclock_now_s() {
+    return sysclock_now<std::chrono::seconds>();
+}
+using sys_ms = std::chrono::sys_time<std::chrono::milliseconds>;
+// Shortcut for sysclock_now<std::chrono::sys_time<std::chrono::milliseconds>>();
+inline sys_ms sysclock_now_ms() {
+    return sysclock_now<std::chrono::milliseconds>();
 }
 
 /// Returns true if the first string is equal to the second string, compared case-insensitively.

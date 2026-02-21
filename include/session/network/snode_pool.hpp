@@ -100,7 +100,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     std::vector<std::pair<swarm::swarm_id_t, std::vector<service_node>>> _all_swarms;
     std::unordered_map<x25519_pubkey, std::pair<swarm::swarm_id_t, std::vector<service_node>>>
             _swarm_cache;
-    std::map<ed25519_pubkey, std::vector<uint64_t>> _snode_strikes;
+    std::map<ed25519_pubkey, std::vector<std::chrono::sys_seconds>> _snode_strikes;
     bool _strikes_flush_scheduled = false;
 
     // Disk I/O
@@ -122,7 +122,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             const std::filesystem::path& path, const std::vector<service_node>& cache);
     static void _perform_strikes_write(
             const std::filesystem::path& path,
-            const std::map<ed25519_pubkey, std::vector<uint64_t>>& strikes);
+            const std::map<ed25519_pubkey, std::vector<std::chrono::sys_seconds>>& strikes);
 
     // Refresh functions
     void _refresh_snode_cache(std::optional<std::string> request_id = std::nullopt);

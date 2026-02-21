@@ -2,14 +2,17 @@
 
 #include <fmt/ranges.h>
 #include <oxenc/base64.h>
+#include <oxenc/endian.h>
 #include <oxenc/hex.h>
 
+#include <concepts>
 #include <exception>
 #include <fstream>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <oxen/quic.hpp>
 #include <oxen/quic/utils.hpp>
+#include <type_traits>
 
 #include "session/file.hpp"
 #include "session/hash.hpp"
@@ -79,6 +82,22 @@ SnodePool::SnodePool(
 
 // MARK: Disk I/O Functions
 
+// Consume a raw integer (in little-endian format) from the beginning of `b`, throwing if
+// `b` is too short, and dropping the read bytes from it.
+template <typename T>
+static T consume(std::string_view& b) {
+    static_assert(std::is_trivially_copyable_v<T> && std::is_default_constructible_v<T>);
+    if (b.size() < sizeof(T))
+        throw std::out_of_range{
+                "Unable to consume data: reached end of data before parsing finished"};
+    T val;
+    std::memcpy(&val, b.data(), sizeof(T));
+    if constexpr (std::integral<T>)
+        oxenc::little_to_host_inplace(val);
+    b.remove_prefix(sizeof(T));
+    return val;
+}
+
 void SnodePool::_load_from_disk() {
     if (_snode_cache_file_path.empty()) {
         log::error(cat, "Tried to load cache from disk without a cache file path.");
@@ -105,28 +124,20 @@ void SnodePool::_load_from_disk() {
         loaded_cache.reserve(
                 (data_view.size() / service_node_disk_format::MAX_LINE_SIZE) + 1);  // +1 for safety
 
-        size_t start = 0;
-        while (start < data_view.size()) {
-            // Find either \n or \r
-            size_t end = data_view.find_first_of("\n\r", start);
-            if (end == std::string_view::npos)
-                end = data_view.size();
-
-            if (end > start) {  // Skip empty lines
-                std::string_view line = data_view.substr(start, end - start);
-
-                try {
-                    loaded_cache.push_back(service_node::from_disk(line));
-                } catch (...) {
-                    ++invalid_entries;
-                }
+        while (!data_view.empty()) {
+            // Find entry deliminted by either \n or \r
+            auto end = data_view.find_first_of("\n\r");
+            if (end == 0) {
+                // Skip empty lines
+                data_view.remove_prefix(1);
+                continue;
             }
-
-            // Skip past any line ending characters (\n, \r, or both in any order)
-            start = end;
-            while (start < data_view.size() &&
-                   (data_view[start] == '\n' || data_view[start] == '\r')) {
-                ++start;
+            auto line = data_view.substr(0, end);
+            data_view.remove_prefix(line.size());
+            try {
+                loaded_cache.push_back(service_node::from_disk(line));
+            } catch (...) {
+                ++invalid_entries;
             }
         }
 
@@ -165,68 +176,38 @@ void SnodePool::_load_from_disk() {
             throw empty_file_exception{};
 
         // We want to filter on load so we don't start the app with expired strikes
-        uint64_t threshold =
-                std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
-                        .count();
-        std::map<ed25519_pubkey, std::vector<uint64_t>> loaded_strikes;
-        auto invalid_entries = 0;
+        auto threshold = sysclock_now_s() - STRIKE_EXPIRY;
 
-        const char* ptr = reinterpret_cast<const char*>(loaded_strikes_data.data());
-        const char* end = ptr + loaded_strikes_data.size();
+        std::string_view buf{
+                reinterpret_cast<const char*>(loaded_strikes_data.data()),
+                loaded_strikes_data.size()};
 
-        if (ptr + sizeof(uint32_t) > end)
-            throw std::runtime_error{"Strikes file too short for header"};
+        decltype(_snode_strikes) loaded_strikes;
+        bool invalid_entries = false;
+        auto entry_count = consume<uint32_t>(buf);
+        try {
+            for (uint32_t i = 0; i < entry_count; ++i) {
+                auto key = consume<ed25519_pubkey>(buf);
+                auto num_stamps = consume<uint16_t>(buf);
 
-        uint32_t entry_count;
-        std::memcpy(&entry_count, ptr, sizeof(uint32_t));
-        ptr += sizeof(uint32_t);
+                // Read timestamps, skipping any stale ones
+                std::vector<std::chrono::sys_seconds> valid_stamps;
+                for (int j = 0; j < num_stamps; ++j) {
+                    std::chrono::sys_seconds ts{
+                            std::chrono::seconds{static_cast<int64_t>(consume<uint64_t>(buf))}};
+                    if (ts > threshold)
+                        valid_stamps.push_back(ts);
+                }
 
-        for (uint32_t i = 0; i < entry_count; ++i) {
-            // Check bounds: Key (32) + Count (2)
-            if (ptr + 32 + sizeof(uint16_t) > end) {
-                invalid_entries++;
-                break;  // Stop parsing if truncated
+                // Only add node if it still has active strikes
+                if (!valid_stamps.empty())
+                    loaded_strikes[key] = std::move(valid_stamps);
             }
-
-            // Read key
-            std::array<unsigned char, 32> key_bytes;
-            std::memcpy(key_bytes.data(), ptr, 32);
-            ptr += 32;
-
-            // Read timestamp count
-            uint16_t num_stamps;
-            std::memcpy(&num_stamps, ptr, sizeof(uint16_t));
-            ptr += sizeof(uint16_t);
-
-            // Check timestamp bounds (count * 8)
-            if (ptr + (num_stamps * sizeof(uint64_t)) > end) {
-                invalid_entries++;
-                break;  // Stop parsing if truncated
-            }
-
-            std::vector<uint64_t> valid_stamps;
-            valid_stamps.reserve(num_stamps);
-
-            // Read timestamps
-            for (int j = 0; j < num_stamps; ++j) {
-                uint64_t ts;
-                std::memcpy(&ts, ptr, sizeof(uint64_t));
-                ptr += sizeof(uint64_t);
-
-                // Filter rxpired
-                if (ts > threshold)
-                    valid_stamps.push_back(ts);
-            }
-
-            // Only add node if it still has active strikes
-            if (!valid_stamps.empty()) {
-                auto key = ed25519_pubkey::from_bytes(key_bytes);
-                loaded_strikes[key] = std::move(valid_stamps);
-            }
+        } catch (...) {
+            invalid_entries = true;
         }
 
-        if (invalid_entries > 0)
+        if (invalid_entries)
             log::warning(
                     cat, "Skipped {} truncated/invalid entries in strikes file.", invalid_entries);
 
@@ -288,52 +269,50 @@ void SnodePool::_perform_cache_write(
 
 void SnodePool::_perform_strikes_write(
         const std::filesystem::path& path,
-        const std::map<ed25519_pubkey, std::vector<uint64_t>>& strikes) {
+        const std::map<ed25519_pubkey, std::vector<std::chrono::sys_seconds>>& strikes) {
     if (path.empty())
         return;
 
     try {
-        uint64_t expiry_threshold =
-                std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
-                        .count();
+        auto expiry_threshold = std::chrono::system_clock::now() - STRIKE_EXPIRY;
         std::vector<char> buffer;
+
+        auto buf_add = [&buffer]<typename T>(const T& val) {
+            static_assert(std::is_trivially_copyable_v<T>);
+            buffer.resize(buffer.size() + sizeof(T));
+            auto* write = buffer.data() + buffer.size() - sizeof(T);
+            if constexpr (std::integral<T>)
+                oxenc::write_host_as_little(val, write);
+            else
+                std::memcpy(write, &val, sizeof(T));
+        };
 
         // Simple binary format: [Count(4)][Key(32)][NumStamps(2)][Stamp(8)]...
         uint32_t entry_count = 0;
-        buffer.resize(sizeof(uint32_t));
+        buf_add(entry_count);
 
-        for (auto& [key, timestamps] : strikes) {
-            std::vector<uint64_t> valid_stamps;
-            for (auto t : timestamps)
+        for (const auto& [key, timestamps] : strikes) {
+            uint16_t t_count = 0;
+            for (const auto& t : timestamps)
                 if (t > expiry_threshold)
-                    valid_stamps.push_back(t);
+                    t_count++;
 
             // Drop node if no active strikes
-            if (valid_stamps.empty())
+            if (t_count == 0)
                 continue;
 
             entry_count++;
 
-            // Write Key (32 bytes)
-            auto key_bytes = reinterpret_cast<const char*>(key.data());
-            buffer.insert(buffer.end(), key_bytes, key_bytes + key.size());
-
-            // Write Timestamp Count (2 bytes)
-            uint16_t t_count = static_cast<uint16_t>(valid_stamps.size());
-            const char* t_count_ptr = reinterpret_cast<const char*>(&t_count);
-            buffer.insert(buffer.end(), t_count_ptr, t_count_ptr + sizeof(uint16_t));
-
-            // Write Timestamps (8 bytes each)
-            const char* stamps_ptr = reinterpret_cast<const char*>(valid_stamps.data());
-            buffer.insert(
-                    buffer.end(),
-                    stamps_ptr,
-                    stamps_ptr + (valid_stamps.size() * sizeof(uint64_t)));
+            buf_add(key);      // Write Key (32 bytes)
+            buf_add(t_count);  // Write Timestamp Count (2 bytes)
+            // Write Timestamps (8 bytes each):
+            for (const auto& t : timestamps)
+                if (t > expiry_threshold)
+                    buf_add(static_cast<uint64_t>(t.time_since_epoch().count()));
         }
 
         // Patch total count at the beginning
-        std::memcpy(buffer.data(), &entry_count, sizeof(uint32_t));
+        oxenc::write_host_as_little(entry_count, buffer.data());
 
         // Create the cache directories if needed
         fs::create_directories(path.parent_path());
@@ -904,9 +883,7 @@ void SnodePool::record_node_failure(const service_node& node, bool permanent) {
 
 void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
     _loop->call([this, key, permanent] {
-        uint64_t now = std::chrono::duration_cast<std::chrono::seconds>(
-                               std::chrono::system_clock::now().time_since_epoch())
-                               .count();
+        auto now = sysclock_now_s();
 
         if (permanent)
             for (int i = 0; i < _config.cache_node_strike_threshold; ++i)
@@ -947,15 +924,13 @@ uint16_t SnodePool::node_strike_count(const service_node& node) {
 
 uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
     return _loop->call_get([this, &key] {
-        if (!_snode_strikes.contains(key))
+        auto it = _snode_strikes.find(key);
+        if (it == _snode_strikes.end())
             return uint16_t{0};
 
-        const auto& stamps = _snode_strikes.at(key);
+        const auto& stamps = it->second;
 
-        uint64_t threshold =
-                std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch() - STRIKE_EXPIRY)
-                        .count();
+        const auto threshold = sysclock_now_s() - STRIKE_EXPIRY;
 
         uint16_t count = 0;
         for (auto t : stamps)

@@ -19,13 +19,13 @@ namespace detail {
     class RequestQueue;
 }
 
-namespace fs = std::filesystem;
+namespace fs = std::filesystem;  // NOLINT(misc-unused-alias-decls)
 
 class Network : public std::enable_shared_from_this<Network> {
   private:
     const config::Config config;
-    std::shared_ptr<oxen::quic::Loop> _loop; // Main loop for network events and syncronization
-    std::shared_ptr<oxen::quic::Loop> _disk_loop; // Auxiliary loop for blocking I/O
+    std::shared_ptr<oxen::quic::Loop> _loop;  // Main loop for network events and syncronization
+    std::shared_ptr<oxen::quic::Loop> _disk_loop;  // Auxiliary loop for blocking I/O
     std::shared_ptr<SnodePool> _snode_pool;
     std::shared_ptr<ITransport> _transport;
     std::shared_ptr<IRouter> _router;

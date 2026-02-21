@@ -134,9 +134,9 @@ namespace detail {
 
 }  // namespace detail
 
-Network::Network(config::Config config) : config{config} {
-    // When testing we can run into the NOFILE limit, so try to increase it if the config option is
-    // set
+Network::Network(config::Config _conf) : config{std::move(_conf)} {
+    // When testing (particulwe can run into the NOFILE limit, so try to increase it if the config
+    // option is set
     if (config.increase_no_file_limit) {
 #ifdef _WIN32
         log::debug(cat, "FD limit adjustment is not supported on Windows");
@@ -929,7 +929,7 @@ void Network::_launch_next_clock_out_of_sync_request(
                     std::vector<std::pair<std::string, std::string>> headers,
                     std::optional<std::string> response) {
                 auto end_steady = std::chrono::steady_clock::now();
-                auto end_system = std::chrono::system_clock::now();
+                auto end_system = sysclock_now_ms();
 
                 // If the resync was cancelled or completed while we were in-flight, do nothing
                 if (!_current_clock_resync_id || *_current_clock_resync_id != request_id) {
@@ -956,14 +956,12 @@ void Network::_launch_next_clock_out_of_sync_request(
                     if (!json.contains("t") || !json["t"].is_number())
                         throw std::runtime_error{"Response didn't contain a 't' value"};
 
-                    auto server_timestamp_ms = json["t"].get<int64_t>();
-                    auto server_time = std::chrono::time_point<std::chrono::system_clock>(
-                            std::chrono::milliseconds{server_timestamp_ms});
-                    auto latency = ((end_steady - start) / 2);
-                    auto tmp = latency.count();
-                    auto offset = std::chrono::duration_cast<std::chrono::milliseconds>(
-                            (server_time - end_system) - latency);
-                    _clock_resync_results.push_back(std::move(offset));
+                    sys_ms server_time{std::chrono::milliseconds{json["t"].get<int64_t>()}};
+                    auto latency = std::chrono::ceil<std::chrono::milliseconds>(
+                            ((end_steady - start) / 2));
+                    auto offset = (server_time - end_system) - latency;
+
+                    _clock_resync_results.emplace_back(offset);
 
                     log::info(
                             cat,
