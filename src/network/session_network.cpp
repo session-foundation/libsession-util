@@ -135,21 +135,21 @@ namespace detail {
 }  // namespace detail
 
 Network::Network(config::Config _conf) : config{std::move(_conf)} {
-    // When testing (particulwe can run into the NOFILE limit, so try to increase it if the config
-    // option is set
+    // When testing (particularly on Apple platforms) we can run into the NOFILE limit, so try to
+    // increase it if the config option is set
     if (config.increase_no_file_limit) {
 #ifdef _WIN32
         log::debug(cat, "FD limit adjustment is not supported on Windows");
 #else
-        auto [rc, rlim_cur, new_lim] = fiddle_rlimit_nofile();
-
-        if (rc != 0)
-            log::error(
-                    cat,
-                    "Failed to increase fd limit: {}; connections may fail!",
-                    std::strerror(rc));
-        else
-            log::warning(cat, "NOFILE limit was only {}; increased to {}", rlim_cur, new_lim);
+        try {
+            auto [oldlim, newlim] = set_rlimit_nofile();
+            if (oldlim != newlim)
+                log::warning(cat, "NOFILE limit was only {}; increased to {}", oldlim, newlim);
+            else
+                log::debug(cat, "NOFILE limit was already {}", oldlim);
+        } catch (const std::system_error& e) {
+            log::error(cat, "Failed to increase fd limit: {}; connections may fail!", e.what());
+        }
 #endif
     }
 

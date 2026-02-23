@@ -6,6 +6,7 @@
 #include <charconv>
 #include <memory>
 #include <session/util.hpp>
+#include <system_error>
 
 extern "C" {
 #include <sys/resource.h>
@@ -241,18 +242,25 @@ LIBSESSION_C_API size_t utf16_count(const uint16_t* utf16_string, size_t utf16_s
 }
 
 #ifndef _WIN32
-std::tuple<int, rlim_t, rlim_t> fiddle_rlimit_nofile(rlim_t nfiles) {
+std::pair<rlim_t, rlim_t> set_rlimit_nofile(rlim_t nfiles) {
     struct rlimit nofile{};
-    auto rc = getrlimit(RLIMIT_NOFILE, &nofile);
-    if (rc != 0) {
-        return {rc, 0, 0};
-        // log about failure
-    } else if (nofile.rlim_cur < nfiles && nofile.rlim_cur < nofile.rlim_max) {
-        auto new_lim = std::min<rlim_t>(nfiles, nofile.rlim_max);
-        nofile.rlim_cur = new_lim;
-        rc = setrlimit(RLIMIT_NOFILE, &nofile);
+    if (0 != getrlimit(RLIMIT_NOFILE, &nofile))
+        throw std::system_error{errno, std::generic_category()};
 
-        return {rc, nofile.rlim_cur, new_lim};
+    if (nfiles == 0)
+        return {nofile.rlim_cur, nofile.rlim_cur};
+
+    if (nfiles > nofile.rlim_max)
+        nfiles = nofile.rlim_max;
+
+    auto was = nofile.rlim_cur;
+
+    if (nofile.rlim_cur != nfiles) {
+        nofile.rlim_cur = nfiles;
+        if (0 != setrlimit(RLIMIT_NOFILE, &nofile))
+            throw std::system_error{errno, std::generic_category()};
     }
+
+    return {was, nofile.rlim_cur};
 }
 #endif

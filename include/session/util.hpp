@@ -321,5 +321,12 @@ std::optional<std::vector<unsigned char>> zstd_decompress(
 }  // namespace session
 
 #ifndef _WIN32
-std::tuple<int, rlim_t, rlim_t> fiddle_rlimit_nofile(rlim_t nfiles = 5000);
+// Updates the file descriptor (NOFILE) limit to allow nfiles open fds.  On success, returns the old
+// limit as first value, and the new limit as second value.  If the requested nfiles is higher than
+// the NOFILE hard limit then this sets the limit to the hard limit instead of the requested value.
+// On failure this throws std::system_error containing the error info.
+//
+// If you pass nfiles=0 then this will not update the FD limit but will simply return the current
+// limit (for both return values).
+std::pair<rlim_t, rlim_t> set_rlimit_nofile(rlim_t nfiles = 5000);
 #endif
