@@ -153,16 +153,6 @@ Network::Network(config::Config _conf) : config{std::move(_conf)} {
 #endif
     }
 
-    // Start by validating the configuration
-    switch (config.transport) {
-        case opt::transport::Type::quic: break;
-        case opt::transport::Type::callbacks:
-            break;
-            if (!config.callbacks_callback)
-                throw std::invalid_argument{"Callbacks requires a callback to be provided."};
-            break;
-    }
-
     // Now we can properly do any setup needed
     _loop = std::make_shared<quic::Loop>();
     _disk_loop = std::make_shared<quic::Loop>();
@@ -172,10 +162,6 @@ Network::Network(config::Config _conf) : config{std::move(_conf)} {
         case opt::transport::Type::quic:
             _transport = std::make_shared<QuicTransport>(
                     std::move(build_quic_transport_config(config)), _loop);
-            break;
-
-        case opt::transport::Type::callbacks:
-            // _transport = std::make_shared<SessionRouterTransport>(_config, *_snode_pool, _loop);
             break;
     }
 
@@ -915,6 +901,7 @@ void Network::_launch_next_clock_out_of_sync_request(
             RequestCategory::standard,
             10s,
             std::nullopt,      // overall_timeout
+            std::nullopt,      // desired_path_index
             std::monostate{},  // details
             false              // ephemeral_connection
     };
@@ -1139,8 +1126,6 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
 
     switch (cpp_defaults.transport) {
         case opt::transport::Type::quic: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
-        case opt::transport::Type::callbacks:
-            config.transport = SESSION_NETWORK_TRANSPORT_CALLBACKS;
         default: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
     }
 
@@ -1196,9 +1181,6 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.quic_max_general_streams = cpp_defaults.quic_max_streams[RequestCategory::standard];
     config.quic_max_file_streams = cpp_defaults.quic_max_streams[RequestCategory::file];
 
-    config.transport_callback = nullptr;
-    config.transport_callback_ctx = nullptr;
-
     return config;
 }
 
@@ -1246,30 +1228,6 @@ LIBSESSION_C_API bool session_network_init(
         switch (config->transport) {
             case SESSION_NETWORK_TRANSPORT_QUIC:
                 cpp_opts.emplace_back(opt::transport::quic());
-                break;
-
-            case SESSION_NETWORK_TRANSPORT_CALLBACKS:
-                if (!config->transport_callback)
-                    throw std::runtime_error(
-                            "transport_callback must be set when using the CALLBACKS for sending "
-                            "requests.");
-
-                auto c_callback_ptr = config->transport_callback;
-                auto ctx = config->transport_callback_ctx;
-
-                opt::transport::network_callback_t cpp_callback =
-                        [c_callback_ptr, ctx](
-                                std::string url,
-                                std::string body,
-                                session::network::network_response_callback_t handle_response) {
-                            auto* c_response_handle =
-                                    new session_response_handle_t{std::move(handle_response)};
-
-                            c_callback_ptr(
-                                    url.c_str(), body.data(), body.size(), c_response_handle, ctx);
-                        };
-
-                cpp_opts.emplace_back(opt::transport::callbacks(std::move(cpp_callback)));
                 break;
         }
 
@@ -1416,8 +1374,6 @@ LIBSESSION_C_API bool session_network_init(
                             RequestCategory::file, config->quic_max_file_streams});
 
                 break;
-
-            case SESSION_NETWORK_TRANSPORT_CALLBACKS: break;
         }
 
         // Construct the Network instance
@@ -1741,6 +1697,7 @@ LIBSESSION_C_API void session_network_send_request(
                 (params->overall_timeout_ms > 0
                          ? std::optional{std::chrono::milliseconds{params->overall_timeout_ms}}
                          : std::nullopt),
+                std::nullopt,
                 request_id};
         auto cpp_callback = [c_cb = callback, c_ctx = ctx](
                                     bool success,
@@ -1787,7 +1744,8 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         const session_upload_callbacks* callbacks,
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
-        int64_t overall_timeout_ms) {
+        int64_t overall_timeout_ms,
+        int8_t desired_path_index) {
 
     if (!network || !callbacks || !callbacks->next_data)
         return nullptr;
@@ -1805,6 +1763,9 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
                 (overall_timeout_ms > 0
                          ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}
                          : std::nullopt);
+
+        if (desired_path_index >= 0)
+            cpp_request->desired_path_index = static_cast<uint8_t>(desired_path_index);
 
         cpp_request->next_data = [h = handle.get()]() -> std::vector<unsigned char> {
             std::vector<unsigned char> buffer(64 * 1024);  // 64KB chunks
@@ -1863,7 +1824,8 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
         int64_t overall_timeout_ms,
-        int64_t partial_min_interval_ms) {
+        int64_t partial_min_interval_ms,
+        int8_t desired_path_index) {
 
     if (!network || !download_url || !callbacks)
         return nullptr;
@@ -1880,6 +1842,8 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                 (overall_timeout_ms > 0
                          ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}
                          : std::nullopt);
+        if (desired_path_index >= 0)
+            cpp_request->desired_path_index = static_cast<uint8_t>(desired_path_index);
 
         if (callbacks->on_data)
             cpp_request->on_data = [h = handle.get()](

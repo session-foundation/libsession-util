@@ -140,6 +140,11 @@ struct Request {
     /// queue, it will be timed out.
     std::optional<std::chrono::milliseconds> overall_timeout;
 
+    /// An optional value which can be provided to send a request down a specific path, should only
+    /// be used for testing. A NULL value will result in a path being selected using the default
+    /// behaviour.
+    std::optional<uint8_t> desired_path_index;
+
     /// Any extra request details which may modify the structure of the request.
     RequestDetails details;
 
@@ -160,6 +165,7 @@ struct Request {
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
+            std::optional<uint8_t> desired_path_index = std::nullopt,
             RequestDetails details = std::monostate{},
             bool ephemeral_connection = false);
 
@@ -169,6 +175,7 @@ struct Request {
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
+            std::optional<uint8_t> desired_path_index = std::nullopt,
             std::optional<std::string> request_id = std::nullopt,
             RequestDetails details = std::monostate{},
             bool ephemeral_connection = false);
@@ -200,6 +207,7 @@ struct UploadRequest {
     std::chrono::milliseconds stall_timeout;
     std::chrono::milliseconds request_timeout;
     std::optional<std::chrono::milliseconds> overall_timeout;
+    std::optional<int8_t> desired_path_index;
     std::shared_ptr<CancellationToken> cancellation_token;
 
     // Called when upload completes (success) or fails (error code)
@@ -213,6 +221,7 @@ struct DownloadRequest {
     std::chrono::milliseconds stall_timeout;
     std::chrono::milliseconds request_timeout;
     std::optional<std::chrono::milliseconds> overall_timeout;
+    std::optional<int8_t> desired_path_index;
     std::shared_ptr<CancellationToken> cancellation_token;
 
     // Called as data arrives (can be called multiple times)

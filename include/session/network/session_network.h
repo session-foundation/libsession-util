@@ -32,7 +32,6 @@ typedef enum {
 
 typedef enum {
     SESSION_NETWORK_TRANSPORT_QUIC = 0,
-    SESSION_NETWORK_TRANSPORT_CALLBACKS = 1,
 } SESSION_NETWORK_TRANSPORT;
 
 typedef void (*session_network_request_t)(
@@ -97,12 +96,6 @@ typedef struct session_network_config {
     bool quic_disable_mtu_discovery;
     uint8_t quic_max_general_streams;
     uint8_t quic_max_file_streams;
-
-    // Callback options (for transport == SESSION_NETWORK_TRANSPORT_CALLBACKS)
-    session_network_request_t transport_callback;
-
-    // A user-defined context pointer passed back to every invocation of `transport_callback`
-    void* transport_callback_ctx;
 
 } session_network_config;
 
@@ -276,7 +269,8 @@ LIBSESSION_EXPORT session_upload_handle_t* session_network_upload(
         const session_upload_callbacks* callbacks,
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
-        int64_t overall_timeout_ms);
+        int64_t overall_timeout_ms,
+        int8_t desired_path_index);
 
 /// API: file_server/session_network_download
 ///
@@ -302,7 +296,8 @@ LIBSESSION_EXPORT session_download_handle_t* session_network_download(
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
         int64_t overall_timeout_ms,
-        int64_t partial_min_interval_ms);
+        int64_t partial_min_interval_ms,
+        int8_t desired_path_index);
 
 /// Cancels an in-progress upload
 LIBSESSION_EXPORT void session_network_upload_cancel(session_upload_handle_t* handle);

@@ -120,15 +120,6 @@ void Config::handle_config_opt(opt::transport transport_) {
         case opt::transport::Type::quic:
             log::debug(cat, "Network config set to transport requests via QUIC");
             break;
-
-        case opt::transport::Type::callbacks: {
-            if (!transport_.callback)
-                throw std::invalid_argument{
-                        "Must provide callback when using the Callbacks to send requests"};
-
-            callbacks_callback = std::move(transport_.callback);
-            log::debug(cat, "Network config set to transport requests via Callbacks");
-        }
     }
 }
 

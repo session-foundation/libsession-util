@@ -18,6 +18,7 @@ Request::Request(
         RequestCategory category,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> overall_timeout,
+        std::optional<uint8_t> desired_path_index,
         RequestDetails details,
         bool ephemeral_connection) :
         request_id{std::move(request_id)},
@@ -27,6 +28,7 @@ Request::Request(
         category{std::move(category)},
         request_timeout{std::move(request_timeout)},
         overall_timeout{std::move(overall_timeout)},
+        desired_path_index{std::move(desired_path_index)},
         details{details},
         ephemeral_connection{ephemeral_connection} {}
 
@@ -37,6 +39,7 @@ Request::Request(
         RequestCategory category,
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> overall_timeout,
+        std::optional<uint8_t> desired_path_index,
         std::optional<std::string> request_id,
         RequestDetails details,
         bool ephemeral_connection) :
@@ -47,6 +50,7 @@ Request::Request(
         category{std::move(category)},
         request_timeout{std::move(request_timeout)},
         overall_timeout{std::move(overall_timeout)},
+        desired_path_index{std::move(desired_path_index)},
         details{details},
         ephemeral_connection{ephemeral_connection} {}
 

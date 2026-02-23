@@ -159,27 +159,18 @@ namespace opt {
     struct transport : base {
         enum class Type {
             quic,
-            callbacks,
         };
         // TODO: Add in "HTTP" as an option
 
-        using network_callback_t = std::function<void(
-                std::string url, std::string body, network_response_callback_t handle_response)>;
-
         Type type;
-        std::optional<network_callback_t> callback;
 
       private:
-        explicit transport(Type t, std::optional<network_callback_t> callback = std::nullopt) :
-                type{t}, callback{std::move(callback)} {}
+        explicit transport(Type t) : type{t} {}
 
       public:
         transport() = delete;
 
         static transport quic() { return transport(Type::quic); }
-        static transport callbacks(network_callback_t callback) {
-            return transport(Type::callbacks, std::move(callback));
-        }
     };
 
     /// Can be used to override the default file server scheme.

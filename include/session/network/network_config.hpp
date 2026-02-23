@@ -66,9 +66,6 @@ struct Config {
     std::unordered_map<RequestCategory, uint8_t> quic_max_streams = {
             {RequestCategory::standard, 32}, {RequestCategory::file, 2}};
 
-    // Callback Transport Options
-    std::optional<opt::transport::network_callback_t> callbacks_callback;
-
     template <typename... Opt>
         requires(
                 sizeof...(Opt) > 0 &&

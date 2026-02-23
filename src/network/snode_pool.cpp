@@ -516,6 +516,7 @@ void SnodePool::_launch_next_refresh_request(
                         RequestCategory::standard,
                         10s,
                         std::nullopt,      // overall_timeout
+                        std::nullopt,      // desired_path_index
                         std::monostate{},  // details
                         true               // ephemeral_connection
                 };
@@ -529,6 +530,7 @@ void SnodePool::_launch_next_refresh_request(
                     RequestCategory::standard,
                     10s,
                     std::nullopt,      // overall_timeout
+                    std::nullopt,      // desired_path_index
                     std::monostate{},  // details
                     true               // ephemeral_connection
             };

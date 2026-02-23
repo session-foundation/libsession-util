@@ -1371,6 +1371,15 @@ OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
 
     auto target_node = std::get_if<service_node>(&request.destination);
 
+    // We want to allow explicit path selection for client-side automated tests so if a
+    // `desired_path_index` has been specified then use it
+    if (request.desired_path_index) {
+        if (candidate_paths.size() < *request.desired_path_index)
+            return nullptr;
+
+        return &candidate_paths[*request.desired_path_index];
+    }
+
     for (OnionPath& path : candidate_paths) {
         // Ignore failed paths (these should have been removed from the list but better to be safe)
         if (path.strike_count >= _config.path_strike_threshold)
