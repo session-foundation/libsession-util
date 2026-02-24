@@ -112,13 +112,15 @@ libsession_system_or_submodule(OXENC oxenc oxenc::oxenc liboxenc>=1.5.0 session-
 
 libsession_system_or_submodule(OXENLOGGING oxenlogging oxen::logging liboxen-logging>=1.2.0 session-router/external/oxen-libquic/external/oxen-logging)
 if(OXENLOGGING_FOUND)
-    # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
-    # but this script will give us them:
-    include(session-router/external/oxen-libquic/external/oxen-logging/cmake/load_fmt_spdlog.cmake)
+    if(NOT TARGET oxen::logging)
+        # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
+        # but this script will give us them:
+        include(session-router/external/oxen-libquic/external/oxen-logging/cmake/load_fmt_spdlog.cmake)
 
-    add_library(oxen-logging-fmt-spdlog INTERFACE)
-    target_link_libraries(oxen-logging-fmt-spdlog INTERFACE oxenlogging::oxenlogging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
-    add_library(oxen::logging ALIAS oxen-logging-fmt-spdlog)
+        add_library(oxen-logging-fmt-spdlog INTERFACE)
+        target_link_libraries(oxen-logging-fmt-spdlog INTERFACE oxenlogging::oxenlogging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
+        add_library(oxen::logging ALIAS oxen-logging-fmt-spdlog)
+    endif()
 endif()
 
 
