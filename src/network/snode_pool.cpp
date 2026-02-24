@@ -147,7 +147,7 @@ void SnodePool::_load_from_disk() {
         if (invalid_entries > 0)
             log::warning(cat, "Skipped {} invalid entries in snode cache.", invalid_entries);
 
-        std::shuffle(loaded_cache.begin(), loaded_cache.end(), csrng);
+        std::ranges::shuffle(loaded_cache, csrng);
         _snode_cache = std::move(loaded_cache);
         _all_swarms = swarm::generate_swarms(_snode_cache);
 
@@ -380,7 +380,7 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
         // Seed nodes are trusted so we only need to use a single node when refreshing from them
         num_nodes_for_refresh = (use_seed_nodes ? 1 : _config.cache_num_nodes_to_use_for_refresh);
         _refresh_candidate_nodes = (use_seed_nodes ? _config.seed_nodes : _snode_cache);
-        std::shuffle(_refresh_candidate_nodes.begin(), _refresh_candidate_nodes.end(), csrng);
+        std::ranges::shuffle(_refresh_candidate_nodes, csrng);
 
         if (!use_routed_fetcher && use_seed_nodes)
             log::debug(
@@ -735,7 +735,7 @@ void SnodePool::_on_refresh_complete(
         std::vector<service_node> nodes;
 
         if (processed_nodes.size() == 1)
-            nodes = processed_nodes[0];
+            nodes = std::move(processed_nodes[0]);
         else if (processed_nodes.size() > 1) {
             const size_t required_count = _config.cache_min_num_refresh_presence_to_include_node;
 
@@ -786,7 +786,7 @@ void SnodePool::_on_refresh_complete(
         }
 
         // Shuffle the nodes so we don't have a specific order
-        std::shuffle(nodes.begin(), nodes.end(), csrng);
+        std::ranges::shuffle(nodes, csrng);
         log::info(
                 cat,
                 "[Request {}] Cache refresh complete with {} nodes.",
@@ -1119,9 +1119,10 @@ void SnodePool::get_swarm(
 
             // Partition into below-threshold and above-thresold.  This keeps the shuffled order of
             // each set:
-            auto over_nodes = std::ranges::stable_partition(nodes.begin(), nodes.end(), [&](const auto&node) {
-                return get_strike_count(node) < _config.cache_node_strike_threshold;
-            });
+            auto over_nodes = std::ranges::stable_partition(
+                    nodes.begin(), nodes.end(), [&](const auto& node) {
+                        return get_strike_count(node) < _config.cache_node_strike_threshold;
+                    });
 
             auto under_count = nodes.size() - over_nodes.size();
             if (over_nodes.empty()) {

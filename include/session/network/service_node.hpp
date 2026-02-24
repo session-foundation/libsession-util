@@ -21,7 +21,7 @@ namespace service_node_disk_format {
     constexpr size_t SWARM_ID_MAX = 20;  // uint64_t max value
     constexpr size_t FIELD_COUNT = 6;
     constexpr size_t SEPARATORS = FIELD_COUNT - 1;  // 5 pipes
-    constexpr size_t LINE_ENDING = 2;               // \n\r (just in case)
+    constexpr size_t LINE_ENDING = 2;               // \r\n (just in case)
 
     constexpr size_t MAX_LINE_SIZE = PUBKEY_HEX + IP_MAX + (PORT_MAX * 2) + VERSION_MAX +
                                      SWARM_ID_MAX + SEPARATORS + LINE_ENDING;
