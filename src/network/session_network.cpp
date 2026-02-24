@@ -1415,6 +1415,10 @@ LIBSESSION_C_API void session_network_clear_cache(network_object* network) {
     unbox(network)->clear_cache();
 }
 
+LIBSESSION_C_API bool session_network_has_retrieved_time_offset(network_object* network) {
+    return unbox(network)->has_retrieved_time_offset();
+}
+
 LIBSESSION_C_API int64_t session_network_time_offset(network_object* network) {
     return unbox(network)->network_time_offset().count();
 }

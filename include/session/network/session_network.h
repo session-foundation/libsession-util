@@ -186,6 +186,7 @@ LIBSESSION_EXPORT void session_network_resume(
 LIBSESSION_EXPORT void session_network_close_connections(network_object* network);
 LIBSESSION_EXPORT void session_network_clear_cache(network_object* network);
 
+LIBSESSION_EXPORT bool session_network_has_retrieved_time_offset(network_object* network);
 LIBSESSION_EXPORT int64_t session_network_time_offset(network_object* network);
 LIBSESSION_EXPORT uint16_t session_network_hardfork(network_object* network);
 LIBSESSION_EXPORT uint16_t session_network_softfork(network_object* network);

@@ -54,6 +54,9 @@ class Network : public std::enable_shared_from_this<Network> {
     explicit Network(config::Config config);
     virtual ~Network();
 
+    bool has_retrieved_time_offset() const {
+        return (_last_successful_clock_resync == std::chrono::steady_clock::time_point{});
+    };
     std::chrono::milliseconds network_time_offset() const { return _network_time_offset; };
     fork_versions fork() const { return _fork_versions.load(); };
     uint16_t hardfork() const { return _fork_versions.load().hardfork; };
