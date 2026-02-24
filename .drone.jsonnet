@@ -117,7 +117,7 @@ local debian_build(name,
     'cmake .. -DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_BUILD_TYPE=' + build_type + ' ' +
     (if werror then '-DWARNINGS_AS_ERRORS=ON ' else '') +
     (if shared_libs then '-DBUILD_SHARED_LIBS=ON ' else '') +
-    '-DUSE_LTO=' + (if lto then 'ON ' else 'OFF ') +
+    '-DUSE_LTO=' + (if lto then 'ON' else 'OFF') + ' -DWITH_LTO=' + (if lto then 'ON ' else 'OFF ')
     '-DWITH_TESTS=' + (if tests then 'ON ' else 'OFF ') +
     cmake_extra +
     ci_dep_mirror(local_mirror),
