@@ -31,12 +31,19 @@ local debian_backports(distro, pkgs) = [
   'eatmydata ' + apt_get_quiet + ' install -y ' + std.join(' ', std.map(function(x) x + '/' + distro + '-backports', pkgs)),
 ];
 
+local add_stf_repo(image) = [
+  'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y lsb-release',
+  'cp utils/deb.session.foundation.gpg /etc/apt/trusted.gpg.d',
+  'echo deb http://deb.session.foundation ' + (if std.startsWith(image, docker_base + 'debian-sid') then 'sid' else '$$(lsb_release -sc)') + ' main >/etc/apt/sources.list.d/session.list',
+  'eatmydata ' + apt_get_quiet + ' update',
+];
+
 // Do something on a debian-like system
 local debian_pipeline(name,
                       image,
                       arch='amd64',
                       deps=default_deps,
-                      oxen_repo=true,
+                      stf_repo=true,
                       kitware_repo=''/* ubuntu codename, if wanted */,
                       allow_fail=false,
                       cmake_pkg='cmake',
@@ -62,12 +69,7 @@ local debian_pipeline(name,
         apt_get_quiet + ' update',
         apt_get_quiet + ' install -y eatmydata',
       ] + (
-        if oxen_repo then [
-          'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y lsb-release',
-          'cp utils/deb.oxen.io.gpg /etc/apt/trusted.gpg.d',
-          'echo deb http://deb.oxen.io $$(lsb_release -sc) main >/etc/apt/sources.list.d/oxen.list',
-          'eatmydata ' + apt_get_quiet + ' update',
-        ] else []
+        if stf_repo then add_stf_repo(image) else []
       ) + (
         if kitware_repo != '' then [
           'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y curl ca-certificates',
@@ -97,7 +99,7 @@ local debian_build(name,
                    shared_libs=true,
                    jobs=6,
                    tests=true,
-                   oxen_repo=true,
+                   stf_repo=true,
                    kitware_repo=''/* ubuntu codename, if wanted */,
                    extra_setup=[],
                    allow_fail=false)
@@ -106,7 +108,7 @@ local debian_build(name,
   image,
   arch=arch,
   deps=deps,
-  oxen_repo=oxen_repo,
+  stf_repo=stf_repo,
   kitware_repo=kitware_repo,
   allow_fail=allow_fail,
   build=[
@@ -131,11 +133,7 @@ local debian_build(name,
                    commands:
                      [apt_get_quiet + ' install -y eatmydata'] + (
                        if std.length(test_deps) > 0 then (
-                         if oxen_repo then [
-                           'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y lsb-release',
-                           'cp utils/deb.oxen.io.gpg /etc/apt/trusted.gpg.d',
-                           'echo deb http://deb.oxen.io $$(lsb_release -sc) main >/etc/apt/sources.list.d/oxen.list',
-                         ] else []
+                         if stf_repo then add_stf_repo(image) else []
                        ) + [
                          'eatmydata ' + apt_get_quiet + ' update',
                          'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
@@ -287,7 +285,7 @@ local static_build(name,
                    build_type='Release',
                    lto=true,
                    deps=default_deps,
-                   oxen_repo=false,
+                   stf_repo=false,
                    kitware_repo=''/* ubuntu codename, if wanted */,
                    cmake_extra='',
                    local_mirror=true,
@@ -298,7 +296,7 @@ local static_build(name,
   image,
   arch=arch,
   deps=deps,
-  oxen_repo=oxen_repo,
+  stf_repo=stf_repo,
   allow_fail=allow_fail,
   build=[
     'export JOBS=' + jobs,
