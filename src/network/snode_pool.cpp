@@ -1108,7 +1108,6 @@ void SnodePool::get_swarm(
     _loop->call([this, swarm_pubkey, ignore_strike_count, cb = std::move(callback)] {
         auto filter_by_strikes =
                 [this](std::vector<service_node> nodes) -> std::vector<service_node> {
-
             // Shuffle everything to start with
             std::ranges::shuffle(nodes, csrng);
 
