@@ -700,7 +700,7 @@ void SnodePool::_on_refresh_complete(
                         (i + 1),
                         nodes.size(),
                         invalid_count);
-                std::stable_sort(nodes.begin(), nodes.end());
+                std::ranges::stable_sort(nodes);
                 processed_nodes.emplace_back(std::move(nodes));
             } catch (const std::exception& e) {
                 _snode_refresh_results.clear();
@@ -1108,62 +1108,36 @@ void SnodePool::get_swarm(
     _loop->call([this, swarm_pubkey, ignore_strike_count, cb = std::move(callback)] {
         auto filter_by_strikes =
                 [this](std::vector<service_node> nodes) -> std::vector<service_node> {
-            auto get_strike_count = [this](const ed25519_pubkey& key) -> size_t {
-                auto it = _snode_strikes.find(key);
+
+            // Shuffle everything to start with
+            std::ranges::shuffle(nodes, csrng);
+
+            auto get_strike_count = [this](const service_node& node) -> size_t {
+                auto it = _snode_strikes.find(node.remote_pubkey);
                 return (it != _snode_strikes.end() ? it->second.size() : 0);
             };
 
-            std::vector<service_node> under_threshold;
-            std::vector<service_node> over_threshold;
+            // Partition into below-threshold and above-thresold.  This keeps the shuffled order of
+            // each set:
+            auto over_nodes = std::ranges::stable_partition(nodes.begin(), nodes.end(), [&](const auto&node) {
+                return get_strike_count(node) < _config.cache_node_strike_threshold;
+            });
 
-            for (const auto& node : nodes) {
-                auto strikes = get_strike_count(node.remote_pubkey);
-
-                if (strikes < _config.cache_node_strike_threshold)
-                    under_threshold.emplace_back(node);
-                else
-                    over_threshold.emplace_back(node);
+            auto under_count = nodes.size() - over_nodes.size();
+            if (over_nodes.empty()) {
+                // Nothing we can do even if we want more
+            } else if (under_count >= _config.cache_min_swarm_size) {
+                // We got enough without considering over-threshold nodes, so just drop them:
+                nodes.erase(over_nodes.begin(), over_nodes.end());
+            } else {
+                // We need to adopt some under-threshold nodes, so stable-sort them by strike count
+                // (the stable part of the sort means we retain their shuffled order among ties),
+                // and then resize nodes to drop off everything beyond the minimum required
+                std::ranges::stable_sort(over_nodes, std::ranges::less{}, get_strike_count);
+                nodes.resize(std::min(nodes.size(), _config.cache_min_swarm_size));
             }
 
-            std::shuffle(under_threshold.begin(), under_threshold.end(), csrng);
-
-            // Only include nodes that are over the strike threshold if we need to
-            if (over_threshold.empty() || under_threshold.size() >= _config.cache_min_swarm_size)
-                return under_threshold;
-
-            // Shuffle nodes with the same strike count
-            std::sort(
-                    over_threshold.begin(),
-                    over_threshold.end(),
-                    [&](const auto& a, const auto& b) {
-                        return get_strike_count(a.remote_pubkey) <
-                               get_strike_count(b.remote_pubkey);
-                    });
-
-            auto start = over_threshold.begin();
-            while (start != over_threshold.end()) {
-                auto strike_count = get_strike_count(start->remote_pubkey);
-                auto end = std::find_if(start, over_threshold.end(), [&](const auto& node) {
-                    return get_strike_count(node.remote_pubkey) != strike_count;
-                });
-                std::shuffle(start, end, csrng);
-                start = end;
-            }
-
-            size_t needed = (_config.cache_min_swarm_size - under_threshold.size());
-            size_t available = std::min(needed, over_threshold.size());
-            std::vector<service_node> result;
-            result.reserve(under_threshold.size() + available);
-            result.insert(
-                    result.end(),
-                    std::make_move_iterator(under_threshold.begin()),
-                    std::make_move_iterator(under_threshold.end()));
-            result.insert(
-                    result.end(),
-                    std::make_move_iterator(over_threshold.begin()),
-                    std::make_move_iterator(over_threshold.begin() + available));
-
-            return result;
+            return nodes;
         };
 
         // Check the in-memory swarm cache first

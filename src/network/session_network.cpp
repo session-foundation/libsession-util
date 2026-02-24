@@ -7,6 +7,7 @@
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <oxen/log/level.hpp>
+#include <ranges>
 #include <vector>
 
 #include "session/blinding.hpp"
@@ -796,17 +797,19 @@ void Network::_handle_421_retry(
                          req_to_retry = std::move(req_to_retry),
                          cb = std::move(cb),
                          failed_node](swarm::swarm_id_t, std::vector<service_node> swarm_nodes) {
-                            std::optional<service_node> new_target;
-                            std::shuffle(swarm_nodes.begin(), swarm_nodes.end(), csrng);
+                            // Extract a single random index from the vector indices, but excluding
+                            // the index of the failing node:
+                            size_t new_target;
+                            auto out = std::ranges::sample(
+                                    std::views::iota(0, static_cast<int>(swarm_nodes.size())) |
+                                            std::views::filter([&](int i) {
+                                                return swarm_nodes[i] != failed_node;
+                                            }),
+                                    &new_target,
+                                    1,
+                                    csrng);
 
-                            for (const auto& node : swarm_nodes) {
-                                if (node != failed_node) {
-                                    new_target = node;
-                                    break;
-                                }
-                            }
-
-                            if (!new_target)
+                            if (out == &new_target)
                                 return cb(
                                         false,
                                         false,
@@ -819,10 +822,10 @@ void Network::_handle_421_retry(
                                     cat,
                                     "Request {} retrying 421 error on new node {}.",
                                     req_to_retry.request_id,
-                                    new_target->to_string());
+                                    swarm_nodes[new_target].to_string());
                             auto final_request = req_to_retry;
                             final_request.retry_count++;
-                            final_request.destination = *new_target;
+                            final_request.destination = std::move(swarm_nodes[new_target]);
                             this->send_request(std::move(final_request), std::move(cb));
                         });
             });
