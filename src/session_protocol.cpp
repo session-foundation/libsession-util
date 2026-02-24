@@ -489,7 +489,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             std::vector<uint8_t> tmp_content_buffer;
             if (is_1o1) {  // Encrypt the padded output
                 std::vector<uint8_t> padded_payload = pad_message(content);
-                tmp_content_buffer = encrypt_for_recipient_deterministic(
+                tmp_content_buffer = encrypt_for_recipient(
                         ed25519_privkey, dest_recipient_pubkey, padded_payload);
                 content = tmp_content_buffer;
             }
@@ -506,19 +506,30 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             envelope.set_content(content.data(), content.size());
 
             // Generate the session pro signature. If there's no pro ed25519 key specified, we still
-            // fill out the pro signature with a dummy 64 byte stream. This is to make pro and
-            // non-pro messages indistinguishable.
-            std::string* pro_sig = envelope.mutable_prosig();
-            pro_sig->resize(crypto_sign_ed25519_BYTES);
-            if (dest_pro_rotating_ed25519_privkey.empty()) {
-                randombytes_buf(pro_sig->data(), pro_sig->size());
-            } else {
-                crypto_sign_ed25519_detached(
-                        reinterpret_cast<uint8_t*>(pro_sig->data()),
-                        nullptr,
-                        content.data(),
-                        content.size(),
-                        dest_pro_rotating_ed25519_privkey.data());
+            // fill out the pro signature with a valid but unverifiable signature by creating a
+            // throw-away key. This makes pro and non-pro messages indistinguishable on the wire.
+            {
+                std::string* pro_sig = envelope.mutable_prosig();
+                pro_sig->resize(crypto_sign_ed25519_BYTES);
+
+                if (dest_pro_rotating_ed25519_privkey.empty()) {
+                    uc32 ignore_pk;
+                    cleared_uc64 dummy_pro_ed_sk;
+                    crypto_sign_ed25519_keypair(ignore_pk.data(), dummy_pro_ed_sk.data());
+                    crypto_sign_ed25519_detached(
+                            reinterpret_cast<uint8_t*>(pro_sig->data()),
+                            nullptr,
+                            content.data(),
+                            content.size(),
+                            dummy_pro_ed_sk.data());
+                } else {
+                    crypto_sign_ed25519_detached(
+                            reinterpret_cast<uint8_t*>(pro_sig->data()),
+                            nullptr,
+                            content.data(),
+                            content.size(),
+                            dest_pro_rotating_ed25519_privkey.data());
+                }
             }
 
             if (is_group) {

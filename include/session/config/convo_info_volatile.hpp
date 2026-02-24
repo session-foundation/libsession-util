@@ -74,21 +74,35 @@ namespace convo {
         int64_t last_read = 0;
         bool unread = false;
 
+        virtual ~base() = default;
+
       protected:
-        void load(const dict& info_dict);
+        virtual void load(const dict& info_dict);
         friend class session::config::val_loader;
         friend class session::config::ConvoInfoVolatile;
+
+        base() = default;
+        base(int64_t last_read, bool unread) : last_read(last_read), unread(unread) {}
     };
 
-    struct one_to_one : base {
-        std::string session_id;  // in hex
-
+    struct pro_base : base {
         /// Hash of the generation index set by the Session Pro Backend
         std::optional<array_uc32> pro_gen_index_hash;
 
         /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid
         /// to
         std::chrono::sys_time<std::chrono::milliseconds> pro_expiry_unix_ts{};
+
+      protected:
+        using base::base;
+
+        void load(const dict& info_dict) override;
+        friend class session::config::val_loader;
+        friend class session::config::ConvoInfoVolatile;
+    };
+
+    struct one_to_one : pro_base {
+        std::string session_id;  // in hex
 
         /// API: convo_info_volatile/one_to_one::one_to_one
         ///
@@ -168,16 +182,9 @@ namespace convo {
         void into(convo_info_volatile_legacy_group& c) const;            // Into c struct
     };
 
-    struct blinded_one_to_one : base {
+    struct blinded_one_to_one : pro_base {
         std::string blinded_session_id;  // in hex
         bool legacy_blinding;
-
-        /// Hash of the generation index set by the Session Pro Backend
-        std::optional<array_uc32> pro_gen_index_hash;
-
-        /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid
-        /// to
-        std::chrono::sys_time<std::chrono::milliseconds> pro_expiry_unix_ts{};
 
         /// API: convo_info_volatile/blinded_one_to_one::blinded_one_to_one
         ///
