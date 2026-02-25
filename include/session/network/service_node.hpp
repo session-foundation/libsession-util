@@ -27,13 +27,11 @@ namespace service_node_disk_format {
                                      SWARM_ID_MAX + SEPARATORS + LINE_ENDING;
 }  // namespace service_node_disk_format
 
-struct fork_versions {
+struct alignas(4) fork_versions {
     uint16_t hardfork;
     uint16_t softfork;
 
-    bool operator==(const fork_versions& other) const {
-        return hardfork == other.hardfork && softfork == other.softfork;
-    }
+    auto operator<=>(const fork_versions& other) const = default;
 };
 
 struct service_node {
