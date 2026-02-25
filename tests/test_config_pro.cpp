@@ -101,25 +101,22 @@ TEST_CASE("Pro", "[config][pro]") {
 
     // Try loading the proof from dict
     {
-        oxenc::bt_dict_producer good_dict;
-
-        // clang-format off
         const session::ProProof& proof = pro_cpp.proof;
-        {
-            auto p = good_dict.append_dict("p");
-            /*version*/         p.append("@", proof.version);
-            /*expiry unix ts*/  p.append("e", proof.expiry_unix_ts.time_since_epoch().count());
-            /*gen_index_hash*/  p.append("g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size()));
-            /*rotating pubkey*/ p.append("r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size()));
-            /*signature*/       p.append("s", std::string{reinterpret_cast<const char *>(proof.sig.data()), proof.sig.size()});
-        }
-        
-        good_dict.append("r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size()));
+        // clang-format off
+        session::config::dict good_dict = {
+            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
+            {"p", session::config::dict{
+                /*version*/         {"@", proof.version},
+                /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
+                /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
+                /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
+                /*signature*/       {"s", std::string{reinterpret_cast<const char *>(proof.sig.data()), proof.sig.size()}},
+            }}
+        };
         // clang-format on
 
         session::config::ProConfig loaded_pro = {};
-        auto good_dict_consumer = oxenc::bt_dict_consumer{good_dict.view()};
-        CHECK(loaded_pro.load(good_dict_consumer));
+        CHECK(loaded_pro.load(good_dict));
         CHECK(loaded_pro.rotating_privkey == pro_cpp.rotating_privkey);
         CHECK(loaded_pro.proof.version == pro_cpp.proof.version);
         CHECK(loaded_pro.proof.gen_index_hash == pro_cpp.proof.gen_index_hash);
@@ -131,27 +128,25 @@ TEST_CASE("Pro", "[config][pro]") {
 
     // Try loading a proof with a bad signature in it from dict
     {
-        oxenc::bt_dict_producer bad_dict;
         std::array<uint8_t, 64> broken_sig = pro_cpp.proof.sig;
         broken_sig[0] = ~broken_sig[0];  // Break the sig
+        const session::ProProof& proof = pro_cpp.proof;
 
         // clang-format off
-        const session::ProProof& proof = pro_cpp.proof;
-        {
-            auto p = bad_dict.append_dict("p");
-            /*version*/         p.append("@", proof.version);
-            /*expiry unix ts*/  p.append("e", proof.expiry_unix_ts.time_since_epoch().count());
-            /*gen_index_hash*/  p.append("g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size()));
-            /*rotating pubkey*/ p.append("r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size()));
-            /*signature*/       p.append("s", std::string{reinterpret_cast<const char *>(broken_sig.data()), broken_sig.size()});
-        }
-
-        bad_dict.append("r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size()));
+        session::config::dict bad_dict = {
+            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
+            {"p", session::config::dict{
+                /*version*/         {"@", proof.version},
+                /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
+                /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
+                /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
+                /*signature*/       {"s", std::string{reinterpret_cast<const char *>(broken_sig.data()), broken_sig.size()}},
+            }}
+        };
         // clang-format on
 
         session::config::ProConfig loaded_pro = {};
-        auto bad_dict_consumer = oxenc::bt_dict_consumer{bad_dict.view()};
-        CHECK(loaded_pro.load(bad_dict_consumer));
+        CHECK(loaded_pro.load(bad_dict));
         CHECK_FALSE(loaded_pro.proof.verify_signature(signing_pk));
     }
 }

@@ -20,33 +20,6 @@ UserProfile::UserProfile(
     load_key(ed25519_secretkey);
 }
 
-void UserProfile::extra_data(oxenc::bt_dict_producer&& extra) const {
-    if (pro_config) {
-        auto root = extra.append_dict("pro_config");
-
-        const ProProof& pro_proof = pro_config->proof;
-        {
-            auto proof_dict = root.append_dict("p");
-            proof_dict.append("@", pro_proof.version);
-            proof_dict.append("e", pro_proof.expiry_unix_ts.time_since_epoch().count());
-            proof_dict.append("g", pro_proof.gen_index_hash);
-            proof_dict.append("r", pro_proof.rotating_pubkey);
-            proof_dict.append("s", pro_proof.sig);
-        }
-
-        root.append("r", pro_config->rotating_privkey);
-    }
-}
-
-void UserProfile::load_extra_data(oxenc::bt_dict_consumer&& extra) {
-    if (extra.skip_until("pro_config")) {
-        auto pd = extra.consume_dict_consumer();
-        ProConfig pro = {};
-        if (pro.load(pd))
-            pro_config = std::move(pro);
-    }
-}
-
 std::optional<std::string_view> UserProfile::get_name() const {
     if (auto* s = data["n"].string(); s && !s->empty())
         return *s;
@@ -177,13 +150,29 @@ std::chrono::sys_seconds UserProfile::get_profile_updated() const {
 }
 
 std::optional<ProConfig> UserProfile::get_pro_config() const {
-    return pro_config;
+    std::optional<ProConfig> result = {};
+    if (const config::dict* s = data["s"].dict(); s) {
+        ProConfig pro = {};
+        if (pro.load(*s))
+            result = std::move(pro);
+    }
+    return result;
 }
 
-void UserProfile::set_pro_config(ProConfig const& pro) {
-    if (pro_config != pro) {
-        pro_config = pro;
-        _needs_dump = true;
+void UserProfile::set_pro_config(const ProConfig& pro) {
+    const std::optional<ProConfig>& curr = get_pro_config();
+    if (!curr || *curr != pro) {
+        auto root = data["s"];
+        root["r"] = pro.rotating_privkey;
+
+        const ProProof& pro_proof = pro.proof;
+        auto proof_dict = root["p"];
+        proof_dict["@"] = pro_proof.version;
+        proof_dict["g"] = pro_proof.gen_index_hash;
+        proof_dict["r"] = pro_proof.rotating_pubkey;
+        proof_dict["e"] = pro_proof.expiry_unix_ts.time_since_epoch().count();
+        proof_dict["s"] = pro_proof.sig;
+
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
         data[target_timestamp] = ts_now();
@@ -191,13 +180,9 @@ void UserProfile::set_pro_config(ProConfig const& pro) {
 }
 
 bool UserProfile::remove_pro_config() {
-    if (pro_config) {
-        pro_config = std::nullopt;
-        _needs_dump = true;
-        return true;
-    }
-
-    return false;
+    bool result = data["s"].exists();
+    data["s"].erase();
+    return result;
 }
 
 session::ProProfileBitset UserProfile::get_profile_bitset() const {
