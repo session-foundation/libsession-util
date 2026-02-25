@@ -151,7 +151,7 @@ std::chrono::sys_seconds UserProfile::get_profile_updated() const {
 
 std::optional<ProConfig> UserProfile::get_pro_config() const {
     std::optional<ProConfig> result = {};
-    if (const config::dict* s = data["s"].dict(); s) {
+    if (const config::dict* s = data["s"].dict()) {
         ProConfig pro = {};
         if (pro.load(*s))
             result = std::move(pro);
@@ -160,7 +160,7 @@ std::optional<ProConfig> UserProfile::get_pro_config() const {
 }
 
 void UserProfile::set_pro_config(const ProConfig& pro) {
-    const std::optional<ProConfig>& curr = get_pro_config();
+    std::optional<ProConfig> curr = get_pro_config();
     if (!curr || *curr != pro) {
         auto root = data["s"];
         root["r"] = pro.rotating_privkey;
