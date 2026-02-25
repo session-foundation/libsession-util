@@ -305,11 +305,7 @@ void ConfigBase::_dump_multiparts(oxenc::bt_dict_producer&& multi) const {
             continue;
         auto pdata = multi.append_dict(to_string(fhash));
         pdata.append("#", parts.done ? 0 : parts.size);
-        pdata.append(
-                "T",
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                        parts.expiry.time_since_epoch())
-                        .count());
+        pdata.append("T", epoch_ms(parts.expiry));
         if (!parts.done) {
             auto parts_list = pdata.append_list("p");
             for (const auto& part : parts.parts) {

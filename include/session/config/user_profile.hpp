@@ -320,9 +320,9 @@ class UserProfile : public ConfigBase {
     /// Inputs:  None
     ///
     /// Outputs:
-    /// - `std::optional<std::chrono::sys_time<std::chrono::milliseconds>>` - The unix timestamp in
+    /// - `std::optional<sys_ms>` - The unix timestamp in
     /// milliseconds that the users pro access will expire, or nullopt if unset.
-    std::optional<std::chrono::sys_time<std::chrono::milliseconds>> get_pro_access_expiry() const;
+    std::optional<sys_ms> get_pro_access_expiry() const;
 
     /// API: user_profile/UserProfile::set_pro_access_expiry
     ///
@@ -331,8 +331,7 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `access_expiry_ts_ms` -- The timestamp that the users Session Pro access will expire, or
     /// nullopt to remove the value.
-    void set_pro_access_expiry(
-            std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms);
+    void set_pro_access_expiry(std::optional<sys_ms> access_expiry_ts_ms);
 
   protected:
     void extra_data(oxenc::bt_dict_producer&& extra) const override;

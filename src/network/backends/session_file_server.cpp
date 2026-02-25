@@ -286,9 +286,7 @@ Request get_client_version(
 
     // Generate the auth signature
     auto blinded_keys = blind_version_key_pair(to_span(seckey.view()));
-    auto timestamp = std::chrono::duration_cast<std::chrono::seconds>(
-                             (std::chrono::system_clock::now()).time_since_epoch())
-                             .count();
+    auto timestamp = epoch_seconds(std::chrono::system_clock::now());
     auto signature = blind_version_sign(to_span(seckey.view()), platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(DEFAULT_CONFIG.pubkey_hex);
     std::string blinded_pk_hex;

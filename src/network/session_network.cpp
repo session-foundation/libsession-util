@@ -3,6 +3,7 @@
 #include <oxenc/base64.h>
 
 #include <any>
+#include <chrono>
 #include <future>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
@@ -1806,22 +1807,15 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         cpp_request.on_complete = [on_complete_fn,
                                    ctx](std::variant<file_metadata, int16_t> result, bool timeout) {
             std::visit(
-                    [&](auto&& arg) {
-                        using T = std::decay_t<decltype(arg)>;
-                        if constexpr (std::is_same_v<T, file_metadata>) {
+                    [&]<typename T>(T& arg) {
+                        if constexpr (std::same_as<T, file_metadata>) {
                             session_file_metadata c_meta{};
                             std::strncpy(
                                     c_meta.file_id, arg.id.c_str(), sizeof(c_meta.file_id) - 1);
                             c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
                             c_meta.size = arg.size;
-                            c_meta.uploaded_timestamp =
-                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                            arg.uploaded.time_since_epoch())
-                                            .count();
-                            c_meta.expiry_timestamp =
-                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                            arg.expiry.time_since_epoch())
-                                            .count();
+                            c_meta.uploaded_timestamp = epoch_seconds(arg.uploaded);
+                            c_meta.expiry_timestamp = epoch_seconds(arg.expiry);
 
                             on_complete_fn(&c_meta, -1, false, ctx);
                         } else {
@@ -1881,12 +1875,8 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                 std::strncpy(c_meta.file_id, metadata.id.c_str(), sizeof(c_meta.file_id) - 1);
                 c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
                 c_meta.size = metadata.size;
-                c_meta.uploaded_timestamp = std::chrono::duration_cast<std::chrono::seconds>(
-                                                    metadata.uploaded.time_since_epoch())
-                                                    .count();
-                c_meta.expiry_timestamp = std::chrono::duration_cast<std::chrono::seconds>(
-                                                  metadata.expiry.time_since_epoch())
-                                                  .count();
+                c_meta.uploaded_timestamp = epoch_seconds(metadata.uploaded);
+                c_meta.expiry_timestamp = epoch_seconds(metadata.expiry);
 
                 on_data_fn(&c_meta, data.data(), data.size(), ctx);
             };
@@ -1902,14 +1892,8 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                                     c_meta.file_id, arg.id.c_str(), sizeof(c_meta.file_id) - 1);
                             c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
                             c_meta.size = arg.size;
-                            c_meta.uploaded_timestamp =
-                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                            arg.uploaded.time_since_epoch())
-                                            .count();
-                            c_meta.expiry_timestamp =
-                                    std::chrono::duration_cast<std::chrono::seconds>(
-                                            arg.expiry.time_since_epoch())
-                                            .count();
+                            c_meta.uploaded_timestamp = epoch_seconds(arg.uploaded);
+                            c_meta.expiry_timestamp = epoch_seconds(arg.expiry);
 
                             on_complete_fn(&c_meta, -1, false, ctx);
                         } else {

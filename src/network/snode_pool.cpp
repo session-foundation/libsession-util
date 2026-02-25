@@ -308,7 +308,7 @@ void SnodePool::_perform_strikes_write(
             // Write Timestamps (8 bytes each):
             for (const auto& t : timestamps)
                 if (t > expiry_threshold)
-                    buf_add(static_cast<uint64_t>(t.time_since_epoch().count()));
+                    buf_add(static_cast<uint64_t>(epoch_seconds(t)));
         }
 
         // Patch total count at the beginning

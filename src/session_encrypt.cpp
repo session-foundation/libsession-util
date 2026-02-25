@@ -34,10 +34,6 @@ using namespace std::literals;
 namespace session {
 
 namespace detail {
-    inline int64_t to_epoch_ms(std::chrono::system_clock::time_point t) {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
-    }
-
     // detail::to_hashable takes either an integral type, system_clock::time_point, or a string
     // type and converts it to a string_view by writing an integer value (using std::to_chars)
     // into the buffer space (which should be at least 20 bytes), and returning a string_view
@@ -57,7 +53,7 @@ namespace detail {
     }
     inline std::string_view to_hashable(
             const std::chrono::system_clock::time_point& val, char*& buffer) {
-        return to_hashable(to_epoch_ms(val), buffer);
+        return to_hashable(epoch_ms(val), buffer);
     }
     template <typename T, std::enable_if_t<std::is_convertible_v<T, std::string_view>, int> = 0>
     std::string_view to_hashable(const T& value, char*&) {

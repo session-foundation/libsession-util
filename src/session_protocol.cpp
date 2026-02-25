@@ -124,11 +124,6 @@ bool proof_verify_message_internal(
     return result;
 }
 
-bool proof_is_active_internal(uint64_t expiry_unix_ts_ms, uint64_t unix_ts_ms) {
-    bool result = unix_ts_ms <= expiry_unix_ts_ms;
-    return result;
-}
-
 struct array_uc32_from_ptr_result {
     bool success;
     session::array_uc32 data;
@@ -168,9 +163,7 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
             result.proof.rotating_pubkey.data,
             cpp.proof.rotating_pubkey.data(),
             cpp.proof.rotating_pubkey.max_size());
-    result.proof.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                             cpp.proof.expiry_unix_ts.time_since_epoch())
-                                             .count();
+    result.proof.expiry_unix_ts_ms = session::epoch_ms(cpp.proof.expiry_unix_ts);
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
     result.msg_bitset.data = cpp.msg_bitset.data;
     result.profile_bitset.data = cpp.profile_bitset.data;
@@ -204,11 +197,7 @@ bool ProProof::verify_message(std::span<const uint8_t> sig, std::span<const uint
 }
 
 bool ProProof::is_active(std::chrono::sys_time<std::chrono::milliseconds> unix_ts) const {
-    bool result = proof_is_active_internal(
-            std::chrono::duration_cast<std::chrono::milliseconds>(expiry_unix_ts.time_since_epoch())
-                    .count(),
-            unix_ts.time_since_epoch().count());
-    return result;
+    return unix_ts <= expiry_unix_ts;
 }
 
 ProStatus ProProof::status(
@@ -1237,8 +1226,7 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(
 
 LIBSESSION_C_API bool session_protocol_pro_proof_is_active(
         session_protocol_pro_proof const* proof, uint64_t unix_ts_ms) {
-    bool result = proof_is_active_internal(proof->expiry_unix_ts_ms, unix_ts_ms);
-    return result;
+    return unix_ts_ms <= proof->expiry_unix_ts_ms;
 }
 
 LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(

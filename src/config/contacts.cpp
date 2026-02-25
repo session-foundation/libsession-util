@@ -131,7 +131,7 @@ void contact_info::into(contacts_contact& c) const {
     } else {
         copy_c_str(c.profile_pic.url, "");
     }
-    c.profile_updated = profile_updated.time_since_epoch().count();
+    c.profile_updated = epoch_seconds(profile_updated);
     c.approved = approved;
     c.approved_me = approved_me;
     c.blocked = blocked;
@@ -370,10 +370,10 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
     } else {
         copy_c_str(c.profile_pic.url, "");
     }
-    c.profile_updated = profile_updated.time_since_epoch().count();
+    c.profile_updated = epoch_seconds(profile_updated);
     c.priority = priority;
     c.legacy_blinding = legacy_blinding;
-    c.created = created.time_since_epoch().count();
+    c.created = epoch_seconds(created);
     c.profile_bitset.data = profile_bitset.data;
 }
 
