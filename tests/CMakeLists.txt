@@ -34,6 +34,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_session_protocol.cpp
     test_xed25519.cpp
     test_unicode_operations.cpp
+    test_backend_session_file_server.cpp
 
     case_logger.cpp
 )

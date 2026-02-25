@@ -71,12 +71,20 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     auto fragment_pos = file_part.find('#');
 
     if (fragment_pos == std::string_view::npos) {
+        // Strip trailing slash if present
+        if (!file_part.empty() && file_part.back() == '/')
+
+            file_part.remove_suffix(1);
         // No fragments
         info.file_id = std::string{file_part};
         info.wants_stream_decryption = false;
     } else {
         // Has fragments
-        info.file_id = std::string{file_part.substr(0, fragment_pos)};
+        auto id_part = file_part.substr(0, fragment_pos);
+        if (!id_part.empty() && id_part.back() == '/')
+            id_part.remove_suffix(1);
+        info.file_id = std::string{id_part};
+
         auto fragments = file_part.substr(fragment_pos + 1);
 
         // Parse fragments (p=... and/or d)
@@ -86,7 +94,8 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
             else if (
                     fragment.starts_with(fmt::format("{}=", file_server::FRAGMENT_PUBKEY)) &&
                     fragment.size() == 66 &&  // 'p=' + pubkey
-                    oxenc::is_hex(fragment.substr(2)))
+                    oxenc::is_hex(fragment.substr(2)) &&
+                    fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
                 info.custom_pubkey_hex = fragment.substr(2);
             // else ignore (unknown or invalid fragment)
         }
