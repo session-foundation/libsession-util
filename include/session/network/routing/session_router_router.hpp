@@ -43,8 +43,8 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     std::unordered_map<std::string, session::router::tunnel_info> _active_tunnels;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
-    std::unordered_map<std::string, std::shared_ptr<UploadRequest>> _active_uploads;
-    std::unordered_map<std::string, std::shared_ptr<DownloadRequest>> _active_downloads;
+    std::unordered_map<std::string, UploadRequest> _active_uploads;
+    std::unordered_map<std::string, DownloadRequest> _active_downloads;
 
   public:
     static std::shared_ptr<SessionRouter> create(
@@ -62,8 +62,8 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     ConnectionStatus get_status() const override { return _status.load(); };
     std::vector<PathInfo> get_active_paths() override;
     void send_request(Request request, network_response_callback_t callback) override;
-    void upload(std::shared_ptr<UploadRequest> request) override;
-    void download(std::shared_ptr<DownloadRequest> request) override;
+    void upload(UploadRequest request) override;
+    void download(DownloadRequest request) override;
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
@@ -82,8 +82,8 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _send_direct_request(Request request, network_response_callback_t callback);
     void _send_proxy_request(Request request, network_response_callback_t callback);
-    void _upload_internal(std::shared_ptr<UploadRequest> request);
-    void _download_internal(std::shared_ptr<DownloadRequest> request);
+    void _upload_internal(UploadRequest request);
+    void _download_internal(DownloadRequest request);
     void _establish_tunnel(
             std::span<const unsigned char>& remote_pubkey,
             const uint16_t remote_port,

@@ -126,11 +126,9 @@ typedef struct session_upload_callbacks {
     // Return -1 to cancel the upload
     size_t (*next_data)(unsigned char* buffer, size_t buffer_capacity, void* ctx);
 
-    // Called when upload completes successfully
-    void (*on_success)(const session_file_metadata* metadata, void* ctx);
-
-    // Called when upload fails (status_code) or times out (timeout=true)
-    void (*on_error)(int16_t status_code, bool timeout, void* ctx);
+    // Called when download completes (a null `metadata` value means an error occured)
+    void (*on_complete)(
+            const session_file_metadata* metadata, int16_t status_code, bool timeout, void* ctx);
 
     void* ctx;  // User context passed to all callbacks
 } session_upload_callbacks;
@@ -143,11 +141,9 @@ typedef struct session_download_callbacks {
             size_t data_len,
             void* ctx);
 
-    // Called when download completes successfully
-    void (*on_success)(const session_file_metadata* metadata, void* ctx);
-
-    // Called when download fails (status_code) or times out (timeout=true)
-    void (*on_error)(int16_t status_code, bool timeout, void* ctx);
+    // Called when download completes (a null `metadata` value means an error occured)
+    void (*on_complete)(
+            const session_file_metadata* metadata, int16_t status_code, bool timeout, void* ctx);
 
     void* ctx;  // User context passed to all callbacks
 } session_download_callbacks;

@@ -27,8 +27,8 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
     config::DirectRouter _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::weak_ptr<ITransport> _transport;
-    std::unordered_map<std::string, std::shared_ptr<UploadRequest>> _active_uploads;
-    std::unordered_map<std::string, std::shared_ptr<DownloadRequest>> _active_downloads;
+    std::unordered_map<std::string, UploadRequest> _active_uploads;
+    std::unordered_map<std::string, DownloadRequest> _active_downloads;
 
   public:
     DirectRouter(
@@ -44,15 +44,15 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
 
     ConnectionStatus get_status() const override { return _status.load(); };
     void send_request(Request request, network_response_callback_t callback) override;
-    void upload(std::shared_ptr<UploadRequest> request) override;
-    void download(std::shared_ptr<DownloadRequest> request) override;
+    void upload(UploadRequest request) override;
+    void download(DownloadRequest request) override;
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
     void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);
-    void _upload_internal(std::shared_ptr<UploadRequest> request);
-    void _download_internal(std::shared_ptr<DownloadRequest> request);
+    void _upload_internal(UploadRequest request);
+    void _download_internal(DownloadRequest request);
     void _handle_transport_response(
             bool success,
             bool timeout,

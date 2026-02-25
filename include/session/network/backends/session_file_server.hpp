@@ -80,7 +80,7 @@ std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view date_st
 Request to_request(
         const std::string& upload_id,
         const config::FileServer& config,
-        std::shared_ptr<UploadRequest> upload_request);
+        UploadRequest upload_request);
 
 /// API: file_server/to_request
 ///
@@ -96,7 +96,7 @@ Request to_request(
 Request to_request(
         const std::string& download_id,
         const config::FileServer& config,
-        std::shared_ptr<DownloadRequest> download_request);
+        DownloadRequest download_request);
 
 /// API: file_server/parse_upload_response
 ///

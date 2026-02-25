@@ -19,8 +19,8 @@ class IRouter {
     virtual std::vector<PathInfo> get_active_paths() { return {}; };
     virtual std::vector<service_node> get_all_used_nodes() { return {}; };
     virtual void send_request(Request request, network_response_callback_t callback) = 0;
-    virtual void upload(std::shared_ptr<UploadRequest> request) = 0;
-    virtual void download(std::shared_ptr<DownloadRequest> request) = 0;
+    virtual void upload(UploadRequest request) = 0;
+    virtual void download(DownloadRequest request) = 0;
 };
 
 }  // namespace session::network

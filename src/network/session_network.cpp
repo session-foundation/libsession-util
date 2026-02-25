@@ -485,26 +485,26 @@ void Network::send_request(Request request, network_response_callback_t callback
     }
 }
 
-void Network::upload(std::shared_ptr<UploadRequest> request) {
+void Network::upload(UploadRequest request) {
     if (_suspended) {
-        if (request->on_complete)
-            request->on_complete(ERROR_NETWORK_SUSPENDED, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
         return;
     }
     if (!_transport) {
-        if (request->on_complete)
-            request->on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
         return;
     }
     if (!_router) {
-        if (request->on_complete)
-            request->on_complete(ERROR_NO_ROUTING_LAYER, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
         return;
     }
 
-    auto user_callback = request->on_complete;
-    request->on_complete = [weak_self = weak_from_this(), user_callback](
-                                   std::variant<file_metadata, int16_t> result, bool timeout) {
+    auto user_callback = request.on_complete;
+    request.on_complete = [weak_self = weak_from_this(), user_callback](
+                                  std::variant<file_metadata, int16_t> result, bool timeout) {
         auto self = weak_self.lock();
         if (!self)
             return;
@@ -534,26 +534,26 @@ void Network::upload(std::shared_ptr<UploadRequest> request) {
     _router->upload(std::move(request));
 }
 
-void Network::download(std::shared_ptr<DownloadRequest> request) {
+void Network::download(DownloadRequest request) {
     if (_suspended) {
-        if (request->on_complete)
-            request->on_complete(ERROR_NETWORK_SUSPENDED, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
         return;
     }
     if (!_transport) {
-        if (request->on_complete)
-            request->on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
         return;
     }
     if (!_router) {
-        if (request->on_complete)
-            request->on_complete(ERROR_NO_ROUTING_LAYER, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
         return;
     }
 
-    auto user_callback = request->on_complete;
-    request->on_complete = [weak_self = weak_from_this(), user_callback, req = request](
-                                   std::variant<file_metadata, int16_t> result, bool timeout) {
+    auto user_callback = request.on_complete;
+    request.on_complete = [weak_self = weak_from_this(), user_callback, req = request](
+                                  std::variant<file_metadata, int16_t> result, bool timeout) {
         auto self = weak_self.lock();
         if (!self)
             return;
@@ -567,7 +567,7 @@ void Network::download(std::shared_ptr<DownloadRequest> request) {
                 // We want to automatically retry the download after the resync so store the request
                 if (!self->_clock_resync_download_queue)
                     self->_clock_resync_download_queue = std::make_shared<std::vector<std::pair<
-                            std::shared_ptr<DownloadRequest>,
+                            DownloadRequest,
                             std::function<void(std::variant<file_metadata, int16_t>, bool)>>>>();
 
                 self->_clock_resync_download_queue->emplace_back(req, user_callback);
@@ -1066,7 +1066,7 @@ void Network::_on_clock_resync_complete(const uint8_t total_requests) {
 
         for (auto& [download_req, cb] : *_clock_resync_download_queue) {
             // Restore the user's callback and retry
-            download_req->on_complete = cb;
+            download_req.on_complete = cb;
             download(download_req);
         }
         _clock_resync_download_queue->clear();
@@ -1107,12 +1107,12 @@ using namespace session;
 using namespace session::network;
 
 struct session_upload_handle_t {
-    std::shared_ptr<UploadRequest> cpp_request;
+    std::shared_ptr<CancellationToken> cancellation_token;
     session_upload_callbacks callbacks;
 };
 
 struct session_download_handle_t {
-    std::shared_ptr<DownloadRequest> cpp_request;
+    std::shared_ptr<CancellationToken> cancellation_token;
     session_download_callbacks callbacks;
 };
 
@@ -1775,22 +1775,26 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         auto handle = std::make_unique<session_upload_handle_t>();
         handle->callbacks = *callbacks;
 
-        auto cpp_request = std::make_shared<UploadRequest>();
-        cpp_request->file_name = (file_name ? std::optional{std::string{file_name}} : std::nullopt);
-        cpp_request->ttl = (ttl > 0 ? std::optional{ttl} : std::nullopt);
-        cpp_request->stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
-        cpp_request->request_timeout = std::chrono::milliseconds{request_timeout_ms};
-        cpp_request->overall_timeout =
+        auto cpp_request = UploadRequest();
+        cpp_request.file_name = (file_name ? std::optional{std::string{file_name}} : std::nullopt);
+        cpp_request.ttl = (ttl > 0 ? std::optional{ttl} : std::nullopt);
+        cpp_request.stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
+        cpp_request.request_timeout = std::chrono::milliseconds{request_timeout_ms};
+        cpp_request.overall_timeout =
                 (overall_timeout_ms > 0
                          ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}
                          : std::nullopt);
 
         if (desired_path_index >= 0)
-            cpp_request->desired_path_index = static_cast<uint8_t>(desired_path_index);
+            cpp_request.desired_path_index = static_cast<uint8_t>(desired_path_index);
 
-        cpp_request->next_data = [h = handle.get()]() -> std::vector<unsigned char> {
+        const auto next_data_fn = callbacks->next_data;
+        const auto on_complete_fn = callbacks->on_complete;
+        const auto ctx = callbacks->ctx;
+
+        cpp_request.next_data = [next_data_fn, ctx]() -> std::vector<unsigned char> {
             std::vector<unsigned char> buffer(64 * 1024);  // 64KB chunks
-            size_t bytes = h->callbacks.next_data(buffer.data(), buffer.size(), h->callbacks.ctx);
+            size_t bytes = next_data_fn(buffer.data(), buffer.size(), ctx);
 
             if (bytes == 0 || bytes == static_cast<size_t>(-1))
                 return {};
@@ -1799,9 +1803,8 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
             return buffer;
         };
 
-        cpp_request->on_complete = [h = handle.get()](
-                                           std::variant<file_metadata, int16_t> result,
-                                           bool timeout) {
+        cpp_request.on_complete = [on_complete_fn,
+                                   ctx](std::variant<file_metadata, int16_t> result, bool timeout) {
             std::visit(
                     [&](auto&& arg) {
                         using T = std::decay_t<decltype(arg)>;
@@ -1820,17 +1823,17 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
                                             arg.expiry.time_since_epoch())
                                             .count();
 
-                            h->callbacks.on_success(&c_meta, h->callbacks.ctx);
+                            on_complete_fn(&c_meta, -1, false, ctx);
                         } else {
                             // int16_t status code
-                            h->callbacks.on_error(arg, timeout, h->callbacks.ctx);
+                            on_complete_fn(nullptr, arg, timeout, ctx);
                         }
                     },
                     result);
         };
 
-        handle->cpp_request = cpp_request;
-        unbox(network)->upload(cpp_request);
+        handle->cancellation_token = cpp_request.cancellation_token;
+        unbox(network)->upload(std::move(cpp_request));
 
         return handle.release();
     } catch (...) {
@@ -1855,21 +1858,25 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         auto handle = std::make_unique<session_download_handle_t>();
         handle->callbacks = *callbacks;
 
-        auto cpp_request = std::make_shared<DownloadRequest>();
-        cpp_request->download_url = download_url;
-        cpp_request->stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
-        cpp_request->request_timeout = std::chrono::milliseconds{request_timeout_ms};
-        cpp_request->overall_timeout =
+        auto cpp_request = DownloadRequest{};
+        cpp_request.download_url = download_url;
+        cpp_request.stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
+        cpp_request.request_timeout = std::chrono::milliseconds{request_timeout_ms};
+        cpp_request.overall_timeout =
                 (overall_timeout_ms > 0
                          ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}
                          : std::nullopt);
         if (desired_path_index >= 0)
-            cpp_request->desired_path_index = static_cast<uint8_t>(desired_path_index);
+            cpp_request.desired_path_index = static_cast<uint8_t>(desired_path_index);
 
-        if (callbacks->on_data)
-            cpp_request->on_data = [h = handle.get()](
-                                           const file_metadata& metadata,
-                                           std::vector<unsigned char> data) {
+        const auto on_data_fn = callbacks->on_data;
+        const auto on_complete_fn = callbacks->on_complete;
+        const auto ctx = callbacks->ctx;
+
+        if (on_data_fn)
+            cpp_request.on_data = [on_data_fn, ctx](
+                                          const file_metadata& metadata,
+                                          std::vector<unsigned char> data) {
                 session_file_metadata c_meta{};
                 std::strncpy(c_meta.file_id, metadata.id.c_str(), sizeof(c_meta.file_id) - 1);
                 c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
@@ -1881,12 +1888,11 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                                                   metadata.expiry.time_since_epoch())
                                                   .count();
 
-                h->callbacks.on_data(&c_meta, data.data(), data.size(), h->callbacks.ctx);
+                on_data_fn(&c_meta, data.data(), data.size(), ctx);
             };
 
-        cpp_request->on_complete = [h = handle.get()](
-                                           std::variant<file_metadata, int16_t> result,
-                                           bool timeout) {
+        cpp_request.on_complete = [on_complete_fn,
+                                   ctx](std::variant<file_metadata, int16_t> result, bool timeout) {
             std::visit(
                     [&](auto&& arg) {
                         using T = std::decay_t<decltype(arg)>;
@@ -1905,17 +1911,17 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                                             arg.expiry.time_since_epoch())
                                             .count();
 
-                            h->callbacks.on_success(&c_meta, h->callbacks.ctx);
+                            on_complete_fn(&c_meta, -1, false, ctx);
                         } else {
                             // int16_t status code
-                            h->callbacks.on_error(arg, timeout, h->callbacks.ctx);
+                            on_complete_fn(nullptr, arg, timeout, ctx);
                         }
                     },
                     result);
         };
 
-        handle->cpp_request = cpp_request;
-        unbox(network)->download(cpp_request);
+        handle->cancellation_token = cpp_request.cancellation_token;
+        unbox(network)->download(std::move(cpp_request));
 
         return handle.release();
     } catch (...) {
@@ -1924,13 +1930,13 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
 }
 
 LIBSESSION_C_API void session_network_upload_cancel(session_upload_handle_t* handle) {
-    if (handle && handle->cpp_request && handle->cpp_request->cancellation_token)
-        handle->cpp_request->cancellation_token->cancel();
+    if (handle && handle->cancellation_token)
+        handle->cancellation_token->cancel();
 }
 
 LIBSESSION_C_API void session_network_download_cancel(session_download_handle_t* handle) {
-    if (handle && handle->cpp_request && handle->cpp_request->cancellation_token)
-        handle->cpp_request->cancellation_token->cancel();
+    if (handle && handle->cancellation_token)
+        handle->cancellation_token->cancel();
 }
 
 LIBSESSION_C_API void session_network_upload_free(session_upload_handle_t* handle) {

@@ -129,14 +129,14 @@ std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view date_st
 Request to_request(
         const std::string& upload_id,
         const config::FileServer& config,
-        std::shared_ptr<UploadRequest> upload_request) {
+        UploadRequest upload_request) {
     std::vector<unsigned char> all_data;
 
     while (true) {
-        if (upload_request->is_cancelled())
+        if (upload_request.is_cancelled())
             throw std::runtime_error{"Request cancelled"};
 
-        auto chunk = upload_request->next_data();
+        auto chunk = upload_request.next_data();
 
         if (chunk.empty())
             break;
@@ -154,16 +154,16 @@ Request to_request(
     std::vector<std::pair<std::string, std::string>> headers;
     headers.emplace_back("Content-Type", "application/octet-stream");
 
-    if (upload_request->file_name) {
+    if (upload_request.file_name) {
         headers.emplace_back(
                 "Content-Disposition",
-                fmt::format("attachment; filename=\"{}\"", *upload_request->file_name));
+                fmt::format("attachment; filename=\"{}\"", *upload_request.file_name));
     } else {
         headers.emplace_back("Content-Disposition", "attachment");
     }
 
-    if (upload_request->ttl)
-        headers.emplace_back("X-FS-TTL", fmt::format("{}", *upload_request->ttl));
+    if (upload_request.ttl)
+        headers.emplace_back("X-FS-TTL", fmt::format("{}", *upload_request.ttl));
 
     return Request{
             upload_id,
@@ -177,15 +177,15 @@ Request to_request(
             std::string{file_server::ENDPOINT_FILE},
             std::move(all_data),
             RequestCategory::file,
-            upload_request->request_timeout,
-            upload_request->overall_timeout};
+            upload_request.request_timeout,
+            upload_request.overall_timeout};
 }
 
 Request to_request(
         const std::string& download_id,
         const config::FileServer& config,
-        std::shared_ptr<DownloadRequest> download_request) {
-    auto download_info = file_server::parse_download_url(download_request->download_url);
+        DownloadRequest download_request) {
+    auto download_info = file_server::parse_download_url(download_request.download_url);
 
     if (!download_info)
         throw invalid_url_exception{"Invalid download url"};
@@ -209,8 +209,8 @@ Request to_request(
             fmt::format("{}/{}", file_server::ENDPOINT_FILE, file_id),
             std::nullopt,
             RequestCategory::file,
-            download_request->request_timeout,
-            download_request->overall_timeout};
+            download_request.request_timeout,
+            download_request.overall_timeout};
 }
 
 file_metadata parse_upload_response(const std::string& body, size_t upload_size) {

@@ -535,14 +535,14 @@ void OnionRequestRouter::send_request(Request request, network_response_callback
     });
 }
 
-void OnionRequestRouter::upload(std::shared_ptr<UploadRequest> request) {
+void OnionRequestRouter::upload(UploadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
             self->_upload_internal(std::move(req));
     });
 }
 
-void OnionRequestRouter::download(std::shared_ptr<DownloadRequest> request) {
+void OnionRequestRouter::download(DownloadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
             self->_download_internal(std::move(req));
@@ -631,19 +631,19 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
 void OnionRequestRouter::_close_connections() {
     // Cancel any uploads and downloads
     for (auto& [id, request] : _active_uploads) {
-        if (request && request->cancellation_token)
-            request->cancellation_token->cancel();
+        if (request.cancellation_token)
+            request.cancellation_token->cancel();
 
-        if (request && request->on_complete)
-            request->on_complete(ERROR_CONNECTION_CLOSED, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_CONNECTION_CLOSED, false);
     }
 
     for (auto& [id, request] : _active_downloads) {
-        if (request && request->cancellation_token)
-            request->cancellation_token->cancel();
+        if (request.cancellation_token)
+            request.cancellation_token->cancel();
 
-        if (request && request->on_complete)
-            request->on_complete(ERROR_CONNECTION_CLOSED, false);
+        if (request.on_complete)
+            request.on_complete(ERROR_CONNECTION_CLOSED, false);
     }
 
     _active_uploads.clear();
@@ -812,7 +812,7 @@ void OnionRequestRouter::_send_request_internal(
     }
 }
 
-void OnionRequestRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
+void OnionRequestRouter::_upload_internal(UploadRequest request) {
     const auto upload_id = "UP-" + random::random_base32(4);
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
     _active_uploads[upload_id] = request;
@@ -839,9 +839,9 @@ void OnionRequestRouter::_upload_internal(std::shared_ptr<UploadRequest> request
                 if (!self)
                     return;
 
-                if (upload_request->is_cancelled() || !req.body) {
+                if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
-                    upload_request->on_complete(ERROR_REQUEST_CANCELLED, false);
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
                     self->_active_uploads.erase(upload_id);
                     return;
                 }
@@ -868,7 +868,7 @@ void OnionRequestRouter::_upload_internal(std::shared_ptr<UploadRequest> request
                             self->_active_uploads.erase(upload_id);
 
                             try {
-                                if (upload_request->is_cancelled())
+                                if (upload_request.is_cancelled())
                                     throw cancellation_exception{"Cancelled during request."};
 
                                 if (!success || timeout)
@@ -893,21 +893,21 @@ void OnionRequestRouter::_upload_internal(std::shared_ptr<UploadRequest> request
                                         metadata.size,
                                         metadata.id);
 
-                                upload_request->on_complete(std::move(metadata), false);
+                                upload_request.on_complete(std::move(metadata), false);
                             } catch (const status_code_exception& e) {
                                 log::error(
                                         cat,
                                         "[Upload {}]: Failure with error: {}",
                                         upload_id,
                                         e.what());
-                                upload_request->on_complete(e.status_code, false);
+                                upload_request.on_complete(e.status_code, false);
                             } catch (const std::exception& e) {
                                 log::error(
                                         cat,
                                         "[Upload {}]: Failure with error: {}",
                                         upload_id,
                                         e.what());
-                                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                                upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
                             }
                         });
             });
@@ -918,14 +918,14 @@ void OnionRequestRouter::_upload_internal(std::shared_ptr<UploadRequest> request
                     return;
 
                 log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
-                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
                 self->_active_uploads.erase(upload_id);
             });
         }
     }).detach();
 }
 
-void OnionRequestRouter::_download_internal(std::shared_ptr<DownloadRequest> request) {
+void OnionRequestRouter::_download_internal(DownloadRequest request) {
     const auto download_id = "DL-" + random::random_base32(4);
     log::info(cat, "[Download {}]: Starting download.", download_id);
     _active_downloads[download_id] = request;
@@ -948,7 +948,7 @@ void OnionRequestRouter::_download_internal(std::shared_ptr<DownloadRequest> req
                     self->_active_downloads.erase(download_id);
 
                     try {
-                        if (request->is_cancelled())
+                        if (request.is_cancelled())
                             throw cancellation_exception{"Cancelled during request."};
 
                         if (!success || timeout)
@@ -964,7 +964,7 @@ void OnionRequestRouter::_download_internal(std::shared_ptr<DownloadRequest> req
                             throw std::runtime_error{"No response body."};
 
                         auto [metadata, data] = file_server::parse_download_response(
-                                request->download_url, headers, *body);
+                                request.download_url, headers, *body);
                         log::info(
                                 cat,
                                 "[Download {}]: Successfully downloaded {} bytes for file ID: {}",
@@ -972,33 +972,33 @@ void OnionRequestRouter::_download_internal(std::shared_ptr<DownloadRequest> req
                                 data.size(),
                                 metadata.id);
 
-                        if (request->on_data)
-                            request->on_data(metadata, std::move(data));
+                        if (request.on_data)
+                            request.on_data(metadata, std::move(data));
 
-                        request->on_complete(std::move(metadata), false);
+                        request.on_complete(std::move(metadata), false);
                     } catch (const status_code_exception& e) {
                         log::error(
                                 cat,
                                 "[Download {}]: Failure with error: {}",
                                 download_id,
                                 e.what());
-                        request->on_complete(e.status_code, false);
+                        request.on_complete(e.status_code, false);
                     } catch (const std::exception& e) {
                         log::error(
                                 cat,
                                 "[Download {}]: Failure with error: {}",
                                 download_id,
                                 e.what());
-                        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                        request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
                     }
                 });
     } catch (const invalid_url_exception& e) {
         log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
-        request->on_complete(ERROR_INVALID_DOWNLOAD_URL, false);
+        request.on_complete(ERROR_INVALID_DOWNLOAD_URL, false);
         _active_downloads.erase(download_id);
     } catch (const std::exception& e) {
         log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
-        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+        request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
         _active_downloads.erase(download_id);
     }
 }

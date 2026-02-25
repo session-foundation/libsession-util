@@ -203,14 +203,14 @@ void SessionRouter::send_request(Request request, network_response_callback_t ca
     });
 }
 
-void SessionRouter::upload(std::shared_ptr<UploadRequest> request) {
+void SessionRouter::upload(UploadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
             self->_upload_internal(std::move(req));
     });
 }
 
-void SessionRouter::download(std::shared_ptr<DownloadRequest> request) {
+void SessionRouter::download(DownloadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
             self->_download_internal(std::move(req));
@@ -247,6 +247,26 @@ void SessionRouter::_finish_setup() {
 
 void SessionRouter::_close_connections() {
     // TODO: Need to close any active connections on the session router instance.
+
+    // Cancel any uploads and downloads
+    for (auto& [id, request] : _active_uploads) {
+        if (request.cancellation_token)
+            request.cancellation_token->cancel();
+
+        if (request.on_complete)
+            request.on_complete(ERROR_CONNECTION_CLOSED, false);
+    }
+
+    for (auto& [id, request] : _active_downloads) {
+        if (request.cancellation_token)
+            request.cancellation_token->cancel();
+
+        if (request.on_complete)
+            request.on_complete(ERROR_CONNECTION_CLOSED, false);
+    }
+
+    _active_uploads.clear();
+    _active_downloads.clear();
 
     // Cancel any pending requests (they can't succeed once the connection is closed)
     for (const auto& [pubkey, pupkey_requests] : _pending_requests)
@@ -511,7 +531,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     _send_direct_request(std::move(proxy_request), std::move(proxy_callback));
 }
 
-void SessionRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
+void SessionRouter::_upload_internal(UploadRequest request) {
     // TODO: Update this to use streaming approach
     const auto upload_id = "UP-" + random::random_base32(4);
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
@@ -539,9 +559,9 @@ void SessionRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
                 if (!self)
                     return;
 
-                if (upload_request->is_cancelled() || !req.body) {
+                if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
-                    upload_request->on_complete(ERROR_REQUEST_CANCELLED, false);
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
                     self->_active_uploads.erase(upload_id);
                     return;
                 }
@@ -568,7 +588,7 @@ void SessionRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
                             self->_active_uploads.erase(upload_id);
 
                             try {
-                                if (upload_request->is_cancelled())
+                                if (upload_request.is_cancelled())
                                     throw cancellation_exception{"Cancelled during request."};
 
                                 if (!success || timeout)
@@ -593,21 +613,21 @@ void SessionRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
                                         metadata.size,
                                         metadata.id);
 
-                                upload_request->on_complete(std::move(metadata), false);
+                                upload_request.on_complete(std::move(metadata), false);
                             } catch (const status_code_exception& e) {
                                 log::error(
                                         cat,
                                         "[Upload {}]: Failure with error: {}",
                                         upload_id,
                                         e.what());
-                                upload_request->on_complete(e.status_code, false);
+                                upload_request.on_complete(e.status_code, false);
                             } catch (const std::exception& e) {
                                 log::error(
                                         cat,
                                         "[Upload {}]: Failure with error: {}",
                                         upload_id,
                                         e.what());
-                                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                                upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
                             }
                         });
             });
@@ -618,14 +638,14 @@ void SessionRouter::_upload_internal(std::shared_ptr<UploadRequest> request) {
                     return;
 
                 log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
-                upload_request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
                 self->_active_uploads.erase(upload_id);
             });
         }
     }).detach();
 }
 
-void SessionRouter::_download_internal(std::shared_ptr<DownloadRequest> request) {
+void SessionRouter::_download_internal(DownloadRequest request) {
     const auto download_id = "DL-" + random::random_base32(4);
     log::info(cat, "[Download {}]: Starting download.", download_id);
     _active_downloads[download_id] = request;
@@ -648,7 +668,7 @@ void SessionRouter::_download_internal(std::shared_ptr<DownloadRequest> request)
                     self->_active_downloads.erase(download_id);
 
                     try {
-                        if (request->is_cancelled())
+                        if (request.is_cancelled())
                             throw cancellation_exception{"Cancelled during request."};
 
                         if (!success || timeout)
@@ -664,7 +684,7 @@ void SessionRouter::_download_internal(std::shared_ptr<DownloadRequest> request)
                             throw std::runtime_error{"No response body."};
 
                         auto [metadata, data] = file_server::parse_download_response(
-                                request->download_url, headers, *body);
+                                request.download_url, headers, *body);
                         log::info(
                                 cat,
                                 "[Download {}]: Successfully downloaded {} bytes for file ID: {}",
@@ -672,33 +692,33 @@ void SessionRouter::_download_internal(std::shared_ptr<DownloadRequest> request)
                                 data.size(),
                                 metadata.id);
 
-                        if (request->on_data)
-                            request->on_data(metadata, std::move(data));
+                        if (request.on_data)
+                            request.on_data(metadata, std::move(data));
 
-                        request->on_complete(std::move(metadata), false);
+                        request.on_complete(std::move(metadata), false);
                     } catch (const status_code_exception& e) {
                         log::error(
                                 cat,
                                 "[Download {}]: Failure with error: {}",
                                 download_id,
                                 e.what());
-                        request->on_complete(e.status_code, false);
+                        request.on_complete(e.status_code, false);
                     } catch (const std::exception& e) {
                         log::error(
                                 cat,
                                 "[Download {}]: Failure with error: {}",
                                 download_id,
                                 e.what());
-                        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                        request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
                     }
                 });
     } catch (const invalid_url_exception& e) {
         log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
-        request->on_complete(ERROR_INVALID_DOWNLOAD_URL, false);
+        request.on_complete(ERROR_INVALID_DOWNLOAD_URL, false);
         _active_downloads.erase(download_id);
     } catch (const std::exception& e) {
         log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
-        request->on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+        request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
         _active_downloads.erase(download_id);
     }
 }
