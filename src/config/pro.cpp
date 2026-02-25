@@ -21,15 +21,14 @@ bool ProConfig::load(const dict& root) {
     if (!p)
         return false;
 
-    std::optional<std::vector<unsigned char>> maybe_rotating_privkey = maybe_vector(root, "r");
-    if (!maybe_rotating_privkey || maybe_rotating_privkey->size() != rotating_privkey.max_size())
+    std::optional<std::vector<unsigned char>> maybe_rotating_seed = maybe_vector(root, "r");
+    if (!maybe_rotating_seed || maybe_rotating_seed->size() != crypto_sign_ed25519_SEEDBYTES)
         return false;
 
     // NOTE: Load into the proof object
     {
         std::optional<uint8_t> version = maybe_int(*p, "@");
         std::optional<std::vector<unsigned char>> maybe_gen_index_hash = maybe_vector(*p, "g");
-        std::optional<std::vector<unsigned char>> maybe_rotating_pubkey = maybe_vector(*p, "r");
         std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_expiry_unix_ts_ms =
                 maybe_ts_ms(*p, "e");
         std::optional<std::vector<unsigned char>> maybe_sig = maybe_vector(*p, "s");
@@ -37,9 +36,6 @@ bool ProConfig::load(const dict& root) {
         if (!version)
             return false;
         if (!maybe_gen_index_hash || maybe_gen_index_hash->size() != proof.gen_index_hash.size())
-            return false;
-        if (!maybe_rotating_pubkey ||
-            maybe_rotating_pubkey->size() != proof.rotating_pubkey.max_size())
             return false;
         if (!maybe_sig || maybe_sig->size() != proof.sig.max_size())
             return false;
@@ -51,15 +47,14 @@ bool ProConfig::load(const dict& root) {
                 proof.gen_index_hash.data(),
                 maybe_gen_index_hash->data(),
                 proof.gen_index_hash.size());
-        std::memcpy(
-                proof.rotating_pubkey.data(),
-                maybe_rotating_pubkey->data(),
-                proof.rotating_pubkey.size());
         proof.expiry_unix_ts = *maybe_expiry_unix_ts_ms;
         std::memcpy(proof.sig.data(), maybe_sig->data(), proof.sig.size());
     }
 
-    std::memcpy(rotating_privkey.data(), maybe_rotating_privkey->data(), rotating_privkey.size());
+    // Derive the rotating public key from the seed and populate the proof's pubkey and the outer
+    // private key
+    crypto_sign_ed25519_seed_keypair(
+            proof.rotating_pubkey.data(), rotating_privkey.data(), maybe_rotating_seed->data());
     return true;
 }
 

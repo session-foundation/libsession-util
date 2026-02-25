@@ -1,6 +1,7 @@
 #include "session/config/user_profile.h"
 
 #include <sodium/crypto_generichash_blake2b.h>
+#include <sodium/crypto_sign_ed25519.h>
 
 #include "internal.hpp"
 #include "session/config/contacts.hpp"
@@ -163,12 +164,12 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
     std::optional<ProConfig> curr = get_pro_config();
     if (!curr || *curr != pro) {
         auto root = data["s"];
-        root["r"] = pro.rotating_privkey;
+        root["r"] = std::span<const unsigned char>(
+                pro.rotating_privkey.data(), crypto_sign_ed25519_SEEDBYTES);
 
         auto proof_dict = root["p"];
         proof_dict["@"] = pro.proof.version;
         proof_dict["g"] = pro.proof.gen_index_hash;
-        proof_dict["r"] = pro.proof.rotating_pubkey;
         proof_dict["e"] = pro.proof.expiry_unix_ts.time_since_epoch().count();
         proof_dict["s"] = pro.proof.sig;
 
