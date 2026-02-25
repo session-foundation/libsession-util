@@ -545,14 +545,15 @@ void QuicTransport::_send_on_connection(
                 if (resp.is_error()) {
                     auto final_timeout = resp.timed_out;
                     auto final_status_code = -1;
-                    std::string err_body =
-                            (resp.body().empty() ? "Unknown QUIC layer error"
-                                                 : std::string{resp.body()});
+                    std::string_view err_body =
+                        resp.body();
+                    if (err_body.empty())
+                        err_body = "Unknown QUIC layer error"sv;
 
                     // The response doesn't provide a status code but the body can include it,
                     // in which case we should try to extract it from the body so we can perform
                     // any status code related logic
-                    if (auto result = Response::parse_text_error(err_body)) {
+                    if (auto result = response::parse_text_error(err_body)) {
                         final_status_code = result->first;
                         final_timeout = result->second;
                     }
@@ -563,7 +564,7 @@ void QuicTransport::_send_on_connection(
                             final_timeout,
                             final_status_code,
                             {content_type_plain_text},
-                            err_body);
+                            std::make_optional<std::string>(err_body));
                 }
 
                 log::debug(cat, "[Request {}] Received raw success response.", req_id);

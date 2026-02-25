@@ -244,10 +244,10 @@ using network_response_callback_t = std::function<void(
         std::vector<std::pair<std::string, std::string>> headers,
         std::optional<std::string> response)>;
 
-struct Response {
-    static std::optional<std::pair<int16_t, bool>> parse_text_error(const std::string& body);
-    static std::optional<int16_t> find_uniform_batch_error(const std::string& body);
-};
+namespace response {
+    std::optional<std::pair<int16_t, bool>> parse_text_error(std::string_view body);
+    std::optional<int16_t> find_uniform_batch_error(std::string_view body);
+}  // namespace response
 
 struct OnionPathMetadata {
     PathCategory category;

@@ -54,20 +54,21 @@ Request::Request(
         details{details},
         ephemeral_connection{ephemeral_connection} {}
 
-std::optional<std::pair<int16_t, bool>> Response::parse_text_error(const std::string& body) {
-    static const std::unordered_map<std::string_view, std::pair<int16_t, bool>> error_map = {
-            {"400 Bad Request", {400, false}},
-            {"401 Unauthorized", {401, false}},
-            {"403 Forbidden", {403, false}},
-            {"404 Not Found", {404, false}},
-            {"405 Method Not Allowed", {405, false}},
-            {"406 Not Acceptable", {406, false}},
-            {"408 Request Timeout", {408, false}},
-            {"500 Internal Server Error", {500, false}},
-            {"502 Bad Gateway", {502, false}},
-            {"503 Service Unavailable", {503, false}},
-            {"504 Gateway Timeout", {504, true}},
-    };
+static const std::unordered_map<std::string_view, std::pair<int16_t, bool>> error_map = {
+        {"400 Bad Request", {400, false}},
+        {"401 Unauthorized", {401, false}},
+        {"403 Forbidden", {403, false}},
+        {"404 Not Found", {404, false}},
+        {"405 Method Not Allowed", {405, false}},
+        {"406 Not Acceptable", {406, false}},
+        {"408 Request Timeout", {408, false}},
+        {"500 Internal Server Error", {500, false}},
+        {"502 Bad Gateway", {502, false}},
+        {"503 Service Unavailable", {503, false}},
+        {"504 Gateway Timeout", {504, true}},
+};
+
+std::optional<std::pair<int16_t, bool>> response::parse_text_error(std::string_view body) {
 
     for (const auto& [prefix, result] : error_map)
         if (body.starts_with(prefix))
@@ -76,7 +77,7 @@ std::optional<std::pair<int16_t, bool>> Response::parse_text_error(const std::st
     return std::nullopt;
 }
 
-std::optional<int16_t> Response::find_uniform_batch_error(const std::string& body) {
+std::optional<int16_t> response::find_uniform_batch_error(std::string_view body) {
     try {
         auto json = nlohmann::json::parse(body);
 

@@ -271,7 +271,7 @@ cached_edge_node cached_edge_node::from_disk(std::string_view str) {
     std::chrono::system_clock::time_point cached_at;
     int64_t timestamp;
     if (quic::parse_int(parts[6], timestamp))
-        cached_at = std::chrono::system_clock::from_time_t(static_cast<time_t>(timestamp));
+        cached_at = std::chrono::sys_time{std::chrono::seconds{timestamp}};
     else
         cached_at = std::chrono::system_clock::now();
 
@@ -1543,7 +1543,7 @@ void OnionRequestRouter::_handle_transport_response(
     std::unordered_set<ed25519_pubkey> penalized_nodes;
 
     if (decrypted_body)
-        if (auto uniform_error = Response::find_uniform_batch_error(*decrypted_body))
+        if (auto uniform_error = response::find_uniform_batch_error(*decrypted_body))
             final_status_code = *uniform_error;
 
     if (final_success)
