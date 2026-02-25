@@ -9,16 +9,15 @@ extern "C" {
 
 #include "session/export.h"
 #include "session/network/session_network_types.h"
-#include "session/onionreq/builder.h"
 #include "session/platform.h"
 
-typedef struct parsed_download_url {
+typedef struct file_server_parsed_download_url {
     char scheme[8];              // "http" or "https" + null
     char host[254];              // 253 max valid DNS length + null
     char file_id[45];            // 44 character id (when a string) + null terminator
     char custom_pubkey_hex[65];  // 64 hex chars + null terminator, empty string if not present
     bool wants_stream_decryption;
-} parsed_download_url;
+} file_server_parsed_download_url;
 
 /// API: session_file_server/session_file_server_parse_download_url
 ///
@@ -31,7 +30,7 @@ typedef struct parsed_download_url {
 /// Outputs:
 /// - returns true if url was successfully parsed, false otherwise.
 LIBSESSION_EXPORT bool session_file_server_parse_download_url(
-        const char* url, parsed_download_url* out);
+        const char* url, file_server_parsed_download_url* out);
 
 /// API: session_file_server/session_file_server_generate_download_url
 ///

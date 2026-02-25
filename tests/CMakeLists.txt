@@ -35,6 +35,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_xed25519.cpp
     test_unicode_operations.cpp
     test_backend_session_file_server.cpp
+    test_backed_session_open_group_server.cpp
 
     case_logger.cpp
 )

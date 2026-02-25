@@ -8,6 +8,7 @@
 
 #include "../session_network_internal.hpp"
 #include "session/blinding.hpp"
+#include "session/network/backends/backend_util.hpp"
 #include "session/network/backends/session_file_server.h"
 #include "session/random.hpp"
 
@@ -65,40 +66,25 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     if (!path.starts_with(fmt::format("/{}/", ENDPOINT_FILE)))
         return std::nullopt;
 
-    auto file_part = path.substr(ENDPOINT_FILE.size() + 2);  // Skip "/file/"
+    auto [file_id, fragments] = backends::split_file_part(path.substr(ENDPOINT_FILE.size() + 2));
 
-    // Split on fragment (#)
-    auto fragment_pos = file_part.find('#');
+    if (file_id.empty())
+        return std::nullopt;
 
-    if (fragment_pos == std::string_view::npos) {
-        // Strip trailing slash if present
-        if (!file_part.empty() && file_part.back() == '/')
+    info.file_id = std::string{file_id};
+    info.wants_stream_decryption = false;
 
-            file_part.remove_suffix(1);
-        // No fragments
-        info.file_id = std::string{file_part};
-        info.wants_stream_decryption = false;
-    } else {
-        // Has fragments
-        auto id_part = file_part.substr(0, fragment_pos);
-        if (!id_part.empty() && id_part.back() == '/')
-            id_part.remove_suffix(1);
-        info.file_id = std::string{id_part};
-
-        auto fragments = file_part.substr(fragment_pos + 1);
-
-        // Parse fragments (p=... and/or d)
-        for (auto fragment : split(fragments, "&", true)) {
-            if (fragment == file_server::FRAGMENT_STREAM_ENCRYPTION)
-                info.wants_stream_decryption = true;
-            else if (
-                    fragment.starts_with(fmt::format("{}=", file_server::FRAGMENT_PUBKEY)) &&
-                    fragment.size() == 66 &&  // 'p=' + pubkey
-                    oxenc::is_hex(fragment.substr(2)) &&
-                    fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
-                info.custom_pubkey_hex = fragment.substr(2);
-            // else ignore (unknown or invalid fragment)
-        }
+    // Parse fragments (p=... and/or d)
+    for (auto fragment : split(fragments, "&", true)) {
+        if (fragment == file_server::FRAGMENT_STREAM_ENCRYPTION)
+            info.wants_stream_decryption = true;
+        else if (
+                fragment.starts_with(fmt::format("{}=", file_server::FRAGMENT_PUBKEY)) &&
+                fragment.size() == 66 &&  // 'p=' + pubkey
+                oxenc::is_hex(fragment.substr(2)) &&
+                fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
+            info.custom_pubkey_hex = fragment.substr(2);
+        // else ignore (unknown or invalid fragment)
     }
 
     return info;
@@ -335,7 +321,7 @@ using namespace session;
 using namespace session::network;
 
 LIBSESSION_C_API bool session_file_server_parse_download_url(
-        const char* url, parsed_download_url* out) {
+        const char* url, file_server_parsed_download_url* out) {
     auto info = file_server::parse_download_url(url);
     if (!info)
         return false;
@@ -362,6 +348,9 @@ LIBSESSION_C_API bool session_file_server_generate_download_url(
         bool use_stream_encryption,
         char* out_url,
         size_t out_url_len) {
+    if (!file_id)
+        return false;
+
     network::config::FileServer config = file_server::DEFAULT_CONFIG;
     if (scheme)
         config.scheme = scheme;

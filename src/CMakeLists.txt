@@ -130,6 +130,7 @@ if(ENABLE_NETWORKING)
         network/snode_pool.cpp
         network/swarm.cpp
         network/backends/session_file_server.cpp
+        network/backends/session_open_group_server.cpp
         network/transport/quic_transport.cpp
         network/routing/direct_router.cpp
         network/routing/onion_request_router.cpp
