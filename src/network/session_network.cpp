@@ -42,6 +42,7 @@ namespace {
 
     config::FileServer build_file_server_config(const config::Config& main_config) {
         config::FileServer file_server_config = file_server::DEFAULT_CONFIG;
+        file_server_config.use_stream_encryption = main_config.file_server_use_stream_encryption;
 
         if (main_config.custom_file_server_scheme)
             file_server_config.scheme = *main_config.custom_file_server_scheme;
@@ -81,11 +82,13 @@ namespace {
                 main_config.quic_max_streams};
     }
 
-    config::DirectRouter build_direct_router_config(const config::Config& main_config) {
-        return {build_file_server_config(main_config)};
+    config::DirectRouter build_direct_router_config(
+            const config::Config& main_config, const config::FileServer& file_server_config) {
+        return {file_server_config};
     }
 
-    config::SessionRouter build_session_router_config(const config::Config& main_config) {
+    config::SessionRouter build_session_router_config(
+            const config::Config& main_config, const config::FileServer& file_server_config) {
         if (!main_config.cache_directory)
             throw std::invalid_argument{
                     "Session Router requires a cache_directory to be configured."};
@@ -93,15 +96,15 @@ namespace {
         if (main_config.netid == opt::netid::Target::devnet)
             throw std::invalid_argument{"Session Router does not support devnet."};
 
-        return {build_file_server_config(main_config),
+        return {file_server_config,
                 main_config.netid,
                 *main_config.cache_directory,
                 main_config.path_length};
     }
 
     config::OnionRequestRouter build_onion_request_router_config(
-            const config::Config& main_config) {
-        return {build_file_server_config(main_config),
+            const config::Config& main_config, const config::FileServer& file_server_config) {
+        return {file_server_config,
                 main_config.cache_directory,
                 main_config.onionreq_edge_node_cache_duration,
                 main_config.netid,
@@ -135,7 +138,8 @@ namespace detail {
 
 }  // namespace detail
 
-Network::Network(config::Config _conf) : config{std::move(_conf)} {
+Network::Network(config::Config _conf) :
+        config{std::move(_conf)}, file_server_config{std::move(build_file_server_config(config))} {
     // When testing (particularly on Apple platforms) we can run into the NOFILE limit, so try to
     // increase it if the config option is set
     if (config.increase_no_file_limit) {
@@ -191,7 +195,7 @@ Network::Network(config::Config _conf) : config{std::move(_conf)} {
     switch (config.router) {
         case opt::router::Type::onion_requests:
             _router = std::make_unique<OnionRequestRouter>(
-                    std::move(build_onion_request_router_config(config)),
+                    std::move(build_onion_request_router_config(config, file_server_config)),
                     _loop,
                     _disk_loop,
                     _snode_pool,
@@ -200,12 +204,17 @@ Network::Network(config::Config _conf) : config{std::move(_conf)} {
 
         case opt::router::Type::session_router:
             _router = SessionRouter::create(
-                    std::move(build_session_router_config(config)), _loop, _snode_pool, _transport);
+                    std::move(build_session_router_config(config, file_server_config)),
+                    _loop,
+                    _snode_pool,
+                    _transport);
             break;
 
         case opt::router::Type::direct:
             _router = std::make_unique<DirectRouter>(
-                    std::move(build_direct_router_config(config)), _loop, _transport);
+                    std::move(build_direct_router_config(config, file_server_config)),
+                    _loop,
+                    _transport);
             break;
     }
 
@@ -1132,6 +1141,8 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
         default: config.transport = SESSION_NETWORK_TRANSPORT_QUIC;
     }
 
+    config.file_server_use_stream_encryption = cpp_defaults.file_server_use_stream_encryption;
+
     config.increase_no_file_limit = cpp_defaults.increase_no_file_limit;
     config.path_length = cpp_defaults.path_length;
     config.enforce_subnet_diversity = cpp_defaults.enforce_subnet_diversity;
@@ -1251,6 +1262,9 @@ LIBSESSION_C_API bool session_network_init(
         if (config->custom_file_server_max_file_size > 0)
             cpp_opts.emplace_back(
                     opt::file_server_max_file_size(config->custom_file_server_max_file_size));
+
+        cpp_opts.emplace_back(
+                opt::file_server_use_stream_encryption(config->file_server_use_stream_encryption));
 
         // General
         if (config->increase_no_file_limit)

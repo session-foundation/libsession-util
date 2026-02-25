@@ -53,6 +53,7 @@ typedef struct session_network_config {
     uint16_t custom_file_server_port;
     const char* custom_file_server_pubkey_hex;
     uint64_t custom_file_server_max_file_size;
+    bool file_server_use_stream_encryption;
 
     // General options
     bool increase_no_file_limit;

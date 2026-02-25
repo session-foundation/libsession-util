@@ -211,6 +211,15 @@ namespace opt {
         explicit file_server_max_file_size(uint16_t max_file_size) : max_file_size{max_file_size} {}
     };
 
+    /// Can be used to override the default (false) flag indicating whether files uploaded to the
+    /// file server should use XChaCha20-stream based encryption.
+    struct file_server_use_stream_encryption : base {
+        bool use_stream_encryption;
+
+        file_server_use_stream_encryption(bool use_stream_encryption) :
+                use_stream_encryption{use_stream_encryption} {}
+    };
+
     /// Can be used to attempt to increase the NOFILE limit (can cause issues with automated tests).
     struct increase_no_file_limit : base {};
 

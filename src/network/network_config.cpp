@@ -29,6 +29,7 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::file_server_port);
         HANDLE_TYPE(opt::file_server_pubkey_hex);
         HANDLE_TYPE(opt::file_server_max_file_size);
+        HANDLE_TYPE(opt::file_server_use_stream_encryption);
 
         // General options
         HANDLE_TYPE(opt::increase_no_file_limit);
@@ -149,6 +150,14 @@ void Config::handle_config_opt(opt::file_server_max_file_size fsmfs) {
     custom_file_server_max_file_size = fsmfs.max_file_size;
     log::debug(
             cat, "Network config custom file server max file size set to {}", fsmfs.max_file_size);
+}
+
+void Config::handle_config_opt(opt::file_server_use_stream_encryption fsuse) {
+    file_server_use_stream_encryption = fsuse.use_stream_encryption;
+    log::debug(
+            cat,
+            "Network config file use stream encryption set to {}",
+            fsuse.use_stream_encryption);
 }
 
 // MARK: General options

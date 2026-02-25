@@ -25,6 +25,7 @@ struct Config {
     std::optional<uint16_t> custom_file_server_port = std::nullopt;
     std::optional<std::string> custom_file_server_pubkey_hex = std::nullopt;
     std::optional<uint64_t> custom_file_server_max_file_size = std::nullopt;
+    bool file_server_use_stream_encryption = false;
 
     // General options
     bool increase_no_file_limit = false;
@@ -97,6 +98,7 @@ struct Config {
     void handle_config_opt(opt::file_server_port fsp);
     void handle_config_opt(opt::file_server_pubkey_hex fsph);
     void handle_config_opt(opt::file_server_max_file_size fsmfs);
+    void handle_config_opt(opt::file_server_use_stream_encryption fsuse);
 
     // General options
     void handle_config_opt(opt::increase_no_file_limit infl);

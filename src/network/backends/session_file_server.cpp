@@ -33,6 +33,8 @@ const config::FileServer DEFAULT_CONFIG = {
         .max_file_size = 10'000'000};
 
 const std::string_view ENDPOINT_FILE = "file";
+const std::string_view FRAGMENT_PUBKEY = "p";
+const std::string_view FRAGMENT_STREAM_ENCRYPTION = "d";
 
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {scheme}://{host}/file/{file_id}(?:#p={customPubkey})(?:d)
@@ -71,7 +73,7 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     if (fragment_pos == std::string_view::npos) {
         // No fragments
         info.file_id = std::string{file_part};
-        info.deterministic = false;
+        info.wants_stream_decryption = false;
     } else {
         // Has fragments
         info.file_id = std::string{file_part.substr(0, fragment_pos)};
@@ -79,10 +81,11 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
 
         // Parse fragments (p=... and/or d)
         for (auto fragment : split(fragments, "&", true)) {
-            if (fragment == "d"sv)
-                info.deterministic = true;
+            if (fragment == file_server::FRAGMENT_STREAM_ENCRYPTION)
+                info.wants_stream_decryption = true;
             else if (
-                    fragment.starts_with("p=") && fragment.size() == 66 &&  // 'p=' + pubkey
+                    fragment.starts_with(fmt::format("{}=", file_server::FRAGMENT_PUBKEY)) &&
+                    fragment.size() == 66 &&  // 'p=' + pubkey
                     oxenc::is_hex(fragment.substr(2)))
                 info.custom_pubkey_hex = fragment.substr(2);
             // else ignore (unknown or invalid fragment)
@@ -90,6 +93,27 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     }
 
     return info;
+}
+
+std::string generate_download_url(std::string_view file_id, const config::FileServer& config) {
+    const auto has_custom_pubkey = (config.pubkey_hex != file_server::DEFAULT_CONFIG.pubkey_hex);
+
+    auto buf = fmt::format(
+            "{}://{}/{}/{}", config.scheme, config.host, file_server::ENDPOINT_FILE, file_id);
+
+    if (config.use_stream_encryption || has_custom_pubkey) {
+        buf += "#";
+
+        if (has_custom_pubkey)
+            buf += fmt::format("{}={}", file_server::FRAGMENT_PUBKEY, config.pubkey_hex);
+
+        if (config.use_stream_encryption) {
+            buf += (has_custom_pubkey ? "&" : "");
+            buf += file_server::FRAGMENT_STREAM_ENCRYPTION;
+        }
+    }
+
+    return buf;
 }
 
 std::optional<std::chrono::sys_seconds> parse_http_date(std::string_view date_str) {
@@ -303,10 +327,49 @@ extern "C" {
 using namespace session;
 using namespace session::network;
 
-LIBSESSION_C_API bool download_url_requires_deterministic_decryption(const char* url) {
-    if (auto info = file_server::parse_download_url(url))
-        return info->deterministic;
-    return false;
+LIBSESSION_C_API bool session_file_server_parse_download_url(
+        const char* url, parsed_download_url* out) {
+    auto info = file_server::parse_download_url(url);
+    if (!info)
+        return false;
+
+    auto copy = [](auto& dest, const std::string& src) {
+        auto len = std::min(src.size(), sizeof(dest) - 1);
+        std::memcpy(dest, src.c_str(), len);
+        dest[len] = '\0';
+    };
+
+    copy(out->scheme, info->scheme);
+    copy(out->host, info->host);
+    copy(out->file_id, info->file_id);
+    copy(out->custom_pubkey_hex, info->custom_pubkey_hex.value_or(""));
+    out->wants_stream_decryption = info->wants_stream_decryption;
+    return true;
+}
+
+LIBSESSION_C_API bool session_file_server_generate_download_url(
+        const char* file_id,
+        const char* scheme,
+        const char* host,
+        const char* pubkey_hex,
+        bool use_stream_encryption,
+        char* out_url,
+        size_t out_url_len) {
+    network::config::FileServer config = file_server::DEFAULT_CONFIG;
+    if (scheme)
+        config.scheme = scheme;
+    if (host)
+        config.host = host;
+    if (pubkey_hex)
+        config.pubkey_hex = pubkey_hex;
+    config.use_stream_encryption = use_stream_encryption;
+
+    auto result = file_server::generate_download_url(file_id, config);
+    if (result.size() >= out_url_len)
+        return false;
+
+    std::memcpy(out_url, result.c_str(), result.size() + 1);
+    return true;
 }
 
 LIBSESSION_C_API session_request_params* session_file_server_get_client_version(

@@ -5,6 +5,7 @@
 #include <optional>
 #include <oxen/quic.hpp>
 
+#include "session/network/backends/session_file_server.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/routing/network_router.hpp"
 #include "session/network/snode_pool.hpp"
@@ -40,6 +41,8 @@ class Network : public std::enable_shared_from_this<Network> {
             _clock_resync_download_queue;
 
   public:
+    const config::FileServer file_server_config;
+
     // Hook to be notified whenever the network connection status changes.
     std::function<void(ConnectionStatus status)> on_status_changed;
     std::function<void(std::chrono::milliseconds network_time_offset, int hardfork, int softfork)>
