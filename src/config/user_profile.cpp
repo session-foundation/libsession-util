@@ -165,13 +165,12 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
         auto root = data["s"];
         root["r"] = pro.rotating_privkey;
 
-        const ProProof& pro_proof = pro.proof;
         auto proof_dict = root["p"];
-        proof_dict["@"] = pro_proof.version;
-        proof_dict["g"] = pro_proof.gen_index_hash;
-        proof_dict["r"] = pro_proof.rotating_pubkey;
-        proof_dict["e"] = pro_proof.expiry_unix_ts.time_since_epoch().count();
-        proof_dict["s"] = pro_proof.sig;
+        proof_dict["@"] = pro.proof.version;
+        proof_dict["g"] = pro.proof.gen_index_hash;
+        proof_dict["r"] = pro.proof.rotating_pubkey;
+        proof_dict["e"] = pro.proof.expiry_unix_ts.time_since_epoch().count();
+        proof_dict["s"] = pro.proof.sig;
 
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
