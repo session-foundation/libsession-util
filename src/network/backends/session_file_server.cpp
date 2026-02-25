@@ -163,7 +163,7 @@ Request to_request(
     }
 
     if (upload_request.ttl)
-        headers.emplace_back("X-FS-TTL", fmt::format("{}", *upload_request.ttl));
+        headers.emplace_back("X-FS-TTL", fmt::format("{}", upload_request.ttl->count()));
 
     return Request{
             upload_id,
@@ -228,12 +228,12 @@ file_metadata parse_upload_response(const std::string& body, size_t upload_size)
 
     if (json.contains("uploaded") && json["uploaded"].is_number()) {
         auto uploaded = json["uploaded"].get<int64_t>();
-        metadata.uploaded = std::chrono::system_clock::time_point(std::chrono::seconds(uploaded));
+        metadata.uploaded = std::chrono::sys_seconds{std::chrono::seconds(uploaded)};
     }
 
     if (json.contains("expires") && json["expires"].is_number()) {
         auto expiry = json["expires"].get<int64_t>();
-        metadata.expiry = std::chrono::system_clock::time_point(std::chrono::seconds(expiry));
+        metadata.expiry = std::chrono::sys_seconds{std::chrono::seconds(expiry)};
     }
 
     return metadata;

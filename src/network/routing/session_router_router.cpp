@@ -250,16 +250,14 @@ void SessionRouter::_close_connections() {
 
     // Cancel any uploads and downloads
     for (auto& [id, request] : _active_uploads) {
-        if (request.cancellation_token)
-            request.cancellation_token->cancel();
+        request.cancel();
 
         if (request.on_complete)
             request.on_complete(ERROR_CONNECTION_CLOSED, false);
     }
 
     for (auto& [id, request] : _active_downloads) {
-        if (request.cancellation_token)
-            request.cancellation_token->cancel();
+        request.cancel();
 
         if (request.on_complete)
             request.on_complete(ERROR_CONNECTION_CLOSED, false);

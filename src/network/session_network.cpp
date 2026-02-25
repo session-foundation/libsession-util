@@ -1108,12 +1108,12 @@ using namespace session;
 using namespace session::network;
 
 struct session_upload_handle_t {
-    std::shared_ptr<CancellationToken> cancellation_token;
+    std::shared_ptr<std::atomic<bool>> cancelled;
     session_upload_callbacks callbacks;
 };
 
 struct session_download_handle_t {
-    std::shared_ptr<CancellationToken> cancellation_token;
+    std::shared_ptr<std::atomic<bool>> cancelled;
     session_download_callbacks callbacks;
 };
 
@@ -1776,15 +1776,15 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         auto handle = std::make_unique<session_upload_handle_t>();
         handle->callbacks = *callbacks;
 
-        auto cpp_request = UploadRequest();
-        cpp_request.file_name = (file_name ? std::optional{std::string{file_name}} : std::nullopt);
-        cpp_request.ttl = (ttl > 0 ? std::optional{ttl} : std::nullopt);
+        UploadRequest cpp_request{};
+        if (file_name)
+            cpp_request.file_name.emplace(file_name);
+        if (ttl > 0)
+            cpp_request.ttl = std::chrono::seconds{ttl};
         cpp_request.stall_timeout = std::chrono::milliseconds{stall_timeout_ms};
         cpp_request.request_timeout = std::chrono::milliseconds{request_timeout_ms};
-        cpp_request.overall_timeout =
-                (overall_timeout_ms > 0
-                         ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}
-                         : std::nullopt);
+        if (overall_timeout_ms > 0)
+            cpp_request.overall_timeout.emplace(overall_timeout_ms);
 
         if (desired_path_index >= 0)
             cpp_request.desired_path_index = static_cast<uint8_t>(desired_path_index);
@@ -1826,7 +1826,7 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
                     result);
         };
 
-        handle->cancellation_token = cpp_request.cancellation_token;
+        handle->cancelled = cpp_request.cancelled;
         unbox(network)->upload(std::move(cpp_request));
 
         return handle.release();
@@ -1904,7 +1904,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                     result);
         };
 
-        handle->cancellation_token = cpp_request.cancellation_token;
+        handle->cancelled = cpp_request.cancelled;
         unbox(network)->download(std::move(cpp_request));
 
         return handle.release();
@@ -1914,13 +1914,13 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
 }
 
 LIBSESSION_C_API void session_network_upload_cancel(session_upload_handle_t* handle) {
-    if (handle && handle->cancellation_token)
-        handle->cancellation_token->cancel();
+    if (handle && handle->cancelled)
+        *handle->cancelled = true;
 }
 
 LIBSESSION_C_API void session_network_download_cancel(session_download_handle_t* handle) {
-    if (handle && handle->cancellation_token)
-        handle->cancellation_token->cancel();
+    if (handle && handle->cancelled)
+        *handle->cancelled = true;
 }
 
 LIBSESSION_C_API void session_network_upload_free(session_upload_handle_t* handle) {

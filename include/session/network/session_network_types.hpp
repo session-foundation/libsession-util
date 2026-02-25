@@ -196,8 +196,8 @@ struct Request {
 struct file_metadata {
     std::string id;
     int64_t size;
-    std::chrono::system_clock::time_point uploaded;
-    std::chrono::system_clock::time_point expiry;
+    std::chrono::sys_seconds uploaded;
+    std::chrono::sys_seconds expiry;
 };
 
 struct FileTransferRequest {
@@ -205,9 +205,16 @@ struct FileTransferRequest {
     std::chrono::milliseconds request_timeout;
     std::optional<std::chrono::milliseconds> overall_timeout;
     std::optional<int8_t> desired_path_index;
-    std::shared_ptr<CancellationToken> cancellation_token;
 
-    bool is_cancelled() const { return cancellation_token && cancellation_token->is_cancelled(); }
+    // This shared ptr is designed to be held by the caller (without the rest of the request object)
+    // to provide a means to trigger a request cancellation by setting it.
+    std::shared_ptr<std::atomic<bool>> cancelled = std::make_shared<std::atomic<bool>>(false);
+
+    void cancel() {
+        if (cancelled)
+            *cancelled = true;
+    }
+    bool is_cancelled() const { return !cancelled || *cancelled; }
 
     // Called when transfer completes (file_metadata) or fails (int16_t error code)
     std::function<void(std::variant<file_metadata, int16_t> result, bool timeout)> on_complete;
@@ -216,7 +223,7 @@ struct FileTransferRequest {
 struct UploadRequest : FileTransferRequest {
     std::function<std::vector<unsigned char>()> next_data;
     std::optional<std::string> file_name;
-    std::optional<uint64_t> ttl;
+    std::optional<std::chrono::seconds> ttl;
 };
 
 struct DownloadRequest : FileTransferRequest {
