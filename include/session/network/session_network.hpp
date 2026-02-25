@@ -4,7 +4,6 @@
 #include <limits>
 #include <optional>
 #include <oxen/quic.hpp>
-#include <session/router.hpp>
 
 #include "session/network/network_config.hpp"
 #include "session/network/routing/network_router.hpp"

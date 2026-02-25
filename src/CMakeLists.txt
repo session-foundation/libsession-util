@@ -124,7 +124,6 @@ if(ENABLE_NETWORKING)
         network/backends/session_file_server.cpp
         network/transport/quic_transport.cpp
         network/routing/direct_router.cpp
-        network/routing/session_router_router.cpp
         network/routing/onion_request_router.cpp
     )
 
@@ -132,13 +131,19 @@ if(ENABLE_NETWORKING)
         PUBLIC
         crypto
         quic
-        session-router::libsessionrouter
         PRIVATE
         nlohmann_json::nlohmann_json
         libsodium::sodium-internal
         nettle::nettle
         date::date
     )
+
+    if(ENABLE_NETWORKING_SROUTER)
+        target_sources(network
+            PRIVATE
+            network/routing/session_router_router.cpp)
+        target_link_libraries(network PUBLIC session-router::libsessionrouter)
+    endif()
 
     if (BUILD_STATIC_DEPS)
         target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)

@@ -193,7 +193,7 @@ set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
 libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json::nlohmann_json nlohmann_json>=3.7.0 session-router/external/nlohmann)
 
-if(ENABLE_NETWORKING)
+if(ENABLE_NETWORKING AND ENABLE_NETWORKING_SROUTER)
     set(SROUTER_FULL OFF CACHE BOOL "")
     set(SROUTER_DAEMON OFF CACHE BOOL "")
     set(SROUTER_NATIVE_BUILD OFF CACHE BOOL "")

@@ -8,9 +8,11 @@
 #include <session/util.hpp>
 #include <system_error>
 
+#ifndef _WIN32
 extern "C" {
 #include <sys/resource.h>
 }
+#endif
 
 namespace session {
 

@@ -378,7 +378,7 @@ local static_build(name,
                docker_base + 'debian-win32-cross',
                'libsession-util-windows-x64-TAG.zip',
                deps=['g++-mingw-w64-x86-64-posix'],
-               cmake_extra='-DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-x86-64-toolchain.cmake'),
+               cmake_extra='-DCMAKE_CXX_FLAGS=-fdiagnostics-color=always -DCMAKE_TOOLCHAIN_FILE=../cmake/mingw-x86-64-toolchain.cmake -DENABLE_NETWORKING_SROUTER=OFF'),
   /*  currently broken:
   static_build('Static Windows x86',
                docker_base + 'debian-win32-cross',

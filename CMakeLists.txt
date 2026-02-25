@@ -83,6 +83,7 @@ option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 
 # Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
 option(ENABLE_NETWORKING "Build with networking functionality" ON)
+option(ENABLE_NETWORKING_SROUTER "Build with session-router networking support (requires ENABLE_NETWORKING)" ON)
 
 if(USE_LTO)
   include(CheckIPOSupported)
