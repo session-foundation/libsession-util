@@ -104,7 +104,7 @@ TEST_CASE("Pro", "[config][pro]") {
         const session::ProProof& proof = pro_cpp.proof;
         // clang-format off
         session::config::dict good_dict = {
-            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
+            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
             {"p", session::config::dict{
                 /*version*/         {"@", proof.version},
                 /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
@@ -134,7 +134,7 @@ TEST_CASE("Pro", "[config][pro]") {
 
         // clang-format off
         session::config::dict bad_dict = {
-            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), rotating_sk.size())},
+            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
             {"p", session::config::dict{
                 /*version*/         {"@", proof.version},
                 /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
