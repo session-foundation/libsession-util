@@ -200,40 +200,33 @@ struct file_metadata {
     std::chrono::system_clock::time_point expiry;
 };
 
-struct UploadRequest {
+struct FileTransferRequest {
+    std::chrono::milliseconds stall_timeout;
+    std::chrono::milliseconds request_timeout;
+    std::optional<std::chrono::milliseconds> overall_timeout;
+    std::optional<int8_t> desired_path_index;
+    std::shared_ptr<CancellationToken> cancellation_token;
+
+    bool is_cancelled() const { return cancellation_token && cancellation_token->is_cancelled(); }
+
+    // Called when transfer completes (file_metadata) or fails (int16_t error code)
+    std::function<void(std::variant<file_metadata, int16_t> result, bool timeout)> on_complete;
+};
+
+struct UploadRequest : FileTransferRequest {
     std::function<std::vector<unsigned char>()> next_data;
     std::optional<std::string> file_name;
     std::optional<uint64_t> ttl;
-    std::chrono::milliseconds stall_timeout;
-    std::chrono::milliseconds request_timeout;
-    std::optional<std::chrono::milliseconds> overall_timeout;
-    std::optional<int8_t> desired_path_index;
-    std::shared_ptr<CancellationToken> cancellation_token;
-
-    // Called when upload completes (success) or fails (error code)
-    std::function<void(std::variant<file_metadata, int16_t> result, bool timeout)> on_complete;
-
-    bool is_cancelled() const { return cancellation_token && cancellation_token->is_cancelled(); }
 };
 
-struct DownloadRequest {
+struct DownloadRequest : FileTransferRequest {
     std::string download_url;
-    std::chrono::milliseconds stall_timeout;
-    std::chrono::milliseconds request_timeout;
-    std::optional<std::chrono::milliseconds> overall_timeout;
-    std::optional<int8_t> desired_path_index;
-    std::shared_ptr<CancellationToken> cancellation_token;
 
     // Called as data arrives (can be called multiple times)
     std::function<void(const file_metadata& info, std::vector<unsigned char> data)> on_data;
 
-    // Called when download completes (success) or fails (error code)
-    std::function<void(std::variant<file_metadata, int16_t> result, bool timeout)> on_complete;
-
     // Minimum interval between on_data calls (to control callback overhead vs memory usage)
     std::chrono::milliseconds partial_min_interval = 250ms;
-
-    bool is_cancelled() const { return cancellation_token && cancellation_token->is_cancelled(); }
 };
 
 using node_failure_reporter_t = std::function<void(const ed25519_pubkey&, bool)>;
