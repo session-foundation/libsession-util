@@ -448,7 +448,7 @@ void Network::send_request(Request request, network_response_callback_t callback
                     int16_t final_status_code = status_code;
 
                     if (body)
-                        if (auto uniform_error = Response::find_uniform_batch_error(*body))
+                        if (auto uniform_error = response::find_uniform_batch_error(*body))
                             final_status_code = *uniform_error;
 
                     // If we got a 406 from a snode, or a 425 from a server, then the device clock
