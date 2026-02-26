@@ -121,28 +121,28 @@ void SessionRouter::_init() {
 
         srouter = std::make_shared<session::router::SessionRouter>(test_ini, _loop);
         srouter->on_connected(
-                [weak_self = weak_from_this()] {
+                [weak_self = weak_from_this(), this] {
                     auto self = weak_self.lock();
                     if (!self)
                         return;
 
-                    auto snode_pool = self->_snode_pool.lock();
+                    auto snode_pool = _snode_pool.lock();
                     if (!snode_pool)
                         return;
 
                     if (snode_pool->size() == 0)
-                        snode_pool->refresh_if_needed({}, [weak_self] {
+                        snode_pool->refresh_if_needed({}, [weak_self, this] {
                             auto self = weak_self.lock();
                             if (!self)
                                 return;
 
-                            self->_loop->call([weak_self] {
+                            _loop->call([weak_self] {
                                 if (auto self = weak_self.lock())
                                     self->_finish_setup();
                             });
                         });
                     else
-                        self->_finish_setup();
+                        _finish_setup();
                 },
                 /*with_path*/ true,
                 /*persist*/ false);
@@ -441,13 +441,14 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
         snode_pool->refresh_if_needed(
                 {},
                 [weak_self = weak_from_this(),
+                 this,
                  req = std::move(request),
                  cb = std::move(callback)]() {
                     auto self = weak_self.lock();
                     if (!self)
                         return;
 
-                    auto snode_pool = self->_snode_pool.lock();
+                    auto snode_pool = _snode_pool.lock();
                     if (!snode_pool)
                         return cb(
                                 false,
@@ -468,7 +469,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
                             cat,
                             "[Request {}]: SnodePool refresh complete, retrying proxy selection.",
                             req.request_id);
-                    self->_send_proxy_request(std::move(req), std::move(cb));
+                    _send_proxy_request(std::move(req), std::move(cb));
                 });
         return;
     }
@@ -548,6 +549,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
     // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
     // disk should be prioritised)
     std::thread([weak_self = weak_from_this(),
+                 this,
                  upload_request = request,
                  upload_id,
                  file_server_config = _config.file_server_config] {
@@ -561,7 +563,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
             Request request =
                     file_server::to_request(upload_id, file_server_config, upload_request);
 
-            self->_loop->call([weak_self, upload_request, req = std::move(request), upload_id] {
+            _loop->call([weak_self, this, upload_request, req = std::move(request), upload_id] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
@@ -569,7 +571,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-                    self->_active_uploads.erase(upload_id);
+                    _active_uploads.erase(upload_id);
                     return;
                 }
 
@@ -580,9 +582,9 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                         upload_id,
                         upload_size);
 
-                self->_send_request_internal(
+                _send_request_internal(
                         std::move(req),
-                        [weak_self, upload_id, upload_request, upload_size](
+                        [weak_self, this, upload_id, upload_request, upload_size](
                                 bool success,
                                 bool timeout,
                                 int16_t status_code,
@@ -592,7 +594,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                             if (!self)
                                 return;
 
-                            self->_active_uploads.erase(upload_id);
+                            _active_uploads.erase(upload_id);
 
                             try {
                                 if (upload_request.is_cancelled())
@@ -639,14 +641,14 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                         });
             });
         } catch (const std::exception& e) {
-            self->_loop->call([weak_self, upload_request, upload_id, err = e.what()] {
+            _loop->call([weak_self, this, upload_request, upload_id, err = e.what()] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
                 log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
                 upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
-                self->_active_uploads.erase(upload_id);
+                _active_uploads.erase(upload_id);
             });
         }
     }).detach();
@@ -662,7 +664,7 @@ void SessionRouter::_download_internal(DownloadRequest request) {
 
         send_request(
                 std::move(req),
-                [weak_self = weak_from_this(), download_id, request](
+                [weak_self = weak_from_this(), this, download_id, request](
                         bool success,
                         bool timeout,
                         int16_t status_code,
@@ -672,7 +674,7 @@ void SessionRouter::_download_internal(DownloadRequest request) {
                     if (!self)
                         return;
 
-                    self->_active_downloads.erase(download_id);
+                    _active_downloads.erase(download_id);
 
                     try {
                         if (request.is_cancelled())
@@ -791,7 +793,7 @@ void SessionRouter::_establish_tunnel(
     srouter->establish_udp(
             srouter_address,
             test_port,
-            [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
+            [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](
                     router::tunnel_info info) mutable {
                 auto self = weak_self.lock();
                 if (!self)
@@ -803,12 +805,12 @@ void SessionRouter::_establish_tunnel(
                         initiating_req_id,
                         address_pubkey_hex);
 
-                auto requests_to_process = std::move(self->_pending_requests[address_pubkey_hex]);
-                self->_pending_requests.erase(address_pubkey_hex);
-                self->_active_tunnels.insert_or_assign(address_pubkey_hex, info);
+                auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
+                _pending_requests.erase(address_pubkey_hex);
+                _active_tunnels.insert_or_assign(address_pubkey_hex, info);
 
                 // We had a successful connection so update the status to connected
-                self->_update_status(ConnectionStatus::connected);
+                _update_status(ConnectionStatus::connected);
 
                 if (!requests_to_process.empty()) {
                     log::debug(
@@ -818,10 +820,10 @@ void SessionRouter::_establish_tunnel(
                             info.remote);
 
                     for (auto&& [req, cb] : std::move(requests_to_process))
-                        self->_send_via_tunnel(info, std::move(req), std::move(cb));
+                        _send_via_tunnel(info, std::move(req), std::move(cb));
                 }
             },
-            [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id]() mutable {
+            [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id]() mutable {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
@@ -832,13 +834,13 @@ void SessionRouter::_establish_tunnel(
                         initiating_req_id,
                         address_pubkey_hex);
 
-                self->_active_tunnels.erase(address_pubkey_hex);
+                _active_tunnels.erase(address_pubkey_hex);
 
                 // Fail all the pending requests for this connection
-                if (auto it = self->_pending_requests.find(address_pubkey_hex);
-                    it != self->_pending_requests.end()) {
+                if (auto it = _pending_requests.find(address_pubkey_hex);
+                    it != _pending_requests.end()) {
                     auto to_fail = std::move(it->second);
-                    self->_pending_requests.erase(it);
+                    _pending_requests.erase(it);
 
                     log::error(
                             cat,
@@ -854,8 +856,8 @@ void SessionRouter::_establish_tunnel(
                 }
 
                 // If we have no longer have any active connections then we are disconnected
-                if (self->_active_tunnels.empty())
-                    self->_update_status(ConnectionStatus::disconnected);
+                if (_active_tunnels.empty())
+                    _update_status(ConnectionStatus::disconnected);
             });
 }
 

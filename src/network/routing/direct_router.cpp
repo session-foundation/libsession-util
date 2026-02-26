@@ -133,6 +133,7 @@ void DirectRouter::_upload_internal(UploadRequest request) {
     // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
     // disk should be prioritised)
     std::thread([weak_self = weak_from_this(),
+                 this,
                  upload_request = request,
                  upload_id,
                  file_server_config = _config.file_server_config] {
@@ -146,7 +147,7 @@ void DirectRouter::_upload_internal(UploadRequest request) {
             Request request =
                     file_server::to_request(upload_id, file_server_config, upload_request);
 
-            self->_loop->call([weak_self, upload_request, req = std::move(request), upload_id] {
+            _loop->call([weak_self, this, upload_request, req = std::move(request), upload_id] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
@@ -165,9 +166,9 @@ void DirectRouter::_upload_internal(UploadRequest request) {
                         upload_id,
                         upload_size);
 
-                self->_send_request_internal(
+                _send_request_internal(
                         std::move(req),
-                        [weak_self, upload_id, upload_request, upload_size](
+                        [weak_self, this, upload_id, upload_request, upload_size](
                                 bool success,
                                 bool timeout,
                                 int16_t status_code,
@@ -177,7 +178,7 @@ void DirectRouter::_upload_internal(UploadRequest request) {
                             if (!self)
                                 return;
 
-                            self->_active_uploads.erase(upload_id);
+                            _active_uploads.erase(upload_id);
 
                             try {
                                 if (upload_request.is_cancelled())
@@ -224,14 +225,14 @@ void DirectRouter::_upload_internal(UploadRequest request) {
                         });
             });
         } catch (const std::exception& e) {
-            self->_loop->call([weak_self, upload_request, upload_id, err = e.what()] {
+            _loop->call([weak_self, this, upload_request, upload_id, err = e.what()] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
                 log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
                 upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
-                self->_active_uploads.erase(upload_id);
+                _active_uploads.erase(upload_id);
             });
         }
     }).detach();
@@ -247,7 +248,7 @@ void DirectRouter::_download_internal(DownloadRequest request) {
 
         send_request(
                 std::move(req),
-                [weak_self = weak_from_this(), download_id, request](
+                [weak_self = weak_from_this(), this, download_id, request](
                         bool success,
                         bool timeout,
                         int16_t status_code,
@@ -257,7 +258,7 @@ void DirectRouter::_download_internal(DownloadRequest request) {
                     if (!self)
                         return;
 
-                    self->_active_downloads.erase(download_id);
+                    _active_downloads.erase(download_id);
 
                     try {
                         if (request.is_cancelled())

@@ -828,6 +828,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
     // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
     // disk should be prioritised)
     std::thread([weak_self = weak_from_this(),
+                 this,
                  upload_request = request,
                  upload_id,
                  file_server_config = _config.file_server_config] {
@@ -841,7 +842,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
             Request request =
                     file_server::to_request(upload_id, file_server_config, upload_request);
 
-            self->_loop->call([weak_self, upload_request, req = std::move(request), upload_id] {
+            _loop->call([weak_self, this, upload_request, req = std::move(request), upload_id] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
@@ -849,7 +850,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                 if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-                    self->_active_uploads.erase(upload_id);
+                    _active_uploads.erase(upload_id);
                     return;
                 }
 
@@ -860,9 +861,9 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                         upload_id,
                         upload_size);
 
-                self->_send_request_internal(
+                _send_request_internal(
                         std::move(req),
-                        [weak_self, upload_id, upload_request, upload_size](
+                        [weak_self, this, upload_id, upload_request, upload_size](
                                 bool success,
                                 bool timeout,
                                 int16_t status_code,
@@ -872,7 +873,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                             if (!self)
                                 return;
 
-                            self->_active_uploads.erase(upload_id);
+                            _active_uploads.erase(upload_id);
 
                             try {
                                 if (upload_request.is_cancelled())
@@ -919,14 +920,14 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                         });
             });
         } catch (const std::exception& e) {
-            self->_loop->call([weak_self, upload_request, upload_id, err = e.what()] {
+            _loop->call([weak_self, this, upload_request, upload_id, err = e.what()] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
                 log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
                 upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
-                self->_active_uploads.erase(upload_id);
+                _active_uploads.erase(upload_id);
             });
         }
     }).detach();
@@ -942,7 +943,7 @@ void OnionRequestRouter::_download_internal(DownloadRequest request) {
 
         send_request(
                 std::move(req),
-                [weak_self = weak_from_this(), download_id, request](
+                [weak_self = weak_from_this(), this, download_id, request](
                         bool success,
                         bool timeout,
                         int16_t status_code,
@@ -952,7 +953,7 @@ void OnionRequestRouter::_download_internal(DownloadRequest request) {
                     if (!self)
                         return;
 
-                    self->_active_downloads.erase(download_id);
+                    _active_downloads.erase(download_id);
 
                     try {
                         if (request.is_cancelled())
@@ -1096,7 +1097,11 @@ void OnionRequestRouter::_build_path(
 
         snode_pool->refresh_if_needed(
                 nodes_to_exclude,
-                [weak_self = weak_from_this(), category, initiating_req_id, nodes_to_exclude]() {
+                [weak_self = weak_from_this(),
+                 this,
+                 category,
+                 initiating_req_id,
+                 nodes_to_exclude]() {
                     auto self = weak_self.lock();
                     if (!self)
                         return;
@@ -1105,7 +1110,7 @@ void OnionRequestRouter::_build_path(
                             cat,
                             "[Request {}]: SnodePool refresh complete, retrying path build.",
                             initiating_req_id.value_or("internal"));
-                    self->_build_path(category, initiating_req_id, nodes_to_exclude);
+                    _build_path(category, initiating_req_id, nodes_to_exclude);
                 });
         return;
     }
@@ -1342,7 +1347,7 @@ void OnionRequestRouter::_on_edge_connectivity_response(
 
     transport->add_failure_listener(
             ed25519_pubkey::from_bytes(edge_node.view_remote_key()),
-            [weak_self = weak_from_this(), pid = path_id, category] {
+            [weak_self = weak_from_this(), this, pid = path_id, category] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
@@ -1354,16 +1359,16 @@ void OnionRequestRouter::_on_edge_connectivity_response(
 
                 // Set the strike_count of the path to the max value and report the error
                 // to trigger a rebuild
-                auto& active_paths = self->_paths[category];
+                auto& active_paths = _paths[category];
                 auto path_it = std::find_if(
                         active_paths.begin(), active_paths.end(), [&pid](const auto& p) {
                             return p.id == pid;
                         });
 
                 if (path_it != active_paths.end())
-                    path_it->strike_count = self->_config.path_strike_threshold;
+                    path_it->strike_count = _config.path_strike_threshold;
 
-                self->_handle_path_failure(pid, category, {});
+                _handle_path_failure(pid, category, {});
             });
 }
 
@@ -1490,6 +1495,7 @@ void OnionRequestRouter::_send_on_path(
     }
 
     auto decryption_callback = [weak_self = weak_from_this(),
+                                this,
                                 parser = std::move(parser),
                                 path_id = path.id,
                                 original_request = std::move(request),
@@ -1512,7 +1518,7 @@ void OnionRequestRouter::_send_on_path(
                 throw std::runtime_error{"Unexpected empty response"};
 
             onionreq::DecryptedResponse decrypted = parser->decrypted_response(*response);
-            self->_handle_transport_response(
+            _handle_transport_response(
                     path_id,
                     std::move(original_request),
                     true,
@@ -1522,7 +1528,7 @@ void OnionRequestRouter::_send_on_path(
                     std::move(decrypted.body),
                     std::move(cb));
         } catch (const std::exception& e) {
-            self->_handle_transport_response(
+            _handle_transport_response(
                     path_id,
                     std::move(original_request),
                     false,
@@ -2098,13 +2104,13 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
     _send_on_path(
             pending_rotation.new_path,
             std::move(info_request),
-            [weak_self = weak_from_this(), new_path_id, rotate_at = std::move(rotate_at)](
+            [weak_self = weak_from_this(), this, new_path_id, rotate_at = std::move(rotate_at)](
                     bool success, bool timeout, int16_t status, auto headers, auto response) {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
-                self->_on_rotation_verification_response(
+                _on_rotation_verification_response(
                         new_path_id, success, timeout, status, rotate_at);
             });
 }

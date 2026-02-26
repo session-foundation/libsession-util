@@ -104,6 +104,7 @@ void QuicTransport::verify_connectivity(
     // For Quic, a successful connection IS a successful ping so we can just check for an existing
     // connection and, if one doesn't exist, try to establish one
     _loop->call([weak_self = weak_from_this(),
+                 this,
                  node = std::move(node),
                  cb = std::move(callback),
                  request_id,
@@ -115,16 +116,15 @@ void QuicTransport::verify_connectivity(
         const auto pubkey_hex = node.remote_pubkey.hex();
 
         // If we already have a connection we can stop here
-        if (self->_active_connection_ids.count(pubkey_hex) ||
-            self->_pending_requests.count(pubkey_hex))
+        if (_active_connection_ids.count(pubkey_hex) || _pending_requests.count(pubkey_hex))
             return cb(true, std::nullopt);
 
-        self->_pending_verification_callbacks[pubkey_hex].push_back(std::move(cb));
+        _pending_verification_callbacks[pubkey_hex].push_back(std::move(cb));
 
         // Only try to establish a connection if we are the first to ask for one
-        if (self->_pending_requests.count(pubkey_hex) == 0 &&
-            self->_pending_verification_callbacks.at(pubkey_hex).size() == 1)
-            self->_establish_connection(
+        if (_pending_requests.count(pubkey_hex) == 0 &&
+            _pending_verification_callbacks.at(pubkey_hex).size() == 1)
+            _establish_connection(
                     {node.remote_pubkey, node.host(), node.omq_port}, request_id, category);
     });
 }
@@ -328,7 +328,7 @@ void QuicTransport::_establish_connection(
                 oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
                 oxen::quic::opt::max_streams{static_cast<uint64_t>(max_streams(category, _config))},
-                [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
+                [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](
                         oxen::quic::Connection& conn) {
                     auto self = weak_self.lock();
                     if (!self)
@@ -344,12 +344,11 @@ void QuicTransport::_establish_connection(
                     auto conn_id = conn.reference_id();
                     auto stream_id = stream->stream_id();
                     auto verification_callbacks =
-                            std::move(self->_pending_verification_callbacks[address_pubkey_hex]);
-                    self->_pending_verification_callbacks.erase(address_pubkey_hex);
+                            std::move(_pending_verification_callbacks[address_pubkey_hex]);
+                    _pending_verification_callbacks.erase(address_pubkey_hex);
 
-                    auto requests_to_process =
-                            std::move(self->_pending_requests[address_pubkey_hex]);
-                    self->_pending_requests.erase(address_pubkey_hex);
+                    auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
+                    _pending_requests.erase(address_pubkey_hex);
 
                     // Only persistent requests verify connectivity so if there is a
                     // verification callback then it should be persistent, otherwise if ANY of
@@ -365,15 +364,15 @@ void QuicTransport::_establish_connection(
                                 });
 
                     if (is_persistent) {
-                        self->_ephemeral_connection_ids.erase(conn_id);  // Just in case
-                        self->_active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
+                        _ephemeral_connection_ids.erase(conn_id);  // Just in case
+                        _active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
                     } else
-                        self->_ephemeral_connection_ids.insert(conn_id);
+                        _ephemeral_connection_ids.insert(conn_id);
 
-                    self->_reserved_stream_ids.insert_or_assign(conn_id, stream_id);
+                    _reserved_stream_ids.insert_or_assign(conn_id, stream_id);
 
                     // We had a successful connection so update the status to connected
-                    self->_update_status(ConnectionStatus::connected);
+                    _update_status(ConnectionStatus::connected);
 
                     for (const auto& pending_cb : verification_callbacks)
                         pending_cb(true, std::nullopt);
@@ -387,7 +386,7 @@ void QuicTransport::_establish_connection(
                                 conn_id.to_string());
 
                         for (auto&& [req, cb] : std::move(requests_to_process))
-                            self->_send_on_connection(conn_id, std::move(req), std::move(cb));
+                            _send_on_connection(conn_id, std::move(req), std::move(cb));
                     }
                 },
                 [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
@@ -527,6 +526,7 @@ void QuicTransport::_send_on_connection(
             payload,
             timeout,
             [weak_self = weak_from_this(),
+             this,
              cb = std::move(callback),
              conn_id,
              req_id = request.request_id](quic::message resp) {
@@ -538,11 +538,11 @@ void QuicTransport::_send_on_connection(
 
                 // If this connection was an ephemeral connection then we should close it (don't
                 // want to keep it alive longer than needed)
-                if (self->_ephemeral_connection_ids.erase(conn_id)) {
-                    self->_reserved_stream_ids.erase(conn_id);
+                if (_ephemeral_connection_ids.erase(conn_id)) {
+                    _reserved_stream_ids.erase(conn_id);
 
-                    if (self->_endpoint)
-                        if (auto conn = self->_endpoint->get_conn(conn_id))
+                    if (_endpoint)
+                        if (auto conn = _endpoint->get_conn(conn_id))
                             conn->close_connection();
                 }
 

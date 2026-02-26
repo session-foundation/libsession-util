@@ -449,7 +449,7 @@ void SnodePool::_launch_next_refresh_request(
                     "trying again in {}ms.",
                     target_request_id,
                     delay.count());
-            _loop->call_later(delay, [weak_self = weak_from_this()] {
+            _loop->call_later(delay, [weak_self = weak_from_this(), this] {
                 // We need to wait until after the `call_later` to reset the `refresh_id` (and clear
                 // previous results) as if we don't then additional refreshes could be triggered
                 // during the delay
@@ -457,9 +457,9 @@ void SnodePool::_launch_next_refresh_request(
                 if (!self)
                     return;
 
-                self->_current_snode_cache_refresh_id.reset();
-                self->_snode_refresh_results.clear();
-                self->_refresh_snode_cache();
+                _current_snode_cache_refresh_id.reset();
+                _snode_refresh_results.clear();
+                _refresh_snode_cache();
             });
             return;
         }

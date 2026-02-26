@@ -436,6 +436,7 @@ void Network::send_request(Request request, network_response_callback_t callback
         auto processed_request = _preprocess_request(std::move(request));
         auto router_callback =
                 [weak_self = weak_from_this(),
+                 this,
                  original_req = processed_request,
                  cb = std::move(callback)](
                         bool success, bool timeout, int16_t status_code, auto headers, auto body) {
@@ -452,7 +453,7 @@ void Network::send_request(Request request, network_response_callback_t callback
                     // include values in different formats, eg. the "Session Network" API returns
                     // `t` in seconds)
                     if (success && body && dest_is_snode)
-                        self->_update_network_state(*body);
+                        _update_network_state(*body);
 
                     int16_t final_status_code = status_code;
 
@@ -472,7 +473,7 @@ void Network::send_request(Request request, network_response_callback_t callback
                     // cache, the original request might succeed after this refresh so we should
                     // just automatically retry
                     if (final_status_code == 421) {
-                        self->_handle_421_retry(std::move(original_req), std::move(cb));
+                        _handle_421_retry(std::move(original_req), std::move(cb));
                         return;
                     }
 
@@ -513,7 +514,7 @@ void Network::upload(UploadRequest request) {
     }
 
     auto user_callback = request.on_complete;
-    request.on_complete = [weak_self = weak_from_this(), user_callback](
+    request.on_complete = [weak_self = weak_from_this(), this, user_callback](
                                   std::variant<file_metadata, int16_t> result, bool timeout) {
         auto self = weak_self.lock();
         if (!self)
@@ -526,7 +527,7 @@ void Network::upload(UploadRequest request) {
             // request
             if (*status_code == ERROR_TOO_EARLY) {
                 log::info(cat, "Upload received 425, triggering clock resync.");
-                self->_resync_clock(std::nullopt, std::nullopt);
+                _resync_clock(std::nullopt, std::nullopt);
 
                 // Can't retry an upload as the data stream has already been consumed, so
                 // just return the error
@@ -562,7 +563,7 @@ void Network::download(DownloadRequest request) {
     }
 
     auto user_callback = request.on_complete;
-    request.on_complete = [weak_self = weak_from_this(), user_callback, req = request](
+    request.on_complete = [weak_self = weak_from_this(), this, user_callback, req = request](
                                   std::variant<file_metadata, int16_t> result, bool timeout) {
         auto self = weak_self.lock();
         if (!self)
@@ -575,13 +576,13 @@ void Network::download(DownloadRequest request) {
                 log::info(cat, "Download received 425, triggering clock resync and retrying.");
 
                 // We want to automatically retry the download after the resync so store the request
-                if (!self->_clock_resync_download_queue)
-                    self->_clock_resync_download_queue = std::make_shared<std::vector<std::pair<
+                if (!_clock_resync_download_queue)
+                    _clock_resync_download_queue = std::make_shared<std::vector<std::pair<
                             DownloadRequest,
                             std::function<void(std::variant<file_metadata, int16_t>, bool)>>>>();
 
-                self->_clock_resync_download_queue->emplace_back(req, user_callback);
-                self->_resync_clock(std::nullopt, std::nullopt);
+                _clock_resync_download_queue->emplace_back(req, user_callback);
+                _resync_clock(std::nullopt, std::nullopt);
                 return;
             }
         }
