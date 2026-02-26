@@ -291,8 +291,8 @@ OnionRequestRouter::OnionRequestRouter(
         _transport{transport} {
     log::trace(cat, "Initializing.");
 
-    _request_queues[PathCategory::standard] = std::make_shared<detail::RequestQueue>(_loop);
-    _request_queues[PathCategory::file] = std::make_shared<detail::RequestQueue>(_loop);
+    _request_queues[PathCategory::standard] = detail::RequestQueue::make(_loop);
+    _request_queues[PathCategory::file] = detail::RequestQueue::make(_loop);
 
     if (_config.cache_directory) {
         std::string cache_file_name;

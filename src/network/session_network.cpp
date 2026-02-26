@@ -204,7 +204,7 @@ Network::Network(config::Config _conf) :
             break;
 
         case opt::router::Type::session_router:
-            _router = SessionRouter::create(
+            _router = SessionRouter::make(
                     std::move(build_session_router_config(config, file_server_config)),
                     _loop,
                     _snode_pool,
@@ -876,7 +876,7 @@ void Network::_resync_clock(
     if (original_request && request_callback) {
         // If we don't have a resync request queue then create one
         if (!_clock_resync_request_queue)
-            _clock_resync_request_queue = std::make_shared<detail::RequestQueue>(_loop);
+            _clock_resync_request_queue = detail::RequestQueue::make(_loop);
 
         _clock_resync_request_queue->add(
                 std::move(*original_request), std::move(*request_callback));
@@ -927,10 +927,9 @@ void Network::_launch_next_clock_out_of_sync_request(
             std::nullopt,
             RequestCategory::standard,
             10s,
-            std::nullopt,      // overall_timeout
-            std::nullopt,      // desired_path_index
-            std::monostate{},  // details
-            false              // ephemeral_connection
+            std::nullopt,     // overall_timeout
+            std::nullopt,     // desired_path_index
+            std::monostate{}  // details
     };
 
     auto start = std::chrono::steady_clock::now();

@@ -35,9 +35,7 @@ class QuicTransport : public ITransport, public std::enable_shared_from_this<Qui
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::shared_ptr<oxen::quic::Endpoint> _endpoint;
 
-    std::unordered_set<oxen::quic::ConnectionID> _ephemeral_connection_ids;
     std::unordered_map<std::string, oxen::quic::ConnectionID> _active_connection_ids;
-    std::unordered_map<oxen::quic::ConnectionID, int64_t> _reserved_stream_ids;
     std::unordered_map<std::string, std::vector<std::function<void(bool, std::optional<uint64_t>)>>>
             _pending_verification_callbacks;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>

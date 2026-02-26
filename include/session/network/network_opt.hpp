@@ -39,7 +39,7 @@ namespace opt {
         std::vector<service_node> seed_nodes;
 
       private:
-        explicit netid(Target t, std::vector<service_node> seed_nodes = {}) :
+        netid(Target t, std::vector<service_node> seed_nodes = {}) :
                 target{t}, seed_nodes{std::move(seed_nodes)} {}
 
       public:
@@ -145,7 +145,7 @@ namespace opt {
         Type type;
 
       private:
-        explicit router(Type t) : type{t} {}
+        router(Type t) : type{t} {}
 
       public:
         router() = delete;
@@ -165,7 +165,7 @@ namespace opt {
         Type type;
 
       private:
-        explicit transport(Type t) : type{t} {}
+        transport(Type t) : type{t} {}
 
       public:
         transport() = delete;
@@ -177,28 +177,28 @@ namespace opt {
     struct file_server_scheme : base {
         std::string scheme;
 
-        explicit file_server_scheme(std::string scheme) : scheme{scheme} {}
+        file_server_scheme(std::string scheme) : scheme{scheme} {}
     };
 
     /// Can be used to override the default file server host.
     struct file_server_host : base {
         std::string host;
 
-        explicit file_server_host(std::string host) : host{host} {}
+        file_server_host(std::string host) : host{host} {}
     };
 
     /// Can be used to override the default file server port.
     struct file_server_port : base {
         uint16_t port;
 
-        explicit file_server_port(uint16_t port) : port{port} {}
+        file_server_port(uint16_t port) : port{port} {}
     };
 
     /// Can be used to override the default file server pubkey.
     struct file_server_pubkey_hex : base {
         std::string pubkey_hex;
 
-        explicit file_server_pubkey_hex(std::string pubkey_hex) : pubkey_hex{pubkey_hex} {}
+        file_server_pubkey_hex(std::string pubkey_hex) : pubkey_hex{pubkey_hex} {}
     };
 
     /// Can be used to override the default file server max file size.
@@ -208,7 +208,7 @@ namespace opt {
     struct file_server_max_file_size : base {
         uint64_t max_file_size;
 
-        explicit file_server_max_file_size(uint16_t max_file_size) : max_file_size{max_file_size} {}
+        file_server_max_file_size(uint16_t max_file_size) : max_file_size{max_file_size} {}
     };
 
     /// Can be used to override the default (false) flag indicating whether files uploaded to the
@@ -228,7 +228,7 @@ namespace opt {
     struct path_length : base {
         uint8_t length;
 
-        explicit path_length(uint8_t length) : length{length} {}
+        path_length(uint8_t length) : length{length} {}
     };
 
     /// Can be used to prevent the code from excluding nodes within the same `/24` subnet from being
@@ -240,15 +240,14 @@ namespace opt {
     struct redirect_retry_count : base {
         uint8_t count;
 
-        explicit redirect_retry_count(uint8_t count) : count{count} {}
+        redirect_retry_count(uint8_t count) : count{count} {}
     };
 
     struct retry_delay : base {
         std::chrono::milliseconds base_delay;
         std::chrono::milliseconds max_delay;
 
-        explicit retry_delay(
-                std::chrono::milliseconds base_delay, std::chrono::milliseconds max_delay) :
+        retry_delay(std::chrono::milliseconds base_delay, std::chrono::milliseconds max_delay) :
                 base_delay{base_delay}, max_delay{max_delay} {}
 
         /// API: retry_delay/exponential
@@ -262,8 +261,8 @@ namespace opt {
             if (failure_count <= 0)
                 return base_delay;
 
-            double delay_ms = base_delay.count() * std::pow(2.0, failure_count - 1);
-            auto final_delay = std::chrono::milliseconds(static_cast<long long>(delay_ms));
+            auto delay = base_delay * std::pow(2.0, failure_count - 1);
+            auto final_delay = std::chrono::floor<std::chrono::milliseconds>(delay);
 
             return std::min(final_delay, max_delay);
         }
@@ -274,7 +273,7 @@ namespace opt {
     struct num_nodes_to_check_for_network_offset : base {
         uint8_t count;
 
-        explicit num_nodes_to_check_for_network_offset(uint8_t count) : count{count} {}
+        num_nodes_to_check_for_network_offset(uint8_t count) : count{count} {}
     };
 
     /// Can be used to override the default (10min) minimum duration that needs to pass before a
@@ -282,8 +281,7 @@ namespace opt {
     struct min_resume_clock_resync_interval : base {
         std::chrono::minutes duration;
 
-        explicit min_resume_clock_resync_interval(std::chrono::minutes duration) :
-                duration{duration} {}
+        min_resume_clock_resync_interval(std::chrono::minutes duration) : duration{duration} {}
     };
 
     // MARK: Snode Pool Options
@@ -292,14 +290,14 @@ namespace opt {
     /// pool and session router bootstrap).
     struct cache_directory : base {
         fs::path path;
-        explicit cache_directory(fs::path p) : path{p} {}
+        cache_directory(fs::path p) : path{p} {}
     };
 
     /// Can be used to override the default (2h) duration that the snode cache can be used for
     /// before it needs to be refreshed.
     struct cache_expiration : base {
         std::chrono::minutes duration;
-        explicit cache_expiration(std::chrono::minutes duration) : duration{duration} {}
+        cache_expiration(std::chrono::minutes duration) : duration{duration} {}
     };
 
     /// Can be used to override the default (2s) minimum duration that the snode cache should live
@@ -307,7 +305,7 @@ namespace opt {
     /// duration has passed to prevent excessive looping.
     struct cache_min_lifetime : base {
         std::chrono::milliseconds duration;
-        explicit cache_min_lifetime(std::chrono::milliseconds duration) : duration{duration} {}
+        cache_min_lifetime(std::chrono::milliseconds duration) : duration{duration} {}
     };
 
     /// Can be used to override the default (12) minimum number of unused nodes before we trigger a
@@ -318,7 +316,7 @@ namespace opt {
     /// the size of a single path.
     struct cache_min_size : base {
         size_t size;
-        explicit cache_min_size(size_t size) : size{size} {}
+        cache_min_size(size_t size) : size{size} {}
     };
 
     /// Can be used to override the default (3) minimum number of nodes to return in a swarm, if
@@ -326,7 +324,7 @@ namespace opt {
     /// are over the threshold will be included until this minimum count is met.
     struct cache_min_swarm_size : base {
         size_t size;
-        explicit cache_min_swarm_size(size_t size) : size{size} {}
+        cache_min_swarm_size(size_t size) : size{size} {}
     };
 
     /// Can be used to override the default (3) number of cached nodes used to refresh the cache for
@@ -336,7 +334,7 @@ namespace opt {
     /// seed node.
     struct cache_num_nodes_to_use_for_refresh : base {
         uint8_t count;
-        explicit cache_num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
+        cache_num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
     };
 
     /// Can be used to override the default (2) number of refresh requests a node must be present in
@@ -346,7 +344,7 @@ namespace opt {
     /// value of `1`.
     struct cache_min_num_refresh_presence_to_include_node : base {
         uint8_t count;
-        explicit cache_min_num_refresh_presence_to_include_node(uint8_t count) : count{count} {}
+        cache_min_num_refresh_presence_to_include_node(uint8_t count) : count{count} {}
     };
 
     /// Can be used to override the default (3) number of times a specific node in a path can
@@ -354,12 +352,12 @@ namespace opt {
     /// is rebuilt if it happens to be the edge node).
     struct cache_node_strike_threshold : base {
         uint16_t count;
-        explicit cache_node_strike_threshold(uint16_t count) : count{count} {}
+        cache_node_strike_threshold(uint16_t count) : count{count} {}
     };
 
     /// Can be used to make the snode cache use the legacy endpoint when refreshing.
     struct cache_refresh_using_legacy_endpoint : base {
-        explicit cache_refresh_using_legacy_endpoint() {}
+        cache_refresh_using_legacy_endpoint() {}
     };
 
     // MARK: Quic Transport Options
@@ -367,13 +365,13 @@ namespace opt {
     /// Can be used to override the default (10s) handshake timeout duration for Quic connections.
     struct quic_handshake_timeout : base {
         std::chrono::milliseconds duration;
-        explicit quic_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
+        quic_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
     };
 
     /// Can be used to override the default (0ms) keep alive duration for Quic connections.
     struct quic_keep_alive : base {
         std::chrono::seconds duration;
-        explicit quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
+        quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
     };
 
     /// Can be used to disable Quic MTU discovery.
@@ -388,7 +386,7 @@ namespace opt {
         RequestCategory category;
         uint8_t max_count;
 
-        explicit quic_max_streams(RequestCategory category, uint8_t max_count) :
+        quic_max_streams(RequestCategory category, uint8_t max_count) :
                 category{category}, max_count{max_count} {}
     };
 
@@ -399,7 +397,7 @@ namespace opt {
     struct onionreq_path_strike_threshold : base {
         uint16_t count;
 
-        explicit onionreq_path_strike_threshold(uint16_t count) : count{count} {}
+        onionreq_path_strike_threshold(uint16_t count) : count{count} {}
     };
 
     /// Can be used to override the default (3) number of times a path can receive an error before
@@ -407,7 +405,7 @@ namespace opt {
     struct onionreq_path_build_retry_limit : base {
         uint16_t count;
 
-        explicit onionreq_path_build_retry_limit(uint16_t count) : count{count} {}
+        onionreq_path_build_retry_limit(uint16_t count) : count{count} {}
     };
 
     /// Can be used to override the default (2) minimum number of paths that are maintained for each
@@ -417,7 +415,7 @@ namespace opt {
         PathCategory category;
         uint8_t min_count;
 
-        explicit onionreq_min_path_count(PathCategory category, uint8_t min_count) :
+        onionreq_min_path_count(PathCategory category, uint8_t min_count) :
                 category{category}, min_count{min_count} {}
     };
 
@@ -434,15 +432,13 @@ namespace opt {
     /// Can be used to override the default (10min) frequency that onion request paths are rotated.
     struct onionreq_path_rotation_frequency : base {
         std::chrono::minutes duration;
-        explicit onionreq_path_rotation_frequency(std::chrono::minutes duration) :
-                duration{duration} {}
+        onionreq_path_rotation_frequency(std::chrono::minutes duration) : duration{duration} {}
     };
 
     /// Can be used to override the default (10d) duration that edge nodes are reused for.
     struct onionreq_edge_node_cache_duration : base {
         std::chrono::days duration;
-        explicit onionreq_edge_node_cache_duration(std::chrono::days duration) :
-                duration{duration} {}
+        onionreq_edge_node_cache_duration(std::chrono::days duration) : duration{duration} {}
     };
 
 }  //  namespace opt

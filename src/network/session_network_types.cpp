@@ -19,8 +19,7 @@ Request::Request(
         std::chrono::milliseconds request_timeout,
         std::optional<std::chrono::milliseconds> overall_timeout,
         std::optional<uint8_t> desired_path_index,
-        RequestDetails details,
-        bool ephemeral_connection) :
+        RequestDetails details) :
         request_id{std::move(request_id)},
         destination{std::move(destination)},
         endpoint{std::move(endpoint)},
@@ -29,8 +28,7 @@ Request::Request(
         request_timeout{std::move(request_timeout)},
         overall_timeout{std::move(overall_timeout)},
         desired_path_index{std::move(desired_path_index)},
-        details{details},
-        ephemeral_connection{ephemeral_connection} {}
+        details{details} {}
 
 Request::Request(
         network_destination destination,
@@ -41,8 +39,7 @@ Request::Request(
         std::optional<std::chrono::milliseconds> overall_timeout,
         std::optional<uint8_t> desired_path_index,
         std::optional<std::string> request_id,
-        RequestDetails details,
-        bool ephemeral_connection) :
+        RequestDetails details) :
         request_id{std::move(request_id.value_or("R-{}"_format(random::random_base32(4))))},
         destination{std::move(destination)},
         endpoint{std::move(endpoint)},
@@ -51,8 +48,7 @@ Request::Request(
         request_timeout{std::move(request_timeout)},
         overall_timeout{std::move(overall_timeout)},
         desired_path_index{std::move(desired_path_index)},
-        details{details},
-        ephemeral_connection{ephemeral_connection} {}
+        details{details} {}
 
 static const std::unordered_map<std::string_view, std::pair<int16_t, bool>> error_map = {
         {"400 Bad Request", {400, false}},

@@ -514,10 +514,9 @@ void SnodePool::_launch_next_refresh_request(
                         to_vector(body.dump()),
                         RequestCategory::standard,
                         10s,
-                        std::nullopt,      // overall_timeout
-                        std::nullopt,      // desired_path_index
-                        std::monostate{},  // details
-                        true               // ephemeral_connection
+                        std::nullopt,     // overall_timeout
+                        std::nullopt,     // desired_path_index
+                        std::monostate{}  // details
                 };
             }
 
@@ -528,10 +527,9 @@ void SnodePool::_launch_next_refresh_request(
                     std::nullopt,
                     RequestCategory::standard,
                     10s,
-                    std::nullopt,      // overall_timeout
-                    std::nullopt,      // desired_path_index
-                    std::monostate{},  // details
-                    true               // ephemeral_connection
+                    std::nullopt,     // overall_timeout
+                    std::nullopt,     // desired_path_index
+                    std::monostate{}  // details
             };
         }();
 

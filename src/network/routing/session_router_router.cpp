@@ -80,7 +80,7 @@ namespace {
 
 }  // namespace
 
-std::shared_ptr<SessionRouter> SessionRouter::create(
+std::shared_ptr<SessionRouter> SessionRouter::make(
         config::SessionRouter config,
         std::shared_ptr<oxen::quic::Loop> loop,
         std::weak_ptr<SnodePool> snode_pool,
@@ -867,7 +867,7 @@ void SessionRouter::_send_via_tunnel(
 
     // If the request has already timedout at this point then just fail it immediately
     auto timeout = request.time_remaining();
-    if (timeout <= std::chrono::milliseconds::zero())
+    if (timeout <= 0s)
         return callback(
                 false,
                 true,

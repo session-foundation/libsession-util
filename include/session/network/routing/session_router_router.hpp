@@ -47,7 +47,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     std::unordered_map<std::string, DownloadRequest> _active_downloads;
 
   public:
-    static std::shared_ptr<SessionRouter> create(
+    static std::shared_ptr<SessionRouter> make(
             config::SessionRouter config,
             std::shared_ptr<oxen::quic::Loop> loop,
             std::weak_ptr<SnodePool> snode_pool,

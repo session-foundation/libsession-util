@@ -28,6 +28,7 @@ constexpr int16_t ERROR_INVALID_DOWNLOAD_URL = -10007;
 constexpr int16_t ERROR_FAILED_TO_QUEUE_REQUEST = -10008;
 constexpr int16_t ERROR_INVALID_DESTINATION = -10009;
 constexpr int16_t ERROR_FAILED_GENERATE_ONION_PAYLOAD = -10010;
+constexpr int16_t ERROR_FAILED_TO_GET_STREAM = -10011;
 constexpr int16_t ERROR_BUILD_TIMEOUT = -10100;
 constexpr int16_t ERROR_REQUEST_CANCELLED = -10200;
 
@@ -161,10 +162,6 @@ struct Request {
     /// `overall_timeout` has been exceeded.
     std::chrono::steady_clock::time_point creation_time = std::chrono::steady_clock::now();
 
-    // If true, the transport should not cache/pool the connection used for this request, this is
-    // for one-shot requests like bootstrapping.
-    bool ephemeral_connection;
-
     int retry_count = 0;
 
     Request(std::string request_id,
@@ -175,8 +172,7 @@ struct Request {
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
             std::optional<uint8_t> desired_path_index = std::nullopt,
-            RequestDetails details = std::monostate{},
-            bool ephemeral_connection = false);
+            RequestDetails details = std::monostate{});
 
     Request(network_destination destination,
             std::string endpoint,
@@ -186,8 +182,7 @@ struct Request {
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
             std::optional<uint8_t> desired_path_index = std::nullopt,
             std::optional<std::string> request_id = std::nullopt,
-            RequestDetails details = std::monostate{},
-            bool ephemeral_connection = false);
+            RequestDetails details = std::monostate{});
 
     std::chrono::milliseconds time_remaining() const {
         if (!overall_timeout)

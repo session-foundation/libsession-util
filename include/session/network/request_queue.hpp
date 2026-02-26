@@ -22,9 +22,14 @@ class RequestQueue : public std::enable_shared_from_this<RequestQueue> {
     std::unordered_map<std::string, std::pair<Request, network_response_callback_t>> _requests;
     std::multimap<std::chrono::steady_clock::time_point, std::string> _req_expiries;
 
-  public:
     RequestQueue(std::shared_ptr<oxen::quic::Loop> loop) : _loop{std::move(loop)} {};
-    ~RequestQueue();
+
+  public:
+    static std::shared_ptr<RequestQueue> make(std::shared_ptr<oxen::quic::Loop> loop) {
+        return std::shared_ptr<RequestQueue>{new RequestQueue{std::move(loop)}};
+    }
+
+    virtual ~RequestQueue();
 
     bool is_empty() const { return _requests.empty(); };
 

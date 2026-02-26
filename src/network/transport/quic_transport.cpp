@@ -187,9 +187,7 @@ void QuicTransport::_close_connections() {
 
     // Clear all storage of requests, paths and connections so that we are in a fresh state on
     // relaunch
-    _ephemeral_connection_ids.clear();
     _active_connection_ids.clear();
-    _reserved_stream_ids.clear();
     _pending_verification_callbacks.clear();
     _pending_requests.clear();
 
@@ -343,33 +341,16 @@ void QuicTransport::_establish_connection(
                     auto stream = conn.open_stream<oxen::quic::BTRequestStream>();
                     auto conn_id = conn.reference_id();
                     auto stream_id = stream->stream_id();
-                    auto verification_callbacks =
-                            std::move(_pending_verification_callbacks[address_pubkey_hex]);
-                    _pending_verification_callbacks.erase(address_pubkey_hex);
+                    auto it = _pending_verification_callbacks.find(address_pubkey_hex);
+                    decltype(it->second) verification_callbacks;
+                    if (it != _pending_verification_callbacks.end()) {
+                        verification_callbacks = std::move(it->second);
+                        _pending_verification_callbacks.erase(it);
+                    }
 
                     auto requests_to_process = std::move(_pending_requests[address_pubkey_hex]);
                     _pending_requests.erase(address_pubkey_hex);
-
-                    // Only persistent requests verify connectivity so if there is a
-                    // verification callback then it should be persistent, otherwise if ANY of
-                    // the requests require persistence then we should store the connection (if
-                    // we don't store it then the connection will timeout and be closed)
-                    bool is_persistent = !verification_callbacks.empty();
-                    if (!is_persistent)
-                        is_persistent = std::any_of(
-                                requests_to_process.begin(),
-                                requests_to_process.end(),
-                                [](const auto& req_pair) {
-                                    return !req_pair.first.ephemeral_connection;
-                                });
-
-                    if (is_persistent) {
-                        _ephemeral_connection_ids.erase(conn_id);  // Just in case
-                        _active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
-                    } else
-                        _ephemeral_connection_ids.insert(conn_id);
-
-                    _reserved_stream_ids.insert_or_assign(conn_id, stream_id);
+                    _active_connection_ids.insert_or_assign(address_pubkey_hex, conn_id);
 
                     // We had a successful connection so update the status to connected
                     _update_status(ConnectionStatus::connected);
@@ -432,7 +413,6 @@ void QuicTransport::_send_on_connection(
                 break;
             }
         }
-        _reserved_stream_ids.erase(conn_id);
 
         return callback(
                 false,
@@ -442,65 +422,24 @@ void QuicTransport::_send_on_connection(
                 "Connection died before request could be sent");
     }
 
-    // Ensure this connection has a reserved stream
-    auto stream_it = _reserved_stream_ids.find(conn_id);
-    if (stream_it == _reserved_stream_ids.end()) {
-        // Something has gone horribly wrong, lets close the connection and the client can retry
-        log::critical(
-                cat,
-                "[Request {}] No stream ID found for active connection {}, closing connection.",
-                request.request_id,
-                conn_id.to_string());
-        conn->close_connection();
-        return callback(
-                false,
-                false,
-                -1,
-                {content_type_plain_text},
-                "Internal error: Stream state missing for active connection");
-    }
-
     // Determine whether we want to use the "reserved" stream (ie. for really small requests) or
     // create a new stream (to maximise concurrency based on the configuration limits)
     std::shared_ptr<oxen::quic::BTRequestStream> target_stream;
 
-    if (use_reserved_stream(request.category)) {
-        auto stream_id = stream_it->second;
-        target_stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id);
-
-        if (!target_stream) {
-            // If the stream is gone then the connection is probably in a bad state so we should
-            // just close it
-            log::warning(
-                    cat,
-                    "[Request {}] Stream {} on connection {} has died, closing connection.",
-                    request.request_id,
-                    stream_id,
-                    conn_id.to_string());
-            conn->close_connection();
-            return callback(
-                    false, false, -1, {content_type_plain_text}, "Connection stream was closed");
-        }
-    } else {
-        target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
-
-        if (!target_stream) {
-            // If we couldn't open a streamthen the connection is probably in a bad state so we
-            // should just close it
-            log::warning(
-                    cat,
-                    "[Request {}] Unable to create stream on connection {}, closing connection.",
-                    request.request_id,
-                    conn_id.to_string());
-            conn->close_connection();
-            return callback(
-                    false, false, -1, {content_type_plain_text}, "Connection stream was closed");
-        }
+    try {
+        if (use_reserved_stream(request.category))
+            // There will **always** be a stream `0` so we use that as the reserved stream
+            target_stream = conn->get_stream<oxen::quic::BTRequestStream>(0);
+        else
+            target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
+    } catch (const std::exception& e) {
+        return callback(
+                false, false, ERROR_FAILED_TO_GET_STREAM, {content_type_plain_text}, e.what());
     }
 
     // If the request has already timedout at this point then just fail it immediately
     auto timeout = request.time_remaining();
-    if (timeout <= std::chrono::milliseconds::zero())
+    if (timeout <= 0s)
         return callback(
                 false,
                 true,
@@ -535,16 +474,6 @@ void QuicTransport::_send_on_connection(
                     return;
 
                 log::trace(cat, "[Request {}] Received response.", req_id);
-
-                // If this connection was an ephemeral connection then we should close it (don't
-                // want to keep it alive longer than needed)
-                if (_ephemeral_connection_ids.erase(conn_id)) {
-                    _reserved_stream_ids.erase(conn_id);
-
-                    if (_endpoint)
-                        if (auto conn = _endpoint->get_conn(conn_id))
-                            conn->close_connection();
-                }
 
                 // Trigger the callback based on the response we got
                 if (resp.timed_out) {
@@ -635,11 +564,6 @@ void QuicTransport::_fail_connection(
                 custom_error.value_or("Unknown error"));
 
     _active_connection_ids.erase(address_pubkey_hex);
-
-    if (conn_id) {
-        _ephemeral_connection_ids.erase(*conn_id);
-        _reserved_stream_ids.erase(*conn_id);
-    }
 
     // Process any waiting verification requests
     if (auto it = _pending_verification_callbacks.find(address_pubkey_hex);
