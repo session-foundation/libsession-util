@@ -18,7 +18,6 @@ namespace session::network::open_group_server {
 
 const std::string_view ROOM = "room";
 const std::string_view ENDPOINT_FILE = "file";
-const std::string_view FRAGMENT_STREAM_ENCRYPTION = "d";
 
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {base_url}/room/{room}/file/{file_id}(?:#d)
@@ -47,20 +46,22 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     if (!after_room.starts_with(fmt::format("/{}/", ENDPOINT_FILE)))
         return std::nullopt;
 
-    auto [file_id, fragments] =
+    auto [file_id_str, fragments] =
             backends::split_file_part(after_room.substr(ENDPOINT_FILE.size() + 2));
 
-    if (file_id.empty())
+    int64_t file_id;
+
+    if (!quic::parse_int(file_id_str, file_id))
         return std::nullopt;
 
-    info.file_id = std::string{file_id};
+    info.file_id = file_id;
     info.wants_stream_decryption = false;
 
     auto file_part = after_room.substr(ENDPOINT_FILE.size() + 2);  // Skip "/file/"
 
     // Parse fragments (d)
     for (auto fragment : split(fragments, "&", true)) {
-        if (fragment == open_group_server::FRAGMENT_STREAM_ENCRYPTION)
+        if (fragment == backends::FRAGMENT_STREAM_ENCRYPTION)
             info.wants_stream_decryption = true;
         // else ignore (unknown or invalid fragment)
     }
@@ -68,7 +69,7 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     return info;
 }
 
-std::string generate_download_url(std::string_view file_id, const config::OpenGroupServer& config) {
+std::string generate_download_url(uint64_t file_id, const config::OpenGroupServer& config) {
     auto buf = fmt::format(
             "{}/{}/{}/{}/{}",
             config.base_url,
@@ -78,7 +79,7 @@ std::string generate_download_url(std::string_view file_id, const config::OpenGr
             file_id);
 
     if (config.use_stream_encryption)
-        buf += fmt::format("#{}", open_group_server::FRAGMENT_STREAM_ENCRYPTION);
+        buf += fmt::format("#{}", backends::FRAGMENT_STREAM_ENCRYPTION);
 
     return buf;
 }
@@ -104,13 +105,13 @@ LIBSESSION_C_API bool session_open_group_server_parse_download_url(
 
     copy(out->base_url, info->base_url);
     copy(out->room, info->room);
-    copy(out->file_id, info->file_id);
+    out->file_id = info->file_id;
     out->wants_stream_decryption = info->wants_stream_decryption;
     return true;
 }
 
 LIBSESSION_C_API bool session_open_group_server_generate_download_url(
-        const char* file_id,
+        uint64_t file_id,
         const char* base_url,
         const char* room,
         const char* pubkey_hex,

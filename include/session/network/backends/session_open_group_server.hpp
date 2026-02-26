@@ -18,12 +18,11 @@ namespace session::network::open_group_server {
 
 extern const std::string_view ROOM;
 extern const std::string_view ENDPOINT_FILE;
-extern const std::string_view FRAGMENT_STREAM_ENCRYPTION;
 
 struct DownloadInfo {
     std::string base_url;
     std::string room;
-    std::string file_id;
+    uint64_t file_id;
     bool wants_stream_decryption;  // If 'd' fragment present
 };
 
@@ -48,6 +47,6 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url);
 ///
 /// Outputs:
 /// - returns url which can be used to download the file.
-std::string generate_download_url(std::string_view file_id, const config::OpenGroupServer& config);
+std::string generate_download_url(uint64_t file_id, const config::OpenGroupServer& config);
 
 }  // namespace session::network::open_group_server

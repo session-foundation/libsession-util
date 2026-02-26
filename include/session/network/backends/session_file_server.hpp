@@ -21,8 +21,6 @@ namespace session::network::file_server {
 extern const config::FileServer DEFAULT_CONFIG;
 
 extern const std::string_view ENDPOINT_FILE;
-extern const std::string_view FRAGMENT_PUBKEY;
-extern const std::string_view FRAGMENT_STREAM_ENCRYPTION;
 
 struct DownloadInfo {
     std::string scheme;

@@ -545,8 +545,7 @@ void QuicTransport::_send_on_connection(
                 if (resp.is_error()) {
                     auto final_timeout = resp.timed_out;
                     auto final_status_code = -1;
-                    std::string_view err_body =
-                        resp.body();
+                    std::string_view err_body = resp.body();
                     if (err_body.empty())
                         err_body = "Unknown QUIC layer error"sv;
 

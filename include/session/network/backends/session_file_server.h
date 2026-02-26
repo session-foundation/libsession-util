@@ -14,7 +14,7 @@ extern "C" {
 typedef struct file_server_parsed_download_url {
     char scheme[8];              // "http" or "https" + null
     char host[254];              // 253 max valid DNS length + null
-    char file_id[45];            // 44 character id (when a string) + null terminator
+    char file_id[65];            // id + null terminator
     char custom_pubkey_hex[65];  // 64 hex chars + null terminator, empty string if not present
     bool wants_stream_decryption;
 } file_server_parsed_download_url;

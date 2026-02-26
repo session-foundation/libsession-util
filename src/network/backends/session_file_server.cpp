@@ -34,8 +34,6 @@ const config::FileServer DEFAULT_CONFIG = {
         .max_file_size = 10'000'000};
 
 const std::string_view ENDPOINT_FILE = "file";
-const std::string_view FRAGMENT_PUBKEY = "p";
-const std::string_view FRAGMENT_STREAM_ENCRYPTION = "d";
 
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {scheme}://{host}/file/{file_id}(?:#p={customPubkey})(?:d)
@@ -76,10 +74,10 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
 
     // Parse fragments (p=... and/or d)
     for (auto fragment : split(fragments, "&", true)) {
-        if (fragment == file_server::FRAGMENT_STREAM_ENCRYPTION)
+        if (fragment == backends::FRAGMENT_STREAM_ENCRYPTION)
             info.wants_stream_decryption = true;
         else if (
-                fragment.starts_with(fmt::format("{}=", file_server::FRAGMENT_PUBKEY)) &&
+                fragment.starts_with(fmt::format("{}=", backends::FRAGMENT_PUBKEY)) &&
                 fragment.size() == 66 &&  // 'p=' + pubkey
                 oxenc::is_hex(fragment.substr(2)) &&
                 fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
@@ -100,11 +98,11 @@ std::string generate_download_url(std::string_view file_id, const config::FileSe
         buf += "#";
 
         if (has_custom_pubkey)
-            buf += fmt::format("{}={}", file_server::FRAGMENT_PUBKEY, config.pubkey_hex);
+            buf += fmt::format("{}={}", backends::FRAGMENT_PUBKEY, config.pubkey_hex);
 
         if (config.use_stream_encryption) {
             buf += (has_custom_pubkey ? "&" : "");
-            buf += file_server::FRAGMENT_STREAM_ENCRYPTION;
+            buf += backends::FRAGMENT_STREAM_ENCRYPTION;
         }
     }
 

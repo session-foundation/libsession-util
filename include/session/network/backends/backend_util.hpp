@@ -4,6 +4,9 @@
 
 namespace session::network::backends {
 
+const std::string_view FRAGMENT_PUBKEY = "p";
+const std::string_view FRAGMENT_STREAM_ENCRYPTION = "d";
+
 struct ParsedFilePart {
     std::string_view file_id;
     std::string_view fragment;  // everything after '#', empty if none
