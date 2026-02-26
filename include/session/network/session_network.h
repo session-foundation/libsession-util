@@ -114,7 +114,7 @@ typedef struct session_upload_handle_t session_upload_handle_t;
 typedef struct session_download_handle_t session_download_handle_t;
 
 typedef struct session_file_metadata {
-    char file_id[45];  // 44 base64url character (or int64 as a string) + null terminator
+    char file_id[65];  // 64 char string + null terminator
     uint64_t size;
     int64_t uploaded_timestamp;  // unix timestamp
     int64_t expiry_timestamp;    // unix timestamp
