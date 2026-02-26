@@ -121,8 +121,7 @@ void SnodePool::_load_from_disk() {
 
         std::string_view data_view(
                 reinterpret_cast<const char*>(loaded_cache_data.data()), loaded_cache_data.size());
-        loaded_cache.reserve(
-                (data_view.size() / service_node_disk_format::MAX_LINE_SIZE) + 1);  // +1 for safety
+        loaded_cache.reserve((data_view.size() / service_node_disk_format::MAX_LINE_SIZE));
 
         while (!data_view.empty()) {
             // Find entry deliminted by either \n or \r
