@@ -49,7 +49,6 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::cache_num_nodes_to_use_for_refresh);
         HANDLE_TYPE(opt::cache_min_num_refresh_presence_to_include_node);
         HANDLE_TYPE(opt::cache_node_strike_threshold);
-        HANDLE_TYPE(opt::cache_refresh_using_legacy_endpoint);
 
         // Quic transport options
         HANDLE_TYPE(opt::quic_handshake_timeout);
@@ -266,11 +265,6 @@ void Config::handle_config_opt(opt::cache_min_num_refresh_presence_to_include_no
 void Config::handle_config_opt(opt::cache_node_strike_threshold nst) {
     cache_node_strike_threshold = nst.count;
     log::debug(cat, "Network config snode pool node strike threshold set to {}", nst.count);
-}
-
-void Config::handle_config_opt(opt::cache_refresh_using_legacy_endpoint rule) {
-    cache_refresh_using_legacy_endpoint = true;
-    log::debug(cat, "Network config will refresh snode cache using legacy endpoint");
 }
 
 // MARK: Quic Transport Options

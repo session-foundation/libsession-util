@@ -48,7 +48,6 @@ struct Config {
     uint8_t cache_num_nodes_to_use_for_refresh = 3;
     uint8_t cache_min_num_refresh_presence_to_include_node = 2;
     uint8_t cache_node_strike_threshold = 3;
-    bool cache_refresh_using_legacy_endpoint = false;
 
     // Onion Request Router Options
     uint8_t onionreq_path_strike_threshold = 3;
@@ -118,7 +117,6 @@ struct Config {
     void handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr);
     void handle_config_opt(opt::cache_min_num_refresh_presence_to_include_node mnrp);
     void handle_config_opt(opt::cache_node_strike_threshold nst);
-    void handle_config_opt(opt::cache_refresh_using_legacy_endpoint rule);
 
     // Quic transport options
     void handle_config_opt(opt::quic_handshake_timeout qht);

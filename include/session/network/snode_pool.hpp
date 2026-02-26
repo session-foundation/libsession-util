@@ -30,7 +30,6 @@ namespace config {
         uint8_t cache_num_nodes_to_use_for_refresh;
         uint8_t cache_min_num_refresh_presence_to_include_node;
         uint16_t cache_node_strike_threshold;
-        bool cache_refresh_using_legacy_endpoint;
     };
 }  // namespace config
 
@@ -140,8 +139,7 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
             std::string refresh_id,
             std::vector<std::vector<std::byte>> raw_results,
             const bool use_direct_fetcher,
-            const uint8_t total_requests,
-            const bool from_legacy_endpoint);
+            const uint8_t total_requests);
 };
 
 }  // namespace session::network

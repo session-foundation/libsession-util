@@ -78,7 +78,6 @@ typedef struct session_network_config {
     uint8_t cache_num_nodes_to_use_for_refresh;
     uint8_t cache_min_num_refresh_presence_to_include_node;
     uint8_t cache_node_strike_threshold;
-    bool cache_refresh_using_legacy_endpoint;
 
     // Onion request router options (only used when router ==
     // SESSION_NETWORK_ROUTER_ONION_REQUESTS)

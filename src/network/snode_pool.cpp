@@ -466,8 +466,6 @@ void SnodePool::_launch_next_refresh_request(
         auto target_node = _refresh_candidate_nodes.back();
         _refresh_candidate_nodes.pop_back();
         auto fetcher_to_use = (use_direct_fetcher ? _direct_fetcher : *_routed_fetcher);
-        auto use_legacy_endpoint =
-                (!use_direct_fetcher && _config.cache_refresh_using_legacy_endpoint);
 
         // If we somehow got into '_launch_next_refresh_request' for a routed request then we need
         // to make sure '_routed_fetcher' was set before we try to use it
@@ -485,63 +483,20 @@ void SnodePool::_launch_next_refresh_request(
                 target_request_id,
                 (use_direct_fetcher ? "direct" : "routed"),
                 target_node.to_string());
-        const Request request = [this,
-                                 &target_request_id,
-                                 &target_node,
-                                 use_direct_fetcher,
-                                 use_legacy_endpoint]() {
-            // A mandatory service node upgrade needs to go out to support calling
-            // `active_nodes_bin` via onion requests so if the `use_legacy_endpoint` setting is
-            // set then we should use the legacy endpoint to refresh the cache
-            if (use_legacy_endpoint) {
-                nlohmann::json body{
-                        {"endpoint", "get_service_nodes"},
-                        {"params",
-                         {{"active_only", true},
-                          {"fields",
-                           {"pubkey_ed25519",
-                            "public_ip",
-                            "storage_port",
-                            "storage_lmq_port",
-                            "storage_server_version",
-                            "swarm_id"}}}},
-                };
-
-                return Request{
-                        target_request_id,
+        const auto request =
+                Request{target_request_id,
                         network_destination{target_node},
-                        std::string{"oxend_request"},
-                        to_vector(body.dump()),
+                        std::string{"active_nodes_bin"},
+                        std::nullopt,
                         RequestCategory::standard,
                         10s,
-                        std::nullopt,     // overall_timeout
-                        std::nullopt,     // desired_path_index
-                        std::monostate{}  // details
-                };
-            }
-
-            return Request{
-                    target_request_id,
-                    network_destination{target_node},
-                    std::string{"active_nodes_bin"},
-                    std::nullopt,
-                    RequestCategory::standard,
-                    10s,
-                    std::nullopt,     // overall_timeout
-                    std::nullopt,     // desired_path_index
-                    std::monostate{}  // details
-            };
-        }();
+                        std::nullopt,       // overall_timeout
+                        std::nullopt,       // desired_path_index
+                        std::monostate{}};  // details
 
         fetcher_to_use(
                 request,
-                [this,
-                 request_id,
-                 index,
-                 target_request_id,
-                 use_direct_fetcher,
-                 total_requests,
-                 use_legacy_endpoint](
+                [this, request_id, index, target_request_id, use_direct_fetcher, total_requests](
                         bool success,
                         bool timeout,
                         int16_t status_code,
@@ -616,11 +571,7 @@ void SnodePool::_launch_next_refresh_request(
                         auto final_results = std::move(_snode_refresh_results);
                         auto refresh_id = *_current_snode_cache_refresh_id;
                         _on_refresh_complete(
-                                refresh_id,
-                                final_results,
-                                use_direct_fetcher,
-                                total_requests,
-                                use_legacy_endpoint);
+                                refresh_id, final_results, use_direct_fetcher, total_requests);
                     }
                 });
     });
@@ -638,20 +589,14 @@ void SnodePool::_on_refresh_complete(
         std::string refresh_id,
         std::vector<std::vector<std::byte>> raw_results,
         const bool use_direct_fetcher,
-        const uint8_t total_requests,
-        const bool from_legacy_endpoint) {
+        const uint8_t total_requests) {
     log::info(
             cat,
             "[Request {}] Have {} responses, processing and finalizing cache refresh.",
             refresh_id,
             raw_results.size());
 
-    _loop->call([this,
-                 refresh_id,
-                 raw_results,
-                 use_direct_fetcher,
-                 total_requests,
-                 from_legacy_endpoint] {
+    _loop->call([this, refresh_id, raw_results, use_direct_fetcher, total_requests] {
         // Sort the vectors (so make it easier to find the intersection)
         std::vector<std::vector<service_node>> processed_nodes;
         processed_nodes.reserve(raw_results.size());
@@ -663,24 +608,7 @@ void SnodePool::_on_refresh_complete(
 
                 // Due to how onion requests work they need to return JSON data which means the data
                 // could be base64-encoded, so handle that case if needed
-                if (from_legacy_endpoint) {
-                    nlohmann::json response_json = nlohmann::json::parse(to_string_view(nodes_bin));
-
-                    if (!response_json.contains("result") || !response_json["result"].is_object())
-                        throw std::runtime_error{"JSON missing result field."};
-
-                    nlohmann::json result_json = response_json["result"];
-                    if (!result_json.contains("service_node_states") ||
-                        !result_json["service_node_states"].is_array())
-                        throw std::runtime_error{"JSON missing service_node_states field."};
-
-                    for (auto& snode : result_json["service_node_states"])
-                        try {
-                            nodes.emplace_back(service_node::legacy_from_json(snode));
-                        } catch (...) {
-                            invalid_count++;
-                        }
-                } else if (!use_direct_fetcher && oxenc::is_base64(nodes_bin)) {
+                if (!use_direct_fetcher && oxenc::is_base64(nodes_bin)) {
                     std::vector<std::byte> converted_nodes;
                     oxenc::from_base64(
                             nodes_bin.begin(),

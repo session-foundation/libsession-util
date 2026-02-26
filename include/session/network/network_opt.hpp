@@ -355,11 +355,6 @@ namespace opt {
         cache_node_strike_threshold(uint16_t count) : count{count} {}
     };
 
-    /// Can be used to make the snode cache use the legacy endpoint when refreshing.
-    struct cache_refresh_using_legacy_endpoint : base {
-        cache_refresh_using_legacy_endpoint() {}
-    };
-
     // MARK: Quic Transport Options
 
     /// Can be used to override the default (10s) handshake timeout duration for Quic connections.

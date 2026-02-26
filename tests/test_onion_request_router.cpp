@@ -232,8 +232,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
             .cache_min_swarm_size = 0,
             .cache_num_nodes_to_use_for_refresh = 3,
             .cache_min_num_refresh_presence_to_include_node = 2,
-            .cache_node_strike_threshold = node_strike_threshold,
-            .cache_refresh_using_legacy_endpoint = false};
+            .cache_node_strike_threshold = node_strike_threshold};
     config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,
@@ -543,8 +542,7 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
             .cache_min_swarm_size = 0,
             .cache_num_nodes_to_use_for_refresh = 3,
             .cache_min_num_refresh_presence_to_include_node = 2,
-            .cache_node_strike_threshold = 3,
-            .cache_refresh_using_legacy_endpoint = false};
+            .cache_node_strike_threshold = 3};
     config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,
@@ -594,8 +592,7 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
             .cache_min_swarm_size = 0,
             .cache_num_nodes_to_use_for_refresh = 3,
             .cache_min_num_refresh_presence_to_include_node = 2,
-            .cache_node_strike_threshold = 3,
-            .cache_refresh_using_legacy_endpoint = false};
+            .cache_node_strike_threshold = 3};
     config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,
@@ -704,8 +701,7 @@ TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeou
             .cache_min_swarm_size = 0,
             .cache_num_nodes_to_use_for_refresh = 3,
             .cache_min_num_refresh_presence_to_include_node = 2,
-            .cache_node_strike_threshold = 3,
-            .cache_refresh_using_legacy_endpoint = false};
+            .cache_node_strike_threshold = 3};
     config::OnionRequestRouter config = {
             file_server::DEFAULT_CONFIG,
             std::nullopt,

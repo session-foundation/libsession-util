@@ -72,8 +72,7 @@ namespace {
                 main_config.cache_min_swarm_size,
                 main_config.cache_num_nodes_to_use_for_refresh,
                 main_config.cache_min_num_refresh_presence_to_include_node,
-                main_config.cache_node_strike_threshold,
-                main_config.cache_refresh_using_legacy_endpoint};
+                main_config.cache_node_strike_threshold};
     }
 
     config::QuicTransport build_quic_transport_config(const config::Config& main_config) {
@@ -1186,7 +1185,6 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.cache_min_num_refresh_presence_to_include_node =
             cpp_defaults.cache_min_num_refresh_presence_to_include_node;
     config.cache_node_strike_threshold = cpp_defaults.cache_node_strike_threshold;
-    config.cache_refresh_using_legacy_endpoint = cpp_defaults.cache_refresh_using_legacy_endpoint;
 
     config.onionreq_path_strike_threshold = cpp_defaults.onionreq_path_strike_threshold;
     config.onionreq_path_build_retry_limit = cpp_defaults.onionreq_path_build_retry_limit;
@@ -1330,9 +1328,6 @@ LIBSESSION_C_API bool session_network_init(
         if (config->cache_node_strike_threshold > 0)
             cpp_opts.emplace_back(
                     opt::cache_node_strike_threshold{config->cache_node_strike_threshold});
-
-        if (config->cache_refresh_using_legacy_endpoint)
-            cpp_opts.emplace_back(opt::cache_refresh_using_legacy_endpoint{});
 
         // Router-specific settings
         switch (config->router) {
