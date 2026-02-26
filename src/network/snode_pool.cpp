@@ -807,7 +807,7 @@ void SnodePool::_on_refresh_complete(
         _snode_cache_refresh_failure_count = 0;
 
         _disk_loop->call([path = _snode_cache_file_path, cache = _snode_cache] {
-            SnodePool::_perform_cache_write(std::move(path), std::move(cache));
+            SnodePool::_perform_cache_write(path, cache);
         });
 
         // Trigger any callbacks
