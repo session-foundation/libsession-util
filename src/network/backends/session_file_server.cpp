@@ -33,7 +33,15 @@ const config::FileServer DEFAULT_CONFIG = {
         .pubkey_hex = "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59",
         .max_file_size = 10'000'000};
 
-const std::string_view ENDPOINT_FILE = "file";
+constexpr std::string_view HEADER_CONTENT_TYPE = "Content-Type";
+constexpr std::string_view HEADER_CONTENT_DISPOSITION = "Content-Disposition";
+constexpr std::string_view HEADER_PUBKEY = "X-FS-Pubkey";
+constexpr std::string_view HEADER_TIMESTAMP = "X-FS-Timestamp";
+constexpr std::string_view HEADER_SIGNATURE = "X-FS-Signature";
+constexpr std::string_view HEADER_TTL = "X-FS-TTL";
+
+constexpr std::string_view ENDPOINT_FILE = "file/{}";
+constexpr std::string_view ENDPOINT_EXTEND = "file/{}/extend";
 
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {scheme}://{host}/file/{file_id}(?:#p={customPubkey})(?:d)
@@ -44,35 +52,28 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     //   https://example.com/file/abc123#p=abc123&d
     DownloadInfo info{};
 
-    // Parse scheme
-    auto scheme_end = url.find("://");
+    auto match = backends::match_endpoint(ENDPOINT_FILE, url);
+
+    if (!match || match->base.empty() || match->captures.size() != 1)
+        return std::nullopt;
+
+    info.file_id = match->captures[0];
+
+    auto scheme_end = match->base.find("://");
     if (scheme_end == std::string_view::npos)
         return std::nullopt;
 
-    info.scheme = std::string{url.substr(0, scheme_end)};
-    auto rest = url.substr(scheme_end + 3);
-
-    // Parse host
-    auto path_start = rest.find('/');
-    if (path_start == std::string_view::npos)
-        return std::nullopt;
-
-    info.host = std::string{rest.substr(0, path_start)};
-    auto path = rest.substr(path_start);
-
-    // Check for /file/ prefix
-    if (!path.starts_with(fmt::format("/{}/", ENDPOINT_FILE)))
-        return std::nullopt;
-
-    auto [file_id, fragments] = backends::split_file_part(path.substr(ENDPOINT_FILE.size() + 2));
-
-    if (file_id.empty())
-        return std::nullopt;
-
-    info.file_id = std::string{file_id};
+    info.scheme = std::string{match->base.substr(0, scheme_end)};
+    info.host = match->base.substr(scheme_end + 3);
     info.wants_stream_decryption = false;
 
-    // Parse fragments (p=... and/or d)
+    // Parse fragments if present (p=... and/or d)
+    auto fragment_pos = url.find('#');
+    if (fragment_pos == std::string_view::npos)
+        return info;
+
+    auto fragments = url.substr(fragment_pos + 1);
+
     for (auto fragment : split(fragments, "&", true)) {
         if (fragment == backends::FRAGMENT_STREAM_ENCRYPTION)
             info.wants_stream_decryption = true;
@@ -92,7 +93,10 @@ std::string generate_download_url(std::string_view file_id, const config::FileSe
     const auto has_custom_pubkey = (config.pubkey_hex != file_server::DEFAULT_CONFIG.pubkey_hex);
 
     auto buf = fmt::format(
-            "{}://{}/{}/{}", config.scheme, config.host, file_server::ENDPOINT_FILE, file_id);
+            "{}://{}/{}",
+            config.scheme,
+            config.host,
+            fmt::format(file_server::ENDPOINT_FILE, file_id));
 
     if (config.use_stream_encryption || has_custom_pubkey) {
         buf += "#";
@@ -145,18 +149,18 @@ Request to_request(
         throw std::runtime_error{"No data to upload"};
 
     std::vector<std::pair<std::string, std::string>> headers;
-    headers.emplace_back("Content-Type", "application/octet-stream");
+    headers.emplace_back(HEADER_CONTENT_TYPE, "application/octet-stream");
 
     if (upload_request.file_name) {
         headers.emplace_back(
-                "Content-Disposition",
+                HEADER_CONTENT_DISPOSITION,
                 fmt::format("attachment; filename=\"{}\"", *upload_request.file_name));
     } else {
-        headers.emplace_back("Content-Disposition", "attachment");
+        headers.emplace_back(HEADER_CONTENT_DISPOSITION, "attachment");
     }
 
     if (upload_request.ttl)
-        headers.emplace_back("X-FS-TTL", fmt::format("{}", upload_request.ttl->count()));
+        headers.emplace_back(HEADER_TTL, "{}"_format(upload_request.ttl->count()));
 
     return Request{
             upload_id,
@@ -263,7 +267,31 @@ std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
     return {std::move(metadata), std::move(data)};
 }
 
-// TODO: [BEFORE RELEASE] Might be good to add in the new "expire" endpoint as well (and any others)
+Request extend_ttl(
+        std::string_view file_id,
+        std::chrono::seconds ttl,
+        const config::FileServer& config,
+        std::chrono::milliseconds request_timeout,
+        std::optional<std::chrono::milliseconds> overall_timeout) {
+    auto headers = std::vector<std::pair<std::string, std::string>>{};
+    headers.emplace_back(HEADER_TTL, "{}"_format(ttl.count()));
+
+    return Request{
+            random::unique_id("ETLL"),
+            ServerDestination{
+                    config.scheme,
+                    config.host,
+                    x25519_pubkey::from_hex(config.pubkey_hex),
+                    config.port,
+                    std::move(headers),
+                    "POST"},
+            fmt::format(ENDPOINT_EXTEND, file_id),
+            std::nullopt,
+            RequestCategory::file_small,
+            request_timeout,
+            overall_timeout};
+}
+
 Request get_client_version(
         Platform platform,
         network::ed25519_seckey seckey,
@@ -291,19 +319,19 @@ Request get_client_version(
             std::back_inserter(blinded_pk_hex));
 
     auto headers = std::vector<std::pair<std::string, std::string>>{};
-    headers.emplace_back("X-FS-Pubkey", blinded_pk_hex);
-    headers.emplace_back("X-FS-Timestamp", "{}"_format(timestamp));
-    headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature.begin(), signature.end()));
+    headers.emplace_back(HEADER_PUBKEY, blinded_pk_hex);
+    headers.emplace_back(HEADER_TIMESTAMP, "{}"_format(timestamp));
+    headers.emplace_back(HEADER_SIGNATURE, oxenc::to_base64(signature.begin(), signature.end()));
 
-    return {random::unique_id("GCV"),
+    return Request{
+            random::unique_id("GCV"),
             ServerDestination{
                     DEFAULT_CONFIG.scheme,
                     DEFAULT_CONFIG.host,
                     pubkey,
                     DEFAULT_CONFIG.port,
                     headers,
-                    "GET"  // method
-            },
+                    "GET"},
             std::move(endpoint),
             std::nullopt,
             RequestCategory::file_small,

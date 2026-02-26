@@ -77,6 +77,10 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
     CHECK(parsed_download_url->custom_pubkey_hex ==
           "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
     CHECK(parsed_download_url->wants_stream_decryption);
+
+    // Doesn't have an issue with a url that isn't in the right format
+    parsed_download_url = file_server::parse_download_url("https://example.com/test/test2"sv);
+    CHECK_FALSE(parsed_download_url.has_value());
 }
 
 TEST_CASE("Download url generation", "[backend][session_file_server]") {

@@ -16,9 +16,6 @@ struct OpenGroupServer {
 
 namespace session::network::open_group_server {
 
-extern const std::string_view ROOM;
-extern const std::string_view ENDPOINT_FILE;
-
 struct DownloadInfo {
     std::string base_url;
     std::string room;

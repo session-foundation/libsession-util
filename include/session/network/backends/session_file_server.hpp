@@ -20,8 +20,6 @@ namespace session::network::file_server {
 
 extern const config::FileServer DEFAULT_CONFIG;
 
-extern const std::string_view ENDPOINT_FILE;
-
 struct DownloadInfo {
     std::string scheme;
     std::string host;

@@ -16,8 +16,8 @@ using namespace oxen::log::literals;
 
 namespace session::network::open_group_server {
 
-const std::string_view ROOM = "room";
-const std::string_view ENDPOINT_FILE = "file";
+constexpr std::string_view ENDPOINT_ROOM = "room/{}";
+constexpr std::string_view ENDPOINT_FILE = "room/{}/file/{}";
 
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {base_url}/room/{room}/file/{file_id}(?:#d)
@@ -26,40 +26,29 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     //   https://example.com/room/file/123#d
     DownloadInfo info{};
 
-    // Parse base_url
-    auto base_url_end = url.find(fmt::format("/{}/", ROOM));
-    if (base_url_end == std::string_view::npos)
+    auto match = backends::match_endpoint(ENDPOINT_FILE, url);
+
+    if (!match || match->base.empty() || match->captures.size() != 2)
         return std::nullopt;
 
-    info.base_url = std::string{url.substr(0, base_url_end)};
-    auto rest = url.substr(base_url_end + ROOM.size() + 2);  // Skip "/room/"
-
-    // Parse room
-    auto room_start = rest.find('/');
-    if (room_start == std::string_view::npos)
-        return std::nullopt;
-
-    info.room = std::string{rest.substr(0, room_start)};
-    auto after_room = rest.substr(room_start);
-
-    // Check for /file/ prefix
-    if (!after_room.starts_with(fmt::format("/{}/", ENDPOINT_FILE)))
-        return std::nullopt;
-
-    auto [file_id_str, fragments] =
-            backends::split_file_part(after_room.substr(ENDPOINT_FILE.size() + 2));
+    info.room = std::string{match->captures[0]};
 
     int64_t file_id;
 
-    if (!quic::parse_int(file_id_str, file_id))
+    if (!quic::parse_int(match->captures[1], file_id))
         return std::nullopt;
 
     info.file_id = file_id;
+    info.base_url = match->base;
     info.wants_stream_decryption = false;
 
-    auto file_part = after_room.substr(ENDPOINT_FILE.size() + 2);  // Skip "/file/"
+    // Parse fragments if present (d)
+    auto fragment_pos = url.find('#');
+    if (fragment_pos == std::string_view::npos)
+        return info;
 
-    // Parse fragments (d)
+    auto fragments = url.substr(fragment_pos + 1);
+
     for (auto fragment : split(fragments, "&", true)) {
         if (fragment == backends::FRAGMENT_STREAM_ENCRYPTION)
             info.wants_stream_decryption = true;
@@ -70,13 +59,8 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
 }
 
 std::string generate_download_url(uint64_t file_id, const config::OpenGroupServer& config) {
-    auto buf = fmt::format(
-            "{}/{}/{}/{}/{}",
-            config.base_url,
-            open_group_server::ROOM,
-            config.room,
-            open_group_server::ENDPOINT_FILE,
-            file_id);
+    auto buf =
+            fmt::format("{}/{}", config.base_url, fmt::format(ENDPOINT_FILE, config.room, file_id));
 
     if (config.use_stream_encryption)
         buf += fmt::format("#{}", backends::FRAGMENT_STREAM_ENCRYPTION);

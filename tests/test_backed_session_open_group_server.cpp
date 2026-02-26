@@ -43,6 +43,11 @@ TEST_CASE("Download url parsing", "[backend][session_open_group_server]") {
     CHECK(parsed_download_url->room == "TeST"sv);
     CHECK(parsed_download_url->file_id == 123);
     CHECK_FALSE(parsed_download_url->wants_stream_decryption);
+
+    // Doesn't have an issue with a url that isn't in the right format
+    parsed_download_url =
+            open_group_server::parse_download_url("https://example.com/test/test2/test3/5432"sv);
+    CHECK_FALSE(parsed_download_url.has_value());
 }
 
 TEST_CASE("Download url generation", "[backend][session_open_group_server]") {
