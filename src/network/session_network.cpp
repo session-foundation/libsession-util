@@ -419,9 +419,18 @@ void Network::send_request(Request request, network_response_callback_t callback
     }
     if (!_transport)
         return callback(
-                false, false, -1, {content_type_plain_text}, "No transport layer configured");
+                false,
+                false,
+                ERROR_NO_TRANSPORT_LAYER,
+                {content_type_plain_text},
+                "No transport layer configured");
     if (!_router)
-        return callback(false, false, -1, {content_type_plain_text}, "No router configured");
+        return callback(
+                false,
+                false,
+                ERROR_NO_ROUTING_LAYER,
+                {content_type_plain_text},
+                "No router configured");
 
     try {
         auto processed_request = _preprocess_request(std::move(request));
@@ -453,9 +462,9 @@ void Network::send_request(Request request, network_response_callback_t callback
 
                     // If we got a 406 from a snode, or a 425 from a server, then the device clock
                     // is out of sync so we need to kick off a clock resync request
-                    if ((final_status_code == 406 && dest_is_snode) ||
-                        (final_status_code == 425 && !dest_is_snode)) {
-                        self->_resync_clock(std::move(original_req), std::move(cb));
+                    if ((final_status_code == ERROR_NOT_ACCEPTABLE && dest_is_snode) ||
+                        (final_status_code == ERROR_TOO_EARLY && !dest_is_snode)) {
+                        _resync_clock(std::move(original_req), std::move(cb));
                         return;
                     }
 
@@ -515,7 +524,7 @@ void Network::upload(UploadRequest request) {
             // If we got a 425 (no need to handle a 406 as we only ever upload to a server),
             // then the device clock is out of sync so we need to kick off a clock resync
             // request
-            if (*status_code == 425) {
+            if (*status_code == ERROR_TOO_EARLY) {
                 log::info(cat, "Upload received 425, triggering clock resync.");
                 self->_resync_clock(std::nullopt, std::nullopt);
 
@@ -562,7 +571,7 @@ void Network::download(DownloadRequest request) {
         if (auto* status_code = std::get_if<int16_t>(&result)) {
             // If we got a 425 (no need to handle a 406 as we only ever download from a server),
             // then the device clock is out of sync so we need to kick off a clock resync request
-            if (*status_code == 425) {
+            if (*status_code == ERROR_TOO_EARLY) {
                 log::info(cat, "Download received 425, triggering clock resync and retrying.");
 
                 // We want to automatically retry the download after the resync so store the request
@@ -768,7 +777,11 @@ void Network::_handle_421_retry(
                 "Request {} received 421 but exceeded max retry count.",
                 original_request.request_id);
         return final_callback(
-                false, false, 421, {content_type_plain_text}, "Exceeded retry limit for 421 error");
+                false,
+                false,
+                ERROR_MISDIRECTED_REQUEST,
+                {content_type_plain_text},
+                "Exceeded retry limit for 421 error");
     }
 
     // Shouldn't automatically retry if the destination isn't a node (we on'y want to auto-retry due
@@ -778,7 +791,7 @@ void Network::_handle_421_retry(
         return final_callback(
                 false,
                 false,
-                421,
+                ERROR_MISDIRECTED_REQUEST,
                 {content_type_plain_text},
                 "Received 421 from a non-service-node destination");
 
@@ -823,7 +836,7 @@ void Network::_handle_421_retry(
                                 return cb(
                                         false,
                                         false,
-                                        421,
+                                        ERROR_MISDIRECTED_REQUEST,
                                         {content_type_plain_text},
                                         "421 Misdirected Request, but no other nodes in swarm to "
                                         "retry");
@@ -1052,7 +1065,7 @@ void Network::_on_clock_resync_complete(const uint8_t total_requests) {
             const auto dest_is_snode = std::holds_alternative<service_node>(req.destination);
             cb(false,
                false,
-               (dest_is_snode ? 406 : 425),
+               (dest_is_snode ? ERROR_NOT_ACCEPTABLE : ERROR_TOO_EARLY),
                {content_type_plain_text},
                clock_out_of_sync_error);
         }

@@ -257,7 +257,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
         return callback(
                 false,
                 false,
-                -1,
+                ERROR_INVALID_DESTINATION,
                 {content_type_plain_text},
                 "Internal error: invalid destination for QuicTransport");
     }
@@ -409,7 +409,12 @@ void QuicTransport::_establish_connection(
 void QuicTransport::_send_on_connection(
         oxen::quic::ConnectionID conn_id, Request request, network_response_callback_t callback) {
     if (!_endpoint)
-        return callback(false, false, -1, {content_type_plain_text}, "Network is invalid");
+        return callback(
+                false,
+                false,
+                ERROR_NETWORK_MISCONFIGURED,
+                {content_type_plain_text},
+                "Network is invalid");
 
     // Try to retrieve the active connection first
     auto conn = _endpoint->get_conn(conn_id);
@@ -497,7 +502,12 @@ void QuicTransport::_send_on_connection(
     // If the request has already timedout at this point then just fail it immediately
     auto timeout = request.time_remaining();
     if (timeout <= std::chrono::milliseconds::zero())
-        return callback(false, true, 408, {content_type_plain_text}, "Request already timed out");
+        return callback(
+                false,
+                true,
+                ERROR_REQUEST_TIMEOUT,
+                {content_type_plain_text},
+                "Request already timed out");
 
     // We have a valid connection and stream so we can send the request
     log::debug(
@@ -539,7 +549,12 @@ void QuicTransport::_send_on_connection(
                 // Trigger the callback based on the response we got
                 if (resp.timed_out) {
                     log::debug(cat, "[Request {}] Timed out.", req_id);
-                    return cb(false, true, 408, {content_type_plain_text}, "Request timed out");
+                    return cb(
+                            false,
+                            true,
+                            ERROR_REQUEST_TIMEOUT,
+                            {content_type_plain_text},
+                            "Request timed out");
                 }
 
                 if (resp.is_error()) {

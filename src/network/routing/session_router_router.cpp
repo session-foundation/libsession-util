@@ -320,7 +320,12 @@ void SessionRouter::_send_request_internal(Request request, network_response_cal
                     "[Request {}]: Dropping after failure to queue due to error: {}.",
                     request.request_id,
                     e.what());
-            return callback(false, false, -1, {content_type_plain_text}, e.what());
+            return callback(
+                    false,
+                    false,
+                    ERROR_FAILED_TO_QUEUE_REQUEST,
+                    {content_type_plain_text},
+                    e.what());
         }
         return;
     }
@@ -408,7 +413,7 @@ void SessionRouter::_send_direct_request(Request request, network_response_callb
         return callback(
                 false,
                 false,
-                -1,
+                ERROR_INVALID_DESTINATION,
                 {content_type_plain_text},
                 "Failed to send request due to error: {}"_format(e.what()));
     }
@@ -420,7 +425,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
         return callback(
                 false,
                 false,
-                -1,
+                ERROR_NO_SNODE_POOL,
                 {content_type_plain_text},
                 "SnodePool was destroyed, cannot find proxy.");
     }
@@ -447,7 +452,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
                         return cb(
                                 false,
                                 false,
-                                -1,
+                                ERROR_NO_SNODE_POOL,
                                 {content_type_plain_text},
                                 "SnodePool was destroyed, cannot find proxy.");
 
@@ -486,7 +491,11 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
                 request.request_id,
                 e.what());
         return callback(
-                false, false, -1, {content_type_plain_text}, "Failed to build proxy request");
+                false,
+                false,
+                ERROR_FAILED_GENERATE_ONION_PAYLOAD,
+                {content_type_plain_text},
+                "Failed to build proxy request");
     }
 
     Request proxy_request{
@@ -744,7 +753,7 @@ void SessionRouter::_establish_tunnel(
             for (auto& [req, cb] : to_fail)
                 cb(false,
                    false,
-                   -1,
+                   ERROR_INVALID_DESTINATION,
                    {content_type_plain_text},
                    "Failed to establish tunnel to remote.");
         }
@@ -837,7 +846,11 @@ void SessionRouter::_establish_tunnel(
                             to_fail.size());
 
                     for (auto& [req, cb] : to_fail)
-                        cb(false, false, -1, {content_type_plain_text}, "Timeout");
+                        cb(false,
+                           false,
+                           ERROR_REQUEST_TIMEOUT,
+                           {content_type_plain_text},
+                           "Timeout");
                 }
 
                 // If we have no longer have any active connections then we are disconnected
@@ -853,7 +866,12 @@ void SessionRouter::_send_via_tunnel(
     // If the request has already timedout at this point then just fail it immediately
     auto timeout = request.time_remaining();
     if (timeout <= std::chrono::milliseconds::zero())
-        return callback(false, true, 408, {content_type_plain_text}, "Request already timed out");
+        return callback(
+                false,
+                true,
+                ERROR_REQUEST_TIMEOUT,
+                {content_type_plain_text},
+                "Request already timed out");
 
     auto transport = _transport.lock();
     if (!transport) {

@@ -745,7 +745,11 @@ void OnionRequestRouter::_send_request_internal(
                     to_string(path_category_for_initiating_req, _config.single_path_mode),
                     request.request_id);
             return callback(
-                    false, false, -1, {content_type_plain_text}, "Unhandled request category");
+                    false,
+                    false,
+                    ERROR_FAILED_TO_QUEUE_REQUEST,
+                    {content_type_plain_text},
+                    "Unhandled request category");
         }
         return;
     }
@@ -780,7 +784,12 @@ void OnionRequestRouter::_send_request_internal(
                 "No request queue for category '{}', request {} is being dropped.",
                 to_string(path_category_for_initiating_req, _config.single_path_mode),
                 request.request_id);
-        return callback(false, false, -1, {content_type_plain_text}, "Unhandled request category");
+        return callback(
+                false,
+                false,
+                ERROR_FAILED_TO_QUEUE_REQUEST,
+                {content_type_plain_text},
+                "Unhandled request category");
     }
 
     // Check if we need to build additional paths
@@ -1045,7 +1054,7 @@ void OnionRequestRouter::_build_path(
             for (const auto& [req, cb] : to_fail)
                 cb(false,
                    false,
-                   -1,
+                   ERROR_NETWORK_MISCONFIGURED,
                    {content_type_plain_text},
                    "Router misconfigured: path_length is 0.");
         }
@@ -1295,7 +1304,7 @@ void OnionRequestRouter::_on_edge_connectivity_response(
                 for (const auto& [req, cb] : requeue)
                     cb(false,
                        false,
-                       -1,
+                       ERROR_INVALID_DESTINATION,
                        {content_type_plain_text},
                        "Request destination conflicts with the only available path in "
                        "single_path_mode");
@@ -1453,7 +1462,7 @@ void OnionRequestRouter::_send_on_path(
         return callback(
                 false,
                 false,
-                -1,
+                ERROR_FAILED_GENERATE_ONION_PAYLOAD,
                 {content_type_plain_text},
                 "Failed to construct onion request payload");
     }
