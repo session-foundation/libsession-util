@@ -342,7 +342,7 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
             return;
         }
 
-        const auto request_id = request_id_opt.value_or("RSC-" + random::random_base32(4));
+        const auto request_id = request_id_opt.value_or(random::unique_id("RSC"));
         bool use_routed_fetcher = true;
         uint8_t num_nodes_for_refresh = 0;
 

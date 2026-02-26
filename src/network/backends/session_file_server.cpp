@@ -295,7 +295,7 @@ Request get_client_version(
     headers.emplace_back("X-FS-Timestamp", "{}"_format(timestamp));
     headers.emplace_back("X-FS-Signature", oxenc::to_base64(signature.begin(), signature.end()));
 
-    return {"GCV-{}"_format(random::random_base32(4)),
+    return {random::unique_id("GCV"),
             ServerDestination{
                     DEFAULT_CONFIG.scheme,
                     DEFAULT_CONFIG.host,

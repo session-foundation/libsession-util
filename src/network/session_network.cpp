@@ -892,7 +892,7 @@ void Network::_resync_clock(
         return;
     }
 
-    const auto request_id = "CoS-" + random::random_base32(4);
+    const std::string request_id = random::unique_id("CoS");
     log::info(cat, "[Request {}] Starting clock resync.", request_id);
     _current_clock_resync_id = request_id;
     _clock_resync_results.clear();

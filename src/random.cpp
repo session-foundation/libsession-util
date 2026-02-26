@@ -1,5 +1,6 @@
 #include "session/random.hpp"
 
+#include <fmt/ranges.h>
 #include <sodium/randombytes.h>
 
 #include <algorithm>
@@ -35,6 +36,12 @@ std::string random_base32(size_t size) {
     } while (result.size() < size);
 
     return result;
+}
+
+std::string unique_id(std::string_view prefix) {
+    static std::atomic<uint32_t> counter{0};
+    return fmt::format(
+            "{}-{}-{}", prefix, counter.fetch_add(1, std::memory_order_relaxed), random_base32(4));
 }
 
 }  // namespace session::random

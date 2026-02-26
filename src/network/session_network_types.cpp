@@ -40,7 +40,7 @@ Request::Request(
         std::optional<uint8_t> desired_path_index,
         std::optional<std::string> request_id,
         RequestDetails details) :
-        request_id{std::move(request_id.value_or("R-{}"_format(random::random_base32(4))))},
+        request_id{std::move(request_id.value_or(random::unique_id("R")))},
         destination{std::move(destination)},
         endpoint{std::move(endpoint)},
         body{std::move(body)},

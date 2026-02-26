@@ -54,6 +54,17 @@ std::vector<unsigned char> random(size_t size);
 /// - random base32 string of the specified length.
 std::string random_base32(size_t size);
 
+/// API: random/unique_id
+///
+/// Generates a unique id in the form of `{prefix}-{id_num}-{random_base32(4)}`.
+///
+/// Inputs:
+/// - `prefix` -- a prefix to prepend to the generated id.
+///
+/// Outputs:
+/// - generated id string.
+std::string unique_id(std::string_view prefix);
+
 /// API: random/get_uniform_distribution
 ///
 /// Generates a cryptographically secure random integer within a given range (inclusive).

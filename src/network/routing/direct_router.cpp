@@ -125,7 +125,7 @@ void DirectRouter::_send_request_internal(Request request, network_response_call
 }
 
 void DirectRouter::_upload_internal(UploadRequest request) {
-    const auto upload_id = "UP-" + random::random_base32(4);
+    const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
     _active_uploads[upload_id] = request;
 
@@ -239,7 +239,7 @@ void DirectRouter::_upload_internal(UploadRequest request) {
 }
 
 void DirectRouter::_download_internal(DownloadRequest request) {
-    const auto download_id = "DL-" + random::random_base32(4);
+    const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
     _active_downloads[download_id] = request;
 

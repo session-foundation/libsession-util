@@ -541,7 +541,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
 
 void SessionRouter::_upload_internal(UploadRequest request) {
     // TODO: Update this to use streaming approach
-    const auto upload_id = "UP-" + random::random_base32(4);
+    const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
     _active_uploads[upload_id] = request;
 
@@ -655,7 +655,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
 }
 
 void SessionRouter::_download_internal(DownloadRequest request) {
-    const auto download_id = "DL-" + random::random_base32(4);
+    const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
     _active_downloads[download_id] = request;
 

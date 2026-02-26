@@ -820,7 +820,7 @@ void OnionRequestRouter::_send_request_internal(
 }
 
 void OnionRequestRouter::_upload_internal(UploadRequest request) {
-    const auto upload_id = "UP-" + random::random_base32(4);
+    const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
     _active_uploads[upload_id] = request;
 
@@ -934,7 +934,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
 }
 
 void OnionRequestRouter::_download_internal(DownloadRequest request) {
-    const auto download_id = "DL-" + random::random_base32(4);
+    const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
     _active_downloads[download_id] = request;
 
@@ -1024,7 +1024,7 @@ void OnionRequestRouter::_build_path(
     }
 
     const std::string req_id_log = (initiating_req_id ? *initiating_req_id : "internal");
-    const std::string path_id = original_path_id.value_or("P-" + random::random_base32(4));
+    const std::string path_id = original_path_id.value_or(random::unique_id("P"));
     log::info(
             cat,
             "[Request {} Path {}]: Starting build for {} path.",
@@ -2045,7 +2045,7 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
     log::info(cat, "[Path {}]: Starting path rotation.", path_id);
     path.rotation_in_progress = true;
 
-    std::string new_path_id = "R-" + random::random_base32(4);
+    const std::string new_path_id = random::unique_id("RP");
     service_node edge_node = path.nodes.front();
     auto nodes_to_exclude = extract_nodes(_paths, _pending_paths);
 
