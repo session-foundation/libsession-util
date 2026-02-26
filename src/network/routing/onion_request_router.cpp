@@ -336,9 +336,24 @@ OnionRequestRouter::OnionRequestRouter(
 }
 
 OnionRequestRouter::~OnionRequestRouter() {
+    std::vector<std::thread> threads_to_join;
+
     // Use 'call_get' to force this to be synchronous
     if (_loop)
-        _loop->call_get([this] { _close_connections(); });
+        _loop->call_get([this, &threads_to_join] {
+            // Harvest upload thread handles *before* _close_connections clears the map
+            for (auto& [_, upload] : _active_uploads)
+                if (upload.second.joinable())
+                    threads_to_join.push_back(std::move(upload.second));
+
+            _close_connections();
+        });
+
+    // Block until upload threads have finished
+    for (auto& t : threads_to_join)
+        if (t.joinable())
+            t.join();
+
     log::debug(cat, "Destroyed.");
 }
 
@@ -511,6 +526,17 @@ void OnionRequestRouter::close_connections() {
     _loop->call_get([this] { _close_connections(); });
 }
 
+void OnionRequestRouter::clear_cache() {
+    // Use 'call_get' to force this to be synchronous
+    _loop->call_get([this] {
+        _cached_edge_nodes = {};
+
+        _disk_loop->call([path = _edge_node_cache_file_path] {
+            OnionRequestRouter::_clear_disk_cache(path);
+        });
+    });
+}
+
 std::vector<PathInfo> OnionRequestRouter::get_active_paths() {
     return _loop->call_get([this] {
         std::vector<PathInfo> result;
@@ -630,11 +656,11 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
 
 void OnionRequestRouter::_close_connections() {
     // Cancel any uploads and downloads
-    for (auto& [id, request] : _active_uploads) {
-        request.cancel();
+    for (auto& [id, request_and_thread] : _active_uploads) {
+        request_and_thread.first.cancel();
 
-        if (request.on_complete)
-            request.on_complete(ERROR_CONNECTION_CLOSED, false);
+        if (request_and_thread.first.on_complete)
+            request_and_thread.first.on_complete(ERROR_CONNECTION_CLOSED, false);
     }
 
     for (auto& [id, request] : _active_downloads) {
@@ -822,16 +848,18 @@ void OnionRequestRouter::_send_request_internal(
 void OnionRequestRouter::_upload_internal(UploadRequest request) {
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
-    _active_uploads[upload_id] = request;
+    auto& [_, upload_thread] =
+            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                    .first->second;
 
     // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
     // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
     // disk should be prioritised)
-    std::thread([weak_self = weak_from_this(),
-                 this,
-                 upload_request = request,
-                 upload_id,
-                 file_server_config = _config.file_server_config] {
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 upload_request = request,
+                                 upload_id,
+                                 file_server_config = _config.file_server_config] {
         auto self = weak_self.lock();
         if (!self)
             return;
@@ -930,7 +958,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                 _active_uploads.erase(upload_id);
             });
         }
-    }).detach();
+    });
 }
 
 void OnionRequestRouter::_download_internal(DownloadRequest request) {

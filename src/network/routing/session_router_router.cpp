@@ -154,9 +154,24 @@ void SessionRouter::_init() {
 }
 
 SessionRouter::~SessionRouter() {
+    std::vector<std::thread> threads_to_join;
+
     // Use 'call_get' to force this to be synchronous
     if (_loop)
-        _loop->call_get([this] { _update_status(ConnectionStatus::disconnected); });
+        _loop->call_get([this, &threads_to_join] {
+            // Harvest upload thread handles *before* _close_connections clears the map
+            for (auto& [_, upload] : _active_uploads)
+                if (upload.second.joinable())
+                    threads_to_join.push_back(std::move(upload.second));
+
+            _close_connections();
+        });
+
+    // Block until upload threads have finished
+    for (auto& t : threads_to_join)
+        if (t.joinable())
+            t.join();
+
     log::debug(cat, "Destroyed.");
 }
 
@@ -249,11 +264,11 @@ void SessionRouter::_close_connections() {
     // TODO: Need to close any active connections on the session router instance.
 
     // Cancel any uploads and downloads
-    for (auto& [id, request] : _active_uploads) {
-        request.cancel();
+    for (auto& [id, request_and_thread] : _active_uploads) {
+        request_and_thread.first.cancel();
 
-        if (request.on_complete)
-            request.on_complete(ERROR_CONNECTION_CLOSED, false);
+        if (request_and_thread.first.on_complete)
+            request_and_thread.first.on_complete(ERROR_CONNECTION_CLOSED, false);
     }
 
     for (auto& [id, request] : _active_downloads) {
@@ -543,16 +558,18 @@ void SessionRouter::_upload_internal(UploadRequest request) {
     // TODO: Update this to use streaming approach
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
-    _active_uploads[upload_id] = request;
+    auto& [_, upload_thread] =
+            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                    .first->second;
 
     // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
     // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
     // disk should be prioritised)
-    std::thread([weak_self = weak_from_this(),
-                 this,
-                 upload_request = request,
-                 upload_id,
-                 file_server_config = _config.file_server_config] {
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 upload_request = request,
+                                 upload_id,
+                                 file_server_config = _config.file_server_config] {
         auto self = weak_self.lock();
         if (!self)
             return;
@@ -651,7 +668,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 _active_uploads.erase(upload_id);
             });
         }
-    }).detach();
+    });
 }
 
 void SessionRouter::_download_internal(DownloadRequest request) {

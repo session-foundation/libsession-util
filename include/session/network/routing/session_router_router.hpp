@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -43,7 +44,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     std::unordered_map<std::string, session::router::tunnel_info> _active_tunnels;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
-    std::unordered_map<std::string, UploadRequest> _active_uploads;
+    std::unordered_map<std::string, std::pair<UploadRequest, std::thread>> _active_uploads;
     std::unordered_map<std::string, DownloadRequest> _active_downloads;
 
   public:

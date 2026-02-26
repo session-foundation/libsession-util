@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -27,7 +28,7 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
     config::DirectRouter _config;
     std::shared_ptr<oxen::quic::Loop> _loop;
     std::weak_ptr<ITransport> _transport;
-    std::unordered_map<std::string, UploadRequest> _active_uploads;
+    std::unordered_map<std::string, std::pair<UploadRequest, std::thread>> _active_uploads;
     std::unordered_map<std::string, DownloadRequest> _active_downloads;
 
   public:
@@ -39,7 +40,7 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
 
     void suspend() override;
     void resume(bool automatically_reconnect = true) override;
-    void close_connections() override {};
+    void close_connections() override;
     void clear_cache() override {};
 
     ConnectionStatus get_status() const override { return _status.load(); };
@@ -49,6 +50,7 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
+    void _close_connections();
     void _update_status(ConnectionStatus new_status);
     void _send_request_internal(Request request, network_response_callback_t callback);
     void _upload_internal(UploadRequest request);

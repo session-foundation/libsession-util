@@ -5,6 +5,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -115,7 +116,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     std::unordered_map<PathCategory, std::vector<OnionPath>> _paths;
     std::unordered_map<PathCategory, std::vector<OnionPath>> _paths_pending_drop;
     std::unordered_map<PathCategory, std::shared_ptr<detail::RequestQueue>> _request_queues;
-    std::unordered_map<std::string, UploadRequest> _active_uploads;
+    std::unordered_map<std::string, std::pair<UploadRequest, std::thread>> _active_uploads;
     std::unordered_map<std::string, DownloadRequest> _active_downloads;
 
     oxen::quic::event_ptr _path_rotation_timer;
@@ -146,7 +147,7 @@ class OnionRequestRouter : public IRouter, public std::enable_shared_from_this<O
     void suspend() override;
     void resume(bool automatically_reconnect = true) override;
     void close_connections() override;
-    void clear_cache() override {}
+    void clear_cache() override;
 
     ConnectionStatus get_status() const override { return _status.load(); };
     std::vector<PathInfo> get_active_paths() override;
