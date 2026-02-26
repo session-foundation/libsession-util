@@ -4,6 +4,7 @@
 #include <sodium/randombytes.h>
 
 #include <algorithm>
+#include <atomic>
 
 #include "session/export.h"
 #include "session/util.hpp"
