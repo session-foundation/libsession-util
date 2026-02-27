@@ -1059,7 +1059,8 @@ void OnionRequestRouter::_build_path(
     }
 
     const std::string req_id_log = (initiating_req_id ? *initiating_req_id : "internal");
-    const std::string path_id = original_path_id.value_or(random::unique_id(to_path_prefix(category)));
+    const std::string path_id =
+            original_path_id.value_or(random::unique_id(to_path_prefix(category)));
     log::info(
             cat,
             "[Request {} Path {}]: Starting build for {} path.",
