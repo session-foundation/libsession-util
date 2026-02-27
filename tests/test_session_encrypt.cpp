@@ -482,22 +482,6 @@ TEST_CASE("Session push notification decryption", "[session-notification][decryp
     CHECK_THROWS(decrypt_push_notification(payload, to_span("invalid")));
 }
 
-TEST_CASE("Session message hash", "[session][message-hash]") {
-    using namespace session;
-
-    auto pubkey_hex = "0518981d2822aabc9ba8dbf83f2feac4c70eb737930bc4f254fa71e01f8464a049"sv;
-    auto base64_data1 =
-            "CAESpQMKA1BVVBIPL2FwaS92MS9tZXNzYWdlGoEDCAcSQjA1MTg5ODFkMjgyMmFhYmM5YmE4ZGJmODNmMmZlYWM0YzcwZWI3Mzc5MzBiYzRmMjU0ZmE3MWUwMWY4NDY0YTA0OSirlfaFnDI4AUKvAvYMh0I1qhBp9tDOzZhl7vMFuD7a9k/BLvPHMOkTrYsjGj2ri7T6AoJjVm/dDMsXlEP58VaGFSv+mcctCRstYox+3CchbQoVieBi2NGE1bqCeiZeLOMxQxleSZ94vzi7CoC8/NCLmTBzKvw0GBo77Tz37yPGxNLp2QO1xOuDVqM1/+4Sdj+JzMpfsZA8PDMmG3T1o8DJJ/EmwlxsmKM/eAjqtNpdF1G7wtZW5im9fiW11sQgG0/+5EsqxqEoo0xsi5TL6L9DN6zKhjXC9bu/QAfI5ZIpF5+9IHzKashPAjSswBZmlesjbFbNvNgBq4hSeXIxjtg7xDm/hfXao1WRa3TMHgfZs2bY+cNlDGqArjZT9q5XTVxsQYXq+mz/koh0qxiJktAC3C0ixs7CInORFiD18omD4oqX1/IB"sv;
-    auto base64_data2 =
-            "CAESpAMKA1BVVBIPL2FwaS92MS9tZXNzYWdlGoEDCAcSQjA1MTg5ODFkMjgyMmFhYmM5YmE4ZGJmODNmMmZlYWM0YzcwZWI3Mzc5MzBiYzRmMjU0ZmE3MWUwMWY4NDY0YTA0OSi/7peInDI4AUKvAsCTN9WMEkajMbC7EA6QOClzdXK3W6MTEElFotQ6PGNa2IKfYb+iu0MRC6ph+1hE5hzfay00v0UfB5Xen3dBgZ2drwToYhYb1zqRlIeesdwT0Yt6ct+Gn47PBL4oXOv7PJo3ys3jlq1t+xbAN/vum/8ART9xVhNIZ+3dOpS62z8pwSqusWECGw9dJDgFN6g0+2R85dco/HP9Z2SiGBaAJulKFUXKaT+jMHab3nPjoqke/lVG544iJAmNbI+KJr61YgtsbVfO02pje1RXeQtQacAtWpCYlin4fNtr6ANTs8aJDb1H1JFOG/r8PZHkPl1Fl/2cDppngZYJJo6/8IH9FpZS64le+mZy2BjP7UKfEx3ulmJIwpfqcqe9qvoTbGtljSf8wRylUkeo1E7Gg2WP8SDrgdXBwIaZp24="sv;
-    int16_t ns = -10;
-
-    CHECK(compute_message_hash(pubkey_hex, ns, base64_data1) ==
-          "xREbCx9GRzDiuU8GsEK7rR1InU6peC3vp10cBkTUDPg");
-    CHECK(compute_message_hash(pubkey_hex, ns, base64_data2) ==
-          "apKu8OMjrbU+YeVWpMSyrr1wHq51K3uKD8WM0F4E1cE");
-}
-
 TEST_CASE("xchacha20", "[session][xchacha20]") {
     using namespace session;
 

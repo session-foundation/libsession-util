@@ -216,6 +216,13 @@ namespace {
         return to_string(category);
     }
 
+    inline std::string to_path_prefix(PathCategory category, bool single_path_mode) {
+        if (single_path_mode)
+            return "ONLY-P";
+
+        return to_path_prefix(category);
+    }
+
     inline RequestCategory to_small_request_category(PathCategory category) {
         switch (category) {
             case PathCategory::standard: return RequestCategory::standard_small;
@@ -271,7 +278,7 @@ cached_edge_node cached_edge_node::from_disk(std::string_view str) {
     std::chrono::system_clock::time_point cached_at;
     int64_t timestamp;
     if (quic::parse_int(parts[6], timestamp))
-        cached_at = std::chrono::sys_time{std::chrono::seconds{timestamp}};
+        cached_at = std::chrono::sys_seconds{std::chrono::seconds{timestamp}};
     else
         cached_at = std::chrono::system_clock::now();
 
@@ -1052,7 +1059,7 @@ void OnionRequestRouter::_build_path(
     }
 
     const std::string req_id_log = (initiating_req_id ? *initiating_req_id : "internal");
-    const std::string path_id = original_path_id.value_or(random::unique_id("P"));
+    const std::string path_id = original_path_id.value_or(random::unique_id(to_path_prefix(category)));
     log::info(
             cat,
             "[Request {} Path {}]: Starting build for {} path.",

@@ -95,6 +95,14 @@ inline std::string to_string(PathCategory category) {
     return "unknown";  // Should not be reached
 }
 
+inline std::string to_path_prefix(PathCategory category) {
+    switch (category) {
+        case PathCategory::standard: return "SP";
+        case PathCategory::file: return "FP";
+    }
+    return "UNKNOWN-PATH";  // Should not be reached
+}
+
 struct ServerDestination {
     std::string protocol;
     std::string host;
