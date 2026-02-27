@@ -33,7 +33,8 @@ service_node service_node::from(const network_service_node& node) {
             node.https_port,
             node.omq_port,
             {node.version[0], node.version[1], node.version[2]},
-            node.swarm_id};
+            node.swarm_id,
+            node.requested_unlock_height};
 }
 
 void service_node::into(network_service_node& n) const {
@@ -48,9 +49,10 @@ void service_node::into(network_service_node& n) const {
     n.omq_port = omq_port;
     std::memcpy(n.version, storage_server_version.data(), sizeof(storage_server_version));
     n.swarm_id = swarm_id;
+    n.requested_unlock_height = requested_unlock_height;
 }
 
-service_node service_node::legacy_from_json(nlohmann::json json) {
+service_node service_node::from_json(nlohmann::json json) {
     auto pk_ed = json["pubkey_ed25519"].get<std::string_view>();
     if (pk_ed.size() != 64 || !oxenc::is_hex(pk_ed))
         throw std::invalid_argument{
@@ -119,64 +121,21 @@ service_node service_node::legacy_from_json(nlohmann::json json) {
     swarm_id_t swarm_id = INVALID_SWARM_ID;
     if (json.contains("swarm_id"))
         swarm_id = json["swarm_id"].get<swarm_id_t>();
+    else if (json.contains("swarm"))
+        if (!quic::parse_int(json["swarm"].get<std::string>(), swarm_id, 16))
+            throw std::runtime_error{"Invalid swarm id"};
+
+    uint64_t requested_unlock_height;
+    if (json.contains("requested_unlock_height"))
+        requested_unlock_height = json["requested_unlock_height"].get<uint64_t>();
 
     return {ed25519_pubkey::from_bytes(pubkey),
             quic::ipv4{ip},
             https_port,
             omq_port,
             storage_server_version,
-            swarm_id};
-}
-
-service_node service_node::legacy_from_disk(std::string_view str) {
-    // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
-    auto parts = split(str, "|");
-    if (parts.size() != 5)
-        throw std::invalid_argument("Invalid service node serialisation: {}"_format(str));
-    if (parts[3].size() != 64 || !oxenc::is_hex(parts[3]))
-        throw std::invalid_argument{
-                "Invalid service node serialisation: pubkey is not hex or has wrong size"};
-
-    uint16_t port;
-    if (!quic::parse_int(parts[1], port))
-        throw std::invalid_argument{"Invalid service node serialization: invalid port"};
-
-    auto version_parts = split(parts[2], ".");
-    std::array<uint16_t, 3> version_array{0, 0, 0};
-    for (size_t i = 0; i < std::min(size_t{3}, version_parts.size()); ++i) {
-        uint16_t v;
-
-        if (quic::parse_int(version_parts[i], v))
-            version_array[i] = v;
-    }
-
-    if (version_array == std::array<uint16_t, 3>{0, 0, 0})
-        throw std::invalid_argument{"Invalid service node serialization: invalid version"};
-
-    swarm_id_t swarm_id = INVALID_SWARM_ID;
-    quic::parse_int(parts[4], swarm_id);
-
-    return {
-            ed25519_pubkey::from_hex(parts[3]),  // ed25519_pubkey
-            quic::ipv4{std::string{parts[0]}},   // ip
-            0,                                   // https_port
-            port,                                // omq_port
-            version_array,                       // storage_server_version
-            swarm_id                             // swarm_id
-    };
-}
-
-std::string service_node::legacy_to_disk() const {
-    // Format is "{ip}|{port}|{version}|{ed_pubkey}|{swarm_id}"
-    return fmt::format(
-            "{}|{}|{}.{}.{}|{}|{}",
-            host(),
-            omq_port,
-            storage_server_version[0],
-            storage_server_version[1],
-            storage_server_version[2],
-            remote_pubkey.hex(),
-            swarm_id);
+            swarm_id,
+            requested_unlock_height};
 }
 
 service_node service_node::from_disk(std::string_view str) {

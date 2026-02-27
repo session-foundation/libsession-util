@@ -222,6 +222,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
     const auto node_strike_threshold = 3;
     config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
             .enforce_subnet_diversity = false,
@@ -532,6 +533,7 @@ TEST_CASE("Network", "[network][onion_request_router][handle_errors]") {
 TEST_CASE("Network", "[network][onion_request_router][build_path]") {
     config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
             .enforce_subnet_diversity = false,
@@ -582,6 +584,7 @@ TEST_CASE("Network", "[network][onion_request_router][build_path]") {
 TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
     config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
             .enforce_subnet_diversity = false,
@@ -691,6 +694,7 @@ TEST_CASE("Network", "[network][onion_request_router][find_valid_path]") {
 TEST_CASE("Network", "[network][onion_request_router][check_request_queue_timeouts]") {
     config::SnodePool pool_config = {
             .cache_directory = std::nullopt,
+            .fallback_snode_pool_path = std::nullopt,
             .cache_expiration = std::chrono::minutes{5},
             .cache_min_lifetime = std::chrono::minutes{5},
             .enforce_subnet_diversity = false,

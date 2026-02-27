@@ -421,25 +421,118 @@ void SnodePool::_refresh_snode_cache(std::optional<std::string> request_id_opt) 
 
         // Kick off the concurrent requests (if there are any)
         for (uint8_t i = 0; i < num_nodes_for_refresh; ++i)
-            _launch_next_refresh_request(request_id, i, !use_routed_fetcher, num_nodes_for_refresh);
+            _launch_next_refresh_request(
+                    request_id, i, use_seed_nodes, !use_routed_fetcher, num_nodes_for_refresh);
     });
 }
 
 void SnodePool::_launch_next_refresh_request(
         const std::string& request_id,
         const uint8_t index,
+        const bool refreshing_from_seed_nodes,
         const bool use_direct_fetcher,
         const uint8_t total_requests) {
-    _loop->call([this, request_id, index, use_direct_fetcher, total_requests] {
+    _loop->call([this,
+                 request_id,
+                 index,
+                 refreshing_from_seed_nodes,
+                 use_direct_fetcher,
+                 total_requests] {
         if (!_current_snode_cache_refresh_id)
             return;
 
         const auto target_request_id = "{}-{}"_format(request_id, index);
 
         if (_refresh_candidate_nodes.empty()) {
-            // If we run out of candidate nodes then we should fail this refresh request and start a
-            // new one with a new id (the `_refresh_snode_cache` will decide which nodes and fetcher
-            // should be used)
+            // If we run out of candidate nodes then we should fail this refresh request and kick
+            // off a new one with a new id (the `_refresh_snode_cache` will decide which nodes and
+            // fetcher should be used)
+            //
+            // If this was a bootstrap request then we've failed to refresh from all seed nodes so
+            // we should try to use the `fallback_snode_pool_path` if it exists, otherwise just
+            // retry indefinitely (not much else we can do)
+            if (refreshing_from_seed_nodes && _config.fallback_snode_pool_path &&
+                !_config.fallback_snode_pool_path->empty() &&
+                fs::exists(*_config.fallback_snode_pool_path)) {
+                log::warning(
+                        cat,
+                        "[Request {}] Ran out of seed nodes for refresh, using fallback cache.",
+                        request_id);
+
+                try {
+                    std::vector<std::byte> loaded_fallback_data =
+                            read_whole_file(*_config.fallback_snode_pool_path);
+                    auto json = nlohmann::json::parse(loaded_fallback_data);
+                    auto nodes = json.at("service_node_states").get<nlohmann::json::array_t>();
+                    auto height = json.at("height").get<int>();
+                    auto file_time = fs::last_write_time(*_config.fallback_snode_pool_path);
+                    auto file_time_sys =
+                            std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+                                    file_time - fs::file_time_type::clock::now() +
+                                    std::chrono::system_clock::now());
+                    auto file_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                file_time_sys.time_since_epoch())
+                                                .count();
+                    auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                          std::chrono::system_clock::now().time_since_epoch())
+                                          .count();
+                    auto seconds_since_build = (now_ms - file_time_ms) / 1000;
+                    auto expected_height_diff = seconds_since_build / 120;
+                    auto expected_current_height = height + expected_height_diff;
+
+                    std::vector<service_node> parsed_nodes;
+                    parsed_nodes.reserve(nodes.size());
+                    auto invalid_count = 0;
+                    auto unlocked_count = 0;
+
+                    for (auto& json_node : nodes)
+                        try {
+                            auto snode = service_node::from_json(json_node);
+
+                            // If a node has an unlock height and it is in the past then it's
+                            // possible that the node is offline so don't both including it in the
+                            // initial cache (if we get a successful connection and refresh the
+                            // cache then it would be added back at that point)
+                            if (snode.requested_unlock_height &&
+                                snode.requested_unlock_height <= expected_current_height) {
+                                unlocked_count++;
+                                continue;
+                            }
+
+                            parsed_nodes.emplace_back(std::move(snode));
+                        } catch (...) {
+                            invalid_count++;
+                        }
+
+                    if (parsed_nodes.size() < _config.cache_min_size)
+                        throw std::runtime_error{
+                                "Failed to parse enough fallback nodes to meet the min cache size"};
+
+                    if (invalid_count > 0)
+                        log::warning(
+                                cat,
+                                "[Request {}] Failed to parse {} fallback nodes.",
+                                request_id,
+                                invalid_count);
+
+                    if (unlocked_count > 0)
+                        log::warning(
+                                cat,
+                                "[Request {}] {} fallback nodes might be unlocked.",
+                                request_id,
+                                unlocked_count);
+
+                    _update_cache(request_id, std::move(parsed_nodes));
+                    return;
+                } catch (const std::exception& e) {
+                    log::error(
+                            cat,
+                            "[Request {}] Failed to process fallback cache, will just retry seed "
+                            "nodes.",
+                            target_request_id);
+                }
+            }
+
             _snode_cache_refresh_failure_count++;
             auto delay = _config.retry_delay.exponential(_snode_cache_refresh_failure_count);
             log::warning(
@@ -496,7 +589,13 @@ void SnodePool::_launch_next_refresh_request(
 
         fetcher_to_use(
                 request,
-                [this, request_id, index, target_request_id, use_direct_fetcher, total_requests](
+                [this,
+                 request_id,
+                 index,
+                 target_request_id,
+                 refreshing_from_seed_nodes,
+                 use_direct_fetcher,
+                 total_requests](
                         bool success,
                         bool timeout,
                         int16_t status_code,
@@ -545,12 +644,14 @@ void SnodePool::_launch_next_refresh_request(
                                 [weak_self = weak_from_this(),
                                  request_id,
                                  index,
+                                 refreshing_from_seed_nodes,
                                  use_direct_fetcher,
                                  total_requests] {
                                     if (auto self = weak_self.lock())
                                         self->_retry_refresh_request(
                                                 request_id,
                                                 index,
+                                                refreshing_from_seed_nodes,
                                                 use_direct_fetcher,
                                                 total_requests);
                                 });
@@ -571,7 +672,11 @@ void SnodePool::_launch_next_refresh_request(
                         auto final_results = std::move(_snode_refresh_results);
                         auto refresh_id = *_current_snode_cache_refresh_id;
                         _on_refresh_complete(
-                                refresh_id, final_results, use_direct_fetcher, total_requests);
+                                refresh_id,
+                                final_results,
+                                refreshing_from_seed_nodes,
+                                use_direct_fetcher,
+                                total_requests);
                     }
                 });
     });
@@ -580,14 +685,17 @@ void SnodePool::_launch_next_refresh_request(
 void SnodePool::_retry_refresh_request(
         const std::string& request_id,
         const uint8_t index,
+        const bool refreshing_from_seed_nodes,
         const bool use_direct_fetcher,
         const uint8_t total_requests) {
-    _launch_next_refresh_request(request_id, index, use_direct_fetcher, total_requests);
+    _launch_next_refresh_request(
+            request_id, index, refreshing_from_seed_nodes, use_direct_fetcher, total_requests);
 }
 
 void SnodePool::_on_refresh_complete(
         std::string refresh_id,
         std::vector<std::vector<std::byte>> raw_results,
+        const bool refreshing_from_seed_nodes,
         const bool use_direct_fetcher,
         const uint8_t total_requests) {
     log::info(
@@ -596,7 +704,12 @@ void SnodePool::_on_refresh_complete(
             refresh_id,
             raw_results.size());
 
-    _loop->call([this, refresh_id, raw_results, use_direct_fetcher, total_requests] {
+    _loop->call([this,
+                 refresh_id,
+                 raw_results,
+                 refreshing_from_seed_nodes,
+                 use_direct_fetcher,
+                 total_requests] {
         // Sort the vectors (so make it easier to find the intersection)
         std::vector<std::vector<service_node>> processed_nodes;
         processed_nodes.reserve(raw_results.size());
@@ -644,12 +757,17 @@ void SnodePool::_on_refresh_complete(
                         delay,
                         [weak_self = weak_from_this(),
                          refresh_id,
+                         refreshing_from_seed_nodes,
                          use_direct_fetcher,
                          total_requests] {
                             if (auto self = weak_self.lock())
                                 for (uint8_t i = 0; i < total_requests; ++i)
                                     self->_launch_next_refresh_request(
-                                            refresh_id, i, use_direct_fetcher, total_requests);
+                                            refresh_id,
+                                            i,
+                                            refreshing_from_seed_nodes,
+                                            use_direct_fetcher,
+                                            total_requests);
                         });
                 return;
             }
@@ -710,6 +828,13 @@ void SnodePool::_on_refresh_complete(
             }
         }
 
+        // Update the cache with the combined nodes
+        _update_cache(refresh_id, std::move(nodes));
+    });
+}
+
+void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> nodes) {
+    _loop->call([this, refresh_id, &nodes] {
         // Shuffle the nodes so we don't have a specific order
         std::ranges::shuffle(nodes, csrng);
         log::info(

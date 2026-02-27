@@ -41,6 +41,7 @@ struct service_node {
     uint16_t omq_port;
     std::array<uint16_t, 3> storage_server_version;
     swarm_id_t swarm_id;
+    uint64_t requested_unlock_height;
 
     oxen::quic::RemoteAddress to_https_address() const {
         return oxen::quic::RemoteAddress{remote_pubkey, ip, https_port};
@@ -80,9 +81,7 @@ struct service_node {
     static std::pair<std::vector<service_node>, int> process_snode_cache_bin(
             std::vector<std::byte> cache_bin);
 
-    static service_node legacy_from_json(nlohmann::json json);
-    static service_node legacy_from_disk(std::string_view str);
-    std::string legacy_to_disk() const;
+    static service_node from_json(nlohmann::json json);
 
     bool operator==(const service_node& other) const = default;
     auto operator<=>(const service_node& other) const = default;

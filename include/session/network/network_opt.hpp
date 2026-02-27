@@ -293,6 +293,13 @@ namespace opt {
         cache_directory(fs::path p) : path{p} {}
     };
 
+    /// Can be used to specify a path to a snode pool cache file that should be used if we are
+    /// unable to bootstrap.
+    struct fallback_snode_pool_path : base {
+        fs::path path;
+        fallback_snode_pool_path(fs::path p) : path{p} {}
+    };
+
     /// Can be used to override the default (2h) duration that the snode cache can be used for
     /// before it needs to be refreshed.
     struct cache_expiration : base {

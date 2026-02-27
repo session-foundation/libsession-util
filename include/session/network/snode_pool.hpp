@@ -17,6 +17,7 @@ namespace session::network {
 namespace config {
     struct SnodePool {
         std::optional<std::filesystem::path> cache_directory;
+        std::optional<std::filesystem::path> fallback_snode_pool_path;
         std::chrono::minutes cache_expiration;
         std::chrono::milliseconds cache_min_lifetime;
         bool enforce_subnet_diversity;
@@ -128,18 +129,22 @@ class SnodePool : public std::enable_shared_from_this<SnodePool> {
     void _launch_next_refresh_request(
             const std::string& request_id,
             const uint8_t index,
+            const bool refreshing_from_seed_nodes,
             const bool use_direct_fetcher,
             const uint8_t total_requests);
     void _retry_refresh_request(
             const std::string& request_id,
             const uint8_t index,
+            const bool refreshing_from_seed_nodes,
             const bool use_direct_fetcher,
             const uint8_t total_requests);
     void _on_refresh_complete(
             std::string refresh_id,
             std::vector<std::vector<std::byte>> raw_results,
+            const bool refreshing_from_seed_nodes,
             const bool use_direct_fetcher,
             const uint8_t total_requests);
+    void _update_cache(std::string refresh_id, std::vector<service_node> nodes);
 };
 
 }  // namespace session::network

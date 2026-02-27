@@ -41,6 +41,7 @@ struct Config {
 
     // Snode Pool Options
     std::optional<fs::path> cache_directory;
+    std::optional<fs::path> fallback_snode_pool_path;
     std::chrono::minutes cache_expiration = 2h;
     std::chrono::milliseconds cache_min_lifetime = 2s;
     size_t cache_min_size = 12;
@@ -110,6 +111,7 @@ struct Config {
 
     // Snode pool options
     void handle_config_opt(opt::cache_directory dir);
+    void handle_config_opt(opt::fallback_snode_pool_path fspp);
     void handle_config_opt(opt::cache_expiration ce);
     void handle_config_opt(opt::cache_min_lifetime mcl);
     void handle_config_opt(opt::cache_min_size mcs);

@@ -42,6 +42,7 @@ Config::Config(const std::vector<std::any>& opts) {
 
         // Snode pool options
         HANDLE_TYPE(opt::cache_directory);
+        HANDLE_TYPE(opt::fallback_snode_pool_path);
         HANDLE_TYPE(opt::cache_expiration);
         HANDLE_TYPE(opt::cache_min_lifetime);
         HANDLE_TYPE(opt::cache_min_size);
@@ -214,6 +215,16 @@ void Config::handle_config_opt(opt::cache_directory dir) {
 
     if (cache_directory)
         log::debug(cat, "Network config using cache dir {}", cache_directory->string());
+}
+
+void Config::handle_config_opt(opt::fallback_snode_pool_path fspp) {
+    fallback_snode_pool_path = std::move(fspp.path);
+
+    if (fallback_snode_pool_path)
+        log::debug(
+                cat,
+                "Network config using fallback snode pool path {}",
+                fallback_snode_pool_path->string());
 }
 
 void Config::handle_config_opt(opt::cache_expiration ce) {

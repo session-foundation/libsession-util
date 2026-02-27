@@ -62,6 +62,7 @@ namespace {
 
     config::SnodePool build_snode_pool_config(const config::Config& main_config) {
         return {main_config.cache_directory,
+                main_config.fallback_snode_pool_path,
                 main_config.cache_expiration,
                 main_config.cache_min_lifetime,
                 main_config.enforce_subnet_diversity,
@@ -1173,6 +1174,7 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
     config.devnet_seed_nodes_size = 0;
 
     config.cache_dir = nullptr;
+    config.fallback_snode_pool_path = nullptr;
     config.cache_expiration_minutes =
             std::chrono::duration_cast<std::chrono::minutes>(cpp_defaults.cache_expiration).count();
     config.cache_min_lifetime_ms =
@@ -1304,6 +1306,10 @@ LIBSESSION_C_API bool session_network_init(
         // Snode cache
         if (config->cache_dir)
             cpp_opts.emplace_back(opt::cache_directory{std::filesystem::path{config->cache_dir}});
+
+        if (config->fallback_snode_pool_path)
+            cpp_opts.emplace_back(opt::fallback_snode_pool_path{
+                    std::filesystem::path{config->fallback_snode_pool_path}});
 
         if (config->cache_expiration_minutes > 0)
             cpp_opts.emplace_back(

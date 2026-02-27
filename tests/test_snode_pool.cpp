@@ -41,6 +41,7 @@ class TestSnodePool : public SnodePool {
 TEST_CASE("Network", "[network][get_unused_nodes]") {
     session::network::config::SnodePool pool_config = {
             std::nullopt,
+            std::nullopt,
             std::chrono::minutes{5},
             std::chrono::minutes{5},
             false,  // enforce_subnet_diversity
@@ -137,6 +138,7 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
 
     // Should exclude nodes which have the same subnet
     pool_config = {
+            std::nullopt,
             std::nullopt,
             std::chrono::minutes{5},
             std::chrono::minutes{5},

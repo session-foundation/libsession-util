@@ -13,6 +13,7 @@ typedef struct network_service_node {
     uint16_t omq_port;
     uint16_t version[3];
     uint64_t swarm_id;
+    uint64_t requested_unlock_height;
 } network_service_node;
 
 #ifdef __cplusplus
