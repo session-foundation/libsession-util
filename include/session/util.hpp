@@ -378,3 +378,13 @@ std::optional<std::vector<unsigned char>> zstd_decompress(
 // limit (for both return values).
 std::pair<rlim_t, rlim_t> set_rlimit_nofile(rlim_t nfiles = 5000);
 #endif
+
+template <typename Fn>
+Fn make_callback_atomic(Fn cb) {
+    auto called = std::make_shared<std::atomic<bool>>(false);
+
+    return [called, cb = std::move(cb)](auto&&... args) {
+        if (!called->exchange(true))
+            cb(std::forward<decltype(args)>(args)...);
+    };
+}

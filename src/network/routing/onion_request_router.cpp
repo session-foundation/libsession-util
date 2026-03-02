@@ -855,6 +855,11 @@ void OnionRequestRouter::_send_request_internal(
 void OnionRequestRouter::_upload_internal(UploadRequest request) {
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
+
+    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
+    // network shutdown cancelling the request and the transport shutdown automatically triggering
+    // callbacks)
+    request.on_complete = make_callback_atomic(std::move(request.on_complete));
     auto& [_, upload_thread] =
             _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
                     .first->second;
@@ -937,6 +942,9 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                                         metadata.id);
 
                                 upload_request.on_complete(std::move(metadata), false);
+                            } catch (const cancellation_exception&) {
+                                log::error(cat, "[Upload {}]: Cancelled", upload_id);
+                                upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
                             } catch (const status_code_exception& e) {
                                 log::error(
                                         cat,
@@ -971,6 +979,11 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
 void OnionRequestRouter::_download_internal(DownloadRequest request) {
     const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
+
+    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
+    // network shutdown cancelling the request and the transport shutdown automatically triggering
+    // callbacks)
+    request.on_complete = make_callback_atomic(std::move(request.on_complete));
     _active_downloads[download_id] = request;
 
     try {
@@ -1019,6 +1032,9 @@ void OnionRequestRouter::_download_internal(DownloadRequest request) {
                             request.on_data(metadata, std::move(data));
 
                         request.on_complete(std::move(metadata), false);
+                    } catch (const cancellation_exception&) {
+                        log::error(cat, "[Download {}]: Cancelled", download_id);
+                        request.on_complete(ERROR_REQUEST_CANCELLED, false);
                     } catch (const status_code_exception& e) {
                         log::error(
                                 cat,
