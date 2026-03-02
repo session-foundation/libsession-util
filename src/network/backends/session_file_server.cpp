@@ -40,7 +40,8 @@ constexpr std::string_view HEADER_TIMESTAMP = "X-FS-Timestamp";
 constexpr std::string_view HEADER_SIGNATURE = "X-FS-Signature";
 constexpr std::string_view HEADER_TTL = "X-FS-TTL";
 
-constexpr std::string_view ENDPOINT_FILE = "file/{}";
+constexpr std::string_view ENDPOINT_FILE = "file";
+constexpr std::string_view ENDPOINT_FILE_INDIVIDUAL = "file/{}";
 constexpr std::string_view ENDPOINT_EXTEND = "file/{}/extend";
 
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
@@ -52,7 +53,7 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     //   https://example.com/file/abc123#p=abc123&d
     DownloadInfo info{};
 
-    auto match = backends::match_endpoint(ENDPOINT_FILE, url);
+    auto match = backends::match_endpoint(ENDPOINT_FILE_INDIVIDUAL, url);
 
     if (!match || match->base.empty() || match->captures.size() != 1)
         return std::nullopt;
@@ -96,7 +97,7 @@ std::string generate_download_url(std::string_view file_id, const config::FileSe
             "{}://{}/{}",
             config.scheme,
             config.host,
-            fmt::format(file_server::ENDPOINT_FILE, file_id));
+            fmt::format(file_server::ENDPOINT_FILE_INDIVIDUAL, file_id));
 
     if (config.use_stream_encryption || has_custom_pubkey) {
         buf += "#";

@@ -593,7 +593,11 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-                    _active_uploads.erase(upload_id);
+
+                    auto active_upload_node = _active_uploads.extract(upload_id);
+                    if (!active_upload_node.empty() &&
+                        active_upload_node.mapped().second.joinable())
+                        active_upload_node.mapped().second.join();
                     return;
                 }
 
@@ -616,7 +620,11 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                             if (!self)
                                 return;
 
-                            _active_uploads.erase(upload_id);
+                            // Join the thread to keep it alive during callback handling
+                            auto active_upload_node = _active_uploads.extract(upload_id);
+                            if (!active_upload_node.empty() &&
+                                active_upload_node.mapped().second.joinable())
+                                active_upload_node.mapped().second.join();
 
                             try {
                                 if (upload_request.is_cancelled())
