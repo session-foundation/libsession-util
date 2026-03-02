@@ -2228,6 +2228,22 @@ void OnionRequestRouter::_on_rotation_verification_response(
     _schedule_path_rotation(new_path_id, category, rotate_at);
     _paths[category].push_back(std::move(new_path));
 
+    // Re-find old_path_it (push_back may have reallocated the vector, invalidating all iterators)
+    old_path_it =
+            std::find_if(active_paths.begin(), active_paths.end(), [&old_path_id](const auto& p) {
+                return p.id == old_path_id;
+            });
+
+    // Just in case
+    if (old_path_it == active_paths.end()) {
+        log::warning(
+                cat,
+                "[Path {}]: Old path disappeared after push_back during rotation.",
+                old_path_id);
+        _update_status();
+        return;
+    }
+
     // Retire the old path
     if (old_path_it->active_requests == 0) {
         log::info(
