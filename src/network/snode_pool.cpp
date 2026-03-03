@@ -462,7 +462,10 @@ void SnodePool::_launch_next_refresh_request(
                 try {
                     std::vector<std::byte> loaded_fallback_data =
                             read_whole_file(*_config.fallback_snode_pool_path);
-                    auto json = nlohmann::json::parse(loaded_fallback_data);
+                    auto json = nlohmann::json::parse(
+                            reinterpret_cast<const char*>(loaded_fallback_data.data()),
+                            reinterpret_cast<const char*>(
+                                    loaded_fallback_data.data() + loaded_fallback_data.size()));
                     auto nodes = json.at("service_node_states").get<nlohmann::json::array_t>();
                     auto height = json.at("height").get<int>();
                     auto file_time = fs::last_write_time(*_config.fallback_snode_pool_path);
