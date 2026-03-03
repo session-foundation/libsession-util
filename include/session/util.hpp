@@ -3,6 +3,7 @@
 #include <oxenc/common.h>
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <concepts>
