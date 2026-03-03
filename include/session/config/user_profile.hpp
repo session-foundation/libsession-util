@@ -28,17 +28,13 @@ using namespace std::literals;
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
 /// E - user pro access expiry unix timestamp (in milliseconds). Note: This can be different from
-/// the pro proof expiry which can be sooner. P - user profile url after re-uploading (should take
-/// precedence over `p` when `T > t`). Q - user profile decryption key (binary) after re-uploading
-/// (should take precedence over `q`
+///     the pro proof expiry which can be sooner.
+/// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
+/// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
 ///     when `T > t`).
 /// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
 ///    (automatically updates when calling `set_reupload_profile_pic`).
 class UserProfile : public ConfigBase {
-
-  private:
-    std::optional<ProConfig> pro_config;
-
   public:
     friend class UserProfileTester;
 
@@ -274,8 +270,7 @@ class UserProfile : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `bool` - A flag indicating whether the config had Session Pro components which were
-    /// removed.
+    /// - `bool` - Flag indicating whether the config had Session Pro config removed or not.
     bool remove_pro_config();
 
     /// API: user_profile/UserProfile::get_pro_features
@@ -331,11 +326,8 @@ class UserProfile : public ConfigBase {
     /// Inputs:
     /// - `access_expiry_ts_ms` -- The timestamp that the users Session Pro access will expire, or
     /// nullopt to remove the value.
-    void set_pro_access_expiry(std::optional<sys_ms> access_expiry_ts_ms);
-
-  protected:
-    void extra_data(oxenc::bt_dict_producer&& extra) const override;
-    void load_extra_data(oxenc::bt_dict_consumer&& extra) override;
+    void set_pro_access_expiry(
+            std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms);
 };
 
 }  // namespace session::config
