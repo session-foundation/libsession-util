@@ -10,64 +10,51 @@
 
 namespace session::config {
 
-bool ProConfig::load(bt_dict_consumer& root) {
+bool ProConfig::load(const dict& root) {
     // Get proof fields from session pro data sitting in the 'p' (proof) dictionary
-    if (!root.skip_until("p"))
+    auto p_it = root.find("p");
+    if (p_it == root.end())
         return false;
 
     // Lookup and get 'p'
-    auto pd = root.consume_dict_consumer();
-
-    if (!root.skip_until("r"))
+    const config::dict* p = std::get_if<config::dict>(&p_it->second);
+    if (!p)
         return false;
 
-    auto rotating_privkey_ = root.consume_string_view();
-
-    if (rotating_privkey_.size() != rotating_privkey.max_size())
+    std::optional<std::vector<unsigned char>> maybe_rotating_seed = maybe_vector(root, "r");
+    if (!maybe_rotating_seed || maybe_rotating_seed->size() != crypto_sign_ed25519_SEEDBYTES)
         return false;
 
     // NOTE: Load into the proof object
     {
-        if (!pd.skip_until("@"))
+        std::optional<uint8_t> version = maybe_int(*p, "@");
+        std::optional<std::vector<unsigned char>> maybe_gen_index_hash = maybe_vector(*p, "g");
+        std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_expiry_unix_ts_ms =
+                maybe_ts_ms(*p, "e");
+        std::optional<std::vector<unsigned char>> maybe_sig = maybe_vector(*p, "s");
+
+        if (!version)
+            return false;
+        if (!maybe_gen_index_hash || maybe_gen_index_hash->size() != proof.gen_index_hash.size())
+            return false;
+        if (!maybe_sig || maybe_sig->size() != proof.sig.max_size())
+            return false;
+        if (!maybe_expiry_unix_ts_ms)
             return false;
 
-        proof.version = pd.consume_integer<uint8_t>();
-
-        if (!pd.skip_until("e"))
-            return false;
-
-        proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(pd.consume_integer<uint64_t>()));
-
-        if (!pd.skip_until("g"))
-            return false;
-
-        auto gen_index_hash = pd.consume_string_view();
-        if (gen_index_hash.size() != proof.gen_index_hash.size())
-            return false;
-
-        if (!pd.skip_until("r"))
-            return false;
-
-        auto rotating_pubkey = pd.consume_string_view();
-        if (rotating_pubkey.size() != proof.rotating_pubkey.max_size())
-            return false;
-
-        if (!pd.skip_until("s"))
-            return false;
-
-        auto sig = pd.consume_string_view();
-        if (sig.size() != proof.sig.max_size())
-            return false;
-
+        proof.version = *version;
         std::memcpy(
-                proof.gen_index_hash.data(), gen_index_hash.data(), proof.gen_index_hash.size());
-        std::memcpy(
-                proof.rotating_pubkey.data(), rotating_pubkey.data(), proof.rotating_pubkey.size());
-        std::memcpy(proof.sig.data(), sig.data(), proof.sig.size());
+                proof.gen_index_hash.data(),
+                maybe_gen_index_hash->data(),
+                proof.gen_index_hash.size());
+        proof.expiry_unix_ts = *maybe_expiry_unix_ts_ms;
+        std::memcpy(proof.sig.data(), maybe_sig->data(), proof.sig.size());
     }
 
-    std::memcpy(rotating_privkey.data(), rotating_privkey_.data(), rotating_privkey.size());
+    // Derive the rotating public key from the seed and populate the proof's pubkey and the outer
+    // private key
+    crypto_sign_ed25519_seed_keypair(
+            proof.rotating_pubkey.data(), rotating_privkey.data(), maybe_rotating_seed->data());
     return true;
 }
 
