@@ -18,6 +18,8 @@ namespace session::network {
 namespace {
     inline auto cat = log::Cat("quic-transport");
 
+    static constexpr uint16_t ACTIVE_STREAM_PRUNE_LIMIT = 32;
+
     inline bool use_reserved_stream(RequestCategory category) {
         switch (category) {
             case RequestCategory::standard: return false;
@@ -485,8 +487,18 @@ void QuicTransport::_send_on_connection(
 
                 log::trace(cat, "[Request {}] Received response.", req_id);
 
-                // If the request timed out then we assume the stream is dead and don't add it back
-                // to the pool
+                // Since the request completed it's round-trip if it isn't the "reserverd" stream
+                // (not used for general requests) then we can either add it back to the pool, or
+                // close it if there are more that the active stream price limit
+                if (stream_id != 0) {
+                    auto conn = _endpoint->get_conn(conn_id);
+
+                    if (conn && conn->get_streams_available() <= ACTIVE_STREAM_PRUNE_LIMIT)
+                        _available_stream_ids[remote_pubkey_hex].insert(stream_id);
+                    else if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id))
+                        stream->close();
+                }
+
                 if (resp.timed_out) {
                     log::debug(cat, "[Request {}] Timed out.", req_id);
                     return cb(
@@ -496,12 +508,6 @@ void QuicTransport::_send_on_connection(
                             {content_type_plain_text},
                             "Request timed out");
                 }
-
-                // Since the request completed it's round-trip we can add it back to the pool (as
-                // long as it isn't the "reserved" stream which shouldn't be used for general
-                // requests)
-                if (stream_id != 0)
-                    _available_stream_ids[remote_pubkey_hex].insert(stream_id);
 
                 if (resp.is_error()) {
                     auto final_timeout = resp.timed_out;
