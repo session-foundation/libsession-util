@@ -490,7 +490,7 @@ void QuicTransport::_send_on_connection(
                 // Since the request completed it's round-trip if it isn't the "reserverd" stream
                 // (not used for general requests) then we can either add it back to the pool, or
                 // close it if there are more that the active stream price limit
-                if (stream_id != 0) {
+                if (stream_id != 0 && _endpoint) {
                     auto conn = _endpoint->get_conn(conn_id);
 
                     if (conn && conn->get_streams_available() <= ACTIVE_STREAM_PRUNE_LIMIT)
