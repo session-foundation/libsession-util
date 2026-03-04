@@ -18,20 +18,6 @@ namespace session::network {
 namespace {
     inline auto cat = log::Cat("quic-transport");
 
-    inline bool max_streams(RequestCategory category, config::QuicTransport config) {
-        RequestCategory target_category = RequestCategory::standard;
-        switch (category) {
-            case RequestCategory::standard: target_category = RequestCategory::standard;
-            case RequestCategory::standard_small: target_category = RequestCategory::standard;
-            case RequestCategory::file: target_category = RequestCategory::file;
-            case RequestCategory::file_small: target_category = RequestCategory::file;
-        }
-
-        return (config.max_streams.contains(target_category)
-                        ? config.max_streams.at(target_category)
-                        : 1);
-    }
-
     inline bool use_reserved_stream(RequestCategory category) {
         switch (category) {
             case RequestCategory::standard: return false;
@@ -266,7 +252,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
     if (auto it = _active_connection_ids.find(remote_pubkey_hex);
         it != _active_connection_ids.end()) {
         log::trace(cat, "[Request {}] Found active connection ID.", request.request_id);
-        _send_on_connection(it->second, std::move(request), std::move(callback));
+        _send_on_connection(it->second, remote_pubkey_hex, std::move(request), std::move(callback));
         return;
     }
 
@@ -325,7 +311,6 @@ void QuicTransport::_establish_connection(
                 oxen::quic::opt::outbound_alpn(ALPN),
                 oxen::quic::opt::handshake_timeout{_config.handshake_timeout},
                 oxen::quic::opt::keep_alive{_config.keep_alive},
-                oxen::quic::opt::max_streams{static_cast<uint64_t>(max_streams(category, _config))},
                 [weak_self = weak_from_this(), this, address_pubkey_hex, initiating_req_id](
                         oxen::quic::Connection& conn) {
                     auto self = weak_self.lock();
@@ -367,7 +352,8 @@ void QuicTransport::_establish_connection(
                                 conn_id.to_string());
 
                         for (auto&& [req, cb] : std::move(requests_to_process))
-                            _send_on_connection(conn_id, std::move(req), std::move(cb));
+                            _send_on_connection(
+                                    conn_id, address_pubkey_hex, std::move(req), std::move(cb));
                     }
                 },
                 [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
@@ -387,7 +373,10 @@ void QuicTransport::_establish_connection(
 }
 
 void QuicTransport::_send_on_connection(
-        oxen::quic::ConnectionID conn_id, Request request, network_response_callback_t callback) {
+        oxen::quic::ConnectionID conn_id,
+        const std::string remote_pubkey_hex,
+        Request request,
+        network_response_callback_t callback) {
     if (!_endpoint)
         return callback(
                 false,
@@ -422,21 +411,6 @@ void QuicTransport::_send_on_connection(
                 "Connection died before request could be sent");
     }
 
-    // Determine whether we want to use the "reserved" stream (ie. for really small requests) or
-    // create a new stream (to maximise concurrency based on the configuration limits)
-    std::shared_ptr<oxen::quic::BTRequestStream> target_stream;
-
-    try {
-        if (use_reserved_stream(request.category))
-            // There will **always** be a stream `0` so we use that as the reserved stream
-            target_stream = conn->get_stream<oxen::quic::BTRequestStream>(0);
-        else
-            target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
-    } catch (const std::exception& e) {
-        return callback(
-                false, false, ERROR_FAILED_TO_GET_STREAM, {content_type_plain_text}, e.what());
-    }
-
     // If the request has already timedout at this point then just fail it immediately
     auto timeout = request.time_remaining();
     if (timeout <= 0s)
@@ -446,6 +420,40 @@ void QuicTransport::_send_on_connection(
                 ERROR_REQUEST_TIMEOUT,
                 {content_type_plain_text},
                 "Request already timed out");
+
+    // Determine whether we want to use the "reserved" stream (ie. for really small requests) or
+    // create a new stream (to maximise concurrency based on the configuration limits)
+    std::shared_ptr<oxen::quic::BTRequestStream> target_stream;
+
+    try {
+        if (use_reserved_stream(request.category))
+            // There will **always** be a stream `0` so we use that as the reserved stream
+            target_stream = conn->get_stream<oxen::quic::BTRequestStream>(0);
+        else {
+            // Try to retrieve an available stream to send the request down, otherwise fallback to
+            // creating a new stream
+            auto stream_it = _available_stream_ids.find(remote_pubkey_hex);
+
+            if (stream_it != _available_stream_ids.end() && !stream_it->second.empty()) {
+                // Remove the id from `_available_stream_ids` regardless of whether we successfully
+                // get the stream from the current connection because if we don't, then it means
+                // that stream isn't valid anyway so should be removed
+                auto& stream_ids = stream_it->second;
+                auto stream_id_it = stream_ids.begin();
+                int64_t id = *stream_id_it;
+                stream_ids.erase(stream_id_it);
+
+                if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(id))
+                    target_stream = stream;
+                else
+                    target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
+            } else
+                target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
+        }
+    } catch (const std::exception& e) {
+        return callback(
+                false, false, ERROR_FAILED_TO_GET_STREAM, {content_type_plain_text}, e.what());
+    }
 
     // We have a valid connection and stream so we can send the request
     log::debug(
@@ -468,6 +476,8 @@ void QuicTransport::_send_on_connection(
              this,
              cb = std::move(callback),
              conn_id,
+             remote_pubkey_hex,
+             stream_id = target_stream->stream_id(),
              req_id = request.request_id](quic::message resp) {
                 auto self = weak_self.lock();
                 if (!self)
@@ -475,7 +485,8 @@ void QuicTransport::_send_on_connection(
 
                 log::trace(cat, "[Request {}] Received response.", req_id);
 
-                // Trigger the callback based on the response we got
+                // If the request timed out then we assume the stream is dead and don't add it back
+                // to the pool
                 if (resp.timed_out) {
                     log::debug(cat, "[Request {}] Timed out.", req_id);
                     return cb(
@@ -485,6 +496,12 @@ void QuicTransport::_send_on_connection(
                             {content_type_plain_text},
                             "Request timed out");
                 }
+
+                // Since the request completed it's round-trip we can add it back to the pool (as
+                // long as it isn't the "reserved" stream which shouldn't be used for general
+                // requests)
+                if (stream_id != 0)
+                    _available_stream_ids[remote_pubkey_hex].insert(stream_id);
 
                 if (resp.is_error()) {
                     auto final_timeout = resp.timed_out;

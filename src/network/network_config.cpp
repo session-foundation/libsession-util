@@ -55,7 +55,6 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::quic_handshake_timeout);
         HANDLE_TYPE(opt::quic_keep_alive);
         HANDLE_TYPE(opt::quic_disable_mtu_discovery);
-        HANDLE_TYPE(opt::quic_max_streams);
 
         // Onion request router options
         HANDLE_TYPE(opt::onionreq_edge_node_cache_duration);
@@ -293,16 +292,6 @@ void Config::handle_config_opt(opt::quic_keep_alive qka) {
 void Config::handle_config_opt(opt::quic_disable_mtu_discovery qdmd) {
     quic_disable_mtu_discovery = true;
     log::debug(cat, "Network config disabled MTU discovery for Quic");
-}
-
-void Config::handle_config_opt(opt::quic_max_streams qms) {
-    quic_max_streams.emplace(qms.category, qms.max_count);
-
-    log::debug(
-            cat,
-            "Network config max {} quic streams set to {}",
-            to_string(qms.category),
-            qms.max_count);
 }
 
 // MARK: Onion Request Router Options

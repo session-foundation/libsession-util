@@ -64,8 +64,6 @@ struct Config {
     std::chrono::milliseconds quic_handshake_timeout{3s};
     std::chrono::seconds quic_keep_alive{10s};
     bool quic_disable_mtu_discovery = false;
-    std::unordered_map<RequestCategory, uint8_t> quic_max_streams = {
-            {RequestCategory::standard, 32}, {RequestCategory::file, 2}};
 
     template <typename... Opt>
         requires(
@@ -124,7 +122,6 @@ struct Config {
     void handle_config_opt(opt::quic_handshake_timeout qht);
     void handle_config_opt(opt::quic_keep_alive qka);
     void handle_config_opt(opt::quic_disable_mtu_discovery qdmd);
-    void handle_config_opt(opt::quic_max_streams qms);
 
     // Onion request router options
     void handle_config_opt(opt::onionreq_path_strike_threshold pst);

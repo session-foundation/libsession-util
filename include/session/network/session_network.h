@@ -95,8 +95,6 @@ typedef struct session_network_config {
     uint32_t quic_handshake_timeout_seconds;
     uint32_t quic_keep_alive_seconds;
     bool quic_disable_mtu_discovery;
-    uint8_t quic_max_general_streams;
-    uint8_t quic_max_file_streams;
 
 } session_network_config;
 
