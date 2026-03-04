@@ -966,7 +966,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                                         "[Upload {}]: Failure with error: {}",
                                         upload_id,
                                         e.what());
-                                upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                                upload_request.on_complete(ERROR_UNKNOWN, false);
                             }
                         });
             });
@@ -983,7 +983,7 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                 if (!active_upload_node.empty() && active_upload_node.mapped().second.joinable())
                     active_upload_node.mapped().second.join();
 
-                upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                upload_request.on_complete(ERROR_UNKNOWN, false);
             });
         }
     });
@@ -1061,7 +1061,7 @@ void OnionRequestRouter::_download_internal(DownloadRequest request) {
                                 "[Download {}]: Failure with error: {}",
                                 download_id,
                                 e.what());
-                        request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+                        request.on_complete(ERROR_UNKNOWN, false);
                     }
                 });
     } catch (const invalid_url_exception& e) {
@@ -1070,7 +1070,7 @@ void OnionRequestRouter::_download_internal(DownloadRequest request) {
         _active_downloads.erase(download_id);
     } catch (const std::exception& e) {
         log::error(cat, "[Download {}]: Exception during download: {}", download_id, e.what());
-        request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
+        request.on_complete(ERROR_UNKNOWN, false);
         _active_downloads.erase(download_id);
     }
 }

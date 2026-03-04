@@ -17,7 +17,6 @@ constexpr int16_t ERROR_REQUEST_TIMEOUT = 408;
 constexpr int16_t ERROR_PAYLOAD_TOO_LARGE = 413;
 constexpr int16_t ERROR_MISDIRECTED_REQUEST = 421;
 constexpr int16_t ERROR_TOO_EARLY = 425;
-constexpr int16_t ERROR_INTERNAL_SERVER_ERROR = 500;
 constexpr int16_t ERROR_NETWORK_MISCONFIGURED = -10001;
 constexpr int16_t ERROR_NETWORK_SUSPENDED = -10002;
 constexpr int16_t ERROR_NO_TRANSPORT_LAYER = -10003;
@@ -31,6 +30,7 @@ constexpr int16_t ERROR_FAILED_GENERATE_ONION_PAYLOAD = -10010;
 constexpr int16_t ERROR_FAILED_TO_GET_STREAM = -10011;
 constexpr int16_t ERROR_BUILD_TIMEOUT = -10100;
 constexpr int16_t ERROR_REQUEST_CANCELLED = -10200;
+constexpr int16_t ERROR_UNKNOWN = -11000;
 
 const std::pair<std::string, std::string> content_type_plain_text = {
         "Content-Type", "text/plain; charset=UTF-8"};
