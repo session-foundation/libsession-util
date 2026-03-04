@@ -971,14 +971,19 @@ void OnionRequestRouter::_upload_internal(UploadRequest request) {
                         });
             });
         } catch (const std::exception& e) {
-            _loop->call([weak_self, this, upload_request, upload_id, err = e.what()] {
+            log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, e.what());
+
+            _loop->call([weak_self, this, upload_request, upload_id] {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
 
-                log::error(cat, "[Upload {}]: Exception during upload: {}", upload_id, err);
+                // Join the thread to keep it alive during callback handling
+                auto active_upload_node = _active_uploads.extract(upload_id);
+                if (!active_upload_node.empty() && active_upload_node.mapped().second.joinable())
+                    active_upload_node.mapped().second.join();
+
                 upload_request.on_complete(ERROR_INTERNAL_SERVER_ERROR, false);
-                _active_uploads.erase(upload_id);
             });
         }
     });
