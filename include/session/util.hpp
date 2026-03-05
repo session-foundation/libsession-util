@@ -3,15 +3,24 @@
 #include <oxenc/common.h>
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <iterator>
+#include <memory>
 #include <optional>
 #include <span>
 #include <type_traits>
 #include <vector>
+
+#ifndef _WIN32
+extern "C" {
+#include <sys/resource.h>
+}
+#endif
 
 #include "types.hpp"
 
@@ -117,8 +126,68 @@ inline unsigned char* to_unsigned(unsigned char* x) {
     return x;
 }
 
-inline uint64_t get_timestamp() {
-    return std::chrono::steady_clock::now().time_since_epoch().count();
+// The same as std::chrono::system_clock::now(), except that it allows you to get it in a different
+// precision.  E.g. sysclock_now<std::chrono::seconds> gives a timepoint with seconds precision (aka
+// std::chrono::sys_seconds).
+template <typename Precision = std::chrono::system_clock::duration>
+inline std::chrono::sys_time<Precision> sysclock_now() {
+    return std::chrono::floor<Precision>(std::chrono::system_clock::now());
+}
+// Shortcut for sysclock_now<std::chrono::seconds>();
+inline std::chrono::sys_seconds sysclock_now_s() {
+    return sysclock_now<std::chrono::seconds>();
+}
+using sys_ms = std::chrono::sys_time<std::chrono::milliseconds>;
+// Shortcut for sysclock_now<std::chrono::sys_time<std::chrono::milliseconds>>();
+inline sys_ms sysclock_now_ms() {
+    return sysclock_now<std::chrono::milliseconds>();
+}
+
+// Returns the duration count of the given duration cast into ToDuration.  Example:
+//     duration_count<std::chrono::seconds>(30000ms)  // returns 30
+// This function requires that the target type is no more precise than d, that is, it will not allow
+// you to cast from seconds to milliseconds because such a cast indicates that the sub-second
+// precision has already been lost.
+template <typename ToDuration, typename Rep, typename Period>
+    requires std::is_convertible_v<ToDuration, std::chrono::duration<Rep, Period>>
+constexpr int64_t duration_count(const std::chrono::duration<Rep, Period>& d) {
+    return std::chrono::duration_cast<ToDuration>(d).count();
+}
+// Returns the seconds count of the given duration
+template <typename Rep, typename Period>
+    requires std::is_convertible_v<std::chrono::seconds, std::chrono::duration<Rep, Period>>
+constexpr int64_t duration_seconds(const std::chrono::duration<Rep, Period>& d) {
+    return duration_count<std::chrono::seconds>(d);
+}
+// Returns the milliseconds count of the given duration
+template <typename Rep, typename Period>
+    requires std::is_convertible_v<std::chrono::milliseconds, std::chrono::duration<Rep, Period>>
+constexpr int64_t duration_ms(const std::chrono::duration<Rep, Period>& d) {
+    return duration_count<std::chrono::milliseconds>(d);
+}
+
+// Returns the time-since-epoch count of the given time point, cast into ToDuration.  The given time
+// point must be at least as precise as ToDuration, i.e. this will not allow you to cast to a more
+// precise time point as that would mean the intended precision has already been lost by an earlier
+// cast.
+template <class ToDuration, class Clock, class Duration>
+    requires std::is_convertible_v<ToDuration, Duration>
+constexpr int64_t epoch_count(const std::chrono::time_point<Clock, Duration>& t) {
+    return duration_count<ToDuration>(t.time_since_epoch());
+}
+// Returns the seconds-since-epoch count of the given time point.  The given time point must be at
+// least as precise as seconds.
+template <class Clock, class Duration>
+    requires std::is_convertible_v<std::chrono::seconds, Duration>
+constexpr int64_t epoch_seconds(const std::chrono::time_point<Clock, Duration>& t) {
+    return duration_seconds(t.time_since_epoch());
+}
+// Returns the milliseconds-since-epoch count of the given time point.  The given time point must
+// have at least milliseconds precision.
+template <class Clock, class Duration>
+    requires std::is_convertible_v<std::chrono::milliseconds, Duration>
+constexpr int64_t epoch_ms(const std::chrono::time_point<Clock, Duration>& t) {
+    return duration_ms(t.time_since_epoch());
 }
 
 /// Returns true if the first string is equal to the second string, compared case-insensitively.
@@ -300,3 +369,24 @@ std::vector<unsigned char> zstd_compress(
 std::optional<std::vector<unsigned char>> zstd_decompress(
         std::span<const unsigned char> data, size_t max_size = 0);
 }  // namespace session
+
+#ifndef _WIN32
+// Updates the file descriptor (NOFILE) limit to allow nfiles open fds.  On success, returns the old
+// limit as first value, and the new limit as second value.  If the requested nfiles is higher than
+// the NOFILE hard limit then this sets the limit to the hard limit instead of the requested value.
+// On failure this throws std::system_error containing the error info.
+//
+// If you pass nfiles=0 then this will not update the FD limit but will simply return the current
+// limit (for both return values).
+std::pair<rlim_t, rlim_t> set_rlimit_nofile(rlim_t nfiles = 5000);
+#endif
+
+template <typename Fn>
+Fn make_callback_atomic(Fn cb) {
+    auto called = std::make_shared<std::atomic<bool>>(false);
+
+    return [called, cb = std::move(cb)](auto&&... args) {
+        if (!called->exchange(true))
+            cb(std::forward<decltype(args)>(args)...);
+    };
+}

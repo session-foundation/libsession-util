@@ -106,17 +106,37 @@ target_link_libraries(config
     libsodium::sodium-internal
 )
 
-if(ENABLE_ONIONREQ)
-    add_libsession_util_library(onionreq
+if(ENABLE_NETWORKING)
+    # libevent
+    if(NOT TARGET libevent::core)
+        add_library(libevent_core INTERFACE)
+        pkg_check_modules(LIBEVENT_core libevent_core>=2.1 IMPORTED_TARGET REQUIRED)
+        target_link_libraries(libevent_core INTERFACE PkgConfig::LIBEVENT_core)
+        add_library(libevent::core ALIAS libevent_core)
+    endif()
+
+    add_libsession_util_library(network
         onionreq/builder.cpp
         onionreq/hop_encryption.cpp
-        onionreq/key_types.cpp
         onionreq/parser.cpp
         onionreq/response_parser.cpp
-        session_network.cpp
+        network/key_types.cpp
+        network/network_config.cpp
+        network/request_queue.cpp
+        network/service_node.cpp
+        network/session_network_internal.cpp
+        network/session_network_types.cpp
+        network/session_network.cpp
+        network/snode_pool.cpp
+        network/swarm.cpp
+        network/backends/session_file_server.cpp
+        network/backends/session_open_group_server.cpp
+        network/transport/quic_transport.cpp
+        network/routing/direct_router.cpp
+        network/routing/onion_request_router.cpp
     )
 
-    target_link_libraries(onionreq
+    target_link_libraries(network
         PUBLIC
         crypto
         quic
@@ -124,10 +144,19 @@ if(ENABLE_ONIONREQ)
         nlohmann_json::nlohmann_json
         libsodium::sodium-internal
         nettle::nettle
+        date::date
+        libevent::core
     )
 
+    if(ENABLE_NETWORKING_SROUTER)
+        target_sources(network
+            PRIVATE
+            network/routing/session_router_router.cpp)
+        target_link_libraries(network PUBLIC session-router::libsessionrouter)
+    endif()
+
     if (BUILD_STATIC_DEPS)
-        target_include_directories(onionreq PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
+        target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
     endif()
 endif()
 

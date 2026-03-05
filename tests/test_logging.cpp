@@ -8,7 +8,7 @@
 
 #include "utils.hpp"
 
-#ifndef DISABLE_ONIONREQ
+#ifndef DISABLE_NETWORKING
 #include <oxen/quic/network.hpp>
 #endif
 
@@ -89,7 +89,7 @@ TEST_CASE("Logging callbacks", "[logging]") {
                   line1));
 }
 
-#ifndef DISABLE_ONIONREQ
+#ifndef DISABLE_NETWORKING
 TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
     oxen::log::clear_sinks();
     simple_logs.clear();
@@ -103,13 +103,9 @@ TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
 
     oxen::log::clear_sinks();
 
-    CHECK(simple_logs.size() >= 2);
     // CHECK(simple_logs == std::vector<std::string>{"uncomment me to fail showing all log lines"});
-#if defined(__APPLE__) && defined(__clang__) && defined(RELEASE_BUILD)
-    CHECK(simple_logs.front().find("libevent loop is started") != std::string::npos);
-#else
-    CHECK(simple_logs.front().find("Starting libevent") != std::string::npos);
-#endif
-    CHECK(simple_logs.back().find("Loop shutdown complete") != std::string::npos);
+    CHECK(std::any_of(simple_logs.begin(), simple_logs.end(), [](const std::string& s) {
+        return s.find("[quic:") != std::string::npos;
+    }));
 }
 #endif

@@ -13,7 +13,8 @@ OnionReqParser::OnionReqParser(
         std::span<const unsigned char> x25519_sk,
         std::span<const unsigned char> req,
         size_t max_size) :
-        keys{x25519_pubkey::from_bytes(x25519_pk), x25519_seckey::from_bytes(x25519_sk)},
+        keys{network::x25519_pubkey::from_bytes(x25519_pk),
+             network::x25519_seckey::from_bytes(x25519_sk)},
         enc{keys.second, keys.first} {
     if (sodium_init() == -1)
         throw std::runtime_error{"Failed to initialize libsodium!"};
@@ -35,7 +36,7 @@ OnionReqParser::OnionReqParser(
     // else leave it at the backwards-compat AES-GCM default
 
     if (auto itr = metadata.find("ephemeral_key"); itr != metadata.end())
-        remote_pk = parse_x25519_pubkey(itr->get<std::string>());
+        remote_pk = network::parse_x25519_pubkey(itr->get<std::string>());
     else
         throw std::invalid_argument{"metadata does not have 'ephemeral_key' entry"};
 

@@ -47,6 +47,86 @@ struct log_level_lowerer : log_level_override {
     log_level_lowerer(oxen::log::Level l, std::string category) :
             log_level_override{std::min(l, oxen::log::get_level(category)), category} {}
 };
+
+class CallTracker {
+  protected:
+    std::unordered_map<std::string, int> call_counts_;
+    std::mutex call_counts_mutex_;
+    std::condition_variable call_cv_;
+    std::vector<std::string> calls_to_ignore_;
+
+  public:
+    virtual ~CallTracker() = default;
+
+    void func_called(const std::string& name) {
+        bool notify = false;
+        {
+            std::lock_guard<std::mutex> lock(call_counts_mutex_);
+            ++call_counts_[name];
+            notify = true;
+        }
+
+        if (notify)
+            call_cv_.notify_all();
+    }
+
+    std::vector<std::string> calls_to_ignore() { return calls_to_ignore_; }
+
+    bool check_should_ignore_and_log_call(const std::string& name) {
+        func_called(name);
+        return std::find(calls_to_ignore_.begin(), calls_to_ignore_.end(), name) !=
+               calls_to_ignore_.end();
+    }
+
+    template <typename... Strings>
+    void ignore_calls_to(Strings&&... args) {
+        (calls_to_ignore_.emplace_back(std::forward<Strings>(args)), ...);
+    }
+
+    void reset_calls() {
+        std::lock_guard<std::mutex> lock(call_counts_mutex_);
+        call_counts_.clear();
+        calls_to_ignore_.clear();
+    }
+
+    int get_call_count(const std::string& name) {
+        std::lock_guard<std::mutex> lock(call_counts_mutex_);
+        auto it = call_counts_.find(name);
+        return (it != call_counts_.end()) ? it->second : 0;
+    }
+
+    bool called(const std::string& name, int times = 1) { return (get_call_count(name) >= times); }
+
+    [[nodiscard]] bool called(
+            const std::string& name, std::chrono::milliseconds timeout, int times = 1) {
+        if (times <= 0)
+            times = 1;
+
+        std::unique_lock<std::mutex> lock(call_counts_mutex_);
+        auto predicate = [&]() {
+            auto it = call_counts_.find(name);
+            return (it != call_counts_.end() && it->second >= times);
+        };
+        return call_cv_.wait_for(lock, timeout, predicate);
+    }
+
+    bool did_not_call(const std::string& name) {
+        std::lock_guard<std::mutex> lock(call_counts_mutex_);
+        return !call_counts_.contains(name);
+    }
+
+    [[nodiscard]] bool did_not_call(const std::string& name, std::chrono::milliseconds duration) {
+        std::unique_lock<std::mutex> lock(call_counts_mutex_);
+        auto predicate = [&]() { return call_counts_.contains(name); };
+
+        if (predicate())
+            return false;  // Already called
+
+        bool was_called_during_wait = call_cv_.wait_for(lock, duration, predicate);
+        return !was_called_during_wait;
+    }
+};
+
 }  // namespace session
 
 inline std::vector<unsigned char> operator""_bytes(const char* x, size_t n) {

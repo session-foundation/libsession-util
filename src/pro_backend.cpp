@@ -355,7 +355,7 @@ std::string GenerateProProofRequest::to_json() const {
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
-    j["unix_ts_ms"] = unix_ts.time_since_epoch().count();
+    j["unix_ts_ms"] = epoch_ms(unix_ts);
     j["master_sig"] = oxenc::to_hex(master_sig);
     j["rotating_sig"] = oxenc::to_hex(rotating_sig);
     std::string result = j.dump();
@@ -391,7 +391,7 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
     uint8_t version = 0;
-    uint64_t unix_ts_ms = unix_ts.time_since_epoch().count();
+    uint64_t unix_ts_ms = epoch_ms(unix_ts);
     array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state = {};
     make_blake2b32_hasher(
@@ -536,7 +536,7 @@ std::string GetProDetailsRequest::to_json() const {
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["master_sig"] = oxenc::to_hex(master_sig);
-    j["unix_ts_ms"] = unix_ts.time_since_epoch().count();
+    j["unix_ts_ms"] = epoch_ms(unix_ts);
     j["count"] = count;
     std::string result = j.dump();
     return result;
@@ -561,7 +561,7 @@ array_uc64 GetProDetailsRequest::build_sig(
     //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
     array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state = {};
-    uint64_t unix_ts_ms = unix_ts.time_since_epoch().count();
+    uint64_t unix_ts_ms = epoch_ms(unix_ts);
     make_blake2b32_hasher(
             &state,
             {SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION,
@@ -809,8 +809,8 @@ array_uc64 SetPaymentRefundRequestedRequest::build_sig(
             crypto_sign_ed25519_PUBLICKEYBYTES);
 
     // Timestamps
-    uint64_t unix_ts_ms = unix_ts.time_since_epoch().count();
-    uint64_t refund_requested_unix_ts_ms = refund_requested_unix_ts.time_since_epoch().count();
+    uint64_t unix_ts_ms = epoch_ms(unix_ts);
+    uint64_t refund_requested_unix_ts_ms = epoch_ms(refund_requested_unix_ts);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<const uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms));
     crypto_generichash_blake2b_update(
@@ -885,8 +885,8 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     nlohmann::json j;
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
-    j["unix_ts_ms"] = unix_ts.time_since_epoch().count();
-    j["refund_requested_unix_ts_ms"] = refund_requested_unix_ts.time_since_epoch().count();
+    j["unix_ts_ms"] = epoch_ms(unix_ts);
+    j["refund_requested_unix_ts_ms"] = epoch_ms(refund_requested_unix_ts);
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
@@ -1325,9 +1325,7 @@ session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
     // error response returns the same struct just with different fields populated.
     result.header.status = cpp.status;
     result.proof.version = cpp.proof.version;
-    result.proof.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                             cpp.proof.expiry_unix_ts.time_since_epoch())
-                                             .count();
+    result.proof.expiry_unix_ts_ms = session::epoch_ms(cpp.proof.expiry_unix_ts);
     std::memcpy(
             result.proof.gen_index_hash.data,
             cpp.proof.gen_index_hash.data(),
@@ -1409,9 +1407,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
         const ProRevocationItem& src = cpp.items[index];
         session_pro_backend_pro_revocation_item& dest = result.items[index];
         std::memcpy(dest.gen_index_hash.data, src.gen_index_hash.data(), src.gen_index_hash.size());
-        dest.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                         src.expiry_unix_ts.time_since_epoch())
-                                         .count();
+        dest.expiry_unix_ts_ms = session::epoch_ms(src.expiry_unix_ts);
     }
     return result;
 }
@@ -1450,6 +1446,8 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         result.header.internal_arena_buf_ = arena.data;
     }
 
+    using session::epoch_ms;
+
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
     result.header.status = cpp.status;
     result.status = cpp.user_status;
@@ -1458,9 +1456,9 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
             &arena, result.items_count * sizeof(*result.items));
     result.auto_renewing = cpp.auto_renewing;
-    result.expiry_unix_ts_ms = cpp.expiry_unix_ts.time_since_epoch().count();
+    result.expiry_unix_ts_ms = epoch_ms(cpp.expiry_unix_ts);
     result.grace_period_duration_ms = cpp.grace_period_duration.count();
-    result.refund_requested_unix_ts_ms = cpp.refund_requested_unix_ts.time_since_epoch().count();
+    result.refund_requested_unix_ts_ms = epoch_ms(cpp.refund_requested_unix_ts);
     result.payments_total = cpp.payments_total;
 
     for (size_t index = 0; index < result.items_count; ++index) {
@@ -1470,28 +1468,14 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         dest.plan = src.plan;
         dest.payment_provider = src.payment_provider;
         dest.payment_provider_metadata = src.payment_provider_metadata;
-        dest.unredeemed_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                             src.unredeemed_unix_ts.time_since_epoch())
-                                             .count();
-        dest.redeemed_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                           src.redeemed_unix_ts.time_since_epoch())
-                                           .count();
-        dest.expiry_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                         src.expiry_unix_ts.time_since_epoch())
-                                         .count();
-        dest.grace_period_duration_ms =
-                std::chrono::duration_cast<std::chrono::milliseconds>(src.grace_period_duration_ms)
-                        .count();
-        dest.platform_refund_expiry_unix_ts_ms =
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                        src.platform_refund_expiry_unix_ts.time_since_epoch())
-                        .count();
-        dest.revoked_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          src.revoked_unix_ts.time_since_epoch())
-                                          .count();
-        dest.refund_requested_unix_ts_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                                   src.refund_requested_unix_ts.time_since_epoch())
-                                                   .count();
+        dest.unredeemed_unix_ts_ms = epoch_ms(src.unredeemed_unix_ts);
+        dest.redeemed_unix_ts_ms = epoch_ms(src.redeemed_unix_ts);
+        dest.expiry_unix_ts_ms = epoch_ms(src.expiry_unix_ts);
+        dest.grace_period_duration_ms = session::duration_ms(src.grace_period_duration_ms);
+        dest.platform_refund_expiry_unix_ts_ms = epoch_ms(src.platform_refund_expiry_unix_ts);
+        dest.revoked_unix_ts_ms = epoch_ms(src.revoked_unix_ts);
+        dest.refund_requested_unix_ts_ms = epoch_ms(src.refund_requested_unix_ts);
+
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;

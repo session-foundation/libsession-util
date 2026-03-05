@@ -17,7 +17,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 project(libsession-util
-    VERSION 1.5.10
+    VERSION 1.6.0
     DESCRIPTION "Session client utility library"
     LANGUAGES ${LANGS})
 
@@ -82,7 +82,8 @@ option(STATIC_LIBSTD "Statically link libstdc++/libgcc" ${default_static_libstd}
 option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 
 # Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
-option(ENABLE_ONIONREQ "Build with onion request functionality" ON)
+option(ENABLE_NETWORKING "Build with networking functionality" ON)
+option(ENABLE_NETWORKING_SROUTER "Build with session-router networking support (requires ENABLE_NETWORKING)" ON)
 
 if(USE_LTO)
   include(CheckIPOSupported)
@@ -119,7 +120,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(external)
 
-if(ENABLE_ONIONREQ)
+if(ENABLE_NETWORKING)
     if(NOT TARGET nettle::nettle)
         if(BUILD_STATIC_DEPS)
             message(FATAL_ERROR "Internal error: nettle::nettle target (expected via libquic BUILD_STATIC_DEPS) not found")

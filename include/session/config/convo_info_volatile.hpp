@@ -91,7 +91,7 @@ namespace convo {
 
         /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid
         /// to
-        std::chrono::sys_time<std::chrono::milliseconds> pro_expiry_unix_ts{};
+        sys_ms pro_expiry_unix_ts{};
 
       protected:
         using base::base;

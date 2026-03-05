@@ -394,20 +394,6 @@ std::string decrypt_ons_response(
 std::vector<unsigned char> decrypt_push_notification(
         std::span<const unsigned char> payload, std::span<const unsigned char> enc_key);
 
-/// API: crypto/compute_message_hash
-///
-/// Computes the hash for a message.
-///
-/// Inputs:
-/// - `pubkey_hex` -- the pubkey as a 66 character hex string that the message will be stored in.
-/// - `ns` -- the namespace that the message will be stored in.
-/// - `data` -- the base64 encoded message data that will be stored for the message.
-///
-/// Outputs:
-/// - `std::string` -- a deterministic hash for the message.
-std::string compute_message_hash(
-        const std::string_view pubkey_hex, int16_t ns, std::string_view data);
-
 /// API: crypto/encrypt_xchacha20
 ///
 /// Encrypts a value with a given key using xchacha20.

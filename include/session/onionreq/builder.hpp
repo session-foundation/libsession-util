@@ -5,46 +5,20 @@
 #include <string_view>
 #include <variant>
 
-#include "key_types.hpp"
+#include "session/network/session_network_types.hpp"
 
 namespace session::network {
 struct service_node;
 struct request_info;
+struct Request;
 }  // namespace session::network
 
 namespace session::onionreq {
 
-struct ServerDestination {
-    std::string protocol;
-    std::string host;
-    std::string endpoint;
-    session::onionreq::x25519_pubkey x25519_pubkey;
-    std::optional<uint16_t> port;
-    std::optional<std::vector<std::pair<std::string, std::string>>> headers;
-    std::string method;
-
-    ServerDestination(
-            std::string protocol,
-            std::string host,
-            std::string endpoint,
-            session::onionreq::x25519_pubkey x25519_pubkey,
-            std::optional<uint16_t> port = std::nullopt,
-            std::optional<std::vector<std::pair<std::string, std::string>>> headers = std::nullopt,
-            std::string method = "GET") :
-            protocol{std::move(protocol)},
-            host{std::move(host)},
-            endpoint{std::move(endpoint)},
-            x25519_pubkey{std::move(x25519_pubkey)},
-            port{std::move(port)},
-            headers{std::move(headers)},
-            method{std::move(method)} {}
-};
-
-using network_destination = std::variant<session::network::service_node, ServerDestination>;
-
 namespace detail {
 
-    session::onionreq::x25519_pubkey pubkey_for_destination(network_destination destination);
+    session::network::x25519_pubkey pubkey_for_destination(
+            network::network_destination destination);
 }
 
 enum class EncryptType {
@@ -66,43 +40,51 @@ inline constexpr std::string_view to_string(EncryptType type) {
 
 // Builder class for preparing onion request payloads.
 class Builder {
-    Builder(const network_destination& destination,
-            const std::vector<network::service_node>& nodes,
-            const EncryptType enc_type_);
-
   public:
+    Builder(const network::network_destination& destination,
+            const std::string& endpoint,
+            const std::vector<network::service_node>& nodes,
+            const EncryptType enc_type_ = EncryptType::xchacha20);
+
     static Builder make(
-            const network_destination& destination,
+            const network::network_destination& destination,
+            const std::string& endpoint,
             const std::vector<network::service_node>& nodes,
             const EncryptType enc_type_ = EncryptType::xchacha20);
 
     EncryptType enc_type;
-    std::optional<x25519_pubkey> destination_x25519_public_key = std::nullopt;
-    std::optional<x25519_keypair> final_hop_x25519_keypair = std::nullopt;
+    bool is_v4_request;
+    std::optional<network::x25519_keypair> final_hop_x25519_keypair = std::nullopt;
 
     Builder(EncryptType enc_type_ = EncryptType::xchacha20) : enc_type{enc_type_} {}
 
     void set_enc_type(EncryptType enc_type_) { enc_type = enc_type_; }
+    std::optional<network::x25519_pubkey> get_destination_x25519_public_key() const {
+        return destination_x25519_public_key_;
+    };
 
-    void set_destination(network_destination destination);
-    void set_destination_pubkey(session::onionreq::x25519_pubkey x25519_pubkey);
+    void set_destination(network::network_destination destination);
     void add_hop(std::span<const unsigned char> remote_key);
-    void add_hop(std::pair<ed25519_pubkey, x25519_pubkey> keys) { hops_.push_back(keys); }
+    void add_hop(std::pair<network::ed25519_pubkey, network::x25519_pubkey> keys) {
+        hops_.push_back(keys);
+    }
 
-    void generate(network::request_info& info);
     std::vector<unsigned char> build(std::vector<unsigned char> payload);
+    std::vector<unsigned char> generate_onion_blob(
+            const std::optional<std::vector<unsigned char>>& plaintext_body);
 
   private:
-    std::vector<std::pair<ed25519_pubkey, x25519_pubkey>> hops_ = {};
+    std::vector<std::pair<network::ed25519_pubkey, network::x25519_pubkey>> hops_ = {};
+    std::string endpoint_;
+    std::optional<network::x25519_pubkey> destination_x25519_public_key_ = std::nullopt;
 
     // Snode request values
 
-    std::optional<ed25519_pubkey> ed25519_public_key_ = std::nullopt;
+    std::optional<network::ed25519_pubkey> ed25519_public_key_ = std::nullopt;
 
     // Proxied request values
 
     std::optional<std::string> host_ = std::nullopt;
-    std::optional<std::string> endpoint_ = std::nullopt;
     std::optional<std::string> protocol_ = std::nullopt;
     std::optional<std::string> method_ = std::nullopt;
     std::optional<uint16_t> port_ = std::nullopt;

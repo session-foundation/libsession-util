@@ -34,10 +34,6 @@ using namespace std::literals;
 namespace session {
 
 namespace detail {
-    inline int64_t to_epoch_ms(std::chrono::system_clock::time_point t) {
-        return std::chrono::duration_cast<std::chrono::milliseconds>(t.time_since_epoch()).count();
-    }
-
     // detail::to_hashable takes either an integral type, system_clock::time_point, or a string
     // type and converts it to a string_view by writing an integer value (using std::to_chars)
     // into the buffer space (which should be at least 20 bytes), and returning a string_view
@@ -57,7 +53,7 @@ namespace detail {
     }
     inline std::string_view to_hashable(
             const std::chrono::system_clock::time_point& val, char*& buffer) {
-        return to_hashable(to_epoch_ms(val), buffer);
+        return to_hashable(epoch_ms(val), buffer);
     }
     template <typename T, std::enable_if_t<std::is_convertible_v<T, std::string_view>, int> = 0>
     std::string_view to_hashable(const T& value, char*&) {
@@ -970,34 +966,6 @@ std::string compute_hash_blake2b_b64(std::vector<std::string_view> parts) {
     return b64hash;
 }
 
-std::string compute_message_hash(
-        const std::string_view pubkey_hex, int16_t ns, std::string_view data) {
-    if (pubkey_hex.size() != 66)
-        throw std::invalid_argument{
-                "Invalid pubkey_hex: Expecting 66 character hex-encoded pubkey"};
-
-    // This function is based on the `computeMessageHash` function on the storage-server used to
-    // generate a message hash:
-    // https://github.com/oxen-io/oxen-storage-server/blob/dev/oxenss/rpc/request_handler.cpp
-    auto pubkey = oxenc::from_hex(pubkey_hex.substr(2));
-    uint8_t netid_raw;
-    oxenc::from_hex(pubkey_hex.begin(), pubkey_hex.begin() + 2, &netid_raw);
-    char netid = static_cast<char>(netid_raw);
-
-    std::array<char, 20> ns_buf;
-    char* ns_buf_ptr = ns_buf.data();
-    std::string_view ns_for_hash = ns != 0 ? detail::to_hashable(ns, ns_buf_ptr) : ""sv;
-
-    auto decoded_data = oxenc::from_base64(data);
-
-    return compute_hash(
-            compute_hash_blake2b_b64,
-            std::string_view{&netid, 1},
-            pubkey,
-            ns_for_hash,
-            decoded_data);
-}
-
 std::vector<unsigned char> encrypt_xchacha20(
         std::span<const unsigned char> plaintext, std::span<const unsigned char> enc_key) {
     if (enc_key.size() != 32)
@@ -1304,18 +1272,6 @@ LIBSESSION_C_API bool session_decrypt_push_notification(
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();
         std::memcpy(*plaintext_out, plaintext.data(), plaintext.size());
-        return true;
-    } catch (...) {
-        return false;
-    }
-}
-
-LIBSESSION_C_API bool session_compute_message_hash(
-        const char* pubkey_hex_in, int16_t ns, const char* base64_data_in, char* hash_out) {
-    try {
-        auto hash = session::compute_message_hash(pubkey_hex_in, ns, base64_data_in);
-
-        std::memcpy(hash_out, hash.c_str(), hash.size() + 1);
         return true;
     } catch (...) {
         return false;

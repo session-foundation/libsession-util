@@ -3,6 +3,7 @@
 #include <iosfwd>
 #include <string>
 #include <string_view>
+#include <vector>
 
 // Utility functions for working with files
 
@@ -19,8 +20,8 @@ std::ofstream open_for_writing(const fs::path& filename);
 /// enabled for any failures.  This also throws if the file cannot be opened.
 std::ifstream open_for_reading(const fs::path& filename);
 
-/// Reads a (binary) file from disk into the string `contents`.
-std::string read_whole_file(const fs::path& filename);
+/// Reads a (binary) file from disk.
+std::vector<std::byte> read_whole_file(const fs::path& filename);
 
 /// Dumps (binary) string contents to disk. The file is overwritten if it already exists.
 void write_whole_file(const fs::path& filename, std::string_view contents = "");

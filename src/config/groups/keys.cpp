@@ -93,11 +93,7 @@ std::vector<unsigned char> Keys::make_dump() const {
             // NB: Keys must be in sorted order
             ki.append("g", k.generation);
             ki.append("k", to_string_view(k.key));
-            ki.append(
-                    "t",
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                            k.timestamp.time_since_epoch())
-                            .count());
+            ki.append("t", epoch_ms(k.timestamp));
         }
     }
 
@@ -462,11 +458,7 @@ std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& 
             auto d = supp.append_dict();
             d.append("g", ki.generation);
             d.append("k", to_string_view(ki.key));
-            d.append(
-                    "t",
-                    std::chrono::duration_cast<std::chrono::milliseconds>(
-                            ki.timestamp.time_since_epoch())
-                            .count());
+            d.append("t", epoch_ms(ki.timestamp));
         }
         supp_keys = std::move(supp).str();
     }

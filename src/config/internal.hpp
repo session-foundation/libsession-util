@@ -233,7 +233,7 @@ void set_positive_int(ConfigBase::DictFieldProxy&& field, int64_t val);
 
 /// Sets a unix timestamp as an integer, if positive; removes it if <= 0.
 inline void set_ts(ConfigBase::DictFieldProxy&& field, std::chrono::sys_seconds val) {
-    set_positive_int(std::move(field), val.time_since_epoch().count());
+    set_positive_int(std::move(field), epoch_seconds(val));
 }
 
 /// Sets a pair of values if the given condition is satisfied, clears both values otherwise.

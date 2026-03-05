@@ -315,9 +315,9 @@ class UserProfile : public ConfigBase {
     /// Inputs:  None
     ///
     /// Outputs:
-    /// - `std::optional<std::chrono::sys_time<std::chrono::milliseconds>>` - The unix timestamp in
+    /// - `std::optional<sys_ms>` - The unix timestamp in
     /// milliseconds that the users pro access will expire, or nullopt if unset.
-    std::optional<std::chrono::sys_time<std::chrono::milliseconds>> get_pro_access_expiry() const;
+    std::optional<sys_ms> get_pro_access_expiry() const;
 
     /// API: user_profile/UserProfile::set_pro_access_expiry
     ///

@@ -30,16 +30,21 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_pro_backend.cpp
     test_random.cpp
     test_session_encrypt.cpp
+    test_utils.cpp
     test_session_protocol.cpp
     test_xed25519.cpp
     test_unicode_operations.cpp
+    test_backend_session_file_server.cpp
+    test_backed_session_open_group_server.cpp
 
     case_logger.cpp
 )
 
-if (ENABLE_ONIONREQ)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_session_network.cpp)
+if(ENABLE_NETWORKING)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_onion_request_router.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_snode_pool.cpp)
 endif()
 
 add_library(test_libs INTERFACE)
@@ -50,10 +55,10 @@ target_link_libraries(test_libs INTERFACE
     nlohmann_json::nlohmann_json
     oxen::logging)
 
-if (ENABLE_ONIONREQ)
-    target_link_libraries(test_libs INTERFACE libsession::onionreq)
+if (ENABLE_NETWORKING)
+    target_link_libraries(test_libs INTERFACE libsession::network)
 else()
-    target_compile_definitions(test_libs INTERFACE DISABLE_ONIONREQ)
+    target_compile_definitions(test_libs INTERFACE DISABLE_NETWORKING)
 endif()
 
 add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})

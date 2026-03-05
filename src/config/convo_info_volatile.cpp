@@ -6,6 +6,7 @@
 #include <sodium/crypto_generichash_blake2b.h>
 
 #include <charconv>
+#include <chrono>
 #include <iterator>
 #include <stdexcept>
 #include <variant>
@@ -53,7 +54,7 @@ namespace convo {
                     pro_gen_index_hash->data(),
                     pro_gen_index_hash->size());
 
-            c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
+            c.pro_expiry_unix_ts_ms = epoch_ms(pro_expiry_unix_ts);
         } else {
             c.has_pro_gen_index_hash = false;
             c.pro_expiry_unix_ts_ms = 0;
@@ -149,7 +150,7 @@ namespace convo {
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->data(),
                     pro_gen_index_hash->size());
-            c.pro_expiry_unix_ts_ms = pro_expiry_unix_ts.time_since_epoch().count();
+            c.pro_expiry_unix_ts_ms = epoch_ms(pro_expiry_unix_ts);
         } else {
             c.has_pro_gen_index_hash = false;
             c.pro_expiry_unix_ts_ms = 0;
@@ -336,7 +337,7 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     auto info = data["1"][session_id_to_bytes(c.session_id)];
     set_base(c, info);
 
-    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+    auto pro_expiry = epoch_ms(c.pro_expiry_unix_ts);
     if (pro_expiry > 0 && c.pro_gen_index_hash) {
         set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_gen_index_hash;
@@ -360,20 +361,17 @@ void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
 }
 
 template <std::derived_from<convo::base> C>
-static bool is_stale(const C& c, int64_t cutoff_ms) {
+static bool is_stale(const C& c, std::chrono::system_clock::time_point cutoff) {
     if (c.unread)
         return false;
     if constexpr (std::derived_from<C, convo::pro_base>)
-        if (c.pro_gen_index_hash.has_value() &&
-            c.pro_expiry_unix_ts.time_since_epoch().count() >= cutoff_ms)
+        if (c.pro_gen_index_hash.has_value() && c.pro_expiry_unix_ts >= cutoff)
             return false;
-    return c.last_read < cutoff_ms;
+    return sys_ms{std::chrono::milliseconds{c.last_read}} < cutoff;
 }
 
 void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
-    const int64_t cutoff = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                   (std::chrono::system_clock::now() - prune).time_since_epoch())
-                                   .count();
+    const auto cutoff = std::chrono::system_clock::now() - prune;
 
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)
@@ -445,7 +443,7 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
 
     set_nonzero_int(info["y"], c.legacy_blinding);
 
-    auto pro_expiry = c.pro_expiry_unix_ts.time_since_epoch().count();
+    auto pro_expiry = epoch_ms(c.pro_expiry_unix_ts);
     if (pro_expiry > 0 && c.pro_gen_index_hash) {
         set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_gen_index_hash;

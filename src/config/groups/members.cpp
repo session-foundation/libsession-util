@@ -213,7 +213,7 @@ void member::into(config_group_member& m) const {
     } else {
         copy_c_str(m.profile_pic.url, "");
     }
-    m.profile_updated = profile_updated.time_since_epoch().count();
+    m.profile_updated = epoch_seconds(profile_updated);
     m.admin = admin;
     static_assert(groups::STATUS_SENT == ::STATUS_SENT);
     static_assert(groups::STATUS_FAILED == ::STATUS_FAILED);
