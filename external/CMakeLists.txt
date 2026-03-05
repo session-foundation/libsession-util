@@ -105,7 +105,7 @@ endif()
 
 if(ENABLE_NETWORKING)
   set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
-  libsession_system_or_submodule(OXENQUIC quic oxen::quic liboxenquic>=1.6 session-router/external/oxen-libquic)
+  libsession_system_or_submodule(OXENQUIC quic oxen::quic liboxenquic>=1.8 session-router/external/oxen-libquic)
 endif()
 
 libsession_system_or_submodule(OXENC oxenc oxenc::oxenc liboxenc>=1.5.0 session-router/external/oxen-libquic/external/oxen-encoding)
