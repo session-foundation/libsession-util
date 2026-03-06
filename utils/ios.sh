@@ -143,10 +143,21 @@ if [ "${SHOULD_BUILD_STATIC_LIBS}" == "SHOULD_BUILD_STATIC_LIBS" ]; then
             -DBUILD_TESTS=OFF \
             -DBUILD_STATIC_DEPS=ON \
             -DENABLE_VISIBILITY=ON \
+            -DSROUTER_FULL=OFF \
+            -DSROUTER_DAEMON=OFF \
             -DSUBMODULE_CHECK=$submodule_check \
             -DCMAKE_BUILD_TYPE=$build_type \
             -DLOCAL_MIRROR=https://oxen.rocks/deps
     done
+fi
+
+# Strip debug info from bundled dependency object files (consumers don't need it
+# and it causes dsymutil warnings when the original build machine's paths are unavailable)
+if [ -f "${BUILD_DIR}/sim/libsession-util.a" ]; then
+    strip -S "${BUILD_DIR}/sim/libsession-util.a"
+fi
+if [ -f "${BUILD_DIR}/ios/libsession-util.a" ]; then
+    strip -S "${BUILD_DIR}/ios/libsession-util.a"
 fi
 
 if [ "${SHOULD_MERGE_STATIC_LIBS}" == "SHOULD_MERGE_STATIC_LIBS" ]; then
