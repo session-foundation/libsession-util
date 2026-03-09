@@ -153,12 +153,11 @@ fi
 
 # Strip debug info from bundled dependency object files (consumers don't need it
 # and it causes dsymutil warnings when the original build machine's paths are unavailable)
-if [ -f "${BUILD_DIR}/sim/libsession-util.a" ]; then
-    strip -S "${BUILD_DIR}/sim/libsession-util.a"
-fi
-if [ -f "${BUILD_DIR}/ios/libsession-util.a" ]; then
-    strip -S "${BUILD_DIR}/ios/libsession-util.a"
-fi
+for f in ${BUILD_DIR}/{sim,ios}/libsession-util.a; do
+    if [ -f "$f" ]; then
+        strip -S "$f"
+    fi
+done
 
 if [ "${SHOULD_MERGE_STATIC_LIBS}" == "SHOULD_MERGE_STATIC_LIBS" ]; then
     # If needed combine simulator builds into a multi-arch lib
