@@ -143,11 +143,21 @@ if [ "${SHOULD_BUILD_STATIC_LIBS}" == "SHOULD_BUILD_STATIC_LIBS" ]; then
             -DBUILD_TESTS=OFF \
             -DBUILD_STATIC_DEPS=ON \
             -DENABLE_VISIBILITY=ON \
+            -DSROUTER_FULL=OFF \
+            -DSROUTER_DAEMON=OFF \
             -DSUBMODULE_CHECK=$submodule_check \
             -DCMAKE_BUILD_TYPE=$build_type \
             -DLOCAL_MIRROR=https://oxen.rocks/deps
     done
 fi
+
+# Strip debug info from bundled dependency object files (consumers don't need it
+# and it causes dsymutil warnings when the original build machine's paths are unavailable)
+for f in ${BUILD_DIR}/{sim,ios}/libsession-util.a; do
+    if [ -f "$f" ]; then
+        strip -S "$f"
+    fi
+done
 
 if [ "${SHOULD_MERGE_STATIC_LIBS}" == "SHOULD_MERGE_STATIC_LIBS" ]; then
     # If needed combine simulator builds into a multi-arch lib
