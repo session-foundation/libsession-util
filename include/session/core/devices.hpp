@@ -1,0 +1,195 @@
+#pragma once
+
+#include <oxenc/bt_value.h>
+
+#include <array>
+#include <chrono>
+#include <cstddef>
+#include <map>
+#include <session/sodium_array.hpp>
+#include <stdexcept>
+#include <string>
+
+#include "component.hpp"
+
+namespace session::core {
+
+class Core;
+
+namespace device {
+
+    enum class Type {
+        Unknown,
+        Session_iOS,
+        Session_Desktop,
+        Session_Android,
+    };
+
+    enum class State {
+        Registered = 0,  ///< Device is in the account's registered device set
+        Pending = 1,  ///< Local device info that has a pending request to join the account's device
+                      ///< set
+        Unregistered = 2,  ///< Local device info that cannot be pushed because the device is not
+                           /// currently in the device group.
+    };
+
+    // Value returned to indicate the push status of a device info or account keys update.
+    enum class PushStatus {
+        Synced = 0,      // We have pushed and confirmed (i.e. fetched the update)
+        Pushed = 1,      // We have pushed, but not yet confirmed
+        Pending = 2,     // We need to push, but haven't yet done so
+        NotInGroup = 3,  // We are not in the device group and so can't push
+    };
+
+    struct Info {
+        // Unique device id, in raw bytes.  Typically randomized during device initial setup.
+        std::array<std::byte, 32> id;
+
+        // Device seqno.  Incremented on device key rotation and/or info updates.
+        int64_t seqno;
+
+        // Timestamp of the most recent update.
+        std::chrono::sys_seconds timestamp;
+
+        // The device type; one of the above enum values, or DevType::Unknown if the device type is
+        // not one of the standard Session clients.
+        Type type;
+
+        // When device type is not one of the standard session clients, this will be set to a
+        // free-form string indicating the device type.  Will be empty if no device type is provided
+        // in the device info at all.  When DevType has a non-Unknown value, this will be
+        // empty/ignored.
+        std::string other_device;
+
+        // Device-provided description of itself.  This could contain the OS type or version,
+        // possible a device nickname, but is generally free-form data.
+        std::string description;
+
+        // This computes the current "device emoji" sequence, which depends on the device id and
+        // pubkeys.  This allows a user to visually identify (and verify) a device within the device
+        // list at any time, but its primary purpose is for identifying the device during linking.
+
+        // Indicates whether the device is registered or not.
+        State state;
+
+        // Application version triplet as reported by the device.  The 2nd and 3rd values will
+        // always be in [0, 999].  (If setting device info, they will be clamped if outside this
+        // range).
+        std::array<int, 3> version;
+
+        // The current device-specific X25519 pubkey
+        std::array<std::byte, 32> pk_x25519;
+
+        // The current device-specific MLKEM-768 pubkey
+        std::array<std::byte, 1184> pk_mlkem768;
+
+        // Unknown extra keys.  Single-character keys in here are reserved for future
+        // libsession-util use; longer strings can be used for custom client data, if needed.
+        oxenc::bt_dict extra;
+    };
+
+    using map = std::map<std::array<std::byte, 32>, Info>;
+
+    struct decryption_failed : std::runtime_error {
+        using std::runtime_error::runtime_error;
+    };
+};  // namespace device
+
+class Devices final : detail::CoreComponent {
+  public:
+  private:
+    friend class Core;
+    explicit Devices(Core& c) : detail::CoreComponent{c} {}
+
+    void init() override;
+
+    std::array<std::byte, 32> self_id;
+
+    // Encrypts the inner device data for all the members of the device group.
+    std::vector<std::byte> encrypt_device_data(const device::map& devices);
+
+    // Inverse of encrypt_device_data.  Throws if invalid.  Throws `Devices::decryption_failed` if
+    // the message was parsed successfully, but we failed to decrypt any of its encrypted values.
+    device::map decrypt_device_data(std::span<const std::byte> data);
+
+  public:
+    // Returns the current device's random identifier, in hex.
+    std::string device_id() const;
+
+    // Returns info for all registered and/or pending devices and/or unregistered devices for this
+    // account.
+    device::map devices(
+            bool include_registered = true,
+            bool include_pending = false,
+            bool include_unregistered = false);
+
+    // Returns *this* device's info for this account, and whether the device is registered in the
+    // device list.
+    std::pair<device::Info, bool> device_info();
+
+    // Updates this device's info locally to match the given info; if the current device is
+    // registered then this dirties the device config data, requiring a push.
+    //
+    // The state and pk_* fields of the input value are ignored.
+    void update_info(const device::Info& info);
+
+    // Stores the X25519 + MLKEM768 keys that make up an "X-Wing" key
+    struct XWingKeys {
+        cleared_uc32 x25519_sec;
+        std::array<unsigned char, 32> x25519_pub;
+        cleared_array<unsigned char, 2400> mlkem768_sec;
+        std::array<unsigned char, 1184> mlkem768_pub;
+    };
+
+    struct DeviceKeys : XWingKeys {
+        std::chrono::sys_seconds created;
+        std::optional<std::chrono::sys_seconds> rotated;
+    };
+
+    // Rotates the device keys used for encrypting device group data.  This also implicitly updates
+    // the current device's public keys.  If the current device is registered, calling this will
+    // dirty the config data and require another push.
+    //
+    // This returns the newly created keys.  (It can be safely discarded as it will already be
+    // stored in the database).
+    DeviceKeys rotate_device_keys();
+
+    // Returns current and recent local device private keys.  This will be sorted with most recent
+    // key first.  If there is no current key at all, this generates one.
+    std::vector<DeviceKeys> active_device_keys();
+
+    // Returns true if the device key updates needs to be pushed for other account devices to
+    // receive.  Returns an enum value:
+    // -
+
+    struct AccountKeys : XWingKeys {
+        std::chrono::sys_seconds created;
+        std::optional<std::chrono::sys_seconds> rotated;
+    };
+
+    // Returns the current active account keys after pruning obsolete ones: that is, the current key
+    // plus all keys that were rotated away fewer than 16 days ago.  (16 days = 14 day max incoming
+    // message TTL + 24h sender key update lag + 24h safety margin).  Keys are returned sorted from
+    // newest to oldest.
+    std::vector<AccountKeys> active_account_keys();
+
+    // Returns the time when this device's unique device key is due to be rotated.  Returns nullopt
+    // if this device is not currently part of the device group.
+    std::optional<std::chrono::system_clock::time_point> next_device_rotation();
+
+    bool device_rotation_due() {
+        auto t = next_device_rotation();
+        return t && *t >= std::chrono::system_clock::now();
+    }
+
+    // Return true if the account key is due to be rotated by this device.  Returns nullopt if this
+    // device is not currently part of the device group.
+    std::optional<std::chrono::system_clock::time_point> next_account_rotation();
+
+    bool account_rotation_due() {
+        auto t = next_account_rotation();
+        return t && *t >= std::chrono::system_clock::now();
+    }
+};
+
+}  // namespace session::core

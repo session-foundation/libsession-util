@@ -1,0 +1,31 @@
+Any files in this directory beginning with a number and ending with .cpp or .sql are one-time
+migrations: they are processed in ascii-sorted order against the `migrations_applied` table: if the
+migration doesn't exist there then the migration is executed when the and the entry is inserted into
+`migrations_applied`.
+
+It is recommended that migrations defined here use the format `NNN_description_of_migration.sql`,
+such as `000_device_tables.sql`.  Updates that depend on earlier migrations having happend must then
+ensure that they use a larger `NNN` value than the update that they depend on.  Migrations that
+depend on no other database components at all should start at 000.
+
+There are two sorts of migrations permitted here: SQL and C++.
+
+SQL migrations are simply a file of queries to execute.  If the queries execute successfully, the
+migration is considered applied.  Each migration runs inside a transaction (and so does not need to
+worry about starting a transaction itself); if migration fails, the transaction is rolled back,
+otherwise it (and the insertion into `migrations_applied`) is committed.
+
+C++ migrations are for cases where more complex logic is needed to perform a migration: any such
+migration should define a function `apply_FILENAME` in the session::core::schema namespace that
+takes arguments `(session::sqlite::Connection&, session::core::Core&)` and performs any needed
+migrations.  FILENAME here will be the filename on disk without the .cpp extension, with any
+non-alphanumeric characters replaced with `_`.  As with the SQL migration, there will be an active
+transaction around the call; the C++ code should throw if the migration cannot be performed (which
+will roll back the transaction).  Migrations are performed as the final step of Core instance
+construction (and so Core initialization is finished, but the Core object has not yet been returned
+to the creator).
+
+It is not permitted to use the same base filename for both SQL and C++ migrations (e.g. having both
+007_bond_james_bond.sql and 007_bond_james_bond.cpp): if a migration wants to use both, use a
+different numeric prefix or some sort of suffix (either of which will also defines the order the two
+migrations would be applied).

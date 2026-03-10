@@ -100,6 +100,25 @@ target_link_libraries(crypto
     libsession::protos
 )
 
+# libsession "Core" for maintaining persistent Session client state
+add_libsession_util_library(core
+    core.cpp
+    core/component.cpp
+    core/devices.cpp
+    core/pro.cpp
+)
+add_subdirectory(core/schema)
+
+target_link_libraries(
+    core
+    PUBLIC
+    crypto
+    PRIVATE
+    sessiondep::libsodium
+    session::SQLite
+    mlkem_native::mlkem768
+)
+
 target_link_libraries(config
     PUBLIC
     crypto

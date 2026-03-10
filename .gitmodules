@@ -10,6 +10,9 @@
 [submodule "external/session-router"]
 	path = external/session-router
 	url = https://github.com/session-foundation/session-router.git
+[submodule "external/session-sqlite"]
+	path = external/session-sqlite
+	url = https://github.com/session-foundation/session-sqlite.git
 [submodule "external/date"]
 	path = external/date
 	url = https://github.com/HowardHinnant/date.git

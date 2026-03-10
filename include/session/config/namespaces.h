@@ -24,6 +24,11 @@ typedef enum NAMESPACE {
     NAMESPACE_GROUP_INFO = 13,
     NAMESPACE_GROUP_MEMBERS = 14,
 
+    // Device group namespaces:
+    NAMESPACE_DEVICE_GROUP = 21,
+    NAMESPACE_DEVICE_LINK = 22,
+    NAMESPACE_DEVICE_PUBKEYS = -21,
+
     // The local config should never be pushed but this gives us a nice identifier for each config
     // type
     NAMESPACE_LOCAL = 9999,
