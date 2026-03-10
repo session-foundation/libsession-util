@@ -176,6 +176,7 @@ void QuicTransport::_close_connections() {
     // Clear all storage of requests, paths and connections so that we are in a fresh state on
     // relaunch
     _active_connection_ids.clear();
+    _available_stream_ids.clear();
     _pending_verification_callbacks.clear();
     _pending_requests.clear();
 
@@ -401,6 +402,7 @@ void QuicTransport::_send_on_connection(
         for (auto it = _active_connection_ids.begin(); it != _active_connection_ids.end(); ++it) {
             if (it->second == conn_id) {
                 _active_connection_ids.erase(it);
+                _available_stream_ids.erase(conn_id);
                 break;
             }
         }
@@ -432,25 +434,37 @@ void QuicTransport::_send_on_connection(
             // There will **always** be a stream `0` so we use that as the reserved stream
             target_stream = conn->get_stream<oxen::quic::BTRequestStream>(0);
         else {
-            // Try to retrieve an available stream to send the request down, otherwise fallback to
-            // creating a new stream
-            auto stream_it = _available_stream_ids.find(remote_pubkey_hex);
+            int64_t stream_id = -1;
 
-            if (stream_it != _available_stream_ids.end() && !stream_it->second.empty()) {
-                // Remove the id from `_available_stream_ids` regardless of whether we successfully
-                // get the stream from the current connection because if we don't, then it means
-                // that stream isn't valid anyway so should be removed
-                auto& stream_ids = stream_it->second;
-                auto stream_id_it = stream_ids.begin();
-                int64_t id = *stream_id_it;
-                stream_ids.erase(stream_id_it);
+            if (auto& streams = _available_stream_ids[conn_id]; !streams.empty()) {
+                stream_id = *streams.begin();
+                streams.erase(streams.begin());
+            }
 
-                if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(id))
-                    target_stream = stream;
-                else
-                    target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
-            } else
+            if (stream_id != -1) {
+                try {
+                    target_stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id);
+                } catch (const std::exception& e) {
+                    log::warning(
+                            cat,
+                            "[Request {}] Failed to retrieve stream {} on conn {} due to error: {}",
+                            request.request_id,
+                            stream_id,
+                            conn_id.to_string(),
+                            e.what());
+                }
+            }
+
+            if (!target_stream) {
+                log::debug(
+                        cat,
+                        "[Request {}] Unable to find existing stream{}, creating new stream on "
+                        "conn {}",
+                        request.request_id,
+                        (stream_id == -1 ? "" : " {}"_format(stream_id)),
+                        conn_id.to_string());
                 target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
+            }
         }
     } catch (const std::exception& e) {
         return callback(
@@ -494,7 +508,7 @@ void QuicTransport::_send_on_connection(
                     auto conn = _endpoint->get_conn(conn_id);
 
                     if (conn && conn->get_streams_available() <= ACTIVE_STREAM_PRUNE_LIMIT)
-                        _available_stream_ids[remote_pubkey_hex].insert(stream_id);
+                        _available_stream_ids[conn_id].insert(stream_id);
                     else if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id))
                         stream->close();
                 }
@@ -586,7 +600,9 @@ void QuicTransport::_fail_connection(
                 address_pubkey_hex,
                 custom_error.value_or("Unknown error"));
 
-    _active_connection_ids.erase(address_pubkey_hex);
+    // Clear the connection and stream ids
+    if (auto id = _active_connection_ids.extract(address_pubkey_hex))
+        _available_stream_ids.erase(id.mapped());
 
     // Process any waiting verification requests
     if (auto it = _pending_verification_callbacks.find(address_pubkey_hex);
