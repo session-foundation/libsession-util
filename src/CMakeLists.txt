@@ -85,8 +85,9 @@ target_link_libraries(util
     PUBLIC
     common
     oxen::logging
-    libzstd::static
-    simdutf
+    PRIVATE
+    sessiondep::libzstd
+    sessiondep::simdutf
 )
 
 target_link_libraries(crypto
@@ -143,7 +144,7 @@ if(ENABLE_NETWORKING)
         PRIVATE
         nlohmann_json::nlohmann_json
         libsodium::sodium-internal
-        nettle::nettle
+        sessiondep::nettle
         date::date
         libevent::core
     )

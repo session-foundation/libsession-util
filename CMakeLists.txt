@@ -58,7 +58,8 @@ else()
     set(static_default ON)
 endif()
 
-option(BUILD_STATIC_DEPS "Build all dependencies statically rather than trying to link to them on the system" ${static_default})
+include(cmake/session-deps/Deps.cmake)
+
 option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${static_default})
 
 if(BUILD_SHARED_LIBS OR libsession_IS_TOPLEVEL_PROJECT)
@@ -121,25 +122,11 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(external)
 
 if(ENABLE_NETWORKING)
-    if(NOT TARGET nettle::nettle)
-        if(BUILD_STATIC_DEPS)
-            message(FATAL_ERROR "Internal error: nettle::nettle target (expected via libquic BUILD_STATIC_DEPS) not found")
-        else()
-            find_package(PkgConfig REQUIRED)
-            pkg_check_modules(NETTLE REQUIRED IMPORTED_TARGET nettle)
-            add_library(nettle INTERFACE)
-            target_link_libraries(nettle INTERFACE PkgConfig::NETTLE)
-            add_library(nettle::nettle ALIAS nettle)
-        endif()
-    endif()
+    session_dep(nettle 3)
 endif()
 
 add_subdirectory(src)
 add_subdirectory(proto)
-
-if (BUILD_STATIC_DEPS)
-    include(StaticBuild)
-endif()
 
 if(STATIC_BUNDLE)
 

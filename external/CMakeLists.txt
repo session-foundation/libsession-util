@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 option(SUBMODULE_CHECK "Enables checking that vendored library submodules are up to date" ON)
 
 if(SUBMODULE_CHECK)
@@ -33,11 +34,22 @@ if(SUBMODULE_CHECK)
     check_submodule(date)
   endif()
 endif()
+=======
+include(../cmake/session-deps/Deps.cmake)
+
+message(STATUS "Checking submodules")
+check_submodule(ios-cmake)
+check_submodule(oxen-libquic external/oxen-logging external/oxen-encoding)
+check_submodule(nlohmann-json)
+check_submodule(protobuf)
+check_submodule(session-sqlite SQLiteCpp cmake/session-deps)
+>>>>>>> 46a23593 (Refactor internal dependencies to use session-deps)
 
 if(NOT BUILD_STATIC_DEPS AND NOT FORCE_ALL_SUBMODULES)
   find_package(PkgConfig REQUIRED)
 endif()
 
+<<<<<<< HEAD
 macro(libsession_system_or_submodule BIGNAME smallname target pkgconf subdir)
   if(NOT TARGET ${target})
     option(FORCE_${BIGNAME}_SUBMODULE "force using ${smallname} submodule" OFF)
@@ -121,6 +133,18 @@ if(OXENLOGGING_FOUND)
         target_link_libraries(oxen-logging-fmt-spdlog INTERFACE oxenlogging::oxenlogging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
         add_library(oxen::logging ALIAS oxen-logging-fmt-spdlog)
     endif()
+=======
+set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
+if(ENABLE_ONIONREQ)
+  sessiondep_or_submodule(liboxenquic 1.3.0 oxen-libquic quic)
+endif()
+
+if(NOT TARGET oxenc::oxenc)
+    # The oxenc target will already exist if we load libquic above via submodule
+    set(OXENC_BUILD_TESTS OFF CACHE BOOL "")
+    set(OXENC_BUILD_DOCS OFF CACHE BOOL "")
+    sessiondep_or_submodule(liboxenc 1.3.0 oxen-libquic/external/oxen-encoding oxenc::oxenc)
+>>>>>>> 46a23593 (Refactor internal dependencies to use session-deps)
 endif()
 
 
@@ -162,36 +186,19 @@ set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(protobuf_ABSL_PROVIDER "module" CACHE STRING "" FORCE)
 set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "")
 set(protobuf_BUILD_PROTOBUF_BINARIES ON CACHE BOOL "" FORCE)
-libsession_system_or_submodule(PROTOBUF_LITE protobuf_lite protobuf::libprotobuf-lite protobuf-lite>=3.21 protobuf)
-if(TARGET PkgConfig::PROTOBUF_LITE AND NOT TARGET protobuf::libprotobuf-lite)
-    add_library(protobuf::libprotobuf-lite ALIAS PkgConfig::PROTOBUF_LITE)
-endif()
+sessiondep_or_submodule(protobuf-lite 3.21 protobuf protobuf::libprotobuf-lite)
 
-
-set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "")
-set(ZSTD_BUILD_TESTS OFF CACHE BOOL "")
-set(ZSTD_BUILD_CONTRIB OFF CACHE BOOL "")
-set(ZSTD_BUILD_SHARED OFF CACHE BOOL "")
-set(ZSTD_BUILD_STATIC ON CACHE BOOL "")
-set(ZSTD_MULTITHREAD_SUPPORT OFF CACHE BOOL "")
-add_subdirectory(zstd/build/cmake EXCLUDE_FROM_ALL)
-# zstd's cmake doesn't properly set up include paths on its targets, so we have to wrap it in an
-# interface target that does:
-add_library(libzstd_static_fixed_includes INTERFACE)
-target_include_directories(libzstd_static_fixed_includes INTERFACE zstd/lib zstd/lib/common)
-target_link_libraries(libzstd_static_fixed_includes INTERFACE libzstd_static)
-add_library(libzstd::static ALIAS libzstd_static_fixed_includes)
-export(
-    TARGETS libzstd_static_fixed_includes
-    NAMESPACE libsession::
-    FILE libsessionZstd.cmake
-)
-libsession_static_bundle(libzstd_static)
+# Force a static libzstd: we want semi-stable compressed output, which means we want all session
+# clients to use the same version (where that is guaranteed) as much as possible, so that duplicate
+# configs get deduplicated at the swarm.
+set(BUILD_STATIC_libzstd ON CACHE BOOL "" FORCE)
+session_dep(libzstd 1.5)
+libsession_static_bundle(sessiondep::libzstd)
 
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
-libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json::nlohmann_json nlohmann_json>=3.7.0 session-router/external/nlohmann)
+sessiondep_or_submodule(nlohmann_json 3.7.0 nlohmann-json nlohmann_json::nlohmann_json)
 
 if(ENABLE_NETWORKING AND ENABLE_NETWORKING_SROUTER)
     set(SROUTER_FULL OFF CACHE BOOL "")
@@ -205,17 +212,8 @@ if(ENABLE_NETWORKING AND ENABLE_NETWORKING_SROUTER)
     libsession_static_bundle(session-router::libsessionrouter)
 endif()
 
-set(JSON_BuildTests OFF CACHE INTERNAL "")
-set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
-
-function(simdutf_subdir)
-    set(SIMDUTF_TESTS OFF CACHE BOOL "")
-    set(SIMDUTF_TOOLS OFF CACHE BOOL "")
-    set(BUILD_SHARED_LIBS OFF)
-    add_subdirectory(simdutf)
-endfunction()
-simdutf_subdir()
-libsession_static_bundle(simdutf)
+session_dep(simdutf 7)
+libsession_static_bundle(sessiondep::simdutf)
 
 # We need Howard Hinnant's header-only date library for now because the STL implementation of
 # std::chrono::parse() is spotty or broken on:
