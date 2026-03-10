@@ -432,25 +432,38 @@ void QuicTransport::_send_on_connection(
             // There will **always** be a stream `0` so we use that as the reserved stream
             target_stream = conn->get_stream<oxen::quic::BTRequestStream>(0);
         else {
-            // Try to retrieve an available stream to send the request down, otherwise fallback to
-            // creating a new stream
-            auto stream_it = _available_stream_ids.find(remote_pubkey_hex);
+            int64_t stream_id = -1;
 
-            if (stream_it != _available_stream_ids.end() && !stream_it->second.empty()) {
+            try {
+                // Try to retrieve an available stream to send the request down, otherwise fallback
+                // to creating a new stream
+                auto stream_it = _available_stream_ids.find(remote_pubkey_hex);
+
+                if (stream_it == _available_stream_ids.end() || stream_it->second.empty())
+                    throw std::runtime_error{"Stream does not exist"};
+
                 // Remove the id from `_available_stream_ids` regardless of whether we successfully
                 // get the stream from the current connection because if we don't, then it means
                 // that stream isn't valid anyway so should be removed
                 auto& stream_ids = stream_it->second;
                 auto stream_id_it = stream_ids.begin();
-                int64_t id = *stream_id_it;
+                stream_id = *stream_id_it;
                 stream_ids.erase(stream_id_it);
 
-                if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(id))
+                if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id))
                     target_stream = stream;
                 else
-                    target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
-            } else
+                    throw std::runtime_error{"Stream does not exist"};
+            } catch (...) {
+                log::debug(
+                        cat,
+                        "[Request {}] Unable to find existing stream{}, creating new stream on "
+                        "conn {}",
+                        request.request_id,
+                        (stream_id == -1 ? "" : " {}"_format(stream_id)),
+                        conn_id.to_string());
                 target_stream = conn->open_stream<oxen::quic::BTRequestStream>();
+            }
         }
     } catch (const std::exception& e) {
         return callback(
