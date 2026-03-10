@@ -54,6 +54,7 @@ add_libsession_util_library(crypto
     session_protocol.cpp
     sodium_array.cpp
     xed25519.cpp
+    xed25519-tweetnacl.cpp
     pro_backend.cpp
     types.cpp
 )
@@ -94,7 +95,7 @@ target_link_libraries(crypto
     PUBLIC
     util
     PRIVATE
-    libsodium::sodium-internal
+    sessiondep::libsodium
     nlohmann_json::nlohmann_json
     libsession::protos
 )
@@ -104,7 +105,7 @@ target_link_libraries(config
     crypto
     libsession::protos
     PRIVATE
-    libsodium::sodium-internal
+    sessiondep::libsodium
 )
 
 if(ENABLE_NETWORKING)
@@ -143,7 +144,7 @@ if(ENABLE_NETWORKING)
         quic
         PRIVATE
         nlohmann_json::nlohmann_json
-        libsodium::sodium-internal
+        sessiondep::libsodium
         sessiondep::nettle
         date::date
         libevent::core

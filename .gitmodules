@@ -1,6 +1,3 @@
-[submodule "external/libsodium-internal"]
-    path = external/libsodium-internal
-    url = https://github.com/session-foundation/libsodium-internal.git
 [submodule "tests/Catch2"]
 	path = tests/Catch2
 	url = https://github.com/catchorg/Catch2

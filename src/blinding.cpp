@@ -67,7 +67,9 @@ namespace {
         auto k = blind15_factor(server_pk);
         if (session_id.size() == 33)
             session_id = session_id.subspan(1);
-        auto ed_pk = xed25519::pubkey(session_id);
+        if (session_id.size() != 32)
+            throw std::invalid_argument{"Invalid session id"};
+        auto ed_pk = xed25519::pubkey(session_id.first<32>());
         if (0 != crypto_scalarmult_ed25519_noclamp(out + 1, k.data(), ed_pk.data()))
             throw std::runtime_error{"Cannot blind: invalid session_id (not on main subgroup)"};
         out[0] = 0x15;
@@ -80,7 +82,9 @@ namespace {
         auto k = blind25_factor(session_id, server_pk);
         if (session_id.size() == 33)
             session_id = session_id.subspan(1);
-        auto ed_pk = xed25519::pubkey(session_id);
+        if (session_id.size() != 32)
+            throw std::invalid_argument{"Invalid session id"};
+        auto ed_pk = xed25519::pubkey(session_id.first<32>());
         if (0 != crypto_scalarmult_ed25519_noclamp(out + 1, k.data(), ed_pk.data()))
             throw std::runtime_error{"Cannot blind: invalid session_id (not on main subgroup)"};
         out[0] = 0x25;

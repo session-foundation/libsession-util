@@ -2,7 +2,6 @@
 
 #include <sodium/crypto_core_ed25519.h>
 #include <sodium/crypto_generichash_blake2b.h>
-#include <sodium/crypto_internal_fe25519.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
@@ -20,16 +19,6 @@ template <size_t N>
 using bytes = std::array<unsigned char, N>;
 
 namespace {
-
-    void fe25519_montx_to_edy(fe25519 y, const fe25519 u) {
-        fe25519 one;
-        crypto_internal_fe25519_1(one);
-        fe25519 um1, up1;
-        crypto_internal_fe25519_sub(um1, u, one);
-        crypto_internal_fe25519_add(up1, u, one);
-        crypto_internal_fe25519_invert(up1, up1);
-        crypto_internal_fe25519_mul(y, um1, up1);
-    }
 
     // We construct an Ed25519-like signature with one important difference: where Ed25519
     // calculates `r = H(S || M) mod L` (where S is the second half of the SHA-512 hash of the
@@ -127,7 +116,7 @@ bool verify(
         std::span<const unsigned char> msg) {
     assert(signature.size() == crypto_sign_ed25519_BYTES);
     assert(curve25519_pubkey.size() == 32);
-    auto ed_pubkey = pubkey(curve25519_pubkey);
+    auto ed_pubkey = pubkey(curve25519_pubkey.first<32>());
     return 0 == crypto_sign_ed25519_verify_detached(
                         signature.data(), msg.data(), msg.size(), ed_pubkey.data());
 }
@@ -136,19 +125,12 @@ bool verify(std::string_view signature, std::string_view curve25519_pubkey, std:
     return verify(to_span(signature), to_span(curve25519_pubkey), to_span(msg));
 }
 
-std::array<unsigned char, 32> pubkey(std::span<const unsigned char> curve25519_pubkey) {
-    fe25519 u, y;
-    crypto_internal_fe25519_frombytes(u, curve25519_pubkey.data());
-    fe25519_montx_to_edy(y, u);
-
-    std::array<unsigned char, 32> ed_pubkey;
-    crypto_internal_fe25519_tobytes(ed_pubkey.data(), y);
-
-    return ed_pubkey;
-}
+// pubkey(...) is in xed25519-tweetnacl.cpp
 
 std::string pubkey(std::string_view curve25519_pubkey) {
-    auto ed_pk = pubkey(to_span(curve25519_pubkey));
+    if (curve25519_pubkey.size() != 32)
+        throw std::invalid_argument{"Invalid X25519 pubkey"};
+    auto ed_pk = pubkey(to_span(curve25519_pubkey).first<32>());
     return std::string{reinterpret_cast<const char*>(ed_pk.data()), ed_pk.size()};
 }
 
@@ -179,16 +161,11 @@ LIBSESSION_C_API bool session_xed25519_verify(
     return session::xed25519::verify({signature, 64}, {pubkey, 32}, {msg, msg_len});
 }
 
-LIBSESSION_C_API bool session_xed25519_pubkey(
+LIBSESSION_C_API void session_xed25519_pubkey(
         unsigned char* ed25519_pubkey, const unsigned char* curve25519_pubkey) {
     assert(ed25519_pubkey != NULL);
-    try {
-        auto edpk = session::xed25519::pubkey({curve25519_pubkey, 32});
-        std::memcpy(ed25519_pubkey, edpk.data(), edpk.size());
-        return true;
-    } catch (...) {
-        return false;
-    }
+    std::span<const unsigned char, 32> xpk{curve25519_pubkey, 32};
+    std::memcpy(ed25519_pubkey, session::xed25519::pubkey(xpk).data(), 32);
 }
 
 }  // extern "C"

@@ -57,11 +57,11 @@ TEST_CASE("XEd25519 pubkey conversion", "[xed25519][pubkey]") {
     REQUIRE(rc == 0);
     REQUIRE(view_hex(xpk2) == view_hex(xpub2));
 
-    auto xed1 = session::xed25519::pubkey(session::to_span(xpub1));
+    auto xed1 = session::xed25519::pubkey(xpub1);
     REQUIRE(view_hex(xed1) == oxenc::to_hex(pub1));
 
     // This one fails because the original Ed pubkey is negative
-    auto xed2 = session::xed25519::pubkey(session::to_span(xpub2));
+    auto xed2 = session::xed25519::pubkey(xpub2);
     REQUIRE(view_hex(xed2) != oxenc::to_hex(pub2));
     // After making the xed negative we should be okay:
     xed2[31] |= 0x80;
@@ -125,11 +125,11 @@ TEST_CASE("XEd25519 verification", "[xed25519][verify]") {
 }
 
 TEST_CASE("XEd25519 pubkey conversion (C wrapper)", "[xed25519][pubkey][c]") {
-    auto xed1 = session::xed25519::pubkey(session::to_span(xpub1));
+    auto xed1 = session::xed25519::pubkey(xpub1);
     REQUIRE(view_hex(xed1) == oxenc::to_hex(pub1));
 
     // This one fails because the original Ed pubkey is negative
-    auto xed2 = session::xed25519::pubkey(session::to_span(xpub2));
+    auto xed2 = session::xed25519::pubkey(xpub2);
     REQUIRE(view_hex(xed2) != oxenc::to_hex(pub2));
     // After making the xed negative we should be okay:
     xed2[31] |= 0x80;

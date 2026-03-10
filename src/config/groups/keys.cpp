@@ -596,7 +596,7 @@ std::vector<unsigned char> Keys::swarm_make_subaccount(
     auto k = subaccount_blind_factor(X);
 
     // T = |S|
-    auto T = xed25519::pubkey(std::span<const unsigned char>{X.data(), X.size()});
+    auto T = xed25519::pubkey(X);
 
     // kT is the user's Ed25519 blinded pubkey:
     std::array<unsigned char, 32> kT;
@@ -633,7 +633,7 @@ std::vector<unsigned char> Keys::swarm_subaccount_token(
     auto k = subaccount_blind_factor(X);
 
     // T = |S|
-    auto T = xed25519::pubkey(std::span<const unsigned char>{X.data(), X.size()});
+    auto T = xed25519::pubkey(X);
 
     std::vector<unsigned char> out;
     out.resize(4 + 32);
