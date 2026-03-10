@@ -176,6 +176,7 @@ void QuicTransport::_close_connections() {
     // Clear all storage of requests, paths and connections so that we are in a fresh state on
     // relaunch
     _active_connection_ids.clear();
+    _available_stream_ids.clear();
     _pending_verification_callbacks.clear();
     _pending_requests.clear();
 
@@ -401,6 +402,7 @@ void QuicTransport::_send_on_connection(
         for (auto it = _active_connection_ids.begin(); it != _active_connection_ids.end(); ++it) {
             if (it->second == conn_id) {
                 _active_connection_ids.erase(it);
+                _available_stream_ids.erase(conn_id);
                 break;
             }
         }
@@ -437,7 +439,7 @@ void QuicTransport::_send_on_connection(
             try {
                 // Try to retrieve an available stream to send the request down, otherwise fallback
                 // to creating a new stream
-                auto stream_it = _available_stream_ids.find(remote_pubkey_hex);
+                auto stream_it = _available_stream_ids.find(conn_id);
 
                 if (stream_it == _available_stream_ids.end() || stream_it->second.empty())
                     throw std::runtime_error{"Stream does not exist"};
@@ -450,10 +452,21 @@ void QuicTransport::_send_on_connection(
                 stream_id = *stream_id_it;
                 stream_ids.erase(stream_id_it);
 
-                if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id))
-                    target_stream = stream;
-                else
-                    throw std::runtime_error{"Stream does not exist"};
+                try {
+                    if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id))
+                        target_stream = stream;
+                    else
+                        throw std::runtime_error{"Stream does not exist"};
+                } catch (const std::exception& e) {
+                    log::warning(
+                            cat,
+                            "[Request {}] Failed to retrieve stream {} on conn {} due to error: {}",
+                            request.request_id,
+                            stream_id,
+                            conn_id.to_string(),
+                            e.what());
+                    throw;
+                }
             } catch (...) {
                 log::debug(
                         cat,
@@ -507,7 +520,7 @@ void QuicTransport::_send_on_connection(
                     auto conn = _endpoint->get_conn(conn_id);
 
                     if (conn && conn->get_streams_available() <= ACTIVE_STREAM_PRUNE_LIMIT)
-                        _available_stream_ids[remote_pubkey_hex].insert(stream_id);
+                        _available_stream_ids[conn_id].insert(stream_id);
                     else if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id))
                         stream->close();
                 }
@@ -599,7 +612,9 @@ void QuicTransport::_fail_connection(
                 address_pubkey_hex,
                 custom_error.value_or("Unknown error"));
 
-    _active_connection_ids.erase(address_pubkey_hex);
+    // Clear the connection and stream ids
+    if (auto id = _active_connection_ids.extract(address_pubkey_hex))
+        _available_stream_ids.erase(id.mapped());
 
     // Process any waiting verification requests
     if (auto it = _pending_verification_callbacks.find(address_pubkey_hex);
