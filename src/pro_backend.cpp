@@ -59,6 +59,7 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
         .cancel_subscription_url            = string8_literal(""),
     }
 };
+// clang-format on
 
 namespace {
 const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
@@ -223,12 +224,10 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
 
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L171
-    array_uc32 hash_to_sign = {};
-    crypto_generichash_blake2b_state state = {};
-    make_blake2b32_hasher(
-            &state,
-            {SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION,
-             sizeof(SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION) - 1});
+    array_uc32 hash_to_sign;
+    crypto_generichash_blake2b_state state;
+    crypto_generichash_blake2b_init_salt_personal(
+            &state, nullptr, 0, hash_to_sign.size(), nullptr, ADD_PRO_PAYMENT_PERS.data());
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state,
@@ -404,12 +403,10 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
     uint8_t version = 0;
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
-    array_uc32 hash_to_sign = {};
-    crypto_generichash_blake2b_state state = {};
-    make_blake2b32_hasher(
-            &state,
-            {SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION,
-             sizeof(SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION) - 1});
+    array_uc32 hash_to_sign;
+    crypto_generichash_blake2b_state state;
+    crypto_generichash_blake2b_init_salt_personal(
+            &state, nullptr, 0, 32, nullptr, GENERATE_PROOF_PERS.data());
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state, master_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
@@ -571,13 +568,11 @@ array_uc64 GetProDetailsRequest::build_sig(
 
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
-    array_uc32 hash_to_sign = {};
-    crypto_generichash_blake2b_state state = {};
+    array_uc32 hash_to_sign;
+    crypto_generichash_blake2b_state state;
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
-    make_blake2b32_hasher(
-            &state,
-            {SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION,
-             sizeof(SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION) - 1});
+    crypto_generichash_blake2b_init_salt_personal(
+            &state, nullptr, 0, 32, nullptr, GET_PRO_DETAILS_PERS.data());
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state,
@@ -813,12 +808,10 @@ array_uc64 SetPaymentRefundRequestedRequest::build_sig(
 
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5962925d7f18f83a3ff5774885495e5dd55ecb0a/server.py#L634
-    array_uc32 hash_to_sign = {};
-    crypto_generichash_blake2b_state state = {};
-    make_blake2b32_hasher(
-            &state,
-            {SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION,
-             sizeof(SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION) - 1});
+    array_uc32 hash_to_sign;
+    crypto_generichash_blake2b_state state;
+    crypto_generichash_blake2b_init_salt_personal(
+            &state, nullptr, 0, 32, nullptr, SET_PAYMENT_REFUND_REQUESTED_PERS.data());
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(
             &state,

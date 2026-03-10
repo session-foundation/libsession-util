@@ -11,11 +11,20 @@
 
 namespace session::random {
 
+void fill(std::span<std::byte> buf) {
+    randombytes_buf(buf.data(), buf.size());
+}
+void fill(std::span<unsigned char> buf) {
+    fill(std::span{reinterpret_cast<std::byte*>(buf.data()), buf.size()});
+}
+void fill(std::span<char> buf) {
+    fill(std::span{reinterpret_cast<std::byte*>(buf.data()), buf.size()});
+}
+
 std::vector<unsigned char> random(size_t size) {
     std::vector<unsigned char> result;
     result.resize(size);
-    randombytes_buf(result.data(), size);
-
+    fill(result);
     return result;
 }
 
@@ -50,9 +59,8 @@ std::string unique_id(std::string_view prefix) {
 extern "C" {
 
 LIBSESSION_C_API unsigned char* session_random(size_t size) {
-    auto result = session::random::random(size);
     auto* ret = static_cast<unsigned char*>(malloc(size));
-    std::memcpy(ret, result.data(), result.size());
+    session::random::fill(std::span{ret, size});
     return ret;
 }
 

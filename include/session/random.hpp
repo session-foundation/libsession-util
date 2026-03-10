@@ -36,6 +36,18 @@ inline constexpr CSRNG csrng{};
 
 namespace session::random {
 
+/// API: random/random_fill
+///
+/// Wrapper around the randombytes_buf function.
+///
+/// Inputs:
+/// - `buf` -- span to fill with random bytes
+///
+/// Outputs: None.
+void fill(std::span<std::byte> buf);
+void fill(std::span<unsigned char> buf);
+void fill(std::span<char> buf);
+
 /// API: random/random
 ///
 /// Wrapper around the randombytes_buf function.

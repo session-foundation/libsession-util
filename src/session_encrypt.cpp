@@ -144,7 +144,7 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
 
     // To make our ephemeral seed we're going to hash: SENDER_SEED || RECIPIENT_PK || MESSAGE with a
     // keyed blake2b hash.
-    cleared_array<crypto_box_SEEDBYTES> seed;
+    cleared_uchars<crypto_box_SEEDBYTES> seed;
     crypto_generichash_blake2b_state st;
     crypto_generichash_blake2b_init(&st, BOX_HASHKEY.data(), BOX_HASHKEY.size(), seed.size());
     crypto_generichash_blake2b_update(&st, ed25519_privkey.data(), 32);
@@ -152,15 +152,15 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
     crypto_generichash_blake2b_update(&st, message.data(), message.size());
     crypto_generichash_blake2b_final(&st, seed.data(), seed.size());
 
-    cleared_array<crypto_box_SECRETKEYBYTES> eph_sk;
-    cleared_array<crypto_box_PUBLICKEYBYTES> eph_pk;
+    cleared_uchars<crypto_box_SECRETKEYBYTES> eph_sk;
+    cleared_uchars<crypto_box_PUBLICKEYBYTES> eph_pk;
 
     crypto_box_seed_keypair(eph_pk.data(), eph_sk.data(), seed.data());
 
     // The nonce for a sealed box is not passed but is implicitly defined as the (unkeyed) blake2b
     // hash of:
     //     EPH_PUBKEY || RECIPIENT_PUBKEY
-    cleared_array<crypto_box_NONCEBYTES> nonce;
+    cleared_uchars<crypto_box_NONCEBYTES> nonce;
     crypto_generichash_blake2b_init(&st, nullptr, 0, nonce.size());
     crypto_generichash_blake2b_update(&st, eph_pk.data(), eph_pk.size());
     crypto_generichash_blake2b_update(&st, recipient_pubkey.data(), recipient_pubkey.size());
@@ -327,7 +327,7 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
     }
 
     // Encrypt using xchacha20-poly1305
-    cleared_array<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
+    cleared_uchars<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
     randombytes_buf(nonce.data(), nonce.size());
 
     std::vector<unsigned char> ciphertext;

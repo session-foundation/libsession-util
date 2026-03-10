@@ -49,9 +49,14 @@ inline std::span<const OutChar> to_span(const char (&literal)[N]) {
 }
 
 template <typename OutChar = unsigned char, typename Container>
-    requires(!oxenc::bt_input_string<Container>)
-inline std::span<const OutChar> to_span(const Container& c) {
-    return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
+    requires(
+            std::convertible_to<
+                    const Container&,
+                    std::span<const typename Container::value_type>> &&
+            !oxenc::bt_input_string<Container> && oxenc::basic_char<typename Container::value_type>)
+inline auto to_span(const Container& c) {
+    constexpr size_t Extent{decltype(std::span{c})::extent};
+    return std::span<const OutChar, Extent>{reinterpret_cast<const OutChar*>(c.data()), c.size()};
 }
 
 // Helper functions to convert container types

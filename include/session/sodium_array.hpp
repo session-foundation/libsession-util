@@ -62,11 +62,26 @@ struct sodium_cleared : T {
     ~sodium_cleared() { sodium_zero_buffer(this, sizeof(*this)); }
 };
 
-template <size_t N>
-using cleared_array = sodium_cleared<std::array<unsigned char, N>>;
+template <oxenc::basic_char Char, size_t N>
+struct cleared_array : sodium_cleared<std::array<Char, N>> {
+    using sodium_cleared<std::array<Char, N>>::sodium_cleared;
 
-using cleared_uc32 = cleared_array<32>;
-using cleared_uc64 = cleared_array<64>;
+    // Provide implicit conversion to fixed extent span because otherwise span's built-in is dynamic
+    // extent (because span uses CTAD which detects std::array but not our subclass).
+    operator std::span<Char, N>() { return std::span{static_cast<std::array<Char, N>&>(*this)}; }
+    operator std::span<const Char, N>() const {
+        return std::span{static_cast<const std::array<Char, N>&>(*this)};
+    }
+};
+
+template <size_t N>
+using cleared_uchars = cleared_array<unsigned char, N>;
+using cleared_uc32 = cleared_uchars<32>;
+using cleared_uc64 = cleared_uchars<64>;
+template <size_t N>
+using cleared_bytes = cleared_array<std::byte, N>;
+using cleared_b32 = cleared_bytes<32>;
+using cleared_b64 = cleared_bytes<64>;
 
 // This is an optional (i.e. can be empty) fixed-size (at construction) buffer that does allocation
 // and freeing via libsodium.  It is slower and heavier than a regular allocation type but takes

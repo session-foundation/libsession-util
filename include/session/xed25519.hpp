@@ -32,9 +32,10 @@ std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string
 /// however, that there are *two* possible Ed25519 pubkeys that could result in a given curve25519
 /// pubkey: this always returns the positive value.  You can get the other possibility (the
 /// negative) by setting the sign bit, i.e. `returned_pubkey[31] |= 0x80`.
-std::array<unsigned char, 32> pubkey(std::span<const unsigned char> curve25519_pubkey);
+std::array<unsigned char, 32> pubkey(std::span<const unsigned char, 32> curve25519_pubkey) noexcept;
 
-/// "Softer" version that takes/returns strings of regular chars
+/// "Softer" version that takes/returns strings of regular chars.  Throws invalid_argument if the
+/// input is not 32 bytes.
 std::string pubkey(std::string_view curve25519_pubkey);
 
 /// Utility function that provides a constant-time `if (b) f = g;` implementation for byte arrays.

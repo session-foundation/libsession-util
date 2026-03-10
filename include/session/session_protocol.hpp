@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <session/hash.hpp>
 #include <session/sodium_array.hpp>
 #include <session/types.hpp>
 #include <span>
@@ -55,6 +56,15 @@
 namespace session {
 
 enum ProProofVersion { ProProofVersion_v0 };
+
+/// Session Pro personalisation bytes for hashing. Must match
+///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/backend.py#L21
+///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/server.py#L571
+inline constexpr auto GENERATE_PROOF_PERS = "ProGenerateProof"_b2b_pers;
+inline constexpr auto BUILD_PROOF_PERS = "ProProof________"_b2b_pers;
+inline constexpr auto ADD_PRO_PAYMENT_PERS = "ProAddPayment___"_b2b_pers;
+inline constexpr auto SET_PAYMENT_REFUND_REQUESTED_PERS = "ProSetRefundReq_"_b2b_pers;
+inline constexpr auto GET_PRO_DETAILS_PERS = "ProGetProDetReq_"_b2b_pers;
 
 enum class ProStatus {
     // Pro proof sig was not signed by the Pro backend key
@@ -640,7 +650,4 @@ DecodedCommunityMessage decode_for_community(
         sys_ms unix_ts,
         const array_uc32& pro_backend_pubkey);
 
-/// Initialiser the blake2b hashing context to generate 32 byte hashes for Session Pro features.
-void make_blake2b32_hasher(
-        struct crypto_generichash_blake2b_state* hasher, std::string_view personalization);
 }  // namespace session
