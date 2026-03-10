@@ -436,27 +436,14 @@ void QuicTransport::_send_on_connection(
         else {
             int64_t stream_id = -1;
 
-            try {
-                // Try to retrieve an available stream to send the request down, otherwise fallback
-                // to creating a new stream
-                auto stream_it = _available_stream_ids.find(conn_id);
+            if (auto& streams = _available_stream_ids[conn_id]; !streams.empty()) {
+                stream_id = *streams.begin();
+                streams.erase(streams.begin());
+            }
 
-                if (stream_it == _available_stream_ids.end() || stream_it->second.empty())
-                    throw std::runtime_error{"Stream does not exist"};
-
-                // Remove the id from `_available_stream_ids` regardless of whether we successfully
-                // get the stream from the current connection because if we don't, then it means
-                // that stream isn't valid anyway so should be removed
-                auto& stream_ids = stream_it->second;
-                auto stream_id_it = stream_ids.begin();
-                stream_id = *stream_id_it;
-                stream_ids.erase(stream_id_it);
-
+            if (stream_id != -1) {
                 try {
-                    if (auto stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id))
-                        target_stream = stream;
-                    else
-                        throw std::runtime_error{"Stream does not exist"};
+                    target_stream = conn->get_stream<oxen::quic::BTRequestStream>(stream_id);
                 } catch (const std::exception& e) {
                     log::warning(
                             cat,
@@ -465,9 +452,10 @@ void QuicTransport::_send_on_connection(
                             stream_id,
                             conn_id.to_string(),
                             e.what());
-                    throw;
                 }
-            } catch (...) {
+            }
+
+            if (!target_stream) {
                 log::debug(
                         cat,
                         "[Request {}] Unable to find existing stream{}, creating new stream on "
