@@ -51,21 +51,15 @@ static std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> ma
     return key;
 }
 
-std::vector<unsigned char> encrypt(
-        std::span<const unsigned char> message,
+void encrypt_prealloced(
+        std::span<unsigned char> message,
         std::span<const unsigned char> key_base,
         std::string_view domain) {
-    std::vector<unsigned char> msg;
-    msg.reserve(message.size() + ENCRYPT_DATA_OVERHEAD);
-    msg.assign(message.begin(), message.end());
-    encrypt_inplace(msg, key_base, domain);
-    return msg;
-}
-void encrypt_inplace(
-        std::vector<unsigned char>& message,
-        std::span<const unsigned char> key_base,
-        std::string_view domain) {
-    auto key = make_encrypt_key(key_base, message.size(), domain);
+    if (message.size() < ENCRYPT_DATA_OVERHEAD)
+        throw std::invalid_argument{
+                "encrypt_prealloced: buffer is smaller than ENCRYPT_DATA_OVERHEAD"};
+    size_t plaintext_len = message.size() - ENCRYPT_DATA_OVERHEAD;
+    auto key = make_encrypt_key(key_base, plaintext_len, domain);
 
     std::string nonce_key{NONCE_KEY_PREFIX};
     nonce_key += domain;
@@ -75,12 +69,9 @@ void encrypt_inplace(
             nonce.data(),
             nonce.size(),
             message.data(),
-            message.size(),
+            plaintext_len,
             to_unsigned(nonce_key.data()),
             nonce_key.size());
-
-    size_t plaintext_len = message.size();
-    message.resize(plaintext_len + ENCRYPT_DATA_OVERHEAD);
 
     unsigned long long outlen = 0;
     crypto_aead_xchacha20poly1305_ietf_encrypt(
@@ -94,8 +85,26 @@ void encrypt_inplace(
             nonce.data(),
             key.data());
 
-    assert(outlen == message.size() - crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    assert(outlen == plaintext_len + crypto_aead_xchacha20poly1305_ietf_ABYTES);
     std::memcpy(message.data() + outlen, nonce.data(), nonce.size());
+}
+
+std::vector<unsigned char> encrypt(
+        std::span<const unsigned char> message,
+        std::span<const unsigned char> key_base,
+        std::string_view domain) {
+    std::vector<unsigned char> out(message.size() + ENCRYPT_DATA_OVERHEAD);
+    std::memcpy(out.data(), message.data(), message.size());
+    encrypt_prealloced(out, key_base, domain);
+    return out;
+}
+
+void encrypt_inplace(
+        std::vector<unsigned char>& message,
+        std::span<const unsigned char> key_base,
+        std::string_view domain) {
+    message.resize(message.size() + ENCRYPT_DATA_OVERHEAD);
+    encrypt_prealloced(message, key_base, domain);
 }
 
 static_assert(

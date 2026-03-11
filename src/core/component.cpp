@@ -1,3 +1,4 @@
+#include <oxen/quic/loop.hpp>
 #include <session/core.hpp>
 #include <session/core/component.hpp>
 #include <session/sqlite.hpp>
@@ -10,6 +11,10 @@ sqlite::Connection CoreComponent::conn() {
 
 core::callbacks& CoreComponent::cb() {
     return core.callbacks;
+}
+
+quic::Loop& CoreComponent::loop() {
+    return *core._loop;
 }
 
 CoreComponent::CoreComponent(Core& core) : core{core} {

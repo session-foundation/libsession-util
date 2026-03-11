@@ -2,6 +2,7 @@
 
 #include <initializer_list>
 #include <oxen/log.hpp>
+#include <oxen/quic/loop.hpp>
 #include <session/core.hpp>
 #include <session/core/schema/schema_registry.hpp>
 #include <unordered_set>
@@ -13,7 +14,13 @@ namespace session::core {
 namespace log = oxen::log;
 using namespace session::sqlite;
 
+void Core::LoopDeleter::operator()(quic::Loop* p) const {
+    delete p;
+}
+
 void Core::init() {
+    _loop.reset(new quic::Loop());
+
     apply_migrations();
 
     for (auto* component : _comp_init)

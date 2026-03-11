@@ -54,6 +54,22 @@ void encrypt_inplace(
         std::span<const unsigned char> key_base,
         std::string_view domain);
 
+/// API: encrypt/encrypt_prealloced
+///
+/// Encrypts a pre-allocated buffer in place.  `message` must have exactly ENCRYPT_DATA_OVERHEAD
+/// bytes of trailing space already allocated beyond the plaintext (i.e. message.size() must equal
+/// plaintext_size + ENCRYPT_DATA_OVERHEAD).  The plaintext in the leading bytes is encrypted in
+/// place, and the auth tag and nonce are written into the trailing ENCRYPT_DATA_OVERHEAD bytes.
+///
+/// Inputs:
+/// - `message` -- buffer containing plaintext followed by ENCRYPT_DATA_OVERHEAD reserved bytes
+/// - `key_base` -- Fixed key that all clients, must be 32 bytes.
+/// - `domain` -- short string for the keyed hash
+void encrypt_prealloced(
+        std::span<unsigned char> message,
+        std::span<const unsigned char> key_base,
+        std::string_view domain);
+
 /// API: encrypt/ENCRYPT_DATA_OVERHEAD
 ///
 /// Member variable

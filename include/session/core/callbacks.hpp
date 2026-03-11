@@ -70,6 +70,10 @@ struct callbacks {
     /// Parameters:
     /// - removed_device -- the most recent info we have (locally) for the removed device.
     std::function<void(const device::Info& removed_device)> device_removed;
+
+    /// Callback invoked when *this* device has been confirmed removed from the account (typically
+    /// from another device) from an incoming device group update.
+    std::function<void()> device_self_removed;
 };
 
 }  // namespace session::core

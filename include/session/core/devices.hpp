@@ -6,9 +6,12 @@
 #include <chrono>
 #include <cstddef>
 #include <map>
+#include <optional>
 #include <session/sodium_array.hpp>
+#include <span>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 #include "component.hpp"
 
@@ -53,7 +56,7 @@ namespace device {
 
         // The device type; one of the above enum values, or DevType::Unknown if the device type is
         // not one of the standard Session clients.
-        Type type;
+        Type type = device::Type::Unknown;
 
         // When device type is not one of the standard session clients, this will be set to a
         // free-form string indicating the device type.  Will be empty if no device type is provided
@@ -69,8 +72,13 @@ namespace device {
         // pubkeys.  This allows a user to visually identify (and verify) a device within the device
         // list at any time, but its primary purpose is for identifying the device during linking.
 
-        // Indicates whether the device is registered or not.
+        // Indicates whether the device is registered, pending registration, or not registered.
         State state;
+
+        // For state == State::Unregistered, this timestamp (if set) indicates that the device was
+        // removed from the device group at that timestamp.  It will be nullopt for a device that
+        // was never in the device group.
+        std::optional<std::chrono::sys_seconds> kicked;
 
         // Application version triplet as reported by the device.  The 2nd and 3rd values will
         // always be in [0, 999].  (If setting device info, they will be clamped if outside this
@@ -134,15 +142,22 @@ class Devices final : detail::CoreComponent {
     void receive_device_data(std::span<const unsigned char> data);
 
     // Returns info for all registered and/or pending devices and/or unregistered devices for this
-    // account.
+    // account.  If `only_device` is non-empty it must be a 32-byte device id that is used to
+    // filter the results to just that one device.
     device::map devices(
             bool include_registered = true,
             bool include_pending = false,
-            bool include_unregistered = false);
+            bool include_unregistered = false,
+            std::span<const std::byte> only_device = {});
 
-    // Returns *this* device's info for this account, and whether the device is registered in the
-    // device list.
+    // Returns *this* device's info and whether it is registered in the device group.
     std::pair<device::Info, bool> device_info();
+
+    // Builds an outgoing link request message to upload to Namespace::DeviceLink.  This should
+    // only be called when this device is not currently registered in the device group; throws
+    // std::logic_error if it is already registered.  The returned bytes are to be pushed to
+    // Namespace::DeviceLink with a 10-minute TTL.
+    std::vector<std::byte> build_link_request();
 
     // Updates this device's info locally to match the given info; if the current device is
     // registered then this dirties the device config data, requiring a push.

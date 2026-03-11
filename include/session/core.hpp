@@ -111,17 +111,28 @@
 ///
 /// ```
 
+namespace oxen::quic {
+class Loop;
+}  // namespace oxen::quic
+
 namespace session::pro_backend {
 struct ProRevocationItem;
 };  // namespace session::pro_backend
 
 namespace session::core {
 
+namespace quic = oxen::quic;
+
 namespace detail {
     class CoreComponent;
 }
 
 class Core {
+    // Constructed first (in init()), destroyed last: must outlive all components that use it.
+    // Custom deleter allows quic::Loop to remain an incomplete type in this header.
+    struct LoopDeleter { void operator()(quic::Loop*) const; };
+    std::unique_ptr<quic::Loop, LoopDeleter> _loop;
+
     sqlite::Database db;
     friend class detail::CoreComponent;
 
@@ -139,8 +150,8 @@ class Core {
     void init();
 
   public:
-    // Constructor taking a specific encryption type, any number of session::SQLite database
-    // options; anything else gets passed through to the individual component constructors.
+    // Constructor taking a struct of callbacks to invoke on various events, and any number of
+    // session::SQLite database options to open the core database.
     template <sqlite::DatabaseOption... DBOpts>
     Core(core::callbacks callbacks, std::filesystem::path db_path, const DBOpts&... opts) :
             callbacks{std::move(callbacks)}, db{std::move(db_path), opts...} {

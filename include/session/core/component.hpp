@@ -3,7 +3,12 @@
 namespace session::sqlite {
 class Connection;
 }
+namespace oxen::quic {
+class Loop;
+}  // namespace oxen::quic
 namespace session::core {
+
+namespace quic = oxen::quic;
 
 class Core;
 struct callbacks;
@@ -23,6 +28,9 @@ namespace detail {
 
         // Returns the application callbacks registered with Core.
         core::callbacks& cb();
+
+        // Returns the event loop for scheduling async work.
+        quic::Loop& loop();
 
         explicit CoreComponent(Core& core);
 

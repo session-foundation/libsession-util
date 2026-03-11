@@ -117,6 +117,7 @@ target_link_libraries(
     sessiondep::libsodium
     session::SQLite
     mlkem_native::mlkem768
+    quic
 )
 
 target_link_libraries(config

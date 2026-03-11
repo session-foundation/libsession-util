@@ -5,9 +5,10 @@ CREATE TABLE devices (
     unique_id device_id BLOB UNIQUE NOT NULL CHECK(length(id) == 32),
 
     state INTEGER NOT NULL CHECK(state == 0 OR state == 1 OR state == 2), -- registered, pending, unregistered
-    changes INTEGER NOT NULL DEFAULT 0, -- 1 means there are unpushed local device info changes
+    changes INTEGER NOT NULL DEFAULT 0, -- 1 means there are unconfirmed local device info changes
     seqno INTEGER NOT NULL DEFAULT 1,
     timestamp INTEGER NOT NULL,
+    kicked_timestamp INTEGER,  -- set when the device was kicked from the device group
     device_type TEXT NOT NULL, -- typically a/i/d (Android/iOS/Desktop), but can be anything
     description TEXT NOT NULL, -- freeform device description
     version INTEGER NOT NULL, -- = 1000000*V + 1000*v + p for version "V.v.p"

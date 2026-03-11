@@ -18,6 +18,7 @@
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <ranges>
+#include <session/config/encrypt.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
 #include <session/hash.hpp>
@@ -165,52 +166,22 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys() {
     return keys;
 }
 
-device::map Devices::devices(
-        bool include_registered, bool include_pending, bool include_unregistered) {
+namespace {
 
-    std::string where_clause;
-    if (include_registered && include_pending && include_unregistered)
-        ;  // leave empty to select all
-    else {
-        std::vector<int> where_states;
-        if (include_registered)
-            where_states.push_back(static_cast<int>(device::State::Registered));
-        if (include_pending)
-            where_states.push_back(static_cast<int>(device::State::Pending));
-        if (include_unregistered)
-            where_states.push_back(static_cast<int>(device::State::Unregistered));
-        if (where_states.empty())
-            return {};
-        where_clause = "WHERE state IN ({})"_format(fmt::join(where_states, ","));
-    }
-
-    auto c = conn();
-    SQLite::Transaction tx{c.sql};
-
-    device::map devs;
-
-    for (auto [id, devid, state, changes, seqno, timestamp, type, desc, ver, pk_ml, pk_x] :
-         c.prepared_results<
-                 int64_t,
-                 sqlite::blob_guts<std::array<std::byte, 32>>,
-                 int,
-                 int,
-                 int,
-                 int64_t,
-                 std::string,
-                 std::string,
-                 int64_t,
-                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
-                 sqlite::blobn<32>>(R"(
-SELECT id, unique_id, state, changes, seqno, timestamp, device_type, description, version,
-        pubkey_mlkem768, pubkey_x25519
-FROM devices
-{}
-ORDER BY unique_id
-)"_format(where_clause))) {
-        auto& info = devs[devid];
-
-        info.id = devid;
+    // Builds a device::Info from the fields of a devices table row (excluding the row id, changes,
+    // and kicked_timestamp columns, which are not part of device::Info).
+    device::Info fill_device_info(
+            std::span<const std::byte, 32> devid,
+            int state,
+            int seqno,
+            int64_t timestamp,
+            std::string type,
+            std::string desc,
+            int64_t ver,
+            const sqlite::blobn<MLKEM768_PUBLICKEYBYTES>& pk_ml,
+            const sqlite::blobn<32>& pk_x) {
+        device::Info info;
+        std::memcpy(info.id.data(), devid.data(), info.id.size());
         info.seqno = seqno;
         info.timestamp = std::chrono::sys_seconds{std::chrono::seconds{timestamp}};
         info.type = device::Type::Unknown;
@@ -229,10 +200,13 @@ ORDER BY unique_id
         info.version[0] = ver / 1000000;
         std::memcpy(info.pk_x25519.data(), pk_x.data(), info.pk_x25519.size());
         std::memcpy(info.pk_mlkem768.data(), pk_ml.data(), info.pk_mlkem768.size());
+        return info;
+    }
 
+    void load_device_extras(sqlite::Connection& c, int64_t row_id, device::Info& info) {
         for (auto [key, value] : c.prepared_results<std::string, sqlite::blob>(
                      "SELECT key, bt_value FROM device_unknown WHERE device = ? ORDER BY key",
-                     id)) {
+                     row_id)) {
             try {
                 info.extra[key] = oxenc::bt_deserialize<bt_value>(value);
             } catch (const std::exception& e) {
@@ -241,7 +215,67 @@ ORDER BY unique_id
         }
     }
 
+}  // namespace
+
+device::map Devices::devices(
+        bool include_registered,
+        bool include_pending,
+        bool include_unregistered,
+        std::span<const std::byte> only_device) {
+
+    // Encode included states as a bitmask (bit 0 = Registered, 1 = Pending, 2 = Unregistered) so
+    // we use a stable query string regardless of which states are selected.
+    int state_mask = (include_registered ? 1 : 0) | (include_pending ? 2 : 0) |
+                     (include_unregistered ? 4 : 0);
+    if (state_mask == 0)
+        return {};
+
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+    device::map devs;
+
+    std::string query =
+            "SELECT id, unique_id, state, changes, seqno, timestamp, device_type, description,"
+            "       version, pubkey_mlkem768, pubkey_x25519"
+            " FROM devices WHERE ((1 << state) & ?) != 0";
+    if (!only_device.empty())
+        query += " AND unique_id = ?";
+    query += " ORDER BY unique_id";
+
+    auto st = c.prepared_st(query);
+    if (only_device.empty())
+        bind_oneshot(st, state_mask);
+    else
+        bind_oneshot(st, state_mask, only_device);
+
+    for (auto [id, devid, state, changes, seqno, timestamp, type, desc, ver, pk_ml, pk_x] :
+         sqlite::IterableStatementWrapper<
+                 int64_t,
+                 sqlite::blob_guts<std::array<std::byte, 32>>,
+                 int,
+                 int,
+                 int,
+                 int64_t,
+                 std::string,
+                 std::string,
+                 int64_t,
+                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+                 sqlite::blobn<32>>{std::move(st)}) {
+        auto& info = devs[devid];
+        info = fill_device_info(
+                devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml,
+                pk_x);
+        load_device_extras(c, id, info);
+    }
+
     return devs;
+}
+
+std::pair<device::Info, bool> Devices::device_info() {
+    auto devs = devices(true, true, true, self_id);
+    if (auto it = devs.find(self_id); it != devs.end())
+        return {std::move(it->second), it->second.state == device::State::Registered};
+    return {device::Info{.id = self_id}, false};
 }
 
 namespace {
@@ -276,32 +310,66 @@ namespace {
         out.append(key, value);
     }
 
+    // Encodes the fields of a device::Info into an already-opened bt_dict_producer (passed as
+    // rvalue to allow callers to pass sub-producers directly from append_dict()).
+    void encode_device_info(oxenc::bt_dict_producer&& devout, const device::Info& info) {
+        auto xit = info.extra.cbegin();
+        auto xend = info.extra.cend();
+        write_next(devout, "#", info.seqno, xit, xend);
+        write_next(devout, "@", info.timestamp.time_since_epoch().count(), xit, xend);
+        write_next(devout, "M", info.pk_mlkem768, xit, xend);
+        write_next(devout, "X", info.pk_x25519, xit, xend);
+        write_next(devout, "d", info.description, xit, xend);
+        write_extras(devout, "t", xit, xend);
+        if (auto t = info.encoded_type(); !t.empty())
+            devout.append("t", t);
+        auto ver = info.version[0] * 1000000 + std::clamp(info.version[1], 0, 999) * 1000 +
+                   std::clamp(info.version[2], 0, 999);
+        write_extras(devout, "v", xit, xend);
+        if (ver != 0)
+            devout.append("v", ver);
+        for (; xit != xend; ++xit)
+            devout.append_bt(xit->first, xit->second);
+    }
+
     std::string encode_device_data(const device::map& devices) {
         oxenc::bt_dict_producer out;
         for (const auto& [id, info] : devices) {
-            auto devout = out.append_dict(
-                    std::string_view{reinterpret_cast<const char*>(id.data()), id.size()});
 
-            auto xit = info.extra.cbegin();
-            auto xend = info.extra.cend();
-            write_next(devout, "#", info.seqno, xit, xend);
-            write_next(devout, "@", info.timestamp.time_since_epoch().count(), xit, xend);
-            write_next(devout, "M", info.pk_mlkem768, xit, xend);
-            write_next(devout, "X", info.pk_x25519, xit, xend);
-            write_next(devout, "d", info.description, xit, xend);
-            write_extras(devout, "t", xit, xend);
-            if (auto t = info.encoded_type(); !t.empty())
-                devout.append("t", t);
-            auto ver = info.version[0] * 1000000 + std::clamp(info.version[1], 0, 999) * 1000 +
-                       std::clamp(info.version[2], 0, 999);
-            write_extras(devout, "v", xit, xend);
-            if (ver != 0)
-                devout.append("v", ver);
+            std::string_view id_sv{reinterpret_cast<const char*>(id.data()), id.size()};
 
-            for (; xit != xend; ++xit)
-                out.append_bt(xit->first, xit->second);
+            if (info.state == device::State::Pending) {
+                log::debug(
+                        cat, "Skipping pending device {} in device group data", oxenc::to_hex(id));
+                continue;
+            } else if (info.state == device::State::Unregistered) {
+                // We write a timestamp tombstone value for a kicked device, with the kick timestamp
+                // as the value.
+                //
+                // TODO: we should prune devices that were kicked a long time ago.
+                if (info.kicked)
+                    out.append(id_sv, info.kicked->time_since_epoch().count());
+                else
+                    log::debug(
+                            cat,
+                            "Skipping unregistered (but not kicked) device {}",
+                            oxenc::to_hex(id));
+                continue;
+            }
+
+            encode_device_info(out.append_dict(id_sv), info);
         }
 
+        return std::move(out).str();
+    }
+
+    std::string encode_link_request_plaintext(
+            std::span<const std::byte, 32> device_id, const device::Info& info) {
+        oxenc::bt_dict_producer out;
+        // "I" (device id) sorts before "i" (info dict)
+        out.append("I", std::string_view{
+                                reinterpret_cast<const char*>(device_id.data()), device_id.size()});
+        encode_device_info(out.append_dict("i"), info);
         return std::move(out).str();
     }
 
@@ -370,7 +438,10 @@ namespace {
             consume_extra(dev, info.extra);
     }
 
-    device::map decode_device_data(std::span<const unsigned char> data, device::State state) {
+    // Decodes an incoming devices data message.  The return map will include both full device
+    // records, and deleted devices: deleted devices will have a mostly default-constructed Info
+    // object where only id, state (=State::Unregistered) and kicked (=removal timestamp) are set.
+    device::map decode_device_data(std::span<const unsigned char> data) {
         device::map devices;
 
         oxenc::bt_dict_consumer in{data};
@@ -386,21 +457,26 @@ namespace {
                 continue;
             }
 
-            if (in.is_integer()) {
-                // An integer indicates a "device removed" timestamp, used to distinguish between
-                // "device removed" and "I don't know about the device yet".  It gets pruned when
-                // updating once it hits a certain age threshold.
-                log::debug(cat, "Skipping recently removed device id={}", oxenc::to_hex(in_id));
-                continue;
-            }
-
             std::array<std::byte, 32> id;
             std::memcpy(id.data(), in_id.data(), 32);
             auto [it, ins] = devices.try_emplace(id);
             if (!ins)
                 throw std::runtime_error{"Invalid encoded device data: duplicate devices ids"};
 
-            decode_one(it->second, in.consume_dict_consumer(), state);
+            auto& info = it->second;
+
+            if (in.is_integer()) {
+                // An integer indicates a "device removed" timestamp, used to distinguish between
+                // "device removed" and "I don't know about the device yet".  It gets pruned when
+                // updating once it hits a certain age threshold.
+                //
+                // If the device wants to get re-added to the group then it must generate a new
+                // device id.
+                info.state = device::State::Unregistered;
+                info.kicked.emplace(std::chrono::seconds{in.consume_integer<int64_t>()});
+            } else {
+                decode_one(info, in.consume_dict_consumer(), device::State::Registered);
+            }
         }
 
         return devices;
@@ -607,7 +683,61 @@ void Devices::receive_device_data(std::span<const unsigned char> data) {
     auto c = conn();
     SQLite::Transaction tx{c.sql};
 
+    // Snapshot the current state of all devices before processing updates so we can detect
+    // transitions and fire the appropriate callbacks afterward.
+    device::map old_devs;
+    for (auto [id, devid, state, seqno, timestamp, type, desc, ver, pk_ml, pk_x] :
+         c.prepared_results<
+                 int64_t,
+                 sqlite::blob_guts<std::array<std::byte, 32>>,
+                 int,
+                 int,
+                 int64_t,
+                 std::string,
+                 std::string,
+                 int64_t,
+                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+                 sqlite::blobn<32>>(
+                 "SELECT id, unique_id, state, seqno, timestamp, device_type, description, version,"
+                 "       pubkey_mlkem768, pubkey_x25519 FROM devices")) {
+        auto& info = old_devs[devid];
+        info = fill_device_info(
+                devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml,
+                pk_x);
+        load_device_extras(c, id, info);
+    }
+
+    std::vector<std::function<void()>> post_commit;
+
     for (const auto& [id, info] : devs) {
+        bool is_self = (id == self_id);
+        auto old_it = old_devs.find(id);
+        bool was_registered = old_it != old_devs.end() &&
+                              old_it->second.state == device::State::Registered;
+
+        if (info.state == device::State::Unregistered) {
+            // Kicked device: preserve whatever existing row data we have, just update state and
+            // kicked_timestamp.  If we have no row for this device we can't do anything useful
+            // (we'd have no data to fill the required columns with), so skip it.
+            assert(info.kicked);
+            c.prepared_exec(
+                    R"(UPDATE devices SET state = ?, kicked_timestamp = ? WHERE unique_id = ?)",
+                    static_cast<int>(device::State::Unregistered),
+                    info.kicked->time_since_epoch().count(),
+                    id);
+
+            if (was_registered) {
+                if (is_self) {
+                    if (auto& f = cb().device_self_removed)
+                        post_commit.push_back(f);
+                } else if (auto& f = cb().device_removed) {
+                    auto& old = old_it->second;
+                    post_commit.push_back([&f, &old] { f(old); });
+                }
+            }
+            continue;
+        }
+
         auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
 
         // Returns the row id if inserted or updated (i.e. seqno increased), nullopt if the seqno
@@ -615,8 +745,8 @@ void Devices::receive_device_data(std::span<const unsigned char> data) {
         auto dev_id = c.prepared_maybe_get<int64_t>(
                 R"(INSERT INTO devices
                     (unique_id, state, seqno, timestamp, device_type, description, version,
-                     pubkey_mlkem768, pubkey_x25519)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     pubkey_mlkem768, pubkey_x25519, kicked_timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                    ON CONFLICT(unique_id) DO UPDATE SET
                        state = excluded.state,
                        seqno = excluded.seqno,
@@ -625,7 +755,8 @@ void Devices::receive_device_data(std::span<const unsigned char> data) {
                        description = excluded.description,
                        version = excluded.version,
                        pubkey_mlkem768 = excluded.pubkey_mlkem768,
-                       pubkey_x25519 = excluded.pubkey_x25519
+                       pubkey_x25519 = excluded.pubkey_x25519,
+                       kicked_timestamp = excluded.kicked_timestamp
                    WHERE excluded.seqno > seqno
                    RETURNING id)",
                 id,
@@ -643,17 +774,93 @@ void Devices::receive_device_data(std::span<const unsigned char> data) {
 
         c.prepared_exec("DELETE FROM device_unknown WHERE device = ?", *dev_id);
         for (const auto& [key, val] : info.extra) {
-            auto encoded = std::visit(
-                    [](const auto& v) { return oxenc::bt_serialize(v); }, val);
+            auto encoded = std::visit([](const auto& v) { return oxenc::bt_serialize(v); }, val);
             c.prepared_exec(
                     "INSERT INTO device_unknown (device, key, bt_value) VALUES (?, ?, ?)",
                     *dev_id,
                     key,
                     to_span<std::byte>(encoded));
         }
+
+        if (!was_registered) {
+            if (is_self) {
+                if (auto& f = cb().device_self_added)
+                    post_commit.push_back(f);
+            } else if (auto& f = cb().device_added) {
+                // reqid=0: correlating with pending link request records is not yet implemented
+                post_commit.push_back([&f, &inf = info] { f(0, inf); });
+            }
+        }
     }
 
     tx.commit();
+    for (auto& f : post_commit)
+        f();
+}
+
+std::vector<std::byte> Devices::build_link_request() {
+    auto [info, is_registered] = device_info();
+
+    if (is_registered)
+        throw std::logic_error{
+                "build_link_request() called on a device that is already registered in the device "
+                "group"};
+
+    info.id = self_id;
+    info.seqno++;
+    info.timestamp = std::chrono::time_point_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now());
+
+    // Always use the current active device keys for the pubkeys in the link request, regardless
+    // of what is stored in the DB, as the DB may lag a key rotation.
+    auto keys = active_device_keys();
+    std::memcpy(
+            info.pk_x25519.data(),
+            reinterpret_cast<const std::byte*>(keys.front().x25519_pub.data()),
+            info.pk_x25519.size());
+    std::memcpy(
+            info.pk_mlkem768.data(),
+            reinterpret_cast<const std::byte*>(keys.front().mlkem768_pub.data()),
+            info.pk_mlkem768.size());
+
+    // Upsert our own device row with the updated seqno, timestamp, and pubkeys.  Mark changes=TRUE
+    // so that other parts of the system know a pending link request is outstanding.
+    auto c = conn();
+    auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
+    c.prepared_exec(
+            R"(INSERT INTO devices
+                (unique_id, state, seqno, timestamp, device_type, description, version,
+                 pubkey_mlkem768, pubkey_x25519, changes)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+               ON CONFLICT(unique_id) DO UPDATE SET
+                   state = excluded.state,
+                   seqno = excluded.seqno,
+                   timestamp = excluded.timestamp,
+                   device_type = excluded.device_type,
+                   description = excluded.description,
+                   version = excluded.version,
+                   pubkey_mlkem768 = excluded.pubkey_mlkem768,
+                   pubkey_x25519 = excluded.pubkey_x25519,
+                   changes = excluded.changes)",
+            self_id,
+            static_cast<int>(device::State::Pending),
+            info.seqno,
+            info.timestamp.time_since_epoch().count(),
+            info.encoded_type(),
+            info.description,
+            ver,
+            info.pk_mlkem768,
+            info.pk_x25519);
+
+    auto plaintext = encode_link_request_plaintext(self_id, info);
+    std::vector<std::byte> out(plaintext.size() + config::ENCRYPT_DATA_OVERHEAD);
+    std::memcpy(out.data(), plaintext.data(), plaintext.size());
+    auto seed = core.globals.account_seed();
+    config::encrypt_prealloced(
+            as_span<unsigned char>(std::span{out}),
+            as_span<unsigned char>(seed.buf).first(32),
+            "link-request");
+    return out;
 }
 
 device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
@@ -799,7 +1006,7 @@ device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
         throw device::decryption_failed{"Failed to decrypt incoming device data"};
     }
 
-    return decode_device_data(plaintext_devices, device::State::Registered);
+    return decode_device_data(plaintext_devices);
 }
 
 }  // namespace session::core
