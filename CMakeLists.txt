@@ -58,9 +58,17 @@ else()
     set(static_default ON)
 endif()
 
+# Override the default OFF value set in cmake/session-deps/Deps.cmake so that BUILD_STATIC_DEPS
+# defaults to the same value as BUILD_SHARED_LIBS (i.e. static by default).
+set(BUILD_STATIC_DEPS ${static_default} CACHE BOOL "Build all dependencies statically rather than trying to link to them on the system")
+
 include(cmake/session-deps/Deps.cmake)
 
 option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${static_default})
+
+if(STATIC_BUNDLE AND NOT BUILD_STATIC_DEPS)
+    message(FATAL_ERROR "STATIC_BUNDLE requires BUILD_STATIC_DEPS to be enabled")
+endif()
 
 if(BUILD_SHARED_LIBS OR libsession_IS_TOPLEVEL_PROJECT)
     set(install_default ON)

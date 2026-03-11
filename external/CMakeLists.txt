@@ -21,6 +21,9 @@ function(add_static_subdirectory dir)
     add_subdirectory(${dir} ${ARGN})
 endfunction()
 
+session_dep(libsodium 1.0.21)
+libsession_static_bundle(sessiondep::libsodium)
+
 if(ENABLE_NETWORKING)
     if(ENABLE_NETWORKING_SROUTER)
         set(SROUTER_FULL OFF CACHE BOOL "")
@@ -28,8 +31,6 @@ if(ENABLE_NETWORKING)
         set(SROUTER_NATIVE_BUILD OFF CACHE BOOL "")
         set(SROUTER_JEMALLOC OFF CACHE BOOL "")
 
-        add_library(sodium INTERFACE)
-        target_link_libraries(sodium INTERFACE libsodium::sodium-internal)
         add_static_subdirectory(session-router EXCLUDE_FROM_ALL)
         libsession_static_bundle(session-router::libsessionrouter)
     else()
@@ -81,10 +82,6 @@ if(APPLE)
     endforeach()
 endif()
 
-session_dep(libsodium 1.0.21)
-libsession_static_bundle(sessiondep::libsodium)
-
-
 set(protobuf_VERBOSE ON CACHE BOOL "" FORCE)
 set(protobuf_INSTALL ON CACHE BOOL "" FORCE)
 set(protobuf_WITH_ZLIB OFF CACHE BOOL "" FORCE)
@@ -128,9 +125,11 @@ if(NOT TARGET mlkem_native::mlkem768)
     add_library(mlkem_native::mlkem768 ALIAS mlkem_native768)
 endif()
 
-set(JSON_BuildTests OFF CACHE INTERNAL "")
-set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
-sessiondep_or_submodule(nlohmann_json 3.7.0 nlohmann-json nlohmann_json::nlohmann_json)
+if(NOT TARGET nlohmann_json::nlohmann_json)
+    set(JSON_BuildTests OFF CACHE INTERNAL "")
+    set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
+    sessiondep_or_submodule(nlohmann_json 3.7.0 nlohmann-json nlohmann_json::nlohmann_json)
+endif()
 
 
 session_dep(simdutf 7)
