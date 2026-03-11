@@ -131,7 +131,9 @@ namespace detail {
 class Core {
     // Constructed first (in init()), destroyed last: must outlive all components that use it.
     // Custom deleter allows quic::Loop to remain an incomplete type in this header.
-    struct LoopDeleter { void operator()(quic::Loop*) const; };
+    struct LoopDeleter {
+        void operator()(quic::Loop*) const;
+    };
     std::unique_ptr<quic::Loop, LoopDeleter> _loop;
 
     sqlite::Database db;

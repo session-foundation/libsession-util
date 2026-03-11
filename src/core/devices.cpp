@@ -263,8 +263,7 @@ device::map Devices::devices(
                  sqlite::blobn<32>>{std::move(st)}) {
         auto& info = devs[devid];
         info = fill_device_info(
-                devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml,
-                pk_x);
+                devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml, pk_x);
         load_device_extras(c, id, info);
     }
 
@@ -367,8 +366,10 @@ namespace {
             std::span<const std::byte, 32> device_id, const device::Info& info) {
         oxenc::bt_dict_producer out;
         // "I" (device id) sorts before "i" (info dict)
-        out.append("I", std::string_view{
-                                reinterpret_cast<const char*>(device_id.data()), device_id.size()});
+        out.append(
+                "I",
+                std::string_view{
+                        reinterpret_cast<const char*>(device_id.data()), device_id.size()});
         encode_device_info(out.append_dict("i"), info);
         return std::move(out).str();
     }
@@ -702,8 +703,7 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
                  "       pubkey_mlkem768, pubkey_x25519 FROM devices")) {
         auto& info = old_devs[devid];
         info = fill_device_info(
-                devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml,
-                pk_x);
+                devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml, pk_x);
         load_device_extras(c, id, info);
     }
 
@@ -712,8 +712,8 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
     for (const auto& [id, info] : devs) {
         bool is_self = (id == self_id);
         auto old_it = old_devs.find(id);
-        bool was_registered = old_it != old_devs.end() &&
-                              old_it->second.state == device::State::Registered;
+        bool was_registered =
+                old_it != old_devs.end() && old_it->second.state == device::State::Registered;
 
         if (info.state == device::State::Unregistered) {
             // Kicked device: preserve whatever existing row data we have, just update state and
@@ -808,8 +808,8 @@ std::vector<std::byte> Devices::build_link_request() {
 
     info.id = self_id;
     info.seqno++;
-    info.timestamp = std::chrono::time_point_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now());
+    info.timestamp =
+            std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
 
     // Always use the current active device keys for the pubkeys in the link request, regardless
     // of what is stored in the DB, as the DB may lag a key rotation.

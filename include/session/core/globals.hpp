@@ -38,7 +38,7 @@ class Globals final : detail::CoreComponent {
     // CoreComponent base class method from other components.
     session::secure_buffer _account_seed;
     std::array<unsigned char, 32> _pubkey_ed25519;
-    std::array<unsigned char, 33> _session_id; // AKA pubkey_x25519 with a 0x05 byte prefix
+    std::array<unsigned char, 33> _session_id;  // AKA pubkey_x25519 with a 0x05 byte prefix
 
     void init() override;
 
