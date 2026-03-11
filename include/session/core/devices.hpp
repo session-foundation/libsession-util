@@ -86,6 +86,17 @@ namespace device {
         // Unknown extra keys.  Single-character keys in here are reserved for future
         // libsession-util use; longer strings can be used for custom client data, if needed.
         oxenc::bt_dict extra;
+
+        // Returns the encoded device type string: "i", "a", or "d" for the standard Session
+        // client types, `other_device` for unknown types, or "" if unknown with no other_device.
+        std::string_view encoded_type() const {
+            switch (type) {
+                case Type::Session_iOS: return "i";
+                case Type::Session_Android: return "a";
+                case Type::Session_Desktop: return "d";
+                default: return other_device;
+            }
+        }
     };
 
     using map = std::map<std::array<std::byte, 32>, Info>;
@@ -115,6 +126,12 @@ class Devices final : detail::CoreComponent {
   public:
     // Returns the current device's random identifier, in hex.
     std::string device_id() const;
+
+    // Decrypts an incoming encrypted device data message (from the Namespace::DeviceGroup swarm
+    // message namespace) and stores the resulting device list in the database.  Returns without
+    // doing anything if decryption fails (e.g. we are not in the device group, or we don't have
+    // the right keys for the message).
+    void receive_device_data(std::span<const unsigned char> data);
 
     // Returns info for all registered and/or pending devices and/or unregistered devices for this
     // account.

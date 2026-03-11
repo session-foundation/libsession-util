@@ -24,6 +24,7 @@
 #include <session/random.hpp>
 #include <session/sqlite.hpp>
 #include <session/types.hpp>
+#include <session/util.hpp>
 #include <stdexcept>
 
 namespace session::core {
@@ -289,14 +290,8 @@ namespace {
             write_next(devout, "X", info.pk_x25519, xit, xend);
             write_next(devout, "d", info.description, xit, xend);
             write_extras(devout, "t", xit, xend);
-            switch (info.type) {
-                case device::Type::Session_iOS: devout.append("t", "i"); break;
-                case device::Type::Session_Android: devout.append("t", "a"); break;
-                case device::Type::Session_Desktop: devout.append("t", "d"); break;
-                default:
-                    if (!info.other_device.empty())
-                        devout.append("t", info.other_device);
-            }
+            if (auto t = info.encoded_type(); !t.empty())
+                devout.append("t", t);
             auto ver = info.version[0] * 1000000 + std::clamp(info.version[1], 0, 999) * 1000 +
                        std::clamp(info.version[2], 0, 999);
             write_extras(devout, "v", xit, xend);
@@ -598,6 +593,67 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     assert(o.view().size() == out.size());  // Ensure we calculated exactly the right size above
 
     return out;
+}
+
+void Devices::receive_device_data(std::span<const unsigned char> data) {
+    device::map devs;
+    try {
+        devs = decrypt_device_data(std::as_bytes(data));
+    } catch (const device::decryption_failed& e) {
+        log::warning(cat, "Ignoring incoming device group message: {}", e.what());
+        return;
+    }
+
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+
+    for (const auto& [id, info] : devs) {
+        auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
+
+        // Returns the row id if inserted or updated (i.e. seqno increased), nullopt if the seqno
+        // guard prevented an update.
+        auto dev_id = c.prepared_maybe_get<int64_t>(
+                R"(INSERT INTO devices
+                    (unique_id, state, seqno, timestamp, device_type, description, version,
+                     pubkey_mlkem768, pubkey_x25519)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(unique_id) DO UPDATE SET
+                       state = excluded.state,
+                       seqno = excluded.seqno,
+                       timestamp = excluded.timestamp,
+                       device_type = excluded.device_type,
+                       description = excluded.description,
+                       version = excluded.version,
+                       pubkey_mlkem768 = excluded.pubkey_mlkem768,
+                       pubkey_x25519 = excluded.pubkey_x25519
+                   WHERE excluded.seqno > seqno
+                   RETURNING id)",
+                id,
+                static_cast<int>(info.state),
+                info.seqno,
+                info.timestamp.time_since_epoch().count(),
+                info.encoded_type(),
+                info.description,
+                ver,
+                info.pk_mlkem768,
+                info.pk_x25519);
+
+        if (!dev_id)
+            continue;
+
+        c.prepared_exec("DELETE FROM device_unknown WHERE device = ?", *dev_id);
+        for (const auto& [key, val] : info.extra) {
+            auto encoded = std::visit(
+                    [](const auto& v) { return oxenc::bt_serialize(v); }, val);
+            c.prepared_exec(
+                    "INSERT INTO device_unknown (device, key, bt_value) VALUES (?, ?, ?)",
+                    *dev_id,
+                    key,
+                    to_span<std::byte>(encoded));
+        }
+    }
+
+    tx.commit();
 }
 
 device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
