@@ -13,6 +13,7 @@ namespace session::core {
 
 namespace log = oxen::log;
 using namespace session::sqlite;
+static auto cat = log::Cat("core");
 
 void Core::LoopDeleter::operator()(quic::Loop* p) const {
     delete p;
@@ -31,6 +32,29 @@ void Core::init() {
 
 void Core::register_comp_init(detail::CoreComponent* c) {
     _comp_init.push_back(c);
+}
+
+void Core::receive_messages(
+        std::span<const std::span<const unsigned char>> messages,
+        config::Namespace ns,
+        bool is_final) {
+    using config::Namespace;
+    switch (ns) {
+        case Namespace::DeviceGroup:
+            devices.parse_device_group(messages, is_final);
+            break;
+        case Namespace::DeviceLink:
+            devices.parse_link_request(messages, is_final);
+            break;
+        case Namespace::DevicePubkeys:
+            devices.parse_device_pubkeys(messages, is_final);
+            break;
+        default:
+            log::warning(
+                    cat,
+                    "receive_messages: ignoring unhandled namespace {}",
+                    static_cast<int16_t>(ns));
+    }
 }
 
 void Core::apply_migrations() {

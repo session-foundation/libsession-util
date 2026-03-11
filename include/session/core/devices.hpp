@@ -127,6 +127,17 @@ class Devices final : detail::CoreComponent {
     // Encrypts the inner device data for all the members of the device group.
     std::vector<std::byte> encrypt_device_data(const device::map& devices);
 
+    // Processes a single incoming encrypted device group message.
+    void receive_device_group_message(std::span<const unsigned char> data);
+
+    // Handlers for incoming swarm messages by namespace, called from Core::receive_messages.
+    void parse_device_group(
+            std::span<const std::span<const unsigned char>> messages, bool is_final);
+    void parse_link_request(
+            std::span<const std::span<const unsigned char>> messages, bool is_final);
+    void parse_device_pubkeys(
+            std::span<const std::span<const unsigned char>> messages, bool is_final);
+
     // Inverse of encrypt_device_data.  Throws if invalid.  Throws `Devices::decryption_failed` if
     // the message was parsed successfully, but we failed to decrypt any of its encrypted values.
     device::map decrypt_device_data(std::span<const std::byte> data);
@@ -134,12 +145,6 @@ class Devices final : detail::CoreComponent {
   public:
     // Returns the current device's random identifier, in hex.
     std::string device_id() const;
-
-    // Decrypts an incoming encrypted device data message (from the Namespace::DeviceGroup swarm
-    // message namespace) and stores the resulting device list in the database.  Returns without
-    // doing anything if decryption fails (e.g. we are not in the device group, or we don't have
-    // the right keys for the message).
-    void receive_device_data(std::span<const unsigned char> data);
 
     // Returns info for all registered and/or pending devices and/or unregistered devices for this
     // account.  If `only_device` is non-empty it must be a 32-byte device id that is used to

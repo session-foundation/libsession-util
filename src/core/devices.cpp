@@ -671,7 +671,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     return out;
 }
 
-void Devices::receive_device_data(std::span<const unsigned char> data) {
+void Devices::receive_device_group_message(std::span<const unsigned char> data) {
     device::map devs;
     try {
         devs = decrypt_device_data(std::as_bytes(data));
@@ -1007,6 +1007,22 @@ device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
     }
 
     return decode_device_data(plaintext_devices);
+}
+
+void Devices::parse_device_group(
+        std::span<const std::span<const unsigned char>> messages, bool /*is_final*/) {
+    for (const auto& msg : messages)
+        receive_device_group_message(msg);
+}
+
+void Devices::parse_link_request(
+        std::span<const std::span<const unsigned char>> /*messages*/, bool /*is_final*/) {
+    log::debug(cat, "parse_link_request: not yet implemented");
+}
+
+void Devices::parse_device_pubkeys(
+        std::span<const std::span<const unsigned char>> /*messages*/, bool /*is_final*/) {
+    log::debug(cat, "parse_device_pubkeys: not yet implemented");
 }
 
 }  // namespace session::core

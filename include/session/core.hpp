@@ -1,5 +1,6 @@
 #pragma once
 
+#include <session/config/namespaces.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
 #include <session/types.hpp>
@@ -167,6 +168,17 @@ class Core {
 
     // Device groups for handling shared encryption key among account devices
     Devices devices{*this};
+
+    // Passes a batch of messages retrieved from the swarm to the appropriate handler based on the
+    // namespace they were retrieved from.  `is_final` should be true if this batch represents the
+    // complete current contents of the namespace (i.e. there are no more messages pending
+    // retrieval), and false if more messages may follow.  Note that if there turn out to be no more
+    // messages after a non-final call, the caller should still call this with an empty span and
+    // is_final=true to flush any actions that are deferred until the end of a fetch.
+    void receive_messages(
+            std::span<const std::span<const unsigned char>> messages,
+            config::Namespace ns,
+            bool is_final);
 };
 
 }  // namespace session::core
