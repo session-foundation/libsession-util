@@ -128,13 +128,7 @@ target_link_libraries(config
 )
 
 if(ENABLE_NETWORKING)
-    # libevent
-    if(NOT TARGET libevent::core)
-        add_library(libevent_core INTERFACE)
-        pkg_check_modules(LIBEVENT_core libevent_core>=2.1 IMPORTED_TARGET REQUIRED)
-        target_link_libraries(libevent_core INTERFACE PkgConfig::LIBEVENT_core)
-        add_library(libevent::core ALIAS libevent_core)
-    endif()
+    session_dep(libevent_core 2.1)
 
     add_libsession_util_library(network
         onionreq/builder.cpp
@@ -166,7 +160,7 @@ if(ENABLE_NETWORKING)
         sessiondep::libsodium
         sessiondep::nettle
         date::date
-        libevent::core
+        sessiondep::libevent_core
     )
 
     if(ENABLE_NETWORKING_SROUTER)
