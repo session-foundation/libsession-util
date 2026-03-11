@@ -8,6 +8,10 @@ sqlite::Connection CoreComponent::conn() {
     return core.db.conn();
 }
 
+core::callbacks& CoreComponent::cb() {
+    return core.callbacks;
+}
+
 CoreComponent::CoreComponent(Core& core) : core{core} {
     core.register_comp_init(this);
 }

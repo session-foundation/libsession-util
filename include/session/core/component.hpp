@@ -6,6 +6,7 @@ class Connection;
 namespace session::core {
 
 class Core;
+struct callbacks;
 
 namespace detail {
     // Internal base class bridge between Core and the various components of core.  This bridge
@@ -19,6 +20,9 @@ namespace detail {
         // Gets a thread-unique database connection from the Core's Database's connection pool. This
         // is unique to the calling thread and must not be used across threads.
         sqlite::Connection conn();
+
+        // Returns the application callbacks registered with Core.
+        core::callbacks& cb();
 
         explicit CoreComponent(Core& core);
 
