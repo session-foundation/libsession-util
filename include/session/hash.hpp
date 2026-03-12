@@ -1,6 +1,7 @@
 #pragma once
 
 #include <oxenc/common.h>
+#include <oxenc/endian.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
 #include <array>
@@ -9,8 +10,6 @@
 #include <span>
 #include <type_traits>
 #include <vector>
-
-#include "types.hpp"
 
 namespace session::hash {
 
@@ -51,21 +50,35 @@ std::vector<unsigned char> hash(
 template <typename T>
 concept ByteContainer =
         std::ranges::contiguous_range<T> && oxenc::basic_char<std::ranges::range_value_t<T>>;
+template <typename T>
+concept HashInput = ByteContainer<T> || oxenc::endian_swappable_integer<T>;
 
 /// API: hash/update_all
 ///
 /// Wrapper about crypto_generichash_blake2b_update that takes any number of contiguous byte
-/// containers and updates the hash state with them, in argument order.
-template <ByteContainer... T>
+/// containers *or* integer values and updates the hash state with them, in argument order.  Integer
+/// values are always written as raw bytes in little-endian encoding (i.e. they will be byte-swapped
+/// if necessary).
+template <HashInput... T>
     requires(sizeof...(T) > 0)
 void update_all(crypto_generichash_blake2b_state& st, const T&... args) {
-    auto update_one = [&st](const auto& arg) {
-        crypto_generichash_blake2b_update(
-                &st,
-                reinterpret_cast<const unsigned char*>(std::ranges::data(arg)),
-                std::ranges::size(arg));
+    auto make_hashable = []<typename U>(const U& val) {
+        if constexpr (ByteContainer<U>)
+            return std::span{
+                    reinterpret_cast<const unsigned char*>(std::ranges::data(val)),
+                    std::ranges::size(val)};
+        else if constexpr (oxenc::little_endian || sizeof(val) == 1)
+            return std::span{reinterpret_cast<const unsigned char*>(&val), sizeof(val)};
+        else {
+            std::array<unsigned char, sizeof(val)> swapped;
+            oxenc::write_big_as_host(swapped.data(), val);
+            return swapped;
+        }
     };
-    (update_one(args), ...);
+    auto update_hash = [&st](std::span<const unsigned char> arg) {
+        crypto_generichash_blake2b_update(&st, arg.data(), arg.size());
+    };
+    (update_hash(make_hashable(args)), ...);
 }
 
 namespace detail {
@@ -101,7 +114,7 @@ inline constexpr std::span<unsigned char, 0> nullkey{};
 ///
 /// This version of blake2b() takes a key as the second argument and computes a keyed hash.  The key
 /// must be between 0 and 64 characters long.  (A 0-length key is equivalent to no key).
-template <Blake2BOutputContainer Out, Blake2BKey Key, ByteContainer... T>
+template <Blake2BOutputContainer Out, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_key(Out& out, const Key& key, const T&... args) {
     crypto_generichash_blake2b_state st;
@@ -113,9 +126,10 @@ void blake2b_key(Out& out, const Key& key, const T&... args) {
 
 /// API: hash/blake2b
 ///
-/// One-shot hasher that takes an output container and and any number of contiguous byte containers,
-/// computes the blake2b hash of the concatentation of the containers (in argument order) and then
-/// writes the hash into the output container.
+/// One-shot hasher that takes an output container and any number of contiguous byte containers or
+/// integer values, computes the blake2b hash of the concatentation of the containers (in argument
+/// order) and then writes the hash into the output container.  Integer values are hashed as their
+/// little-endian (fixed size) byte representation.
 ///
 /// This version uses neither key nor personalisation strings; see blake2b_key, blake2b_pers, and
 /// blake2b_key_pers if you want one or both of those.
@@ -125,7 +139,7 @@ void blake2b_key(Out& out, const Key& key, const T&... args) {
 ///
 /// It is permitted for overlap between the output and input containers; the output container is not
 /// written until all input containers have been consumed.
-template <Blake2BOutputContainer Out, ByteContainer... T>
+template <Blake2BOutputContainer Out, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b(Out& out, const T&... args) {
     return blake2b_key(out, nullkey, args...);
@@ -137,7 +151,7 @@ void blake2b(Out& out, const T&... args) {
 /// and third arguments and computes a keyed hash with a personalisation string.  The
 /// personalisation string must be exact 16 bytes, and is typically constructed with "..."_b2b_pers
 /// for compile-time validation.  The key must be between 0 and 64 bytes long.
-template <Blake2BOutputContainer Out, Blake2BKey Key, ByteContainer... T>
+template <Blake2BOutputContainer Out, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_key_pers(
         Out& out, const Key& key, std::span<const unsigned char, 16> pers, const T&... args) {
@@ -158,7 +172,7 @@ void blake2b_key_pers(
 /// This version of blake2b() takes a 16-byte personality string as the second argument and computes
 /// a unkeyed hash with a personalisation string.  The personalization string must be exact 16
 /// bytes, and is typically constructed with "..."_b2b_pers for compile-time validation.
-template <Blake2BOutputContainer Out, ByteContainer... T>
+template <Blake2BOutputContainer Out, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_pers(Out& out, std::span<const unsigned char, 16> pers, const T&... args) {
     return blake2b_key_pers(out, nullkey, pers, args...);

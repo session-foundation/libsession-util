@@ -229,12 +229,12 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
     hash::blake2b_pers(
             hash_to_sign,
             ADD_PRO_PAYMENT_PERS,
-            int_for_hashing(version),
+            version,
             master_privkey.subspan(
                     crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
             rotating_privkey.subspan(
                     crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
-            int_for_hashing(static_cast<uint8_t>(payment_tx_provider)),
+            static_cast<uint8_t>(payment_tx_provider),
             payment_tx_payment_id,
             payment_tx_order_id);
 
@@ -393,10 +393,10 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     hash::blake2b_pers(
             hash_to_sign,
             GENERATE_PROOF_PERS,
-            int_for_hashing(version),
+            version,
             master_privkey.last<32>(),
             rotating_privkey.last<32>(),
-            int_for_hashing(unix_ts_ms));
+            unix_ts_ms);
 
     // Sign the hash with both keys
     MasterRotatingSignatures result = {};
@@ -555,10 +555,10 @@ uc64 GetProDetailsRequest::build_sig(
     hash::blake2b_pers(
             hash_to_sign,
             GET_PRO_DETAILS_PERS,
-            int_for_hashing(version),
+            version,
             master_privkey.last<32>(),
-            int_for_hashing(unix_ts_ms),
-            int_for_hashing(count));
+            unix_ts_ms,
+            count);
 
     // Sign the hash
     uc64 result = {};
@@ -790,12 +790,12 @@ uc64 SetPaymentRefundRequestedRequest::build_sig(
     hash::blake2b_pers(
             hash_to_sign,
             SET_PAYMENT_REFUND_REQUESTED_PERS,
-            int_for_hashing(version),
+            version,
             master_privkey.subspan(
                     crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
-            int_for_hashing(unix_ts_ms),
-            int_for_hashing(refund_requested_unix_ts_ms),
-            int_for_hashing(static_cast<uint8_t>(payment_tx_provider)),
+            unix_ts_ms,
+            refund_requested_unix_ts_ms,
+            static_cast<uint8_t>(payment_tx_provider),
             payment_tx_payment_id,
             payment_tx_order_id);
 

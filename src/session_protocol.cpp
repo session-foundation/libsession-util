@@ -60,10 +60,10 @@ session::uc32 proof_hash_internal(
     session::hash::blake2b_pers(
             result,
             session::BUILD_PROOF_PERS,
-            session::int_for_hashing(version),
+            version,
             gen_index_hash,
             rotating_pubkey,
-            session::int_for_hashing(expiry_unix_ts_ms));
+            expiry_unix_ts_ms);
     return result;
 }
 
