@@ -347,8 +347,8 @@ inline int64_t to_epoch_seconds(int64_t timestamp) {
 // Converts an integer to a fixed-size array of its little-endian byte representation, suitable for
 // passing to a hash function in an endian-safe way.
 template <oxenc::endian_swappable_integer T>
-std::array<unsigned char, sizeof(T)> int_for_hashing(T value) {
-    std::array<unsigned char, sizeof(T)> result;
+std::array<std::byte, sizeof(T)> int_for_hashing(T value) {
+    std::array<std::byte, sizeof(T)> result;
     oxenc::write_host_as_little(value, result.data());
     return result;
 }
