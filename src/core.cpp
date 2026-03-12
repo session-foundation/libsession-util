@@ -1,4 +1,5 @@
 #include <SQLiteCpp/Statement.h>
+#include <sodium/core.h>
 
 #include <initializer_list>
 #include <oxen/log.hpp>
@@ -20,6 +21,9 @@ void Core::LoopDeleter::operator()(quic::Loop* p) const {
 }
 
 void Core::init() {
+    if (sodium_init() < 0)
+        throw std::runtime_error{"libsodium initialization failed!"};
+
     _loop.reset(new quic::Loop());
 
     apply_migrations();

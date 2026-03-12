@@ -105,6 +105,7 @@ add_libsession_util_library(core
     core.cpp
     core/component.cpp
     core/devices.cpp
+    core/link_sas.cpp
     core/pro.cpp
 )
 add_subdirectory(core/schema)

@@ -21,6 +21,7 @@
 #include <session/config/encrypt.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
+#include <session/core/link_sas.hpp>
 #include <session/hash.hpp>
 #include <session/random.hpp>
 #include <session/sqlite.hpp>
@@ -798,7 +799,7 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
         f();
 }
 
-std::vector<std::byte> Devices::build_link_request() {
+Devices::LinkRequestResult Devices::build_link_request() {
     auto [info, is_registered] = device_info();
 
     if (is_registered)
@@ -853,6 +854,7 @@ std::vector<std::byte> Devices::build_link_request() {
             info.pk_x25519);
 
     auto plaintext = encode_link_request_plaintext(self_id, info);
+    auto sas = link_request_sas(to_span<std::byte>(plaintext));
     std::vector<std::byte> out(plaintext.size() + config::ENCRYPT_DATA_OVERHEAD);
     std::memcpy(out.data(), plaintext.data(), plaintext.size());
     auto seed = core.globals.account_seed();
@@ -860,7 +862,7 @@ std::vector<std::byte> Devices::build_link_request() {
             as_span<unsigned char>(std::span{out}),
             as_span<unsigned char>(seed.buf).first(32),
             "link-request");
-    return out;
+    return {std::move(out), sas};
 }
 
 device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {

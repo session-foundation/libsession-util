@@ -11,6 +11,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "component.hpp"
@@ -158,11 +159,17 @@ class Devices final : detail::CoreComponent {
     // Returns *this* device's info and whether it is registered in the device group.
     std::pair<device::Info, bool> device_info();
 
+    struct LinkRequestResult {
+        std::vector<std::byte> message;        // encrypted bytes to push to Namespace::DeviceLink
+        std::array<std::string_view, 21> sas;  // emoji SAS sequence for user display
+    };
+
     // Builds an outgoing link request message to upload to Namespace::DeviceLink.  This should
     // only be called when this device is not currently registered in the device group; throws
-    // std::logic_error if it is already registered.  The returned bytes are to be pushed to
-    // Namespace::DeviceLink with a 10-minute TTL.
-    std::vector<std::byte> build_link_request();
+    // std::logic_error if it is already registered.  The returned message is to be pushed to
+    // Namespace::DeviceLink with a 10-minute TTL.  The sas field contains the short authentication
+    // string that should be displayed to the user for verification against the accepting device.
+    LinkRequestResult build_link_request();
 
     // Updates this device's info locally to match the given info; if the current device is
     // registered then this dirties the device config data, requiring a push.
