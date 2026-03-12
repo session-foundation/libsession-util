@@ -216,6 +216,56 @@ namespace {
         }
     }
 
+    // Upserts a device into the devices table (guarded by seqno) and updates device_unknown extras.
+    // Returns the row id if inserted or updated (i.e. seqno guard allowed it), nullopt if the
+    // update was rejected by the seqno guard.  info.id must be set to the 32-byte device id.
+    // Always sets changes=FALSE since this is for storing incoming device data, not local changes.
+    std::optional<int64_t> upsert_device_info(sqlite::Connection& c, const device::Info& info) {
+        auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
+        auto dev_id = c.prepared_maybe_get<int64_t>(
+                R"(INSERT INTO devices
+                    (unique_id, state, seqno, timestamp, device_type, description, version,
+                     pubkey_mlkem768, pubkey_x25519, kicked_timestamp, changes)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, FALSE)
+                   ON CONFLICT(unique_id) DO UPDATE SET
+                       state = excluded.state,
+                       seqno = excluded.seqno,
+                       timestamp = excluded.timestamp,
+                       device_type = excluded.device_type,
+                       description = excluded.description,
+                       version = excluded.version,
+                       pubkey_mlkem768 = excluded.pubkey_mlkem768,
+                       pubkey_x25519 = excluded.pubkey_x25519,
+                       kicked_timestamp = excluded.kicked_timestamp,
+                       changes = excluded.changes
+                   WHERE excluded.seqno > seqno
+                   RETURNING id)",
+                info.id,
+                static_cast<int>(info.state),
+                info.seqno,
+                info.timestamp.time_since_epoch().count(),
+                info.encoded_type(),
+                info.description,
+                ver,
+                info.pk_mlkem768,
+                info.pk_x25519);
+
+        if (!dev_id)
+            return std::nullopt;
+
+        c.prepared_exec("DELETE FROM device_unknown WHERE device = ?", *dev_id);
+        for (const auto& [key, val] : info.extra) {
+            auto encoded = std::visit([](const auto& v) { return oxenc::bt_serialize(v); }, val);
+            c.prepared_exec(
+                    "INSERT INTO device_unknown (device, key, bt_value) VALUES (?, ?, ?)",
+                    *dev_id,
+                    key,
+                    to_span<std::byte>(encoded));
+        }
+
+        return dev_id;
+    }
+
 }  // namespace
 
 device::map Devices::devices(
@@ -399,6 +449,7 @@ namespace {
     }
 
     void decode_one(device::Info& info, oxenc::bt_dict_consumer dev, device::State state) {
+        info.state = state;
         read_extras(dev, "#", info.extra);
         info.seqno = dev.require<int64_t>("#");
 
@@ -466,6 +517,7 @@ namespace {
                 throw std::runtime_error{"Invalid encoded device data: duplicate devices ids"};
 
             auto& info = it->second;
+            info.id = id;
 
             if (in.is_integer()) {
                 // An integer indicates a "device removed" timestamp, used to distinguish between
@@ -739,57 +791,28 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
             continue;
         }
 
-        auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
-
-        // Returns the row id if inserted or updated (i.e. seqno increased), nullopt if the seqno
-        // guard prevented an update.
-        auto dev_id = c.prepared_maybe_get<int64_t>(
-                R"(INSERT INTO devices
-                    (unique_id, state, seqno, timestamp, device_type, description, version,
-                     pubkey_mlkem768, pubkey_x25519, kicked_timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-                   ON CONFLICT(unique_id) DO UPDATE SET
-                       state = excluded.state,
-                       seqno = excluded.seqno,
-                       timestamp = excluded.timestamp,
-                       device_type = excluded.device_type,
-                       description = excluded.description,
-                       version = excluded.version,
-                       pubkey_mlkem768 = excluded.pubkey_mlkem768,
-                       pubkey_x25519 = excluded.pubkey_x25519,
-                       kicked_timestamp = excluded.kicked_timestamp
-                   WHERE excluded.seqno > seqno
-                   RETURNING id)",
-                id,
-                static_cast<int>(info.state),
-                info.seqno,
-                info.timestamp.time_since_epoch().count(),
-                info.encoded_type(),
-                info.description,
-                ver,
-                info.pk_mlkem768,
-                info.pk_x25519);
+        auto dev_id = upsert_device_info(c, info);
 
         if (!dev_id)
             continue;
-
-        c.prepared_exec("DELETE FROM device_unknown WHERE device = ?", *dev_id);
-        for (const auto& [key, val] : info.extra) {
-            auto encoded = std::visit([](const auto& v) { return oxenc::bt_serialize(v); }, val);
-            c.prepared_exec(
-                    "INSERT INTO device_unknown (device, key, bt_value) VALUES (?, ?, ?)",
-                    *dev_id,
-                    key,
-                    to_span<std::byte>(encoded));
-        }
 
         if (!was_registered) {
             if (is_self) {
                 if (auto& f = cb().device_self_added)
                     post_commit.push_back(f);
-            } else if (auto& f = cb().device_added) {
-                // reqid=0: correlating with pending link request records is not yet implemented
-                post_commit.push_back([&f, &inf = info] { f(0, inf); });
+            } else {
+                // If we had a pending link request for this device, consume it: delete the record
+                // and use its id as the reqid so the app can correlate the acceptance with the
+                // earlier device_link_request callback.
+                auto reqid = c.prepared_maybe_get<int64_t>(
+                                      "DELETE FROM device_link_requests WHERE device = ?"
+                                      " RETURNING id",
+                                      *dev_id)
+                                     .value_or(0);
+                if (auto& f = cb().device_added)
+                    post_commit.push_back([&f, &inf = info, reqid] {
+                        f(static_cast<int>(reqid), inf);
+                    });
             }
         }
     }

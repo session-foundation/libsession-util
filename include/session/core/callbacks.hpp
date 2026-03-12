@@ -1,5 +1,7 @@
 #pragma once
 #include <functional>
+#include <span>
+#include <string_view>
 #include <session/core/devices.hpp>
 
 namespace session::core {
@@ -30,15 +32,13 @@ struct callbacks {
     /// If this callback is not set then new device link requests are ignored by this device.
     ///
     /// Parameters:
-    /// - reqid -- a unique identifier for this request; this is only used within the current
-    ///   Core object, and is used to uniquely identify the request.  It will *not* work across
-    ///   Core teardown and restart.
-    /// - new_device -- the new device metadata included in the link request.  Crucial in this info
-    ///   is the link_emoji sequence: a vector of 8 emoji (each in a separate utf8 string, leaving
-    ///   separation, display, etc. up to the front-end) that provides a visual identifier of the
-    ///   account device identifier, and is used to visually verify that the device making the
-    ///   request is in fact the same device that is being confirmed.
-    std::function<void(int reqid, const device::Info& new_device)> device_link_request;
+    /// - reqid -- a unique identifier for this request that persists across Core restarts and can
+    ///   be used to correlate this request with a subsequent device_added callback.
+    /// - new_device -- the new device metadata included in the link request.
+    /// - sas -- a span of 21 string_views representing the short authentication string for this
+    ///   request.  The first 7 are the standard display; all 21 are available for the extended
+    ///   view.  Formatting and joining is left to the caller.
+    std::function<void(int reqid, const device::Info& new_device, std::span<const std::string_view> sas)> device_link_request;
 
     /// Callback that is invoked when a new device has been linked to the account.  If a batch
     /// of messages being processed includes both a device link request *and* an acceptance

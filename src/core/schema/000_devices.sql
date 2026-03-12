@@ -28,6 +28,19 @@ CREATE TABLE device_unknown (
     PRIMARY KEY(device, key)
 ) STRICT;
 
+-- This table tracks pending incoming device link requests from other devices that have been
+-- received but not yet accepted, ignored, or denied.  Device info for the requesting device is
+-- stored in the devices table (with state=Pending); this table holds the link-request-specific
+-- fields: when the request was received locally, and the precomputed Argon2id seed from which
+-- the short authentication string emoji are derived (stored to avoid re-running the expensive
+-- hash on every display).
+CREATE TABLE device_link_requests (
+    id INTEGER PRIMARY KEY NOT NULL,
+    device INTEGER UNIQUE NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+    received_at INTEGER NOT NULL,  -- unix timestamp of when this request was stored locally
+    sas_seed BLOB NOT NULL CHECK(length(sas_seed) == 16)  -- 16-byte Argon2id output for SAS display
+) STRICT;
+
 -- This table holds current and recent device private keys for *this* device, including the
 -- timestamp then the device keypairs were created, and when they were rotated away from.
 CREATE TABLE device_privkeys (

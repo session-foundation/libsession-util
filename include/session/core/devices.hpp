@@ -31,8 +31,11 @@ namespace device {
 
     enum class State {
         Registered = 0,  ///< Device is in the account's registered device set
-        Pending = 1,  ///< Local device info that has a pending request to join the account's device
-                      ///< set
+        Pending = 1,  ///< A device with a pending link request.  This is used for two cases:
+                      ///< - This device has sent a request to join the account's device group and
+                      ///<   is awaiting acceptance by an existing device.
+                      ///< - Another device has sent a link request that has been received but not
+                      ///<   yet accepted, ignored, or rejected by this device.
         Unregistered = 2,  ///< Local device info that cannot be pushed because the device is not
                            /// currently in the device group.
     };
@@ -68,10 +71,6 @@ namespace device {
         // Device-provided description of itself.  This could contain the OS type or version,
         // possible a device nickname, but is generally free-form data.
         std::string description;
-
-        // This computes the current "device emoji" sequence, which depends on the device id and
-        // pubkeys.  This allows a user to visually identify (and verify) a device within the device
-        // list at any time, but its primary purpose is for identifying the device during linking.
 
         // Indicates whether the device is registered, pending registration, or not registered.
         State state;
