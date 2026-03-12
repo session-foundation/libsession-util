@@ -8,6 +8,7 @@
 #include <cassert>
 
 #include "session/export.h"
+#include "session/hash.hpp"
 #include "session/util.hpp"
 
 using namespace std::literals;
@@ -40,14 +41,12 @@ static std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> ma
     // nonce reuse concern so that you would not only have to hash collide but also have it happen
     // on messages of identical sizes and identical domain.
     std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> key{0};
-    crypto_generichash_blake2b_state state;
-    crypto_generichash_blake2b_init(&state, nullptr, 0, key.size());
-    crypto_generichash_blake2b_update(&state, key_base.data(), key_base.size());
     oxenc::host_to_big_inplace(message_size);
-    crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<const unsigned char*>(&message_size), sizeof(message_size));
-    crypto_generichash_blake2b_update(&state, to_unsigned(domain.data()), domain.size());
-    crypto_generichash_blake2b_final(&state, key.data(), key.size());
+    hash::blake2b(
+            key,
+            key_base,
+            std::span{reinterpret_cast<const unsigned char*>(&message_size), sizeof(message_size)},
+            to_span(domain));
     return key;
 }
 

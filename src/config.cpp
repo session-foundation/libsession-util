@@ -5,7 +5,6 @@
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/endian.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_generichash_blake2b.h>
 
 #include <limits>
 #include <optional>
@@ -16,6 +15,7 @@
 
 #include "config/internal.hpp"
 #include "session/bt_merge.hpp"
+#include "session/hash.hpp"
 #include "session/util.hpp"
 
 using namespace std::literals;
@@ -346,8 +346,7 @@ namespace {
     }
 
     hash_t& hash_msg(hash_t& into, std::span<const unsigned char> serialized) {
-        crypto_generichash_blake2b(
-                into.data(), into.size(), serialized.data(), serialized.size(), nullptr, 0);
+        hash::blake2b(into, serialized);
         return into;
     }
 

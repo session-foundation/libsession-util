@@ -11,6 +11,7 @@
 
 #include "session/ed25519.hpp"
 #include "session/export.h"
+#include "session/hash.hpp"
 #include "session/platform.h"
 #include "session/platform.hpp"
 #include "session/xed25519.hpp"
@@ -19,18 +20,11 @@ namespace session {
 
 using namespace std::literals;
 
-using uc32 = std::array<unsigned char, 32>;
-using uc33 = std::array<unsigned char, 33>;
-using uc64 = std::array<unsigned char, 64>;
-
 std::array<unsigned char, 32> blind15_factor(std::span<const unsigned char> server_pk) {
     assert(server_pk.size() == 32);
 
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init(&st, nullptr, 0, 64);
-    crypto_generichash_blake2b_update(&st, server_pk.data(), server_pk.size());
     uc64 blind_hash;
-    crypto_generichash_blake2b_final(&st, blind_hash.data(), blind_hash.size());
+    hash::blake2b(blind_hash, server_pk);
 
     uc32 k;
     crypto_core_ed25519_scalar_reduce(k.data(), blind_hash.data());
@@ -324,7 +318,7 @@ std::pair<uc32, cleared_uc32> blind25_key_pair(
     return result;
 }
 
-static const auto version_blinding_hash_key_sig = to_span("VersionCheckKey_sig");
+static constexpr auto version_blinding_hash_key_sig = "VersionCheckKey_sig"_uc;
 
 std::pair<uc32, cleared_uc64> blind_version_key_pair(std::span<const unsigned char> ed25519_sk) {
     if (ed25519_sk.size() != 32 && ed25519_sk.size() != 64)
@@ -335,13 +329,7 @@ std::pair<uc32, cleared_uc64> blind_version_key_pair(std::span<const unsigned ch
     std::pair<uc32, cleared_uc64> result;
     cleared_uc32 blind_seed;
     auto& [pk, sk] = result;
-    crypto_generichash_blake2b(
-            blind_seed.data(),
-            32,
-            ed25519_sk.data(),
-            32,
-            version_blinding_hash_key_sig.data(),
-            version_blinding_hash_key_sig.size());
+    hash::blake2b_key(blind_seed, version_blinding_hash_key_sig, ed25519_sk.first(32));
 
     // Reuse `sk` to avoid needing extra secure erasing:
     if (0 != crypto_sign_ed25519_seed_keypair(pk.data(), sk.data(), blind_seed.data()))
@@ -350,8 +338,8 @@ std::pair<uc32, cleared_uc64> blind_version_key_pair(std::span<const unsigned ch
     return result;
 }
 
-static const auto hash_key_seed = to_span("SessCommBlind25_seed");
-static const auto hash_key_sig = to_span("SessCommBlind25_sig");
+static constexpr auto hash_key_seed = "SessCommBlind25_seed"_uc;
+static constexpr auto hash_key_sig = "SessCommBlind25_sig"_uc;
 
 std::vector<unsigned char> blind25_sign(
         std::span<const unsigned char> ed25519_sk,
@@ -377,21 +365,10 @@ std::vector<unsigned char> blind25_sign(
     auto [A, a] = blind25_key_pair(ed25519_sk, to_span(server_pk));
 
     uc32 seedhash;
-    crypto_generichash_blake2b(
-            seedhash.data(),
-            seedhash.size(),
-            ed25519_sk.data(),
-            32,
-            hash_key_seed.data(),
-            hash_key_seed.size());
+    hash::blake2b_key(seedhash, hash_key_seed, ed25519_sk.first(32));
 
     uc64 r_hash;
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init(&st, hash_key_sig.data(), hash_key_sig.size(), r_hash.size());
-    crypto_generichash_blake2b_update(&st, seedhash.data(), seedhash.size());
-    crypto_generichash_blake2b_update(&st, A.data(), A.size());
-    crypto_generichash_blake2b_update(&st, message.data(), message.size());
-    crypto_generichash_blake2b_final(&st, r_hash.data(), r_hash.size());
+    hash::blake2b_key(r_hash, hash_key_sig, seedhash, A, message);
 
     uc32 r;
     crypto_core_ed25519_scalar_reduce(r.data(), r_hash.data());

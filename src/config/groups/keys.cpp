@@ -21,6 +21,7 @@
 #include "session/config/groups/info.hpp"
 #include "session/config/groups/keys.h"
 #include "session/config/groups/members.hpp"
+#include "session/hash.hpp"
 #include "session/multi_encrypt.hpp"
 #include "session/session_encrypt.hpp"
 #include "session/xed25519.hpp"
@@ -244,7 +245,7 @@ namespace {
     const std::span<const unsigned char> enc_key_hash_key = to_span("SessionGroupKeyGen");
     constexpr auto enc_key_admin_hash_key = "SessionGroupKeyAdminKey"sv;
     constexpr auto enc_key_member_hash_key = "SessionGroupKeyMemberKey"sv;
-    const std::span<const unsigned char> junk_seed_hash_key = to_span("SessionGroupJunkMembers");
+    constexpr auto junk_seed_hash_key = "SessionGroupJunkMembers"_uc;
 
 }  // namespace
 
@@ -372,11 +373,7 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
             junk_data.resize(encrypted.size() * n_junk);
 
             std::array<unsigned char, randombytes_SEEDBYTES> rng_seed;
-            crypto_generichash_blake2b_init(
-                    &st, junk_seed_hash_key.data(), junk_seed_hash_key.size(), rng_seed.size());
-            crypto_generichash_blake2b_update(&st, h1.data(), h1.size());
-            crypto_generichash_blake2b_update(&st, _sign_sk.data(), _sign_sk.size());
-            crypto_generichash_blake2b_final(&st, rng_seed.data(), rng_seed.size());
+            hash::blake2b_key(rng_seed, junk_seed_hash_key, h1, _sign_sk);
 
             randombytes_buf_deterministic(junk_data.data(), junk_data.size(), rng_seed.data());
             std::string_view junk_view = to_string_view(junk_data);
@@ -540,13 +537,13 @@ std::array<unsigned char, 32> Keys::subaccount_blind_factor(
     static_assert(mask.size() == crypto_generichash_blake2b_KEYBYTES);
 
     std::array<unsigned char, 64> h;
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init(&st, mask.data(), mask.size(), h.size());
-    crypto_generichash_blake2b_update(&st, to_unsigned("\x05"), 1);
-    crypto_generichash_blake2b_update(&st, session_xpk.data(), session_xpk.size());
-    crypto_generichash_blake2b_update(&st, to_unsigned("\x03"), 1);
-    crypto_generichash_blake2b_update(&st, _sign_pk->data(), _sign_pk->size());
-    crypto_generichash_blake2b_final(&st, h.data(), h.size());
+    hash::blake2b_key(
+            h,
+            mask,
+            std::array<unsigned char, 1>{'\x05'},
+            session_xpk,
+            std::array<unsigned char, 1>{'\x03'},
+            *_sign_pk);
 
     std::array<unsigned char, 32> out;
     crypto_core_ed25519_scalar_reduce(out.data(), h.data());
@@ -716,25 +713,16 @@ Keys::swarm_auth Keys::swarm_subaccount_sign(
     //
     // (using the standard Ed25519 SHA-512 here for H)
 
-    constexpr auto seed_hash_key = "SubaccountSeed"sv;
-    constexpr auto r_hash_key = "SubaccountSig"sv;
+    constexpr std::array<unsigned char, 14> seed_hash_key = {
+            'S', 'u', 'b', 'a', 'c', 'c', 'o', 'u', 'n', 't', 'S', 'e', 'e', 'd'};
+    constexpr std::array<unsigned char, 13> r_hash_key = {
+            'S', 'u', 'b', 'a', 'c', 'c', 'o', 'u', 'n', 't', 'S', 'i', 'g'};
     std::array<unsigned char, 32> hseed;
-    crypto_generichash_blake2b(
-            hseed.data(),
-            hseed.size(),
-            user_ed25519_sk.data(),
-            32,
-            to_unsigned(seed_hash_key.data()),
-            seed_hash_key.size());
+    hash::blake2b_key(
+            hseed, seed_hash_key, std::span<const unsigned char>{user_ed25519_sk.data(), 32});
 
     std::array<unsigned char, 64> tmp;
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init(
-            &st, to_unsigned(r_hash_key.data()), r_hash_key.size(), tmp.size());
-    crypto_generichash_blake2b_update(&st, hseed.data(), hseed.size());
-    crypto_generichash_blake2b_update(&st, kT.data(), kT.size());
-    crypto_generichash_blake2b_update(&st, msg.data(), msg.size());
-    crypto_generichash_blake2b_final(&st, tmp.data(), tmp.size());
+    hash::blake2b_key(tmp, r_hash_key, hseed, kT, msg);
 
     std::array<unsigned char, 32> r;
     crypto_core_ed25519_scalar_reduce(r.data(), tmp.data());

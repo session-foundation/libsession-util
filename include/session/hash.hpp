@@ -52,7 +52,7 @@ template <typename T>
 concept ByteContainer =
         std::ranges::contiguous_range<T> && oxenc::basic_char<std::ranges::range_value_t<T>>;
 
-/// API: hash/blake2b_update
+/// API: hash/update_all
 ///
 /// Wrapper about crypto_generichash_blake2b_update that takes any number of contiguous byte
 /// containers and updates the hash state with them, in argument order.
@@ -122,6 +122,9 @@ void blake2b_key(Out& out, const Key& key, const T&... args) {
 ///
 /// Output must be a fixed extent span or containers (e.g. std::array), and must satisfy the blake2b
 /// requirements (output size in [1,64]).
+///
+/// It is permitted for overlap between the output and input containers; the output container is not
+/// written until all input containers have been consumed.
 template <Blake2BOutputContainer Out, ByteContainer... T>
     requires(sizeof...(T) > 0)
 void blake2b(Out& out, const T&... args) {
@@ -184,6 +187,7 @@ struct StringLiteral {
         for (size_t i = 0; i < N - 1; ++i)
             chars[i] = s[i];
     }
+    static constexpr size_t size() { return N; }
 };
 
 inline namespace literals {
@@ -191,7 +195,7 @@ inline namespace literals {
     /// User-defined literal for a 16-byte, unsigned char array intended for use as a BLAKE2b
     /// personality value. Example:
     ///
-    ///     using namespace session::hash::literals;
+    ///     using namespace session::literals;
     ///     constexpr auto PERS_XYZ = "XYZ-XYZ-XYZ-WXYZ"_b2b_pers;
     ///
     template <StringLiteral Str>
@@ -200,6 +204,20 @@ inline namespace literals {
                 Str.chars.size() == 16,
                 "BLAKE2b personalization strings must be exactly 16 bytes long");
         std::array<unsigned char, 16> pers;
+        for (size_t i = 0; i < pers.size(); i++)
+            pers[i] = static_cast<unsigned char>(Str.chars[i]);
+        return pers;
+    }
+
+    /// User-defined literal for an arbitrary-length, unsigned char array; this is primarily
+    /// intended for fixed keys with BLAKE2b hash.  Example:
+    ///
+    ///     using namespace session::literals;
+    ///     constexpr auto HASH_KEY_42 = "forty-two"_uc;
+    ///
+    template <StringLiteral Str>
+    constexpr auto operator""_uc() {
+        std::array<unsigned char, Str.chars.size()> pers;
         for (size_t i = 0; i < pers.size(); i++)
             pers[i] = static_cast<unsigned char>(Str.chars[i]);
         return pers;

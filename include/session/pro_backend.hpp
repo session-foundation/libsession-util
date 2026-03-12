@@ -61,10 +61,10 @@ namespace session::pro_backend {
 
 /// TODO: Assign the Session Pro backend public key for verifying proofs to allow users of the
 /// library to have the pubkey available for verifying proofs.
-constexpr array_uc32 PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-static_assert(sizeof(PUBKEY) == array_uc32{}.size());
+constexpr uc32 PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+static_assert(sizeof(PUBKEY) == uc32{}.size());
 
 enum struct AddProPaymentResponseStatus {
     /// Payment was claimed and the pro proof was successfully generated
@@ -101,8 +101,8 @@ struct ResponseHeader {
 };
 
 struct MasterRotatingSignatures {
-    array_uc64 master_sig;
-    array_uc64 rotating_sig;
+    uc64 master_sig;
+    uc64 rotating_sig;
 };
 
 struct AddProPaymentUserTransaction {
@@ -132,20 +132,20 @@ struct AddProPaymentRequest {
 
     /// 32-byte Ed25519 Session Pro master public key derived from the Session account seed to
     /// register a Session Pro payment under.
-    array_uc32 master_pkey;
+    uc32 master_pkey;
 
     /// 32-byte Ed25519 Session Pro rotating public key to authorise to use the generated Session
     /// Pro proof
-    array_uc32 rotating_pkey;
+    uc32 rotating_pkey;
 
     /// Transaction containing the payment details to register on the Session Pro backend
     AddProPaymentUserTransaction payment_tx;
 
     /// 64-byte signature proving knowledge of the master key's secret component
-    array_uc64 master_sig;
+    uc64 master_sig;
 
     /// 64-byte signature proving knowledge of the rotating key's secret component
-    array_uc64 rotating_sig;
+    uc64 rotating_sig;
 
     /// API: pro/AddProPaymentRequest::to_json
     ///
@@ -239,19 +239,19 @@ struct GenerateProProofRequest {
     /// 32-byte Ed25519 Session Pro master public key to generate a Session Pro proof from. This key
     /// must have had a prior, and still active payment registered under it for a new proof to be
     /// generated successfully.
-    array_uc32 master_pkey;
+    uc32 master_pkey;
 
     /// 32-byte Ed25519 Session Pro rotating public key authorized to use the generated proof
-    array_uc32 rotating_pkey;
+    uc32 rotating_pkey;
 
     /// Unix timestamp of the request
     sys_ms unix_ts;
 
     /// 64-byte signature proving knowledge of the master key's secret component
-    array_uc64 master_sig;
+    uc64 master_sig;
 
     /// 64-byte signature proving knowledge of the rotating key's secret component
-    array_uc64 rotating_sig;
+    uc64 rotating_sig;
 
     /// API: pro/GenerateProProofRequest::build_sigs
     ///
@@ -324,7 +324,7 @@ struct GetProRevocationsRequest {
 
 struct ProRevocationItem {
     /// 32-byte hash of the generation index, identifying a proof
-    array_uc32 gen_index_hash;
+    uc32 gen_index_hash;
 
     /// Unix timestamp when the proof expires
     sys_ms expiry_unix_ts;
@@ -356,10 +356,10 @@ struct GetProDetailsRequest {
     std::uint8_t version;
 
     /// 32-byte Ed25519 master public key to retrieve payments for
-    array_uc32 master_pkey;
+    uc32 master_pkey;
 
     /// 64-byte signature proving knowledge of the master public key's secret component
-    array_uc64 master_sig;
+    uc64 master_sig;
 
     /// Unix timestamp of the request
     sys_ms unix_ts;
@@ -380,8 +380,8 @@ struct GetProDetailsRequest {
     /// - `count` -- Amount of historical payments to request
     ///
     /// Outputs:
-    /// - `array_uc64` - the 64-byte signature
-    static array_uc64 build_sig(
+    /// - `uc64` - the 64-byte signature
+    static uc64 build_sig(
             uint8_t version,
             std::span<const uint8_t> master_privkey,
             sys_ms unix_ts,
@@ -567,10 +567,10 @@ struct SetPaymentRefundRequestedRequest {
     std::uint8_t version;
 
     /// 32-byte Ed25519 master public key to retrieve payments for
-    array_uc32 master_pkey;
+    uc32 master_pkey;
 
     /// 64-byte signature proving knowledge of the master public key's secret component
-    array_uc64 master_sig;
+    uc64 master_sig;
 
     /// Unix timestamp of the current time
     sys_ms unix_ts;
@@ -603,8 +603,8 @@ struct SetPaymentRefundRequestedRequest {
     ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
-    /// - `array_uc64` - the 64-byte signature
-    static array_uc64 build_sig(
+    /// - `uc64` - the 64-byte signature
+    static uc64 build_sig(
             uint8_t version,
             std::span<const uint8_t> master_privkey,
             sys_ms unix_ts,

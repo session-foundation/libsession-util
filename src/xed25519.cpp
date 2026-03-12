@@ -1,7 +1,6 @@
 #include "session/xed25519.hpp"
 
 #include <sodium/crypto_core_ed25519.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
@@ -11,9 +10,12 @@
 #include <stdexcept>
 
 #include "session/export.h"
+#include "session/hash.hpp"
 #include "session/util.hpp"
 
 namespace session::xed25519 {
+
+using namespace session::literals;
 
 template <size_t N>
 using bytes = std::array<unsigned char, N>;
@@ -31,18 +33,10 @@ namespace {
         bytes<64> random;
         randombytes_buf(random.data(), random.size());
 
-        constexpr static bytes<16> personality = {
-                'x', 'e', 'd', '2', '5', '5', '1', '9', 's', 'i', 'g', 'n', 'a', 't', 'u', 'r'};
+        constexpr static auto personality = "xed25519signatur"_b2b_pers;
 
-        crypto_generichash_blake2b_state st;
-        static_assert(personality.size() == crypto_generichash_blake2b_PERSONALBYTES);
-        crypto_generichash_blake2b_init_salt_personal(
-                &st, nullptr, 0, 64, nullptr, personality.data());
-        crypto_generichash_blake2b_update(&st, a.data(), a.size());
-        crypto_generichash_blake2b_update(&st, msg.data(), msg.size());
-        crypto_generichash_blake2b_update(&st, random.data(), random.size());
         bytes<64> h_aMZ;
-        crypto_generichash_blake2b_final(&st, h_aMZ.data(), h_aMZ.size());
+        hash::blake2b_pers(h_aMZ, personality, a, msg, random);
 
         bytes<32> r;
         crypto_core_ed25519_scalar_reduce(r.data(), h_aMZ.data());

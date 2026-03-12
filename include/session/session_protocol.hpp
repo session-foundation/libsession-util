@@ -86,12 +86,12 @@ class ProProof {
     std::uint8_t version;
 
     /// Hash of the generation index set by the Session Pro Backend
-    array_uc32 gen_index_hash;
+    uc32 gen_index_hash;
 
     /// The public key that the Session client registers their Session Pro entitlement under.
     /// Session clients must sign messages with this key along side the sending of this proof for
     /// the network to authenticate their usage of the proof
-    array_uc32 rotating_pubkey;
+    uc32 rotating_pubkey;
 
     /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid to
     sys_ms expiry_unix_ts;
@@ -99,7 +99,7 @@ class ProProof {
     /// Signature over the contents of the proof. It is signed by the Session Pro Backend key which
     /// is the entity responsible for issueing tamper-proof Sesison Pro certificates for Session
     /// clients.
-    array_uc64 sig;
+    uc64 sig;
 
     /// API: pro/Proof::verify_signature
     ///
@@ -175,7 +175,7 @@ class ProProof {
     /// API: pro/Proof::hash
     ///
     /// Create a 32-byte hash from the proof. This hash is the payload that is signed in the proof.
-    array_uc32 hash() const;
+    uc32 hash() const;
 
     bool operator==(const ProProof& other) const {
         return version == other.version && gen_index_hash == other.gen_index_hash &&
@@ -238,14 +238,14 @@ struct Destination {
 
     // When type => (CommunityInbox || SyncMessage || Contact): set to the recipient's Session
     // public key
-    array_uc33 recipient_pubkey;
+    uc33 recipient_pubkey;
 
     // When type => CommunityInbox: set this pubkey to the server's key
-    array_uc32 community_inbox_server_pubkey;
+    uc32 community_inbox_server_pubkey;
 
     // When type => Group: set to the group public keys for a 0x03 prefix (e.g. groups v2)
     // `group_pubkey` to encrypt the message for.
-    array_uc33 group_ed25519_pubkey;
+    uc33 group_ed25519_pubkey;
 
     // When type => Group: Set the encryption key of the group for groups v2 messages. Typically
     // the latest key for the group, e.g: `Keys::group_enc_key` or `groups_keys_group_enc_key`
@@ -259,12 +259,12 @@ struct Envelope {
     // Optional fields. These fields are set if the appropriate flag has been set in `flags`
     // otherwise the corresponding values are to be ignored and those fields will be
     // zero-initialised.
-    array_uc33 source;
+    uc33 source;
     uint32_t source_device;
     uint64_t server_timestamp;
 
     // Signature by the sending client's rotating key
-    array_uc64 pro_sig;
+    uc64 pro_sig;
 };
 
 struct DecodedPro {
@@ -286,11 +286,11 @@ struct DecodedEnvelope {
     // Sender public key extracted from the encrypted content payload. This is not set if the
     // envelope was a groups v2 envelope where the envelope was encrypted and only the x25519 pubkey
     // was available.
-    array_uc32 sender_ed25519_pubkey;
+    uc32 sender_ed25519_pubkey;
 
     // The x25519 pubkey, always populated on successful parse. Either it's present from decrypting
     // a Groups v2 envelope or it's re-derived from the Ed25519 pubkey.
-    array_uc32 sender_x25519_pubkey;
+    uc32 sender_x25519_pubkey;
 
     // Set if the envelope included a pro payload. The caller must check the status to determine if
     // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
@@ -312,7 +312,7 @@ struct DecodedCommunityMessage {
     // signature is sourced from the envelope, the envelope's `pro_sig` field is also set to the
     // same signature as this instance for consistency. Otherwise the signature, if set was
     // extracted from the community-exclusive pro signature field in the content message.
-    std::optional<array_uc64> pro_sig;
+    std::optional<uc64> pro_sig;
 
     // Set if the envelope included a pro payload. The caller must check the status to determine if
     // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
@@ -422,7 +422,7 @@ std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const array_uc33& recipient_pubkey,
+        const uc33& recipient_pubkey,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_community_inbox
@@ -456,8 +456,8 @@ std::vector<uint8_t> encode_for_community_inbox(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const array_uc33& recipient_pubkey,
-        const array_uc32& community_pubkey,
+        const uc33& recipient_pubkey,
+        const uc32& community_pubkey,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_community
@@ -519,7 +519,7 @@ std::vector<uint8_t> encode_for_group(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const array_uc33& group_ed25519_pubkey,
+        const uc33& group_ed25519_pubkey,
         const cleared_uc32& group_enc_key,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);
 
@@ -614,7 +614,7 @@ std::vector<uint8_t> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
-        const array_uc32& pro_backend_pubkey);
+        const uc32& pro_backend_pubkey);
 
 /// API: session_protocol/decode_for_community
 ///
@@ -648,6 +648,6 @@ DecodedEnvelope decode_envelope(
 DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
         sys_ms unix_ts,
-        const array_uc32& pro_backend_pubkey);
+        const uc32& pro_backend_pubkey);
 
 }  // namespace session

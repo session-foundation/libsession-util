@@ -87,7 +87,7 @@ namespace convo {
 
     struct pro_base : base {
         /// Hash of the generation index set by the Session Pro Backend
-        std::optional<array_uc32> pro_gen_index_hash;
+        std::optional<uc32> pro_gen_index_hash;
 
         /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid
         /// to

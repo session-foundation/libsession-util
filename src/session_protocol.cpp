@@ -2,11 +2,11 @@
 #include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
 #include <simdutf.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
 #include <oxen/log.hpp>
+#include <session/hash.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
@@ -48,25 +48,24 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
 // clang-format on
 
 namespace {
-session::array_uc32 proof_hash_internal(
+session::uc32 proof_hash_internal(
         std::uint8_t version,
         std::span<const std::uint8_t> gen_index_hash,
         std::span<const std::uint8_t> rotating_pubkey,
         std::uint64_t expiry_unix_ts_ms) {
 
-    constexpr std::string_view PRO_BACKEND_BLAKE2B_PERSONALISATION = "SeshProBackend__";
     // This must match the hashing routine at
     // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
-    session::array_uc32 result = {};
-    crypto_generichash_blake2b_state state;
-    crypto_generichash_blake2b_init_salt_personal(
-            &state, nullptr, 0, 32, nullptr, session::BUILD_PROOF_PERS.data());
-    crypto_generichash_blake2b_update(&state, &version, sizeof(version));
-    crypto_generichash_blake2b_update(&state, gen_index_hash.data(), gen_index_hash.size());
-    crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
-    crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<uint8_t*>(&expiry_unix_ts_ms), sizeof(expiry_unix_ts_ms));
-    crypto_generichash_blake2b_final(&state, result.data(), result.size());
+    session::uc32 result = {};
+    session::hash::blake2b_pers(
+            result,
+            session::BUILD_PROOF_PERS,
+            std::span<const uint8_t, 1>{&version, 1},
+            gen_index_hash,
+            rotating_pubkey,
+            std::span<const uint8_t, sizeof(expiry_unix_ts_ms)>{
+                    reinterpret_cast<const uint8_t*>(&expiry_unix_ts_ms),
+                    sizeof(expiry_unix_ts_ms)});
     return result;
 }
 
@@ -106,7 +105,7 @@ bool proof_verify_message_internal(
 
 struct array_uc32_from_ptr_result {
     bool success;
-    session::array_uc32 data;
+    session::uc32 data;
 };
 
 static array_uc32_from_ptr_result array_uc32_from_ptr(const void* ptr, size_t len) {
@@ -163,7 +162,7 @@ bool ProProof::verify_signature(const std::span<const uint8_t>& verify_pubkey) c
                 "Invalid verify_pubkey: Must be 32 byte Ed25519 public key (was: {})",
                 verify_pubkey.size())};
 
-    array_uc32 hash_to_sign = hash();
+    uc32 hash_to_sign = hash();
     bool result = proof_verify_signature_internal(hash_to_sign, sig, verify_pubkey);
     return result;
 }
@@ -202,8 +201,8 @@ ProStatus ProProof::status(
     return result;
 }
 
-array_uc32 ProProof::hash() const {
-    array_uc32 result = proof_hash_internal(
+uc32 ProProof::hash() const {
+    uc32 result = proof_hash_internal(
             version, gen_index_hash, rotating_pubkey, expiry_unix_ts.time_since_epoch().count());
     return result;
 }
@@ -279,7 +278,7 @@ std::vector<uint8_t> encode_for_1o1(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const array_uc33& recipient_pubkey,
+        const uc33& recipient_pubkey,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::SyncOr1o1;
@@ -295,8 +294,8 @@ std::vector<uint8_t> encode_for_community_inbox(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const array_uc33& recipient_pubkey,
-        const array_uc32& community_pubkey,
+        const uc33& recipient_pubkey,
+        const uc32& community_pubkey,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::CommunityInbox;
@@ -325,7 +324,7 @@ std::vector<uint8_t> encode_for_group(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const array_uc33& group_ed25519_pubkey,
+        const uc33& group_ed25519_pubkey,
         const cleared_uc32& group_enc_key,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
@@ -579,7 +578,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
 
                 // We need to sign the padded content, so we pad the `Content` then sign it
                 tmp_content_buffer = pad_message(content);
-                array_uc64 pro_sig;
+                uc64 pro_sig;
                 bool was_signed = crypto_sign_ed25519_detached(
                                           pro_sig.data(),
                                           nullptr,
@@ -657,7 +656,7 @@ std::vector<uint8_t> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const uint8_t> envelope_payload,
-        const array_uc32& pro_backend_pubkey) {
+        const uc32& pro_backend_pubkey) {
     DecodedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
     std::span<const uint8_t> envelope_plaintext = envelope_payload;
@@ -916,7 +915,7 @@ DecodedEnvelope decode_envelope(
 DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-        const array_uc32& pro_backend_pubkey) {
+        const uc32& pro_backend_pubkey) {
     // TODO: Community message parsing requires a custom code path for now as we are planning to
     // migrate from sending plain `Content` to `Content` with a pro signature embedded in `Content`
     // (added exclusively for communities usecase), then, transitioning to sending an `Envelope` to
@@ -1154,7 +1153,7 @@ LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
 
 LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
     bytes32 result = {};
-    session::array_uc32 hash = proof_hash_internal(
+    session::uc32 hash = proof_hash_internal(
             proof->version,
             proof->gen_index_hash.data,
             proof->rotating_pubkey.data,
@@ -1170,7 +1169,7 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
     if (verify_pubkey_len != crypto_sign_ed25519_PUBLICKEYBYTES)
         return false;
     auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
-    session::array_uc32 hash = proof_hash_internal(
+    session::uc32 hash = proof_hash_internal(
             proof->version,
             proof->gen_index_hash.data,
             proof->rotating_pubkey.data,

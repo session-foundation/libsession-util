@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "session/blinding.hpp"
+#include "session/hash.hpp"
 #include "session/sodium_array.hpp"
 #include "session/types.hpp"
 
@@ -108,7 +109,7 @@ std::vector<unsigned char> sign_for_recipient(
     return buf;
 }
 
-static const std::span<const unsigned char> BOX_HASHKEY = to_span("SessionBoxEphemeralHashKey");
+static constexpr auto BOX_HASHKEY = "SessionBoxEphemeralHashKey"_uc;
 
 std::vector<unsigned char> encrypt_for_recipient(
         std::span<const unsigned char> ed25519_privkey,
@@ -145,12 +146,8 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
     // To make our ephemeral seed we're going to hash: SENDER_SEED || RECIPIENT_PK || MESSAGE with a
     // keyed blake2b hash.
     cleared_uchars<crypto_box_SEEDBYTES> seed;
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init(&st, BOX_HASHKEY.data(), BOX_HASHKEY.size(), seed.size());
-    crypto_generichash_blake2b_update(&st, ed25519_privkey.data(), 32);
-    crypto_generichash_blake2b_update(&st, recipient_pubkey.data(), 32);
-    crypto_generichash_blake2b_update(&st, message.data(), message.size());
-    crypto_generichash_blake2b_final(&st, seed.data(), seed.size());
+    hash::blake2b_key(
+            seed, BOX_HASHKEY, ed25519_privkey.first(32), recipient_pubkey.first(32), message);
 
     cleared_uchars<crypto_box_SECRETKEYBYTES> eph_sk;
     cleared_uchars<crypto_box_PUBLICKEYBYTES> eph_pk;
@@ -161,10 +158,7 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
     // hash of:
     //     EPH_PUBKEY || RECIPIENT_PUBKEY
     cleared_uchars<crypto_box_NONCEBYTES> nonce;
-    crypto_generichash_blake2b_init(&st, nullptr, 0, nonce.size());
-    crypto_generichash_blake2b_update(&st, eph_pk.data(), eph_pk.size());
-    crypto_generichash_blake2b_update(&st, recipient_pubkey.data(), recipient_pubkey.size());
-    crypto_generichash_blake2b_final(&st, nonce.data(), nonce.size());
+    hash::blake2b(nonce, eph_pk, recipient_pubkey);
 
     // A sealed box is a regular box (using the ephermal keys and nonce), but with the ephemeral
     // pubkey prepended:
@@ -267,12 +261,7 @@ static cleared_uc32 blinded_shared_secret(
     auto& recipient = sending ? jB : kA;
 
     // H(kjsR || kS || jR):
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init(&st, nullptr, 0, 32);
-    crypto_generichash_blake2b_update(&st, shared_secret.data(), shared_secret.size());
-    crypto_generichash_blake2b_update(&st, sender.data(), sender.size());
-    crypto_generichash_blake2b_update(&st, recipient.data(), recipient.size());
-    crypto_generichash_blake2b_final(&st, shared_secret.data(), shared_secret.size());
+    hash::blake2b(shared_secret, shared_secret, sender, recipient);
 
     return shared_secret;
 }

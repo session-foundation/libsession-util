@@ -17,6 +17,7 @@
 #include <type_traits>
 
 #include "internal-util.hpp"
+#include "session/hash.hpp"
 
 namespace session::attachment {
 
@@ -236,13 +237,9 @@ encrypt_buffer_init(
     std::span<const unsigned char> udata{
             reinterpret_cast<const unsigned char*>(data.data()), data.size()};
 
-    crypto_generichash_blake2b_state b_st;
     const auto domain_byte = static_cast<uint8_t>(domain);
-    crypto_generichash_blake2b_init(&b_st, &domain_byte, 1, nonce_key.size());
-    crypto_generichash_blake2b_update(
-            &b_st, reinterpret_cast<const unsigned char*>(seed.data()), 32);
-    crypto_generichash_blake2b_update(&b_st, udata.data(), udata.size());
-    crypto_generichash_blake2b_final(&b_st, nonce_key.data(), nonce_key.size());
+    hash::blake2b_key(
+            nonce_key, std::span<const uint8_t, 1>{&domain_byte, 1}, seed.first(32), udata);
     std::memcpy(key.data(), nonce_key.data() + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE);
 
     inpos = udata.data();
