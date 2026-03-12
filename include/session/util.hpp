@@ -1,6 +1,7 @@
 #pragma once
 
 #include <oxenc/common.h>
+#include <oxenc/endian.h>
 
 #include <array>
 #include <atomic>
@@ -341,6 +342,15 @@ inline int64_t to_epoch_seconds(int64_t timestamp) {
     return timestamp > 9'000'000'000'000 ? timestamp / 1'000'000
          : timestamp > 9'000'000'000     ? timestamp / 1'000
                                          : timestamp;
+}
+
+// Converts an integer to a fixed-size array of its little-endian byte representation, suitable for
+// passing to a hash function in an endian-safe way.
+template <oxenc::endian_swappable_integer T>
+std::array<unsigned char, sizeof(T)> int_for_hashing(T value) {
+    std::array<unsigned char, sizeof(T)> result;
+    oxenc::write_host_as_little(value, result.data());
+    return result;
 }
 
 // Takes a timestamp as unix epoch seconds (not ms, µs) and wraps it in a sys_seconds containing it.

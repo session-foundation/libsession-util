@@ -60,12 +60,10 @@ session::uc32 proof_hash_internal(
     session::hash::blake2b_pers(
             result,
             session::BUILD_PROOF_PERS,
-            std::span<const uint8_t, 1>{&version, 1},
+            session::int_for_hashing(version),
             gen_index_hash,
             rotating_pubkey,
-            std::span<const uint8_t, sizeof(expiry_unix_ts_ms)>{
-                    reinterpret_cast<const uint8_t*>(&expiry_unix_ts_ms),
-                    sizeof(expiry_unix_ts_ms)});
+            session::int_for_hashing(expiry_unix_ts_ms));
     return result;
 }
 

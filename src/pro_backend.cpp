@@ -2,7 +2,6 @@
 #include <oxenc/hex.h>
 #include <session/export.h>
 #include <session/pro_backend.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <chrono>
@@ -12,6 +11,7 @@
 #include <session/session_encrypt.hpp>
 #include <session/sodium_array.hpp>
 #include <session/types.hpp>
+#include <session/util.hpp>
 
 // clang-format off
 const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT] = {
@@ -226,32 +226,17 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L171
     uc32 hash_to_sign;
-    crypto_generichash_blake2b_state state;
-    crypto_generichash_blake2b_init_salt_personal(
-            &state, nullptr, 0, hash_to_sign.size(), nullptr, ADD_PRO_PAYMENT_PERS.data());
-    crypto_generichash_blake2b_update(&state, &version, sizeof(version));
-    crypto_generichash_blake2b_update(
-            &state,
-            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
-    crypto_generichash_blake2b_update(
-            &state,
-            rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
-
-    uint8_t provider_u8 = payment_tx_provider;
-    crypto_generichash_blake2b_update(&state, &provider_u8, sizeof(provider_u8));
-    crypto_generichash_blake2b_update(
-            &state,
-            reinterpret_cast<const uint8_t*>(payment_tx_payment_id.data()),
-            payment_tx_payment_id.size());
-    if (payment_tx_order_id.size()) {
-        crypto_generichash_blake2b_update(
-                &state,
-                reinterpret_cast<const uint8_t*>(payment_tx_order_id.data()),
-                payment_tx_order_id.size());
-    }
-    crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
+    hash::blake2b_pers(
+            hash_to_sign,
+            ADD_PRO_PAYMENT_PERS,
+            int_for_hashing(version),
+            master_privkey.subspan(
+                    crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
+            rotating_privkey.subspan(
+                    crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
+            int_for_hashing(static_cast<uint8_t>(payment_tx_provider)),
+            payment_tx_payment_id,
+            payment_tx_order_id);
 
     // Sign the hash with both keys
     MasterRotatingSignatures result = {};
@@ -408,11 +393,10 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     hash::blake2b_pers(
             hash_to_sign,
             GENERATE_PROOF_PERS,
-            std::span<const uint8_t, 1>{&version, 1},
+            int_for_hashing(version),
             master_privkey.last<32>(),
             rotating_privkey.last<32>(),
-            std::span<const uint8_t, sizeof(unix_ts_ms)>{
-                    reinterpret_cast<const uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms)});
+            int_for_hashing(unix_ts_ms));
 
     // Sign the hash with both keys
     MasterRotatingSignatures result = {};
@@ -571,12 +555,10 @@ uc64 GetProDetailsRequest::build_sig(
     hash::blake2b_pers(
             hash_to_sign,
             GET_PRO_DETAILS_PERS,
-            std::span<const uint8_t, 1>{&version, 1},
+            int_for_hashing(version),
             master_privkey.last<32>(),
-            std::span<const uint8_t, sizeof(unix_ts_ms)>{
-                    reinterpret_cast<const uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms)},
-            std::span<const uint8_t, sizeof(count)>{
-                    reinterpret_cast<const uint8_t*>(&count), sizeof(count)});
+            int_for_hashing(unix_ts_ms),
+            int_for_hashing(count));
 
     // Sign the hash
     uc64 result = {};
@@ -803,39 +785,19 @@ uc64 SetPaymentRefundRequestedRequest::build_sig(
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5962925d7f18f83a3ff5774885495e5dd55ecb0a/server.py#L634
     uc32 hash_to_sign;
-    crypto_generichash_blake2b_state state;
-    crypto_generichash_blake2b_init_salt_personal(
-            &state, nullptr, 0, 32, nullptr, SET_PAYMENT_REFUND_REQUESTED_PERS.data());
-    crypto_generichash_blake2b_update(&state, &version, sizeof(version));
-    crypto_generichash_blake2b_update(
-            &state,
-            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
-
-    // Timestamps
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
     uint64_t refund_requested_unix_ts_ms = epoch_ms(refund_requested_unix_ts);
-    crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<const uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms));
-    crypto_generichash_blake2b_update(
-            &state,
-            reinterpret_cast<const uint8_t*>(&refund_requested_unix_ts_ms),
-            sizeof(refund_requested_unix_ts_ms));
-
-    // Payment provider
-    uint8_t provider_u8 = payment_tx_provider;
-    crypto_generichash_blake2b_update(&state, &provider_u8, sizeof(provider_u8));
-    crypto_generichash_blake2b_update(
-            &state,
-            reinterpret_cast<const uint8_t*>(payment_tx_payment_id.data()),
-            payment_tx_payment_id.size());
-    if (payment_tx_order_id.size()) {
-        crypto_generichash_blake2b_update(
-                &state,
-                reinterpret_cast<const uint8_t*>(payment_tx_order_id.data()),
-                payment_tx_order_id.size());
-    }
-    crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
+    hash::blake2b_pers(
+            hash_to_sign,
+            SET_PAYMENT_REFUND_REQUESTED_PERS,
+            int_for_hashing(version),
+            master_privkey.subspan(
+                    crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
+            int_for_hashing(unix_ts_ms),
+            int_for_hashing(refund_requested_unix_ts_ms),
+            int_for_hashing(static_cast<uint8_t>(payment_tx_provider)),
+            payment_tx_payment_id,
+            payment_tx_order_id);
 
     // Sign the hash
     uc64 result = {};
