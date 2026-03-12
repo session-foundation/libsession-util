@@ -17,17 +17,17 @@ struct SerialisedProtobufContentWithProForTesting {
     ProProof proof;
     std::string plaintext;
     std::vector<uint8_t> plaintext_padded;
-    array_uc64 sig_over_plaintext_with_user_pro_key;
-    array_uc64 sig_over_plaintext_padded_with_user_pro_key;
-    array_uc32 pro_proof_hash;
+    uc64 sig_over_plaintext_with_user_pro_key;
+    uc64 sig_over_plaintext_padded_with_user_pro_key;
+    uc32 pro_proof_hash;
     bytes64 sig_over_plaintext_with_user_pro_key_c;
     bytes32 pro_proof_hash_c;
 };
 
 static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_session_pro(
         std::string_view data_body,
-        const array_uc64& user_rotating_privkey,
-        const array_uc64& pro_backend_privkey,
+        const uc64& user_rotating_privkey,
+        const uc64& pro_backend_privkey,
         std::chrono::sys_seconds content_unix_ts,
         std::chrono::sys_seconds pro_expiry_unix_ts,
         session_protocol_pro_message_bitset msg_bitset,
@@ -178,8 +178,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     // Pro metadata
     const auto user_pro_seed =
             "0123456789abcdef0123456789abcdeff00baa00000000000000000000000000"_hexbytes;
-    array_uc32 user_pro_ed_pk;
-    array_uc64 user_pro_ed_sk;
+    uc32 user_pro_ed_pk;
+    uc64 user_pro_ed_sk;
     crypto_sign_ed25519_seed_keypair(
             user_pro_ed_pk.data(), user_pro_ed_sk.data(), user_pro_seed.data());
 
@@ -230,8 +230,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     // Setup a dummy "Session Pro Backend" key
     // We reuse test key 1 as the "Session Pro" backend key that signs the proofs as it
     // doesn't matter what key really, just that we have one available for signing.
-    const array_uc64& pro_backend_ed_sk = keys.ed_sk1;
-    const array_uc32& pro_backend_ed_pk = keys.ed_pk1;
+    const uc64& pro_backend_ed_sk = keys.ed_sk1;
+    const uc32& pro_backend_ed_pk = keys.ed_pk1;
     char error[256];
 
     SECTION("Encrypt/decrypt for contact in default namespace w/o pro attached") {
@@ -286,7 +286,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Verify pro
         ProProof nil_proof = {};
-        array_uc32 nil_hash = nil_proof.hash();
+        uc32 nil_hash = nil_proof.hash();
         bytes32 decrypt_result_pro_hash =
                 session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(decrypt_result.pro.status ==
@@ -526,8 +526,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // TODO: Finish setting up a fake group
         const auto group_v2_seed =
                 "0123456789abcdef0123456789abcdeff00baadeadb33f000000000000000000"_hexbytes;
-        array_uc64 group_v2_sk = {};
-        array_uc32 group_v2_pk = {};
+        uc64 group_v2_sk = {};
+        uc32 group_v2_pk = {};
         crypto_sign_ed25519_seed_keypair(
                 group_v2_pk.data(), group_v2_sk.data(), group_v2_seed.data());
 
@@ -693,7 +693,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Try decrypt with a bad backend key
         {
-            array_uc32 bad_pro_backend_ed_pk = pro_backend_ed_pk;
+            uc32 bad_pro_backend_ed_pk = pro_backend_ed_pk;
             bad_pro_backend_ed_pk[0] ^= 1;
             session_protocol_decoded_envelope decrypt_result = session_protocol_decode_envelope(
                     &decrypt_keys,
@@ -850,8 +850,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encode/decode for community inbox (content message)") {
         const auto community_seed =
                 "0123456789abcdef0123456789abcdeff00baadeadb33f000000000000000000"_hexbytes;
-        array_uc64 community_sk = {};
-        array_uc32 community_pk = {};
+        uc64 community_sk = {};
+        uc32 community_pk = {};
         crypto_sign_ed25519_seed_keypair(
                 community_pk.data(), community_sk.data(), community_seed.data());
 

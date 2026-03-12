@@ -626,7 +626,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                 c.pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
                         std::chrono::milliseconds{unix_timestamp(i)}};
 
-                session::array_uc32 hash{};
+                session::uc32 hash{};
                 std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(i % 256));
                 c.pro_gen_index_hash = hash;
             }
@@ -836,7 +836,7 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
                           .count();
     c.pro_expiry_unix_ts_ms = 10000;
 
-    session::array_uc32 hash{};
+    session::uc32 hash{};
     std::fill(hash.begin(), hash.end(), static_cast<uint8_t>(3));
     std::memcpy(c.pro_gen_index_hash.data, hash.data(), hash.size());
     c.has_pro_gen_index_hash = true;

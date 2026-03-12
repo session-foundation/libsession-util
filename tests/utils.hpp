@@ -205,17 +205,17 @@ std::set<std::common_type_t<T...>> make_set(T&&... args) {
 }
 
 struct TestKeys {
-    session::array_uc32 seed0;
-    session::array_uc64 ed_sk0;
-    session::array_uc32 ed_pk0;
-    session::array_uc32 curve_pk0;
-    session::array_uc33 session_pk0;
+    session::uc32 seed0;
+    session::uc64 ed_sk0;
+    session::uc32 ed_pk0;
+    session::uc32 curve_pk0;
+    session::uc33 session_pk0;
 
-    session::array_uc32 seed1;
-    session::array_uc64 ed_sk1;
-    session::array_uc32 ed_pk1;
-    session::array_uc32 curve_pk1;
-    session::array_uc33 session_pk1;
+    session::uc32 seed1;
+    session::uc64 ed_sk1;
+    session::uc32 ed_pk1;
+    session::uc32 curve_pk1;
+    session::uc33 session_pk1;
 };
 
 static inline TestKeys get_deterministic_test_keys() {
