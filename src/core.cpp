@@ -44,8 +44,7 @@ void Core::receive_messages(
         bool is_final) {
     using config::Namespace;
     switch (ns) {
-        case Namespace::DeviceGroup: devices.parse_device_group(messages, is_final); break;
-        case Namespace::DeviceLink: devices.parse_link_request(messages, is_final); break;
+        case Namespace::Devices: devices.parse_device_messages(messages, is_final); break;
         case Namespace::DevicePubkeys: devices.parse_device_pubkeys(messages, is_final); break;
         default:
             log::warning(

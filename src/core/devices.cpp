@@ -1,4 +1,5 @@
 #include <fmt/ranges.h>
+#include <oxen/quic/format.hpp>
 #include <mlkem_native.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
@@ -536,6 +537,23 @@ namespace {
         return devices;
     }
 
+    // Values for the devices.processing column, set during batch message processing and cleared
+    // after callbacks are fired at is_final.
+    enum class Processing {
+        LinkRequest = 1,  // new/updated link request received
+        Registered = 2,   // device newly transitioned to Registered
+        Removed = 3,      // device newly transitioned to Unregistered
+    };
+
+    constexpr std::string_view format_as(Processing p) {
+        switch (p) {
+            case Processing::LinkRequest: return "link-request";
+            case Processing::Registered: return "registered";
+            case Processing::Removed: return "removed";
+        }
+        return "unknown";
+    }
+
     constexpr auto PERS_DEV_NONCE = "SessionDevDNonce"_b2b_pers;
     constexpr auto PERS_KEY_NONCE = "SessionDevKNonce"_b2b_pers;
     constexpr auto PERS_KEY_KEY = "SessionDevKeyKey"_b2b_pers;
@@ -695,6 +713,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     std::vector<std::byte> out;
     out.resize(
             2                                              // Outer "d" ... "e" delimiters
+            + 5                                            // "0:" + "1:D" (message type indicator)
             + 3 + bt_bytes_encoded(A.size())               // "1:A" + "32:...(A eph pk)..."
             + 3 + bt_bytes_encoded(ciphertext_raw.size())  // "1:C" + "NNNN:...(mlkem cts)..."
             + 3 + bt_bytes_encoded(enc_key_raw.size())     // "1:K" + "NNN:...(encrypted keys)..."
@@ -704,6 +723,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
 
     oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};
 
+    o.append("", "D");
     o.append("A", A);
     o.append("C", ciphertext_raw);
     o.append("K", enc_key_raw);
@@ -737,89 +757,45 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
     auto c = conn();
     SQLite::Transaction tx{c.sql};
 
-    // Snapshot the current state of all devices before processing updates so we can detect
-    // transitions and fire the appropriate callbacks afterward.
-    device::map old_devs;
-    for (auto [id, devid, state, seqno, timestamp, type, desc, ver, pk_ml, pk_x] :
-         c.prepared_results<
-                 int64_t,
-                 sqlite::blob_guts<std::array<std::byte, 32>>,
-                 int,
-                 int,
-                 int64_t,
-                 std::string,
-                 std::string,
-                 int64_t,
-                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
-                 sqlite::blobn<32>>(
-                 "SELECT id, unique_id, state, seqno, timestamp, device_type, description, version,"
-                 "       pubkey_mlkem768, pubkey_x25519 FROM devices")) {
-        auto& info = old_devs[devid];
-        info = fill_device_info(
-                devid, state, seqno, timestamp, std::move(type), std::move(desc), ver, pk_ml, pk_x);
-        load_device_extras(c, id, info);
-    }
-
-    std::vector<std::function<void()>> post_commit;
-
     for (const auto& [id, info] : devs) {
-        bool is_self = (id == self_id);
-        auto old_it = old_devs.find(id);
-        bool was_registered =
-                old_it != old_devs.end() && old_it->second.state == device::State::Registered;
-
         if (info.state == device::State::Unregistered) {
             // Kicked device: preserve whatever existing row data we have, just update state and
             // kicked_timestamp.  If we have no row for this device we can't do anything useful
-            // (we'd have no data to fill the required columns with), so skip it.
+            // (we'd have no data to fill the required columns with), so skip it.  Set
+            // processing=Removed only if the device was previously Registered.
             assert(info.kicked);
             c.prepared_exec(
-                    R"(UPDATE devices SET state = ?, kicked_timestamp = ? WHERE unique_id = ?)",
+                    R"(UPDATE devices
+                       SET state = ?, kicked_timestamp = ?,
+                           processing = CASE WHEN state = ? THEN ? ELSE processing END
+                       WHERE unique_id = ?)",
                     static_cast<int>(device::State::Unregistered),
                     info.kicked->time_since_epoch().count(),
+                    static_cast<int>(device::State::Registered),
+                    static_cast<int>(Processing::Removed),
                     id);
-
-            if (was_registered) {
-                if (is_self) {
-                    if (auto& f = cb().device_self_removed)
-                        post_commit.push_back(f);
-                } else if (auto& f = cb().device_removed) {
-                    auto& old = old_it->second;
-                    post_commit.push_back([&f, &old] { f(old); });
-                }
-            }
             continue;
         }
 
-        auto dev_id = upsert_device_info(c, info);
+        // Check state before upsert to detect a registration transition.
+        bool was_registered = c.prepared_maybe_get<int>(
+                                       "SELECT state FROM devices WHERE unique_id = ?", id)
+                                      .value_or(-1) ==
+                              static_cast<int>(device::State::Registered);
 
+        auto dev_id = upsert_device_info(c, info);
         if (!dev_id)
             continue;
 
-        if (!was_registered) {
-            if (is_self) {
-                if (auto& f = cb().device_self_added)
-                    post_commit.push_back(f);
-            } else {
-                // If we had a pending link request for this device, consume it: delete the record
-                // and use its id as the reqid so the app can correlate the acceptance with the
-                // earlier device_link_request callback.
-                auto reqid = c.prepared_maybe_get<int64_t>(
-                                      "DELETE FROM device_link_requests WHERE device = ?"
-                                      " RETURNING id",
-                                      *dev_id)
-                                     .value_or(0);
-                if (auto& f = cb().device_added)
-                    post_commit.push_back([&f, &inf = info, reqid] {
-                        f(static_cast<int>(reqid), inf);
-                    });
-            }
-        }
+        // Mark as newly registered only on a state transition (not for info-only updates).
+        if (!was_registered)
+            c.prepared_exec(
+                    "UPDATE devices SET processing = ? WHERE id = ?",
+                    static_cast<int>(Processing::Registered),
+                    *dev_id);
     }
 
     tx.commit();
-    for (auto& f : post_commit)
-        f();
 }
 
 Devices::LinkRequestResult Devices::build_link_request() {
@@ -878,19 +854,34 @@ Devices::LinkRequestResult Devices::build_link_request() {
 
     auto plaintext = encode_link_request_plaintext(self_id, info);
     auto sas = link_request_sas(to_span<std::byte>(plaintext));
-    std::vector<std::byte> out(plaintext.size() + config::ENCRYPT_DATA_OVERHEAD);
-    std::memcpy(out.data(), plaintext.data(), plaintext.size());
+
+    // Encrypt the plaintext
+    std::vector<unsigned char> encrypted(plaintext.size() + config::ENCRYPT_DATA_OVERHEAD);
+    std::memcpy(encrypted.data(), plaintext.data(), plaintext.size());
     auto seed = core.globals.account_seed();
     config::encrypt_prealloced(
-            as_span<unsigned char>(std::span{out}),
+            as_span<unsigned char>(std::span{encrypted}),
             as_span<unsigned char>(seed.buf).first(32),
             "link-request");
+
+    // Wrap in outer bt-dict: {"": "L", "L": <encrypted>}
+    std::vector<std::byte> out(
+            2                                               // Outer "d" ... "e" delimiters
+            + 5                                             // "0:" + "1:L" (message type indicator)
+            + 3 + bt_bytes_encoded(encrypted.size())        // "1:L" + "NNN:...(encrypted blob)..."
+    );
+    oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};
+    o.append("", "L");
+    o.append("L", std::span<const unsigned char>{encrypted});
+    assert(o.view().size() == out.size());
+
     return {std::move(out), sas};
 }
 
 device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
 
     oxenc::bt_dict_consumer in{enc_data};
+    in.require<std::string_view>("");  // skip the "" type key added by the outer wrapper
     auto A = in.require_span<unsigned char, 32>("A");
     auto ciphertext_raw = in.require_span<unsigned char>("C");
     auto enc_key_raw = in.require_span<unsigned char>("K");
@@ -1034,15 +1025,208 @@ device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
     return decode_device_data(plaintext_devices);
 }
 
-void Devices::parse_device_group(
-        std::span<const std::span<const unsigned char>> messages, bool /*is_final*/) {
-    for (const auto& msg : messages)
-        receive_device_group_message(msg);
+void Devices::receive_link_request(std::span<const unsigned char> data) {
+    // Parse outer bt-dict: {"": "L", "L": <encrypted>}
+    oxenc::bt_dict_consumer outer{data};
+    outer.require<std::string_view>("");  // skip type indicator
+    auto encrypted = outer.require_span<unsigned char>("L");
+
+    // Decrypt using the account seed
+    std::vector<unsigned char> plaintext;
+    try {
+        auto seed = core.globals.account_seed();
+        plaintext = config::decrypt(
+                encrypted, as_span<unsigned char>(seed.buf).first(32), "link-request");
+    } catch (const config::decrypt_error& e) {
+        log::warning(cat, "Ignoring incoming link request: decryption failed: {}", e.what());
+        return;
+    }
+
+    // Parse plaintext: {"I": <32-byte device id>, "i": {device info dict}}
+    device::Info info;
+    try {
+        oxenc::bt_dict_consumer pt{std::span<const unsigned char>{plaintext}};
+        auto in_id = pt.require_span<unsigned char, 32>("I");
+        std::memcpy(info.id.data(), in_id.data(), info.id.size());
+
+        // Skip any unknown keys between "I" and "i"
+        oxenc::bt_dict extra_outer;
+        while (!pt.is_finished() && std::string_view{pt.key()} < "i")
+            consume_extra(pt, extra_outer);
+        if (pt.is_finished() || std::string_view{pt.key()} != "i")
+            throw std::runtime_error{"missing 'i' device info dict"};
+        decode_one(info, pt.consume_dict_consumer(), device::State::Pending);
+    } catch (const std::exception& e) {
+        log::warning(cat, "Ignoring incoming link request: failed to parse: {}", e.what());
+        return;
+    }
+
+    auto c = conn();
+
+    // Reject if already registered or unregistered; only Pending (or absent) is valid
+    auto existing_state =
+            c.prepared_maybe_get<int>("SELECT state FROM devices WHERE unique_id = ?", info.id)
+                    .value_or(-1);
+    if (existing_state != -1 && existing_state != static_cast<int>(device::State::Pending)) {
+        log::debug(
+                cat,
+                "Ignoring link request from {}: device already in state {}",
+                oxenc::to_hex(info.id),
+                existing_state);
+        return;
+    }
+
+    SQLite::Transaction tx{c.sql};
+
+    auto dev_id = upsert_device_info(c, info);
+    if (!dev_id) {
+        log::debug(
+                cat,
+                "Ignoring link request from {}: rejected by seqno guard",
+                oxenc::to_hex(info.id));
+        return;
+    }
+
+    auto sas_seed = derive_sas_seed(as_span<std::byte>(std::span{plaintext}));
+
+    c.prepared_exec(
+            R"(INSERT INTO device_link_requests (device, received_at, sas_seed)
+               VALUES (?, ?, ?)
+               ON CONFLICT(device) DO UPDATE SET
+                   received_at = excluded.received_at,
+                   sas_seed = excluded.sas_seed)",
+            *dev_id,
+            epoch_seconds(sysclock_now_s()),
+            sas_seed);
+
+    // Set processing=LinkRequest only if not already set to a higher-priority value by a
+    // concurrent device group message in the same batch
+    c.prepared_exec(
+            "UPDATE devices SET processing = ? WHERE id = ? AND processing IS NULL",
+            static_cast<int>(Processing::LinkRequest),
+            *dev_id);
+
+    tx.commit();
 }
 
-void Devices::parse_link_request(
-        std::span<const std::span<const unsigned char>> /*messages*/, bool /*is_final*/) {
-    log::debug(cat, "parse_link_request: not yet implemented");
+void Devices::parse_device_messages(
+        std::span<const std::span<const unsigned char>> messages, bool is_final) {
+    for (const auto& msg : messages) {
+        try {
+            oxenc::bt_dict_consumer in{msg};
+            auto type = in.require<std::string_view>("");
+            if (type == "D")
+                receive_device_group_message(msg);
+            else if (type == "L")
+                receive_link_request(msg);
+            else
+                log::warning(cat, "Ignoring device message with unknown type '{}'", type);
+        } catch (const std::exception& e) {
+            log::warning(cat, "Ignoring malformed device message: {}", e.what());
+        }
+    }
+
+    if (!is_final)
+        return;
+
+    // Fire deferred callbacks for all devices with a pending processing state.  We collect first
+    // to avoid nested statement conflicts during callback + processing-clear operations.
+    struct ProcessingItem {
+        int64_t row_id;
+        std::array<std::byte, 32> id;
+        Processing processing;
+        device::Info info;
+    };
+
+    auto c = conn();
+    std::vector<ProcessingItem> items;
+    for (auto [row_id, raw_id, processing_int, state_int, seqno, timestamp, dtype, desc, ver,
+               pk_ml, pk_x, kicked_ts] :
+         c.prepared_results<
+                 int64_t,
+                 sqlite::blob_guts<std::array<std::byte, 32>>,
+                 int,
+                 int,
+                 int,
+                 int64_t,
+                 std::string,
+                 std::string,
+                 int64_t,
+                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+                 sqlite::blobn<32>,
+                 std::optional<int64_t>>(
+                 "SELECT id, unique_id, processing, state, seqno, timestamp, device_type,"
+                 "       description, version, pubkey_mlkem768, pubkey_x25519, kicked_timestamp"
+                 " FROM devices WHERE processing IS NOT NULL ORDER BY unique_id")) {
+        auto& item = items.emplace_back();
+        item.row_id = row_id;
+        item.id = raw_id;
+        item.processing = static_cast<Processing>(processing_int);
+        item.info = fill_device_info(
+                raw_id, state_int, seqno, timestamp,
+                std::move(dtype), std::move(desc), ver, pk_ml, pk_x);
+        if (kicked_ts)
+            item.info.kicked.emplace(std::chrono::seconds{*kicked_ts});
+        load_device_extras(c, row_id, item.info);
+    }
+
+    for (const auto& item : items) {
+        bool is_self = (item.id == self_id);
+        try {
+            switch (item.processing) {
+                case Processing::LinkRequest:
+                    if (auto& f = cb().device_link_request) {
+                        auto [lr_id, sas_seed] = c.prepared_get<
+                                int64_t, sqlite::blob_guts<std::array<std::byte, 16>>>(
+                                "SELECT id, sas_seed FROM device_link_requests WHERE device = ?",
+                                item.row_id);
+                        f(static_cast<int>(lr_id), item.info, sas_from_seed(sas_seed));
+                    }
+                    break;
+                case Processing::Registered:
+                    if (is_self) {
+                        if (auto& f = cb().device_self_added)
+                            f();
+                    } else {
+                        if (auto& f = cb().device_added) {
+                            auto reqid =
+                                    c.prepared_maybe_get<int64_t>(
+                                             "SELECT id FROM device_link_requests WHERE device = ?",
+                                             item.row_id)
+                                            .value_or(0LL);
+                            f(static_cast<int>(reqid), item.info);
+                        }
+                        // Clean up any link request row (whether callback was set or not)
+                        c.prepared_exec(
+                                "DELETE FROM device_link_requests WHERE device = ?", item.row_id);
+                    }
+                    break;
+                case Processing::Removed:
+                    if (is_self) {
+                        if (auto& f = cb().device_self_removed)
+                            f();
+                    } else {
+                        if (auto& f = cb().device_removed)
+                            f(item.info);
+                    }
+                    break;
+            }
+            c.prepared_exec("UPDATE devices SET processing = NULL WHERE id = ?", item.row_id);
+        } catch (const std::exception& e) {
+            log::warning(
+                    cat,
+                    "Exception in {} device callback for device {}: {}",
+                    item.processing,
+                    oxenc::to_hex(item.id),
+                    e.what());
+            // Don't clear processing so the callback will be retried
+        }
+    }
+
+    // Prune stale link requests (older than 10 minutes)
+    c.prepared_exec(
+            "DELETE FROM device_link_requests WHERE received_at < ?",
+            epoch_seconds(sysclock_now_s() - std::chrono::seconds{600}));
 }
 
 void Devices::parse_device_pubkeys(

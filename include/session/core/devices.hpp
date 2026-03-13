@@ -127,19 +127,20 @@ class Devices final : detail::CoreComponent {
     // Encrypts the inner device data for all the members of the device group.
     std::vector<std::byte> encrypt_device_data(const device::map& devices);
 
-    // Processes a single incoming encrypted device group message.
+    // Processes a single incoming device group ("D") or link request ("L") message.  `data` is the
+    // full raw message bytes including the outer bt-dict wrapper with the "" type key.
     void receive_device_group_message(std::span<const unsigned char> data);
+    void receive_link_request(std::span<const unsigned char> data);
 
     // Handlers for incoming swarm messages by namespace, called from Core::receive_messages.
-    void parse_device_group(
-            std::span<const std::span<const unsigned char>> messages, bool is_final);
-    void parse_link_request(
+    void parse_device_messages(
             std::span<const std::span<const unsigned char>> messages, bool is_final);
     void parse_device_pubkeys(
             std::span<const std::span<const unsigned char>> messages, bool is_final);
 
     // Inverse of encrypt_device_data.  Throws if invalid.  Throws `Devices::decryption_failed` if
     // the message was parsed successfully, but we failed to decrypt any of its encrypted values.
+    // `data` should be positioned just past the "" type key (i.e. starting at "A").
     device::map decrypt_device_data(std::span<const std::byte> data);
 
   public:
@@ -159,14 +160,14 @@ class Devices final : detail::CoreComponent {
     std::pair<device::Info, bool> device_info();
 
     struct LinkRequestResult {
-        std::vector<std::byte> message;        // encrypted bytes to push to Namespace::DeviceLink
+        std::vector<std::byte> message;        // encrypted bytes to push to Namespace::Devices
         std::array<std::string_view, 21> sas;  // emoji SAS sequence for user display
     };
 
-    // Builds an outgoing link request message to upload to Namespace::DeviceLink.  This should
+    // Builds an outgoing link request message to upload to Namespace::Devices.  This should
     // only be called when this device is not currently registered in the device group; throws
     // std::logic_error if it is already registered.  The returned message is to be pushed to
-    // Namespace::DeviceLink with a 10-minute TTL.  The sas field contains the short authentication
+    // Namespace::Devices with a 10-minute TTL.  The sas field contains the short authentication
     // string that should be displayed to the user for verification against the accepting device.
     LinkRequestResult build_link_request();
 

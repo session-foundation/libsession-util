@@ -6,6 +6,7 @@ CREATE TABLE devices (
 
     state INTEGER NOT NULL CHECK(state == 0 OR state == 1 OR state == 2), -- registered, pending, unregistered
     changes INTEGER NOT NULL DEFAULT 0, -- 1 means there are unconfirmed local device info changes
+    processing INTEGER,  -- non-null during batch processing: 1=new link request, 2=newly registered, 3=newly removed
     seqno INTEGER NOT NULL DEFAULT 1,
     timestamp INTEGER NOT NULL,
     kicked_timestamp INTEGER,  -- set when the device was kicked from the device group
