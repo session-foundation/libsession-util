@@ -45,7 +45,7 @@ void Core::receive_messages(
     using config::Namespace;
     switch (ns) {
         case Namespace::Devices: devices.parse_device_messages(messages, is_final); break;
-        case Namespace::DevicePubkeys: devices.parse_device_pubkeys(messages, is_final); break;
+        case Namespace::AccountPubkeys: devices.parse_account_pubkeys(messages, is_final); break;
         default:
             log::warning(
                     cat,

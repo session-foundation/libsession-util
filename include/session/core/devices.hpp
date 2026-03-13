@@ -135,7 +135,7 @@ class Devices final : detail::CoreComponent {
     // Handlers for incoming swarm messages by namespace, called from Core::receive_messages.
     void parse_device_messages(
             std::span<const std::span<const unsigned char>> messages, bool is_final);
-    void parse_device_pubkeys(
+    void parse_account_pubkeys(
             std::span<const std::span<const unsigned char>> messages, bool is_final);
 
     // Inverse of encrypt_device_data.  Throws if invalid.  Throws `Devices::decryption_failed` if

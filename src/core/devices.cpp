@@ -385,6 +385,7 @@ namespace {
 
     std::string encode_device_data(const device::map& devices) {
         oxenc::bt_dict_producer out;
+        auto devs = out.append_dict("D");
         for (const auto& [id, info] : devices) {
 
             std::string_view id_sv{reinterpret_cast<const char*>(id.data()), id.size()};
@@ -399,7 +400,7 @@ namespace {
                 //
                 // TODO: we should prune devices that were kicked a long time ago.
                 if (info.kicked)
-                    out.append(id_sv, info.kicked->time_since_epoch().count());
+                    devs.append(id_sv, info.kicked->time_since_epoch().count());
                 else
                     log::debug(
                             cat,
@@ -408,7 +409,7 @@ namespace {
                 continue;
             }
 
-            encode_device_info(out.append_dict(id_sv), info);
+            encode_device_info(devs.append_dict(id_sv), info);
         }
 
         return std::move(out).str();
@@ -499,28 +500,26 @@ namespace {
         device::map devices;
 
         oxenc::bt_dict_consumer in{data};
-        while (!in.is_finished()) {
-            auto in_id = in.key();
-            // A 32-byte keys are device IDs, but we allow (and ignore) keys with other sizes to
-            // allow for future expansion
-            if (in_id.size() != 32) {
-                log::debug(
-                        cat,
-                        "Skipping unknown {}-length key: not a 32-byte device id",
-                        in_id.size());
-                continue;
-            }
+        auto devs = in.require<bt_dict_consumer>("D");
+        // Unknown top-level keys alongside "D" are ignored for forward compatibility.
+
+        while (!devs.is_finished()) {
+            auto in_id = devs.key();
+            if (in_id.size() != 32)
+                throw std::runtime_error{
+                        "Invalid encoded device data: unexpected {}-byte key in device dict (expected 32)"_format(
+                                in_id.size())};
 
             std::array<std::byte, 32> id;
             std::memcpy(id.data(), in_id.data(), 32);
             auto [it, ins] = devices.try_emplace(id);
             if (!ins)
-                throw std::runtime_error{"Invalid encoded device data: duplicate devices ids"};
+                throw std::runtime_error{"Invalid encoded device data: duplicate device ids"};
 
             auto& info = it->second;
             info.id = id;
 
-            if (in.is_integer()) {
+            if (devs.is_integer()) {
                 // An integer indicates a "device removed" timestamp, used to distinguish between
                 // "device removed" and "I don't know about the device yet".  It gets pruned when
                 // updating once it hits a certain age threshold.
@@ -528,9 +527,9 @@ namespace {
                 // If the device wants to get re-added to the group then it must generate a new
                 // device id.
                 info.state = device::State::Unregistered;
-                info.kicked.emplace(std::chrono::seconds{in.consume_integer<int64_t>()});
+                info.kicked.emplace(std::chrono::seconds{devs.consume_integer<int64_t>()});
             } else {
-                decode_one(info, in.consume_dict_consumer(), device::State::Registered);
+                decode_one(info, devs.consume_dict_consumer(), device::State::Registered);
             }
         }
 
@@ -713,7 +712,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     std::vector<std::byte> out;
     out.resize(
             2                                              // Outer "d" ... "e" delimiters
-            + 5                                            // "0:" + "1:D" (message type indicator)
+            + 5                                            // "0:" + "1:G" (message type indicator)
             + 3 + bt_bytes_encoded(A.size())               // "1:A" + "32:...(A eph pk)..."
             + 3 + bt_bytes_encoded(ciphertext_raw.size())  // "1:C" + "NNNN:...(mlkem cts)..."
             + 3 + bt_bytes_encoded(enc_key_raw.size())     // "1:K" + "NNN:...(encrypted keys)..."
@@ -723,7 +722,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
 
     oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};
 
-    o.append("", "D");
+    o.append("", "G");
     o.append("A", A);
     o.append("C", ciphertext_raw);
     o.append("K", enc_key_raw);
@@ -1115,7 +1114,7 @@ void Devices::parse_device_messages(
         try {
             oxenc::bt_dict_consumer in{msg};
             auto type = in.require<std::string_view>("");
-            if (type == "D")
+            if (type == "G")
                 receive_device_group_message(msg);
             else if (type == "L")
                 receive_link_request(msg);
@@ -1229,9 +1228,9 @@ void Devices::parse_device_messages(
             epoch_seconds(sysclock_now_s() - std::chrono::seconds{600}));
 }
 
-void Devices::parse_device_pubkeys(
+void Devices::parse_account_pubkeys(
         std::span<const std::span<const unsigned char>> /*messages*/, bool /*is_final*/) {
-    log::debug(cat, "parse_device_pubkeys: not yet implemented");
+    log::debug(cat, "parse_account_pubkeys: not yet implemented");
 }
 
 }  // namespace session::core
