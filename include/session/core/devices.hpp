@@ -18,6 +18,8 @@
 
 namespace session::core {
 
+using namespace std::literals;
+
 class Core;
 
 namespace device {
@@ -138,10 +140,12 @@ class Devices final : detail::CoreComponent {
     void parse_account_pubkeys(
             std::span<const std::span<const unsigned char>> messages, bool is_final);
 
-    // Inverse of encrypt_device_data.  Throws if invalid.  Throws `Devices::decryption_failed` if
-    // the message was parsed successfully, but we failed to decrypt any of its encrypted values.
-    // `data` should be positioned just past the "" type key (i.e. starting at "A").
-    device::map decrypt_device_data(std::span<const std::byte> data);
+    // Decrypts an incoming encrypted device group ("G") message, returning the bt-encoded group
+    // payload plaintext (a bt-dict containing at minimum a "D" devices subdict and optionally a
+    // "K" account keys list).  Throws if parsing or decryption fails.  Throws
+    // `device::decryption_failed` if we could not find a key that successfully decrypts the data
+    // (i.e. we are not in the device group, or all our keys have rotated past this message).
+    std::vector<std::byte> decrypt_device_data(std::span<const std::byte> data);
 
   public:
     // Returns the current device's random identifier, in hex.
@@ -211,10 +215,25 @@ class Devices final : detail::CoreComponent {
         std::optional<std::chrono::sys_seconds> rotated;
     };
 
+    // How long after rotation to keep an old account key.  14 days is the maximum 1-to-1 message
+    // TTL, plus 24h for sender key update lag, plus 24h safety margin.
+    static constexpr auto ACCOUNT_KEY_RETENTION = 16 * 24h;
+
+    // Base rotation period and jitter window for account key rotation.  The formula is designed so
+    // that the minimum rotation time across all N devices in the group is Unif[PERIOD-WINDOW/2,
+    // PERIOD+WINDOW/2], regardless of N, masking the number of devices in the group.
+    static constexpr auto ACCOUNT_KEY_ROTATION_PERIOD = 12h;
+    static constexpr auto ACCOUNT_KEY_ROTATION_WINDOW = 2h;
+
+    // Rotates the shared account keys used for PFS+PQ message encryption.  Generates a new random
+    // seed, stores it in the database, marks the previous active key as rotated, and prunes keys
+    // older than ACCOUNT_KEY_RETENTION.  Should be called when account_rotation_due() is true and
+    // when a device first joins the device group with no existing account keys.
+    void rotate_account_keys();
+
     // Returns the current active account keys after pruning obsolete ones: that is, the current key
-    // plus all keys that were rotated away fewer than 16 days ago.  (16 days = 14 day max incoming
-    // message TTL + 24h sender key update lag + 24h safety margin).  Keys are returned sorted from
-    // newest to oldest.
+    // plus all keys that were rotated away fewer than ACCOUNT_KEY_RETENTION ago.  Keys are returned
+    // sorted from newest to oldest.  If there are no keys at all, generates an initial one.
     std::vector<AccountKeys> active_account_keys();
 
     // Returns the time when this device's unique device key is due to be rotated.  Returns nullopt
@@ -223,7 +242,7 @@ class Devices final : detail::CoreComponent {
 
     bool device_rotation_due() {
         auto t = next_device_rotation();
-        return t && *t >= std::chrono::system_clock::now();
+        return t && *t <= std::chrono::system_clock::now();
     }
 
     // Return true if the account key is due to be rotated by this device.  Returns nullopt if this
@@ -232,8 +251,15 @@ class Devices final : detail::CoreComponent {
 
     bool account_rotation_due() {
         auto t = next_account_rotation();
-        return t && *t >= std::chrono::system_clock::now();
+        return t && *t <= std::chrono::system_clock::now();
     }
+
+    // Builds the signed account public key message for upload to namespace -21.  The message is a
+    // bt-encoded dict containing the current active ML-KEM-768 pubkey ("M"), X25519 pubkey ("X"),
+    // and a "positive alternative" Ed25519 signature ("~") over the preceding fields, allowing
+    // recipients who only know the account's Session ID (X25519) to verify the keys.
+    // Throws if there are no active account keys.
+    std::vector<std::byte> build_account_pubkey_message();
 };
 
 }  // namespace session::core

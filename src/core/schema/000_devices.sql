@@ -57,21 +57,21 @@ CREATE TABLE device_privkeys (
 CREATE TRIGGER device_privkey_rotation AFTER INSERT ON device_privkeys
 FOR EACH ROW WHEN NEW.rotated IS NULL
 BEGIN
-    UPDATE device_privkeys SET rotated = NEW.created WHERE rotated IS NULL;
+    UPDATE device_privkeys SET rotated = NEW.created WHERE rotated IS NULL AND id != NEW.id;
 END;
 
 -- This table holds current and recent *account* keys, which are shared within the device
 -- group and have their public keys published for remote users to use to encrypt messages.
 -- Unlike device_privkeys, these keys are shared among all devices in the device group.
-CREATE TABLE device_group_keys (
+CREATE TABLE device_account_keys (
     id INTEGER PRIMARY KEY NOT NULL,
     created INTEGER NOT NULL,
     rotated INTEGER, -- timestamp when a new key superceded this key
-    seed BLOB NOT NULL CHECK(length(seed) == 32),
+    seed BLOB UNIQUE NOT NULL CHECK(length(seed) == 32),
     pubkey_mlkem768 BLOB NOT NULL CHECK(length(pubkey_mlkem768) == 1184),
     pubkey_x25519 BLOB NOT NULL CHECK(length(pubkey_x25519) == 32),
     -- Virtual column containing the first two mlkem pubkey values to assist with lookups based on
     -- incoming message key indicator:
     key_indicator BLOB GENERATED ALWAYS AS (substr(pubkey_mlkem768, 1, 2)) VIRTUAL
 ) STRICT;
-CREATE INDEX device_group_keys_ki_index ON device_group_keys(key_indicator);
+CREATE INDEX device_account_keys_ki_index ON device_account_keys(key_indicator);

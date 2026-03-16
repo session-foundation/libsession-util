@@ -13,6 +13,7 @@
 #include <sodium/crypto_xof_turboshake256.h>
 #include <sodium/utils.h>
 
+#include <cmath>
 #include <chrono>
 #include <concepts>
 #include <iterator>
@@ -24,6 +25,7 @@
 #include <session/core/devices.hpp>
 #include <session/core/link_sas.hpp>
 #include <session/hash.hpp>
+#include <session/xed25519.hpp>
 #include <session/random.hpp>
 #include <session/sqlite.hpp>
 #include <session/types.hpp>
@@ -88,6 +90,30 @@ static Keys keys_from_seed(std::span<const std::byte, 32> seed) {
     return keys;
 }
 
+// Lightweight formattable wrapper for logging a brief "aabb…xxyy" hex summary of a key.  The
+// hex computation is deferred to when the formatter is invoked, so it is skipped entirely if
+// the log level is disabled.
+struct key_summary {
+    std::span<const std::byte> key;
+
+    template <std::ranges::contiguous_range T>
+        requires oxenc::basic_char<std::ranges::range_value_t<T>>
+    key_summary(const T& k) : key{std::as_bytes(std::span{k})} {}
+};
+
+std::string format_as(const key_summary& ks) {
+    return "{}…{}"_format(
+            oxenc::to_hex(ks.key.begin(), ks.key.begin() + 2),
+            oxenc::to_hex(ks.key.end() - 2, ks.key.end()));
+}
+
+// format_as for XWingKeys-derived types (DeviceKeys, AccountKeys), defined in session::core so
+// that fmtlib's ADL-based lookup can find it when logging these types.
+template <std::derived_from<Devices::XWingKeys> Keys>
+std::string format_as(const Keys& k) {
+    return "X25519[{}], MLKEM768[{}]"_format(key_summary{k.x25519_pub}, key_summary{k.mlkem768_pub});
+}
+
 Devices::DeviceKeys Devices::rotate_device_keys() {
     // We store just one single seed value, then use TurboSHAKE256 to expand it into separate X25519
     // (32B) and MLKEM-768 (64B) seeds.
@@ -102,15 +128,26 @@ Devices::DeviceKeys Devices::rotate_device_keys() {
             std::chrono::system_clock::now().time_since_epoch());
     c.prepared_exec("INSERT INTO device_privkeys (created, seed) VALUES (?, ?)", now.count(), seed);
 
-    log::info(
-            cat,
-            "New rotating device keys generated: X25519[{}…{}], MLKEM768[{}…{}]",
-            oxenc::to_hex(keys.x25519_pub.begin(), keys.x25519_pub.begin() + 2),
-            oxenc::to_hex(keys.x25519_pub.end() - 2, keys.x25519_pub.end()),
-            oxenc::to_hex(keys.mlkem768_pub.begin(), keys.mlkem768_pub.begin() + 2),
-            oxenc::to_hex(keys.mlkem768_pub.end() - 2, keys.mlkem768_pub.end()));
+    log::info(cat, "New rotating device keys generated: {}", keys);
 
     return keys;
+}
+
+void Devices::rotate_account_keys() {
+    cleared_b32 seed;
+    random::fill(seed);
+    auto keys = keys_from_seed<AccountKeys>(seed);
+
+    auto c = conn();
+    c.prepared_exec(
+            "INSERT INTO device_account_keys (created, seed, pubkey_mlkem768, pubkey_x25519)"
+            " VALUES (?, ?, ?, ?)",
+            epoch_seconds(sysclock_now_s()),
+            seed,
+            keys.mlkem768_pub,
+            keys.x25519_pub);
+
+    log::info(cat, "New account keys generated: {}", keys);
 }
 
 std::vector<Devices::DeviceKeys> Devices::active_device_keys() {
@@ -135,15 +172,15 @@ std::vector<Devices::DeviceKeys> Devices::active_device_keys() {
 }
 
 std::vector<Devices::AccountKeys> Devices::active_account_keys() {
-    std::vector<AccountKeys> keys;
-
-    auto rotation_cutoff = std::chrono::duration_cast<std::chrono::seconds>(
-                                   std::chrono::system_clock::now().time_since_epoch()) -
-                           16 * 24h;
-
     auto c = conn();
     SQLite::Transaction tx{c.sql};
-    c.prepared_exec("DELETE FROM device_group_keys WHERE rotated < ?", rotation_cutoff.count());
+
+    c.prepared_exec(
+            "DELETE FROM device_account_keys WHERE rotated < ?",
+            epoch_seconds(sysclock_now_s() - ACCOUNT_KEY_RETENTION));
+
+    std::vector<AccountKeys> keys;
+    bool have_active = false;
     for (auto [id, created, rotated, seed, pk_ml, pk_x] :
          c.prepared_results<
                  int64_t,
@@ -151,18 +188,33 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys() {
                  std::optional<int64_t>,
                  sqlite::blobn<32>,
                  sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
-                 sqlite::blobn<32>>("SELECT created, rotated, seed, pubkey_mlkem768, pubkey_x25519"
-                                    " ORDER BY rotated DESC NULLS FIRST, created DESC")) {
-        keys.push_back(keys_from_seed<AccountKeys>(seed));
-        if (0 != std::memcmp(keys.back().mlkem768_pub.data(), pk_ml.data(), pk_ml.size()) ||
-            0 != std::memcmp(keys.back().x25519_pub.data(), pk_x.data(), pk_x.size())) {
+                 sqlite::blobn<32>>(
+                 "SELECT id, created, rotated, seed, pubkey_mlkem768, pubkey_x25519"
+                 " FROM device_account_keys"
+                 " ORDER BY rotated DESC NULLS FIRST, created DESC")) {
+        auto& k = keys.emplace_back(keys_from_seed<AccountKeys>(seed));
+        k.created = std::chrono::sys_seconds{std::chrono::seconds{created}};
+        if (rotated)
+            k.rotated.emplace(std::chrono::seconds{*rotated});
+        if (!rotated)
+            have_active = true;
+        if (0 != std::memcmp(k.mlkem768_pub.data(), pk_ml.data(), pk_ml.size()) ||
+            0 != std::memcmp(k.x25519_pub.data(), pk_x.data(), pk_x.size())) {
             log::warning(
                     cat,
-                    "device_group_keys row with id={} ignored: row contains invalid precomputed "
+                    "device_account_keys row with id={} ignored: row contains invalid precomputed "
                     "pubkeys",
                     id);
             keys.pop_back();
         }
+    }
+
+    tx.commit();
+
+    if (!have_active) {
+        log::info(cat, "No currently active account keys; generating a new one");
+        rotate_account_keys();
+        return active_account_keys();
     }
 
     return keys;
@@ -331,6 +383,19 @@ std::pair<device::Info, bool> Devices::device_info() {
 
 namespace {
 
+    // Plain-old-data representation of a single account key seed entry as read from or written to
+    // the "K" list in the device group plaintext payload.
+    struct AccountKeySeed {
+        cleared_b32 seed;
+        int64_t created;
+        std::optional<int64_t> rotated;
+    };
+
+    struct GroupPayload {
+        device::map devices;
+        std::vector<AccountKeySeed> account_keys;
+    };
+
     // Called while building a bt dict to pull out any unknown intermediate keys immediately before
     // appending a new one.  E.g. call `write_extra(out, "a", it, end)` to write out any keys from
     // `it` that precede "a".  `it` is mutated, and left at the first value > "a", ready for the
@@ -383,33 +448,53 @@ namespace {
             devout.append_bt(xit->first, xit->second);
     }
 
-    std::string encode_device_data(const device::map& devices) {
+    std::string encode_group_payload(
+            const device::map& devices,
+            std::span<const AccountKeySeed> acc_keys) {
         oxenc::bt_dict_producer out;
-        auto devs = out.append_dict("D");
-        for (const auto& [id, info] : devices) {
 
-            std::string_view id_sv{reinterpret_cast<const char*>(id.data()), id.size()};
+        {
+            auto devs = out.append_dict("D");
+            for (const auto& [id, info] : devices) {
 
-            if (info.state == device::State::Pending) {
-                log::debug(
-                        cat, "Skipping pending device {} in device group data", oxenc::to_hex(id));
-                continue;
-            } else if (info.state == device::State::Unregistered) {
-                // We write a timestamp tombstone value for a kicked device, with the kick timestamp
-                // as the value.
-                //
-                // TODO: we should prune devices that were kicked a long time ago.
-                if (info.kicked)
-                    devs.append(id_sv, info.kicked->time_since_epoch().count());
-                else
+                std::string_view id_sv{reinterpret_cast<const char*>(id.data()), id.size()};
+
+                if (info.state == device::State::Pending) {
                     log::debug(
                             cat,
-                            "Skipping unregistered (but not kicked) device {}",
+                            "Skipping pending device {} in device group data",
                             oxenc::to_hex(id));
-                continue;
-            }
+                    continue;
+                } else if (info.state == device::State::Unregistered) {
+                    // We write a timestamp tombstone value for a kicked device, with the kick
+                    // timestamp as the value.
+                    //
+                    // TODO: we should prune devices that were kicked a long time ago.
+                    if (info.kicked)
+                        devs.append(id_sv, info.kicked->time_since_epoch().count());
+                    else
+                        log::debug(
+                                cat,
+                                "Skipping unregistered (but not kicked) device {}",
+                                oxenc::to_hex(id));
+                    continue;
+                }
 
-            encode_device_info(devs.append_dict(id_sv), info);
+                encode_device_info(devs.append_dict(id_sv), info);
+            }
+        }  // "D" dict closed here
+
+        if (!acc_keys.empty()) {
+            auto kl = out.append_list("K");
+            for (const auto& k : acc_keys) {
+                auto e = kl.append_dict();
+                e.append("c", k.created);
+                if (k.rotated)
+                    e.append("r", *k.rotated);
+                e.append("s",
+                         std::string_view{
+                                 reinterpret_cast<const char*>(k.seed.data()), k.seed.size()});
+            }
         }
 
         return std::move(out).str();
@@ -493,15 +578,14 @@ namespace {
             consume_extra(dev, info.extra);
     }
 
-    // Decodes an incoming devices data message.  The return map will include both full device
-    // records, and deleted devices: deleted devices will have a mostly default-constructed Info
-    // object where only id, state (=State::Unregistered) and kicked (=removal timestamp) are set.
-    device::map decode_device_data(std::span<const unsigned char> data) {
-        device::map devices;
+    // Decodes the plaintext bt-encoded device group payload.  The returned device map will include
+    // both full device records and tombstoned devices: the latter have a mostly default-constructed
+    // Info where only id, state (=State::Unregistered), and kicked (=removal timestamp) are set.
+    GroupPayload decode_group_payload(std::span<const std::byte> data) {
+        GroupPayload result;
 
         oxenc::bt_dict_consumer in{data};
         auto devs = in.require<bt_dict_consumer>("D");
-        // Unknown top-level keys alongside "D" are ignored for forward compatibility.
 
         while (!devs.is_finished()) {
             auto in_id = devs.key();
@@ -512,7 +596,7 @@ namespace {
 
             std::array<std::byte, 32> id;
             std::memcpy(id.data(), in_id.data(), 32);
-            auto [it, ins] = devices.try_emplace(id);
+            auto [it, ins] = result.devices.try_emplace(id);
             if (!ins)
                 throw std::runtime_error{"Invalid encoded device data: duplicate device ids"};
 
@@ -533,7 +617,17 @@ namespace {
             }
         }
 
-        return devices;
+        auto kl = in.require<bt_list_consumer>("K");
+        while (!kl.is_finished()) {
+            auto& k = result.account_keys.emplace_back();
+            auto e = kl.consume_dict_consumer();
+            k.created = e.require<int64_t>("c");
+            k.rotated = e.maybe<int64_t>("r");
+            auto s = e.require_span<std::byte, 32>("s");
+            std::memcpy(k.seed.data(), s.data(), 32);
+        }
+
+        return result;
     }
 
     // Values for the devices.processing column, set during batch message processing and cleared
@@ -557,6 +651,7 @@ namespace {
     constexpr auto PERS_KEY_NONCE = "SessionDevKNonce"_b2b_pers;
     constexpr auto PERS_KEY_KEY = "SessionDevKeyKey"_b2b_pers;
     constexpr auto PERS_KEY_KEY_IND = "SessionDevKeyInd"_b2b_pers;
+    constexpr auto PERS_ACC_KEY_ROT = "SessionAccKeyRot"_b2b_pers;
 
     constexpr int bt_bytes_encoded(int x) {
         int sz = 1 + x;
@@ -651,7 +746,19 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     cleared_uc32 key_base;
     random::fill(key_base);
 
-    auto plaintext_devices = encode_device_data(devices);
+    // Fetch account key seeds for inclusion in the payload.
+    std::vector<AccountKeySeed> acc_keys;
+    for (auto [seed, created, rotated] :
+         conn().prepared_results<sqlite::blobn<32>, int64_t, std::optional<int64_t>>(
+                 "SELECT seed, created, rotated FROM device_account_keys"
+                 " ORDER BY rotated DESC NULLS FIRST, created DESC")) {
+        auto& k = acc_keys.emplace_back();
+        std::memcpy(k.seed.data(), seed.data(), 32);
+        k.created = created;
+        k.rotated = rotated;
+    }
+
+    auto plaintext_devices = encode_group_payload(devices, acc_keys);
     std::vector<unsigned char> enc_devices;
     enc_devices.resize(plaintext_devices.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
     crypto_aead_xchacha20poly1305_ietf_encrypt(
@@ -745,9 +852,10 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
 }
 
 void Devices::receive_device_group_message(std::span<const unsigned char> data) {
-    device::map devs;
+    GroupPayload payload;
     try {
-        devs = decrypt_device_data(std::as_bytes(data));
+        auto raw = decrypt_device_data(std::as_bytes(data));
+        payload = decode_group_payload(raw);
     } catch (const device::decryption_failed& e) {
         log::warning(cat, "Ignoring incoming device group message: {}", e.what());
         return;
@@ -756,7 +864,26 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
     auto c = conn();
     SQLite::Transaction tx{c.sql};
 
-    for (const auto& [id, info] : devs) {
+    // Merge incoming account keys.  New seeds are inserted as-is (the rotation trigger handles
+    // marking any existing active key as rotated when a newer active key arrives).  For seeds we
+    // already have, we reconcile the `rotated` column: if both rotated at different times, take the
+    // minimum; if only one side has rotated, adopt that rotation.
+    for (const auto& k : payload.account_keys) {
+        auto keys = keys_from_seed<AccountKeys>(k.seed);
+        c.prepared_exec(
+                "INSERT INTO device_account_keys"
+                " (created, rotated, seed, pubkey_mlkem768, pubkey_x25519)"
+                " VALUES (?, ?, ?, ?, ?)"
+                " ON CONFLICT (seed) DO UPDATE SET"
+                "   rotated = COALESCE(MIN(excluded.rotated, rotated), excluded.rotated, rotated)",
+                k.created,
+                k.rotated,
+                k.seed,
+                keys.mlkem768_pub,
+                keys.x25519_pub);
+    }
+
+    for (const auto& [id, info] : payload.devices) {
         if (info.state == device::State::Unregistered) {
             // Kicked device: preserve whatever existing row data we have, just update state and
             // kicked_timestamp.  If we have no row for this device we can't do anything useful
@@ -877,7 +1004,7 @@ Devices::LinkRequestResult Devices::build_link_request() {
     return {std::move(out), sas};
 }
 
-device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
+std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
 
     oxenc::bt_dict_consumer in{enc_data};
     in.require<std::string_view>("");  // skip the "" type key added by the outer wrapper
@@ -941,7 +1068,7 @@ device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
 
     cleared_uc32 ml_ss, aB, ki, key_base;
 
-    std::vector<unsigned char> plaintext_devices;
+    std::vector<std::byte> plaintext_devices;
     plaintext_devices.resize(enc_devices.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
 
     // Trial decrypt until we find one that works, except that we can skip most of the heavy
@@ -992,7 +1119,7 @@ device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
 
             // Now we can decrypt the encrypted payload:
             if (0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                             plaintext_devices.data(),
+                             reinterpret_cast<unsigned char*>(plaintext_devices.data()),
                              nullptr,
                              nullptr,
                              reinterpret_cast<const unsigned char*>(enc_devices.data()),
@@ -1021,7 +1148,7 @@ device::map Devices::decrypt_device_data(std::span<const std::byte> enc_data) {
         throw device::decryption_failed{"Failed to decrypt incoming device data"};
     }
 
-    return decode_device_data(plaintext_devices);
+    return plaintext_devices;
 }
 
 void Devices::receive_link_request(std::span<const unsigned char> data) {
@@ -1231,6 +1358,82 @@ void Devices::parse_device_messages(
 void Devices::parse_account_pubkeys(
         std::span<const std::span<const unsigned char>> /*messages*/, bool /*is_final*/) {
     log::debug(cat, "parse_account_pubkeys: not yet implemented");
+}
+
+std::optional<std::chrono::system_clock::time_point> Devices::next_account_rotation() {
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+
+    if (!c.prepared_maybe_get<int>(
+                "SELECT 1 FROM devices WHERE unique_id = ? AND state = ?",
+                self_id, static_cast<int>(device::State::Registered)))
+        return std::nullopt;
+
+    int64_t t_created = 0;
+    std::optional<cleared_b32> active_seed;
+    for (auto [created, seed] : c.prepared_results<int64_t, sqlite::blobn<32>>(
+                 "SELECT created, seed FROM device_account_keys"
+                 " WHERE rotated IS NULL ORDER BY created DESC LIMIT 1")) {
+        t_created = created;
+        std::memcpy(active_seed.emplace().data(), seed.data(), seed.size());
+    }
+    if (!active_seed)
+        return std::nullopt;
+
+    auto N = c.prepared_get<int64_t>(
+            "SELECT count(*) FROM devices WHERE state = ?",
+            static_cast<int>(device::State::Registered));
+
+    tx.commit();
+
+    // u is a per-device uniform random value in [0,1], derived deterministically from the device
+    // ID and current account key seed so that each device independently computes a consistent
+    // rotation schedule.
+    std::array<std::byte, 8> hash_out;
+    hash::blake2b_key_pers(hash_out, *active_seed, PERS_ACC_KEY_ROT, self_id);
+    double u = oxenc::load_little_to_host<uint64_t>(hash_out.data()) / 0x1p64;
+
+    // With N registered devices, the minimum of their N individual offsets is uniformly
+    // distributed in [PERIOD - WINDOW/2, PERIOD + WINDOW/2].
+    auto offset = std::chrono::duration_cast<std::chrono::system_clock::duration>(
+            (ACCOUNT_KEY_ROTATION_PERIOD - ACCOUNT_KEY_ROTATION_WINDOW / 2) +
+            ACCOUNT_KEY_ROTATION_WINDOW * (1.0 - std::pow(u, static_cast<double>(N))));
+
+    return std::chrono::sys_seconds{std::chrono::seconds{t_created}} + offset;
+}
+
+std::optional<std::chrono::system_clock::time_point> Devices::next_device_rotation() {
+    // TODO: implement device key rotation scheduling
+    return std::nullopt;
+}
+
+std::vector<std::byte> Devices::build_account_pubkey_message() {
+    auto keys = active_account_keys();
+    if (keys.empty())
+        throw std::runtime_error{"build_account_pubkey_message: no active account keys"};
+    const auto& k = keys.front();
+
+    std::vector<std::byte> out(
+            2                                    // outer dict d...e
+            + 3 + bt_bytes_encoded(1184)         // "1:M" + mlkem768_pub
+            + 3 + bt_bytes_encoded(32)           // "1:X" + x25519_pub
+            + 3 + bt_bytes_encoded(64)           // "1:~" + XEd25519 signature
+    );
+
+    oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};
+    o.append("M", k.mlkem768_pub);
+    o.append("X", k.x25519_pub);
+    o.append_signature(
+            "~", [seed = core.globals.account_seed()](std::span<const unsigned char> body) {
+                cleared_uc32 x25519_priv;
+                crypto_sign_ed25519_sk_to_curve25519(
+                        x25519_priv.data(),
+                        reinterpret_cast<const unsigned char*>(seed.buf.data()));
+                return xed25519::sign(x25519_priv, body);
+            });
+
+    assert(o.view().size() == out.size());  // Ensure we calculated exactly the right size above
+    return out;
 }
 
 }  // namespace session::core
