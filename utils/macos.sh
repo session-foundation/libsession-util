@@ -34,7 +34,8 @@ for i in arm64 x86_64; do
 
     if [ "$(uname -m)" == "$i" ]; then
         echo "Building for macos ($i) in $build"
-        ./utils/static-bundle.sh "$build" ""
+        ./utils/static-bundle.sh "$build" "" \
+            -DLOCAL_MIRROR=https://oxen.rocks/deps
     else
         echo "Cross-compiling for macos ($i) in $build"
         # The args here are a bit weird:
