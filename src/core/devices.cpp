@@ -864,10 +864,11 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
     auto c = conn();
     SQLite::Transaction tx{c.sql};
 
-    // Merge incoming account keys.  New seeds are inserted as-is (the rotation trigger handles
-    // marking any existing active key as rotated when a newer active key arrives).  For seeds we
-    // already have, we reconcile the `rotated` column: if both rotated at different times, take the
-    // minimum; if only one side has rotated, adopt that rotation.
+    // Merge incoming account keys.  New seeds are inserted and the rotation trigger applies
+    // tie-breaking: latest created wins (smallest seed as tiebreaker), so concurrent rotations
+    // from multiple devices converge deterministically.  For seeds we already have, we reconcile
+    // the `rotated` column: if both sides have rotated at different times, take the minimum; if
+    // only one side has rotated, adopt that rotation.
     for (const auto& k : payload.account_keys) {
         auto keys = keys_from_seed<AccountKeys>(k.seed);
         c.prepared_exec(

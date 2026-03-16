@@ -75,3 +75,19 @@ CREATE TABLE device_account_keys (
     key_indicator BLOB GENERATED ALWAYS AS (substr(pubkey_mlkem768, 1, 2)) VIRTUAL
 ) STRICT;
 CREATE INDEX device_account_keys_ki_index ON device_account_keys(key_indicator);
+
+-- When a new account key is inserted as active (rotated IS NULL), apply deterministic
+-- tie-breaking: the key with the latest created timestamp wins (ties broken by smallest seed),
+-- and all unrotated losers are immediately marked as rotated at the winner's creation time.
+-- This handles concurrent rotations from multiple devices: once all devices sync, the trigger
+-- guarantees they all converge on the same active key regardless of insertion order.
+CREATE TRIGGER device_account_key_rotation AFTER INSERT ON device_account_keys
+FOR EACH ROW WHEN NEW.rotated IS NULL
+BEGIN
+    UPDATE device_account_keys SET rotated = winner.created
+    FROM (SELECT id, created FROM device_account_keys
+          WHERE rotated IS NULL
+          ORDER BY created DESC, seed ASC
+          LIMIT 1) AS winner
+    WHERE device_account_keys.rotated IS NULL AND device_account_keys.id != winner.id;
+END;
