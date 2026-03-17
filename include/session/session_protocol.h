@@ -58,10 +58,12 @@ struct session_protocol_strings {
     string8 url_privacy_policy;
     string8 url_pro_access_not_found;
     string8 url_pro_faq;
+    string8 url_pro_page;
     string8 url_pro_privacy_policy;
     string8 url_pro_roadmap;
     string8 url_pro_support;
     string8 url_pro_terms_of_service;
+    string8 url_pro_upgrade;
     string8 url_staking;
     string8 url_support;
     string8 url_survey;
