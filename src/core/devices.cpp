@@ -124,9 +124,24 @@ Devices::DeviceKeys Devices::rotate_device_keys() {
     auto keys = keys_from_seed<DeviceKeys>(seed);
 
     auto c = conn();
-    auto now = std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch());
-    c.prepared_exec("INSERT INTO device_privkeys (created, seed) VALUES (?, ?)", now.count(), seed);
+    SQLite::Transaction tx{c.sql};
+
+    auto now = epoch_seconds(sysclock_now_s());
+    c.prepared_exec("INSERT INTO device_privkeys (created, seed) VALUES (?, ?)", now, seed);
+
+    // Update our own device row with the new pubkeys and bump seqno so the change gets broadcast.
+    // If no row exists yet, this is a no-op; the new pubkeys will be read from the active device
+    // keys when the row is first created.
+    c.prepared_exec(
+            "UPDATE devices"
+            " SET pubkey_mlkem768 = ?, pubkey_x25519 = ?, seqno = seqno + 1, timestamp = ?"
+            " WHERE unique_id = ?",
+            keys.mlkem768_pub,
+            keys.x25519_pub,
+            now,
+            self_id);
+
+    tx.commit();
 
     log::info(cat, "New rotating device keys generated: {}", keys);
 
@@ -272,14 +287,13 @@ namespace {
     // Upserts a device into the devices table (guarded by seqno) and updates device_unknown extras.
     // Returns the row id if inserted or updated (i.e. seqno guard allowed it), nullopt if the
     // update was rejected by the seqno guard.  info.id must be set to the 32-byte device id.
-    // Always sets changes=FALSE since this is for storing incoming device data, not local changes.
     std::optional<int64_t> upsert_device_info(sqlite::Connection& c, const device::Info& info) {
         auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
         auto dev_id = c.prepared_maybe_get<int64_t>(
                 R"(INSERT INTO devices
                     (unique_id, state, seqno, timestamp, device_type, description, version,
-                     pubkey_mlkem768, pubkey_x25519, kicked_timestamp, changes)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, FALSE)
+                     pubkey_mlkem768, pubkey_x25519, kicked_timestamp)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                    ON CONFLICT(unique_id) DO UPDATE SET
                        state = excluded.state,
                        seqno = excluded.seqno,
@@ -289,8 +303,7 @@ namespace {
                        version = excluded.version,
                        pubkey_mlkem768 = excluded.pubkey_mlkem768,
                        pubkey_x25519 = excluded.pubkey_x25519,
-                       kicked_timestamp = excluded.kicked_timestamp,
-                       changes = excluded.changes
+                       kicked_timestamp = excluded.kicked_timestamp
                    WHERE excluded.seqno > seqno
                    RETURNING id)",
                 info.id,
@@ -339,7 +352,7 @@ device::map Devices::devices(
     device::map devs;
 
     std::string query =
-            "SELECT id, unique_id, state, changes, seqno, timestamp, device_type, description,"
+            "SELECT id, unique_id, state, seqno, timestamp, device_type, description,"
             "       version, pubkey_mlkem768, pubkey_x25519"
             " FROM devices WHERE ((1 << state) & ?) != 0";
     if (!only_device.empty())
@@ -352,11 +365,10 @@ device::map Devices::devices(
     else
         bind_oneshot(st, state_mask, only_device);
 
-    for (auto [id, devid, state, changes, seqno, timestamp, type, desc, ver, pk_ml, pk_x] :
+    for (auto [id, devid, state, seqno, timestamp, type, desc, ver, pk_ml, pk_x] :
          sqlite::IterableStatementWrapper<
                  int64_t,
                  sqlite::blob_guts<std::array<std::byte, 32>>,
-                 int,
                  int,
                  int,
                  int64_t,
@@ -851,6 +863,21 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     return out;
 }
 
+// Prebuilt SQL with Processing/State enum values embedded as literals rather than parameters.
+static const std::string KICK_DEVICE_SQL =
+        "UPDATE devices"
+        " SET state = {0}, kicked_timestamp = ?,"
+        "     processing = CASE WHEN state = {1} THEN {2} ELSE processing END,"
+        "     broadcast_needed = CASE WHEN state = {1} THEN 1 ELSE broadcast_needed END"
+        " WHERE unique_id = ?"_format(
+                static_cast<int>(device::State::Unregistered),
+                static_cast<int>(device::State::Registered),
+                static_cast<int>(Processing::Removed));
+
+static const std::string REGISTER_DEVICE_SQL =
+        "UPDATE devices SET processing = {}, broadcast_needed = 1 WHERE id = ?"_format(
+                static_cast<int>(Processing::Registered));
+
 void Devices::receive_device_group_message(std::span<const unsigned char> data) {
     GroupPayload payload;
     try {
@@ -891,16 +918,7 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
             // (we'd have no data to fill the required columns with), so skip it.  Set
             // processing=Removed only if the device was previously Registered.
             assert(info.kicked);
-            c.prepared_exec(
-                    R"(UPDATE devices
-                       SET state = ?, kicked_timestamp = ?,
-                           processing = CASE WHEN state = ? THEN ? ELSE processing END
-                       WHERE unique_id = ?)",
-                    static_cast<int>(device::State::Unregistered),
-                    info.kicked->time_since_epoch().count(),
-                    static_cast<int>(device::State::Registered),
-                    static_cast<int>(Processing::Removed),
-                    id);
+            c.prepared_exec(KICK_DEVICE_SQL, info.kicked->time_since_epoch().count(), id);
             continue;
         }
 
@@ -916,10 +934,7 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
 
         // Mark as newly registered only on a state transition (not for info-only updates).
         if (!was_registered)
-            c.prepared_exec(
-                    "UPDATE devices SET processing = ? WHERE id = ?",
-                    static_cast<int>(Processing::Registered),
-                    *dev_id);
+            c.prepared_exec(REGISTER_DEVICE_SQL, *dev_id);
     }
 
     tx.commit();
@@ -950,15 +965,16 @@ Devices::LinkRequestResult Devices::build_link_request() {
             reinterpret_cast<const std::byte*>(keys.front().mlkem768_pub.data()),
             info.pk_mlkem768.size());
 
-    // Upsert our own device row with the updated seqno, timestamp, and pubkeys.  Mark changes=TRUE
-    // so that other parts of the system know a pending link request is outstanding.
+    // Upsert our own device row with the updated seqno, timestamp, and pubkeys.  The pending link
+    // request is detectable via state=Pending on our own row; needs_push() detects dirty state via
+    // the seqno increment above exceeding pushed_seqno.
     auto c = conn();
     auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
     c.prepared_exec(
             R"(INSERT INTO devices
                 (unique_id, state, seqno, timestamp, device_type, description, version,
-                 pubkey_mlkem768, pubkey_x25519, changes)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                 pubkey_mlkem768, pubkey_x25519)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(unique_id) DO UPDATE SET
                    state = excluded.state,
                    seqno = excluded.seqno,
@@ -967,8 +983,7 @@ Devices::LinkRequestResult Devices::build_link_request() {
                    description = excluded.description,
                    version = excluded.version,
                    pubkey_mlkem768 = excluded.pubkey_mlkem768,
-                   pubkey_x25519 = excluded.pubkey_x25519,
-                   changes = excluded.changes)",
+                   pubkey_x25519 = excluded.pubkey_x25519)",
             self_id,
             static_cast<int>(device::State::Pending),
             info.seqno,
@@ -1357,8 +1372,72 @@ void Devices::parse_device_messages(
 }
 
 void Devices::parse_account_pubkeys(
-        std::span<const std::span<const unsigned char>> /*messages*/, bool /*is_final*/) {
-    log::debug(cat, "parse_account_pubkeys: not yet implemented");
+        std::span<const std::span<const unsigned char>> messages, bool /*is_final*/) {
+    if (messages.empty())
+        return;
+
+    // The x25519 pubkey for signature verification: session_id() is 0x05 || x25519_pub
+    auto x25519_pub = core.globals.session_id().subspan<1>();
+
+    auto c = conn();
+    for (const auto& msg : messages) {
+        try {
+            oxenc::bt_dict_consumer in{msg};
+            auto M = in.require_span<unsigned char, MLKEM768_PUBLICKEYBYTES>("M");
+            auto X = in.require_span<unsigned char, 32>("X");
+            in.require_signature(
+                    "~",
+                    [&x25519_pub](
+                            std::span<const unsigned char> body,
+                            std::span<const unsigned char> sig) {
+                        if (!xed25519::verify(sig, x25519_pub, body))
+                            throw std::runtime_error{
+                                    "Invalid account pubkey message: signature verification failed"};
+                    });
+
+            // Look up the key by indicator (indexed) then verify full pubkeys, and mark published.
+            c.prepared_exec(
+                    "UPDATE device_account_keys SET published = 1"
+                    " WHERE key_indicator = ? AND pubkey_mlkem768 = ? AND pubkey_x25519 = ?",
+                    M.first<2>(),
+                    M,
+                    X);
+        } catch (const std::exception& e) {
+            log::warning(cat, "Ignoring malformed account pubkey message: {}", e.what());
+        }
+    }
+}
+
+static const std::string NEEDS_PUSH_SQL =
+        "SELECT"
+        // device_group: we are registered AND (own seqno dirty OR broadcast needed OR
+        // undistributed account key)
+        " CASE WHEN EXISTS("
+        "   SELECT 1 FROM devices WHERE unique_id = ? AND state = {0}"
+        " ) THEN ("
+        "   (SELECT pushed_seqno IS NULL OR seqno > pushed_seqno"
+        "    FROM devices WHERE unique_id = ?)"
+        "   OR EXISTS(SELECT 1 FROM devices WHERE broadcast_needed)"
+        "   OR EXISTS(SELECT 1 FROM device_account_keys WHERE NOT distributed)"
+        " ) ELSE 0 END,"
+        // account_pubkey: the current active account key has not yet been confirmed on the swarm
+        " EXISTS(SELECT 1 FROM device_account_keys WHERE rotated IS NULL AND NOT published)"_format(
+                static_cast<int>(device::State::Registered));
+
+Devices::NeedsPush Devices::needs_push() {
+    auto c = conn();
+    auto [dg, ap] = c.prepared_get<int, int>(NEEDS_PUSH_SQL, self_id, self_id);
+    return {.device_group = bool(dg), .account_pubkey = bool(ap)};
+}
+
+void Devices::mark_device_group_pushed(int64_t seqno) {
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+    c.prepared_exec(
+            "UPDATE devices SET pushed_seqno = ? WHERE unique_id = ?", seqno, self_id);
+    c.prepared_exec("UPDATE devices SET broadcast_needed = 0");
+    c.prepared_exec("UPDATE device_account_keys SET distributed = 1");
+    tx.commit();
 }
 
 std::optional<std::chrono::system_clock::time_point> Devices::next_account_rotation() {

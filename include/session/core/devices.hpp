@@ -206,10 +206,6 @@ class Devices final : detail::CoreComponent {
     // key first.  If there is no current key at all, this generates one.
     std::vector<DeviceKeys> active_device_keys();
 
-    // Returns true if the device key updates needs to be pushed for other account devices to
-    // receive.  Returns an enum value:
-    // -
-
     struct AccountKeys : XWingKeys {
         std::chrono::sys_seconds created;
         std::optional<std::chrono::sys_seconds> rotated;
@@ -260,6 +256,29 @@ class Devices final : detail::CoreComponent {
     // recipients who only know the account's Session ID (X25519) to verify the keys.
     // Throws if there are no active account keys.
     std::vector<std::byte> build_account_pubkey_message();
+
+    // Flags indicating which messages need to be pushed to the swarm.
+    struct NeedsPush {
+        bool device_group;   ///< True if an updated device group message needs to be pushed
+        bool account_pubkey; ///< True if an updated account pubkey message needs to be pushed
+    };
+
+    // Returns whether a push is currently needed.  Should be called after processing a final swarm
+    // message batch (or at startup) to determine whether outgoing pushes are required.
+    //
+    // device_group is true when this device is registered AND any of the following hold:
+    //   - our own device info has changed since the last confirmed device group push
+    //   - any device has a state transition (registered/removed) that needs broadcasting
+    //   - any account key seed has not yet been distributed via a confirmed push
+    //
+    // account_pubkey is true when the current active account key has not yet been seen confirmed
+    // on the swarm (i.e. neither we nor another device has pushed it and we've received it back).
+    NeedsPush needs_push();
+
+    // Marks the device group message as successfully pushed with the given own-device seqno (which
+    // the caller reads from device_info() before building the push message).  Updates pushed_seqno,
+    // clears broadcast_needed on all device rows, and marks all account key seeds as distributed.
+    void mark_device_group_pushed(int64_t seqno);
 };
 
 }  // namespace session::core

@@ -5,9 +5,10 @@ CREATE TABLE devices (
     unique_id BLOB UNIQUE NOT NULL CHECK(length(unique_id) == 32),
 
     state INTEGER NOT NULL CHECK(state == 0 OR state == 1 OR state == 2), -- registered, pending, unregistered
-    changes INTEGER NOT NULL DEFAULT 0, -- 1 means there are unconfirmed local device info changes
     processing INTEGER,  -- non-null during batch processing: 1=new link request, 2=newly registered, 3=newly removed
     seqno INTEGER NOT NULL DEFAULT 1,
+    pushed_seqno INTEGER,         -- seqno of the last confirmed device group push; NULL = never pushed
+    broadcast_needed INTEGER NOT NULL DEFAULT 0,  -- 1 when a state transition (registered/removed) needs broadcasting
     timestamp INTEGER NOT NULL,
     kicked_timestamp INTEGER,  -- set when the device was kicked from the device group
     device_type TEXT NOT NULL, -- typically a/i/d (Android/iOS/Desktop), but can be anything
@@ -48,7 +49,6 @@ CREATE TABLE device_privkeys (
     id INTEGER PRIMARY KEY NOT NULL,
     created INTEGER NOT NULL, -- unix timestamp
     rotated INTEGER, -- timestamp when a newer key was added, superceding this key
-    pushed INTEGER, -- timestamp when this key was verified as pushed to the device group
     seed BLOB NOT NULL CHECK(length(seed) == 32),
 ) STRICT;
 
@@ -67,6 +67,8 @@ CREATE TABLE device_account_keys (
     id INTEGER PRIMARY KEY NOT NULL,
     created INTEGER NOT NULL,
     rotated INTEGER, -- timestamp when a new key superceded this key
+    distributed INTEGER NOT NULL DEFAULT 0,  -- 1 once this key's seed has been included in a confirmed device group push
+    published INTEGER NOT NULL DEFAULT 0,    -- 1 once this key's pubkeys have been confirmed pushed as the account pubkey message
     seed BLOB UNIQUE NOT NULL CHECK(length(seed) == 32),
     pubkey_mlkem768 BLOB NOT NULL CHECK(length(pubkey_mlkem768) == 1184),
     pubkey_x25519 BLOB NOT NULL CHECK(length(pubkey_x25519) == 32),
