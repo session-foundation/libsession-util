@@ -20,6 +20,7 @@
 
 #include "internal.hpp"
 #include "oxenc/bt_serialize.h"
+#include "session/clock.hpp"
 #include "session/config/base.h"
 #include "session/config/encrypt.hpp"
 #include "session/config/protos.hpp"
@@ -270,7 +271,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
 
             return {true, std::move(result)};
         } else {
-            parts.expiry = std::chrono::system_clock::now() + MULTIPART_MAX_WAIT;
+            parts.expiry = clock_now() + MULTIPART_MAX_WAIT;
             log::debug(
                     cat,
                     "message {} (part {} of {}) stored without completing a multipart set for {}",
@@ -288,7 +289,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
 }
 
 void ConfigBase::_expire_multiparts() {
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     for (auto it = _multiparts.begin(); it != _multiparts.end();) {
         auto& [hash, parts] = *it;
         if (parts.expiry < now)
@@ -299,7 +300,7 @@ void ConfigBase::_expire_multiparts() {
 }
 
 void ConfigBase::_dump_multiparts(oxenc::bt_dict_producer&& multi) const {
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     for (const auto& [fhash, parts] : _multiparts) {
         if (parts.expiry < now)
             continue;
@@ -319,7 +320,7 @@ void ConfigBase::_dump_multiparts(oxenc::bt_dict_producer&& multi) const {
 }
 
 void ConfigBase::_load_multiparts(oxenc::bt_dict_consumer&& multi) {
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     while (!multi.is_finished()) {
         auto [k, pdata] = multi.next_dict_consumer();
         if (k.size() != sizeof(hash_t)) {
@@ -656,7 +657,7 @@ std::unordered_set<std::string> ConfigBase::active_hashes() const {
     // First copy any hashes that make up the currently active config:
     std::unordered_set<std::string> hashes{_curr_hashes};
 
-    auto now = std::chrono::system_clock::now();
+    auto now = clock_now();
     // Add include any pending partial configs that *might* be newer:
     for (const auto& [_, part] : _multiparts)
         if (!part.done && part.expiry > now)

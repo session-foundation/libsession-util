@@ -6,6 +6,7 @@
 #include <chrono>
 #include <list>
 #include <memory>
+#include <session/clock.hpp>
 #include <session/config.hpp>
 #include <session/types.hpp>
 #include <session/util.hpp>
@@ -202,7 +203,7 @@ class ConfigBase : public ConfigSig {
             done = true;
             size = 0;
             parts.clear();
-            expiry = std::chrono::system_clock::now() + lifetime;
+            expiry = clock_now() + lifetime;
         }
     };
 

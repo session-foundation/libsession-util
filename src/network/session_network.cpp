@@ -771,7 +771,10 @@ void Network::_update_network_state(const std::string& body) {
 
             if (new_versions != old_versions)
                 on_network_info_changed(
-                        _network_time_offset.load(), new_versions.hardfork, new_versions.softfork);
+                        std::chrono::duration_cast<std::chrono::milliseconds>(
+                                AdjustedClock::get_offset()),
+                        new_versions.hardfork,
+                        new_versions.softfork);
         }
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to parse network state from response: {}", e.what());
@@ -966,7 +969,7 @@ void Network::_launch_next_clock_out_of_sync_request(
                     std::vector<std::pair<std::string, std::string>> headers,
                     std::optional<std::string> response) {
                 auto end_steady = std::chrono::steady_clock::now();
-                auto end_system = sysclock_now_ms();
+                auto end_system = clock_now_ms();
 
                 // If the resync was cancelled or completed while we were in-flight, do nothing
                 if (!_current_clock_resync_id || *_current_clock_resync_id != request_id) {
@@ -1064,7 +1067,7 @@ void Network::_on_clock_resync_complete(const uint8_t total_requests) {
             median_offset = (middle_values_sum / 2);
         }
 
-        _network_time_offset = median_offset;
+        AdjustedClock::set_offset(median_offset);
         _last_successful_clock_resync = std::chrono::steady_clock::now();
         log::info(
                 cat, "[Request {}] Network offset set to: {}ms", refresh_id, median_offset.count());

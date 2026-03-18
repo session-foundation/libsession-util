@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <iterator>
 #include <memory>
+#include <session/clock.hpp>
 #include <session/config.hpp>
 
 #include "base.hpp"

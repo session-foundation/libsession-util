@@ -13,8 +13,24 @@
 #include <string_view>
 #include <vector>
 
+#include "session/clock.hpp"
 #include "session/types.hpp"
 #include "session/util.hpp"
+
+// RAII helper that saves the current AdjustedClock offset, installs a new one on construction,
+// and restores the prior offset on destruction.
+struct ScopedClockOffset {
+    explicit ScopedClockOffset(session::AdjustedClock::duration new_offset) :
+            _saved{session::AdjustedClock::get_offset()} {
+        session::AdjustedClock::set_offset(new_offset);
+    }
+    ~ScopedClockOffset() { session::AdjustedClock::set_offset(_saved); }
+    ScopedClockOffset(const ScopedClockOffset&) = delete;
+    ScopedClockOffset& operator=(const ScopedClockOffset&) = delete;
+
+  private:
+    session::AdjustedClock::duration _saved;
+};
 
 using namespace std::literals;
 using namespace oxenc::literals;

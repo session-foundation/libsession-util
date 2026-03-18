@@ -3,6 +3,7 @@
 #include <session/pro_backend.h>
 
 #include <chrono>
+#include <session/clock.hpp>
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <span>

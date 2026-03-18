@@ -8,6 +8,7 @@
 
 #include "../session_network_internal.hpp"
 #include "session/blinding.hpp"
+#include "session/clock.hpp"
 #include "session/network/backends/backend_util.hpp"
 #include "session/network/backends/session_file_server.h"
 #include "session/random.hpp"
@@ -316,7 +317,7 @@ Request get_client_version(
 
     // Generate the auth signature
     auto blinded_keys = blind_version_key_pair(to_span(seckey.view()));
-    auto timestamp = epoch_seconds(std::chrono::system_clock::now());
+    auto timestamp = epoch_seconds(clock_now_s());
     auto signature = blind_version_sign(to_span(seckey.view()), platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(DEFAULT_CONFIG.pubkey_hex);
     std::string blinded_pk_hex;

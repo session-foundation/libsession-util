@@ -12,6 +12,7 @@
 #include <variant>
 
 #include "internal.hpp"
+#include "session/clock.hpp"
 #include "session/config/convo_info_volatile.h"
 #include "session/config/error.h"
 #include "session/export.h"
@@ -353,7 +354,7 @@ void ConvoInfoVolatile::set_base(const convo::base& c, DictFieldProxy& info) {
         r = c.last_read;
     else {
         std::chrono::system_clock::time_point last_read{std::chrono::milliseconds{c.last_read}};
-        if (last_read > std::chrono::system_clock::now() - PRUNE_LOW)
+        if (last_read > clock_now() - PRUNE_LOW)
             info["r"] = c.last_read;
     }
 
@@ -371,7 +372,7 @@ static bool is_stale(const C& c, std::chrono::system_clock::time_point cutoff) {
 }
 
 void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
-    const auto cutoff = std::chrono::system_clock::now() - prune;
+    const auto cutoff = clock_now() - prune;
 
     std::vector<std::string> stale;
     for (auto it = begin_1to1(); it != end(); ++it)

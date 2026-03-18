@@ -2,6 +2,7 @@
 #include <session/core.hpp>
 #include <session/network/session_network.hpp>
 #include <session/sqlite.hpp>
+
 #include "utils.hpp"
 
 using namespace session;

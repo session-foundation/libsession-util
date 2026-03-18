@@ -125,9 +125,7 @@ void blake2b_key(Out& out, const Key& key, const T&... args) {
             std::ranges::size(out));
     update_all(st, args...);
     crypto_generichash_blake2b_final(
-            &st,
-            reinterpret_cast<unsigned char*>(std::ranges::data(out)),
-            std::ranges::size(out));
+            &st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), std::ranges::size(out));
 }
 
 /// API: hash/blake2b
@@ -171,9 +169,7 @@ void blake2b_key_pers(
             pers.data());
     update_all(st, args...);
     crypto_generichash_blake2b_final(
-            &st,
-            reinterpret_cast<unsigned char*>(std::ranges::data(out)),
-            std::ranges::size(out));
+            &st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), std::ranges::size(out));
 }
 
 /// API: hash/blake2b_pers

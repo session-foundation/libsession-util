@@ -1,8 +1,8 @@
 #pragma once
 #include <functional>
+#include <session/core/devices.hpp>
 #include <span>
 #include <string_view>
-#include <session/core/devices.hpp>
 
 namespace session::core {
 
@@ -38,7 +38,9 @@ struct callbacks {
     /// - sas -- a span of 21 string_views representing the short authentication string for this
     ///   request.  The first 7 are the standard display; all 21 are available for the extended
     ///   view.  Formatting and joining is left to the caller.
-    std::function<void(int reqid, const device::Info& new_device, std::span<const std::string_view> sas)> device_link_request;
+    std::function<void(
+            int reqid, const device::Info& new_device, std::span<const std::string_view> sas)>
+            device_link_request;
 
     /// Callback that is invoked when a new device has been linked to the account.  If a batch
     /// of messages being processed includes both a device link request *and* an acceptance

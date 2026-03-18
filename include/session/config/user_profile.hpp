@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <optional>
+#include <session/clock.hpp>
 #include <session/config.hpp>
 
 #include "base.hpp"

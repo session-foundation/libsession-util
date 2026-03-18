@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "session/blinding.hpp"
+#include "session/clock.hpp"
 #include "session/hash.hpp"
 #include "session/sodium_array.hpp"
 #include "session/types.hpp"

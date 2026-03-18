@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <map>
 #include <optional>
+#include <session/clock.hpp>
 #include <session/sodium_array.hpp>
 #include <span>
 #include <stdexcept>
@@ -33,7 +34,7 @@ namespace device {
 
     enum class State {
         Registered = 0,  ///< Device is in the account's registered device set
-        Pending = 1,  ///< A device with a pending link request.  This is used for two cases:
+        Pending = 1,     ///< A device with a pending link request.  This is used for two cases:
                       ///< - This device has sent a request to join the account's device group and
                       ///<   is awaiting acceptance by an existing device.
                       ///< - Another device has sent a link request that has been received but not
@@ -226,6 +227,9 @@ class Devices final : detail::CoreComponent {
     static constexpr auto ACCOUNT_KEY_ROTATION_PERIOD = 12h;
     static constexpr auto ACCOUNT_KEY_ROTATION_WINDOW = 2h;
 
+    // How long to keep a pending link request before pruning it as stale.
+    static constexpr auto LINK_REQUEST_MAX_AGE = 10min;
+
     // Rotates the shared account keys used for PFS+PQ message encryption.  Generates a new random
     // seed, stores it in the database, marks the previous active key as rotated, and prunes keys
     // older than ACCOUNT_KEY_RETENTION.  Should be called when account_rotation_due() is true and
@@ -243,7 +247,7 @@ class Devices final : detail::CoreComponent {
 
     bool device_rotation_due() {
         auto t = next_device_rotation();
-        return t && *t <= std::chrono::system_clock::now();
+        return t && *t <= clock_now();
     }
 
     // Return true if the account key is due to be rotated by this device.  Returns nullopt if this
@@ -252,7 +256,7 @@ class Devices final : detail::CoreComponent {
 
     bool account_rotation_due() {
         auto t = next_account_rotation();
-        return t && *t <= std::chrono::system_clock::now();
+        return t && *t <= clock_now();
     }
 
     // Builds the signed account public key message for upload to namespace -21.  The message is a
@@ -264,8 +268,8 @@ class Devices final : detail::CoreComponent {
 
     // Flags indicating which messages need to be pushed to the swarm.
     struct NeedsPush {
-        bool device_group;   ///< True if an updated device group message needs to be pushed
-        bool account_pubkey; ///< True if an updated account pubkey message needs to be pushed
+        bool device_group;    ///< True if an updated device group message needs to be pushed
+        bool account_pubkey;  ///< True if an updated account pubkey message needs to be pushed
     };
 
     // Returns whether a push is currently needed.  Should be called after processing a final swarm

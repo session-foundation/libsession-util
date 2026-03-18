@@ -14,6 +14,7 @@
 #include <oxen/quic/utils.hpp>
 #include <type_traits>
 
+#include "session/clock.hpp"
 #include "session/file.hpp"
 #include "session/hash.hpp"
 #include "session/random.hpp"
@@ -175,7 +176,7 @@ void SnodePool::_load_from_disk() {
             throw empty_file_exception{};
 
         // We want to filter on load so we don't start the app with expired strikes
-        auto threshold = sysclock_now_s() - STRIKE_EXPIRY;
+        auto threshold = clock_now_s() - STRIKE_EXPIRY;
 
         std::string_view buf{
                 reinterpret_cast<const char*>(loaded_strikes_data.data()),
@@ -938,7 +939,7 @@ void SnodePool::record_node_failure(const service_node& node, bool permanent) {
 
 void SnodePool::record_node_failure(const ed25519_pubkey& key, bool permanent) {
     _loop->call([this, key, permanent] {
-        auto now = sysclock_now_s();
+        auto now = clock_now_s();
 
         if (permanent)
             for (int i = 0; i < _config.cache_node_strike_threshold; ++i)
@@ -985,7 +986,7 @@ uint16_t SnodePool::node_strike_count(const ed25519_pubkey& key) {
 
         const auto& stamps = it->second;
 
-        const auto threshold = sysclock_now_s() - STRIKE_EXPIRY;
+        const auto threshold = clock_now_s() - STRIKE_EXPIRY;
 
         uint16_t count = 0;
         for (auto t : stamps)

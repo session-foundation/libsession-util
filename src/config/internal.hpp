@@ -8,6 +8,7 @@
 #include <string_view>
 #include <type_traits>
 
+#include "session/clock.hpp"
 #include "session/config/base.h"
 #include "session/config/base.hpp"
 #include "session/config/error.h"
@@ -171,12 +172,6 @@ std::optional<int64_t> maybe_int(const session::config::dict& d, const char* key
 // Digs into a config `dict` to get out an int64_t; returns 0 if the value is not there or not an
 // int.  Equivalent to `maybe_int(d, key).value_or(0)`.
 int64_t int_or_0(const session::config::dict& d, const char* key);
-
-// Returns std::chrono::system_clock::now(), with the given precision (seconds, if unspecified).
-template <typename Duration = std::chrono::seconds>
-std::chrono::sys_time<Duration> ts_now() {
-    return std::chrono::floor<Duration>(std::chrono::system_clock::now());
-}
 
 // Digs into a config `dict` to get out an int64_t containing unix timestamp seconds, returns it
 // wrapped in a std::chrono::sys_seconds.  Returns nullopt if not there (or not int).

@@ -38,7 +38,7 @@ void UserProfile::set_name(std::string_view new_name) {
     set_nonempty_str(data["n"], new_name);
 
     const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] = ts_now();
+    data[target_timestamp] = clock_now_s();
 }
 void UserProfile::set_name_truncated(std::string new_name) {
     set_name(utf8_truncate(std::move(new_name), contact_info::MAX_NAME_LENGTH));
@@ -75,7 +75,7 @@ void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned
     if (url.empty() || key.size() != 32)
         set_reupload_profile_pic({});
 
-    data["t"] = ts_now();
+    data["t"] = clock_now_s();
 }
 
 void UserProfile::set_profile_pic(profile_pic pic) {
@@ -93,7 +93,7 @@ void UserProfile::set_reupload_profile_pic(
         return;
 
     set_pair_if(!url.empty() && key.size() == 32, data["P"], url, data["Q"], key);
-    data["T"] = ts_now();
+    data["T"] = clock_now_s();
 }
 
 void UserProfile::set_reupload_profile_pic(profile_pic pic) {
@@ -132,7 +132,7 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
         data["M"] = static_cast<int>(*value);
 
     const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-    data[target_timestamp] = ts_now();
+    data[target_timestamp] = clock_now_s();
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
@@ -175,7 +175,7 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
 
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = ts_now();
+        data[target_timestamp] = clock_now_s();
     }
 }
 
@@ -198,7 +198,7 @@ void UserProfile::set_pro_badge(bool enabled) {
     if (dirtied) {
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = ts_now();
+        data[target_timestamp] = clock_now_s();
     }
 }
 
@@ -208,7 +208,7 @@ void UserProfile::set_animated_avatar(bool enabled) {
     if (dirtied) {
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = ts_now();
+        data[target_timestamp] = clock_now_s();
     }
 }
 

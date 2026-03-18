@@ -18,6 +18,7 @@
 #include <unordered_set>
 
 #include "../internal.hpp"
+#include "session/clock.hpp"
 #include "session/config/groups/info.hpp"
 #include "session/config/groups/keys.h"
 #include "session/config/groups/members.hpp"

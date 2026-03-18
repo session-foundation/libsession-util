@@ -1,5 +1,4 @@
 #include <fmt/ranges.h>
-#include <oxen/quic/format.hpp>
 #include <mlkem_native.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
@@ -13,28 +12,30 @@
 #include <sodium/crypto_xof_turboshake256.h>
 #include <sodium/utils.h>
 
-#include <cmath>
 #include <chrono>
+#include <cmath>
 #include <concepts>
 #include <iterator>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <oxen/quic/format.hpp>
 #include <ranges>
 #include <session/config/encrypt.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
 #include <session/core/link_sas.hpp>
 #include <session/hash.hpp>
-#include <session/xed25519.hpp>
 #include <session/random.hpp>
 #include <session/sqlite.hpp>
 #include <session/types.hpp>
 #include <session/util.hpp>
+#include <session/xed25519.hpp>
 #include <stdexcept>
 
 namespace session::core {
 
 using namespace oxen::log::literals;
+using namespace std::literals;
 
 namespace log = oxen::log;
 static auto cat = log::Cat("core.dev");
@@ -111,7 +112,8 @@ std::string format_as(const key_summary& ks) {
 // that fmtlib's ADL-based lookup can find it when logging these types.
 template <std::derived_from<Devices::XWingKeys> Keys>
 std::string format_as(const Keys& k) {
-    return "X25519[{}], MLKEM768[{}]"_format(key_summary{k.x25519_pub}, key_summary{k.mlkem768_pub});
+    return "X25519[{}], MLKEM768[{}]"_format(
+            key_summary{k.x25519_pub}, key_summary{k.mlkem768_pub});
 }
 
 Devices::DeviceKeys Devices::rotate_device_keys() {
@@ -126,7 +128,7 @@ Devices::DeviceKeys Devices::rotate_device_keys() {
     auto c = conn();
     SQLite::Transaction tx{c.sql};
 
-    auto now = epoch_seconds(sysclock_now_s());
+    auto now = epoch_seconds(clock_now_s());
     c.prepared_exec("INSERT INTO device_privkeys (created, seed) VALUES (?, ?)", now, seed);
 
     // Update our own device row with the new pubkeys and bump seqno so the change gets broadcast.
@@ -157,7 +159,7 @@ void Devices::rotate_account_keys() {
     c.prepared_exec(
             "INSERT INTO device_account_keys (created, seed, pubkey_mlkem768, pubkey_x25519)"
             " VALUES (?, ?, ?, ?)",
-            epoch_seconds(sysclock_now_s()),
+            epoch_seconds(clock_now_s()),
             seed,
             keys.mlkem768_pub,
             keys.x25519_pub);
@@ -192,18 +194,17 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys() {
 
     c.prepared_exec(
             "DELETE FROM device_account_keys WHERE rotated < ?",
-            epoch_seconds(sysclock_now_s() - ACCOUNT_KEY_RETENTION));
+            epoch_seconds(clock_now_s() - ACCOUNT_KEY_RETENTION));
 
     std::vector<AccountKeys> keys;
     bool have_active = false;
-    for (auto [id, created, rotated, seed, pk_ml, pk_x] :
-         c.prepared_results<
-                 int64_t,
-                 int64_t,
-                 std::optional<int64_t>,
-                 sqlite::blobn<32>,
-                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
-                 sqlite::blobn<32>>(
+    for (auto [id, created, rotated, seed, pk_ml, pk_x] : c.prepared_results<
+                                                          int64_t,
+                                                          int64_t,
+                                                          std::optional<int64_t>,
+                                                          sqlite::blobn<32>,
+                                                          sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+                                                          sqlite::blobn<32>>(
                  "SELECT id, created, rotated, seed, pubkey_mlkem768, pubkey_x25519"
                  " FROM device_account_keys"
                  " ORDER BY rotated DESC NULLS FIRST, created DESC")) {
@@ -404,13 +405,14 @@ void Devices::update_info(const device::Info& info) {
     auto [current, is_registered] = device_info();
 
     // Early-exit if nothing changed: no seqno bump, no push triggered.
-    // current.seqno == 0 means no row exists yet (default-init sentinel; real rows have seqno >= 1).
+    // current.seqno == 0 means no row exists yet (default-init sentinel; real rows have seqno >=
+    // 1).
     if (current.seqno > 0 && current.same_user_fields(info))
         return;
 
     auto keys = active_device_keys();
     auto& front_key = keys.front();
-    auto now = sysclock_now_s();
+    auto now = clock_now_s();
     auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
 
     auto c = conn();
@@ -518,8 +520,7 @@ namespace {
     }
 
     std::string encode_group_payload(
-            const device::map& devices,
-            std::span<const AccountKeySeed> acc_keys) {
+            const device::map& devices, std::span<const AccountKeySeed> acc_keys) {
         oxenc::bt_dict_producer out;
 
         {
@@ -560,9 +561,10 @@ namespace {
                 e.append("c", k.created);
                 if (k.rotated)
                     e.append("r", *k.rotated);
-                e.append("s",
-                         std::string_view{
-                                 reinterpret_cast<const char*>(k.seed.data()), k.seed.size()});
+                e.append(
+                        "s",
+                        std::string_view{
+                                reinterpret_cast<const char*>(k.seed.data()), k.seed.size()});
             }
         }
 
@@ -980,10 +982,9 @@ void Devices::receive_device_group_message(std::span<const unsigned char> data) 
         }
 
         // Check state before upsert to detect a registration transition.
-        bool was_registered = c.prepared_maybe_get<int>(
-                                       "SELECT state FROM devices WHERE unique_id = ?", id)
-                                      .value_or(-1) ==
-                              static_cast<int>(device::State::Registered);
+        bool was_registered =
+                c.prepared_maybe_get<int>("SELECT state FROM devices WHERE unique_id = ?", id)
+                        .value_or(-1) == static_cast<int>(device::State::Registered);
 
         auto dev_id = upsert_device_info(c, info);
         if (!dev_id)
@@ -1007,8 +1008,7 @@ Devices::LinkRequestResult Devices::build_link_request() {
 
     info.id = self_id;
     info.seqno++;
-    info.timestamp =
-            std::chrono::time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
+    info.timestamp = clock_now_s();
 
     // Always use the current active device keys for the pubkeys in the link request, regardless
     // of what is stored in the DB, as the DB may lag a key rotation.
@@ -1065,9 +1065,9 @@ Devices::LinkRequestResult Devices::build_link_request() {
 
     // Wrap in outer bt-dict: {"": "L", "L": <encrypted>}
     std::vector<std::byte> out(
-            2                                               // Outer "d" ... "e" delimiters
-            + 5                                             // "0:" + "1:L" (message type indicator)
-            + 3 + bt_bytes_encoded(encrypted.size())        // "1:L" + "NNN:...(encrypted blob)..."
+            2                                         // Outer "d" ... "e" delimiters
+            + 5                                       // "0:" + "1:L" (message type indicator)
+            + 3 + bt_bytes_encoded(encrypted.size())  // "1:L" + "NNN:...(encrypted blob)..."
     );
     oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};
     o.append("", "L");
@@ -1295,7 +1295,7 @@ void Devices::receive_link_request(std::span<const unsigned char> data) {
                    received_at = excluded.received_at,
                    sas_seed = excluded.sas_seed)",
             *dev_id,
-            epoch_seconds(sysclock_now_s()),
+            epoch_seconds(clock_now_s()),
             sas_seed);
 
     // Set processing=LinkRequest only if not already set to a higher-priority value by a
@@ -1339,8 +1339,18 @@ void Devices::parse_device_messages(
 
     auto c = conn();
     std::vector<ProcessingItem> items;
-    for (auto [row_id, raw_id, processing_int, state_int, seqno, timestamp, dtype, desc, ver,
-               pk_ml, pk_x, kicked_ts] :
+    for (auto [row_id,
+               raw_id,
+               processing_int,
+               state_int,
+               seqno,
+               timestamp,
+               dtype,
+               desc,
+               ver,
+               pk_ml,
+               pk_x,
+               kicked_ts] :
          c.prepared_results<
                  int64_t,
                  sqlite::blob_guts<std::array<std::byte, 32>>,
@@ -1362,8 +1372,15 @@ void Devices::parse_device_messages(
         item.id = raw_id;
         item.processing = static_cast<Processing>(processing_int);
         item.info = fill_device_info(
-                raw_id, state_int, seqno, timestamp,
-                std::move(dtype), std::move(desc), ver, pk_ml, pk_x);
+                raw_id,
+                state_int,
+                seqno,
+                timestamp,
+                std::move(dtype),
+                std::move(desc),
+                ver,
+                pk_ml,
+                pk_x);
         if (kicked_ts)
             item.info.kicked.emplace(std::chrono::seconds{*kicked_ts});
         load_device_extras(c, row_id, item.info);
@@ -1376,7 +1393,8 @@ void Devices::parse_device_messages(
                 case Processing::LinkRequest:
                     if (auto& f = cb().device_link_request) {
                         auto [lr_id, sas_seed] = c.prepared_get<
-                                int64_t, sqlite::blob_guts<std::array<std::byte, 16>>>(
+                                int64_t,
+                                sqlite::blob_guts<std::array<std::byte, 16>>>(
                                 "SELECT id, sas_seed FROM device_link_requests WHERE device = ?",
                                 item.row_id);
                         f(static_cast<int>(lr_id), item.info, sas_from_seed(sas_seed));
@@ -1425,7 +1443,7 @@ void Devices::parse_device_messages(
     // Prune stale link requests (older than 10 minutes)
     c.prepared_exec(
             "DELETE FROM device_link_requests WHERE received_at < ?",
-            epoch_seconds(sysclock_now_s() - std::chrono::seconds{600}));
+            epoch_seconds(clock_now_s() - LINK_REQUEST_MAX_AGE));
 }
 
 void Devices::parse_account_pubkeys(
@@ -1449,7 +1467,8 @@ void Devices::parse_account_pubkeys(
                             std::span<const unsigned char> sig) {
                         if (!xed25519::verify(sig, x25519_pub, body))
                             throw std::runtime_error{
-                                    "Invalid account pubkey message: signature verification failed"};
+                                    "Invalid account pubkey message: signature verification "
+                                    "failed"};
                     });
 
             // Look up the key by indicator (indexed) then verify full pubkeys, and mark published.
@@ -1490,8 +1509,7 @@ Devices::NeedsPush Devices::needs_push() {
 void Devices::mark_device_group_pushed(int64_t seqno) {
     auto c = conn();
     SQLite::Transaction tx{c.sql};
-    c.prepared_exec(
-            "UPDATE devices SET pushed_seqno = ? WHERE unique_id = ?", seqno, self_id);
+    c.prepared_exec("UPDATE devices SET pushed_seqno = ? WHERE unique_id = ?", seqno, self_id);
     c.prepared_exec("UPDATE devices SET broadcast_needed = 0");
     c.prepared_exec("UPDATE device_account_keys SET distributed = 1");
     tx.commit();
@@ -1503,7 +1521,8 @@ std::optional<std::chrono::system_clock::time_point> Devices::next_account_rotat
 
     if (!c.prepared_maybe_get<int>(
                 "SELECT 1 FROM devices WHERE unique_id = ? AND state = ?",
-                self_id, static_cast<int>(device::State::Registered)))
+                self_id,
+                static_cast<int>(device::State::Registered)))
         return std::nullopt;
 
     int64_t t_created = 0;
@@ -1551,10 +1570,10 @@ std::vector<std::byte> Devices::build_account_pubkey_message() {
     const auto& k = keys.front();
 
     std::vector<std::byte> out(
-            2                                    // outer dict d...e
-            + 3 + bt_bytes_encoded(1184)         // "1:M" + mlkem768_pub
-            + 3 + bt_bytes_encoded(32)           // "1:X" + x25519_pub
-            + 3 + bt_bytes_encoded(64)           // "1:~" + XEd25519 signature
+            2                             // outer dict d...e
+            + 3 + bt_bytes_encoded(1184)  // "1:M" + mlkem768_pub
+            + 3 + bt_bytes_encoded(32)    // "1:X" + x25519_pub
+            + 3 + bt_bytes_encoded(64)    // "1:~" + XEd25519 signature
     );
 
     oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};

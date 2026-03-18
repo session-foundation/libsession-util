@@ -5,6 +5,7 @@
 #include <optional>
 #include <oxen/quic.hpp>
 
+#include "session/clock.hpp"
 #include "session/network/backends/session_file_server.hpp"
 #include "session/network/network_config.hpp"
 #include "session/network/routing/network_router.hpp"
@@ -59,7 +60,9 @@ class Network : public std::enable_shared_from_this<Network> {
     bool has_retrieved_time_offset() const {
         return (_last_successful_clock_resync == std::chrono::steady_clock::time_point{});
     };
-    std::chrono::milliseconds network_time_offset() const { return _network_time_offset; };
+    std::chrono::milliseconds network_time_offset() const {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(AdjustedClock::get_offset());
+    };
     fork_versions fork() const { return _fork_versions.load(); };
     uint16_t hardfork() const { return _fork_versions.load().hardfork; };
     uint16_t softfork() const { return _fork_versions.load().softfork; };
@@ -107,7 +110,6 @@ class Network : public std::enable_shared_from_this<Network> {
 
   private:
     std::atomic<ConnectionStatus> _status{ConnectionStatus::unknown};
-    std::atomic<std::chrono::milliseconds> _network_time_offset{0ms};
     std::atomic<fork_versions> _fork_versions{{0, 0}};
 
     void configure();
