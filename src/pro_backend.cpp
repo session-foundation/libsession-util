@@ -46,6 +46,17 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
         .refund_status_url                  = string8_literal("https://support.apple.com/118224"),
         .update_subscription_url            = string8_literal("https://apps.apple.com/account/subscriptions"),
         .cancel_subscription_url            = string8_literal("https://account.apple.com/account/manage/section/subscriptions"),
+    },
+    /*SESSION_PRO_PAYMENT_PROVIDER_RANGEPROOF*/ {
+        .device                             = string8_literal(""),
+        .store                              = string8_literal(""),
+        .platform                           = string8_literal(""),
+        .platform_account                   = string8_literal(""),
+        .refund_platform_url                = string8_literal(""),
+        .refund_support_url                 = string8_literal(""),
+        .refund_status_url                  = string8_literal(""),
+        .update_subscription_url            = string8_literal(""),
+        .cancel_subscription_url            = string8_literal(""),
     }
 };
 
@@ -155,6 +166,7 @@ std::string AddProPaymentRequest::to_json() const {
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
@@ -738,6 +750,7 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
                 std::chrono::milliseconds(refund_requested_ts));
         switch (item.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
             } break;
 
@@ -890,6 +903,7 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
@@ -1478,6 +1492,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
 
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
 
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
