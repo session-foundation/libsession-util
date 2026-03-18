@@ -107,6 +107,11 @@ namespace device {
                 default: return other_device;
             }
         }
+
+        // Returns true if the user-settable fields (those controlled by update_info()) are equal to
+        // the corresponding fields in `other`.  Does NOT compare id, seqno, timestamp, state, pk_*,
+        // or kicked.  The unknown `extra` fields are included in the comparison.
+        bool same_user_fields(const Info& other) const;
     };
 
     using map = std::map<std::array<std::byte, 32>, Info>;

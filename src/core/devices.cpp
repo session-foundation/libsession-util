@@ -393,6 +393,63 @@ std::pair<device::Info, bool> Devices::device_info() {
     return {device::Info{.id = self_id}, false};
 }
 
+bool device::Info::same_user_fields(const Info& other) const {
+    auto fields = [](const Info& i) {
+        return std::tie(i.type, i.other_device, i.description, i.version, i.extra);
+    };
+    return fields(*this) == fields(other);
+}
+
+void Devices::update_info(const device::Info& info) {
+    auto [current, is_registered] = device_info();
+
+    // Early-exit if nothing changed: no seqno bump, no push triggered.
+    // current.seqno == 0 means no row exists yet (default-init sentinel; real rows have seqno >= 1).
+    if (current.seqno > 0 && current.same_user_fields(info))
+        return;
+
+    auto keys = active_device_keys();
+    auto& front_key = keys.front();
+    auto now = sysclock_now_s();
+    auto ver = info.version[0] * 1000000 + info.version[1] * 1000 + info.version[2];
+
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+
+    auto dev_id = c.prepared_get<int64_t>(
+            R"(INSERT INTO devices
+                (unique_id, state, seqno, timestamp, device_type, description, version,
+                 pubkey_mlkem768, pubkey_x25519)
+               VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(unique_id) DO UPDATE SET
+                   seqno = seqno + 1,
+                   timestamp = excluded.timestamp,
+                   device_type = excluded.device_type,
+                   description = excluded.description,
+                   version = excluded.version
+               RETURNING id)",
+            self_id,
+            static_cast<int>(device::State::Unregistered),
+            now.time_since_epoch().count(),
+            info.encoded_type(),
+            info.description,
+            ver,
+            std::as_bytes(std::span{front_key.mlkem768_pub}),
+            std::as_bytes(std::span{front_key.x25519_pub}));
+
+    c.prepared_exec("DELETE FROM device_unknown WHERE device = ?", dev_id);
+    for (const auto& [key, val] : info.extra) {
+        auto encoded = std::visit([](const auto& v) { return oxenc::bt_serialize(v); }, val);
+        c.prepared_exec(
+                "INSERT INTO device_unknown (device, key, bt_value) VALUES (?, ?, ?)",
+                dev_id,
+                key,
+                to_span<std::byte>(encoded));
+    }
+
+    tx.commit();
+}
+
 namespace {
 
     // Plain-old-data representation of a single account key seed entry as read from or written to
