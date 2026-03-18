@@ -62,6 +62,10 @@ static bool string8_equals(string8 s8, std::string_view str) {
             "item.apple_web_line_order_id: %.*s\n",
             (int)item.apple_web_line_order_id_count,
             item.apple_web_line_order_id);
+    fprintf(stderr,
+            "item.rangeproof_order_id: %.*s\n",
+            (int)item.rangeproof_order_id_count,
+            item.rangeproof_order_id);
 }
 
 [[maybe_unused]] static void dump_pro_revocation(
@@ -648,7 +652,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                 std::string(payment_tx.order_id, payment_tx.order_id_count)}}})}};
             std::string json = j.dump();
 
-            // Valid JSON
+            // Valid Google JSON
             auto result =
                     session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
             {
@@ -689,6 +693,34 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.items[0].google_order_id_count == payment_tx.order_id_count);
                 REQUIRE(std::memcmp(
                                 result.items[0].google_order_id,
+                                payment_tx.order_id,
+                                payment_tx.order_id_count) == 0);
+            }
+
+            // Tweak JSON for Rangeproof
+            j["result"]["items"][0]["payment_provider"] =
+                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF;
+            j["result"]["items"][0].erase("google_payment_token");
+            j["result"]["items"][0].erase("google_order_id");
+            j["result"]["items"][0]["rangeproof_order_id"] =
+                    std::string(payment_tx.order_id, payment_tx.order_id_count);
+            json = j.dump();
+
+            // Valid Rangeproof JSON
+            auto result_rangeproof =
+                    session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
+            {
+                scope_exit result_free{[&]() {
+                    session_pro_backend_get_pro_details_response_free(&result_rangeproof);
+                }};
+                for (size_t index = 0; index < result.header.errors_count; index++)
+                    INFO(result_rangeproof.header.errors[index].data);
+
+                // Only check what we expect to be different
+                REQUIRE(result_rangeproof.items[0].rangeproof_order_id_count ==
+                        payment_tx.payment_id_count);
+                REQUIRE(std::memcmp(
+                                result_rangeproof.items[0].rangeproof_order_id,
                                 payment_tx.order_id,
                                 payment_tx.order_id_count) == 0);
             }

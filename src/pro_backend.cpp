@@ -165,8 +165,8 @@ std::string AddProPaymentRequest::to_json() const {
     j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {assert(false && "Unimplemented");} break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
@@ -750,10 +750,8 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
                 std::chrono::milliseconds(refund_requested_ts));
         switch (item.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
             } break;
-
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
                 item.google_payment_token =
                         json_require<std::string>(obj, "google_payment_token", result.errors);
@@ -777,6 +775,12 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
                        sizeof(((session_pro_backend_pro_payment_item*)0)->apple_tx_id));
                 assert(item.apple_web_line_order_id.size() <
                        sizeof(((session_pro_backend_pro_payment_item*)0)->apple_web_line_order_id));
+            } break;
+    case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
+item.rangeproof_order_id =
+                        json_require<std::string>(obj, "rangeproof_order_id", result.errors);
+assert(item.rangeproof_order_id.size() <
+                       sizeof(((session_pro_backend_pro_payment_item*)0)->rangeproof_order_id));
             } break;
         }
 
@@ -1492,9 +1496,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
 
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
-
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
                 dest.google_payment_token_count = snprintf_clamped(
                         dest.google_payment_token,
@@ -1518,6 +1520,14 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
                         sizeof(dest.apple_web_line_order_id),
                         src.apple_web_line_order_id.data());
             } break;
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
+                dest.rangeproof_order_id_count = snprintf_clamped(
+                        dest.rangeproof_order_id,
+                        sizeof(dest.rangeproof_order_id),
+                        src.rangeproof_order_id.data());
+
+            } break;
+
         }
     }
 

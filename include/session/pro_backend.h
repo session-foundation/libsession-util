@@ -243,6 +243,8 @@ struct session_pro_backend_pro_payment_item {
     size_t apple_tx_id_count;
     char apple_web_line_order_id[128];
     size_t apple_web_line_order_id_count;
+    char rangeproof_order_id[128];
+    size_t rangeproof_order_id_count;
 };
 
 typedef struct session_pro_backend_get_pro_details_response
