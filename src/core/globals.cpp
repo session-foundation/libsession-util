@@ -31,7 +31,7 @@ std::optional<std::vector<std::byte>> Globals::get_blob(std::string_view key) {
     auto c = conn();
     auto st = c.prepared_bind(GET_ONE, key, "blob");
     if (st->executeStep()) {
-        auto data = get<sqlite::blob>(st);
+        auto data = sqlite::get<sqlite::blob>(st);
         result.emplace().reserve(data.size());
         result->assign(data.begin(), data.end());
     }
@@ -42,14 +42,14 @@ std::optional<session::secure_buffer> Globals::get_blob_secure(std::string_view 
     auto c = conn();
     auto st = c.prepared_bind(GET_ONE, key, "blob");
     if (st->executeStep())
-        result.emplace(get<sqlite::blob>(st));
+        result.emplace(sqlite::get<sqlite::blob>(st));
     return result;
 }
 bool Globals::get_blob_to(std::string_view key, std::span<std::byte> to) {
     auto c = conn();
     auto st = c.prepared_bind(GET_ONE, key, "blob");
     if (st->executeStep()) {
-        if (auto data = get<sqlite::blob>(st); data.size() == to.size()) {
+        if (auto data = sqlite::get<sqlite::blob>(st); data.size() == to.size()) {
             std::memcpy(to.data(), data.data(), to.size());
             return true;
         }

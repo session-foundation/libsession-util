@@ -2,7 +2,7 @@
 -- Table storing all the device group info
 CREATE TABLE devices (
     id INTEGER PRIMARY KEY NOT NULL,
-    unique_id device_id BLOB UNIQUE NOT NULL CHECK(length(id) == 32),
+    unique_id BLOB UNIQUE NOT NULL CHECK(length(unique_id) == 32),
 
     state INTEGER NOT NULL CHECK(state == 0 OR state == 1 OR state == 2), -- registered, pending, unregistered
     changes INTEGER NOT NULL DEFAULT 0, -- 1 means there are unconfirmed local device info changes

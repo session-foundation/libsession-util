@@ -45,12 +45,16 @@ if(ENABLE_NETWORKING)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_onion_request_router.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_snode_pool.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_core_network.cpp)
 endif()
 
 add_library(test_libs INTERFACE)
 
 target_link_libraries(test_libs INTERFACE
     libsession::config
+    libsession::core
+    libsession::crypto
+    session::SQLite
     sessiondep::libsodium
     nlohmann_json::nlohmann_json
     oxen::logging)

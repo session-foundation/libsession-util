@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <session/config/namespaces.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
@@ -120,6 +121,10 @@ namespace session::pro_backend {
 struct ProRevocationItem;
 };  // namespace session::pro_backend
 
+namespace session::network {
+class Network;
+}
+
 namespace session::core {
 
 namespace quic = oxen::quic;
@@ -135,6 +140,8 @@ class Core {
         void operator()(quic::Loop*) const;
     };
     std::unique_ptr<quic::Loop, LoopDeleter> _loop;
+
+    std::shared_ptr<network::Network> _network;
 
     sqlite::Database db;
     friend class detail::CoreComponent;
@@ -160,6 +167,12 @@ class Core {
             callbacks{std::move(callbacks)}, db{std::move(db_path), opts...} {
         init();
     }
+
+    /// Set an optional network interface that can be used to make network requests to swarm members
+    void set_network(std::shared_ptr<network::Network> network) { _network = std::move(network); }
+
+    /// Returns the optional network interface, if set.
+    const std::shared_ptr<network::Network>& network() const { return _network; }
 
     // Global value storage.  This are used by some components, but can also be used by the
     // application to persist settings.
