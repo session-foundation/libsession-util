@@ -20,11 +20,12 @@ enum {
 };
 
 /// Store front that a Session Pro payment came from. Must match:
-///   https://github.com/Doy-lee/session-pro-backend/blob/3a1bdf2bfdc83487280e9b1d9a40aac8fd168dd6/base.py#L14
+///   https://github.com/session-foundation/session-pro-backend/blob/8ec0aacca2e5975407df1b60f5346477e17de44d/base.py#L78
 typedef enum SESSION_PRO_BACKEND_PAYMENT_PROVIDER {
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL,
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE,
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE,
+    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF,
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT,
 } SESSION_PRO_BACKEND_PAYMENT_PROVIDER;
 
@@ -242,6 +243,8 @@ struct session_pro_backend_pro_payment_item {
     size_t apple_tx_id_count;
     char apple_web_line_order_id[128];
     size_t apple_web_line_order_id_count;
+    char rangeproof_order_id[128];
+    size_t rangeproof_order_id_count;
 };
 
 typedef struct session_pro_backend_get_pro_details_response

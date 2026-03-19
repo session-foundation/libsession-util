@@ -46,6 +46,17 @@ const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_
         .refund_status_url                  = string8_literal("https://support.apple.com/118224"),
         .update_subscription_url            = string8_literal("https://apps.apple.com/account/subscriptions"),
         .cancel_subscription_url            = string8_literal("https://account.apple.com/account/manage/section/subscriptions"),
+    },
+    /*SESSION_PRO_PAYMENT_PROVIDER_RANGEPROOF*/ {
+        .device                             = string8_literal(""),
+        .store                              = string8_literal(""),
+        .platform                           = string8_literal(""),
+        .platform_account                   = string8_literal(""),
+        .refund_platform_url                = string8_literal(""),
+        .refund_support_url                 = string8_literal(""),
+        .refund_status_url                  = string8_literal(""),
+        .update_subscription_url            = string8_literal(""),
+        .cancel_subscription_url            = string8_literal(""),
     }
 };
 
@@ -156,6 +167,7 @@ std::string AddProPaymentRequest::to_json() const {
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
             j["payment_tx"]["google_order_id"] = payment_tx.order_id;
@@ -740,7 +752,6 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
             } break;
-
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
                 item.google_payment_token =
                         json_require<std::string>(obj, "google_payment_token", result.errors);
@@ -764,6 +775,12 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
                        sizeof(((session_pro_backend_pro_payment_item*)0)->apple_tx_id));
                 assert(item.apple_web_line_order_id.size() <
                        sizeof(((session_pro_backend_pro_payment_item*)0)->apple_web_line_order_id));
+            } break;
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
+                item.rangeproof_order_id =
+                          json_require<std::string>(obj, "rangeproof_order_id", result.errors);
+                assert(item.rangeproof_order_id.size() <
+                        sizeof(((session_pro_backend_pro_payment_item*)0)->rangeproof_order_id));
             } break;
         }
 
@@ -891,6 +908,7 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
             j["payment_tx"]["google_order_id"] = payment_tx.order_id;
@@ -1479,7 +1497,6 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
-
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
                 dest.google_payment_token_count = snprintf_clamped(
                         dest.google_payment_token,
@@ -1503,6 +1520,14 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
                         sizeof(dest.apple_web_line_order_id),
                         src.apple_web_line_order_id.data());
             } break;
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
+                dest.rangeproof_order_id_count = snprintf_clamped(
+                        dest.rangeproof_order_id,
+                        sizeof(dest.rangeproof_order_id),
+                        src.rangeproof_order_id.data());
+
+            } break;
+
         }
     }
 

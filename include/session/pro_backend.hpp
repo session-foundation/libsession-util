@@ -486,6 +486,10 @@ struct ProPaymentItem {
     /// When payment provider is set to iOS App Store, this is the platform-specific web line order
     /// ID. This information should be considered as confidential and stored appropriately.
     std::string apple_web_line_order_id;
+
+    /// When payment provider is set to Rangeproof, this is the platform-specific order ID.
+    /// This information should be considered as confidential and stored appropriately.
+    std::string rangeproof_order_id;
 };
 
 struct GetProDetailsResponse : public ResponseHeader {
