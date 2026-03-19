@@ -165,7 +165,7 @@ std::string AddProPaymentRequest::to_json() const {
     j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {assert(false && "Unimplemented");} break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
@@ -776,11 +776,11 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
                 assert(item.apple_web_line_order_id.size() <
                        sizeof(((session_pro_backend_pro_payment_item*)0)->apple_web_line_order_id));
             } break;
-    case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
-item.rangeproof_order_id =
-                        json_require<std::string>(obj, "rangeproof_order_id", result.errors);
-assert(item.rangeproof_order_id.size() <
-                       sizeof(((session_pro_backend_pro_payment_item*)0)->rangeproof_order_id));
+            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
+                item.rangeproof_order_id =
+                          json_require<std::string>(obj, "rangeproof_order_id", result.errors);
+                assert(item.rangeproof_order_id.size() <
+                        sizeof(((session_pro_backend_pro_payment_item*)0)->rangeproof_order_id));
             } break;
         }
 
@@ -907,7 +907,7 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: [[fallthrough]];
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;

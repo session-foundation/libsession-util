@@ -20,7 +20,7 @@ enum {
 };
 
 /// Store front that a Session Pro payment came from. Must match:
-///   https://github.com/Doy-lee/session-pro-backend/blob/3a1bdf2bfdc83487280e9b1d9a40aac8fd168dd6/base.py#L14
+///   https://github.com/session-foundation/session-pro-backend/blob/8ec0aacca2e5975407df1b60f5346477e17de44d/base.py#L78
 typedef enum SESSION_PRO_BACKEND_PAYMENT_PROVIDER {
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL,
     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE,

@@ -718,7 +718,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
                 // Only check what we expect to be different
                 REQUIRE(result_rangeproof.items[0].rangeproof_order_id_count ==
-                        payment_tx.payment_id_count);
+                        payment_tx.order_id_count);
                 REQUIRE(std::memcmp(
                                 result_rangeproof.items[0].rangeproof_order_id,
                                 payment_tx.order_id,
