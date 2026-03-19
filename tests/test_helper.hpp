@@ -5,10 +5,8 @@
 namespace session {
 
 class TestHelper {
-public:
-    static void poll(core::Core& core) {
-        core._poll();
-    }
+  public:
+    static void poll(core::Core& core) { core._poll(); }
 };
 
-} // namespace session
+}  // namespace session

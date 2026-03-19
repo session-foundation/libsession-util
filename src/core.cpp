@@ -1,5 +1,7 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
+#include <oxenc/base64.h>
+#include <oxenc/hex.h>
 #include <sodium/core.h>
 #include <sodium/crypto_sign_ed25519.h>
 
@@ -7,8 +9,6 @@
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
 #include <oxen/quic/loop.hpp>
-#include <oxenc/base64.h>
-#include <oxenc/hex.h>
 #include <session/core.hpp>
 #include <session/core/schema/schema_registry.hpp>
 #include <session/network/session_network.hpp>
@@ -111,22 +111,22 @@ void Core::_poll() {
     };
 
     net->get_swarm(globals.pubkey_x25519(), false, [this, net, req_body](auto, auto swarm) {
-            if (swarm.empty())
-                return;
+        if (swarm.empty())
+            return;
 
-            auto body_str = req_body.dump();
-            net->send_request(
-                    network::Request{
-                            swarm.front(),
-                            "storage_rpc",
-                            to_vector<unsigned char>(body_str),
-                            network::RequestCategory::standard_small,
-                            20s},
-                    [this](bool success,
-                           bool /*timeout*/,
-                           int16_t /*status_code*/,
-                           std::vector<std::pair<std::string, std::string>> /*headers*/,
-                           std::optional<std::string> body) {
+        auto body_str = req_body.dump();
+        net->send_request(
+                network::Request{
+                        swarm.front(),
+                        "storage_rpc",
+                        to_vector<unsigned char>(body_str),
+                        network::RequestCategory::standard_small,
+                        20s},
+                [this](bool success,
+                       bool /*timeout*/,
+                       int16_t /*status_code*/,
+                       std::vector<std::pair<std::string, std::string>> /*headers*/,
+                       std::optional<std::string> body) {
                     if (!success || !body)
                         return;
 
@@ -154,7 +154,9 @@ void Core::_poll() {
                                 auto& decoded = messages_data.emplace_back();
                                 decoded.reserve(oxenc::from_base64_size(b64_data.size()));
                                 oxenc::from_base64(
-                                        b64_data.begin(), b64_data.end(), std::back_inserter(decoded));
+                                        b64_data.begin(),
+                                        b64_data.end(),
+                                        std::back_inserter(decoded));
 
                                 if (msg.contains("hash") && msg["hash"].is_string())
                                     newest_hash = msg["hash"].get<std::string>();
@@ -163,9 +165,12 @@ void Core::_poll() {
                             if (!messages_data.empty()) {
                                 if (!newest_hash.empty())
                                     conn.prepared_exec(
-                                            "INSERT INTO namespace_sync (namespace, last_hash) VALUES (?, ?) "
-                                            "ON CONFLICT(namespace) DO UPDATE SET last_hash = excluded.last_hash",
-                                            ns_val, newest_hash);
+                                            R"(
+INSERT INTO namespace_sync (namespace, last_hash) VALUES (?, ?)
+ON CONFLICT(namespace) DO UPDATE SET last_hash = excluded.last_hash
+)",
+                                            ns_val,
+                                            newest_hash);
                                 receive_messages(to_view_vector(messages_data), ns, true);
                             }
                         }
@@ -173,7 +178,7 @@ void Core::_poll() {
                         log::warning(cat, "Failed to parse poll response: {}", e.what());
                     }
                 });
-        });
+    });
 }
 
 void Core::receive_messages(

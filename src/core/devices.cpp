@@ -561,10 +561,7 @@ namespace {
                 e.append("c", k.created);
                 if (k.rotated)
                     e.append("r", *k.rotated);
-                e.append(
-                        "s",
-                        std::string_view{
-                                reinterpret_cast<const char*>(k.seed.data()), k.seed.size()});
+                e.append("s", k.seed);
             }
         }
 
@@ -575,10 +572,7 @@ namespace {
             std::span<const std::byte, 32> device_id, const device::Info& info) {
         oxenc::bt_dict_producer out;
         // "I" (device id) sorts before "i" (info dict)
-        out.append(
-                "I",
-                std::string_view{
-                        reinterpret_cast<const char*>(device_id.data()), device_id.size()});
+        out.append("I", device_id);
         encode_device_info(out.append_dict("i"), info);
         return std::move(out).str();
     }
@@ -1250,9 +1244,9 @@ void Devices::receive_link_request(std::span<const unsigned char> data) {
 
         // Skip any unknown keys between "I" and "i"
         oxenc::bt_dict extra_outer;
-        while (!pt.is_finished() && std::string_view{pt.key()} < "i")
+        while (!pt.is_finished() && pt.key() < "i")
             consume_extra(pt, extra_outer);
-        if (pt.is_finished() || std::string_view{pt.key()} != "i")
+        if (pt.is_finished() || pt.key() != "i")
             throw std::runtime_error{"missing 'i' device info dict"};
         decode_one(info, pt.consume_dict_consumer(), device::State::Pending);
     } catch (const std::exception& e) {

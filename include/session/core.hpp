@@ -139,7 +139,7 @@ namespace detail {
 }
 
 class Core {
-    friend class session::TestHelper; // for unit tests
+    friend class session::TestHelper;  // for unit tests
 
     // Constructed first (in init()), destroyed last: must outlive all components that use it.
     // Custom deleter allows quic::Loop to remain an incomplete type in this header.

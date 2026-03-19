@@ -134,12 +134,10 @@ void Globals::init() {
             _pubkey_ed25519.data(),
             reinterpret_cast<unsigned char*>(rw.buf.data()),
             reinterpret_cast<unsigned char*>(seed.data()));
-    if (0 !=
-        crypto_sign_ed25519_pk_to_curve25519(_pubkey_x25519.data(), _pubkey_ed25519.data()))
+    if (0 != crypto_sign_ed25519_pk_to_curve25519(_pubkey_x25519.data(), _pubkey_ed25519.data()))
         // This *should* be impossible when starting from a seed because that would mean the seed
         // generation produced an invalid Ed pubkey!
-        log::critical(
-                cat, "Failed to convert seed-extracted Ed25519 pubkey to X25519 session ID!");
+        log::critical(cat, "Failed to convert seed-extracted Ed25519 pubkey to X25519 session ID!");
 
     _session_id[0] = 0x05;
     std::copy(_pubkey_x25519.begin(), _pubkey_x25519.end(), _session_id.data() + 1);
