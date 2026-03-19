@@ -166,8 +166,8 @@ std::string AddProPaymentRequest::to_json() const {
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
             j["payment_tx"]["google_order_id"] = payment_tx.order_id;
@@ -907,8 +907,8 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
             j["payment_tx"]["google_order_id"] = payment_tx.order_id;
