@@ -39,7 +39,7 @@ struct callbacks {
     ///   request.  The first 7 are the standard display; all 21 are available for the extended
     ///   view.  Formatting and joining is left to the caller.
     std::function<void(
-            int reqid, const device::Info& new_device, std::span<const std::string_view> sas)>
+            int reqid, const device::Info& new_device, std::span<const std::string_view, 21> sas)>
             device_link_request;
 
     /// Callback that is invoked when a new device has been linked to the account.  If a batch

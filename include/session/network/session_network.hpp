@@ -87,7 +87,7 @@ class Network : public std::enable_shared_from_this<Network> {
     /// retrieving the swarm.
     /// - 'callback' - [in] callback to be called with the retrieved swarm (in the case of an error
     /// the callback will be called with an empty list).
-    void get_swarm(
+    virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
             bool ignore_strike_count,
             std::function<void(swarm_id_t swarm_id, std::vector<service_node> swarm)> callback);
@@ -104,7 +104,7 @@ class Network : public std::enable_shared_from_this<Network> {
     void get_random_nodes(
             uint16_t count, std::function<void(std::vector<service_node> nodes)> callback);
 
-    void send_request(Request request, network_response_callback_t callback);
+    virtual void send_request(Request request, network_response_callback_t callback);
     void upload(UploadRequest request);
     void download(DownloadRequest request);
 

@@ -115,6 +115,7 @@
 
 namespace oxen::quic {
 class Loop;
+struct Ticker;
 }  // namespace oxen::quic
 
 namespace session::pro_backend {
@@ -165,6 +166,11 @@ class Core {
     // migrations, and then calls init() on each sub-component.
     void init();
 
+    // Polling-related members and methods
+    std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
+    void _update_polling();
+    void _poll();
+
   public:
     // Constructor taking a struct of callbacks to invoke on various events, and any number of
     // session::SQLite database options to open the core database.
@@ -175,7 +181,7 @@ class Core {
     }
 
     /// Set an optional network interface that can be used to make network requests to swarm members
-    void set_network(std::shared_ptr<network::Network> network) { _network = std::move(network); }
+    void set_network(std::shared_ptr<network::Network> network);
 
     /// Returns the optional network interface, if set.
     const std::shared_ptr<network::Network>& network() const { return _network; }

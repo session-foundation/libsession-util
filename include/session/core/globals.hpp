@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <session/network/key_types.hpp>
 #include <session/secure_buffer.hpp>
 #include <string>
 #include <variant>
@@ -37,7 +38,8 @@ class Globals final : detail::CoreComponent {
     // Read-only access is available via the account_seed() method, or via the `seed()`
     // CoreComponent base class method from other components.
     session::secure_buffer _account_seed;
-    std::array<unsigned char, 32> _pubkey_ed25519;
+    network::ed25519_pubkey _pubkey_ed25519;
+    network::x25519_pubkey _pubkey_x25519;
     std::array<unsigned char, 33> _session_id;  // AKA pubkey_x25519 with a 0x05 byte prefix
 
     void init() override;
@@ -74,7 +76,8 @@ class Globals final : detail::CoreComponent {
     session::secure_buffer::r_accessor account_seed() { return _account_seed.access(); }
     // These are computed from the account_seed during construction:
     std::span<const unsigned char, 33> session_id() { return _session_id; }
-    std::span<const unsigned char, 32> pubkey_ed25519() { return _pubkey_ed25519; }
+    const network::ed25519_pubkey& pubkey_ed25519() const { return _pubkey_ed25519; }
+    const network::x25519_pubkey& pubkey_x25519() const { return _pubkey_x25519; }
 };
 
 }  // namespace session::core
