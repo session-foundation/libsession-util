@@ -13,6 +13,7 @@
 #include <session/core/schema/schema_registry.hpp>
 #include <session/network/session_network.hpp>
 #include <session/network/session_network_types.hpp>
+#include <session/clock.hpp>
 #include <session/util.hpp>
 #include <unordered_set>
 
@@ -81,7 +82,7 @@ void Core::_poll() {
             last_hashes[std::to_string(ns_val)] = *last_hash;
     }
 
-    auto now_ms = epoch_ms(sysclock_now_ms());
+    auto now_ms = epoch_ms(clock_now_ms());
     auto session_id = oxenc::to_hex(globals.session_id());
 
     nlohmann::json params = {
