@@ -49,7 +49,7 @@ CREATE TABLE device_privkeys (
     id INTEGER PRIMARY KEY NOT NULL,
     created INTEGER NOT NULL, -- unix timestamp
     rotated INTEGER, -- timestamp when a newer key was added, superceding this key
-    seed BLOB NOT NULL CHECK(length(seed) == 32),
+    seed BLOB NOT NULL CHECK(length(seed) == 32)
 ) STRICT;
 
 -- This trigger handles key rotation: whenever we insert a new key, any existing keys are

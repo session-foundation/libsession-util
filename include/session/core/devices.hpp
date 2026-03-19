@@ -17,6 +17,10 @@
 
 #include "component.hpp"
 
+namespace session {
+class TestHelper;
+}  // namespace session
+
 namespace session::core {
 
 using namespace std::literals;
@@ -126,6 +130,7 @@ class Devices final : detail::CoreComponent {
   public:
   private:
     friend class Core;
+    friend class session::TestHelper;
     explicit Devices(Core& c) : detail::CoreComponent{c} {}
 
     void init() override;

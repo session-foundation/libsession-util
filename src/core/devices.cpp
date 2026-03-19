@@ -77,7 +77,7 @@ static Keys keys_from_seed(std::span<const std::byte, 32> seed) {
     crypto_xof_turboshake256_update(
             &st, reinterpret_cast<const unsigned char*>(seed.data()), seed.size());
     crypto_xof_turboshake256_squeeze(&st, x_sec.data(), x_sec.size());
-    crypto_scalarmult_curve25519_base(x_pub.data(), x_pub.data());
+    crypto_scalarmult_curve25519_base(x_pub.data(), x_sec.data());
 
     static_assert(MLKEM768_PUBLICKEYBYTES == sizeof(ml_pub));
     static_assert(MLKEM768_SECRETKEYBYTES == sizeof(ml_sec));
@@ -170,13 +170,14 @@ void Devices::rotate_account_keys() {
 std::vector<Devices::DeviceKeys> Devices::active_device_keys() {
     std::vector<DeviceKeys> keys;
     auto c = conn();
-    SQLite::Transaction tx{c.sql};
     bool have_active = false;
-    for (auto [seed, active] : c.prepared_results<sqlite::blobn<32>, int>(
-                 "SELECT seed, rotated IS NULL FROM device_privkeys"
+    for (auto [seed, rotated] : c.prepared_results<sqlite::blobn<32>, std::optional<int64_t>>(
+                 "SELECT seed, rotated FROM device_privkeys"
                  " ORDER BY rotated DESC NULLS FIRST, created DESC")) {
-        keys.push_back(keys_from_seed<DeviceKeys>(seed));
-        if (active)
+        auto& k = keys.emplace_back(keys_from_seed<DeviceKeys>(seed));
+        if (rotated)
+            k.rotated.emplace(std::chrono::seconds{*rotated});
+        else
             have_active = true;
     }
 
@@ -214,8 +215,8 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys() {
             k.rotated.emplace(std::chrono::seconds{*rotated});
         if (!rotated)
             have_active = true;
-        if (0 != std::memcmp(k.mlkem768_pub.data(), pk_ml.data(), pk_ml.size()) ||
-            0 != std::memcmp(k.x25519_pub.data(), pk_x.data(), pk_x.size())) {
+        if (std::memcmp(k.mlkem768_pub.data(), pk_ml.data(), pk_ml.size()) != 0 ||
+            std::memcmp(k.x25519_pub.data(), pk_x.data(), pk_x.size()) != 0) {
             log::warning(
                     cat,
                     "device_account_keys row with id={} ignored: row contains invalid precomputed "

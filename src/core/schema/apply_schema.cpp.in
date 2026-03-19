@@ -6,7 +6,7 @@ namespace session::core { class Core; }
 namespace session::core::schema {
 
 void @FUNC_NAME@(session::sqlite::Connection& conn, Core&) {
-    session::sqlite::exec_query(conn.sql, R"_SQL_DELIM_(
+    conn.sql.exec(R"_SQL_DELIM_(
 @SCHEMA_SQL@
 )_SQL_DELIM_");
 }
