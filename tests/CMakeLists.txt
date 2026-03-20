@@ -27,6 +27,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_hash.cpp
     #test_logging.cpp  # Handled separately, see below
     test_multi_encrypt.cpp
+    test_mnemonics.cpp
     test_proto.cpp
     test_pro_backend.cpp
     test_random.cpp

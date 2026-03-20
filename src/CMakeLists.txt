@@ -110,6 +110,7 @@ add_libsession_util_library(core
     core/pro.cpp
 )
 add_subdirectory(core/schema)
+add_subdirectory(mnemonics)
 
 target_link_libraries(
     core
