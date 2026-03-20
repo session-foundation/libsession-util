@@ -1,9 +1,152 @@
 #include <catch2/catch_test_macros.hpp>
 #include <random>
 #include <session/mnemonics.hpp>
+#include <string_view>
 #include <vector>
 
+#include "utils.hpp"
+
 using namespace session::mnemonics;
+
+// Test vectors: SHA-512("libsession-util mnemonic test vector") encoded as 48 words per language.
+// These pin the exact word list contents and ordering; if any word list changes this test fails.
+TEST_CASE("Mnemonic word list test vectors", "[mnemonics]") {
+    // seed = SHA-512("libsession-util mnemonic test vector")
+    auto seed = "0dd5d9bc3d68c25a396f4aacd922a4d620a19cf3c9054cb825dd8a2c5420f4f3"
+                "ca314c582ffef5388df36e2546cc9103dd1776a634f676e1e631289b8d280b2e"_hex_b;
+
+    // clang-format off
+    const std::pair<std::string_view, std::array<std::string_view, 48>> expected[] = {
+        {"English", {
+            "threaten", "efficient", "wives",    "skirting", "repent",   "ashtray",
+            "rural",    "ammo",      "reunion",  "yoyo",     "already",  "tucks",
+            "attire",   "waxing",    "uphill",   "template", "ghetto",   "anxiety",
+            "utensils", "newt",      "safety",   "paper",    "quote",    "pebbles",
+            "album",    "gnaw",      "puppy",    "tidy",     "foxes",    "menu",
+            "evenings", "spying",    "wallets",  "plotting", "fuselage", "geometry",
+            "toilet",   "cylinder",  "swagger",  "eels",     "when",     "tether",
+            "cowl",     "saga",      "gossip",   "vats",     "bias",     "federal",
+        }},
+        {"Chinese (simplified)", {
+            "忆", "众", "瓷", "坡", "残", "合", "麻", "度", "综", "淀", "得", "炭",
+            "四", "弃", "隆", "违", "亚", "物", "博", "娘", "缓", "薄", "纤", "暗",
+            "方", "减", "爷", "浆", "官", "乐", "称", "阀", "蜡", "予", "谈", "落",
+            "罚", "志", "蓝", "音", "浅", "森", "百", "净", "波", "灌", "无", "格",
+        }},
+        {"Dutch", {
+            "tray",      "erna",       "zetbaas",    "spijgat",   "rits",      "bedwelmd",
+            "salade",    "arubaan",    "rodijk",     "zottebol",  "aorta",     "vanmiddag",
+            "belboei",   "worp",       "voip",       "tosti",     "glaasje",   "auping",
+            "waas",      "neuzelaar",  "saus",       "pacht",     "ramselaar", "pauze",
+            "amnestie",  "goeierd",    "puzzelaar",  "treur",     "gegraaid",  "mantel",
+            "feilbaar",  "tabak",      "witmaker",   "plausibel", "gemiddeld", "giepmans",
+            "tyfoon",    "derf",       "ticket",     "ermitage",  "zalig",     "trabant",
+            "danenberg", "scampi",     "groosman",   "warklomp",  "bolvormig", "formule",
+        }},
+        {"Esperanto", {
+            "sizifa",    "ebena",    "viskoza",      "rapida",   "optimisto",   "anjono",
+            "pezoforto", "alfabeto", "orfino",       "zeto",     "akselo",      "stomako",
+            "aplikado",  "vazaro",   "timida",       "sidejo",   "fermi",       "alzaca",
+            "tosti",     "latitudo", "pilkoludo",    "moskito",  "ofsajdo",     "muro",
+            "akademio",  "fimensa",  "oblikva",      "sklavo",   "eskapi",      "kisi",
+            "elektro",   "rojo",     "vampiro",      "neulo",    "etullernejo", "feino",
+            "sodakvo",   "cigaredo", "safario",      "duzo",     "veziko",      "simpla",
+            "cemento",   "pimento",  "flirti",       "tunelo",   "babili",      "enciklopedio",
+        }},
+        {"French", {
+            "skier",   "devoir",   "vingt",   "rideau",  "profond", "aucun",
+            "rail",    "angoisse", "propre",  "vous",    "amener",  "star",
+            "avant",   "vampire",  "tenter",  "sigle",   "fixe",    "ardeur",
+            "toge",    "navrer",   "rang",    "parmi",   "pompier", "pause",
+            "album",   "focus",    "poids",   "socle",   "faible",  "miel",
+            "eaux",    "rustre",   "vague",   "pilote",  "faveur",  "final",
+            "songeur", "chiot",    "sauge",   "devin",   "version", "sinon",
+            "chasse",  "rapace",   "fosse",   "tour",    "billet",  "enlever",
+        }},
+        {"German", {
+            "Salz",     "Dezibel",  "Wind",     "plündern", "Mund",     "Anker",
+            "Oberarzt", "Alter",    "Nabel",    "Zielfoto", "Almosen",  "Skikurs",
+            "Anrecht",  "Wahlen",   "Tempo",    "Rüstung",  "Espe",     "Amulett",
+            "Topmodel", "Kampagne", "Ofenholz", "Lavasee",  "Milchkuh", "Lerche",
+            "Aktfoto",  "Exil",     "melden",   "Sanftmut", "Erde",     "Hufeisen",
+            "Edelweiß", "Rapsöl",   "Vorrat",   "Luxus",    "erkalten", "Erzeuger",
+            "Schulbus", "Bogen",    "Respekt",  "Detektiv", "wechseln", "Sack",
+            "Blauwal",  "öffnen",   "Fakultät", "Trödel",   "Bach",     "Einzug",
+        }},
+        {"Italian", {
+            "spegnere", "comune",   "vigilare", "sartoria", "pulire",   "arachidi",
+            "retorica", "amnistia", "quaderno", "zainetto", "amante",   "subire",
+            "armonia",  "velluto",  "tirare",   "sospiro",  "enigma",   "anello",
+            "trattore", "moglie",   "ricambio", "panino",   "porzione", "parodia",
+            "allarme",  "esaltare", "polimero", "spezzare", "dorso",    "madama",
+            "cupola",   "seme",     "vegetale", "pianeta",  "eclissi",  "emisfero",
+            "stadio",   "cannone",  "silicone", "compagna", "vertebra", "spalla",
+            "calzone",  "ricetta",  "estrarre", "tulipano", "bagaglio", "dialogo",
+        }},
+        {"Japanese", {
+            "なさけ",       "きかく",     "はらう",     "でこぼこ",   "たんとう",   "いとこ",
+            "ちゃんこなべ", "いさましい", "たんぴん",   "ひかく",     "いきもの",   "にっさん",
+            "いふく",       "はせる",     "ねっしん",   "どんぶり",   "けちゃっぷ", "いそがしい",
+            "ねんかん",     "せいよう",   "ちらみ",     "そめる",     "たぼう",     "そんぞく",
+            "あんてい",     "けとばす",   "だったい",   "ななおし",   "くめる",     "しょっけん",
+            "きまる",       "てんぷら",   "はこぶ",     "たいめん",   "けいけん",   "けしき",
+            "なれる",       "おじさん",   "とくしゅう", "きかい",     "はったつ",   "ないそう",
+            "おくる",       "ちりがみ",   "けみかる",   "のがす",     "うせつ",     "くうき",
+        }},
+        {"Lojban", {
+            "vasxu",  "ferti",   "rarbau", "tadji",  "sisku",  "cando",
+            "sobde",  "bloti",   "skami",  "faumlu", "birka",  "xabju",
+            "carna",  "jbogu'e", "xruki",  "tutci",  "jicmu",  "briju",
+            "zbabu",  "panje",   "sombo",  "ransu",  "senpi",  "rekto",
+            "bifce",  "jinku",   "savru",  "vensa",  "jarco",  "murta",
+            "gapru",  "temse",   "jbocre", "rupnu",  "jdini",  "jgira",
+            "viska",  "dansu",   "toldi",  "fepri",  "reisku", "vamji",
+            "dacti",  "sonci",   "jivbu",  "zifre",  "cinza",  "grake",
+        }},
+        {"Portuguese", {
+            "sonso",     "druso",       "vontade",  "riacho",    "paxa",      "arlequim",
+            "porvir",    "alvura",      "pegaso",   "xodo",      "alhures",   "tavola",
+            "ascorbico", "vetusto",     "trovoar",  "slide",     "feto",      "anotar",
+            "ufologo",   "mausoleu",    "prezar",   "nouveau",   "otite",     "nutritivo",
+            "ajudante",  "fiorde",      "orla",     "sossego",   "exaustor",  "lele",
+            "emulsao",   "rural",       "veja",     "ojeriza",   "faixas",    "feltro",
+            "suor",      "cluster",     "seara",    "dropes",    "viquingue", "soerguer",
+            "cinzento",  "privilegios", "foco",     "unheiro",   "bemol",     "ereto",
+        }},
+        {"Russian", {
+            "уровень",  "древний",  "эмблема",  "тайна",    "сельский", "бегство",
+            "согласие", "арсенал",  "сечение",  "язык",     "аптека",   "фишка",
+            "бивень",   "шрам",     "центр",    "умолять",  "исходить", "атрибут",
+            "чепуха",   "отбор",    "сонный",   "пуля",     "рюкзак",   "пшеница",
+            "анкета",   "капитан",  "рыба",     "ускорять", "иголка",   "область",
+            "женщина",  "трибуна",  "шорох",    "ресурс",   "изоляция", "ипподром",
+            "ушко",     "гамма",    "тянуть",   "драка",    "щель",     "уплата",
+            "выходить", "сообщать", "кенгуру",  "чужой",    "быстрый",  "зачет",
+        }},
+        {"Spanish", {
+            "pasta",   "chiste",   "relieve", "obtener", "mito",    "anillo",
+            "músculo", "aleta",    "moho",    "riego",   "alambre", "pésimo",
+            "añejo",   "reacción", "pompa",   "parcela", "diente",  "altura",
+            "previo",  "intuir",   "nación",  "llanto",  "mensaje", "loción",
+            "aguja",   "divino",   "mecha",   "pausa",   "curva",   "héroe",
+            "collar",  "óptica",   "rasgo",   "mamut",   "dejar",   "diamante",
+            "pellejo", "brote",    "otoño",   "chico",   "reflejo", "párrafo",
+            "bozal",   "nadar",    "droga",   "pronto",  "astro",   "crear",
+        }},
+    };
+    // clang-format on
+
+    for (auto& [lang_name, exp_words] : expected) {
+        SECTION(std::string(lang_name)) {
+            auto* lang = find_language(lang_name);
+            REQUIRE(lang);
+            auto words = bytes_to_words(seed, *lang);
+            REQUIRE(words.size() == 48);
+            for (size_t i = 0; i < 48; i++)
+                CHECK(words[i] == exp_words[i]);
+        }
+    }
+}
 
 TEST_CASE("Mnemonic round-trip tests", "[mnemonics]") {
     std::vector<std::byte> data_128(16);
@@ -123,7 +266,21 @@ TEST_CASE("Mnemonic error handling", "[mnemonics]") {
     }
 
     SECTION("Unknown word") {
-        std::vector<std::string_view> words = {"abbey", "abducts", "zzzzzz"};
+        // Use mixed case to verify word() returns the original input, not a lowercased prefix.
+        // "ZZZ..." has prefix "zzz" which is not in the English word list.
+        std::vector<std::string_view> words = {"abbey", "abducts", "ZZZunknown"};
+        CHECK_THROWS_AS(words_to_bytes(words, *english), unknown_word_error);
+        try {
+            words_to_bytes(words, *english);
+        } catch (const unknown_word_error& e) {
+            CHECK(e.word() == "ZZZunknown");
+        }
+    }
+
+    SECTION("Overflow word triplet") {
+        // a=0 (abbey), b=0 (abbey), c=1625 (zoom):
+        // 0 + 0 + 1625*1626² = 4,296,298,500 > UINT32_MAX — must be rejected
+        std::vector<std::string_view> words = {"abbey", "abbey", "zoom"};
         CHECK_THROWS_AS(words_to_bytes(words, *english), std::invalid_argument);
     }
 }

@@ -1,8 +1,8 @@
-# Watch the languages directory so CMake re-runs if files are added/removed:
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "languages")
-
 file(GLOB LANG_FILES "languages/*.txt")
 list(SORT LANG_FILES)
+
+# Watch the languages directory (for added/removed files) and each individual file (for edits):
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "languages" ${LANG_FILES})
 
 # Reorder to put english first
 set(LANG_FILES_ORDERED "")

@@ -2,8 +2,9 @@
 
 #include <array>
 #include <cstddef>
-#include <optional>
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -12,14 +13,10 @@ namespace session::mnemonics {
 /**
  * The number of words in each mnemonic language word list.
  *
- * This value (1626) is chosen because 1626^24 is just enough to represent a 256-bit (32-byte)
- * random value.
- *
- * The math:
- * log2(1626^24) = 24 * log2(1626) ≈ 24 * 10.6669... ≈ 256.006... bits.
- *
- * Thus, 24 words from a 1626-word dictionary can represent 2^256 states with a tiny amount of
- * extra space that is simply unused.
+ * The encoding uses 3 words per 32-bit chunk, so 24 words encodes 256 bits.  1626 was chosen
+ * because 1626³ (≈ 4.299 × 10⁹) just barely exceeds 2³² (≈ 4.295 × 10⁹), meaning three words
+ * can represent any 32-bit value — with a small number of 3-word combinations (~0.09%) that
+ * exceed 2³²-1 and are therefore invalid.
  */
 constexpr size_t NWORDS = 1626;
 
@@ -36,6 +33,18 @@ struct Mnemonics {
     std::string_view native_name;
     int prefix_len;
     std::array<std::string_view, NWORDS> words;
+};
+
+/// Exception thrown when a word is not found in the mnemonic dictionary.
+class unknown_word_error : public std::invalid_argument {
+  public:
+    explicit unknown_word_error(std::string word);
+
+    /// The word that was not found in the dictionary.
+    const std::string& word() const { return word_; }
+
+  private:
+    std::string word_;
 };
 
 /**
@@ -80,8 +89,9 @@ std::vector<std::string_view> bytes_to_words(
  * @param words The input word list. Its length must be a multiple of 3.
  * @param lang The language used for the mnemonic.
  * @return A vector of bytes representing the input mnemonic.
- * @throws std::invalid_argument if the input length is not a multiple of 3, or if a word
- *         is not found in the language dictionary.
+ * @throws std::invalid_argument if the input length is not a multiple of 3, or if the word
+ *         sequence encodes an invalid (overflowing) value.
+ * @throws unknown_word_error if a word is not found in the language dictionary.
  */
 std::vector<std::byte> words_to_bytes(
         std::span<const std::string_view> words, const Mnemonics& lang);
@@ -92,7 +102,9 @@ std::vector<std::byte> words_to_bytes(
  * @param words The input word list. Its length must be a multiple of 3.
  * @param lang_name The name of the language (English or native) used.
  * @return A vector of bytes representing the input mnemonic.
- * @throws std::invalid_argument if the language is unknown or the input is invalid.
+ * @throws std::invalid_argument if the language is unknown, the input length is not a multiple
+ *         of 3, or the word sequence encodes an invalid (overflowing) value.
+ * @throws unknown_word_error if a word is not found in the language dictionary.
  */
 std::vector<std::byte> words_to_bytes(
         std::span<const std::string_view> words, std::string_view lang_name);

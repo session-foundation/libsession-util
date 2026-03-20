@@ -1,16 +1,22 @@
 #include <oxenc/endian.h>
 
-#include <algorithm>
+#include <cassert>
 #include <cctype>
-#include <cstring>
-#include <memory>
 #include <mutex>
+#include <vector>
+#include <oxen/log/format.hpp>
 #include <session/mnemonics.hpp>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 
 namespace session::mnemonics {
+
+using namespace oxen::log::literals;
+
+unknown_word_error::unknown_word_error(std::string word) :
+        std::invalid_argument{"Unknown mnemonic word: {}"_format(word)},
+        word_{std::move(word)} {}
 
 const Mnemonics* find_language(std::string_view name) {
     for (auto lang : get_languages()) {
@@ -21,100 +27,58 @@ const Mnemonics* find_language(std::string_view name) {
 }
 
 namespace {
-    /**
-     * Converts ASCII characters in a UTF-8 string to lowercase.
-     * Non-ASCII characters are left unchanged.
-     */
-    std::string to_lower_ascii(std::string_view s) {
+    // Returns the lowercased first `n_codepoints` UTF-8 codepoints of `s`.  ASCII characters are
+    // lowercased; non-ASCII codepoints are copied as-is.
+    std::string word_prefix(std::string_view s, int n_codepoints) {
         std::string result;
         result.reserve(s.size());
-        for (char c : s) {
-            if (static_cast<unsigned char>(c) < 128)
-                result.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
-            else
-                result.push_back(c);
+        const char* it = s.data();
+        const char* end = it + s.size();
+        for (int count = 0; it < end && count < n_codepoints; count++) {
+            uint8_t b = static_cast<uint8_t>(*it);
+            int len;
+            if ((b & 0b11100000) == 0b11000000)       // 110xxxxx: 2-byte sequence
+                len = 2;
+            else if ((b & 0b11110000) == 0b11100000)  // 1110xxxx: 3-byte sequence
+                len = 3;
+            else if ((b & 0b11111000) == 0b11110000)  // 11110xxx: 4-byte sequence
+                len = 4;
+            else                                       // 0xxxxxxx: ASCII, or invalid byte
+                len = 1;
+            if (len == 1) {
+                result.push_back(static_cast<char>(std::tolower(b)));
+                it++;
+            } else {
+                for (int k = 0; k < len && it < end; k++)
+                    result.push_back(*it++);
+            }
         }
         return result;
     }
 
-    /**
-     * Gets a prefix of a UTF-8 string containing at most n_codepoints.
-     */
-    std::string_view get_prefix(std::string_view s, int n_codepoints) {
-        if (n_codepoints <= 0)
-            return "";
+    using WordMap = std::unordered_map<std::string, int>;
 
-        const char* it = s.data();
-        const char* end = it + s.size();
-        int count = 0;
-        while (it < end && count < n_codepoints) {
-            uint8_t b = static_cast<uint8_t>(*it);
-            if (b < 0x80)  // 0xxxxxxx: 1-byte ASCII
-                it += 1;
-            else if ((b & 0xE0) == 0xC0)  // 110xxxxx: 2-byte sequence
-                it += 2;
-            else if ((b & 0xF0) == 0xE0)  // 1110xxxx: 3-byte sequence
-                it += 3;
-            else if ((b & 0xF8) == 0xF0)  // 11110xxx: 4-byte sequence
-                it += 4;
-            else  // Invalid UTF-8 start byte or continuation byte
-                it += 1;
+    const WordMap& get_word_map(const Mnemonics& lang) {
+        auto langs = get_languages();
+        size_t idx = std::find(langs.begin(), langs.end(), &lang) - langs.begin();
 
-            count++;
-        }
-        return std::string_view(s.data(), std::min<size_t>(it - s.data(), s.size()));
-    }
+        static std::vector<WordMap> maps(langs.size());
+        static std::vector<std::once_flag> flags(langs.size());
 
-    struct WordMap {
-        std::unordered_map<std::string, int> map;
-        std::unordered_map<std::string, int> prefix_map;
-        std::mutex mutex;
-        bool initialized = false;
-    };
-
-    WordMap& get_word_map(const Mnemonics& lang) {
-        static std::mutex maps_mutex;
-        static std::unordered_map<const Mnemonics*, std::unique_ptr<WordMap>> maps;
-
-        std::lock_guard lock(maps_mutex);
-        auto& ptr = maps[&lang];
-        if (!ptr)
-            ptr = std::make_unique<WordMap>();
-        return *ptr;
+        std::call_once(flags[idx], [&] {
+            for (int i = 0; i < static_cast<int>(NWORDS); ++i) {
+                std::string prefix = word_prefix(lang.words[i], lang.prefix_len);
+                assert(!prefix.empty());
+                maps[idx][prefix] = i;
+            }
+        });
+        return maps[idx];
     }
 
     int get_word_index(const Mnemonics& lang, std::string_view word) {
-        auto& wm = get_word_map(lang);
-        {
-            std::lock_guard lock(wm.mutex);
-            if (!wm.initialized) {
-                for (int i = 0; i < static_cast<int>(NWORDS); ++i) {
-                    std::string_view w = lang.words[i];
-                    std::string lower_w = to_lower_ascii(w);
-                    wm.map[lower_w] = i;
-
-                    std::string lower_prefix = to_lower_ascii(get_prefix(w, lang.prefix_len));
-                    if (!lower_prefix.empty())
-                        wm.prefix_map[lower_prefix] = i;
-                }
-                wm.initialized = true;
-            }
-        }
-
-        std::string lower_input = to_lower_ascii(word);
-
-        auto it = wm.map.find(lower_input);
-        if (it != wm.map.end())
-            return it->second;
-
-        std::string lower_input_prefix = to_lower_ascii(get_prefix(lower_input, lang.prefix_len));
-        if (!lower_input_prefix.empty()) {
-            auto pit = wm.prefix_map.find(lower_input_prefix);
-            if (pit != wm.prefix_map.end())
-                return pit->second;
-        }
-
-        return -1;
+        const auto& wm = get_word_map(lang);
+        auto it = wm.find(word_prefix(word, lang.prefix_len));
+        return it != wm.end() ? it->second : -1;
     }
 }  // namespace
 
@@ -158,19 +122,20 @@ std::vector<std::byte> words_to_bytes(
     result.resize((words.size() / 3) * 4);
 
     for (size_t i = 0; i < words.size(); i += 3) {
-        int w1 = get_word_index(lang, words[i]);
-        int w2 = get_word_index(lang, words[i + 1]);
-        int w3 = get_word_index(lang, words[i + 2]);
-
-        if (w1 < 0 || w2 < 0 || w3 < 0)
-            throw std::invalid_argument("Word not found in mnemonic dictionary");
-
-        uint32_t a = static_cast<uint32_t>(w1);
-        uint32_t b = static_cast<uint32_t>(w2);
-        uint32_t c = static_cast<uint32_t>(w3);
+        std::array<uint32_t, 3> w;
+        for (int j = 0; j < 3; j++) {
+            int idx = get_word_index(lang, words[i + j]);
+            if (idx < 0)
+                throw unknown_word_error{std::string(words[i + j])};
+            w[j] = static_cast<uint32_t>(idx);
+        }
+        auto [a, b, c] = w;
 
         uint32_t x = a + ((NWORDS - a + b) % NWORDS) * NWORDS +
                      ((NWORDS - b + c) % NWORDS) * (NWORDS * NWORDS);
+
+        if (x % NWORDS != a)
+            throw std::invalid_argument("Mnemonic word sequence encodes an invalid value");
 
         oxenc::write_host_as_little<uint32_t>(x, &result[(i / 3) * 4]);
     }
