@@ -18,6 +18,9 @@ unknown_word_error::unknown_word_error(std::string word) :
         std::invalid_argument{"Unknown mnemonic word: {}"_format(word)},
         word_{std::move(word)} {}
 
+checksum_error::checksum_error() :
+        std::invalid_argument{"Seed phrase checksum word does not match"} {}
+
 const Mnemonics* find_language(std::string_view name) {
     for (auto lang : get_languages()) {
         if (lang->english_name == name || lang->native_name == name)
@@ -83,13 +86,15 @@ namespace {
 }  // namespace
 
 std::vector<std::string_view> bytes_to_words(
-        std::span<const std::byte> bytes, const Mnemonics& lang) {
+        std::span<const std::byte> bytes, const Mnemonics& lang, bool checksum) {
     if (bytes.size() % 4 != 0)
         throw std::invalid_argument("Input length must be a multiple of 4 bytes");
 
+    size_t n = (bytes.size() / 4) * 3;
     std::vector<std::string_view> result;
-    result.reserve((bytes.size() / 4) * 3);
+    result.reserve(n + checksum);
 
+    uint32_t sum = 0;
     for (size_t i = 0; i < bytes.size(); i += 4) {
         uint32_t val = oxenc::load_little_to_host<uint32_t>(&bytes[i]);
 
@@ -100,28 +105,37 @@ std::vector<std::string_view> bytes_to_words(
         result.push_back(lang.words[a]);
         result.push_back(lang.words[b]);
         result.push_back(lang.words[c]);
+        sum += a + b + c;
     }
+
+    if (checksum)
+        result.push_back(result[sum % n]);
 
     return result;
 }
 
 std::vector<std::string_view> bytes_to_words(
-        std::span<const std::byte> bytes, std::string_view lang_name) {
+        std::span<const std::byte> bytes, std::string_view lang_name, bool checksum) {
     auto lang = find_language(lang_name);
     if (!lang)
         throw std::invalid_argument("Unknown mnemonic language: " + std::string(lang_name));
-    return bytes_to_words(bytes, *lang);
+    return bytes_to_words(bytes, *lang, checksum);
 }
 
 std::vector<std::byte> words_to_bytes(
         std::span<const std::string_view> words, const Mnemonics& lang) {
-    if (words.size() % 3 != 0)
-        throw std::invalid_argument("Input word count must be a multiple of 3");
+    size_t n = words.size();
+    bool has_checksum = n % 3 == 1;
+    if (!has_checksum && n % 3 != 0)
+        throw std::invalid_argument(
+                "Input word count must be a multiple of 3 (+1 with a checksum)");
 
+    size_t seed_words = n - has_checksum;
     std::vector<std::byte> result;
-    result.resize((words.size() / 3) * 4);
+    result.resize((seed_words / 3) * 4);
 
-    for (size_t i = 0; i < words.size(); i += 3) {
+    uint32_t sum = 0;
+    for (size_t i = 0; i < seed_words; i += 3) {
         std::array<uint32_t, 3> w;
         for (int j = 0; j < 3; j++) {
             int idx = get_word_index(lang, words[i + j]);
@@ -138,6 +152,16 @@ std::vector<std::byte> words_to_bytes(
             throw std::invalid_argument("Mnemonic word sequence encodes an invalid value");
 
         oxenc::write_host_as_little<uint32_t>(x, &result[(i / 3) * 4]);
+        sum += a + b + c;
+    }
+
+    if (has_checksum) {
+        int checksum_idx = get_word_index(lang, words[n - 1]);
+        if (checksum_idx < 0)
+            throw unknown_word_error{std::string(words[n - 1])};
+        int expected_idx = get_word_index(lang, words[sum % seed_words]);
+        if (checksum_idx != expected_idx)
+            throw checksum_error{};
     }
 
     return result;

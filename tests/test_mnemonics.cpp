@@ -140,7 +140,7 @@ TEST_CASE("Mnemonic word list test vectors", "[mnemonics]") {
         SECTION(std::string(lang_name)) {
             auto* lang = find_language(lang_name);
             REQUIRE(lang);
-            auto words = bytes_to_words(seed, *lang);
+            auto words = bytes_to_words(seed, *lang, false);
             REQUIRE(words.size() == 48);
             for (size_t i = 0; i < 48; i++)
                 CHECK(words[i] == exp_words[i]);
@@ -166,16 +166,28 @@ TEST_CASE("Mnemonic round-trip tests", "[mnemonics]") {
     for (auto lang : get_languages()) {
         SECTION("Language: " + std::string(lang->english_name)) {
             // 128-bit -> 12 words -> 128-bit
-            auto words12 = bytes_to_words(data_128, *lang);
+            auto words12 = bytes_to_words(data_128, *lang, false);
             CHECK(words12.size() == 12);
             auto back12 = words_to_bytes(words12, *lang);
             CHECK(back12 == data_128);
 
+            // 128-bit -> 13 words (with checksum) -> 128-bit
+            auto words13 = bytes_to_words(data_128, *lang);
+            CHECK(words13.size() == 13);
+            auto back13 = words_to_bytes(words13, *lang);
+            CHECK(back13 == data_128);
+
             // 256-bit -> 24 words -> 256-bit
-            auto words24 = bytes_to_words(data_256, *lang);
+            auto words24 = bytes_to_words(data_256, *lang, false);
             CHECK(words24.size() == 24);
             auto back24 = words_to_bytes(words24, *lang);
             CHECK(back24 == data_256);
+
+            // 256-bit -> 25 words (with checksum) -> 256-bit
+            auto words25 = bytes_to_words(data_256, *lang);
+            CHECK(words25.size() == 25);
+            auto back25 = words_to_bytes(words25, *lang);
+            CHECK(back25 == data_256);
         }
     }
 }
@@ -193,7 +205,7 @@ TEST_CASE("Mnemonic case-insensitivity and prefix matching", "[mnemonics]") {
     // Words for English at indices 1443, 180, 205
     std::vector<std::byte> data = {
             std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
-    auto words = bytes_to_words(data, *english);
+    auto words = bytes_to_words(data, *english, false);
     REQUIRE(words.size() == 3);
 
     SECTION("Exact match") {
@@ -250,6 +262,49 @@ TEST_CASE("Mnemonic language lookup", "[mnemonics]") {
     CHECK(find_language("Deutsch") != nullptr);
     CHECK(find_language("русский язык") != nullptr);
     CHECK(find_language("NonExistent") == nullptr);
+}
+
+TEST_CASE("Mnemonic checksum", "[mnemonics]") {
+    auto english = find_language("English");
+    REQUIRE(english);
+
+    std::vector<std::byte> data = {
+            std::byte{0x01}, std::byte{0x02}, std::byte{0x03}, std::byte{0x04}};
+    auto words3 = bytes_to_words(data, *english, false);
+    REQUIRE(words3.size() == 3);
+    auto words4 = bytes_to_words(data, *english);
+    REQUIRE(words4.size() == 4);
+
+    SECTION("Checksum word is correct position duplicate") {
+        // sum of indices % 3 gives the position whose word is duplicated
+        int i0 = 0, i1 = 0, i2 = 0;
+        for (size_t i = 0; i < 3; i++) {
+            int idx = 0;
+            for (size_t j = 0; j < english->words.size(); j++)
+                if (english->words[j] == words3[i]) { idx = j; break; }
+            if (i == 0) i0 = idx;
+            else if (i == 1) i1 = idx;
+            else i2 = idx;
+        }
+        size_t expected_pos = (i0 + i1 + i2) % 3;
+        CHECK(words4[3] == words3[expected_pos]);
+    }
+
+    SECTION("Checksum round-trip") {
+        auto back = words_to_bytes(words4, *english);
+        CHECK(back == data);
+    }
+
+    SECTION("Bad checksum throws checksum_error") {
+        // Replace the checksum word with a different valid word
+        std::vector<std::string_view> bad = {words4[0], words4[1], words4[2], words4[2] == words4[0] ? words4[1] : words4[0]};
+        CHECK_THROWS_AS(words_to_bytes(bad, *english), checksum_error);
+    }
+
+    SECTION("Unknown checksum word throws unknown_word_error") {
+        std::vector<std::string_view> bad = {words4[0], words4[1], words4[2], "ZZZunknown"};
+        CHECK_THROWS_AS(words_to_bytes(bad, *english), unknown_word_error);
+    }
 }
 
 TEST_CASE("Mnemonic error handling", "[mnemonics]") {
