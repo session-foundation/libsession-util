@@ -97,31 +97,14 @@ void Core::_poll() {
     if (!net)
         return;
 
-    auto namespaces = {config::Namespace::Devices, config::Namespace::AccountPubkeys};
+    constexpr std::array namespaces = {
+            config::Namespace::Devices, config::Namespace::AccountPubkeys};
     nlohmann::json ns_list = nlohmann::json::array();
-    nlohmann::json last_hashes = nlohmann::json::object();
-
-    auto conn = db.conn();
-    for (auto ns : namespaces) {
-        auto ns_val = static_cast<int16_t>(ns);
-        ns_list.push_back(ns_val);
-        auto last_hash = conn.prepared_maybe_get<std::string>(
-                "SELECT last_hash FROM namespace_sync WHERE namespace = ?", ns_val);
-        if (last_hash)
-            last_hashes[std::to_string(ns_val)] = *last_hash;
-    }
+    for (auto ns : namespaces)
+        ns_list.push_back(static_cast<int16_t>(ns));
 
     auto now_ms = epoch_ms(clock_now_ms());
     auto session_id = oxenc::to_hex(globals.session_id());
-
-    nlohmann::json params = {
-            {"pubkey", session_id},
-            {"namespaces", ns_list},
-            {"timestamp", now_ms},
-    };
-
-    if (!last_hashes.empty())
-        params["last_hashes"] = last_hashes;
 
     std::string to_sign = fmt::format("retrieve{}{}", session_id, now_ms);
     std::array<unsigned char, 64> sig;
@@ -133,82 +116,116 @@ void Core::_poll() {
             to_sign.size(),
             reinterpret_cast<const unsigned char*>(seed.buf.data()));
 
-    params["signature"] = oxenc::to_base64(sig);
+    auto sig_b64 = oxenc::to_base64(sig);
 
-    nlohmann::json req_body = {
-            {"method", "retrieve"},
-            {"params", params},
-    };
+    net->get_swarm(
+            globals.pubkey_x25519(),
+            false,
+            [this, net, namespaces, ns_list, session_id, now_ms, sig_b64](auto, auto swarm) {
+                if (swarm.empty())
+                    return;
 
-    net->get_swarm(globals.pubkey_x25519(), false, [this, net, req_body](auto, auto swarm) {
-        if (swarm.empty())
-            return;
+                auto& node = swarm.front();
 
-        auto body_str = req_body.dump();
-        net->send_request(
-                network::Request{
-                        swarm.front(),
-                        "storage_rpc",
-                        to_vector<unsigned char>(body_str),
-                        network::RequestCategory::standard_small,
-                        20s},
-                [this](bool success,
-                       bool /*timeout*/,
-                       int16_t /*status_code*/,
-                       std::vector<std::pair<std::string, std::string>> /*headers*/,
-                       std::optional<std::string> body) {
-                    if (!success || !body)
-                        return;
-
-                    try {
-                        auto json = nlohmann::json::parse(*body);
-                        if (!json.contains("results") || !json["results"].is_array())
-                            return;
-
-                        auto conn = db.conn();
-                        for (const auto& res : json["results"]) {
-                            if (!res.contains("namespace") || !res.contains("messages") ||
-                                !res["messages"].is_array())
-                                continue;
-
-                            auto ns_val = res["namespace"].get<int16_t>();
-                            auto ns = static_cast<config::Namespace>(ns_val);
-
-                            std::vector<std::vector<unsigned char>> messages_data;
-                            std::string newest_hash;
-
-                            for (const auto& msg : res["messages"]) {
-                                if (!msg.contains("data") || !msg["data"].is_string())
-                                    continue;
-                                auto b64_data = msg["data"].get<std::string_view>();
-                                auto& decoded = messages_data.emplace_back();
-                                decoded.reserve(oxenc::from_base64_size(b64_data.size()));
-                                oxenc::from_base64(
-                                        b64_data.begin(),
-                                        b64_data.end(),
-                                        std::back_inserter(decoded));
-
-                                if (msg.contains("hash") && msg["hash"].is_string())
-                                    newest_hash = msg["hash"].get<std::string>();
-                            }
-
-                            if (!messages_data.empty()) {
-                                if (!newest_hash.empty())
-                                    conn.prepared_exec(
-                                            R"(
-INSERT INTO namespace_sync (namespace, last_hash) VALUES (?, ?)
-ON CONFLICT(namespace) DO UPDATE SET last_hash = excluded.last_hash
-)",
-                                            ns_val,
-                                            newest_hash);
-                                receive_messages(to_view_vector(messages_data), ns, true);
-                            }
-                        }
-                    } catch (const std::exception& e) {
-                        log::warning(cat, "Failed to parse poll response: {}", e.what());
+                nlohmann::json last_hashes = nlohmann::json::object();
+                {
+                    auto conn = db.conn();
+                    for (auto ns : namespaces) {
+                        auto ns_val = static_cast<int16_t>(ns);
+                        auto last_hash = conn.prepared_maybe_get<std::string>(
+                                "SELECT last_hash FROM namespace_sync"
+                                " WHERE namespace = ? AND sn_pubkey = ?",
+                                ns_val,
+                                node.remote_pubkey);
+                        if (last_hash)
+                            last_hashes[std::to_string(ns_val)] = *last_hash;
                     }
-                });
-    });
+                }
+
+                nlohmann::json params = {
+                        {"pubkey", session_id},
+                        {"namespaces", ns_list},
+                        {"timestamp", now_ms},
+                        {"signature", sig_b64},
+                };
+                if (!last_hashes.empty())
+                    params["last_hashes"] = last_hashes;
+
+                nlohmann::json req_body = {
+                        {"method", "retrieve"},
+                        {"params", params},
+                };
+
+                auto body_str = req_body.dump();
+                net->send_request(
+                        network::Request{
+                                node,
+                                "storage_rpc",
+                                to_vector<unsigned char>(body_str),
+                                network::RequestCategory::standard_small,
+                                20s},
+                        [this, sn_pubkey = node.remote_pubkey](
+                                bool success,
+                                bool /*timeout*/,
+                                int16_t /*status_code*/,
+                                std::vector<std::pair<std::string, std::string>> /*headers*/,
+                                std::optional<std::string> body) {
+                            if (!success || !body)
+                                return;
+
+                            try {
+                                auto json = nlohmann::json::parse(*body);
+                                if (!json.contains("results") || !json["results"].is_array())
+                                    return;
+
+                                auto conn = db.conn();
+                                for (const auto& res : json["results"]) {
+                                    if (!res.contains("namespace") ||
+                                        !res.contains("messages") ||
+                                        !res["messages"].is_array())
+                                        continue;
+
+                                    auto ns_val = res["namespace"].get<int16_t>();
+                                    auto ns = static_cast<config::Namespace>(ns_val);
+
+                                    std::vector<std::vector<unsigned char>> messages_data;
+                                    std::string newest_hash;
+
+                                    for (const auto& msg : res["messages"]) {
+                                        if (!msg.contains("data") || !msg["data"].is_string())
+                                            continue;
+                                        auto b64_data = msg["data"].get<std::string_view>();
+                                        auto& decoded = messages_data.emplace_back();
+                                        decoded.reserve(
+                                                oxenc::from_base64_size(b64_data.size()));
+                                        oxenc::from_base64(
+                                                b64_data.begin(),
+                                                b64_data.end(),
+                                                std::back_inserter(decoded));
+
+                                        if (msg.contains("hash") && msg["hash"].is_string())
+                                            newest_hash = msg["hash"].get<std::string>();
+                                    }
+
+                                    if (!messages_data.empty()) {
+                                        if (!newest_hash.empty())
+                                            conn.prepared_exec(
+                                                    R"(
+INSERT INTO namespace_sync (namespace, sn_pubkey, last_hash) VALUES (?, ?, ?)
+ON CONFLICT(namespace, sn_pubkey) DO UPDATE SET last_hash = excluded.last_hash
+)",
+                                                    ns_val,
+                                                    sn_pubkey,
+                                                    newest_hash);
+                                        receive_messages(
+                                                to_view_vector(messages_data), ns, true);
+                                    }
+                                }
+                            } catch (const std::exception& e) {
+                                log::warning(cat, "Failed to parse poll response: {}", e.what());
+                            }
+                        });
+            });
 }
 
 void Core::receive_messages(

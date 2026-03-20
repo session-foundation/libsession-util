@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
+#include <session/network/key_types.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
 
@@ -39,10 +40,15 @@ class TestHelper {
   public:
     static void poll(core::Core& core) { core._poll(); }
 
-    // Returns the last_hash stored for the given namespace (or nullopt if none).
-    static std::optional<std::string> namespace_last_hash(core::Core& core, int16_t ns) {
+    // Returns the last_hash stored for the given namespace+sn_pubkey pair (or nullopt if none).
+    static std::optional<std::string> namespace_last_hash(
+            core::Core& core,
+            int16_t ns,
+            const network::ed25519_pubkey& sn_pubkey) {
         return core.db.conn().prepared_maybe_get<std::string>(
-                "SELECT last_hash FROM namespace_sync WHERE namespace = ?", ns);
+                "SELECT last_hash FROM namespace_sync WHERE namespace = ? AND sn_pubkey = ?",
+                ns,
+                sn_pubkey);
     }
 
     // Returns the raw 32-byte seed for the account key identified by the given x25519 public key.
