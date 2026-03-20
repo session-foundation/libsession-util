@@ -138,6 +138,26 @@ namespace detail {
     class CoreComponent;
 }
 
+/// Wraps a predefined 32-byte account seed to pass to the Core constructor, overriding any seed
+/// already stored in the database.  Used when restoring an existing account from a seed.
+struct predefined_seed {
+    cleared_b32 bytes;
+    explicit predefined_seed(std::span<const std::byte, 32> s) {
+        std::ranges::copy(s, bytes.begin());
+    }
+    explicit predefined_seed(std::span<const unsigned char, 32> s) {
+        std::ranges::copy(std::as_bytes(s), bytes.begin());
+    }
+};
+
+/// Concept satisfied by any type usable as a Core constructor option: a sqlite database option
+/// (encryption, behaviour), or a Core-specific option tag (predefined_seed, callbacks).  All
+/// options can be passed in any order after the db_path positional argument.
+template <typename T>
+concept CoreOption = sqlite::DatabaseOption<std::remove_cvref_t<T>> ||
+                     std::same_as<std::remove_cvref_t<T>, predefined_seed> ||
+                     std::same_as<std::remove_cvref_t<T>, callbacks>;
+
 class Core {
     friend class session::TestHelper;  // for unit tests
 
@@ -171,12 +191,53 @@ class Core {
     void _update_polling();
     void _poll();
 
+    // Extracts an option of type T from a pack; returns the first match wrapped in optional, or
+    // nullopt if not present.  Mirrors the same helper in session::sqlite::Database.
+    template <typename T, typename... Opts>
+    static constexpr auto _maybe_instance(Opts&&... opts) {
+        using Ret = std::optional<T>;
+        if constexpr (sizeof...(Opts) == 0)
+            return Ret{std::nullopt};
+        else {
+            auto finder = []<typename Opt, typename... More>(
+                                  auto&& self, Opt&& o, More&&... more) -> Ret {
+                if constexpr (std::same_as<std::remove_cvref_t<Opt>, T>)
+                    return std::make_optional<T>(std::forward<Opt>(o));
+                else if constexpr (sizeof...(More) > 0)
+                    return self(self, std::forward<More>(more)...);
+                else
+                    return std::nullopt;
+            };
+            return finder(finder, std::forward<Opts>(opts)...);
+        }
+    }
+
+    // Constructs a sqlite::Database from the subset of opts that satisfy sqlite::DatabaseOption.
+    template <CoreOption... Opts>
+    static sqlite::Database _make_db(std::filesystem::path path, Opts&&... opts) {
+        return std::apply(
+                [&]<sqlite::DatabaseOption... DBOpts>(DBOpts&&... db_opts) {
+                    return sqlite::Database{std::move(path), std::forward<DBOpts>(db_opts)...};
+                },
+                std::tuple_cat([]<typename T>(T&& o) {
+                    if constexpr (sqlite::DatabaseOption<std::remove_cvref_t<T>>)
+                        return std::tuple<std::remove_cvref_t<T>>{std::forward<T>(o)};
+                    else
+                        return std::tuple<>{};
+                }(std::forward<Opts>(opts))...));
+    }
+
   public:
-    // Constructor taking a struct of callbacks to invoke on various events, and any number of
-    // session::SQLite database options to open the core database.
-    template <sqlite::DatabaseOption... DBOpts>
-    Core(core::callbacks callbacks, std::filesystem::path db_path, const DBOpts&... opts) :
-            callbacks{std::move(callbacks)}, db{std::move(db_path), opts...} {
+    // Constructor taking a db path and any mix of Core and database options in any order.
+    // - callbacks (optional, defaults to empty): event callbacks for the application
+    // - predefined_seed (optional): overrides any seed stored in the database
+    // - database options: see sqlite::DatabaseOption (encryption, behaviour flags, etc.)
+    template <CoreOption... Opts>
+    Core(std::filesystem::path db_path, Opts&&... opts) :
+            callbacks{_maybe_instance<core::callbacks>(std::forward<Opts>(opts)...).value_or({})},
+            db{_make_db(std::move(db_path), std::forward<Opts>(opts)...)} {
+        if (auto s = _maybe_instance<predefined_seed>(std::forward<Opts>(opts)...))
+            globals._predefined_seed = std::move(s->bytes);
         init();
     }
 

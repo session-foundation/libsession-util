@@ -597,7 +597,7 @@ namespace {
     // Consumes and stores any unknown extra fields from `btdc` up to (but not including) `key` into
     // `extras`
     void read_extras(oxenc::bt_dict_consumer& btdc, std::string_view key, oxenc::bt_dict& extra) {
-        while (btdc.key() < key)
+        while (!btdc.is_finished() && btdc.key() < key)
             consume_extra(btdc, extra);
     }
 
@@ -621,7 +621,7 @@ namespace {
         info.description = dev.maybe<std::string_view>("d").value_or(""sv);
 
         read_extras(dev, "t", info.extra);
-        auto type = dev.require<std::string_view>("t");
+        auto type = dev.maybe<std::string_view>("t").value_or(""sv);
         info.other_device.clear();
         if (type == "i")
             info.type = device::Type::Session_iOS;

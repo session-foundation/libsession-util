@@ -120,12 +120,18 @@ void Globals::init() {
     SQLite::Transaction tx{c.sql};
     cleared_b32 seed;
     bool have_seed = get_blob_to("_seed", seed);
+    const cleared_b32* seed_to_use = &seed;
     if (!have_seed) {
-        // FIXME: we should allow full 32-byte seeds here, but for now this is compatible with the
-        // 16-byte/128-bit seed that Session accounts use which is 16 random bytes followed by 16
-        // 0s:
-        randombytes_buf(seed.data(), 16);
-        std::memset(seed.data() + 16, 0, 16);
+        if (_predefined_seed) {
+            // Use the predefined seed directly, avoiding an extra copy+clear.
+            seed_to_use = &*_predefined_seed;
+        } else {
+            // FIXME: we should allow full 32-byte seeds here, but for now this is compatible with
+            // the 16-byte/128-bit seed that Session accounts use which is 16 random bytes followed
+            // by 16 0s:
+            randombytes_buf(seed.data(), 16);
+            std::memset(seed.data() + 16, 0, 16);
+        }
     }
 
     auto rw = _account_seed.resize(64);
@@ -133,7 +139,9 @@ void Globals::init() {
     crypto_sign_ed25519_seed_keypair(
             _pubkey_ed25519.data(),
             reinterpret_cast<unsigned char*>(rw.buf.data()),
-            reinterpret_cast<unsigned char*>(seed.data()));
+            reinterpret_cast<const unsigned char*>(seed_to_use->data()));
+
+    _predefined_seed.reset();  // Clear now that it has been consumed
     if (0 != crypto_sign_ed25519_pk_to_curve25519(_pubkey_x25519.data(), _pubkey_ed25519.data()))
         // This *should* be impossible when starting from a seed because that would mean the seed
         // generation produced an invalid Ed pubkey!

@@ -1,7 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <session/core.hpp>
 #include <session/network/session_network.hpp>
-#include <session/sqlite.hpp>
 
 #include "utils.hpp"
 
@@ -13,7 +12,7 @@ TEST_CASE("Core can hold an optional Network interface", "[core][network]") {
     if (std::filesystem::exists(db_path))
         std::filesystem::remove(db_path);
 
-    core::Core core{callbacks, db_path, sqlite::argon2id_password{"test"}};
+    core::Core core{db_path, callbacks};
 
     SECTION("Network is initially null") {
         CHECK(core.network() == nullptr);

@@ -5,6 +5,7 @@
 #include <optional>
 #include <session/network/key_types.hpp>
 #include <session/secure_buffer.hpp>
+#include <session/sodium_array.hpp>
 #include <string>
 #include <variant>
 #include <vector>
@@ -43,6 +44,10 @@ class Globals final : detail::CoreComponent {
     std::array<unsigned char, 33> _session_id;  // AKA pubkey_x25519 with a 0x05 byte prefix
 
     void init() override;
+
+    // If set by the Core constructor before init(), used as the initial account seed when the
+    // database does not yet contain one.  Cleared after use in init().
+    std::optional<cleared_b32> _predefined_seed;
 
   public:
     // Retrieval methods.  These query for the given key and, if the type matches, return the given

@@ -1,16 +1,12 @@
 #include <oxenc/base64.h>
-#include <oxenc/bt_producer.h>
 #include <oxenc/hex.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>
-#include <session/config/encrypt.hpp>
 #include <session/core.hpp>
 #include <session/network/session_network.hpp>
-#include <session/sqlite.hpp>
 
 #include "test_helper.hpp"
-#include "utils.hpp"
 
 using namespace session;
 
@@ -49,8 +45,6 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
     if (std::filesystem::exists(db_path))
         std::filesystem::remove(db_path);
 
-    auto test_keys = get_deterministic_test_keys();
-
     bool received = false;
     core::callbacks callbacks;
     callbacks.device_link_request = [&](int,
@@ -58,7 +52,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
                                         std::span<const std::string_view>) { received = true; };
 
     {
-        core::Core core{callbacks, db_path, sqlite::argon2id_password{"test"}};
+        core::Core core{db_path, callbacks};
         auto mock_net = std::make_shared<MockNetwork>();
 
         core.set_network(mock_net);
@@ -77,36 +71,18 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
         CHECK(params.contains("timestamp"));
         CHECK(params.contains("signature"));
 
-        // Prepare a valid encrypted link request message using the core's actual seed
-        std::vector<unsigned char> outer_msg;
+        // Build a valid link request from a second device sharing the same account seed.
+        // The link request is encrypted with the account seed, so the receiving core can only
+        // decrypt it if both devices share that seed.
+        cleared_b32 seed_bytes;
         {
-            // Plaintext: {"I": <id>, "i": {"n": "test", "p": <pk>, "k": <ed_pk>}}
-            std::vector<unsigned char> plaintext;
-            oxenc::bt_dict_producer p;
-            auto dev_id =
-                    "0101010101010101010101010101010101010101010101010101010101010101"_hexbytes;
-            p.append("I", dev_id);
-            {
-                auto sub = p.append_dict("i");
-                sub.append("k", test_keys.ed_pk1);
-                sub.append("n", "test device");
-                sub.append("p", test_keys.curve_pk1);
-            }
-            auto p_span = p.span<unsigned char>();
-            plaintext.assign(p_span.begin(), p_span.end());
-
-            // Encrypt with the core's actual seed
-            auto core_seed = core.globals.account_seed();
-            auto seed_span = session::to_span(core_seed.buf).first(32);
-            auto encrypted = config::encrypt(plaintext, seed_span, "link-request");
-
-            // Outer: {"": "L", "L": <encrypted>}
-            oxenc::bt_dict_producer outer;
-            outer.append("", "L");
-            outer.append("L", encrypted);
-            auto outer_span = outer.span<unsigned char>();
-            outer_msg.assign(outer_span.begin(), outer_span.end());
+            auto seed_acc = core.globals.account_seed();
+            std::ranges::copy(seed_acc.buf.first<32>(), seed_bytes.begin());
         }
+        TempCore linker{core::predefined_seed{std::span<const std::byte, 32>{seed_bytes}}};
+        auto link_msg = linker->devices.build_link_request().message;
+        const auto* p = reinterpret_cast<const unsigned char*>(link_msg.data());
+        std::vector<unsigned char> outer_msg{p, p + link_msg.size()};
 
         // Prepare a mock response
         nlohmann::json response;
@@ -123,7 +99,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
         sent.callback(true, false, 200, {}, response.dump());
 
         // Verify last_hash was updated in DB
-        CHECK(core.globals.get_text("_last_hash_21") == "hash1");
+        CHECK(TestHelper::namespace_last_hash(core, 21) == "hash1");
         CHECK(received);
 
         // Poll again, should include last_hash

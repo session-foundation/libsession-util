@@ -1,11 +1,8 @@
-#include <fmt/format.h>
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <sodium/crypto_sign_ed25519.h>
 
-#include <atomic>
 #include <catch2/catch_test_macros.hpp>
-#include <filesystem>
 #include <session/clock.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
@@ -18,31 +15,6 @@
 using namespace session;
 using namespace session::core;
 using namespace std::literals;
-
-static constexpr std::array<std::byte, 32> test_key_bytes{};
-
-// Smart-pointer-like wrapper around a unique_ptr<Core> with RAII cleanup of the temp DB file.
-struct TempCore {
-    std::filesystem::path path;
-    std::unique_ptr<Core> core;
-
-    explicit TempCore(core::callbacks cb = {}) :
-            path{[] {
-                static std::atomic<int> n{0};
-                return std::filesystem::temp_directory_path() /
-                       fmt::format("test_core_devices_{}.db", ++n);
-            }()},
-            core{std::make_unique<Core>(std::move(cb), path, sqlite::raw_key{test_key_bytes})} {}
-
-    ~TempCore() {
-        core.reset();  // close DB before removing the file
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
-    }
-
-    Core* operator->() { return core.get(); }
-    Core& operator*() { return *core; }
-};
 
 TEST_CASE("Devices - identity", "[core][devices]") {
     TempCore c;
