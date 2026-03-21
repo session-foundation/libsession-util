@@ -1,6 +1,7 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
+#include <sodium/utils.h>
 
 #include <concepts>
 #include <oxen/log.hpp>
@@ -156,6 +157,21 @@ void Globals::init() {
     }
 
     log::info(cat, "Initialized with Session ID: {}", oxenc::to_hex(_session_id));
+}
+
+mnemonics::secure_mnemonic Globals::seed_mnemonic(const mnemonics::Mnemonics& lang, bool force_24) {
+    auto seed = _account_seed.access();
+    // _account_seed stores the 64-byte Ed25519 secret key, of which the first 32 bytes are the
+    // account seed.  A Session account uses 128-bit entropy when the upper 16 bytes of that seed
+    // are all zero; in that case we encode only the lower 16 bytes.
+    auto seed32 = seed.buf.first(32);
+    bool is_128bit = !force_24 &&
+                     sodium_memcmp(seed32.data() + 16, std::array<std::byte, 16>{}.data(), 16) == 0;
+    return mnemonics::bytes_to_words(is_128bit ? seed32.first(16) : seed32, lang);
+}
+
+mnemonics::secure_mnemonic Globals::seed_mnemonic(std::string_view lang_name, bool force_24) {
+    return seed_mnemonic(mnemonics::get_language(lang_name), force_24);
 }
 
 }  // namespace session::core

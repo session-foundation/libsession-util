@@ -94,6 +94,7 @@ target_link_libraries(util
 target_link_libraries(crypto
     PUBLIC
     util
+    session::secure_buffer
     PRIVATE
     sessiondep::libsodium
     nlohmann_json::nlohmann_json

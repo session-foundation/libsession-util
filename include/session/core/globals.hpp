@@ -3,10 +3,12 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <session/mnemonics.hpp>
 #include <session/network/key_types.hpp>
 #include <session/secure_buffer.hpp>
 #include <session/sodium_array.hpp>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -36,8 +38,7 @@ class Globals final : detail::CoreComponent {
     // account seed is generated during initialization if the database doesn't contain one (e.g. if
     // brand new).
     //
-    // Read-only access is available via the account_seed() method, or via the `seed()`
-    // CoreComponent base class method from other components.
+    // Read-only access is available via the account_seed() method.
     session::secure_buffer _account_seed;
     network::ed25519_pubkey _pubkey_ed25519;
     network::x25519_pubkey _pubkey_x25519;
@@ -83,6 +84,16 @@ class Globals final : detail::CoreComponent {
     std::span<const unsigned char, 33> session_id() { return _session_id; }
     const network::ed25519_pubkey& pubkey_ed25519() const { return _pubkey_ed25519; }
     const network::x25519_pubkey& pubkey_x25519() const { return _pubkey_x25519; }
+
+    /// Returns the account seed as a mnemonic word list with checksum, stored in secure memory.
+    ///
+    /// If `force_24` is false (the default), returns 13 words when the upper 16 bytes of the
+    /// seed are all zero (128-bit entropy), or 25 words otherwise.  If `force_24` is true,
+    /// always returns 25 words.
+    mnemonics::secure_mnemonic seed_mnemonic(
+            const mnemonics::Mnemonics& lang, bool force_24 = false);
+    mnemonics::secure_mnemonic seed_mnemonic(
+            std::string_view lang_name = "English", bool force_24 = false);
 };
 
 }  // namespace session::core

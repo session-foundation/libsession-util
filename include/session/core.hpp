@@ -2,6 +2,7 @@
 
 #include <memory>
 #include <session/config/namespaces.hpp>
+#include <session/mnemonics.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
 #include <session/types.hpp>
@@ -148,6 +149,19 @@ struct predefined_seed {
     explicit predefined_seed(std::span<const unsigned char, 32> s) {
         std::ranges::copy(std::as_bytes(s), bytes.begin());
     }
+
+    /// Constructs a predefined_seed from a mnemonic word list.
+    ///
+    /// Accepts 12 or 13 words (128-bit seed; the upper 16 bytes are set to zero), or 24 or 25
+    /// words (256-bit seed).  13- and 25-word inputs include a checksum word which is validated.
+    ///
+    /// @throws std::invalid_argument if the word count is not 12, 13, 24, or 25.
+    /// @throws mnemonics::unknown_word_error if a word is not found in the language dictionary.
+    /// @throws mnemonics::checksum_error if the checksum word (if present) does not match.
+    explicit predefined_seed(
+            std::span<const std::string_view> words, const mnemonics::Mnemonics& lang);
+    explicit predefined_seed(
+            std::span<const std::string_view> words, std::string_view lang_name = "English");
 };
 
 /// Concept satisfied by any type usable as a Core constructor option: a sqlite database option

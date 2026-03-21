@@ -8,6 +8,7 @@
 #include <initializer_list>
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
+#include <oxen/log/format.hpp>
 #include <oxen/quic/loop.hpp>
 #include <session/clock.hpp>
 #include <session/core.hpp>
@@ -23,7 +24,35 @@ namespace session::core {
 
 namespace log = oxen::log;
 using namespace session::sqlite;
+using namespace oxen::log::literals;
 static auto cat = log::Cat("core");
+
+static cleared_b32 seed_from_words(
+        std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) {
+    auto n = words.size();
+    if (n != 12 && n != 13 && n != 24 && n != 25)
+        throw std::invalid_argument{
+                "Seed phrase must be 12, 13, 24, or 25 words (got {})"_format(n)};
+
+    cleared_b32 result;
+    if (n <= 13) {
+        // 12 or 13 words → 16-byte seed in the lower half; upper 16 bytes are zeroed
+        mnemonics::words_to_bytes(words, lang, std::span<std::byte>(result.data(), 16));
+        std::memset(result.data() + 16, 0, 16);
+    } else {
+        // 24 or 25 words → full 32-byte seed
+        mnemonics::words_to_bytes(words, lang, std::span<std::byte>(result.data(), 32));
+    }
+    return result;
+}
+
+predefined_seed::predefined_seed(
+        std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) :
+        predefined_seed{seed_from_words(words, lang)} {}
+
+predefined_seed::predefined_seed(
+        std::span<const std::string_view> words, std::string_view lang_name) :
+        predefined_seed{words, mnemonics::get_language(lang_name)} {}
 
 void Core::LoopDeleter::operator()(quic::Loop* p) const {
     delete p;

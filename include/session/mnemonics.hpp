@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <session/secure_buffer.hpp>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -53,6 +54,18 @@ class checksum_error : public std::invalid_argument {
     checksum_error();
 };
 
+/// Exception thrown when a language name is not found in the language registry.
+class unknown_language_error : public std::invalid_argument {
+  public:
+    explicit unknown_language_error(std::string name);
+
+    /// The language name that was not found.
+    const std::string& name() const { return name_; }
+
+  private:
+    std::string name_;
+};
+
 /**
  * Returns a list of all supported mnemonic languages.
  * English is always the first element, followed by other languages sorted by name.
@@ -68,63 +81,114 @@ std::span<const Mnemonics* const> get_languages();
 const Mnemonics* find_language(std::string_view name);
 
 /**
- * Converts a byte span to a mnemonic word list using the specified language.
+ * Looks up a language by its English or native name, throwing if not found.
+ *
+ * @param name The name to look for.
+ * @return A reference to the Mnemonics struct.
+ * @throws unknown_language_error if the language name is not found.
+ */
+const Mnemonics& get_language(std::string_view name);
+
+/// Stores mnemonic string_view objects (each pointing into the language word list) in secure
+/// (sodium) memory so that the word identities are zeroed on destruction.
+///
+/// Call open() to iterate over the words.  The returned opened_span holds a read accessor
+/// that keeps the buffer readable for its own lifetime, so the following are both safe:
+///
+///     for (auto w : m.open()) { ... }
+///     auto s = m.open(); for (auto w : s.words) { ... }
+///
+/// Do NOT do: `for (auto w : m.open().words)` — the opened_span (and its accessor) would be
+/// destroyed before the loop body runs, re-locking the buffer and causing a crash.
+struct secure_mnemonic {
+    session::secure_buffer storage;
+
+    struct opened_span {
+        session::secure_buffer::r_accessor acc;
+        std::span<const std::string_view> words;
+
+        const std::string_view& operator[](size_t i) const { return words[i]; }
+        const std::string_view* begin() const { return words.data(); }
+        const std::string_view* end() const { return words.data() + words.size(); }
+    };
+
+    opened_span open() {
+        auto acc = storage.access();
+        std::span<const std::string_view> words{
+                reinterpret_cast<const std::string_view*>(acc.buf.data()),
+                acc.buf.size() / sizeof(std::string_view)};
+        return {std::move(acc), words};
+    }
+
+    size_t size() const { return storage.size() / sizeof(std::string_view); }
+};
+
+/**
+ * Converts a byte span to a mnemonic word list using the specified language, stored in secure
+ * memory.
  *
  * @param bytes The input byte span. Its length must be a multiple of 4.
  * @param lang The language to use for the mnemonic.
  * @param checksum If true (the default), append a checksum word after the encoded words.  The
  *        checksum word is the seed word at position (sum of all word indices) % N, where N is
  *        the number of encoded words.
- * @return A vector of words representing the input bytes, plus a checksum word if requested.
+ * @return A secure_mnemonic containing the words, plus a checksum word if requested.
  * @throws std::invalid_argument if the input length is not a multiple of 4.
  */
-std::vector<std::string_view> bytes_to_words(
+secure_mnemonic bytes_to_words(
         std::span<const std::byte> bytes, const Mnemonics& lang, bool checksum = true);
 
-/**
- * Converts a byte span to a mnemonic word list using the specified language.
- *
- * @param bytes The input byte span. Its length must be a multiple of 4.
- * @param lang_name The name of the language (English or native) to use.
- * @param checksum If true (the default), append a checksum word after the encoded words.
- * @return A vector of words representing the input bytes, plus a checksum word if requested.
- * @throws std::invalid_argument if the language is unknown or the input length is invalid.
- */
-std::vector<std::string_view> bytes_to_words(
+/// Same as above, but takes a language by name instead of by reference.
+/// @throws unknown_language_error if the language name is not found.
+secure_mnemonic bytes_to_words(
         std::span<const std::byte> bytes, std::string_view lang_name, bool checksum = true);
 
 /**
- * Converts a mnemonic word list to a byte span using the specified language.
+ * Converts a mnemonic word list to bytes using the specified language, stored in secure memory.
  *
  * Accepts a word count that is either a multiple of 3 (no checksum) or one more than a multiple
  * of 3 (with checksum).  If a checksum word is present it is validated.
  *
  * @param words The input word list.
  * @param lang The language used for the mnemonic.
- * @return A vector of bytes representing the input mnemonic.
+ * @return A secure_buffer containing the decoded bytes.
  * @throws std::invalid_argument if the input length is invalid, or if the word sequence encodes
  *         an invalid (overflowing) value.
  * @throws unknown_word_error if a word is not found in the language dictionary.
  * @throws checksum_error if a checksum word is present but does not match.
  */
-std::vector<std::byte> words_to_bytes(
+session::secure_buffer words_to_bytes(
         std::span<const std::string_view> words, const Mnemonics& lang);
 
+/// Same as above, but takes a language by name instead of by reference.
+/// @throws unknown_language_error if the language name is not found.
+session::secure_buffer words_to_bytes(
+        std::span<const std::string_view> words, std::string_view lang_name);
+
 /**
- * Converts a mnemonic word list to a byte span using the specified language.
+ * Converts a mnemonic word list to bytes, writing directly into a caller-provided output span.
  *
- * Accepts a word count that is either a multiple of 3 (no checksum) or one more than a multiple
- * of 3 (with checksum).  If a checksum word is present it is validated.
+ * The size of `out` determines the expected number of seed words: out.size() must be a multiple
+ * of 4, and words.size() must equal (out.size() / 4 * 3) or (out.size() / 4 * 3) + 1 (the
+ * latter if a checksum word is appended).
  *
  * @param words The input word list.
- * @param lang_name The name of the language (English or native) used.
- * @return A vector of bytes representing the input mnemonic.
- * @throws std::invalid_argument if the language is unknown, the input length is invalid, or the
- *         word sequence encodes an invalid (overflowing) value.
+ * @param lang The language used for the mnemonic.
+ * @param out Output span to write decoded bytes into; must be a multiple-of-4 size exactly
+ *        matching the decoded byte count implied by the word count.
+ * @throws std::invalid_argument if the word count does not match the output size, the word
+ *         sequence encodes an invalid (overflowing) value, or out.size() is not a multiple of 4.
  * @throws unknown_word_error if a word is not found in the language dictionary.
  * @throws checksum_error if a checksum word is present but does not match.
  */
-std::vector<std::byte> words_to_bytes(
-        std::span<const std::string_view> words, std::string_view lang_name);
+void words_to_bytes(
+        std::span<const std::string_view> words, const Mnemonics& lang, std::span<std::byte> out);
+
+/// Same as above, but takes a language by name instead of by reference.
+/// @throws unknown_language_error if the language name is not found.
+void words_to_bytes(
+        std::span<const std::string_view> words,
+        std::string_view lang_name,
+        std::span<std::byte> out);
 
 }  // namespace session::mnemonics

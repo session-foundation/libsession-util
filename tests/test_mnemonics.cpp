@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <random>
 #include <session/mnemonics.hpp>
@@ -12,8 +13,9 @@ using namespace session::mnemonics;
 // These pin the exact word list contents and ordering; if any word list changes this test fails.
 TEST_CASE("Mnemonic word list test vectors", "[mnemonics]") {
     // seed = SHA-512("libsession-util mnemonic test vector")
-    auto seed = "0dd5d9bc3d68c25a396f4aacd922a4d620a19cf3c9054cb825dd8a2c5420f4f3"
-                "ca314c582ffef5388df36e2546cc9103dd1776a634f676e1e631289b8d280b2e"_hex_b;
+    auto seed =
+            "0dd5d9bc3d68c25a396f4aacd922a4d620a19cf3c9054cb825dd8a2c5420f4f3"
+            "ca314c582ffef5388df36e2546cc9103dd1776a634f676e1e631289b8d280b2e"_hex_b;
 
     // clang-format off
     const std::pair<std::string_view, std::array<std::string_view, 48>> expected[] = {
@@ -140,10 +142,11 @@ TEST_CASE("Mnemonic word list test vectors", "[mnemonics]") {
         SECTION(std::string(lang_name)) {
             auto* lang = find_language(lang_name);
             REQUIRE(lang);
-            auto words = bytes_to_words(seed, *lang, false);
-            REQUIRE(words.size() == 48);
+            auto mnemonic = bytes_to_words(seed, *lang, false);
+            REQUIRE(mnemonic.size() == 48);
+            auto wspan = mnemonic.open();
             for (size_t i = 0; i < 48; i++)
-                CHECK(words[i] == exp_words[i]);
+                CHECK(wspan[i] == exp_words[i]);
         }
     }
 }
@@ -168,26 +171,26 @@ TEST_CASE("Mnemonic round-trip tests", "[mnemonics]") {
             // 128-bit -> 12 words -> 128-bit
             auto words12 = bytes_to_words(data_128, *lang, false);
             CHECK(words12.size() == 12);
-            auto back12 = words_to_bytes(words12, *lang);
-            CHECK(back12 == data_128);
+            auto back12 = words_to_bytes(words12.open().words, *lang);
+            CHECK(std::ranges::equal(back12.access().buf, data_128));
 
             // 128-bit -> 13 words (with checksum) -> 128-bit
             auto words13 = bytes_to_words(data_128, *lang);
             CHECK(words13.size() == 13);
-            auto back13 = words_to_bytes(words13, *lang);
-            CHECK(back13 == data_128);
+            auto back13 = words_to_bytes(words13.open().words, *lang);
+            CHECK(std::ranges::equal(back13.access().buf, data_128));
 
             // 256-bit -> 24 words -> 256-bit
             auto words24 = bytes_to_words(data_256, *lang, false);
             CHECK(words24.size() == 24);
-            auto back24 = words_to_bytes(words24, *lang);
-            CHECK(back24 == data_256);
+            auto back24 = words_to_bytes(words24.open().words, *lang);
+            CHECK(std::ranges::equal(back24.access().buf, data_256));
 
             // 256-bit -> 25 words (with checksum) -> 256-bit
             auto words25 = bytes_to_words(data_256, *lang);
             CHECK(words25.size() == 25);
-            auto back25 = words_to_bytes(words25, *lang);
-            CHECK(back25 == data_256);
+            auto back25 = words_to_bytes(words25.open().words, *lang);
+            CHECK(std::ranges::equal(back25.access().buf, data_256));
         }
     }
 }
@@ -209,14 +212,14 @@ TEST_CASE("Mnemonic case-insensitivity and prefix matching", "[mnemonics]") {
     REQUIRE(words.size() == 3);
 
     SECTION("Exact match") {
-        auto back = words_to_bytes(words, *english);
-        CHECK(back == data);
+        auto back = words_to_bytes(words.open().words, *english);
+        CHECK(std::ranges::equal(back.access().buf, data));
     }
 
     SECTION("Case-insensitive match (ASCII)") {
         std::vector<std::string_view> upper_words;
         std::vector<std::string> storage;
-        for (auto w : words) {
+        for (auto w : words.open()) {
             std::string upper(w);
             for (auto& c : upper)
                 c = std::toupper(static_cast<unsigned char>(c));
@@ -226,33 +229,33 @@ TEST_CASE("Mnemonic case-insensitivity and prefix matching", "[mnemonics]") {
             upper_words.push_back(s);
 
         auto back = words_to_bytes(upper_words, *english);
-        CHECK(back == data);
+        CHECK(std::ranges::equal(back.access().buf, data));
     }
 
     SECTION("Prefix match") {
         std::vector<std::string_view> prefix_words;
         std::vector<std::string> storage;
-        for (auto w : words) {
+        for (auto w : words.open()) {
             storage.push_back(std::string(w.substr(0, english->prefix_len)));
         }
         for (const auto& s : storage)
             prefix_words.push_back(s);
 
         auto back = words_to_bytes(prefix_words, *english);
-        CHECK(back == data);
+        CHECK(std::ranges::equal(back.access().buf, data));
     }
 
     SECTION("Prefix match with typo after prefix") {
         std::vector<std::string_view> typo_words;
         std::vector<std::string> storage;
-        for (auto w : words) {
+        for (auto w : words.open()) {
             storage.push_back(std::string(w.substr(0, english->prefix_len)) + "xyz");
         }
         for (const auto& s : storage)
             typo_words.push_back(s);
 
         auto back = words_to_bytes(typo_words, *english);
-        CHECK(back == data);
+        CHECK(std::ranges::equal(back.access().buf, data));
     }
 }
 
@@ -277,32 +280,42 @@ TEST_CASE("Mnemonic checksum", "[mnemonics]") {
 
     SECTION("Checksum word is correct position duplicate") {
         // sum of indices % 3 gives the position whose word is duplicated
+        auto s3 = words3.open();
+        auto s4 = words4.open();
         int i0 = 0, i1 = 0, i2 = 0;
         for (size_t i = 0; i < 3; i++) {
             int idx = 0;
             for (size_t j = 0; j < english->words.size(); j++)
-                if (english->words[j] == words3[i]) { idx = j; break; }
-            if (i == 0) i0 = idx;
-            else if (i == 1) i1 = idx;
-            else i2 = idx;
+                if (english->words[j] == s3[i]) {
+                    idx = j;
+                    break;
+                }
+            if (i == 0)
+                i0 = idx;
+            else if (i == 1)
+                i1 = idx;
+            else
+                i2 = idx;
         }
         size_t expected_pos = (i0 + i1 + i2) % 3;
-        CHECK(words4[3] == words3[expected_pos]);
+        CHECK(s4[3] == s3[expected_pos]);
     }
 
     SECTION("Checksum round-trip") {
-        auto back = words_to_bytes(words4, *english);
-        CHECK(back == data);
+        auto back = words_to_bytes(words4.open().words, *english);
+        CHECK(std::ranges::equal(back.access().buf, data));
     }
 
     SECTION("Bad checksum throws checksum_error") {
         // Replace the checksum word with a different valid word
-        std::vector<std::string_view> bad = {words4[0], words4[1], words4[2], words4[2] == words4[0] ? words4[1] : words4[0]};
+        auto s4 = words4.open();
+        std::vector<std::string_view> bad = {s4[0], s4[1], s4[2], s4[2] == s4[0] ? s4[1] : s4[0]};
         CHECK_THROWS_AS(words_to_bytes(bad, *english), checksum_error);
     }
 
     SECTION("Unknown checksum word throws unknown_word_error") {
-        std::vector<std::string_view> bad = {words4[0], words4[1], words4[2], "ZZZunknown"};
+        auto s4 = words4.open();
+        std::vector<std::string_view> bad = {s4[0], s4[1], s4[2], "ZZZunknown"};
         CHECK_THROWS_AS(words_to_bytes(bad, *english), unknown_word_error);
     }
 }
