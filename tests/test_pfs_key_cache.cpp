@@ -115,7 +115,7 @@ TEST_CASE("prefetch_pfs_keys fetches and caches remote account pubkeys", "[core]
         mock_net->sent_requests.clear();
 
         // Advance clock past the fresh threshold.
-        ScopedClockOffset stale{core::Core::PFS_KEY_FRESH_DURATION + 1s};
+        ScopedClockOffset advance_past_fresh{core::Core::PFS_KEY_FRESH_DURATION + 1s};
         c->prefetch_pfs_keys(sid);
         CHECK(mock_net->sent_requests.size() == 1);
     }
@@ -166,7 +166,7 @@ TEST_CASE("prefetch_pfs_keys NAK handling", "[core][pfs]") {
         c->prefetch_pfs_keys(sid);
         fire_nak();
 
-        ScopedClockOffset expired{core::Core::PFS_KEY_NAK_DURATION + 1s};
+        ScopedClockOffset advance_past_nak_expiry{core::Core::PFS_KEY_NAK_DURATION + 1s};
         c->prefetch_pfs_keys(sid);
         CHECK(mock_net->sent_requests.size() == 1);
     }
@@ -185,7 +185,7 @@ TEST_CASE("prefetch_pfs_keys NAK handling", "[core][pfs]") {
         REQUIRE(before->pubkey_x25519.has_value());
 
         // Advance clock to make the entry stale, then fire a re-fetch that returns nothing.
-        ScopedClockOffset stale{core::Core::PFS_KEY_FRESH_DURATION + 1s};
+        ScopedClockOffset advance_past_fresh{core::Core::PFS_KEY_FRESH_DURATION + 1s};
         c->prefetch_pfs_keys(sid);
         fire_nak();
 
@@ -209,7 +209,7 @@ TEST_CASE("prefetch_pfs_keys NAK handling", "[core][pfs]") {
 
         // Make stale and fire a NAK.
         {
-            ScopedClockOffset stale{core::Core::PFS_KEY_FRESH_DURATION + 1s};
+            ScopedClockOffset advance_past_fresh{core::Core::PFS_KEY_FRESH_DURATION + 1s};
             c->prefetch_pfs_keys(sid);
             fire_nak();
 
