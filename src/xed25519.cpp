@@ -5,6 +5,7 @@
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
+#include <bit>
 #include <cassert>
 #include <cstring>
 #include <stdexcept>
@@ -99,6 +100,12 @@ bytes<64> sign(
     return signature;
 }
 
+std::array<std::byte, 64> sign(
+        std::span<const std::byte> curve25519_privkey, std::span<const std::byte> msg) {
+    return std::bit_cast<std::array<std::byte, 64>>(
+            sign(as_span<unsigned char>(curve25519_privkey), as_span<unsigned char>(msg)));
+}
+
 std::string sign(std::string_view curve25519_privkey, std::string_view msg) {
     auto sig = sign(to_span(curve25519_privkey), to_span(msg));
     return std::string{reinterpret_cast<const char*>(sig.data()), sig.size()};
@@ -115,11 +122,26 @@ bool verify(
                         signature.data(), msg.data(), msg.size(), ed_pubkey.data());
 }
 
+bool verify(
+        std::span<const std::byte> signature,
+        std::span<const std::byte> curve25519_pubkey,
+        std::span<const std::byte> msg) {
+    return verify(
+            as_span<unsigned char>(signature),
+            as_span<unsigned char>(curve25519_pubkey),
+            as_span<unsigned char>(msg));
+}
+
 bool verify(std::string_view signature, std::string_view curve25519_pubkey, std::string_view msg) {
     return verify(to_span(signature), to_span(curve25519_pubkey), to_span(msg));
 }
 
 // pubkey(...) is in xed25519-tweetnacl.cpp
+
+std::array<std::byte, 32> pubkey(std::span<const std::byte, 32> curve25519_pubkey) noexcept {
+    return std::bit_cast<std::array<std::byte, 32>>(
+            pubkey(as_span<unsigned char>(curve25519_pubkey)));
+}
 
 std::string pubkey(std::string_view curve25519_pubkey) {
     if (curve25519_pubkey.size() != 32)

@@ -49,6 +49,7 @@ if(ENABLE_NETWORKING)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_snode_pool.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_core_network.cpp)
     list(APPEND LIB_SESSION_UTESTS_SOURCES test_poll.cpp)
+    list(APPEND LIB_SESSION_UTESTS_SOURCES test_pfs_key_cache.cpp)
 endif()
 
 add_library(test_libs INTERFACE)

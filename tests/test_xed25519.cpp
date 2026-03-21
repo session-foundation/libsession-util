@@ -164,6 +164,42 @@ TEST_CASE("XEd25519 signing (C wrapper)", "[xed25519][sign][c]") {
             xed_sig2.data(), msg.data(), msg.size(), pub2_abs.data());
     REQUIRE(rc == 0);  // Flipped sign should work
 }
+TEST_CASE("XEd25519 std::byte overloads", "[xed25519][byte]") {
+    std::array<unsigned char, 32> xsk1;
+    int rc = crypto_sign_ed25519_sk_to_curve25519(xsk1.data(), seed1.data());
+    REQUIRE(rc == 0);
+
+    const auto msg_uc = session::to_span("hello world");
+    // Build std::byte versions of privkey, pubkey, and message.
+    auto xsk1_b = std::bit_cast<std::array<std::byte, 32>>(xsk1);
+    auto xpub1_b = std::bit_cast<std::array<std::byte, 32>>(xpub1);
+    std::array<std::byte, 11> msg_b;
+    std::memcpy(msg_b.data(), msg_uc.data(), msg_b.size());
+
+    // sign() byte overload should return a std::byte array.
+    auto sig_b = session::xed25519::sign(
+            std::span<const std::byte>{xsk1_b}, std::span<const std::byte>{msg_b});
+    static_assert(std::same_as<decltype(sig_b), std::array<std::byte, 64>>);
+
+    // The signature must verify with the unsigned char overload.
+    auto sig_uc = std::bit_cast<std::array<unsigned char, 64>>(sig_b);
+    rc = crypto_sign_ed25519_verify_detached(
+            sig_uc.data(), msg_uc.data(), msg_uc.size(), pub1.data());
+    REQUIRE(rc == 0);
+
+    // verify() byte overload.
+    REQUIRE(session::xed25519::verify(
+            std::span<const std::byte>{sig_b},
+            std::span<const std::byte>{xpub1_b},
+            std::span<const std::byte>{msg_b}));
+
+    // pubkey() byte overload should return a std::byte array.
+    auto ed_pk_b = session::xed25519::pubkey(std::span<const std::byte, 32>{xpub1_b});
+    static_assert(std::same_as<decltype(ed_pk_b), std::array<std::byte, 32>>);
+    auto ed_pk_uc = std::bit_cast<std::array<unsigned char, 32>>(ed_pk_b);
+    REQUIRE(view_hex(ed_pk_uc) == oxenc::to_hex(pub1));
+}
+
 TEST_CASE("XEd25519 verification (C wrapper)", "[xed25519][verify][c]") {
     std::array<unsigned char, 32> xsk1;
     int rc = crypto_sign_ed25519_sk_to_curve25519(xsk1.data(), seed1.data());

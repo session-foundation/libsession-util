@@ -10,34 +10,6 @@
 
 using namespace session;
 
-class MockNetwork : public network::Network {
-  public:
-    MockNetwork() : network::Network(network::config::Config{}) {}
-
-    struct SentRequest {
-        network::Request request;
-        network::network_response_callback_t callback;
-    };
-    std::vector<SentRequest> sent_requests;
-
-    // The node returned by get_swarm; tests can change this to simulate swarm-member switches.
-    network::service_node current_node;
-
-    void send_request(
-            network::Request request, network::network_response_callback_t callback) override {
-        sent_requests.push_back({std::move(request), std::move(callback)});
-    }
-
-    void get_swarm(
-            session::network::x25519_pubkey /*swarm_pubkey*/,
-            bool /*ignore_strike_count*/,
-            std::function<
-                    void(network::swarm_id_t swarm_id, std::vector<network::service_node> swarm)>
-                    callback) override {
-        callback(0, {current_node});
-    }
-};
-
 // Helpers to build a mock retrieve response carrying a single message in one namespace.
 static nlohmann::json make_response(
         int16_t ns, std::vector<unsigned char> msg_data, std::string hash) {
@@ -100,8 +72,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
         const auto* p = reinterpret_cast<const unsigned char*>(link_msg.data());
         std::vector<unsigned char> outer_msg{p, p + link_msg.size()};
 
-        sent.callback(
-                true, false, 200, {}, make_response(21, outer_msg, "hash1").dump());
+        sent.callback(true, false, 200, {}, make_response(21, outer_msg, "hash1").dump());
 
         // Verify last_hash was stored under this specific node's pubkey.
         CHECK(TestHelper::namespace_last_hash(core, 21, mock_net->current_node.remote_pubkey) ==
@@ -121,8 +92,9 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
         std::filesystem::remove(db_path);
 }
 
-TEST_CASE("Polling uses per-node last_hash to avoid missing messages on swarm-member switch",
-          "[core][poll]") {
+TEST_CASE(
+        "Polling uses per-node last_hash to avoid missing messages on swarm-member switch",
+        "[core][poll]") {
     TempCore c;
     auto mock_net = std::make_shared<MockNetwork>();
 
@@ -138,8 +110,7 @@ TEST_CASE("Polling uses per-node last_hash to avoid missing messages on swarm-me
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params =
-                nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
+        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
         // No prior hash for any node — must not send last_hashes.
         CHECK_FALSE(params.contains("last_hashes"));
     }
@@ -154,8 +125,7 @@ TEST_CASE("Polling uses per-node last_hash to avoid missing messages on swarm-me
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params =
-                nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
+        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
         CHECK(params["last_hashes"]["21"] == "xyz");
     }
 
@@ -165,8 +135,7 @@ TEST_CASE("Polling uses per-node last_hash to avoid missing messages on swarm-me
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params =
-                nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
+        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
         // B has no recorded hash — must not send last_hashes so we get everything.
         CHECK_FALSE(params.contains("last_hashes"));
     }
@@ -183,8 +152,7 @@ TEST_CASE("Polling uses per-node last_hash to avoid missing messages on swarm-me
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params =
-                nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
+        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
         CHECK(params["last_hashes"]["21"] == "xyz");
     }
 }

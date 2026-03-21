@@ -133,6 +133,7 @@ class TestHelper;
 
 namespace session::core {
 
+using namespace std::literals;
 namespace quic = oxen::quic;
 
 namespace detail {
@@ -257,6 +258,22 @@ class Core {
 
     /// Set an optional network interface that can be used to make network requests to swarm members
     void set_network(std::shared_ptr<network::Network> network);
+
+    /// How long a cached PFS key is considered fresh (no re-fetch needed).
+    static constexpr auto PFS_KEY_FRESH_DURATION = 24h;
+    /// How long a cached PFS key is usable as a fallback before it expires entirely.
+    static constexpr auto PFS_KEY_EXPIRY_DURATION = 48h;
+
+    /// Initiates a background fetch of the X25519 and ML-KEM-768 account public keys for the
+    /// given remote session_id (33-byte 0x05-prefixed X25519 pubkey), caching the result in the
+    /// pfs_key_cache table.
+    ///
+    /// - If the cached entry is less than PFS_KEY_FRESH_DURATION (24h) old, does nothing.
+    /// - If the entry is stale (24–48h old) or absent, initiates a network fetch via the network
+    ///   object (if present).  Stale entries remain usable as a fallback until they expire.
+    /// - Entries older than PFS_KEY_EXPIRY_DURATION (48h) are overwritten on next successful
+    ///   fetch.
+    void prefetch_pfs_keys(std::span<const unsigned char, 33> session_id);
 
     /// Returns the optional network interface, if set.
     const std::shared_ptr<network::Network>& network() const { return _network; }

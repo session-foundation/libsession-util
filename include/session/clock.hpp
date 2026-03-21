@@ -100,4 +100,18 @@ constexpr int64_t epoch_ms(const std::chrono::time_point<Clock, Duration>& t) {
     return duration_ms(t.time_since_epoch());
 }
 
+// Inverse of epoch_count/epoch_seconds/epoch_ms: reconstruct a sys_time with the given duration
+// precision from a raw integer count of that duration since the epoch.
+template <typename Duration>
+inline std::chrono::sys_time<Duration> from_epoch(int64_t t) {
+    return std::chrono::sys_time<Duration>{Duration{t}};
+}
+// Shortcuts for the common cases:
+inline std::chrono::sys_seconds from_epoch_s(int64_t t) {
+    return from_epoch<std::chrono::seconds>(t);
+}
+inline sys_ms from_epoch_ms(int64_t t) {
+    return from_epoch<std::chrono::milliseconds>(t);
+}
+
 }  // namespace session

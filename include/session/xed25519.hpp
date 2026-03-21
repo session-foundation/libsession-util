@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <span>
 #include <string>
 #include <string_view>
@@ -13,6 +14,11 @@ std::array<unsigned char, 64> sign(
         std::span<const unsigned char> curve25519_privkey /* 32 bytes */,
         std::span<const unsigned char> msg);
 
+/// std::byte overload; returns a std::byte array.
+std::array<std::byte, 64> sign(
+        std::span<const std::byte> curve25519_privkey /* 32 bytes */,
+        std::span<const std::byte> msg);
+
 /// "Softer" version that takes and returns strings of regular chars
 std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string_view msg);
 
@@ -21,6 +27,12 @@ std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string
         std::span<const unsigned char> signature /* 64 bytes */,
         std::span<const unsigned char> curve25519_pubkey /* 32 bytes */,
         std::span<const unsigned char> msg);
+
+/// std::byte overload
+[[nodiscard]] bool verify(
+        std::span<const std::byte> signature /* 64 bytes */,
+        std::span<const std::byte> curve25519_pubkey /* 32 bytes */,
+        std::span<const std::byte> msg);
 
 /// "Softer" version that takes strings of regular chars
 [[nodiscard]] bool verify(
@@ -33,6 +45,9 @@ std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string
 /// pubkey: this always returns the positive value.  You can get the other possibility (the
 /// negative) by setting the sign bit, i.e. `returned_pubkey[31] |= 0x80`.
 std::array<unsigned char, 32> pubkey(std::span<const unsigned char, 32> curve25519_pubkey) noexcept;
+
+/// std::byte overload; returns a std::byte array.
+std::array<std::byte, 32> pubkey(std::span<const std::byte, 32> curve25519_pubkey) noexcept;
 
 /// "Softer" version that takes/returns strings of regular chars.  Throws invalid_argument if the
 /// input is not 32 bytes.
