@@ -239,31 +239,48 @@ void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
     std::array<unsigned char, 33> sid;
     std::ranges::copy(session_id, sid.begin());
 
-    // Skip the fetch if the cached entry is still fresh (< 24h old).
+    // Skip the fetch if the cached entry is still fresh, or a recent NAK suppresses retrying.
     {
         auto conn = db.conn();
-        auto fetched_at = conn.prepared_maybe_get<int64_t>(
-                "SELECT fetched_at FROM pfs_key_cache WHERE session_id = ?", sid);
-        if (fetched_at) {
-            auto age = clock_now_s() - from_epoch_s(*fetched_at);
-            if (age < PFS_KEY_FRESH_DURATION) {
+        auto sid_hex = oxenc::to_hex(session_id.begin(), session_id.end());
+
+        if (auto row = conn.prepared_maybe_get<std::optional<int64_t>, std::optional<int64_t>>(
+                    "SELECT fetched_at, nak_at FROM pfs_key_cache WHERE session_id = ?", sid)) {
+            auto [fetched_at, nak_at] = *row;
+            if (fetched_at) {
+                auto age = clock_now_s() - from_epoch_s(*fetched_at);
+                if (age < PFS_KEY_FRESH_DURATION) {
+                    log::debug(
+                            cat,
+                            "prefetch_pfs_keys: cached key for {} is still fresh ({} old), "
+                            "skipping",
+                            sid_hex,
+                            age);
+                    return;
+                }
                 log::debug(
                         cat,
-                        "prefetch_pfs_keys: cached key for {} is still fresh ({} old), skipping",
-                        oxenc::to_hex(session_id.begin(), session_id.end()),
+                        "prefetch_pfs_keys: cached key for {} is stale ({} old), re-fetching",
+                        sid_hex,
                         age);
-                return;
+            } else if (nak_at) {
+                auto age = clock_now_s() - from_epoch_s(*nak_at);
+                if (age < PFS_KEY_NAK_DURATION) {
+                    log::debug(
+                            cat,
+                            "prefetch_pfs_keys: recent NAK for {} ({} old), skipping",
+                            sid_hex,
+                            age);
+                    return;
+                }
+                log::debug(
+                        cat,
+                        "prefetch_pfs_keys: expired NAK for {} ({} old), re-fetching",
+                        sid_hex,
+                        age);
             }
-            log::debug(
-                    cat,
-                    "prefetch_pfs_keys: cached key for {} is stale ({} old), re-fetching",
-                    oxenc::to_hex(session_id.begin(), session_id.end()),
-                    age);
         } else {
-            log::debug(
-                    cat,
-                    "prefetch_pfs_keys: no cached key for {}, fetching",
-                    oxenc::to_hex(session_id.begin(), session_id.end()));
+            log::debug(cat, "prefetch_pfs_keys: no cached key for {}, fetching", sid_hex);
         }
     }
 
@@ -389,25 +406,37 @@ void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
                                     }
                                 }
 
+                                auto now_s = epoch_seconds(clock_now_s());
+
                                 if (!pk_x25519 || !pk_mlkem768) {
                                     log::debug(
                                             cat,
                                             "prefetch_pfs_keys: no valid account pubkey message "
                                             "found in response");
+                                    // Record a NAK.  If a valid entry already exists, update only
+                                    // nak_at and leave fetched_at and pubkeys untouched.
+                                    db.conn().prepared_exec(
+                                            R"(
+INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
+VALUES (?, NULL, ?, NULL, NULL)
+ON CONFLICT(session_id) DO UPDATE SET nak_at = excluded.nak_at
+)",
+                                            sid,
+                                            now_s);
                                     return;
                                 }
 
                                 db.conn().prepared_exec(
                                         R"(
-INSERT INTO pfs_key_cache (session_id, fetched_at, pubkey_x25519, pubkey_mlkem768)
-VALUES (?, ?, ?, ?)
+INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
+VALUES (?, ?, NULL, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
     fetched_at = excluded.fetched_at,
     pubkey_x25519 = excluded.pubkey_x25519,
     pubkey_mlkem768 = excluded.pubkey_mlkem768
 )",
                                         sid,
-                                        epoch_seconds(clock_now_s()),
+                                        now_s,
                                         *pk_x25519,
                                         *pk_mlkem768);
                             } catch (const std::exception& e) {

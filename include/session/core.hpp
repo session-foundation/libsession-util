@@ -263,6 +263,8 @@ class Core {
     static constexpr auto PFS_KEY_FRESH_DURATION = 24h;
     /// How long a cached PFS key is usable as a fallback before it expires entirely.
     static constexpr auto PFS_KEY_EXPIRY_DURATION = 48h;
+    /// How long a NAK (successful fetch that returned no keys) suppresses re-fetching.
+    static constexpr auto PFS_KEY_NAK_DURATION = 1h;
 
     /// Initiates a background fetch of the X25519 and ML-KEM-768 account public keys for the
     /// given remote session_id (33-byte 0x05-prefixed X25519 pubkey), caching the result in the

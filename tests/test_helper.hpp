@@ -93,13 +93,6 @@ class TestHelper {
         return seed;
     }
 
-    // Cached PFS key entry as stored in the pfs_key_cache table.
-    struct PfsCacheEntry {
-        int64_t fetched_at;
-        std::array<std::byte, 32> pubkey_x25519;
-        std::array<std::byte, 1184> pubkey_mlkem768;
-    };
-
     // Returns the {pubkey_x25519, pubkey_mlkem768} of the active (unrotated) account key.
     static std::pair<std::array<std::byte, 32>, std::array<std::byte, 1184>> active_account_pubkeys(
             core::Core& core) {
@@ -113,21 +106,38 @@ class TestHelper {
         return {x25519, mlkem768};
     }
 
+    // Cached PFS key entry as stored in the pfs_key_cache table.
+    // fetched_at and pubkeys are nullopt when the entry is a NAK (no valid keys).
+    struct PfsCacheEntry {
+        std::optional<int64_t> fetched_at;
+        std::optional<int64_t> nak_at;
+        std::optional<std::array<std::byte, 32>> pubkey_x25519;
+        std::optional<std::array<std::byte, 1184>> pubkey_mlkem768;
+    };
+
     // Returns the pfs_key_cache entry for the given session_id, or nullopt if absent.
     static std::optional<PfsCacheEntry> pfs_cache_entry(
             core::Core& core, std::span<const unsigned char, 33> session_id) {
-        auto conn = core.db.conn();
-        if (!conn.prepared_maybe_get<int64_t>(
-                    "SELECT fetched_at FROM pfs_key_cache WHERE session_id = ?", session_id))
+        using X = sqlite::blob_guts<std::array<std::byte, 32>>;
+        using M = sqlite::blob_guts<std::array<std::byte, 1184>>;
+        auto row = core.db.conn()
+                           .prepared_maybe_get<
+                                   std::optional<int64_t>,
+                                   std::optional<int64_t>,
+                                   std::optional<X>,
+                                   std::optional<M>>(
+                                   "SELECT fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768"
+                                   " FROM pfs_key_cache WHERE session_id = ?",
+                                   session_id);
+        if (!row)
             return std::nullopt;
-        auto [fetched_at, pk_x25519, pk_mlkem768] = conn.prepared_get<
-                int64_t,
-                sqlite::blob_guts<std::array<std::byte, 32>>,
-                sqlite::blob_guts<std::array<std::byte, 1184>>>(
-                "SELECT fetched_at, pubkey_x25519, pubkey_mlkem768"
-                " FROM pfs_key_cache WHERE session_id = ?",
-                session_id);
-        return PfsCacheEntry{fetched_at, pk_x25519, pk_mlkem768};
+        auto [fetched_at, nak_at, pk_x25519, pk_mlkem768] = *row;
+        return PfsCacheEntry{
+                fetched_at,
+                nak_at,
+                pk_x25519 ? std::optional{(std::array<std::byte, 32>)*pk_x25519} : std::nullopt,
+                pk_mlkem768 ? std::optional{(std::array<std::byte, 1184>)*pk_mlkem768}
+                            : std::nullopt};
     }
 };
 
