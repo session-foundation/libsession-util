@@ -8,6 +8,24 @@ namespace session::core {
 
 class Core;
 
+/// Return value of prefetch_pfs_keys() describing the current cache state at the time of the call.
+enum class PfsKeyStatus {
+    fresh,     ///< A fresh cached key exists; no fetch was initiated
+    stale,     ///< A usable but stale key exists; a background re-fetch was initiated.
+               ///< The pfs_keys_fetched callback will fire when the fetch completes.
+    fetching,  ///< No usable key is cached; a background fetch was initiated.
+               ///< The pfs_keys_fetched callback will fire when the fetch completes.
+    nak,       ///< An unexpired NAK suppresses fetching; no usable key exists
+};
+
+/// Result passed to the pfs_keys_fetched callback when a background fetch completes.
+enum class PfsKeyFetch {
+    new_key,    ///< A key was retrieved and stored (new or changed from the previous cache entry)
+    unchanged,  ///< Keys were retrieved but match what was already cached
+    not_found,  ///< The fetch succeeded but the remote account pubkey namespace held no valid keys
+    failed,     ///< The network request failed (swarm lookup or send_request)
+};
+
 /// Struct holding application callbacks to fire when libsession Core events happen to allow the
 /// Core object to fire into the application front-end.
 struct callbacks {
@@ -76,6 +94,16 @@ struct callbacks {
     /// Callback invoked when *this* device has been confirmed removed from the account (typically
     /// from another device) from an incoming device group update.
     std::function<void()> device_self_removed;
+
+    /// Callback invoked when a background PFS key fetch initiated by prefetch_pfs_keys() completes.
+    /// Not invoked for cache hits or NAK suppressions (i.e. only fires when prefetch_pfs_keys()
+    /// returns stale or fetching).
+    ///
+    /// Parameters:
+    /// - session_id -- 33-byte session ID (0x05 prefix + X25519 pubkey) of the remote user
+    /// - result -- the outcome of the fetch: new_key, unchanged, not_found, or failed
+    std::function<void(std::span<const unsigned char, 33> session_id, PfsKeyFetch result)>
+            pfs_keys_fetched;
 };
 
 }  // namespace session::core

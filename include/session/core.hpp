@@ -266,16 +266,19 @@ class Core {
     /// How long a NAK (successful fetch that returned no keys) suppresses re-fetching.
     static constexpr auto PFS_KEY_NAK_DURATION = 1h;
 
-    /// Initiates a background fetch of the X25519 and ML-KEM-768 account public keys for the
-    /// given remote session_id (33-byte 0x05-prefixed X25519 pubkey), caching the result in the
-    /// pfs_key_cache table.
+    /// Checks and/or initiates a background fetch of the X25519 and ML-KEM-768 account public keys
+    /// for the given remote session_id (33-byte 0x05-prefixed X25519 pubkey), caching the result
+    /// in the pfs_key_cache table.
     ///
-    /// - If the cached entry is less than PFS_KEY_FRESH_DURATION (24h) old, does nothing.
-    /// - If the entry is stale (24–48h old) or absent, initiates a network fetch via the network
-    ///   object (if present).  Stale entries remain usable as a fallback until they expire.
-    /// - Entries older than PFS_KEY_EXPIRY_DURATION (48h) are overwritten on next successful
-    ///   fetch.
-    void prefetch_pfs_keys(std::span<const unsigned char, 33> session_id);
+    /// Returns a PfsKeyStatus value describing the current cache state:
+    /// - fresh   -- cached key is less than PFS_KEY_FRESH_DURATION (24h) old; no fetch initiated.
+    /// - stale   -- cached key is 24–48h old; a background re-fetch has been initiated and the
+    ///              pfs_keys_fetched callback will fire when it completes.
+    /// - fetching -- no usable key is cached; a background fetch has been initiated and the
+    ///              pfs_keys_fetched callback will fire when it completes.
+    /// - nak     -- a recent fetch returned no keys; re-fetching is suppressed for
+    ///              PFS_KEY_NAK_DURATION (1h).
+    PfsKeyStatus prefetch_pfs_keys(std::span<const unsigned char, 33> session_id);
 
     /// Returns the optional network interface, if set.
     const std::shared_ptr<network::Network>& network() const { return _network; }

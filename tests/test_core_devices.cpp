@@ -249,7 +249,8 @@ TEST_CASE("Devices - account keys", "[core][devices]") {
     SECTION("rotate_account_keys produces a distinct key: same timestamp, seed tiebreak") {
         // Snap the adjusted clock to the start of the next second so both key-creation calls
         // land in the same second with no risk of spanning a second boundary.
-        ScopedClockOffset pin_to_next_second{(clock_now_s() + 1s) - std::chrono::system_clock::now()};
+        ScopedClockOffset pin_to_next_second{
+                (clock_now_s() + 1s) - std::chrono::system_clock::now()};
 
         c->devices.active_account_keys();  // ensure initial key exists at pinned second
         c->devices.rotate_account_keys();  // new key created at same second

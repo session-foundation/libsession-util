@@ -229,7 +229,7 @@ ON CONFLICT(namespace, sn_pubkey) DO UPDATE SET last_hash = excluded.last_hash
             });
 }
 
-void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
+PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
     auto net = _network;
     if (!net)
         throw std::logic_error{"prefetch_pfs_keys called without a network object"};
@@ -240,6 +240,8 @@ void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
     std::ranges::copy(session_id, sid.begin());
 
     // Skip the fetch if the cached entry is still fresh, or a recent NAK suppresses retrying.
+    // Otherwise determine whether we have a stale (but usable) key or no key at all.
+    auto status = PfsKeyStatus::fetching;
     {
         auto conn = db.conn();
         auto sid_hex = oxenc::to_hex(session_id.begin(), session_id.end());
@@ -256,13 +258,14 @@ void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
                             "skipping",
                             sid_hex,
                             age);
-                    return;
+                    return PfsKeyStatus::fresh;
                 }
                 log::debug(
                         cat,
                         "prefetch_pfs_keys: cached key for {} is stale ({} old), re-fetching",
                         sid_hex,
                         age);
+                status = PfsKeyStatus::stale;
             } else if (nak_at) {
                 auto age = clock_now_s() - from_epoch_s(*nak_at);
                 if (age < PFS_KEY_NAK_DURATION) {
@@ -271,7 +274,7 @@ void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
                             "prefetch_pfs_keys: recent NAK for {} ({} old), skipping",
                             sid_hex,
                             age);
-                    return;
+                    return PfsKeyStatus::nak;
                 }
                 log::debug(
                         cat,
@@ -303,6 +306,8 @@ void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
             x25519_pub, false, [this, net, sid = std::move(sid), req_body](auto, auto swarm) {
                 if (swarm.empty()) {
                     log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
+                    if (callbacks.pfs_keys_fetched)
+                        callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
                     return;
                 }
 
@@ -322,6 +327,8 @@ void Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
                                 std::optional<std::string> body) {
                             if (!success || !body) {
                                 log::debug(cat, "prefetch_pfs_keys: request failed");
+                                if (callbacks.pfs_keys_fetched)
+                                    callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
                                 return;
                             }
 
@@ -423,10 +430,25 @@ ON CONFLICT(session_id) DO UPDATE SET nak_at = excluded.nak_at
 )",
                                             sid,
                                             now_s);
+                                    if (callbacks.pfs_keys_fetched)
+                                        callbacks.pfs_keys_fetched(sid, PfsKeyFetch::not_found);
                                     return;
                                 }
 
-                                db.conn().prepared_exec(
+                                auto conn = db.conn();
+                                SQLite::Transaction tx{conn.sql};
+
+                                bool is_unchanged = conn.prepared_maybe_get<int>(
+                                                                "SELECT 1 FROM pfs_key_cache"
+                                                                " WHERE session_id = ?"
+                                                                " AND pubkey_x25519 = ? AND "
+                                                                "pubkey_mlkem768 = ?",
+                                                                sid,
+                                                                *pk_x25519,
+                                                                *pk_mlkem768)
+                                                            .has_value();
+
+                                conn.prepared_exec(
                                         R"(
 INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
 VALUES (?, ?, NULL, ?, ?)
@@ -439,6 +461,12 @@ ON CONFLICT(session_id) DO UPDATE SET
                                         now_s,
                                         *pk_x25519,
                                         *pk_mlkem768);
+                                tx.commit();
+                                if (callbacks.pfs_keys_fetched)
+                                    callbacks.pfs_keys_fetched(
+                                            sid,
+                                            is_unchanged ? PfsKeyFetch::unchanged
+                                                         : PfsKeyFetch::new_key);
                             } catch (const std::exception& e) {
                                 log::warning(
                                         cat,
@@ -447,6 +475,7 @@ ON CONFLICT(session_id) DO UPDATE SET
                             }
                         });
             });
+    return status;
 }
 
 void Core::receive_messages(
