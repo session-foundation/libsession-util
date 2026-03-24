@@ -4,6 +4,7 @@
 #include <oxenc/endian.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_xof_shake256.h>
+#include <sodium/utils.h>
 
 #include <array>
 #include <optional>
@@ -80,6 +81,20 @@ namespace detail {
             oxenc::write_big_as_host(swapped.data(), val);
             return swapped;
         }
+    }
+    // Initializes a SHAKE-256 (or SHA3-256) keccak state with the given domain suffix byte and
+    // absorbs all of `args` into it.  The domain byte distinguishes the hash function:
+    //   - 0x1F = SHAKE-256 (crypto_xof_shake256_DOMAIN_STANDARD)
+    //   - 0x06 = SHA3-256
+    // See the sha3_256 API doc comment for the explanation of why this works.
+    template <HashInput... T>
+        requires(sizeof...(T) > 0)
+    void keccak_absorb(crypto_xof_shake256_state& st, unsigned char domain, const T&... args) {
+        crypto_xof_shake256_init_with_domain(&st, domain);
+        auto update = [&st](std::span<const unsigned char> arg) {
+            crypto_xof_shake256_update(&st, arg.data(), arg.size());
+        };
+        (update(make_hashable(args)), ...);
     }
 }  // namespace detail
 
@@ -217,14 +232,10 @@ struct [[nodiscard]] shake256 {
     template <HashInput... T>
         requires(sizeof...(T) > 0)
     explicit shake256(const T&... args) {
-        crypto_xof_shake256_init(&st);
-        auto update = [this](std::span<const unsigned char> arg) {
-            crypto_xof_shake256_update(&st, arg.data(), arg.size());
-        };
-        (update(detail::make_hashable(args)), ...);
+        detail::keccak_absorb(st, crypto_xof_shake256_DOMAIN_STANDARD, args...);
     }
 
-    ~shake256();
+    ~shake256() { sodium_memzero(&st, sizeof(st)); }
 
     shake256(const shake256&) = delete;
     shake256& operator=(const shake256&) = delete;
@@ -242,6 +253,35 @@ struct [[nodiscard]] shake256 {
         return *this;
     }
 };
+
+/// API: hash/sha3_256
+///
+/// One-shot SHA3-256 (NIST FIPS 202) hasher.  Takes a fixed-size 32-byte output container and any
+/// number of contiguous byte containers or integer values, computes the SHA3-256 hash of their
+/// concatenation (in argument order), and writes the result into the output container.  Integer
+/// values are hashed as their little-endian (fixed-size) byte representation.
+///
+/// Implementation note: SHA3-256 and SHAKE-256 share identical Keccak-1600 sponge parameters
+/// (state=1600 bits, rate=136 bytes, capacity=512 bits) and differ *only* in the domain suffix
+/// byte absorbed into the state during padding before the final squeeze:
+///
+///   - SHAKE-256: 0x1F  (FIPS 202 §6.2 XOF suffix '11111')
+///   - SHA3-256:  0x06  (FIPS 202 §6.1 hash suffix '01', plus the leading '1' of the Keccak
+///                       multi-rate padding '10*1', making the combined byte '0000 0110')
+///
+/// Because the sponge parameters are identical, crypto_xof_shake256_init_with_domain(&st, 0x06)
+/// followed by absorbing input and squeezing 32 bytes is exactly SHA3-256.  This is the intended
+/// use of init_with_domain, not a workaround.
+///
+/// The temporary keccak state is zeroed before this function returns.
+template <HashOutputContainer Out, HashInput... T>
+    requires(detail::container_extent_v<Out> == 32 && sizeof...(T) > 0)
+void sha3_256(Out& out, const T&... args) {
+    crypto_xof_shake256_state st;
+    detail::keccak_absorb(st, 0x06, args...);
+    crypto_xof_shake256_squeeze(&st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), 32);
+    sodium_memzero(&st, sizeof(st));
+}
 
 // Helper callable usable with unordered_map and similar to hash an array of chars by simply copying
 // the first sizeof(size_t) bytes, suitable for use with pre-hashed values.

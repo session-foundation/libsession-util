@@ -1,16 +1,11 @@
 #include "session/hash.hpp"
 
 #include <sodium/crypto_generichash_blake2b.h>
-#include <sodium/utils.h>
 
 #include "session/export.h"
 #include "session/util.hpp"
 
 namespace session::hash {
-
-shake256::~shake256() {
-    sodium_memzero(&st, sizeof(st));
-}
 
 void hash(
         std::span<unsigned char> hash,
