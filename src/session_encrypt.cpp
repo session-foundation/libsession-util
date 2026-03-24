@@ -64,6 +64,22 @@ namespace detail {
 
 }  // namespace detail
 
+// Expands an Ed25519 privkey from a 32-byte seed if necessary, or passes through a 64-byte key.
+// Returns a (span, storage) pair where the span is always the full 64-byte key and storage is
+// non-null only when expansion was needed.  Moving the returned pair is safe because storage is
+// heap-allocated (unique_ptr), so the heap address — and thus the span — remain valid after a move.
+static std::pair<std::span<const unsigned char, 64>, std::unique_ptr<cleared_uc64>>
+expand_ed25519_privkey(std::span<const unsigned char> privkey) {
+    if (privkey.size() == 64)
+        return {std::span<const unsigned char, 64>{privkey.data(), 64}, nullptr};
+    if (privkey.size() != 32)
+        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
+    auto buf = std::make_unique<cleared_uc64>();
+    uc32 ignore_pk;
+    crypto_sign_ed25519_seed_keypair(ignore_pk.data(), buf->data(), privkey.data());
+    return {std::span<const unsigned char, 64>{buf->data(), 64}, std::move(buf)};
+}
+
 // Version tag we prepend to encrypted-for-blinded-user messages.  This is here so we can detect if
 // some future version changes the format (and if not even try to load it).
 inline constexpr unsigned char BLINDED_ENCRYPT_VERSION = 0;
@@ -72,15 +88,8 @@ std::vector<unsigned char> sign_for_recipient(
         std::span<const unsigned char> ed25519_privkey,
         std::span<const unsigned char> recipient_pubkey,
         std::span<const unsigned char> message) {
-    cleared_uc64 ed_sk_from_seed;
-    if (ed25519_privkey.size() == 32) {
-        uc32 ignore_pk;
-        crypto_sign_ed25519_seed_keypair(
-                ignore_pk.data(), ed_sk_from_seed.data(), ed25519_privkey.data());
-        ed25519_privkey = {ed_sk_from_seed.data(), ed_sk_from_seed.size()};
-    } else if (ed25519_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
-    }
+    auto [ed_sk, _ed_sk_storage] = expand_ed25519_privkey(ed25519_privkey);
+    ed25519_privkey = ed_sk;
     // If prefixed, drop it (and do this for the caller, too) so that everything after this
     // doesn't need to worry about whether it is prefixed or not.
     if (recipient_pubkey.size() == 33 && recipient_pubkey.front() == 0x05)
@@ -507,15 +516,8 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 
 std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
         std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> ciphertext) {
-    cleared_uc64 ed_sk_from_seed;
-    if (ed25519_privkey.size() == 32) {
-        uc32 ignore_pk;
-        crypto_sign_ed25519_seed_keypair(
-                ignore_pk.data(), ed_sk_from_seed.data(), ed25519_privkey.data());
-        ed25519_privkey = {ed_sk_from_seed.data(), ed_sk_from_seed.size()};
-    } else if (ed25519_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
-    }
+    auto [ed_sk, _ed_sk_storage] = expand_ed25519_privkey(ed25519_privkey);
+    ed25519_privkey = ed_sk;
 
     cleared_uc32 x_sec;
     uc32 x_pub;
