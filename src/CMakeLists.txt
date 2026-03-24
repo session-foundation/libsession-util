@@ -97,6 +97,7 @@ target_link_libraries(crypto
     session::secure_buffer
     PRIVATE
     sessiondep::libsodium
+    mlkem_native::mlkem768
     nlohmann_json::nlohmann_json
     libsession::protos
 )

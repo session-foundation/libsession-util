@@ -60,6 +60,7 @@ target_link_libraries(test_libs INTERFACE
     libsession::crypto
     session::SQLite
     sessiondep::libsodium
+    mlkem_native::mlkem768
     nlohmann_json::nlohmann_json
     oxen::logging)
 

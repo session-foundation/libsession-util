@@ -1,4 +1,6 @@
+#include <mlkem_native.h>
 #include <session/session_encrypt.h>
+#include <sodium/crypto_scalarmult_curve25519.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -496,4 +498,108 @@ TEST_CASE("xchacha20", "[session][xchacha20]") {
     auto ciphertext = encrypt_xchacha20(to_span("TestMessage"), enc_key);
     CHECK(decrypt_xchacha20(ciphertext, enc_key) == to_vector("TestMessage"));
     CHECK_THROWS(encrypt_xchacha20(payload, to_span("invalid")));
+}
+
+TEST_CASE("v2 PFS+PQ message encryption", "[session-protocol][encrypt][v2]") {
+    using namespace session;
+
+    // Sender: existing well-known test keypair 1
+    const auto seed1 = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> sender_ed_pk;
+    std::array<unsigned char, 64> sender_ed_sk;
+    crypto_sign_ed25519_seed_keypair(sender_ed_pk.data(), sender_ed_sk.data(), seed1.data());
+
+    // Recipient: long-term session identity from test keypair 2
+    const auto seed2 = "00112233445566778899aabbccddeeff00000000000000000000000000000000"_hexbytes;
+    std::array<unsigned char, 32> recip_ed_pk, recip_curve_pk;
+    std::array<unsigned char, 64> recip_ed_sk;
+    crypto_sign_ed25519_seed_keypair(recip_ed_pk.data(), recip_ed_sk.data(), seed2.data());
+    REQUIRE(0 == crypto_sign_ed25519_pk_to_curve25519(recip_curve_pk.data(), recip_ed_pk.data()));
+
+    std::array<unsigned char, 32> recip_x25519_sec;
+    REQUIRE(0 == crypto_sign_ed25519_sk_to_curve25519(recip_x25519_sec.data(), recip_ed_sk.data()));
+
+    std::array<unsigned char, 33> recip_session_id;
+    recip_session_id[0] = 0x05;
+    std::copy(recip_curve_pk.begin(), recip_curve_pk.end(), recip_session_id.begin() + 1);
+
+    // Recipient PFS X25519 account key (deterministic)
+    const auto pfs_x25519_seed =
+            "aabbccddeeff0011223344556677889900112233445566778899aabbccddeeff"_hexbytes;
+    std::array<unsigned char, 32> pfs_x25519_sec, pfs_x25519_pub;
+    std::copy(pfs_x25519_seed.begin(), pfs_x25519_seed.end(), pfs_x25519_sec.begin());
+    crypto_scalarmult_curve25519_base(pfs_x25519_pub.data(), pfs_x25519_sec.data());
+
+    // Recipient PFS ML-KEM-768 account key (deterministic, needs 64-byte seed)
+    const auto pfs_mlkem_seed =
+            "deadbeefcafebabe0123456789abcdef0123456789abcdef0123456789abcdef"
+            "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"_hexbytes;
+    std::array<unsigned char, MLKEM768_PUBLICKEYBYTES> pfs_mlkem_pub;
+    std::array<unsigned char, MLKEM768_SECRETKEYBYTES> pfs_mlkem_sec;
+    REQUIRE(0 == sr_mlkem768_keypair_derand(
+                         pfs_mlkem_pub.data(), pfs_mlkem_sec.data(), pfs_mlkem_seed.data()));
+
+    // Encrypt a message from sender to recipient
+    auto ct = encrypt_for_recipient_v2(
+            to_span(sender_ed_sk),
+            recip_session_id,
+            pfs_x25519_pub,
+            pfs_mlkem_pub,
+            to_span("hello world"),
+            std::nullopt);
+
+    // Ciphertext is padded to a multiple of 256 bytes
+    CHECK(ct.size() % 256 == 0);
+
+    // decrypt_incoming_v2_prefix recovers the 2-byte ML-KEM pubkey prefix using the
+    // recipient's long-term X25519 keys (cheap; no PFS keys needed at this stage)
+    auto prefix = decrypt_incoming_v2_prefix(recip_x25519_sec, recip_curve_pk, ct);
+    CHECK(prefix[0] == pfs_mlkem_pub[0]);
+    CHECK(prefix[1] == pfs_mlkem_pub[1]);
+
+    // Decrypt with the correct keys succeeds
+    auto result = decrypt_incoming_v2(
+            recip_session_id, pfs_x25519_sec, pfs_x25519_pub, pfs_mlkem_sec, ct);
+    CHECK(result.content == to_vector("hello world"));
+    CHECK(result.sender_session_id[0] == 0x05);
+    CHECK(!result.pro_signature);
+
+    // The recovered sender session ID matches the sender's X25519 pubkey
+    std::array<unsigned char, 32> sender_curve_pk;
+    REQUIRE(0 == crypto_sign_ed25519_pk_to_curve25519(sender_curve_pk.data(), sender_ed_pk.data()));
+    CHECK(std::equal(
+            result.sender_session_id.begin() + 1,
+            result.sender_session_id.end(),
+            sender_curve_pk.begin()));
+
+    // Wrong X25519 key throws DecryptV2Error (wrong-key failure, not a format error)
+    auto wrong_x25519_sec = pfs_x25519_sec;
+    wrong_x25519_sec[0] ^= 0xff;
+    std::array<unsigned char, 32> wrong_x25519_pub;
+    crypto_scalarmult_curve25519_base(wrong_x25519_pub.data(), wrong_x25519_sec.data());
+    CHECK_THROWS_AS(
+            decrypt_incoming_v2(
+                    recip_session_id, wrong_x25519_sec, wrong_x25519_pub, pfs_mlkem_sec, ct),
+            DecryptV2Error);
+
+    // Truncated ciphertext throws before key matching (unrecoverable format error)
+    auto truncated = std::vector<unsigned char>(ct.begin(), ct.begin() + 100);
+    CHECK_THROWS_AS(
+            decrypt_incoming_v2_prefix(recip_x25519_sec, recip_curve_pk, truncated),
+            std::runtime_error);
+
+    // Encrypting and decrypting with a pro_signature
+    std::array<unsigned char, 64> fake_pro_sig;
+    std::fill(fake_pro_sig.begin(), fake_pro_sig.end(), 0x42);
+    auto ct_pro = encrypt_for_recipient_v2(
+            to_span(sender_ed_sk),
+            recip_session_id,
+            pfs_x25519_pub,
+            pfs_mlkem_pub,
+            to_span("hello world"),
+            std::span<const unsigned char, 64>{fake_pro_sig});
+    auto result_pro = decrypt_incoming_v2(
+            recip_session_id, pfs_x25519_sec, pfs_x25519_pub, pfs_mlkem_sec, ct_pro);
+    REQUIRE(result_pro.pro_signature.has_value());
+    CHECK(*result_pro.pro_signature == fake_pro_sig);
 }

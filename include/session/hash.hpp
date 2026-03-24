@@ -244,7 +244,7 @@ struct [[nodiscard]] shake256 {
 
     template <HashOutputContainer... Outs>
         requires(sizeof...(Outs) > 0)
-    shake256& operator()(Outs&... outs) {
+    shake256& operator()(Outs&&... outs) {
         (crypto_xof_shake256_squeeze(
                  &st,
                  reinterpret_cast<unsigned char*>(std::ranges::data(outs)),

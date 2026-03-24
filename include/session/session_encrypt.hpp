@@ -2,8 +2,10 @@
 
 #include <stdint.h>
 
+#include <array>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -110,6 +112,127 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
         std::span<const unsigned char> server_pk,
         std::span<const unsigned char> recipient_blinded_id,
         std::span<const unsigned char> message);
+
+/// API: crypto/encrypt_for_recipient_v2
+///
+/// Encrypts a v2 Session DM (PFS + post-quantum) for a recipient.
+///
+/// The wire format of the returned ciphertext is:
+///   0x00 0x02 | ki (2B) | E (32B) | mlkem_ct (1088B) | xchacha20poly1305_ciphertext
+///
+/// where:
+/// - `ki` is an encrypted key indicator used by the recipient to cheaply identify which of
+///   their current account keys was used, without revealing it to outside observers.
+/// - `E` is an ephemeral X25519 pubkey.
+/// - `mlkem_ct` is an ML-KEM-768 ciphertext.
+/// - The xchacha20poly1305 ciphertext contains the signed, padded inner plaintext.
+///
+/// The inner plaintext is a bt-encoded dict with:
+/// - "S": the sender's Ed25519 pubkey (32 bytes)
+/// - "c": the message content (typically a serialized protobuf Content)
+/// - "~": a 64-byte Ed25519 signature over a BLAKE2b-64 hash of the preceding content,
+///        keyed with the recipient's 33-byte Session ID (personalized "SessionV2Message")
+/// - "~P": optional Session Pro Ed25519 signature verifying the sender's Pro status.  The public
+///         key for verifying this is embedded within the protobuf Content.  Present only when the
+///         message uses Session Pro features; absent otherwise.
+///
+/// Inputs:
+/// - `sender_ed25519_privkey` -- sender's 32-byte seed or 64-byte Ed25519 secret key
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed long-term X25519 pubkey (S with prefix)
+/// - `recipient_account_x25519` -- 32-byte recently-fetched PFS account X25519 pubkey (X)
+/// - `recipient_account_mlkem768` -- 1184-byte recently-fetched PFS account ML-KEM-768 pubkey (M)
+/// - `content` -- the plaintext message content to encrypt (typically a serialized protobuf)
+/// - `pro_signature` -- optional 64-byte Session Pro Ed25519 signature.  Pass nullopt when the
+///                      sender is not using Session Pro features.
+///
+/// Outputs:
+/// - The encrypted v2 ciphertext to send to the swarm.
+/// - Throws on invalid keys or encryption failure.
+std::vector<unsigned char> encrypt_for_recipient_v2(
+        std::span<const unsigned char> sender_ed25519_privkey,
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char, 32> recipient_account_x25519,
+        std::span<const unsigned char, 1184> recipient_account_mlkem768,
+        std::span<const unsigned char> content,
+        std::optional<std::span<const unsigned char, 64>> pro_signature = std::nullopt);
+
+/// Exception thrown when a v2 message could not be decrypted with a given account key.  The
+/// caller should catch this and try the next candidate key.  Other exceptions (e.g.,
+/// std::runtime_error for invalid message format, or std::invalid_argument for bad keys) are
+/// unrecoverable and should not be caught per-key.
+struct DecryptV2Error : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+/// Result of decrypt_incoming_v2.
+struct DecryptV2Result {
+    std::vector<unsigned char> content;               ///< Decrypted message content.
+    std::array<unsigned char, 33> sender_session_id;  ///< 05-prefixed Session ID of the sender.
+    std::optional<std::array<unsigned char, 64>> pro_signature;  ///< Pro sig, if present.
+};
+
+/// API: crypto/decrypt_incoming_v2_prefix
+///
+/// Extracts and decrypts the 2-byte key indicator from a v2 Session DM ciphertext, returning
+/// the first 2 bytes of the ML-KEM-768 public key that was used to encrypt the message.
+///
+/// This is a cheap pre-filter step: the caller uses the returned prefix to look up which of
+/// their PFS account keys match, then passes the matching key(s) to `decrypt_incoming_v2`.
+///
+/// Inputs:
+/// - `x25519_sec` -- 32-byte long-term X25519 secret key of the recipient (the raw key, *not*
+///   the Ed25519 key).
+/// - `x25519_pub` -- 32-byte long-term X25519 public key of the recipient (i.e. the Session ID
+///   bytes without the `0x05` prefix).
+/// - `ciphertext` -- wire-format v2 ciphertext as produced by `encrypt_for_recipient_v2`.
+///
+/// Outputs:
+/// - The recovered 2-byte ML-KEM-768 public key prefix.
+/// - Throws `std::runtime_error` if the ciphertext is too short or has the wrong prefix bytes.
+std::array<unsigned char, 2> decrypt_incoming_v2_prefix(
+        std::span<const unsigned char, 32> x25519_sec,
+        std::span<const unsigned char, 32> x25519_pub,
+        std::span<const unsigned char> ciphertext);
+
+/// API: crypto/decrypt_incoming_v2
+///
+/// Inverse of `encrypt_for_recipient_v2`: decrypts a v2 Session DM using a single PFS account
+/// key.  Verifies the X-Wing (ML-KEM-768 + X25519) shared secret derivation and the inner
+/// Ed25519 message signature.
+///
+/// Typical usage: call `decrypt_incoming_v2_prefix` to get the 2-byte ML-KEM prefix, look up
+/// all PFS account keys whose ML-KEM-768 public key begins with that prefix, then call this
+/// function for each candidate, catching `DecryptV2Error` and trying the next key on failure:
+///
+///     auto prefix = decrypt_incoming_v2_prefix(x25519_sec, x25519_pub, ciphertext);
+///     for (auto& key : pfs_keys_by_prefix(prefix)) {
+///         try {
+///             return decrypt_incoming_v2(session_id, key.x_sec, key.x_pub,
+///                                        key.mlkem_sec, ciphertext);
+///         } catch (const DecryptV2Error&) { continue; }
+///     }
+///     throw std::runtime_error{"no PFS account key could decrypt the message"};
+///
+/// Inputs:
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed Session ID of the recipient.  Used to
+///   verify the inner Ed25519 message signature; no private key material is needed here.
+/// - `account_pfs_x25519_sec` -- 32-byte X25519 secret key of the PFS account key to try.
+/// - `account_pfs_x25519_pub` -- 32-byte X25519 public key of the PFS account key to try.
+/// - `account_pfs_mlkem768_sec` -- 2400-byte ML-KEM-768 secret key of the PFS account key
+///   to try.
+/// - `ciphertext` -- wire-format v2 ciphertext as produced by `encrypt_for_recipient_v2`.
+///
+/// Outputs:
+/// - `DecryptV2Result` with the decrypted content, 33-byte (05-prefixed) sender Session ID,
+///   and an optional 64-byte Session Pro signature.
+/// - Throws `DecryptV2Error` if the key did not decrypt the message (try the next candidate).
+/// - Throws `std::runtime_error` for unrecoverable errors (invalid format, signature failure).
+DecryptV2Result decrypt_incoming_v2(
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char, 32> account_pfs_x25519_sec,
+        std::span<const unsigned char, 32> account_pfs_x25519_pub,
+        std::span<const unsigned char, 2400> account_pfs_mlkem768_sec,
+        std::span<const unsigned char> ciphertext);
 
 static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 
