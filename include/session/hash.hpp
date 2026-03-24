@@ -3,6 +3,7 @@
 #include <oxenc/common.h>
 #include <oxenc/endian.h>
 #include <sodium/crypto_generichash_blake2b.h>
+#include <sodium/crypto_xof_shake256.h>
 
 #include <array>
 #include <optional>
@@ -53,34 +54,6 @@ concept ByteContainer =
 template <typename T>
 concept HashInput = ByteContainer<T> || oxenc::endian_swappable_integer<T>;
 
-/// API: hash/update_all
-///
-/// Wrapper about crypto_generichash_blake2b_update that takes any number of contiguous byte
-/// containers *or* integer values and updates the hash state with them, in argument order.  Integer
-/// values are always written as raw bytes in little-endian encoding (i.e. they will be byte-swapped
-/// if necessary).
-template <HashInput... T>
-    requires(sizeof...(T) > 0)
-void update_all(crypto_generichash_blake2b_state& st, const T&... args) {
-    auto make_hashable = []<typename U>(const U& val) {
-        if constexpr (ByteContainer<U>)
-            return std::span{
-                    reinterpret_cast<const unsigned char*>(std::ranges::data(val)),
-                    std::ranges::size(val)};
-        else if constexpr (oxenc::little_endian || sizeof(val) == 1)
-            return std::span{reinterpret_cast<const unsigned char*>(&val), sizeof(val)};
-        else {
-            std::array<unsigned char, sizeof(val)> swapped;
-            oxenc::write_big_as_host(swapped.data(), val);
-            return swapped;
-        }
-    };
-    auto update_hash = [&st](std::span<const unsigned char> arg) {
-        crypto_generichash_blake2b_update(&st, arg.data(), arg.size());
-    };
-    (update_hash(make_hashable(args)), ...);
-}
-
 namespace detail {
 
     template <typename T, size_t N>
@@ -93,14 +66,47 @@ namespace detail {
 
     template <typename T>
     constexpr size_t container_extent_v = decltype(extract_extent(std::declval<T&>()))::value;
+
+    template <HashInput U>
+    auto make_hashable(const U& val) {
+        if constexpr (ByteContainer<U>)
+            return std::span{
+                    reinterpret_cast<const unsigned char*>(std::ranges::data(val)),
+                    std::ranges::size(val)};
+        else if constexpr (oxenc::little_endian || sizeof(val) == 1)
+            return std::span{reinterpret_cast<const unsigned char*>(&val), sizeof(val)};
+        else {
+            std::array<unsigned char, sizeof(val)> swapped;
+            oxenc::write_big_as_host(swapped.data(), val);
+            return swapped;
+        }
+    }
 }  // namespace detail
 
+/// API: hash/update_all
+///
+/// Wrapper about crypto_generichash_blake2b_update that takes any number of contiguous byte
+/// containers *or* integer values and updates the hash state with them, in argument order.  Integer
+/// values are always written as raw bytes in little-endian encoding (i.e. they will be byte-swapped
+/// if necessary).
+template <HashInput... T>
+    requires(sizeof...(T) > 0)
+void update_all(crypto_generichash_blake2b_state& st, const T&... args) {
+    auto update_hash = [&st](std::span<const unsigned char> arg) {
+        crypto_generichash_blake2b_update(&st, arg.data(), arg.size());
+    };
+    (update_hash(detail::make_hashable(args)), ...);
+}
+
+/// Concept for a fixed-size, writable byte container — the basic requirement for any hash output.
 template <typename T>
-concept Blake2BOutputContainer =
+concept HashOutputContainer =
         std::ranges::contiguous_range<T> && !std::is_const_v<std::ranges::range_value_t<T>> &&
         oxenc::basic_char<std::ranges::range_value_t<T>> &&
-        detail::container_extent_v<T> != std::dynamic_extent &&
-        detail::container_extent_v<T> >= 1 && detail::container_extent_v<T> <= 64;
+        detail::container_extent_v<T> != std::dynamic_extent && detail::container_extent_v<T> >= 1;
+
+template <typename T>
+concept Blake2BOutputContainer = HashOutputContainer<T> && detail::container_extent_v<T> <= 64;
 
 template <typename T>
 concept Blake2BKey =
@@ -182,6 +188,60 @@ template <Blake2BOutputContainer Out, HashInput... T>
 void blake2b_pers(Out& out, std::span<const unsigned char, 16> pers, const T&... args) {
     return blake2b_key_pers(out, nullkey, pers, args...);
 }
+
+/// API: hash/shake256
+///
+/// SHAKE256 XOF hasher/squeezer.  Construct with any number of contiguous byte containers or
+/// integer values to absorb their concatenation, then call operator() with one or more fixed-size
+/// output containers to squeeze output.  Multiple operator() calls squeeze sequentially.  Integer
+/// values are absorbed as their little-endian (fixed-size) byte representation.
+///
+/// Unlike blake2b, SHAKE256 has no key or personalisation mechanism; callers achieve domain
+/// separation by simply prepending a domain string as the first argument.
+///
+/// The internal keccak state is zeroed on destruction.
+///
+/// Example:
+///
+///     // Squeeze two outputs in one call:
+///     hash::shake256("SessionMyKey"_uc, seed)(out_a, out_b);
+///
+///     // Or squeeze incrementally:
+///     hash::shake256 sq{"SessionMyKey"_uc, seed};
+///     sq(out_a);
+///     sq(out_b);
+///
+struct [[nodiscard]] shake256 {
+    crypto_xof_shake256_state st;
+
+    template <HashInput... T>
+        requires(sizeof...(T) > 0)
+    explicit shake256(const T&... args) {
+        crypto_xof_shake256_init(&st);
+        auto update = [this](std::span<const unsigned char> arg) {
+            crypto_xof_shake256_update(&st, arg.data(), arg.size());
+        };
+        (update(detail::make_hashable(args)), ...);
+    }
+
+    ~shake256();
+
+    shake256(const shake256&) = delete;
+    shake256& operator=(const shake256&) = delete;
+    shake256(shake256&&) = delete;
+    shake256& operator=(shake256&&) = delete;
+
+    template <HashOutputContainer... Outs>
+        requires(sizeof...(Outs) > 0)
+    shake256& operator()(Outs&... outs) {
+        (crypto_xof_shake256_squeeze(
+                 &st,
+                 reinterpret_cast<unsigned char*>(std::ranges::data(outs)),
+                 std::ranges::size(outs)),
+         ...);
+        return *this;
+    }
+};
 
 // Helper callable usable with unordered_map and similar to hash an array of chars by simply copying
 // the first sizeof(size_t) bytes, suitable for use with pre-hashed values.

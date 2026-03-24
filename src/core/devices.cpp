@@ -9,7 +9,6 @@
 #include <sodium/crypto_scalarmult_curve25519.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/crypto_stream_xchacha20.h>
-#include <sodium/crypto_xof_turboshake256.h>
 #include <sodium/utils.h>
 
 #include <chrono>
@@ -35,6 +34,7 @@
 namespace session::core {
 
 using namespace oxen::log::literals;
+using namespace session::literals;
 using namespace std::literals;
 
 namespace log = oxen::log;
@@ -57,14 +57,14 @@ std::string Devices::device_id() const {
 }
 
 template <typename T>
-consteval unsigned char KEY_DOMAIN() = delete;
+consteval auto KEY_DOMAIN() = delete;
 template <>
-consteval unsigned char KEY_DOMAIN<Devices::DeviceKeys>() {
-    return static_cast<unsigned char>('D');
+consteval auto KEY_DOMAIN<Devices::DeviceKeys>() {
+    return "SessionDeviceKeys"_uc;
 }
 template <>
-consteval unsigned char KEY_DOMAIN<Devices::AccountKeys>() {
-    return static_cast<unsigned char>('A');
+consteval auto KEY_DOMAIN<Devices::AccountKeys>() {
+    return "SessionAccountKeys"_uc;
 }
 
 template <std::derived_from<Devices::XWingKeys> Keys>
@@ -72,18 +72,14 @@ static Keys keys_from_seed(std::span<const std::byte, 32> seed) {
     Keys keys;
     auto& [x_sec, x_pub, ml_sec, ml_pub] = static_cast<Devices::XWingKeys&>(keys);
 
-    crypto_xof_turboshake256_state st;
-    crypto_xof_turboshake256_init_with_domain(&st, KEY_DOMAIN<Keys>());
-    crypto_xof_turboshake256_update(
-            &st, reinterpret_cast<const unsigned char*>(seed.data()), seed.size());
-    crypto_xof_turboshake256_squeeze(&st, x_sec.data(), x_sec.size());
-    crypto_scalarmult_curve25519_base(x_pub.data(), x_sec.data());
-
     static_assert(MLKEM768_PUBLICKEYBYTES == sizeof(ml_pub));
     static_assert(MLKEM768_SECRETKEYBYTES == sizeof(ml_sec));
 
+    // Use SHAKE256 to expand the seed into separate X25519 and MLKEM-768 seeds.  Domain
+    // separation is achieved by prepending the domain string before the seed.
     cleared_array<unsigned char, 2 * MLKEM_SYMBYTES> ml_seed;
-    crypto_xof_turboshake256_squeeze(&st, ml_seed.data(), ml_seed.size());
+    hash::shake256(KEY_DOMAIN<Keys>(), seed)(x_sec, ml_seed);
+    crypto_scalarmult_curve25519_base(x_pub.data(), x_sec.data());
 
     if (0 != sr_mlkem768_keypair_derand(ml_pub.data(), ml_sec.data(), ml_seed.data()))
         throw std::runtime_error{"ML-KEM-768 keygen failed!"};
@@ -117,7 +113,7 @@ std::string format_as(const Keys& k) {
 }
 
 Devices::DeviceKeys Devices::rotate_device_keys() {
-    // We store just one single seed value, then use TurboSHAKE256 to expand it into separate X25519
+    // We store just one single seed value, then use SHAKE256 to expand it into separate X25519
     // (32B) and MLKEM-768 (64B) seeds.
     cleared_b32 seed;
     random::fill(seed);
