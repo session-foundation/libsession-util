@@ -9,6 +9,16 @@
 #include "session/hash.hpp"
 #include "session/sodium_array.hpp"
 
+namespace session {
+
+void Ed25519PrivKeySpan::expand_seed(std::span<const unsigned char, 32> seed) {
+    auto& buf = storage_.emplace();
+    uc32 ignore_pk;
+    crypto_sign_ed25519_seed_keypair(ignore_pk.data(), buf.data(), seed.data());
+}
+
+}  // namespace session
+
 namespace session::ed25519 {
 
 std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_key_pair() {
@@ -47,17 +57,7 @@ std::array<unsigned char, 32> seed_for_ed_privkey(std::span<const unsigned char>
 }
 
 std::vector<unsigned char> sign(
-        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> msg) {
-    cleared_uc64 ed_sk_from_seed;
-    if (ed25519_privkey.size() == 32) {
-        uc32 ignore_pk;
-        crypto_sign_ed25519_seed_keypair(
-                ignore_pk.data(), ed_sk_from_seed.data(), ed25519_privkey.data());
-        ed25519_privkey = {ed_sk_from_seed.data(), ed_sk_from_seed.size()};
-    } else if (ed25519_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
-    }
-
+        const Ed25519PrivKeySpan& ed25519_privkey, std::span<const unsigned char> msg) {
     std::vector<unsigned char> sig;
     sig.resize(64);
 

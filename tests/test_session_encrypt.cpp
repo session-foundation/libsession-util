@@ -67,7 +67,7 @@ TEST_CASE("Session protocol encryption", "[session-protocol][encrypt]") {
                 "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
                 "culpa qui officia deserunt mollit anim id est laborum."sv;
         auto enc =
-                encrypt_for_recipient({to_span(ed_sk).data(), 32}, sid_raw2, to_span(lorem_ipsum));
+                encrypt_for_recipient(to_span(ed_sk).first<32>(), sid_raw2, to_span(lorem_ipsum));
         CHECK(std::search(
                       enc.begin(),
                       enc.end(),
@@ -242,7 +242,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                 "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
                 "culpa qui officia deserunt mollit anim id est laborum."sv;
         auto enc = encrypt_for_blinded_recipient(
-                {to_span(ed_sk).data(), 32},
+                to_span(ed_sk).first<32>(),
                 to_span(server_pk),
                 {blind15_pk2_prefixed.data(), 33},
                 to_span(lorem_ipsum));
@@ -253,7 +253,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                       to_unsigned("dolore magna") + strlen("dolore magna")) == enc.end());
 
         auto [msg, sender] = decrypt_from_blinded_recipient(
-                {to_span(ed_sk).data(), 32},
+                to_span(ed_sk).first<32>(),
                 to_span(server_pk),
                 {blind15_pk_prefixed.data(), 33},
                 {blind15_pk2_prefixed.data(), 33},
@@ -264,7 +264,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
         auto broken = enc;
         broken[463] ^= 0x80;  // 1 + 445 + 16 = 462 is the start of the nonce
         CHECK_THROWS(decrypt_from_blinded_recipient(
-                {to_span(ed_sk).data(), 32},
+                to_span(ed_sk).first<32>(),
                 to_span(server_pk),
                 {blind15_pk_prefixed.data(), 33},
                 {blind15_pk2_prefixed.data(), 33},
@@ -279,7 +279,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                 "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
                 "culpa qui officia deserunt mollit anim id est laborum."sv;
         auto enc = encrypt_for_blinded_recipient(
-                {to_span(ed_sk).data(), 32},
+                to_span(ed_sk).first<32>(),
                 to_span(server_pk),
                 {blind15_pk2_prefixed.data(), 33},
                 to_span(lorem_ipsum));
@@ -290,7 +290,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                       to_unsigned("dolore magna") + strlen("dolore magna")) == enc.end());
 
         auto [msg, sender] = decrypt_from_blinded_recipient(
-                {to_span(ed_sk2).data(), 32},
+                to_span(ed_sk2).first<32>(),
                 to_span(server_pk),
                 {blind15_pk_prefixed.data(), 33},
                 {blind15_pk2_prefixed.data(), 33},
@@ -301,7 +301,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
         auto broken = enc;
         broken[463] ^= 0x80;  // 1 + 445 + 16 = 462 is the start of the nonce
         CHECK_THROWS(decrypt_from_blinded_recipient(
-                {to_span(ed_sk2).data(), 32},
+                to_span(ed_sk2).first<32>(),
                 to_span(server_pk),
                 {blind15_pk_prefixed.data(), 33},
                 {blind15_pk2_prefixed.data(), 33},
@@ -394,7 +394,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                 "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
                 "culpa qui officia deserunt mollit anim id est laborum."sv;
         auto enc = encrypt_for_blinded_recipient(
-                {to_span(ed_sk).data(), 32},
+                to_span(ed_sk).first<32>(),
                 to_span(server_pk),
                 {blind25_pk2_prefixed.data(), 33},
                 to_span(lorem_ipsum));
@@ -405,7 +405,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                       to_unsigned("dolore magna") + strlen("dolore magna")) == enc.end());
 
         auto [msg, sender] = decrypt_from_blinded_recipient(
-                {to_span(ed_sk2).data(), 32},
+                to_span(ed_sk2).first<32>(),
                 to_span(server_pk),
                 {blind25_pk_prefixed.data(), 33},
                 {blind25_pk2_prefixed.data(), 33},
@@ -416,7 +416,7 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
         auto broken = enc;
         broken[463] ^= 0x80;  // 1 + 445 + 16 = 462 is the start of the nonce
         CHECK_THROWS(decrypt_from_blinded_recipient(
-                {to_span(ed_sk2).data(), 32},
+                to_span(ed_sk2).first<32>(),
                 to_span(server_pk),
                 {blind25_pk_prefixed.data(), 33},
                 {blind25_pk2_prefixed.data(), 33},

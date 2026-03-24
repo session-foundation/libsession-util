@@ -64,32 +64,14 @@ namespace detail {
 
 }  // namespace detail
 
-// Expands an Ed25519 privkey from a 32-byte seed if necessary, or passes through a 64-byte key.
-// Returns a (span, storage) pair where the span is always the full 64-byte key and storage is
-// non-null only when expansion was needed.  Moving the returned pair is safe because storage is
-// heap-allocated (unique_ptr), so the heap address — and thus the span — remain valid after a move.
-static std::pair<std::span<const unsigned char, 64>, std::unique_ptr<cleared_uc64>>
-expand_ed25519_privkey(std::span<const unsigned char> privkey) {
-    if (privkey.size() == 64)
-        return {std::span<const unsigned char, 64>{privkey.data(), 64}, nullptr};
-    if (privkey.size() != 32)
-        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
-    auto buf = std::make_unique<cleared_uc64>();
-    uc32 ignore_pk;
-    crypto_sign_ed25519_seed_keypair(ignore_pk.data(), buf->data(), privkey.data());
-    return {std::span<const unsigned char, 64>{buf->data(), 64}, std::move(buf)};
-}
-
 // Version tag we prepend to encrypted-for-blinded-user messages.  This is here so we can detect if
 // some future version changes the format (and if not even try to load it).
 inline constexpr unsigned char BLINDED_ENCRYPT_VERSION = 0;
 
 std::vector<unsigned char> sign_for_recipient(
-        std::span<const unsigned char> ed25519_privkey,
+        const Ed25519PrivKeySpan& ed25519_privkey,
         std::span<const unsigned char> recipient_pubkey,
         std::span<const unsigned char> message) {
-    auto [ed_sk, _ed_sk_storage] = expand_ed25519_privkey(ed25519_privkey);
-    ed25519_privkey = ed_sk;
     // If prefixed, drop it (and do this for the caller, too) so that everything after this
     // doesn't need to worry about whether it is prefixed or not.
     if (recipient_pubkey.size() == 33 && recipient_pubkey.front() == 0x05)
@@ -122,7 +104,7 @@ std::vector<unsigned char> sign_for_recipient(
 static constexpr auto BOX_HASHKEY = "SessionBoxEphemeralHashKey"_uc;
 
 std::vector<unsigned char> encrypt_for_recipient(
-        std::span<const unsigned char> ed25519_privkey,
+        const Ed25519PrivKeySpan& ed25519_privkey,
         std::span<const unsigned char> recipient_pubkey,
         std::span<const unsigned char> message) {
 
@@ -143,7 +125,7 @@ std::vector<unsigned char> encrypt_for_recipient(
 }
 
 std::vector<unsigned char> encrypt_for_recipient_deterministic(
-        std::span<const unsigned char> ed25519_privkey,
+        const Ed25519PrivKeySpan& ed25519_privkey,
         std::span<const unsigned char> recipient_pubkey,
         std::span<const unsigned char> message) {
 
@@ -157,7 +139,7 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
     // keyed blake2b hash.
     cleared_uchars<crypto_box_SEEDBYTES> seed;
     hash::blake2b_key(
-            seed, BOX_HASHKEY, ed25519_privkey.first(32), recipient_pubkey.first(32), message);
+            seed, BOX_HASHKEY, ed25519_privkey.seed(), recipient_pubkey.first(32), message);
 
     cleared_uchars<crypto_box_SECRETKEYBYTES> eph_sk;
     cleared_uchars<crypto_box_PUBLICKEYBYTES> eph_pk;
@@ -277,12 +259,10 @@ static cleared_uc32 blinded_shared_secret(
 }
 
 std::vector<unsigned char> encrypt_for_blinded_recipient(
-        std::span<const unsigned char> ed25519_privkey,
+        const Ed25519PrivKeySpan& ed25519_privkey,
         std::span<const unsigned char> server_pk,
         std::span<const unsigned char> recipient_blinded_id,
         std::span<const unsigned char> message) {
-    if (ed25519_privkey.size() != 64 && ed25519_privkey.size() != 32)
-        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
     if (server_pk.size() != 32)
         throw std::invalid_argument{"Invalid server_pk: expected 32 bytes"};
     if (recipient_blinded_id.size() != 33)
@@ -315,15 +295,8 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
     buf.insert(buf.end(), message.begin(), message.end());
 
     // append A (pubkey)
-    if (ed25519_privkey.size() == 64) {
-        buf.insert(buf.end(), ed25519_privkey.begin() + 32, ed25519_privkey.end());
-    } else {
-        cleared_uc64 ed_sk_from_seed;
-        uc32 ed_pk_buf;
-        crypto_sign_ed25519_seed_keypair(
-                ed_pk_buf.data(), ed_sk_from_seed.data(), ed25519_privkey.data());
-        buf.insert(buf.end(), ed_pk_buf.begin(), ed_pk_buf.end());
-    }
+    auto pk = ed25519_privkey.pubkey();
+    buf.insert(buf.end(), pk.begin(), pk.end());
 
     // Encrypt using xchacha20-poly1305
     cleared_uchars<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
@@ -363,7 +336,7 @@ static constexpr size_t GROUPS_ENCRYPT_OVERHEAD =
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES;
 
 std::vector<unsigned char> encrypt_for_group(
-        std::span<const unsigned char> user_ed25519_privkey,
+        const Ed25519PrivKeySpan& user_ed25519_privkey,
         std::span<const unsigned char> group_ed25519_pubkey,
         std::span<const unsigned char> group_enc_key,
         std::span<const unsigned char> plaintext,
@@ -371,21 +344,6 @@ std::vector<unsigned char> encrypt_for_group(
         size_t padding) {
     if (plaintext.size() > GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE)
         throw std::runtime_error{"Cannot encrypt plaintext: message size is too large"};
-
-    // Generate the user's pubkey if they passed in a 32 byte secret key instead of the
-    // libsodium-style 64 byte secret key.
-    cleared_uc64 user_ed25519_privkey_from_seed;
-    if (user_ed25519_privkey.size() == 32) {
-        uc32 ignore_pk;
-        crypto_sign_ed25519_seed_keypair(
-                ignore_pk.data(),
-                user_ed25519_privkey_from_seed.data(),
-                user_ed25519_privkey.data());
-        user_ed25519_privkey = {
-                user_ed25519_privkey_from_seed.data(), user_ed25519_privkey_from_seed.size()};
-    } else if (user_ed25519_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid user_ed25519_privkey: expected 32 or 64 bytes"};
-    }
 
     if (group_enc_key.size() != 32 && group_enc_key.size() != 64)
         throw std::invalid_argument{"Invalid group_enc_key: expected 32 or 64 bytes"};
@@ -473,7 +431,7 @@ std::vector<unsigned char> encrypt_for_group(
 }
 
 std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
-        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> ciphertext) {
+        const Ed25519PrivKeySpan& ed25519_privkey, std::span<const unsigned char> ciphertext) {
     auto [buf, sender_ed_pk] = decrypt_incoming(ed25519_privkey, ciphertext);
 
     // Convert the sender_ed_pk to the sender's session ID
@@ -515,10 +473,7 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 }
 
 std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
-        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> ciphertext) {
-    auto [ed_sk, _ed_sk_storage] = expand_ed25519_privkey(ed25519_privkey);
-    ed25519_privkey = ed_sk;
-
+        const Ed25519PrivKeySpan& ed25519_privkey, std::span<const unsigned char> ciphertext) {
     cleared_uc32 x_sec;
     uc32 x_pub;
     crypto_sign_ed25519_sk_to_curve25519(x_sec.data(), ed25519_privkey.data());
@@ -567,30 +522,20 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
 }
 
 std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipient(
-        std::span<const unsigned char> ed25519_privkey,
+        const Ed25519PrivKeySpan& ed25519_privkey,
         std::span<const unsigned char> server_pk,
         std::span<const unsigned char> sender_id,
         std::span<const unsigned char> recipient_id,
         std::span<const unsigned char> ciphertext) {
-    uc32 ed_pk_from_seed;
-    cleared_uc64 ed_sk_from_seed;
-    if (ed25519_privkey.size() == 32) {
-        crypto_sign_ed25519_seed_keypair(
-                ed_pk_from_seed.data(), ed_sk_from_seed.data(), ed25519_privkey.data());
-        ed25519_privkey = {ed_sk_from_seed.data(), ed_sk_from_seed.size()};
-    } else if (ed25519_privkey.size() == 64)
-        std::memcpy(ed_pk_from_seed.data(), ed25519_privkey.data() + 32, 32);
-    else
-        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
+    auto ed_pk = ed25519_privkey.pubkey();
     if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + 1 +
                                     crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
 
     cleared_uc32 dec_key;
-    auto blinded_id = recipient_id[0] == 0x25
-                            ? blinded25_id_from_ed(to_span(ed_pk_from_seed), server_pk)
-                            : blinded15_id_from_ed(to_span(ed_pk_from_seed), server_pk);
+    auto blinded_id = recipient_id[0] == 0x25 ? blinded25_id_from_ed(to_span(ed_pk), server_pk)
+                                              : blinded15_id_from_ed(to_span(ed_pk), server_pk);
 
     if (to_string_view(sender_id) == to_string_view(blinded_id))
         dec_key = blinded_shared_secret(ed25519_privkey, sender_id, recipient_id, server_pk, true);
@@ -1091,7 +1036,7 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
     session_encrypt_group_message result = {};
     try {
         std::vector<unsigned char> result_cpp = encrypt_for_group(
-                {user_ed25519_privkey, user_ed25519_privkey_len},
+                Ed25519PrivKeySpan::from(user_ed25519_privkey, user_ed25519_privkey_len),
                 {group_ed25519_pubkey, group_ed25519_pubkey_len},
                 {group_enc_key, group_enc_key_len},
                 {plaintext, plaintext_len},

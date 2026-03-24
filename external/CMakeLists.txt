@@ -24,6 +24,12 @@ endfunction()
 session_dep(libsodium 1.0.21)
 libsession_static_bundle(sessiondep::libsodium)
 
+if(NOT TARGET oxenc::oxenc)
+    set(OXENC_BUILD_TESTS OFF CACHE BOOL "")
+    set(OXENC_BUILD_DOCS OFF CACHE BOOL "")
+    sessiondep_or_submodule(liboxenc 1.6.0 session-router/external/oxen-libquic/external/oxen-encoding oxenc::oxenc)
+endif()
+
 if(ENABLE_NETWORKING)
     if(ENABLE_NETWORKING_SROUTER)
         set(SROUTER_FULL OFF CACHE BOOL "")
@@ -37,13 +43,6 @@ if(ENABLE_NETWORKING)
         set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
         sessiondep_or_submodule(liboxenquic 1.8.0 session-router/external/oxen-libquic quic)
     endif()
-endif()
-
-if(NOT TARGET oxenc::oxenc)
-    # The oxenc target will already exist if we load libquic above via submodule
-    set(OXENC_BUILD_TESTS OFF CACHE BOOL "")
-    set(OXENC_BUILD_DOCS OFF CACHE BOOL "")
-    sessiondep_or_submodule(liboxenc 1.5.0 oxen-libquic/external/oxen-encoding oxenc::oxenc)
 endif()
 
 if(NOT TARGET oxen::logging)

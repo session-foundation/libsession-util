@@ -4,6 +4,78 @@
 #include <span>
 #include <vector>
 
+#include "session/sodium_array.hpp"
+
+namespace session {
+
+/// A span-like type representing a fully-expanded Ed25519 private key (always 64 bytes).
+/// Implicitly constructible from any fixed-extent 32- or 64-byte unsigned char spannable:
+/// - 32-byte input (seed): the 64-byte key is computed via libsodium and stored internally.
+/// - 64-byte input: holds a non-owning span into the caller's data — no copy or allocation.
+///
+/// Non-copyable and non-moveable to avoid dangling references to internal storage.
+struct Ed25519PrivKeySpan {
+    template <typename T>
+        requires(
+                std::constructible_from<std::span<const unsigned char, 64>, const T&> ||
+                std::constructible_from<std::span<const unsigned char, 32>, const T&>)
+    Ed25519PrivKeySpan(const T& src) {
+        if constexpr (std::constructible_from<std::span<const unsigned char, 64>, const T&>)
+            data_ = std::span<const unsigned char, 64>{src}.data();
+        else {
+            expand_seed(std::span<const unsigned char, 32>{src});
+            data_ = storage_->data();
+        }
+    }
+
+    // Explicit constructor for runtime-known sizes (e.g. at C API boundaries).
+    // Throws std::invalid_argument if size is not 32 or 64.
+    explicit Ed25519PrivKeySpan(const unsigned char* data, size_t size) {
+        if (size == 64)
+            data_ = data;
+        else if (size == 32) {
+            expand_seed(std::span<const unsigned char, 32>{data, 32});
+            data_ = storage_->data();
+        } else
+            throw std::invalid_argument{"Ed25519 private key must be 32 or 64 bytes"};
+    }
+
+    // Named factory aliases for the explicit constructor above, for readability at call sites.
+    static Ed25519PrivKeySpan from(std::span<const unsigned char> key) {
+        return Ed25519PrivKeySpan{key.data(), key.size()};
+    }
+    static Ed25519PrivKeySpan from(const unsigned char* data, size_t size) {
+        return Ed25519PrivKeySpan{data, size};
+    }
+
+    Ed25519PrivKeySpan(const Ed25519PrivKeySpan&) = delete;
+    Ed25519PrivKeySpan& operator=(const Ed25519PrivKeySpan&) = delete;
+    Ed25519PrivKeySpan(Ed25519PrivKeySpan&&) = delete;
+    Ed25519PrivKeySpan& operator=(Ed25519PrivKeySpan&&) = delete;
+
+    std::span<const unsigned char, 64> span() const {
+        return std::span<const unsigned char, 64>(data_, 64);
+    }
+    operator std::span<const unsigned char, 64>() const { return span(); }
+    operator std::span<const unsigned char>() const { return span(); }
+    const unsigned char* data() const { return data_; }
+    auto begin() const { return data_; }
+    auto end() const { return data_ + 64; }
+    static constexpr size_t size() { return 64; }
+    // Returns the 32-byte seed (first half of the libsodium key).
+    std::span<const unsigned char, 32> seed() const { return span().first<32>(); }
+    // Returns the 32-byte Ed25519 public key (second half of the libsodium key).
+    std::span<const unsigned char, 32> pubkey() const { return span().last<32>(); }
+
+  private:
+    void expand_seed(std::span<const unsigned char, 32> seed);
+
+    const unsigned char* data_ = nullptr;
+    std::optional<cleared_uc64> storage_;
+};
+
+}  // namespace session
+
 namespace session::ed25519 {
 
 /// Generates a random Ed25519 key pair
@@ -32,13 +104,13 @@ std::array<unsigned char, 32> seed_for_ed_privkey(std::span<const unsigned char>
 /// Generates a signature for the message using the libsodium-style ed25519 secret key, 64 bytes.
 ///
 /// Inputs:
-/// - `ed25519_privkey` -- the libsodium-style secret key, 64 bytes.
+/// - `ed25519_privkey` -- the Ed25519 private key; accepts a 32-byte seed or 64-byte libsodium key.
 /// - `msg` -- the data to generate a signature for.
 ///
 /// Outputs:
 /// - The ed25519 signature
 std::vector<unsigned char> sign(
-        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> msg);
+        const Ed25519PrivKeySpan& ed25519_privkey, std::span<const unsigned char> msg);
 
 /// API: ed25519/verify
 ///

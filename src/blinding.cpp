@@ -481,7 +481,7 @@ std::vector<unsigned char> blind_version_sign_request(
     if (body)
         buf.insert(buf.end(), body->begin(), body->end());
 
-    return ed25519::sign({sk.data(), sk.size()}, buf);
+    return ed25519::sign(sk, buf);
 }
 
 std::vector<unsigned char> blind_version_sign(
@@ -505,7 +505,7 @@ std::vector<unsigned char> blind_version_sign(
     }
     buf.insert(buf.end(), url.begin(), url.end());
 
-    return ed25519::sign({sk.data(), sk.size()}, buf);
+    return ed25519::sign(sk, buf);
 }
 
 bool session_id_matches_blinded_id(
