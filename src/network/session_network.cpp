@@ -869,6 +869,17 @@ void Network::_resync_clock(
         return;
     }
 
+    if (!_snode_pool) {
+        log::info(cat, "Ignoring clock resync attempt as SnodePool has been destroyed.");
+        if (request_callback)
+            (*request_callback)(
+                    false,
+                    false,
+                    ERROR_NO_SNODE_POOL,
+                    {content_type_plain_text},
+                    "SnodePool was destroyed.");
+    }
+
     // Add the request to the request queue, we do this so we can trigger it's callback after the
     // resync completes as it would likely fail with another clock out of sync error if it gets
     // retried immediately
@@ -896,13 +907,18 @@ void Network::_resync_clock(
     _current_clock_resync_id = request_id;
     _clock_resync_results.clear();
 
-    // Pick the random nodes we want to use for retrying (these won't change for this resync
-    // attempt)
-    auto resync_nodes = _snode_pool->get_unused_nodes(config.num_nodes_to_check_for_network_offset);
+    // Refresh the snode pool if needed to ensure we have the most up-to-date cache
+    std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
+    _snode_pool->refresh_if_needed(std::move(nodes_to_exclude), [this, request_id] {
+        // Pick the random nodes we want to use for retrying (these won't change for this resync
+        // attempt)
+        auto resync_nodes =
+                _snode_pool->get_unused_nodes(config.num_nodes_to_check_for_network_offset);
 
-    for (uint8_t i = 0; i < resync_nodes.size(); ++i)
-        _launch_next_clock_out_of_sync_request(
-                request_id, i, resync_nodes[i], config.num_nodes_to_check_for_network_offset);
+        for (uint8_t i = 0; i < resync_nodes.size(); ++i)
+            _launch_next_clock_out_of_sync_request(
+                    request_id, i, resync_nodes[i], config.num_nodes_to_check_for_network_offset);
+    });
 }
 
 void Network::_launch_next_clock_out_of_sync_request(
