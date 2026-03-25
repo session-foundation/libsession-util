@@ -118,6 +118,7 @@ target_link_libraries(
     PUBLIC
     crypto
     PRIVATE
+    config
     sessiondep::libsodium
     session::SQLite
     mlkem_native::mlkem768
@@ -173,6 +174,7 @@ if(ENABLE_NETWORKING)
             PRIVATE
             network/routing/session_router_router.cpp)
         target_link_libraries(network PUBLIC session-router::libsessionrouter)
+        target_compile_definitions(network PUBLIC ENABLE_NETWORKING_SROUTER)
     endif()
 
     if (BUILD_STATIC_DEPS)

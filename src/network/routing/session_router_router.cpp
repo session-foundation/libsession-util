@@ -111,9 +111,6 @@ void SessionRouter::_init() {
     data-dir={}
     [bind]
     listen=:0
-    [logging]
-    type=none
-    level=*=debug,quic=info
     )"_format(opt::netid::to_string(_config.netid), _config.cache_directory);
 
     try {

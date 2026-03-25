@@ -5,12 +5,15 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <chrono>
+#include <concepts>
 #include <cstddef>
+#include <future>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "session/clock.hpp"
@@ -295,3 +298,84 @@ struct scope_exit {
             cleanup();
     }
 };
+
+// ── Async/callback helpers (adapted from oxen-libquic/tests/utils.hpp) ────────────────────────
+
+template <typename T>
+struct functional_helper : public functional_helper<decltype(&T::operator())> {};
+template <typename Class, typename Ret, typename... Args>
+struct functional_helper<Ret (Class::*)(Args...) const> {
+    using return_type = Ret;
+    static constexpr bool is_void = std::is_void_v<Ret>;
+    using type = std::function<Ret(Args...)>;
+};
+template <typename T>
+using functional_helper_t = typename functional_helper<T>::type;
+
+struct set_on_exit {
+    std::promise<void>& p;
+    explicit set_on_exit(std::promise<void>& p) : p{p} {}
+    ~set_on_exit() { p.set_value(); }
+};
+
+/// Wraps a callable in a promise/future pair.  When passed as a std::function argument (via
+/// implicit conversion), it calls the inner callable and then signals the promise, allowing tests
+/// to block until an asynchronous callback fires.
+///
+/// Usage:
+///     bool got_it = false;
+///     callback_waiter waiter{[&got_it](bool x) { got_it = x; }};
+///     async_operation(waiter);            // waiter implicitly converts to std::function<void(bool)>
+///     REQUIRE(waiter.wait());             // blocks up to 5s
+///     CHECK(got_it);
+template <typename T>
+struct callback_waiter {
+    using Func_t = functional_helper_t<T>;
+
+    Func_t func;
+    std::shared_ptr<std::promise<void>> p{std::make_shared<std::promise<void>>()};
+    std::future<void> f{p->get_future()};
+
+    explicit callback_waiter(T f) : func{std::move(f)} {}
+
+    [[nodiscard]] bool wait(std::chrono::milliseconds timeout = 5s) {
+        return f.wait_for(timeout) == std::future_status::ready;
+    }
+
+    [[nodiscard]] bool is_ready() { return wait(0ms); }
+
+    // Deliberate implicit conversion to std::function<...>: calls the inner callable then signals
+    // the promise.
+    operator Func_t() {
+        return [p = p, func = func](auto&&... args) {
+            set_on_exit prom_setter{*p};
+            return func(std::forward<decltype(args)>(args)...);
+        };
+    }
+
+    void call() { this->operator Func_t()(); }
+};
+
+/// Polls a condition, sleeping between checks.  Returns the last result of f() as soon as it is
+/// truthy, or when the timeout expires (returning the last falsy result).
+template <std::invocable<> Callback>
+auto wait_for(
+        Callback f,
+        std::chrono::milliseconds timeout = 5s,
+        std::chrono::milliseconds check_interval = 25ms) {
+    auto end = std::chrono::steady_clock::now() + timeout;
+    for (;;) {
+        auto val = f();
+        if (val || std::chrono::steady_clock::now() >= end)
+            return val;
+        std::this_thread::sleep_for(check_interval);
+    }
+}
+
+// require_future(f) — asserts that std::future f becomes ready within 5s.
+// require_future(f, timeout) — asserts that f becomes ready within the given timeout.
+#define _require_future2(f, timeout) REQUIRE((f).wait_for(timeout) == std::future_status::ready)
+#define _require_future1(f) _require_future2((f), 5s)
+#define GET_REQUIRE_FUTURE_MACRO(_1, _2, NAME, ...) NAME
+#define require_future(...) \
+    GET_REQUIRE_FUTURE_MACRO(__VA_ARGS__, _require_future2, _require_future1)(__VA_ARGS__)

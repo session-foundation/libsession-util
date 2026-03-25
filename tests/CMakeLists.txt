@@ -95,6 +95,22 @@ if(NOT TARGET check)
         COMMAND testAll)
 endif()
 
+option(BUILD_LIVE_TESTS "Build the live testnet integration tests (requires ENABLE_NETWORKING)" ${ENABLE_NETWORKING})
+
+if(BUILD_LIVE_TESTS)
+    if(NOT ENABLE_NETWORKING)
+        message(FATAL_ERROR "BUILD_LIVE_TESTS requires ENABLE_NETWORKING")
+    endif()
+
+    add_executable(testLive
+        live/main.cpp
+        live/test_swarm.cpp
+        live/test_pubkey_xfer.cpp)
+    target_link_libraries(testLive PRIVATE
+        test_libs
+        Catch2::Catch2)
+endif()
+
 add_executable(swarm-auth-test EXCLUDE_FROM_ALL swarm-auth-test.cpp)
 target_link_libraries(swarm-auth-test PRIVATE config)
 

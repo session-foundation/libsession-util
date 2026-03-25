@@ -46,8 +46,11 @@ class MockNetwork : public network::Network {
 
 // Smart-pointer-like RAII wrapper around a Core backed by a unique temporary DB file.
 // The DB file is removed on destruction.  Default encryption uses a zeroed raw_key.
+// If `extra_dir` is set, that directory tree is also removed recursively on destruction (used by
+// make_live_core to clean up the network's cache directory).
 struct TempCore {
     std::filesystem::path path;
+    std::optional<std::filesystem::path> extra_dir;
     std::unique_ptr<core::Core> core;
 
     template <core::CoreOption... Opts>
@@ -58,10 +61,15 @@ struct TempCore {
             }()},
             core{std::make_unique<core::Core>(path, std::forward<Opts>(opts)...)} {}
 
+    TempCore(TempCore&&) = default;
+    TempCore& operator=(TempCore&&) = default;
+
     ~TempCore() {
         core.reset();  // close DB before removing the file
         std::error_code ec;
         std::filesystem::remove(path, ec);
+        if (extra_dir)
+            std::filesystem::remove_all(*extra_dir, ec);
     }
 
     core::Core* operator->() { return core.get(); }
@@ -114,6 +122,17 @@ class TestHelper {
         std::optional<std::array<std::byte, 32>> pubkey_x25519;
         std::optional<std::array<std::byte, 1184>> pubkey_mlkem768;
     };
+
+    // Returns true if the namespace_sync table has at least one row with a last_hash set for the
+    // given namespace (on any swarm node).  Used by live tests to detect that a poll completed
+    // and delivered at least one message.
+    static bool has_any_namespace_sync(core::Core& core, config::Namespace ns) {
+        auto count = core.db.conn().prepared_get<int64_t>(
+                "SELECT COUNT(*) FROM namespace_sync"
+                " WHERE namespace = ? AND last_hash IS NOT NULL",
+                static_cast<int16_t>(ns));
+        return count > 0;
+    }
 
     // Returns the pfs_key_cache entry for the given session_id, or nullopt if absent.
     static std::optional<PfsCacheEntry> pfs_cache_entry(

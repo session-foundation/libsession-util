@@ -103,14 +103,14 @@ void Core::_poll() {
 
     constexpr std::array namespaces = {
             config::Namespace::Devices, config::Namespace::AccountPubkeys};
-    nlohmann::json ns_list = nlohmann::json::array();
-    for (auto ns : namespaces)
-        ns_list.push_back(static_cast<int16_t>(ns));
 
     auto now_ms = epoch_ms(clock_now_ms());
     auto session_id = oxenc::to_hex(globals.session_id());
+    auto ed25519_hex = globals.pubkey_ed25519().hex();
 
-    std::string to_sign = fmt::format("retrieve{}{}", session_id, now_ms);
+    // Devices (21) requires auth: sign "retrieve" || namespace || timestamp (base-10 strings).
+    constexpr auto devices_ns_val = static_cast<int16_t>(config::Namespace::Devices);
+    std::string to_sign = fmt::format("retrieve{}{}", devices_ns_val, now_ms);
     std::array<unsigned char, 64> sig;
     auto seed = globals.account_seed();
     crypto_sign_ed25519_detached(
@@ -119,56 +119,56 @@ void Core::_poll() {
             reinterpret_cast<const unsigned char*>(to_sign.data()),
             to_sign.size(),
             reinterpret_cast<const unsigned char*>(seed.buf.data()));
-
     auto sig_b64 = oxenc::to_base64(sig);
 
     net->get_swarm(
             globals.pubkey_x25519(),
             false,
-            [this, net, namespaces, ns_list, session_id, now_ms, sig_b64](auto, auto swarm) {
+            [this, net, namespaces, session_id, ed25519_hex, now_ms, sig_b64](auto, auto swarm) {
                 if (swarm.empty())
                     return;
 
                 auto& node = swarm.front();
 
-                nlohmann::json last_hashes = nlohmann::json::object();
+                // Build one batch subrequest per namespace.
+                nlohmann::json requests = nlohmann::json::array();
                 {
                     auto conn = db.conn();
                     for (auto ns : namespaces) {
                         auto ns_val = static_cast<int16_t>(ns);
+                        nlohmann::json params = {
+                                {"pubkey", session_id},
+                                {"namespace", ns_val},
+                        };
+
+                        // Devices (21) requires a signed retrieve; AccountPubkeys (-21) does not.
+                        if (ns == config::Namespace::Devices) {
+                            params["pubkey_ed25519"] = ed25519_hex;
+                            params["timestamp"] = now_ms;
+                            params["signature"] = sig_b64;
+                        }
+
                         auto last_hash = conn.prepared_maybe_get<std::string>(
                                 "SELECT last_hash FROM namespace_sync"
                                 " WHERE namespace = ? AND sn_pubkey = ?",
                                 ns_val,
                                 node.remote_pubkey);
                         if (last_hash)
-                            last_hashes[std::to_string(ns_val)] = *last_hash;
+                            params["last_hash"] = *last_hash;
+
+                        requests.push_back({{"method", "retrieve"}, {"params", std::move(params)}});
                     }
                 }
 
-                nlohmann::json params = {
-                        {"pubkey", session_id},
-                        {"namespaces", ns_list},
-                        {"timestamp", now_ms},
-                        {"signature", sig_b64},
-                };
-                if (!last_hashes.empty())
-                    params["last_hashes"] = last_hashes;
-
-                nlohmann::json req_body = {
-                        {"method", "retrieve"},
-                        {"params", params},
-                };
-
-                auto body_str = req_body.dump();
+                auto body_str = nlohmann::json{{"requests", std::move(requests)}}.dump();
                 net->send_request(
                         network::Request{
                                 node,
-                                "storage_rpc",
+                                "batch",
                                 to_vector<unsigned char>(body_str),
                                 network::RequestCategory::standard_small,
                                 20s},
-                        [this, sn_pubkey = node.remote_pubkey](
+                        [this, sn_pubkey = node.remote_pubkey, namespaces](
                                 bool success,
                                 bool /*timeout*/,
                                 int16_t /*status_code*/,
@@ -179,22 +179,31 @@ void Core::_poll() {
 
                             try {
                                 auto json = nlohmann::json::parse(*body);
-                                if (!json.contains("results") || !json["results"].is_array())
+                                auto it = json.find("results");
+                                if (it == json.end() || !it->is_array())
                                     return;
 
+                                auto& results = *it;
                                 auto conn = db.conn();
-                                for (const auto& res : json["results"]) {
-                                    if (!res.contains("namespace") || !res.contains("messages") ||
-                                        !res["messages"].is_array())
+                                for (size_t i = 0; i < namespaces.size() && i < results.size();
+                                     ++i) {
+                                    const auto& res = results[i];
+                                    if (!res.contains("code") || res["code"].get<int>() != 200)
+                                        continue;
+                                    auto body_it = res.find("body");
+                                    if (body_it == res.end())
+                                        continue;
+                                    auto msgs_it = body_it->find("messages");
+                                    if (msgs_it == body_it->end() || !msgs_it->is_array())
                                         continue;
 
-                                    auto ns_val = res["namespace"].get<int16_t>();
-                                    auto ns = static_cast<config::Namespace>(ns_val);
+                                    auto ns = namespaces[i];
+                                    auto ns_val = static_cast<int16_t>(ns);
 
                                     std::vector<std::vector<unsigned char>> messages_data;
                                     std::string newest_hash;
 
-                                    for (const auto& msg : res["messages"]) {
+                                    for (const auto& msg : *msgs_it) {
                                         if (!msg.contains("data") || !msg["data"].is_string())
                                             continue;
                                         auto b64_data = msg["data"].get<std::string_view>();
@@ -294,16 +303,14 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
     auto session_id_hex = oxenc::to_hex(session_id.begin(), session_id.end());
     auto now_ms = epoch_ms(clock_now_ms());
 
-    nlohmann::json req_body = {
-            {"method", "retrieve"},
-            {"params",
-             {{"pubkey", session_id_hex},
-              {"namespaces", {static_cast<int16_t>(config::Namespace::AccountPubkeys)}},
-              {"timestamp", now_ms}}},
+    // AccountPubkeys (-21) allows unauthenticated retrieve: no signature needed.
+    nlohmann::json params = {
+            {"pubkey", session_id_hex},
+            {"namespace", static_cast<int16_t>(config::Namespace::AccountPubkeys)},
     };
 
     net->get_swarm(
-            x25519_pub, false, [this, net, sid = std::move(sid), req_body](auto, auto swarm) {
+            x25519_pub, false, [this, net, sid = std::move(sid), params](auto, auto swarm) {
                 if (swarm.empty()) {
                     log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
                     if (callbacks.pfs_keys_fetched)
@@ -311,11 +318,11 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
                     return;
                 }
 
-                auto body_str = req_body.dump();
+                auto body_str = params.dump();
                 net->send_request(
                         network::Request{
                                 swarm.front(),
-                                "storage_rpc",
+                                "retrieve",
                                 to_vector<unsigned char>(body_str),
                                 network::RequestCategory::standard_small,
                                 20s},
@@ -334,11 +341,12 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
 
                             try {
                                 auto json = nlohmann::json::parse(*body);
-                                if (!json.contains("results") || !json["results"].is_array()) {
+                                auto msgs_it = json.find("messages");
+                                if (msgs_it == json.end() || !msgs_it->is_array()) {
                                     log::warning(
                                             cat,
                                             "prefetch_pfs_keys: response missing or invalid "
-                                            "'results' array");
+                                            "'messages' array");
                                     return;
                                 }
 
@@ -351,65 +359,44 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
                                 std::optional<std::array<std::byte, MLKEM768_PUBLICKEYBYTES>>
                                         pk_mlkem768;
 
-                                for (const auto& res : json["results"]) {
-                                    if (!res.contains("namespace")) {
+                                for (const auto& msg : *msgs_it) {
+                                    auto data_it = msg.find("data");
+                                    if (data_it == msg.end() || !data_it->is_string()) {
                                         log::warning(
                                                 cat,
-                                                "prefetch_pfs_keys: result entry missing "
-                                                "'namespace' field");
+                                                "prefetch_pfs_keys: message missing or "
+                                                "non-string 'data' field");
                                         continue;
                                     }
-                                    if (res["namespace"].get<int16_t>() !=
-                                        static_cast<int16_t>(config::Namespace::AccountPubkeys))
-                                        continue;
-                                    if (!res.contains("messages") || !res["messages"].is_array()) {
+                                    auto b64 = data_it->get<std::string_view>();
+                                    std::vector<std::byte> decoded;
+                                    decoded.reserve(oxenc::from_base64_size(b64.size()));
+                                    oxenc::from_base64(
+                                            b64.begin(), b64.end(), std::back_inserter(decoded));
+                                    try {
+                                        oxenc::bt_dict_consumer in{decoded};
+                                        auto M = in.require_span<
+                                                std::byte,
+                                                MLKEM768_PUBLICKEYBYTES>("M");
+                                        auto X = in.require_span<std::byte, 32>("X");
+                                        in.require_signature(
+                                                "~",
+                                                [&x25519_pub](
+                                                        std::span<const unsigned char> b,
+                                                        std::span<const unsigned char> sig) {
+                                                    if (!xed25519::verify(sig, x25519_pub, b))
+                                                        throw std::runtime_error{
+                                                                "signature verification "
+                                                                "failed"};
+                                                });
+                                        std::ranges::copy(X, pk_x25519.emplace().begin());
+                                        std::ranges::copy(M, pk_mlkem768.emplace().begin());
+                                    } catch (const std::exception& e) {
                                         log::warning(
                                                 cat,
-                                                "prefetch_pfs_keys: AccountPubkeys result "
-                                                "missing or invalid 'messages' array");
-                                        continue;
-                                    }
-
-                                    for (const auto& msg : res["messages"]) {
-                                        if (!msg.contains("data") || !msg["data"].is_string()) {
-                                            log::warning(
-                                                    cat,
-                                                    "prefetch_pfs_keys: message missing or "
-                                                    "non-string 'data' field");
-                                            continue;
-                                        }
-                                        auto b64 = msg["data"].get<std::string_view>();
-                                        std::vector<std::byte> decoded;
-                                        decoded.reserve(oxenc::from_base64_size(b64.size()));
-                                        oxenc::from_base64(
-                                                b64.begin(),
-                                                b64.end(),
-                                                std::back_inserter(decoded));
-                                        try {
-                                            oxenc::bt_dict_consumer in{decoded};
-                                            auto M = in.require_span<
-                                                    std::byte,
-                                                    MLKEM768_PUBLICKEYBYTES>("M");
-                                            auto X = in.require_span<std::byte, 32>("X");
-                                            in.require_signature(
-                                                    "~",
-                                                    [&x25519_pub](
-                                                            std::span<const unsigned char> b,
-                                                            std::span<const unsigned char> sig) {
-                                                        if (!xed25519::verify(sig, x25519_pub, b))
-                                                            throw std::runtime_error{
-                                                                    "signature verification "
-                                                                    "failed"};
-                                                    });
-                                            std::ranges::copy(X, pk_x25519.emplace().begin());
-                                            std::ranges::copy(M, pk_mlkem768.emplace().begin());
-                                        } catch (const std::exception& e) {
-                                            log::warning(
-                                                    cat,
-                                                    "Ignoring malformed remote account pubkey "
-                                                    "message: {}",
-                                                    e.what());
-                                        }
+                                                "Ignoring malformed remote account pubkey "
+                                                "message: {}",
+                                                e.what());
                                     }
                                 }
 

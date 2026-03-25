@@ -538,7 +538,7 @@ void QuicTransport::_send_on_connection(
                         final_timeout = result->second;
                     }
 
-                    log::debug(cat, "[Request {}] Failed with QUIC error: {}.", req_id, err_body);
+                    log::warning(cat, "[Request {}] Failed with QUIC error: {}.", req_id, err_body);
                     return cb(
                             false,
                             final_timeout,
