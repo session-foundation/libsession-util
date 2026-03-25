@@ -70,7 +70,7 @@ inline std::vector<unsigned char> build_account_pubkeys_store_params(session::co
             nullptr,
             reinterpret_cast<const unsigned char*>(to_sign.data()),
             to_sign.size(),
-            reinterpret_cast<const unsigned char*>(seed.buf.data()));
+            seed.ed25519_secret().data());
 
     auto msg = core.devices.build_account_pubkey_message();
 

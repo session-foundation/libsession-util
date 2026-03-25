@@ -10,19 +10,25 @@
 
 using namespace session;
 
-// Helpers to build a mock retrieve response carrying a single message in one namespace.
+// Helpers to build a mock batch response carrying a single message in the first result slot.
+// _poll() sends a two-namespace batch (Devices at index 0, AccountPubkeys at index 1) and
+// processes results positionally, so msg_data/hash go in results[0]; results[1] is empty.
+// The ns parameter is accepted for readability at call sites but is otherwise unused.
 static nlohmann::json make_response(
-        int16_t ns, std::vector<unsigned char> msg_data, std::string hash) {
-    nlohmann::json response;
-    response["results"] = nlohmann::json::array();
-    nlohmann::json res_item;
-    res_item["namespace"] = ns;
-    res_item["messages"] = nlohmann::json::array();
+        int16_t /*ns*/, std::vector<unsigned char> msg_data, std::string hash) {
     nlohmann::json msg_item;
     msg_item["data"] = oxenc::to_base64(msg_data);
     msg_item["hash"] = std::move(hash);
-    res_item["messages"].push_back(msg_item);
-    response["results"].push_back(res_item);
+
+    nlohmann::json body0;
+    body0["messages"] = nlohmann::json::array({std::move(msg_item)});
+    nlohmann::json body1;
+    body1["messages"] = nlohmann::json::array();
+
+    nlohmann::json response;
+    response["results"] = nlohmann::json::array(
+            {nlohmann::json{{"code", 200}, {"body", std::move(body0)}},
+             nlohmann::json{{"code", 200}, {"body", std::move(body1)}}});
     return response;
 }
 
@@ -46,15 +52,24 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
     REQUIRE(mock_net->sent_requests.size() == 1);
     auto& sent = mock_net->sent_requests[0];
 
-    auto req_json = nlohmann::json::parse(*sent.request.body);
-    CHECK(req_json["method"] == "retrieve");
-    auto& params = req_json["params"];
+    CHECK(sent.request.endpoint == "batch");
+    auto batch_json = nlohmann::json::parse(*sent.request.body);
+    auto& reqs = batch_json["requests"];
+    REQUIRE(reqs.size() == 2);
+    // Subrequest 0: Devices (ns 21) — requires auth.
+    CHECK(reqs[0]["method"] == "retrieve");
+    auto& params = reqs[0]["params"];
     CHECK(params["pubkey"] == oxenc::to_hex(core->globals.session_id()));
-    CHECK(params["namespaces"] == nlohmann::json::array({21, -21}));
+    CHECK(params["namespace"] == 21);
+    CHECK(params.contains("pubkey_ed25519"));
     CHECK(params.contains("timestamp"));
     CHECK(params.contains("signature"));
-    // No prior hash for this node yet, so no last_hashes in request.
-    CHECK_FALSE(params.contains("last_hashes"));
+    // No prior hash for this node yet, so no last_hash in either subrequest.
+    CHECK_FALSE(params.contains("last_hash"));
+    // Subrequest 1: AccountPubkeys (ns -21) — no auth required.
+    CHECK(reqs[1]["method"] == "retrieve");
+    CHECK(reqs[1]["params"]["namespace"] == -21);
+    CHECK_FALSE(reqs[1]["params"].contains("signature"));
 
     // Build a valid link request from a second device sharing the same account seed.
     cleared_b32 seed_bytes;
@@ -74,13 +89,13 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
           "hash1");
     CHECK(received);
 
-    // Poll again with the same node — should include last_hash.
+    // Poll again with the same node — should include last_hash in the Devices subrequest.
     mock_net->sent_requests.clear();
     TestHelper::poll(*core);
 
     REQUIRE(mock_net->sent_requests.size() == 1);
-    auto req_json2 = nlohmann::json::parse(*mock_net->sent_requests[0].request.body);
-    CHECK(req_json2["params"]["last_hashes"]["21"] == "hash1");
+    auto batch_json2 = nlohmann::json::parse(*mock_net->sent_requests[0].request.body);
+    CHECK(batch_json2["requests"][0]["params"]["last_hash"] == "hash1");
 }
 
 TEST_CASE(
@@ -101,9 +116,9 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
-        // No prior hash for any node — must not send last_hashes.
-        CHECK_FALSE(params.contains("last_hashes"));
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        // No prior hash for any node — must not send last_hash.
+        CHECK_FALSE(p.contains("last_hash"));
     }
     // Respond with hash "xyz" from node A.
     mock_net->sent_requests[0].callback(
@@ -116,8 +131,8 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
-        CHECK(params["last_hashes"]["21"] == "xyz");
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        CHECK(p["last_hash"] == "xyz");
     }
 
     // ── Third poll: switch to node B — no stored hash for B, so request everything ──
@@ -126,9 +141,9 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
-        // B has no recorded hash — must not send last_hashes so we get everything.
-        CHECK_FALSE(params.contains("last_hashes"));
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        // B has no recorded hash — must not send last_hash so we get everything.
+        CHECK_FALSE(p.contains("last_hash"));
     }
     // Respond with hash "zyx" from node B (the message that B happens to have seen first).
     mock_net->sent_requests[0].callback(
@@ -143,7 +158,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto params = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["params"];
-        CHECK(params["last_hashes"]["21"] == "xyz");
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        CHECK(p["last_hash"] == "xyz");
     }
 }
