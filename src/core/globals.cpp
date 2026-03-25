@@ -135,12 +135,14 @@ void Globals::init() {
         }
     }
 
-    auto rw = _account_seed.resize(64);
+    auto rw = _account_seed.resize(96);
 
+    auto* rw_uc = reinterpret_cast<unsigned char*>(rw.buf.data());
     crypto_sign_ed25519_seed_keypair(
             _pubkey_ed25519.data(),
-            reinterpret_cast<unsigned char*>(rw.buf.data()),
+            rw_uc,
             reinterpret_cast<const unsigned char*>(seed_to_use->data()));
+    crypto_sign_ed25519_sk_to_curve25519(rw_uc + 64, rw_uc);
 
     _predefined_seed.reset();  // Clear now that it has been consumed
     if (0 != crypto_sign_ed25519_pk_to_curve25519(_pubkey_x25519.data(), _pubkey_ed25519.data()))
@@ -153,7 +155,7 @@ void Globals::init() {
 
     if (!have_seed) {
         log::info(cat, "Generated new Session account seed");
-        set("_seed", rw.buf);
+        set("_seed", rw.buf.first(32));
     }
 
     log::info(cat, "Initialized with Session ID: {}", oxenc::to_hex(_session_id));
@@ -161,9 +163,9 @@ void Globals::init() {
 
 mnemonics::secure_mnemonic Globals::seed_mnemonic(const mnemonics::Mnemonics& lang, bool force_24) {
     auto seed = _account_seed.access();
-    // _account_seed stores the 64-byte Ed25519 secret key, of which the first 32 bytes are the
-    // account seed.  A Session account uses 128-bit entropy when the upper 16 bytes of that seed
-    // are all zero; in that case we encode only the lower 16 bytes.
+    // _account_seed stores the 96-byte key material; the first 32 bytes are the account seed.
+    // A Session account uses 128-bit entropy when the last 16 bytes of that seed are all zero;
+    // in that case we encode only the first 16 bytes.
     auto seed32 = seed.buf.first(32);
     bool is_128bit = !force_24 &&
                      sodium_memcmp(seed32.data() + 16, std::array<std::byte, 16>{}.data(), 16) == 0;

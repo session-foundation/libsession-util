@@ -242,18 +242,14 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
 }
 
 std::vector<unsigned char> encrypt_for_recipient_v2(
-        std::span<const unsigned char> sender_ed25519_privkey,
+        const Ed25519PrivKeySpan& sender_ed25519_privkey,
         std::span<const unsigned char, 33> recipient_session_id,
         std::span<const unsigned char, 32> recipient_account_x25519,
         std::span<const unsigned char, 1184> recipient_account_mlkem768,
         std::span<const unsigned char> content,
         std::optional<std::span<const unsigned char, 64>> pro_signature) {
 
-    // Expand 32-byte seed → 64-byte ed25519 key if needed.  Storage is heap-allocated so the span
-    // remains valid if the pair is moved.
-    auto [ed_sk, _ed_sk_storage] = expand_ed25519_privkey(sender_ed25519_privkey);
-    // In libsodium's full ed25519 key layout, bytes [32:64] are the public key
-    std::span<const unsigned char, 32> sender_ed_pk{ed_sk.data() + 32, 32};
+    auto sender_ed_pk = sender_ed25519_privkey.pubkey();
 
     // S = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
     std::span<const unsigned char, 32> S{recipient_session_id.data() + 1, 32};
@@ -345,7 +341,8 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
             hash::blake2b_key_pers(h, recipient_session_id, V2_MSG_SIG_PERS, body);
             uc64 sig;
             if (0 !=
-                crypto_sign_ed25519_detached(sig.data(), nullptr, h.data(), h.size(), ed_sk.data()))
+                crypto_sign_ed25519_detached(
+                        sig.data(), nullptr, h.data(), h.size(), sender_ed25519_privkey.data()))
                 throw std::runtime_error{"Failed to sign v2 message"};
             return sig;
         });

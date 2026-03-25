@@ -79,7 +79,33 @@ class Globals final : detail::CoreComponent {
     void set(std::string_view key, std::string_view text);
     void set(std::string_view key, std::span<const std::byte> blob);
 
-    session::secure_buffer::r_accessor account_seed() { return _account_seed.access(); }
+    /// RAII accessor returned by account_seed().  Holds the underlying secure buffer open for
+    /// reading while alive; the buffer becomes unreadable again when the last copy is destroyed.
+    struct AccountSeedAccess {
+      private:
+        friend class Globals;
+        explicit AccountSeedAccess(const session::secure_buffer::r_accessor& acc) : _acc{acc} {}
+        session::secure_buffer::r_accessor _acc;
+
+        auto ubuf() const {
+            return std::span<const unsigned char, 96>{
+                    reinterpret_cast<const unsigned char*>(_acc.buf.data()), 96};
+        }
+
+      public:
+        /// The raw 32-byte account seed (identical to ed25519_secret().first<32>()).
+        std::span<const unsigned char, 32> seed() const { return ubuf().first<32>(); }
+        /// The 64-byte Ed25519 secret key in libsodium format (seed || pubkey).
+        std::span<const unsigned char, 64> ed25519_secret() const { return ubuf().first<64>(); }
+        /// The 32-byte X25519 secret key derived from the account seed.  This is also the clamped
+        /// private scalar of the Ed25519 key, usable for advanced scalar-multiplication operations.
+        std::span<const unsigned char, 32> x25519_key() const { return ubuf().last<32>(); }
+    };
+
+    AccountSeedAccess account_seed() {
+        auto acc = _account_seed.access();
+        return AccountSeedAccess{acc};
+    }
     // These are computed from the account_seed during construction:
     std::span<const unsigned char, 33> session_id() { return _session_id; }
     const network::ed25519_pubkey& pubkey_ed25519() const { return _pubkey_ed25519; }

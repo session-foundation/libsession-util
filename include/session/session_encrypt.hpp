@@ -149,7 +149,7 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
 /// - The encrypted v2 ciphertext to send to the swarm.
 /// - Throws on invalid keys or encryption failure.
 std::vector<unsigned char> encrypt_for_recipient_v2(
-        std::span<const unsigned char> sender_ed25519_privkey,
+        const Ed25519PrivKeySpan& sender_ed25519_privkey,
         std::span<const unsigned char, 33> recipient_session_id,
         std::span<const unsigned char, 32> recipient_account_x25519,
         std::span<const unsigned char, 1184> recipient_account_mlkem768,

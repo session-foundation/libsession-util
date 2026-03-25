@@ -905,7 +905,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
                         nullptr,
                         body.data(),
                         body.size(),
-                        reinterpret_cast<const unsigned char*>(seed.buf.data()));
+                        seed.ed25519_secret().data());
                 return sig;
             });
 
@@ -1052,7 +1052,7 @@ Devices::LinkRequestResult Devices::build_link_request() {
     auto seed = core.globals.account_seed();
     config::encrypt_prealloced(
             as_span<unsigned char>(std::span{encrypted}),
-            as_span<unsigned char>(seed.buf).first(32),
+            seed.seed(),
             "link-request");
 
     // Wrap in outer bt-dict: {"": "L", "L": <encrypted>}
@@ -1227,7 +1227,7 @@ void Devices::receive_link_request(std::span<const unsigned char> data) {
     try {
         auto seed = core.globals.account_seed();
         plaintext = config::decrypt(
-                encrypted, as_span<unsigned char>(seed.buf).first(32), "link-request");
+                encrypted, seed.seed(), "link-request");
     } catch (const config::decrypt_error& e) {
         log::warning(cat, "Ignoring incoming link request: decryption failed: {}", e.what());
         return;
@@ -1573,11 +1573,7 @@ std::vector<std::byte> Devices::build_account_pubkey_message() {
     o.append("X", k.x25519_pub);
     o.append_signature(
             "~", [seed = core.globals.account_seed()](std::span<const unsigned char> body) {
-                cleared_uc32 x25519_priv;
-                crypto_sign_ed25519_sk_to_curve25519(
-                        x25519_priv.data(),
-                        reinterpret_cast<const unsigned char*>(seed.buf.data()));
-                return xed25519::sign(x25519_priv, body);
+                return xed25519::sign(seed.x25519_key(), body);
             });
 
     assert(o.view().size() == out.size());  // Ensure we calculated exactly the right size above

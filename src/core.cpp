@@ -118,7 +118,7 @@ void Core::_poll() {
             nullptr,
             reinterpret_cast<const unsigned char*>(to_sign.data()),
             to_sign.size(),
-            reinterpret_cast<const unsigned char*>(seed.buf.data()));
+            seed.ed25519_secret().data());
     auto sig_b64 = oxenc::to_base64(sig);
 
     net->get_swarm(
