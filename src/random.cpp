@@ -48,10 +48,14 @@ std::string random_base32(size_t size) {
     return result;
 }
 
-std::string unique_id(std::string_view prefix) {
-    static std::atomic<uint32_t> counter{0};
+static std::atomic<uint32_t> unique_id_counter{0};
+
+std::string unique_id(std::string_view prefix, size_t random_len) {
     return fmt::format(
-            "{}-{}-{}", prefix, counter.fetch_add(1, std::memory_order_relaxed), random_base32(4));
+            "{}-{}-{}",
+            prefix,
+            unique_id_counter.fetch_add(1, std::memory_order_relaxed),
+            random_base32(random_len));
 }
 
 }  // namespace session::random

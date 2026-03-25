@@ -2,8 +2,8 @@
 
 #include <fmt/format.h>
 
-#include <atomic>
 #include <filesystem>
+#include <session/random.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
 #include <session/network/key_types.hpp>
@@ -55,10 +55,8 @@ struct TempCore {
 
     template <core::CoreOption... Opts>
     explicit TempCore(Opts&&... opts) :
-            path{[] {
-                static std::atomic<int> n{0};
-                return std::filesystem::temp_directory_path() / fmt::format("test_core_{}.db", ++n);
-            }()},
+            path{std::filesystem::temp_directory_path() /
+                 fmt::format("{}.db", session::random::unique_id("test_core", 7))},
             core{std::make_unique<core::Core>(path, std::forward<Opts>(opts)...)} {}
 
     TempCore(TempCore&&) = default;

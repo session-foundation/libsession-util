@@ -79,7 +79,7 @@ std::string random_base32(size_t size);
 ///
 /// Outputs:
 /// - generated id string.
-std::string unique_id(std::string_view prefix);
+std::string unique_id(std::string_view prefix, size_t random_len = 4);
 
 /// API: random/get_uniform_distribution
 ///
