@@ -490,9 +490,9 @@ DecryptV2Result decrypt_incoming_v2(
 // sending -- true if this for a message from A to B, false if this is from B to A.
 static cleared_uc32 blinded_shared_secret(
         std::span<const unsigned char> seed,
-        std::span<const unsigned char> kA,
-        std::span<const unsigned char> jB,
-        std::span<const unsigned char> server_pk,
+        std::span<const unsigned char, 33> kA_prefixed,
+        std::span<const unsigned char, 33> jB_prefixed,
+        std::span<const unsigned char, 32> server_pk,
         bool sending) {
 
     // Because we're doing this generically, we use notation a/A/k for ourselves and b/jB for the
@@ -505,23 +505,17 @@ static cleared_uc32 blinded_shared_secret(
 
     if (seed.size() != 64 && seed.size() != 32)
         throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"Invalid server_pk: expected 32 bytes"};
-    if (kA.size() != 33)
-        throw std::invalid_argument{"Invalid local blinded id: expected 33 bytes"};
-    if (jB.size() != 33)
-        throw std::invalid_argument{"Invalid remote blinded id: expected 33 bytes"};
-    if (kA[0] == 0x15 && jB[0] == 0x15)
+    if (kA_prefixed[0] == 0x15 && jB_prefixed[0] == 0x15)
         blinded_key_pair = blind15_key_pair(seed, server_pk, &k);
-    else if (kA[0] == 0x25 && jB[0] == 0x25)
+    else if (kA_prefixed[0] == 0x25 && jB_prefixed[0] == 0x25)
         blinded_key_pair = blind25_key_pair(seed, server_pk, &k);
     else
         throw std::invalid_argument{"Both ids must start with the same 0x15 or 0x25 prefix"};
 
-    bool blind25 = kA[0] == 0x25;
+    bool blind25 = kA_prefixed[0] == 0x25;
 
-    kA = kA.subspan(1);
-    jB = jB.subspan(1);
+    auto kA = kA_prefixed.subspan<1>();
+    auto jB = jB_prefixed.subspan<1>();
 
     cleared_uc32 ka;
     // Not really switching to x25519 here, this is just an easy way to compute `a`
@@ -549,13 +543,9 @@ static cleared_uc32 blinded_shared_secret(
 
 std::vector<unsigned char> encrypt_for_blinded_recipient(
         const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char> server_pk,
-        std::span<const unsigned char> recipient_blinded_id,
+        std::span<const unsigned char, 32> server_pk,
+        std::span<const unsigned char, 33> recipient_blinded_id,
         std::span<const unsigned char> message) {
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"Invalid server_pk: expected 32 bytes"};
-    if (recipient_blinded_id.size() != 33)
-        throw std::invalid_argument{"Invalid recipient_blinded_id: expected 33 bytes"};
 
     // Generate the blinded key pair & shared encryption key
     std::pair<uc32, cleared_uc32> blinded_key_pair;
@@ -576,7 +566,11 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
             blinded_id.end(), blinded_key_pair.first.begin(), blinded_key_pair.first.end());
 
     auto enc_key = blinded_shared_secret(
-            ed25519_privkey, blinded_id, recipient_blinded_id, server_pk, true);
+            ed25519_privkey,
+            std::span<const unsigned char, 33>{blinded_id.data(), 33},
+            recipient_blinded_id,
+            server_pk,
+            true);
 
     // Inner data: msg || A (i.e. the sender's ed25519 master pubkey, *not* kA blinded pubkey)
     std::vector<unsigned char> buf;
@@ -626,7 +620,7 @@ static constexpr size_t GROUPS_ENCRYPT_OVERHEAD =
 
 std::vector<unsigned char> encrypt_for_group(
         const Ed25519PrivKeySpan& user_ed25519_privkey,
-        std::span<const unsigned char> group_ed25519_pubkey,
+        std::span<const unsigned char, 32> group_ed25519_pubkey,
         std::span<const unsigned char> group_enc_key,
         std::span<const unsigned char> plaintext,
         bool compress,
@@ -634,10 +628,9 @@ std::vector<unsigned char> encrypt_for_group(
     if (plaintext.size() > GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE)
         throw std::runtime_error{"Cannot encrypt plaintext: message size is too large"};
 
+    static_assert(decltype(group_ed25519_pubkey)::extent == crypto_sign_ed25519_PUBLICKEYBYTES);
     if (group_enc_key.size() != 32 && group_enc_key.size() != 64)
         throw std::invalid_argument{"Invalid group_enc_key: expected 32 or 64 bytes"};
-    if (group_ed25519_pubkey.size() != crypto_sign_ed25519_PUBLICKEYBYTES)
-        throw std::invalid_argument{"Invalid group_ed25519_pubkey: expected 32 bytes"};
 
     std::vector<unsigned char> _compressed;
     if (compress) {
@@ -740,8 +733,8 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 }
 
 std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
-        std::span<const unsigned char> x25519_pubkey,
-        std::span<const unsigned char> x25519_seckey,
+        std::span<const unsigned char, 32> x25519_pubkey,
+        std::span<const unsigned char, 32> x25519_seckey,
         std::span<const unsigned char> ciphertext) {
     auto [buf, sender_ed_pk] = decrypt_incoming(x25519_pubkey, x25519_seckey, ciphertext);
 
@@ -772,8 +765,8 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
 }
 
 std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
-        std::span<const unsigned char> x25519_pubkey,
-        std::span<const unsigned char> x25519_seckey,
+        std::span<const unsigned char, 32> x25519_pubkey,
+        std::span<const unsigned char, 32> x25519_seckey,
         std::span<const unsigned char> ciphertext) {
 
     if (ciphertext.size() < crypto_box_SEALBYTES + 32 + 64)
@@ -812,9 +805,9 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
 
 std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipient(
         const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char> server_pk,
-        std::span<const unsigned char> sender_id,
-        std::span<const unsigned char> recipient_id,
+        std::span<const unsigned char, 32> server_pk,
+        std::span<const unsigned char, 33> sender_id,
+        std::span<const unsigned char, 33> recipient_id,
         std::span<const unsigned char> ciphertext) {
     auto ed_pk = ed25519_privkey.pubkey();
     if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + 1 +
@@ -908,13 +901,12 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
 
 DecryptGroupMessage decrypt_group_message(
         std::span<std::span<const unsigned char>> decrypt_ed25519_privkey_list,
-        std::span<const unsigned char> group_ed25519_pubkey,
+        std::span<const unsigned char, 32> group_ed25519_pubkey,
         std::span<const unsigned char> ciphertext) {
+    static_assert(decltype(group_ed25519_pubkey)::extent == crypto_sign_ed25519_PUBLICKEYBYTES);
     DecryptGroupMessage result = {};
     if (ciphertext.size() < GROUPS_ENCRYPT_OVERHEAD)
         throw std::runtime_error{"ciphertext is too small to be encrypted data"};
-    if (group_ed25519_pubkey.size() != crypto_sign_ed25519_PUBLICKEYBYTES)
-        throw std::invalid_argument{"Invalid decrypt_ed25519_privkey: expected 32 bytes"};
 
     // Note we only use the secret key of the decrypt_ed25519_privkey so we don't care about
     // generating the pubkey component if the user only passed in a 32 byte libsodium-style secret
@@ -1044,7 +1036,7 @@ DecryptGroupMessage decrypt_group_message(
 std::string decrypt_ons_response(
         std::string_view lowercase_name,
         std::span<const unsigned char> ciphertext,
-        std::optional<std::span<const unsigned char>> nonce) {
+        std::optional<std::span<const unsigned char, 24>> nonce) {
     // Handle old Argon2-based encryption used before HF16
     if (!nonce) {
         if (ciphertext.size() < crypto_secretbox_MACBYTES)
@@ -1077,10 +1069,9 @@ std::string decrypt_ons_response(
         return session_id;
     }
 
+    static_assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES == 24);
     if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{"Invalid ciphertext: expected to be greater than 16 bytes"};
-    if (nonce->size() != crypto_aead_xchacha20poly1305_ietf_NPUBBYTES)
-        throw std::invalid_argument{"Invalid nonce: expected to be 24 bytes"};
 
     // Hash the ONS name using BLAKE2b
     //
@@ -1123,12 +1114,10 @@ std::string decrypt_ons_response(
 }
 
 std::vector<unsigned char> decrypt_push_notification(
-        std::span<const unsigned char> payload, std::span<const unsigned char> enc_key) {
+        std::span<const unsigned char> payload, std::span<const unsigned char, 32> enc_key) {
     if (payload.size() <
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{"Invalid payload: too short to contain valid encrypted data"};
-    if (enc_key.size() != 32)
-        throw std::invalid_argument{"Invalid enc_key: expected 32 bytes"};
 
     std::vector<unsigned char> buf;
     std::vector<unsigned char> nonce;
@@ -1193,9 +1182,7 @@ std::string compute_hash_blake2b_b64(std::vector<std::string_view> parts) {
 }
 
 std::vector<unsigned char> encrypt_xchacha20(
-        std::span<const unsigned char> plaintext, std::span<const unsigned char> enc_key) {
-    if (enc_key.size() != 32)
-        throw std::invalid_argument{"Invalid enc_key: expected 32 bytes"};
+        std::span<const unsigned char> plaintext, std::span<const unsigned char, 32> key) {
 
     std::vector<unsigned char> ciphertext;
     ciphertext.resize(
@@ -1218,20 +1205,18 @@ std::vector<unsigned char> encrypt_xchacha20(
             0,        // additional data
             nullptr,  // nsec (always unused)
             reinterpret_cast<const unsigned char*>(ciphertext.data()),
-            enc_key.data());
+            key.data());
     assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + clen <= ciphertext.size());
     ciphertext.resize(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + clen);
     return ciphertext;
 }
 
 std::vector<unsigned char> decrypt_xchacha20(
-        std::span<const unsigned char> ciphertext, std::span<const unsigned char> enc_key) {
+        std::span<const unsigned char> ciphertext, std::span<const unsigned char, 32> key) {
     if (ciphertext.size() <
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
-    if (enc_key.size() != 32)
-        throw std::invalid_argument{"Invalid enc_key: expected 32 bytes"};
 
     // Extract nonce from the beginning of the ciphertext:
     auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
@@ -1250,7 +1235,7 @@ std::vector<unsigned char> decrypt_xchacha20(
                      nullptr,
                      0,  // additional data
                      nonce.data(),
-                     enc_key.data()))
+                     key.data()))
         throw std::runtime_error{"Could not decrypt (XChaCha20-Poly1305)"};
     assert(mlen <= plaintext.size());
     plaintext.resize(mlen);
@@ -1258,6 +1243,16 @@ std::vector<unsigned char> decrypt_xchacha20(
 }
 
 }  // namespace session
+
+// Helpers: construct const unsigned char spans from raw C pointers.
+// Used in C API wrappers to avoid verbose std::span<const unsigned char, N>{ptr, N} casts.
+template <size_t N>
+static constexpr std::span<const unsigned char, N> cspan(const unsigned char* p) noexcept {
+    return std::span<const unsigned char, N>(p, N);
+}
+static std::span<const unsigned char> cspan(const unsigned char* p, size_t n) noexcept {
+    return {p, n};
+}
 
 extern "C" {
 
@@ -1272,9 +1267,9 @@ LIBSESSION_C_API bool session_encrypt_for_recipient_deterministic(
         size_t* ciphertext_len) {
     try {
         auto ciphertext = session::encrypt_for_recipient_deterministic(
-                std::span<const unsigned char>{ed25519_privkey, 64},
-                std::span<const unsigned char>{recipient_pubkey, 32},
-                std::span<const unsigned char>{plaintext_in, plaintext_len});
+                cspan<64>(ed25519_privkey),
+                cspan<32>(recipient_pubkey),
+                cspan(plaintext_in, plaintext_len));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1295,10 +1290,10 @@ LIBSESSION_C_API bool session_encrypt_for_blinded_recipient(
         size_t* ciphertext_len) {
     try {
         auto ciphertext = session::encrypt_for_blinded_recipient(
-                std::span<const unsigned char>{ed25519_privkey, 64},
-                std::span<const unsigned char>{community_pubkey, 32},
-                std::span<const unsigned char>{recipient_blinded_id, 33},
-                std::span<const unsigned char>{plaintext_in, plaintext_len});
+                cspan<64>(ed25519_privkey),
+                cspan<32>(community_pubkey),
+                cspan<33>(recipient_blinded_id),
+                cspan(plaintext_in, plaintext_len));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1326,9 +1321,9 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
     try {
         std::vector<unsigned char> result_cpp = encrypt_for_group(
                 Ed25519PrivKeySpan::from(user_ed25519_privkey, user_ed25519_privkey_len),
-                {group_ed25519_pubkey, group_ed25519_pubkey_len},
-                {group_enc_key, group_enc_key_len},
-                {plaintext, plaintext_len},
+                cspan<32>(group_ed25519_pubkey),
+                cspan(group_enc_key, group_enc_key_len),
+                cspan(plaintext, plaintext_len),
                 compress,
                 padding);
         result = {
@@ -1354,8 +1349,8 @@ LIBSESSION_C_API bool session_decrypt_incoming(
         size_t* plaintext_len) {
     try {
         auto result = session::decrypt_incoming_session_id(
-                std::span<const unsigned char>{ed25519_privkey, 64},
-                std::span<const unsigned char>{ciphertext_in, ciphertext_len});
+                cspan<64>(ed25519_privkey),
+                cspan(ciphertext_in, ciphertext_len));
         auto [plaintext, session_id] = result;
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
@@ -1378,9 +1373,9 @@ LIBSESSION_C_API bool session_decrypt_incoming_legacy_group(
         size_t* plaintext_len) {
     try {
         auto result = session::decrypt_incoming_session_id(
-                std::span<const unsigned char>{x25519_pubkey, 32},
-                std::span<const unsigned char>{x25519_seckey, 32},
-                std::span<const unsigned char>{ciphertext_in, ciphertext_len});
+                cspan<32>(x25519_pubkey),
+                cspan<32>(x25519_seckey),
+                cspan(ciphertext_in, ciphertext_len));
         auto [plaintext, session_id] = result;
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
@@ -1405,11 +1400,11 @@ LIBSESSION_C_API bool session_decrypt_for_blinded_recipient(
         size_t* plaintext_len) {
     try {
         auto result = session::decrypt_from_blinded_recipient(
-                std::span<const unsigned char>{ed25519_privkey, 64},
-                std::span<const unsigned char>{community_pubkey, 32},
-                std::span<const unsigned char>{sender_id, 33},
-                std::span<const unsigned char>{recipient_id, 33},
-                std::span<const unsigned char>{ciphertext_in, ciphertext_len});
+                cspan<64>(ed25519_privkey),
+                cspan<32>(community_pubkey),
+                cspan<33>(sender_id),
+                cspan<33>(recipient_id),
+                cspan(ciphertext_in, ciphertext_len));
         auto [plaintext, session_id] = result;
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
@@ -1440,8 +1435,8 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         try {
             result_cpp = decrypt_group_message(
                     {&key, 1},
-                    {group_ed25519_pubkey, group_ed25519_pubkey_len},
-                    {ciphertext, ciphertext_len});
+                    cspan<32>(group_ed25519_pubkey),
+                    cspan(ciphertext, ciphertext_len));
             result = {
                     .success = true,
                     .index = index,
@@ -1469,13 +1464,13 @@ LIBSESSION_C_API bool session_decrypt_ons_response(
         const unsigned char* nonce_in,
         char* session_id_out) {
     try {
-        std::optional<std::span<const unsigned char>> nonce;
+        std::optional<std::span<const unsigned char, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>>
+                nonce;
         if (nonce_in)
-            nonce = std::span<const unsigned char>{
-                    nonce_in, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES};
+            nonce = cspan<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>(nonce_in);
 
         auto session_id = session::decrypt_ons_response(
-                name_in, std::span<const unsigned char>{ciphertext_in, ciphertext_len}, nonce);
+                name_in, cspan(ciphertext_in, ciphertext_len), nonce);
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
         return true;
@@ -1492,8 +1487,8 @@ LIBSESSION_C_API bool session_decrypt_push_notification(
         size_t* plaintext_len) {
     try {
         auto plaintext = session::decrypt_push_notification(
-                std::span<const unsigned char>{payload_in, payload_len},
-                std::span<const unsigned char>{enc_key_in, 32});
+                cspan(payload_in, payload_len),
+                cspan<32>(enc_key_in));
 
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();
@@ -1507,13 +1502,13 @@ LIBSESSION_C_API bool session_decrypt_push_notification(
 LIBSESSION_C_API bool session_encrypt_xchacha20(
         const unsigned char* plaintext_in,
         size_t plaintext_len,
-        const unsigned char* enc_key_in,
+        const unsigned char* key_in,
         unsigned char** ciphertext_out,
         size_t* ciphertext_len) {
     try {
         auto ciphertext = session::encrypt_xchacha20(
-                std::span<const unsigned char>{plaintext_in, plaintext_len},
-                std::span<const unsigned char>{enc_key_in, 32});
+                cspan(plaintext_in, plaintext_len),
+                cspan<32>(key_in));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1527,13 +1522,13 @@ LIBSESSION_C_API bool session_encrypt_xchacha20(
 LIBSESSION_C_API bool session_decrypt_xchacha20(
         const unsigned char* ciphertext_in,
         size_t ciphertext_len,
-        const unsigned char* enc_key_in,
+        const unsigned char* key_in,
         unsigned char** plaintext_out,
         size_t* plaintext_len) {
     try {
         auto plaintext = session::decrypt_xchacha20(
-                std::span<const unsigned char>{ciphertext_in, ciphertext_len},
-                std::span<const unsigned char>{enc_key_in, 32});
+                cspan(ciphertext_in, ciphertext_len),
+                cspan<32>(key_in));
 
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();

@@ -326,7 +326,7 @@ struct DecodeEnvelopeKey {
     // payload is encrypted (e.g. groups v2) and that the contents are unencrypted. If this key is
     // not set the it's assumed the envelope is not encrypted but the contents are encrypted (e.g.:
     // 1o1 or legacy group).
-    std::optional<std::span<const uint8_t>> group_ed25519_pubkey;
+    std::optional<std::span<const uint8_t, 32 /*crypto_sign_ed25519_PUBLICKEYBYTES*/>> group_ed25519_pubkey;
 
     // List of libsodium-style secret key to decrypt the envelope from. Can also be passed as a 32
     // byte secret key. The public key component is not used.

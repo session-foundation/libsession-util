@@ -895,8 +895,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         auto [decrypted_cipher, sender_id] = session::decrypt_from_blinded_recipient(
                 keys.ed_sk1,
                 community_pk,
-                {session_blind15_pk0.data, sizeof(session_blind15_pk0.data)},
-                {session_blind15_pk1.data, sizeof(session_blind15_pk1.data)},
+                session_blind15_pk0.data,
+                session_blind15_pk1.data,
                 {encoded.ciphertext.data, encoded.ciphertext.size});
 
         session_protocol_decoded_community_message decoded = session_protocol_decode_for_community(

@@ -109,8 +109,8 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
 /// - Throw if encryption fails or (which typically means invalid keys provided)
 std::vector<unsigned char> encrypt_for_blinded_recipient(
         const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char> server_pk,
-        std::span<const unsigned char> recipient_blinded_id,
+        std::span<const unsigned char, 32> server_pk,
+        std::span<const unsigned char, 33> recipient_blinded_id,
         std::span<const unsigned char> message);
 
 /// API: crypto/encrypt_for_recipient_v2
@@ -303,7 +303,7 @@ static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 /// - `ciphertext` -- the encrypted, etc. value to send to the swarm
 std::vector<unsigned char> encrypt_for_group(
         const Ed25519PrivKeySpan& user_ed25519_privkey,
-        std::span<const unsigned char> group_ed25519_pubkey,
+        std::span<const unsigned char, 32> group_ed25519_pubkey,
         std::span<const unsigned char> group_enc_key,
         std::span<const unsigned char> plaintext,
         bool compress,
@@ -375,8 +375,8 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
 ///   sender's ED25519 pubkey, *if* the message decrypted and validated successfully.  Throws on
 ///   error.
 std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
-        std::span<const unsigned char> x25519_pubkey,
-        std::span<const unsigned char> x25519_seckey,
+        std::span<const unsigned char, 32> x25519_pubkey,
+        std::span<const unsigned char, 32> x25519_seckey,
         std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_incoming
@@ -413,8 +413,8 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 /// encrypted and the
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
 std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
-        std::span<const unsigned char> x25519_pubkey,
-        std::span<const unsigned char> x25519_seckey,
+        std::span<const unsigned char, 32> x25519_pubkey,
+        std::span<const unsigned char, 32> x25519_seckey,
         std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_from_blinded_recipient
@@ -440,9 +440,9 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
 ///   session ID (in hex), *if* the message decrypted and validated successfully.  Throws on error.
 std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipient(
         const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char> server_pk,
-        std::span<const unsigned char> sender_id,
-        std::span<const unsigned char> recipient_id,
+        std::span<const unsigned char, 32> server_pk,
+        std::span<const unsigned char, 33> sender_id,
+        std::span<const unsigned char, 33> recipient_id,
         std::span<const unsigned char> ciphertext);
 
 struct DecryptGroupMessage {
@@ -479,7 +479,7 @@ struct DecryptGroupMessage {
 /// it throws.
 DecryptGroupMessage decrypt_group_message(
         std::span<std::span<const unsigned char>> decrypt_ed25519_privkey_list,
-        std::span<const unsigned char> group_ed25519_pubkey,
+        std::span<const unsigned char, 32> group_ed25519_pubkey,
         std::span<const unsigned char> ciphertext);
 
 /// API: crypto/decrypt_ons_response
@@ -497,7 +497,7 @@ DecryptGroupMessage decrypt_group_message(
 std::string decrypt_ons_response(
         std::string_view lowercase_name,
         std::span<const unsigned char> ciphertext,
-        std::optional<std::span<const unsigned char>> nonce);
+        std::optional<std::span<const unsigned char, 24>> nonce);
 
 /// API: crypto/decrypt_push_notification
 ///
@@ -513,7 +513,7 @@ std::string decrypt_ons_response(
 /// was
 ///   successful.  Throws on error/failure.
 std::vector<unsigned char> decrypt_push_notification(
-        std::span<const unsigned char> payload, std::span<const unsigned char> enc_key);
+        std::span<const unsigned char> payload, std::span<const unsigned char, 32> enc_key);
 
 /// API: crypto/encrypt_xchacha20
 ///
@@ -521,12 +521,12 @@ std::vector<unsigned char> decrypt_push_notification(
 ///
 /// Inputs:
 /// - `plaintext` -- the data to encrypt.
-/// - `enc_key` -- the key to use for encryption (32 bytes).
+/// - `key` -- the 32-byte symmetric key.
 ///
 /// Outputs:
 /// - `std::vector<unsigned char>` -- the resulting ciphertext.
 std::vector<unsigned char> encrypt_xchacha20(
-        std::span<const unsigned char> plaintext, std::span<const unsigned char> enc_key);
+        std::span<const unsigned char> plaintext, std::span<const unsigned char, 32> key);
 
 /// API: crypto/decrypt_xchacha20
 ///
@@ -534,11 +534,11 @@ std::vector<unsigned char> encrypt_xchacha20(
 ///
 /// Inputs:
 /// - `ciphertext` -- the data to decrypt.
-/// - `enc_key` -- the key to use for decryption (32 bytes).
+/// - `key` -- the 32-byte symmetric key.
 ///
 /// Outputs:
 /// - `std::vector<unsigned char>` -- the resulting plaintext.
 std::vector<unsigned char> decrypt_xchacha20(
-        std::span<const unsigned char> ciphertext, std::span<const unsigned char> enc_key);
+        std::span<const unsigned char> ciphertext, std::span<const unsigned char, 32> key);
 
 }  // namespace session

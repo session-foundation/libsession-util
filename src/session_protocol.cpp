@@ -386,20 +386,14 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
         const Ed25519PrivKeySpan* ed25519_privkey,
         DestinationType dest_type,
         std::span<const uint8_t> dest_pro_rotating_ed25519_privkey,
-        std::span<const uint8_t> dest_recipient_pubkey,
+        std::span<const unsigned char, 33 /*prefix + [x25519 or ed25519] pubkey*/> dest_recipient_pubkey,
         std::chrono::milliseconds dest_sent_timestamp_ms,
-        std::span<const uint8_t> dest_community_inbox_server_pubkey,
-        std::span<const uint8_t> dest_group_ed25519_pubkey,
+        std::span<const unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES>
+                dest_community_inbox_server_pubkey,
+        std::span<const unsigned char, 1 + crypto_sign_ed25519_PUBLICKEYBYTES>
+                dest_group_ed25519_pubkey,
         std::span<const uint8_t> dest_group_enc_key,
         UseMalloc use_malloc) {
-    // The following arguments are passed in from structs with fixed-sized arrays so we expect the
-    // sizes to be correct. It being wrong would be a development error
-    //
-    // The ed25519_privkey is passed into the lower level layer, session encrypt which has its own
-    // private key normalisation to 64 bytes for us.
-    assert(dest_recipient_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
-    assert(dest_community_inbox_server_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
-    assert(dest_group_ed25519_pubkey.size() == 1 + crypto_sign_ed25519_PUBLICKEYBYTES);
     assert(dest_group_enc_key.size() == 32 || dest_group_enc_key.size() == 64);
 
     bool is_group = dest_type == DestinationType::Group;
@@ -492,12 +486,9 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
 
             if (is_group) {
                 std::string bytes = envelope.SerializeAsString();
-                if (dest_group_ed25519_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES + 1)
-                    dest_group_ed25519_pubkey = dest_group_ed25519_pubkey.subspan(1);
-
                 std::vector<uint8_t> ciphertext = encrypt_for_group(
                         *ed25519_privkey,
-                        dest_group_ed25519_pubkey,
+                        dest_group_ed25519_pubkey.subspan<1>(),
                         dest_group_enc_key,
                         to_span(bytes),
                         /*compress*/ true,
@@ -601,7 +592,7 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 std::vector<uint8_t> ciphertext = encrypt_for_blinded_recipient(
                         *ed25519_privkey,
                         dest_community_inbox_server_pubkey,
-                        dest_recipient_pubkey,  // recipient blinded pubkey
+                        dest_recipient_pubkey,  // 33-byte blinded pubkey
                         content);
 
                 if (use_malloc == UseMalloc::Yes) {
@@ -1444,9 +1435,18 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
 
     // Setup decryption keys and decrypt
     DecodeEnvelopeKey keys_cpp = {};
-    if (keys->group_ed25519_pubkey.size) {
-        keys_cpp.group_ed25519_pubkey = std::span<const uint8_t>(
-                keys->group_ed25519_pubkey.data, keys->group_ed25519_pubkey.size);
+    if (keys->group_ed25519_pubkey.size == crypto_sign_ed25519_PUBLICKEYBYTES) {
+        keys_cpp.group_ed25519_pubkey = std::span<const uint8_t, crypto_sign_ed25519_PUBLICKEYBYTES>{
+                keys->group_ed25519_pubkey.data, crypto_sign_ed25519_PUBLICKEYBYTES};
+    } else if (keys->group_ed25519_pubkey.size) {
+        result.error_len_incl_null_terminator =
+                snprintf_clamped(
+                        error,
+                        error_len,
+                        "Invalid group_ed25519_pubkey: must be exactly 32 bytes, was: %zu",
+                        keys->group_ed25519_pubkey.size) +
+                1;
+        return result;
     }
 
     DecodedEnvelope result_cpp = {};
