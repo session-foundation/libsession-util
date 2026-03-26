@@ -1,7 +1,6 @@
 #pragma once
 
 #include <stddef.h>
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -17,7 +16,7 @@ extern "C" {
 /// C friendly buffer structure that is a pointer and length to a span of bytes.
 typedef struct span_u8 span_u8;
 struct span_u8 {
-    uint8_t* data;
+    unsigned char* data;
     size_t size;
 };
 
@@ -31,23 +30,23 @@ struct string8 {
 
 typedef struct bytes32 bytes32;
 struct bytes32 {
-    uint8_t data[32];
+    unsigned char data[32];
 };
 
 typedef struct bytes33 bytes33;
 struct bytes33 {
-    uint8_t data[33];
+    unsigned char data[33];
 };
 
 typedef struct bytes64 bytes64;
 struct bytes64 {
-    uint8_t data[64];
+    unsigned char data[64];
 };
 
 /// Basic bump allocating arena
 typedef struct arena_t arena_t;
 struct arena_t {
-    uint8_t* data;
+    unsigned char* data;
     size_t size;
     size_t max;
 };

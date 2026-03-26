@@ -134,7 +134,7 @@ bool json_require_fixed_bytes_from_hex(
         const nlohmann::json& j,
         std::string_view key,
         std::vector<std::string>& errors,
-        std::span<uint8_t> dest) {
+        std::span<unsigned char> dest) {
     auto hex = json_require<std::string_view>(j, key, errors);
     if (hex.starts_with("0X") || hex.starts_with("0x"))
         hex = hex.substr(2);
@@ -186,11 +186,11 @@ std::string AddProPaymentRequest::to_json() const {
 
 MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         std::uint8_t version,
-        std::span<const uint8_t> master_privkey,
-        std::span<const uint8_t> rotating_privkey,
+        std::span<const unsigned char> master_privkey,
+        std::span<const unsigned char> rotating_privkey,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::span<const unsigned char> payment_tx_payment_id,
+        std::span<const unsigned char> payment_tx_order_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         uc32 master_pubkey;
@@ -234,7 +234,7 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
                     crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
             rotating_privkey.subspan(
                     crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
-            static_cast<uint8_t>(payment_tx_provider),
+            static_cast<unsigned char>(payment_tx_provider),
             payment_tx_payment_id,
             payment_tx_order_id);
 
@@ -257,11 +257,11 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
 
 std::string AddProPaymentRequest::build_to_json(
         std::uint8_t version,
-        std::span<const uint8_t> master_privkey,
-        std::span<const uint8_t> rotating_privkey,
+        std::span<const unsigned char> master_privkey,
+        std::span<const unsigned char> rotating_privkey,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::span<const unsigned char> payment_tx_payment_id,
+        std::span<const unsigned char> payment_tx_order_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         uc32 master_pubkey;
@@ -361,8 +361,8 @@ std::string GenerateProProofRequest::to_json() const {
 
 MasterRotatingSignatures GenerateProProofRequest::build_sigs(
         std::uint8_t request_version,
-        std::span<const uint8_t> master_privkey,
-        std::span<const uint8_t> rotating_privkey,
+        std::span<const unsigned char> master_privkey,
+        std::span<const unsigned char> rotating_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
 
     cleared_uc64 master_from_seed;
@@ -417,8 +417,8 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
 
 std::string GenerateProProofRequest::build_to_json(
         std::uint8_t request_version,
-        std::span<const uint8_t> master_privkey,
-        std::span<const uint8_t> rotating_privkey,
+        std::span<const unsigned char> master_privkey,
+        std::span<const unsigned char> rotating_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
     // Rederive keys from 32 byte seed if given
     cleared_uc64 master_from_seed;
@@ -535,7 +535,7 @@ std::string GetProDetailsRequest::to_json() const {
 
 uc64 GetProDetailsRequest::build_sig(
         uint8_t version,
-        std::span<const uint8_t> master_privkey,
+        std::span<const unsigned char> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         uint32_t count) {
     cleared_uc64 master_from_seed;
@@ -573,7 +573,7 @@ uc64 GetProDetailsRequest::build_sig(
 
 std::string GetProDetailsRequest::build_to_json(
         uint8_t version,
-        std::span<const uint8_t> master_privkey,
+        std::span<const unsigned char> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         uint32_t count) {
     cleared_uc64 master_from_seed;
@@ -766,12 +766,12 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
 
 uc64 SetPaymentRefundRequestedRequest::build_sig(
         uint8_t version,
-        std::span<const uint8_t> master_privkey,
+        std::span<const unsigned char> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::span<const unsigned char> payment_tx_payment_id,
+        std::span<const unsigned char> payment_tx_order_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         uc32 master_pubkey;
@@ -795,7 +795,7 @@ uc64 SetPaymentRefundRequestedRequest::build_sig(
                     crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
             unix_ts_ms,
             refund_requested_unix_ts_ms,
-            static_cast<uint8_t>(payment_tx_provider),
+            static_cast<unsigned char>(payment_tx_provider),
             payment_tx_payment_id,
             payment_tx_order_id);
 
@@ -812,12 +812,12 @@ uc64 SetPaymentRefundRequestedRequest::build_sig(
 
 std::string SetPaymentRefundRequestedRequest::build_to_json(
         uint8_t version,
-        std::span<const uint8_t> master_privkey,
+        std::span<const unsigned char> master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::span<const unsigned char> payment_tx_payment_id,
+        std::span<const unsigned char> payment_tx_order_id) {
     uc64 sig = SetPaymentRefundRequestedRequest::build_sig(
             version,
             master_privkey,
@@ -910,22 +910,22 @@ static string8 C_PARSE_ERROR_INVALID_ARGS = STRING8_LIT("One or more C arguments
 LIBSESSION_C_API session_pro_backend_master_rotating_signatures
 session_pro_backend_add_pro_payment_request_build_sigs(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) {
 
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
-    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::span<const uint8_t> payment_tx_payment_id_span(
+    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
+    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
+    std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
@@ -954,23 +954,23 @@ session_pro_backend_add_pro_payment_request_build_sigs(
 LIBSESSION_C_API session_pro_backend_to_json
 session_pro_backend_add_pro_payment_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) {
     session_pro_backend_to_json result = {};
 
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
-    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::span<const uint8_t> payment_tx_payment_id_span(
+    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
+    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
+    std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     try {
         std::string json = AddProPaymentRequest::build_to_json(
@@ -998,15 +998,15 @@ session_pro_backend_add_pro_payment_request_build_to_json(
 LIBSESSION_C_API session_pro_backend_master_rotating_signatures
 session_pro_backend_generate_pro_proof_request_build_sigs(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) {
 
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
-    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
+    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
+    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
     std::chrono::milliseconds ts{unix_ts_ms};
 
     session_pro_backend_master_rotating_signatures result = {};
@@ -1034,14 +1034,14 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
 LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) {
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
-    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
+    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
+    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
     std::chrono::milliseconds ts{unix_ts_ms};
 
     session_pro_backend_to_json result = {};
@@ -1068,12 +1068,12 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
 LIBSESSION_C_API session_pro_backend_signature
 session_pro_backend_get_pro_details_request_build_sig(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint32_t count) {
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
 
     session_pro_backend_signature result = {};
@@ -1096,12 +1096,12 @@ session_pro_backend_get_pro_details_request_build_sig(
 LIBSESSION_C_API session_pro_backend_to_json
 session_pro_backend_get_pro_details_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint32_t count) {
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
 
     session_pro_backend_to_json result = {};
@@ -1274,7 +1274,7 @@ session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
+            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;
@@ -1339,7 +1339,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
+            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;
@@ -1400,7 +1400,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
+            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;
@@ -1495,23 +1495,23 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
 LIBSESSION_C_API
 session_pro_backend_signature session_pro_backend_set_payment_refund_requested_request_build_sigs(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint64_t refund_requested_unix_ts_ms,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) {
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
     std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
             std::chrono::milliseconds(refund_requested_unix_ts_ms)};
-    std::span<const uint8_t> payment_tx_payment_id_span(
+    std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_signature result = {};
     try {
@@ -1540,24 +1540,24 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
 LIBSESSION_C_API session_pro_backend_to_json
 session_pro_backend_set_payment_refund_requested_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint64_t refund_requested_unix_ts_ms,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) {
 
     // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
+    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
     std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
             std::chrono::milliseconds(refund_requested_unix_ts_ms)};
-    std::span<const uint8_t> payment_tx_payment_id_span(
+    std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_to_json result = {};
     try {
@@ -1643,7 +1643,7 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
             arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
 
         if (arena.max)
-            arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
+            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
             result.header.status = 1;

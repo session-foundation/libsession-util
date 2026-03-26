@@ -1200,7 +1200,7 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     bool decrypt_success = false;
     if (auto pending = pending_key(); pending) {
         try {
-            std::span<std::span<const uint8_t>> key_list = {&(*pending), 1};
+            std::span<std::span<const unsigned char>> key_list = {&(*pending), 1};
             decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
             decrypt_success = true;
         } catch (const std::exception&) {
@@ -1210,8 +1210,8 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     if (!decrypt_success) {
         for (auto& k : keys_) {
             try {
-                std::span<const uint8_t> key = {k.key.data(), k.key.size()};
-                std::span<std::span<const uint8_t>> key_list = {&key, 1};
+                std::span<const unsigned char> key = {k.key.data(), k.key.size()};
+                std::span<std::span<const unsigned char>> key_list = {&key, 1};
                 decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
                 decrypt_success = true;
                 break;
@@ -1352,9 +1352,9 @@ LIBSESSION_C_API size_t groups_keys_get_keys(
         auto keys = unbox(conf).group_keys();
         size_t clamped_offset = std::min(keys.size(), offset);
         for (size_t index = clamped_offset; index < keys.size() && result < dest_size; index++) {
-            const std::span<const uint8_t>& src_key = keys[index];
+            const auto& src_key = keys[index];
             span_u8* dest_key = dest + result++;
-            dest_key->data = const_cast<uint8_t*>(src_key.data());
+            dest_key->data = const_cast<unsigned char*>(src_key.data());
             dest_key->size = src_key.size();
         }
     }
@@ -1364,8 +1364,8 @@ LIBSESSION_C_API size_t groups_keys_get_keys(
 LIBSESSION_C_API const span_u8 groups_keys_group_enc_key(const config_group_keys* conf) {
     span_u8 result = {};
     try {
-        std::span<const uint8_t> key = unbox(conf).group_enc_key();
-        result.data = const_cast<uint8_t*>(key.data());
+        auto key = unbox(conf).group_enc_key();
+        result.data = const_cast<unsigned char*>(key.data());
         result.size = key.size();
         assert(result.size == 32);
     } catch (const std::exception& e) {

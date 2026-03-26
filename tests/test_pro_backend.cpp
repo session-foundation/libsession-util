@@ -87,12 +87,12 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
-        std::array<uint8_t, 8> fake_google_payment_token;
+        std::array<unsigned char, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
         std::string fake_google_payment_token_hex =
                 "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-        std::array<uint8_t, 8> fake_google_order_id;
+        std::array<unsigned char, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
         std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
@@ -119,9 +119,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             rotating_privkey.data,
                             sizeof(rotating_privkey.data),
                             payment_tx.provider,
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                            reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
                             payment_tx.payment_id_count,
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            reinterpret_cast<const unsigned char*>(payment_tx.order_id),
                             payment_tx.order_id_count);
             INFO(result.error);
             REQUIRE(result.success);
@@ -133,11 +133,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     master_privkey.data,
                     rotating_privkey.data,
                     payment_tx.provider,
-                    std::span<const uint8_t>(
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                    std::span<const unsigned char>(
+                            reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
                             payment_tx.payment_id_count),
-                    std::span<const uint8_t>(
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                    std::span<const unsigned char>(
+                            reinterpret_cast<const unsigned char*>(payment_tx.order_id),
                             payment_tx.order_id_count));
 
             REQUIRE(std::memcmp(
@@ -157,9 +157,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     rotating_privkey.data,
                     sizeof(rotating_privkey.data),
                     payment_tx.provider,
-                    reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                    reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
                     payment_tx.payment_id_count,
-                    reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                    reinterpret_cast<const unsigned char*>(payment_tx.order_id),
                     payment_tx.order_id_count);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
@@ -222,9 +222,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             rotating_privkey.data,
                             sizeof(rotating_privkey.data),
                             payment_tx.provider,
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                            reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
                             payment_tx.payment_id_count,
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            reinterpret_cast<const unsigned char*>(payment_tx.order_id),
                             payment_tx.order_id_count);
 
             request.master_sig = sigs.master_sig;
@@ -456,7 +456,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
         }
 
         SECTION("session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse") {
-            std::array<uint8_t, 32> fake_gen_index_hash;
+            std::array<unsigned char, 32> fake_gen_index_hash;
             randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
 
             nlohmann::json j;
@@ -561,7 +561,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             j["result"]["ticket"] = 123;
             j["result"]["items"] = nlohmann::json::array();
 
-            std::array<uint8_t, 32> fake_gen_index_hash;
+            std::array<unsigned char, 32> fake_gen_index_hash;
             randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
 
             auto obj = nlohmann::json::object();
@@ -788,9 +788,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             request.unix_ts_ms,
                             request.refund_requested_unix_ts_ms,
                             payment_tx.provider,
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                            reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
                             payment_tx.payment_id_count,
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                            reinterpret_cast<const unsigned char*>(payment_tx.order_id),
                             payment_tx.order_id_count);
             request.master_sig = sig.sig;
             REQUIRE(sig.success);
@@ -949,12 +949,12 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     // Add pro payment
     session_protocol_pro_proof first_pro_proof = {};
     {
-        std::array<uint8_t, 8> fake_google_payment_token;
+        std::array<unsigned char, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
         std::string fake_google_payment_token_hex =
                 "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-        std::array<uint8_t, 8> fake_google_order_id;
+        std::array<unsigned char, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
         std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
@@ -978,9 +978,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
                         payment_tx.provider,
-                        reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
+                        reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
                         payment_tx.payment_id_count,
-                        reinterpret_cast<const uint8_t*>(payment_tx.order_id),
+                        reinterpret_cast<const unsigned char*>(payment_tx.order_id),
                         payment_tx.order_id_count);
 
         session_pro_backend_add_pro_payment_request request = {};
@@ -1192,12 +1192,12 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     // Add _another_ payment, same details
     session_pro_backend_add_pro_payment_user_transaction another_payment_tx = {};
     {
-        std::array<uint8_t, 8> fake_google_payment_token;
+        std::array<unsigned char, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
         std::string fake_google_payment_token_hex =
                 "DEV." + oxenc::to_hex(fake_google_payment_token);
 
-        std::array<uint8_t, 8> fake_google_order_id;
+        std::array<unsigned char, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
         std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
 
@@ -1222,9 +1222,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
                         another_payment_tx.provider,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
+                        reinterpret_cast<const unsigned char*>(another_payment_tx.payment_id),
                         another_payment_tx.payment_id_count,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.order_id),
+                        reinterpret_cast<const unsigned char*>(another_payment_tx.order_id),
                         another_payment_tx.order_id_count);
 
         session_pro_backend_add_pro_payment_request request = {};
@@ -1314,9 +1314,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         /*unix_ts_ms*/ now_unix_ts_ms,
                         /*refund_requested_unix_ts_ms*/ now_unix_ts_ms,
                         another_payment_tx.provider,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
+                        reinterpret_cast<const unsigned char*>(another_payment_tx.payment_id),
                         another_payment_tx.payment_id_count,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.order_id),
+                        reinterpret_cast<const unsigned char*>(another_payment_tx.order_id),
                         another_payment_tx.order_id_count);
 
         scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};

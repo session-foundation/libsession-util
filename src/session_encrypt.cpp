@@ -1428,7 +1428,7 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         size_t error_len) {
     session_decrypt_group_message_result result = {};
     for (size_t index = 0; index < decrypt_ed25519_privkey_len; index++) {
-        std::span<const uint8_t> key = {
+        std::span<const unsigned char> key = {
                 decrypt_ed25519_privkey_list[index].data, decrypt_ed25519_privkey_list[index].size};
 
         DecryptGroupMessage result_cpp = {};

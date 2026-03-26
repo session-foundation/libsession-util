@@ -114,7 +114,7 @@ struct session_pro_backend_response_header {
     /// Array of error messages (NULL if no errors), with errors_count elements
     string8* errors;
     size_t errors_count;
-    uint8_t* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
+    unsigned char* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
 };
 
 typedef struct session_pro_backend_to_json session_pro_backend_to_json;
@@ -312,14 +312,14 @@ LIBSESSION_EXPORT
 session_pro_backend_master_rotating_signatures
 session_pro_backend_add_pro_payment_request_build_sigs(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) NON_NULL_ARG(2, 4, 7, 9);
 
 /// API: session_pro_backend/add_pro_payment_request_build_to_json
@@ -332,14 +332,14 @@ session_pro_backend_add_pro_payment_request_build_sigs(
 LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_add_pro_payment_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) NON_NULL_ARG(2, 4, 7, 9);
 
 /// API: session_pro_backend/generate_pro_proof_request_build_sigs
@@ -366,9 +366,9 @@ LIBSESSION_EXPORT
 session_pro_backend_master_rotating_signatures
 session_pro_backend_generate_pro_proof_request_build_sigs(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) NON_NULL_ARG(2, 4);
 
@@ -382,9 +382,9 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
 LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
+        const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) NON_NULL_ARG(2, 4);
 
@@ -408,7 +408,7 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
 LIBSESSION_EXPORT
 session_pro_backend_signature session_pro_backend_get_pro_details_request_build_sig(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint32_t count) NON_NULL_ARG(2);
@@ -423,7 +423,7 @@ session_pro_backend_signature session_pro_backend_get_pro_details_request_build_
 LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_get_pro_details_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint32_t count) NON_NULL_ARG(2);
@@ -533,14 +533,14 @@ session_pro_backend_get_pro_details_response session_pro_backend_get_pro_details
 LIBSESSION_EXPORT
 session_pro_backend_signature session_pro_backend_set_payment_refund_requested_request_build_sigs(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint64_t refund_requested_unix_ts_ms,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) NON_NULL_ARG(2, 7, 9);
 
 /// API: session_pro_backend/set_payment_refund_requested_request_build_to_json
@@ -553,14 +553,14 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
 LIBSESSION_EXPORT
 session_pro_backend_to_json session_pro_backend_set_payment_refund_requested_request_build_to_json(
         uint8_t request_version,
-        const uint8_t* master_privkey,
+        const unsigned char* master_privkey,
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint64_t refund_requested_unix_ts_ms,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        const uint8_t* payment_tx_payment_id,
+        const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
+        const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) NON_NULL_ARG(2, 7, 9);
 
 /// API: session_pro_backend/set_payment_refund_requested_request_to_json

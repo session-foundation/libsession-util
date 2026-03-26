@@ -16,7 +16,7 @@ using namespace session;
 struct SerialisedProtobufContentWithProForTesting {
     ProProof proof;
     std::string plaintext;
-    std::vector<uint8_t> plaintext_padded;
+    std::vector<unsigned char> plaintext_padded;
     uc64 sig_over_plaintext_with_user_pro_key;
     uc64 sig_over_plaintext_padded_with_user_pro_key;
     uc32 pro_proof_hash;
@@ -83,14 +83,14 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
     crypto_sign_ed25519_detached(
             result.sig_over_plaintext_with_user_pro_key.data(),
             nullptr,
-            reinterpret_cast<uint8_t*>(result.plaintext.data()),
+            reinterpret_cast<const unsigned char*>(result.plaintext.data()),
             result.plaintext.size(),
             user_rotating_privkey.data());
 
     crypto_sign_ed25519_detached(
             result.sig_over_plaintext_padded_with_user_pro_key.data(),
             nullptr,
-            reinterpret_cast<uint8_t*>(result.plaintext_padded.data()),
+            result.plaintext_padded.data(),
             result.plaintext_padded.size(),
             user_rotating_privkey.data());
 

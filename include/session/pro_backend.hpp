@@ -177,11 +177,11 @@ struct AddProPaymentRequest {
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
     static MasterRotatingSignatures build_sigs(
             std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
+            std::span<const unsigned char> master_privkey,
+            std::span<const unsigned char> rotating_privkey,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
+            std::span<const unsigned char> payment_tx_payment_id,
+            std::span<const unsigned char> payment_tx_order_id);
 
     /// API: pro/AddProPaymentRequest::build_to_json
     ///
@@ -203,11 +203,11 @@ struct AddProPaymentRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
+            std::span<const unsigned char> master_privkey,
+            std::span<const unsigned char> rotating_privkey,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
+            std::span<const unsigned char> payment_tx_payment_id,
+            std::span<const unsigned char> payment_tx_order_id);
 };
 
 /// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
@@ -270,8 +270,8 @@ struct GenerateProProofRequest {
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
     static MasterRotatingSignatures build_sigs(
             std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
+            std::span<const unsigned char> master_privkey,
+            std::span<const unsigned char> rotating_privkey,
             sys_ms unix_ts);
 
     /// API: pro/GenerateProProofRequest::build_to_json
@@ -289,8 +289,8 @@ struct GenerateProProofRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
+            std::span<const unsigned char> master_privkey,
+            std::span<const unsigned char> rotating_privkey,
             sys_ms unix_ts);
 
     /// API: pro/GenerateProProofRequest::to_json
@@ -384,7 +384,7 @@ struct GetProDetailsRequest {
     /// - `uc64` - the 64-byte signature
     static uc64 build_sig(
             uint8_t version,
-            std::span<const uint8_t> master_privkey,
+            std::span<const unsigned char> master_privkey,
             sys_ms unix_ts,
             uint32_t count);
 
@@ -403,7 +403,7 @@ struct GetProDetailsRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t version,
-            std::span<const uint8_t> master_privkey,
+            std::span<const unsigned char> master_privkey,
             sys_ms unix_ts,
             uint32_t count);
 
@@ -607,12 +607,12 @@ struct SetPaymentRefundRequestedRequest {
     /// - `uc64` - the 64-byte signature
     static uc64 build_sig(
             uint8_t version,
-            std::span<const uint8_t> master_privkey,
+            std::span<const unsigned char> master_privkey,
             sys_ms unix_ts,
             sys_ms refund_requested_unix_ts,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
+            std::span<const unsigned char> payment_tx_payment_id,
+            std::span<const unsigned char> payment_tx_order_id);
 
     /// API: pro/SetPaymentRefundRequested::build_to_json
     ///
@@ -637,12 +637,12 @@ struct SetPaymentRefundRequestedRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t version,
-            std::span<const uint8_t> master_privkey,
+            std::span<const unsigned char> master_privkey,
             sys_ms unix_ts,
             sys_ms refund_requested_unix_ts,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
+            std::span<const unsigned char> payment_tx_payment_id,
+            std::span<const unsigned char> payment_tx_order_id);
 
     /// API: pro/SetPaymentRefundRequested::to_json
     ///

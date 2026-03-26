@@ -604,7 +604,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     }
 
     // Ensure the pro config is being stored correctly
-    std::array<uint8_t, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
+    std::array<unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
     session::cleared_uc64 rotating_sk, signing_sk;
     {
         crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());

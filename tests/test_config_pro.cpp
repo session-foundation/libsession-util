@@ -10,7 +10,7 @@ using namespace oxenc::literals;
 
 TEST_CASE("Pro", "[config][pro]") {
     // Setup keys
-    std::array<uint8_t, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
+    std::array<unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
     session::cleared_uc64 rotating_sk, signing_sk;
     {
         crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
@@ -44,7 +44,7 @@ TEST_CASE("Pro", "[config][pro]") {
     {
         // Generate the hashes
         static_assert(crypto_sign_ed25519_BYTES == pro_cpp.proof.sig.max_size());
-        std::array<uint8_t, 32> hash_to_sign_cpp = pro_cpp.proof.hash();
+        std::array<unsigned char, 32> hash_to_sign_cpp = pro_cpp.proof.hash();
         bytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
 
         static_assert(hash_to_sign_cpp.size() == sizeof(hash_to_sign));
@@ -82,11 +82,11 @@ TEST_CASE("Pro", "[config][pro]") {
     // Verify it can verify messages signed with the rotating public key
     {
         std::string_view body = "hello world";
-        std::array<uint8_t, crypto_sign_ed25519_BYTES> sig = {};
+        std::array<unsigned char, crypto_sign_ed25519_BYTES> sig = {};
         int sign_result = crypto_sign_ed25519_detached(
                 sig.data(),
                 nullptr,
-                reinterpret_cast<const uint8_t*>(body.data()),
+                reinterpret_cast<const unsigned char*>(body.data()),
                 body.size(),
                 rotating_sk.data());
         CHECK(sign_result == 0);
@@ -95,7 +95,7 @@ TEST_CASE("Pro", "[config][pro]") {
                 &pro.proof,
                 sig.data(),
                 sig.size(),
-                reinterpret_cast<const uint8_t*>(body.data()),
+                reinterpret_cast<const unsigned char*>(body.data()),
                 body.size()));
     }
 
@@ -128,7 +128,7 @@ TEST_CASE("Pro", "[config][pro]") {
 
     // Try loading a proof with a bad signature in it from dict
     {
-        std::array<uint8_t, 64> broken_sig = pro_cpp.proof.sig;
+        std::array<unsigned char, 64> broken_sig = pro_cpp.proof.sig;
         broken_sig[0] = ~broken_sig[0];  // Break the sig
         const session::ProProof& proof = pro_cpp.proof;
 

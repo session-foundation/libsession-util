@@ -8,7 +8,7 @@ namespace session {
 span_u8 span_u8_alloc_or_throw(size_t size) {
     span_u8 result = {};
     result.size = size;
-    result.data = static_cast<uint8_t*>(malloc(size));
+    result.data = static_cast<unsigned char*>(malloc(size));
     if (!result.data)
         throw std::runtime_error(
                 fmt::format("Failed to allocate {} bytes for span, out of memory", size));

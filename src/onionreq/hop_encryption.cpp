@@ -27,9 +27,9 @@ namespace session::onionreq {
 namespace {
 
     // Derive shared secret from our (ephemeral) `seckey` and the other party's `pubkey`
-    std::array<uint8_t, crypto_scalarmult_BYTES> calculate_shared_secret(
+    std::array<unsigned char, crypto_scalarmult_BYTES> calculate_shared_secret(
             const network::x25519_seckey& seckey, const network::x25519_pubkey& pubkey) {
-        std::array<uint8_t, crypto_scalarmult_BYTES> secret;
+        std::array<unsigned char, crypto_scalarmult_BYTES> secret;
         if (crypto_scalarmult(secret.data(), seckey.data(), pubkey.data()) != 0)
             throw std::runtime_error("Shared key derivation failed (crypto_scalarmult)");
         return secret;
@@ -37,7 +37,7 @@ namespace {
 
     constexpr std::string_view salt{"LOKI"};
 
-    std::array<uint8_t, crypto_scalarmult_BYTES> derive_symmetric_key(
+    std::array<unsigned char, crypto_scalarmult_BYTES> derive_symmetric_key(
             const network::x25519_seckey& seckey, const network::x25519_pubkey& pubkey) {
         auto key = calculate_shared_secret(seckey, pubkey);
 
@@ -168,7 +168,7 @@ std::vector<unsigned char> HopEncryption::decrypt_aesgcm(
 
     gcm_aes256_decrypt(&ctx, ciphertext.size(), plaintext.data(), ciphertext.data());
 
-    std::array<uint8_t, GCM_DIGEST_SIZE> digest_out;
+    std::array<unsigned char, GCM_DIGEST_SIZE> digest_out;
     gcm_aes256_digest(&ctx, digest_out.size(), digest_out.data());
 
     if (sodium_memcmp(digest_out.data(), digest_in.data(), GCM_DIGEST_SIZE) != 0)
