@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "component.hpp"
+#include "swarm_message.hpp"
 
 namespace session {
 class TestHelper;
@@ -146,10 +147,8 @@ class Devices final : detail::CoreComponent {
     void receive_link_request(std::span<const unsigned char> data);
 
     // Handlers for incoming swarm messages by namespace, called from Core::receive_messages.
-    void parse_device_messages(
-            std::span<const std::span<const unsigned char>> messages, bool is_final);
-    void parse_account_pubkeys(
-            std::span<const std::span<const unsigned char>> messages, bool is_final);
+    void parse_device_messages(std::span<const SwarmMessage> messages, bool is_final);
+    void parse_account_pubkeys(std::span<const SwarmMessage> messages, bool is_final);
 
     // Decrypts an incoming encrypted device group ("G") message, returning the bt-encoded group
     // payload plaintext (a bt-dict containing at minimum a "D" devices subdict and optionally a
@@ -244,7 +243,13 @@ class Devices final : detail::CoreComponent {
     // Returns the current active account keys after pruning obsolete ones: that is, the current key
     // plus all keys that were rotated away fewer than ACCOUNT_KEY_RETENTION ago.  Keys are returned
     // sorted from newest to oldest.  If there are no keys at all, generates an initial one.
-    std::vector<AccountKeys> active_account_keys();
+    // Returns account keys, ordered with the active (unrotated) key first then most-recently-rotated
+    // first.  Expired rotated keys are pruned before querying.  If key_indicator is given, only
+    // keys whose ML-KEM-768 pubkey begins with those two bytes are returned (using the indexed
+    // key_indicator virtual column); otherwise all retained keys are returned and a new key is
+    // auto-generated if none is currently active.
+    std::vector<AccountKeys> active_account_keys(
+            std::optional<std::span<const unsigned char, 2>> key_indicator = std::nullopt);
 
     // Returns the time when this device's unique device key is due to be rotated.  Returns nullopt
     // if this device is not currently part of the device group.

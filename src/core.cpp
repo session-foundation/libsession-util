@@ -18,6 +18,9 @@
 #include <session/core/schema/schema_registry.hpp>
 #include <session/network/session_network.hpp>
 #include <session/network/session_network_types.hpp>
+#include <session/pro_backend.hpp>
+#include <session/session_encrypt.hpp>
+#include <session/session_protocol.hpp>
 #include <session/util.hpp>
 #include <session/xed25519.hpp>
 #include <unordered_set>
@@ -30,6 +33,12 @@ namespace log = oxen::log;
 using namespace session::sqlite;
 using namespace oxen::log::literals;
 static auto cat = log::Cat("core");
+
+// Returns true if the given namespace requires a signed retrieve request.  A namespace does NOT
+// require auth if and only if it satisfies: ns_val < 0 && (-ns_val) % 20 == 1 (i.e. -1, -21, ...).
+static constexpr bool ns_requires_auth(int16_t ns_val) {
+    return !(ns_val < 0 && (-ns_val) % 20 == 1);
+}
 
 static cleared_b32 seed_from_words(
         std::span<const std::string_view> words, const mnemonics::Mnemonics& lang) {
@@ -102,29 +111,40 @@ void Core::_poll() {
         return;
 
     constexpr std::array namespaces = {
-            config::Namespace::Devices, config::Namespace::AccountPubkeys};
+            config::Namespace::Default,
+            config::Namespace::Devices,
+            config::Namespace::AccountPubkeys};
 
     auto now_ms = epoch_ms(clock_now_ms());
-    auto session_id = oxenc::to_hex(globals.session_id());
+    auto session_id_hex = oxenc::to_hex(globals.session_id());
     auto ed25519_hex = globals.pubkey_ed25519().hex();
 
-    // Devices (21) requires auth: sign "retrieve" || namespace || timestamp (base-10 strings).
-    constexpr auto devices_ns_val = static_cast<int16_t>(config::Namespace::Devices);
-    std::string to_sign = fmt::format("retrieve{}{}", devices_ns_val, now_ms);
-    std::array<unsigned char, 64> sig;
-    auto seed = globals.account_seed();
-    crypto_sign_ed25519_detached(
-            sig.data(),
-            nullptr,
-            reinterpret_cast<const unsigned char*>(to_sign.data()),
-            to_sign.size(),
-            seed.ed25519_secret().data());
-    auto sig_b64 = oxenc::to_base64(sig);
+    // Build per-namespace signatures for namespaces that require authentication; index-aligned with
+    // `namespaces`.  Empty string means no auth needed for that namespace.
+    std::vector<std::string> ns_sig(namespaces.size());
+    {
+        auto seed = globals.account_seed();
+        for (size_t i = 0; i < namespaces.size(); ++i) {
+            auto ns_val = static_cast<int16_t>(namespaces[i]);
+            if (!ns_requires_auth(ns_val))
+                continue;
+            std::string to_sign = "retrieve{}{}"_format(ns_val, now_ms);
+            std::array<unsigned char, 64> sig;
+            crypto_sign_ed25519_detached(
+                    sig.data(),
+                    nullptr,
+                    reinterpret_cast<const unsigned char*>(to_sign.data()),
+                    to_sign.size(),
+                    seed.ed25519_secret().data());
+            ns_sig[i] = oxenc::to_base64(sig);
+        }
+    }
 
     net->get_swarm(
             globals.pubkey_x25519(),
             false,
-            [this, net, namespaces, session_id, ed25519_hex, now_ms, sig_b64](auto, auto swarm) {
+            [this, net, namespaces, session_id_hex, ed25519_hex, now_ms,
+                    ns_sig = std::move(ns_sig)](auto, auto swarm) {
                 if (swarm.empty())
                     return;
 
@@ -134,18 +154,18 @@ void Core::_poll() {
                 nlohmann::json requests = nlohmann::json::array();
                 {
                     auto conn = db.conn();
-                    for (auto ns : namespaces) {
+                    for (size_t i = 0; i < namespaces.size(); ++i) {
+                        auto ns = namespaces[i];
                         auto ns_val = static_cast<int16_t>(ns);
                         nlohmann::json params = {
-                                {"pubkey", session_id},
+                                {"pubkey", session_id_hex},
                                 {"namespace", ns_val},
                         };
 
-                        // Devices (21) requires a signed retrieve; AccountPubkeys (-21) does not.
-                        if (ns == config::Namespace::Devices) {
+                        if (!ns_sig[i].empty()) {
                             params["pubkey_ed25519"] = ed25519_hex;
                             params["timestamp"] = now_ms;
-                            params["signature"] = sig_b64;
+                            params["signature"] = ns_sig[i];
                         }
 
                         auto last_hash = conn.prepared_maybe_get<std::string>(
@@ -188,7 +208,8 @@ void Core::_poll() {
                                 for (size_t i = 0; i < namespaces.size() && i < results.size();
                                      ++i) {
                                     const auto& res = results[i];
-                                    if (!res.contains("code") || res["code"].get<int>() != 200)
+                                    auto code_it = res.find("code");
+                                    if (code_it == res.end() || code_it->get<int>() != 200)
                                         continue;
                                     auto body_it = res.find("body");
                                     if (body_it == res.end())
@@ -200,25 +221,46 @@ void Core::_poll() {
                                     auto ns = namespaces[i];
                                     auto ns_val = static_cast<int16_t>(ns);
 
+                                    // Decode each message; keep the decoded bytes alive until after
+                                    // receive_messages() returns, since SwarmMessage::data spans
+                                    // into them.
                                     std::vector<std::vector<unsigned char>> messages_data;
+                                    std::vector<SwarmMessage> swarm_messages;
                                     std::string newest_hash;
 
                                     for (const auto& msg : *msgs_it) {
-                                        if (!msg.contains("data") || !msg["data"].is_string())
+                                        auto data_it = msg.find("data");
+                                        if (data_it == msg.end() || !data_it->is_string())
                                             continue;
-                                        auto b64_data = msg["data"].get<std::string_view>();
                                         auto& decoded = messages_data.emplace_back();
-                                        decoded.reserve(oxenc::from_base64_size(b64_data.size()));
+                                        auto b64 = data_it->get<std::string_view>();
+                                        decoded.reserve(oxenc::from_base64_size(b64.size()));
                                         oxenc::from_base64(
-                                                b64_data.begin(),
-                                                b64_data.end(),
+                                                b64.begin(), b64.end(),
                                                 std::back_inserter(decoded));
 
-                                        if (msg.contains("hash") && msg["hash"].is_string())
-                                            newest_hash = msg["hash"].get<std::string>();
+                                        SwarmMessage swarm_msg;
+                                        swarm_msg.data = {decoded.data(), decoded.size()};
+
+                                        if (auto h = msg.find("hash");
+                                                h != msg.end() && h->is_string()) {
+                                            swarm_msg.hash = h->get<std::string>();
+                                            newest_hash = swarm_msg.hash;
+                                        }
+
+                                        if (auto t = msg.find("timestamp");
+                                                t != msg.end() && t->is_number_integer())
+                                            swarm_msg.timestamp =
+                                                    from_epoch_ms(t->get<int64_t>());
+
+                                        if (auto e = msg.find("expiry");
+                                                e != msg.end() && e->is_number_integer())
+                                            swarm_msg.expiry = from_epoch_ms(e->get<int64_t>());
+
+                                        swarm_messages.push_back(std::move(swarm_msg));
                                     }
 
-                                    if (!messages_data.empty()) {
+                                    if (!swarm_messages.empty()) {
                                         if (!newest_hash.empty())
                                             conn.prepared_exec(
                                                     R"(
@@ -228,7 +270,7 @@ ON CONFLICT(namespace, sn_pubkey) DO UPDATE SET last_hash = excluded.last_hash
                                                     ns_val,
                                                     sn_pubkey,
                                                     newest_hash);
-                                        receive_messages(to_view_vector(messages_data), ns, true);
+                                        receive_messages(swarm_messages, ns, true);
                                     }
                                 }
                             } catch (const std::exception& e) {
@@ -465,12 +507,138 @@ ON CONFLICT(session_id) DO UPDATE SET
     return status;
 }
 
+void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
+    if (!callbacks.message_received && !callbacks.message_decrypt_failed)
+        return;
+
+    auto seed = globals.account_seed();
+    auto session_id = globals.session_id();
+    // Long-term X25519 pub/sec used for v2 key-indicator prefix decryption.
+    std::span<const unsigned char, 32> x25519_pub{session_id.data() + 1, 32};
+    auto x25519_sec = seed.x25519_key();
+
+    // Ed25519 secret key used for v1 envelope decryption.
+    // TODO: DecodeEnvelopeKey is an ugly API; refactor it (see project memory).
+    auto ed_sec = seed.ed25519_secret();
+    std::array<std::span<const uint8_t>, 1> ed_sec_arr{ed_sec};
+    DecodeEnvelopeKey v1_keys;
+    v1_keys.decrypt_keys = ed_sec_arr;
+
+    auto fire_received = [&](ReceivedMessage out) {
+        if (!callbacks.message_received)
+            return;
+        try {
+            callbacks.message_received(std::move(out));
+        } catch (const std::exception& e) {
+            log::warning(cat, "message_received callback threw: {}", e.what());
+        }
+    };
+
+    auto fire_fail = [&](const SwarmMessage& msg, MessageDecryptFailure reason) {
+        if (!callbacks.message_decrypt_failed)
+            return;
+        try {
+            callbacks.message_decrypt_failed(msg, reason);
+        } catch (const std::exception& e) {
+            log::warning(cat, "message_decrypt_failed callback threw: {}", e.what());
+        }
+    };
+
+    for (const auto& msg : messages) {
+        auto data = msg.data;
+        if (data.empty()) {
+            fire_fail(msg, MessageDecryptFailure::bad_format);
+            continue;
+        }
+
+        if (data[0] == 0x00) {
+            // Version 2 (PFS+PQ) or an unrecognised future version.
+            if (data.size() < 2 || data[1] != 0x02) {
+                fire_fail(msg, MessageDecryptFailure::unknown_version);
+                continue;
+            }
+
+            // Extract the 2-byte ML-KEM key indicator, then look up matching account keys.
+            std::array<unsigned char, 2> ki;
+            try {
+                ki = decrypt_incoming_v2_prefix(x25519_sec, x25519_pub, data);
+            } catch (const std::exception&) {
+                // Ciphertext is too short or otherwise structurally malformed.
+                fire_fail(msg, MessageDecryptFailure::bad_format);
+                continue;
+            }
+
+            auto keys = devices.active_account_keys(ki);
+            if (keys.empty()) {
+                fire_fail(msg, MessageDecryptFailure::no_pfs_key);
+                continue;
+            }
+
+            bool decrypted = false;
+            for (auto& key : keys) {
+                try {
+                    auto result = decrypt_incoming_v2(
+                            session_id,
+                            key.x25519_sec,
+                            key.x25519_pub,
+                            key.mlkem768_sec,
+                            data);
+                    ReceivedMessage out;
+                    out.hash = msg.hash;
+                    out.timestamp = msg.timestamp;
+                    out.expiry = msg.expiry;
+                    out.sender_session_id = result.sender_session_id;
+                    out.version = 2;
+                    out.content = std::move(result.content);
+                    out.pro_signature = result.pro_signature;
+                    fire_received(std::move(out));
+                    decrypted = true;
+                    break;
+                } catch (const DecryptV2Error&) {
+                    // This key didn't work; try the next candidate.
+                } catch (const std::exception& e) {
+                    // Unrecoverable structural error in the message itself.
+                    log::warning(cat, "v2 direct message format error: {}", e.what());
+                    fire_fail(msg, MessageDecryptFailure::bad_format);
+                    decrypted = true;  // Prevent the generic "no key worked" fallback.
+                    break;
+                }
+            }
+            if (!decrypted)
+                fire_fail(msg, MessageDecryptFailure::decrypt_failed);
+
+        } else {
+            // Version 1: protobuf WebSocketMessage → Envelope wire format.
+            try {
+                auto decoded = decode_envelope(v1_keys, data, pro_backend::PUBKEY);
+
+                ReceivedMessage out;
+                out.hash = msg.hash;
+                out.timestamp = msg.timestamp;
+                out.expiry = msg.expiry;
+                out.version = 1;
+                // Reconstruct the 33-byte (0x05-prefixed) session ID from the x25519 pubkey.
+                out.sender_session_id[0] = 0x05;
+                std::ranges::copy(decoded.sender_x25519_pubkey, out.sender_session_id.begin() + 1);
+                out.content = std::move(decoded.content_plaintext);
+                if (decoded.envelope.flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG)
+                    out.pro_signature = decoded.envelope.pro_sig;
+                fire_received(std::move(out));
+            } catch (const std::exception& e) {
+                log::warning(cat, "v1 direct message decryption error: {}", e.what());
+                fire_fail(msg, MessageDecryptFailure::decrypt_failed);
+            }
+        }
+    }
+}
+
 void Core::receive_messages(
-        std::span<const std::span<const unsigned char>> messages,
+        std::span<const SwarmMessage> messages,
         config::Namespace ns,
         bool is_final) {
     using config::Namespace;
     switch (ns) {
+        case Namespace::Default: _handle_direct_messages(messages); break;
         case Namespace::Devices: devices.parse_device_messages(messages, is_final); break;
         case Namespace::AccountPubkeys: devices.parse_account_pubkeys(messages, is_final); break;
         default:

@@ -634,7 +634,7 @@ std::vector<unsigned char> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const unsigned char> envelope_payload,
-        const uc32& pro_backend_pubkey) {
+        std::span<const uint8_t, 32> pro_backend_pubkey) {
     DecodedEnvelope result = {};
     SessionProtos::Envelope envelope = {};
     std::span<const unsigned char> envelope_plaintext = envelope_payload;
@@ -893,7 +893,7 @@ DecodedEnvelope decode_envelope(
 DecodedCommunityMessage decode_for_community(
         std::span<const unsigned char> content_or_envelope_payload,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-        const uc32& pro_backend_pubkey) {
+        std::span<const uint8_t, 32> pro_backend_pubkey) {
     // TODO: Community message parsing requires a custom code path for now as we are planning to
     // migrate from sending plain `Content` to `Content` with a pro signature embedded in `Content`
     // (added exclusively for communities usecase), then, transitioning to sending an `Envelope` to

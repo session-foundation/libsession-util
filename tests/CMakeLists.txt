@@ -6,6 +6,7 @@ endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
     test_core_devices.cpp
+    test_dm_receive.cpp
     test_attachment_encrypt.cpp
     test_blinding.cpp
     test_bt_merge.cpp

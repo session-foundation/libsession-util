@@ -34,6 +34,7 @@
 
 namespace session::core {
 
+using namespace fmt::literals;
 using namespace oxen::log::literals;
 using namespace session::literals;
 using namespace std::literals;
@@ -186,7 +187,8 @@ std::vector<Devices::DeviceKeys> Devices::active_device_keys() {
     return keys;
 }
 
-std::vector<Devices::AccountKeys> Devices::active_account_keys() {
+std::vector<Devices::AccountKeys> Devices::active_account_keys(
+        std::optional<std::span<const unsigned char, 2>> key_indicator) {
     auto c = conn();
     SQLite::Transaction tx{c.sql};
 
@@ -196,16 +198,28 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys() {
 
     std::vector<AccountKeys> keys;
     bool have_active = false;
-    for (auto [id, created, rotated, seed, pk_ml, pk_x] : c.prepared_results<
-                                                          int64_t,
-                                                          int64_t,
-                                                          std::optional<int64_t>,
-                                                          sqlite::blobn<32>,
-                                                          sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
-                                                          sqlite::blobn<32>>(
-                 "SELECT id, created, rotated, seed, pubkey_mlkem768, pubkey_x25519"
-                 " FROM device_account_keys"
-                 " ORDER BY rotated DESC NULLS FIRST, created DESC")) {
+
+    auto query_all =
+            "SELECT id, created, rotated, seed, pubkey_mlkem768, pubkey_x25519"
+            " FROM device_account_keys"
+            " ORDER BY rotated DESC NULLS FIRST, created DESC";
+    auto query_ki =
+            "SELECT id, created, rotated, seed, pubkey_mlkem768, pubkey_x25519"
+            " FROM device_account_keys"
+            " WHERE key_indicator = ?"
+            " ORDER BY rotated DESC NULLS FIRST, created DESC";
+
+    using cols_t = sqlite::IterableStatementWrapper<
+            int64_t,
+            int64_t,
+            std::optional<int64_t>,
+            sqlite::blobn<32>,
+            sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+            sqlite::blobn<32>>;
+
+    for (auto [id, created, rotated, seed, pk_ml, pk_x] :
+            key_indicator ? cols_t{c.prepared_bind(query_ki, *key_indicator)}
+                          : cols_t{c.prepared_bind(query_all)}) {
         auto& k = keys.emplace_back(keys_from_seed<AccountKeys>(seed));
         k.created = std::chrono::sys_seconds{std::chrono::seconds{created}};
         if (rotated)
@@ -225,7 +239,7 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys() {
 
     tx.commit();
 
-    if (!have_active) {
+    if (!key_indicator && !have_active) {
         log::info(cat, "No currently active account keys; generating a new one");
         rotate_account_keys();
         return active_account_keys();
@@ -1301,15 +1315,15 @@ void Devices::receive_link_request(std::span<const unsigned char> data) {
 }
 
 void Devices::parse_device_messages(
-        std::span<const std::span<const unsigned char>> messages, bool is_final) {
+        std::span<const SwarmMessage> messages, bool is_final) {
     for (const auto& msg : messages) {
         try {
-            oxenc::bt_dict_consumer in{msg};
+            oxenc::bt_dict_consumer in{msg.data};
             auto type = in.require<std::string_view>("");
             if (type == "G")
-                receive_device_group_message(msg);
+                receive_device_group_message(msg.data);
             else if (type == "L")
-                receive_link_request(msg);
+                receive_link_request(msg.data);
             else
                 log::warning(cat, "Ignoring device message with unknown type '{}'", type);
         } catch (const std::exception& e) {
@@ -1439,7 +1453,7 @@ void Devices::parse_device_messages(
 }
 
 void Devices::parse_account_pubkeys(
-        std::span<const std::span<const unsigned char>> messages, bool /*is_final*/) {
+        std::span<const SwarmMessage> messages, bool /*is_final*/) {
     if (messages.empty())
         return;
 
@@ -1449,7 +1463,7 @@ void Devices::parse_account_pubkeys(
     auto c = conn();
     for (const auto& msg : messages) {
         try {
-            oxenc::bt_dict_consumer in{msg};
+            oxenc::bt_dict_consumer in{msg.data};
             auto M = in.require_span<unsigned char, MLKEM768_PUBLICKEYBYTES>("M");
             auto X = in.require_span<unsigned char, 32>("X");
             in.require_signature(

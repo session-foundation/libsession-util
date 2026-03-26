@@ -10,25 +10,27 @@
 
 using namespace session;
 
-// Helpers to build a mock batch response carrying a single message in the first result slot.
-// _poll() sends a two-namespace batch (Devices at index 0, AccountPubkeys at index 1) and
-// processes results positionally, so msg_data/hash go in results[0]; results[1] is empty.
-// The ns parameter is accepted for readability at call sites but is otherwise unused.
+// Helpers to build a mock batch response carrying a single message in the Devices result slot.
+// _poll() sends a three-namespace batch (Default at index 0, Devices at index 1, AccountPubkeys
+// at index 2) and processes results positionally, so msg_data/hash go in results[1]; the other
+// slots are empty.  The ns parameter is accepted for readability at call sites but is otherwise
+// unused.
 static nlohmann::json make_response(
         int16_t /*ns*/, std::vector<unsigned char> msg_data, std::string hash) {
     nlohmann::json msg_item;
     msg_item["data"] = oxenc::to_base64(msg_data);
     msg_item["hash"] = std::move(hash);
 
-    nlohmann::json body0;
-    body0["messages"] = nlohmann::json::array({std::move(msg_item)});
-    nlohmann::json body1;
-    body1["messages"] = nlohmann::json::array();
+    nlohmann::json empty;
+    empty["messages"] = nlohmann::json::array();
+    nlohmann::json devices_body;
+    devices_body["messages"] = nlohmann::json::array({std::move(msg_item)});
 
     nlohmann::json response;
     response["results"] = nlohmann::json::array(
-            {nlohmann::json{{"code", 200}, {"body", std::move(body0)}},
-             nlohmann::json{{"code", 200}, {"body", std::move(body1)}}});
+            {nlohmann::json{{"code", 200}, {"body", empty}},
+             nlohmann::json{{"code", 200}, {"body", std::move(devices_body)}},
+             nlohmann::json{{"code", 200}, {"body", std::move(empty)}}});
     return response;
 }
 
@@ -55,21 +57,25 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
     CHECK(sent.request.endpoint == "batch");
     auto batch_json = nlohmann::json::parse(*sent.request.body);
     auto& reqs = batch_json["requests"];
-    REQUIRE(reqs.size() == 2);
-    // Subrequest 0: Devices (ns 21) — requires auth.
+    REQUIRE(reqs.size() == 3);
+    // Subrequest 0: Default (ns 0) — requires auth.
     CHECK(reqs[0]["method"] == "retrieve");
-    auto& params = reqs[0]["params"];
+    CHECK(reqs[0]["params"]["namespace"] == 0);
+    CHECK(reqs[0]["params"].contains("signature"));
+    // Subrequest 1: Devices (ns 21) — requires auth.
+    CHECK(reqs[1]["method"] == "retrieve");
+    auto& params = reqs[1]["params"];
     CHECK(params["pubkey"] == oxenc::to_hex(core->globals.session_id()));
     CHECK(params["namespace"] == 21);
     CHECK(params.contains("pubkey_ed25519"));
     CHECK(params.contains("timestamp"));
     CHECK(params.contains("signature"));
-    // No prior hash for this node yet, so no last_hash in either subrequest.
+    // No prior hash for this node yet, so no last_hash in any subrequest.
     CHECK_FALSE(params.contains("last_hash"));
-    // Subrequest 1: AccountPubkeys (ns -21) — no auth required.
-    CHECK(reqs[1]["method"] == "retrieve");
-    CHECK(reqs[1]["params"]["namespace"] == -21);
-    CHECK_FALSE(reqs[1]["params"].contains("signature"));
+    // Subrequest 2: AccountPubkeys (ns -21) — no auth required.
+    CHECK(reqs[2]["method"] == "retrieve");
+    CHECK(reqs[2]["params"]["namespace"] == -21);
+    CHECK_FALSE(reqs[2]["params"].contains("signature"));
 
     // Build a valid link request from a second device sharing the same account seed.
     cleared_b32 seed_bytes;
@@ -95,7 +101,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
 
     REQUIRE(mock_net->sent_requests.size() == 1);
     auto batch_json2 = nlohmann::json::parse(*mock_net->sent_requests[0].request.body);
-    CHECK(batch_json2["requests"][0]["params"]["last_hash"] == "hash1");
+    CHECK(batch_json2["requests"][1]["params"]["last_hash"] == "hash1");
 }
 
 TEST_CASE(
@@ -116,7 +122,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         // No prior hash for any node — must not send last_hash.
         CHECK_FALSE(p.contains("last_hash"));
     }
@@ -131,7 +137,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         CHECK(p["last_hash"] == "xyz");
     }
 
@@ -141,7 +147,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         // B has no recorded hash — must not send last_hash so we get everything.
         CHECK_FALSE(p.contains("last_hash"));
     }
@@ -158,7 +164,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][0]["params"];
+        auto p = nlohmann::json::parse(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         CHECK(p["last_hash"] == "xyz");
     }
 }

@@ -206,6 +206,9 @@ class Core {
     void _update_polling();
     void _poll();
 
+    // Decrypts and dispatches one-to-one messages from Namespace::Default.
+    void _handle_direct_messages(std::span<const SwarmMessage> messages);
+
     // Extracts an option of type T from a pack; returns the first match wrapped in optional, or
     // nullopt if not present.  Mirrors the same helper in session::sqlite::Database.
     template <typename T, typename... Opts>
@@ -300,7 +303,7 @@ class Core {
     // messages after a non-final call, the caller should still call this with an empty span and
     // is_final=true to flush any actions that are deferred until the end of a fetch.
     void receive_messages(
-            std::span<const std::span<const unsigned char>> messages,
+            std::span<const SwarmMessage> messages,
             config::Namespace ns,
             bool is_final);
 };

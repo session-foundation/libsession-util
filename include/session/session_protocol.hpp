@@ -616,7 +616,7 @@ std::vector<unsigned char> encode_for_destination(
 DecodedEnvelope decode_envelope(
         const DecodeEnvelopeKey& keys,
         std::span<const unsigned char> envelope_payload,
-        const uc32& pro_backend_pubkey);
+        std::span<const unsigned char, 32> pro_backend_pubkey);
 
 /// API: session_protocol/decode_for_community
 ///
@@ -650,6 +650,6 @@ DecodedEnvelope decode_envelope(
 DecodedCommunityMessage decode_for_community(
         std::span<const unsigned char> content_or_envelope_payload,
         sys_ms unix_ts,
-        const uc32& pro_backend_pubkey);
+        std::span<const unsigned char, 32> pro_backend_pubkey);
 
 }  // namespace session

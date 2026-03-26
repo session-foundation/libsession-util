@@ -1,8 +1,12 @@
 #pragma once
+#include <array>
 #include <functional>
+#include <optional>
 #include <session/core/devices.hpp>
+#include <session/core/swarm_message.hpp>
 #include <span>
 #include <string_view>
+#include <vector>
 
 namespace session::core {
 
@@ -24,6 +28,26 @@ enum class PfsKeyFetch {
     unchanged,  ///< Keys were retrieved but match what was already cached
     not_found,  ///< The fetch succeeded but the remote account pubkey namespace held no valid keys
     failed,     ///< The network request failed (swarm lookup or send_request)
+};
+
+/// Reason code passed to the message_decrypt_failed callback.
+enum class MessageDecryptFailure {
+    no_pfs_key,      ///< Version 2 message but no account key with a matching key indicator exists
+    decrypt_failed,  ///< Decryption failed (either version); key was found but did not work
+    bad_format,      ///< Message is structurally malformed (e.g. invalid bencode, truncated fields)
+    unknown_version, ///< Message starts with 0x00 but carries an unrecognised version byte;
+                     ///< likely a future protocol version this build does not understand
+};
+
+/// A successfully decrypted one-to-one message from Namespace::Default.
+struct ReceivedMessage {
+    std::string hash;    ///< Swarm-assigned message hash
+    sys_ms timestamp;    ///< Server-reported upload timestamp
+    sys_ms expiry;       ///< Server-reported expiry timestamp
+    std::array<unsigned char, 33> sender_session_id;  ///< 0x05-prefixed sender session ID
+    int version;                                       ///< Protocol version: 1 or 2
+    std::vector<unsigned char> content;               ///< Decrypted protobuf-encoded payload
+    std::optional<std::array<unsigned char, 64>> pro_signature;  ///< Session Pro signature, if present
 };
 
 /// Struct holding application callbacks to fire when libsession Core events happen to allow the
@@ -104,6 +128,28 @@ struct callbacks {
     /// - result -- the outcome of the fetch: new_key, unchanged, not_found, or failed
     std::function<void(std::span<const unsigned char, 33> session_id, PfsKeyFetch result)>
             pfs_keys_fetched;
+
+    /// Callback invoked when a one-to-one message from Namespace::Default is successfully
+    /// decrypted.  The message is passed as an rvalue reference: the callback may move from it
+    /// (e.g. to take ownership of the content vector) or simply read it in place.
+    ///
+    /// Parameters:
+    /// - msg -- the decrypted message data
+    std::function<void(ReceivedMessage&& msg)> message_received;
+
+    /// Callback invoked when a one-to-one message from Namespace::Default could not be decrypted
+    /// or parsed.  The raw swarm message and a reason code are provided so the caller can decide
+    /// how to handle it (e.g. log, queue for retry, surface to the user).
+    ///
+    /// When receive_messages() is called directly by the application, `msg` is a reference to one
+    /// of the SwarmMessage elements passed in, which the caller can identify exactly by comparing
+    /// pointers.  When triggered by internal polling, `msg` refers to an internally-owned object.
+    ///
+    /// Parameters:
+    /// - msg    -- the raw swarm message that could not be decrypted
+    /// - reason -- why decryption failed
+    std::function<void(const SwarmMessage& msg, MessageDecryptFailure reason)>
+            message_decrypt_failed;
 };
 
 }  // namespace session::core
