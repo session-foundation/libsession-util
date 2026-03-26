@@ -11,6 +11,7 @@
 #include "core/devices.hpp"
 #include "core/globals.hpp"
 #include "core/pro.hpp"
+#include "session/network/key_types.hpp"
 
 /// The "Core" class is intended to be used by a Session account instance to hold account state.  It
 /// manages an encrypted sqlite database for storing account keys, messages, and other account
@@ -205,9 +206,16 @@ class Core {
     std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
     void _update_polling();
     void _poll();
+    void _handle_poll_response(
+            const network::ed25519_pubkey& sn_pubkey,
+            std::span<const config::Namespace> namespaces,
+            std::string body);
 
     // Decrypts and dispatches one-to-one messages from Namespace::Default.
     void _handle_direct_messages(std::span<const SwarmMessage> messages);
+
+    // Handles a PFS fetch response
+    void _handle_pfs_response(std::span<const unsigned char, 33> sid, std::string body);
 
     // Extracts an option of type T from a pack; returns the first match wrapped in optional, or
     // nullopt if not present.  Mirrors the same helper in session::sqlite::Database.
