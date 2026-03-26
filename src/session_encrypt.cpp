@@ -1349,8 +1349,7 @@ LIBSESSION_C_API bool session_decrypt_incoming(
         size_t* plaintext_len) {
     try {
         auto result = session::decrypt_incoming_session_id(
-                cspan<64>(ed25519_privkey),
-                cspan(ciphertext_in, ciphertext_len));
+                cspan<64>(ed25519_privkey), cspan(ciphertext_in, ciphertext_len));
         auto [plaintext, session_id] = result;
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
@@ -1434,9 +1433,7 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         DecryptGroupMessage result_cpp = {};
         try {
             result_cpp = decrypt_group_message(
-                    {&key, 1},
-                    cspan<32>(group_ed25519_pubkey),
-                    cspan(ciphertext, ciphertext_len));
+                    {&key, 1}, cspan<32>(group_ed25519_pubkey), cspan(ciphertext, ciphertext_len));
             result = {
                     .success = true,
                     .index = index,
@@ -1469,8 +1466,8 @@ LIBSESSION_C_API bool session_decrypt_ons_response(
         if (nonce_in)
             nonce = cspan<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>(nonce_in);
 
-        auto session_id = session::decrypt_ons_response(
-                name_in, cspan(ciphertext_in, ciphertext_len), nonce);
+        auto session_id =
+                session::decrypt_ons_response(name_in, cspan(ciphertext_in, ciphertext_len), nonce);
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
         return true;
@@ -1487,8 +1484,7 @@ LIBSESSION_C_API bool session_decrypt_push_notification(
         size_t* plaintext_len) {
     try {
         auto plaintext = session::decrypt_push_notification(
-                cspan(payload_in, payload_len),
-                cspan<32>(enc_key_in));
+                cspan(payload_in, payload_len), cspan<32>(enc_key_in));
 
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();
@@ -1506,9 +1502,8 @@ LIBSESSION_C_API bool session_encrypt_xchacha20(
         unsigned char** ciphertext_out,
         size_t* ciphertext_len) {
     try {
-        auto ciphertext = session::encrypt_xchacha20(
-                cspan(plaintext_in, plaintext_len),
-                cspan<32>(key_in));
+        auto ciphertext =
+                session::encrypt_xchacha20(cspan(plaintext_in, plaintext_len), cspan<32>(key_in));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1526,9 +1521,8 @@ LIBSESSION_C_API bool session_decrypt_xchacha20(
         unsigned char** plaintext_out,
         size_t* plaintext_len) {
     try {
-        auto plaintext = session::decrypt_xchacha20(
-                cspan(ciphertext_in, ciphertext_len),
-                cspan<32>(key_in));
+        auto plaintext =
+                session::decrypt_xchacha20(cspan(ciphertext_in, ciphertext_len), cspan<32>(key_in));
 
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();

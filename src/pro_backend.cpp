@@ -925,7 +925,8 @@ session_pro_backend_add_pro_payment_request_build_sigs(
     std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(
+            payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
@@ -970,7 +971,8 @@ session_pro_backend_add_pro_payment_request_build_to_json(
     std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(
+            payment_tx_order_id, payment_tx_order_id_len);
 
     try {
         std::string json = AddProPaymentRequest::build_to_json(
@@ -1511,7 +1513,8 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
             std::chrono::milliseconds(refund_requested_unix_ts_ms)};
     std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(
+            payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_signature result = {};
     try {
@@ -1557,7 +1560,8 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
             std::chrono::milliseconds(refund_requested_unix_ts_ms)};
     std::span<const unsigned char> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
+    std::span<const unsigned char> payment_tx_order_id_span(
+            payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_to_json result = {};
     try {

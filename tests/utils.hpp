@@ -325,8 +325,8 @@ struct set_on_exit {
 /// Usage:
 ///     bool got_it = false;
 ///     callback_waiter waiter{[&got_it](bool x) { got_it = x; }};
-///     async_operation(waiter);            // waiter implicitly converts to std::function<void(bool)>
-///     REQUIRE(waiter.wait());             // blocks up to 5s
+///     async_operation(waiter); // waiter implicitly converts to std::function<void(bool)>
+///     REQUIRE(waiter.wait());  // blocks up to 5s
 ///     CHECK(got_it);
 template <typename T>
 struct callback_waiter {

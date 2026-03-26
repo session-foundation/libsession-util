@@ -3,11 +3,11 @@
 #include <fmt/format.h>
 
 #include <filesystem>
-#include <session/random.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
 #include <session/network/key_types.hpp>
 #include <session/network/session_network.hpp>
+#include <session/random.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
 

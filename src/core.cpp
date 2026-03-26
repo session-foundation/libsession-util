@@ -143,8 +143,13 @@ void Core::_poll() {
     net->get_swarm(
             globals.pubkey_x25519(),
             false,
-            [this, net, namespaces, session_id_hex, ed25519_hex, now_ms,
-                    ns_sig = std::move(ns_sig)](auto, auto swarm) {
+            [this,
+             net,
+             namespaces,
+             session_id_hex,
+             ed25519_hex,
+             now_ms,
+             ns_sig = std::move(ns_sig)](auto, auto swarm) {
                 if (swarm.empty())
                     return;
 
@@ -236,25 +241,25 @@ void Core::_poll() {
                                         auto b64 = data_it->get<std::string_view>();
                                         decoded.reserve(oxenc::from_base64_size(b64.size()));
                                         oxenc::from_base64(
-                                                b64.begin(), b64.end(),
+                                                b64.begin(),
+                                                b64.end(),
                                                 std::back_inserter(decoded));
 
                                         SwarmMessage swarm_msg;
                                         swarm_msg.data = {decoded.data(), decoded.size()};
 
                                         if (auto h = msg.find("hash");
-                                                h != msg.end() && h->is_string()) {
+                                            h != msg.end() && h->is_string()) {
                                             swarm_msg.hash = h->get<std::string>();
                                             newest_hash = swarm_msg.hash;
                                         }
 
                                         if (auto t = msg.find("timestamp");
-                                                t != msg.end() && t->is_number_integer())
-                                            swarm_msg.timestamp =
-                                                    from_epoch_ms(t->get<int64_t>());
+                                            t != msg.end() && t->is_number_integer())
+                                            swarm_msg.timestamp = from_epoch_ms(t->get<int64_t>());
 
                                         if (auto e = msg.find("expiry");
-                                                e != msg.end() && e->is_number_integer())
+                                            e != msg.end() && e->is_number_integer())
                                             swarm_msg.expiry = from_epoch_ms(e->get<int64_t>());
 
                                         swarm_messages.push_back(std::move(swarm_msg));
@@ -351,134 +356,129 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
             {"namespace", static_cast<int16_t>(config::Namespace::AccountPubkeys)},
     };
 
-    net->get_swarm(
-            x25519_pub, false, [this, net, sid = std::move(sid), params](auto, auto swarm) {
-                if (swarm.empty()) {
-                    log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
-                    if (callbacks.pfs_keys_fetched)
-                        callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
-                    return;
-                }
+    net->get_swarm(x25519_pub, false, [this, net, sid = std::move(sid), params](auto, auto swarm) {
+        if (swarm.empty()) {
+            log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
+            if (callbacks.pfs_keys_fetched)
+                callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
+            return;
+        }
 
-                auto body_str = params.dump();
-                net->send_request(
-                        network::Request{
-                                swarm.front(),
-                                "retrieve",
-                                to_vector<unsigned char>(body_str),
-                                network::RequestCategory::standard_small,
-                                20s},
-                        [this, sid = std::move(sid)](
-                                bool success,
-                                bool /*timeout*/,
-                                int16_t /*status_code*/,
-                                std::vector<std::pair<std::string, std::string>> /*headers*/,
-                                std::optional<std::string> body) {
-                            if (!success || !body) {
-                                log::debug(cat, "prefetch_pfs_keys: request failed");
-                                if (callbacks.pfs_keys_fetched)
-                                    callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
-                                return;
+        auto body_str = params.dump();
+        net->send_request(
+                network::Request{
+                        swarm.front(),
+                        "retrieve",
+                        to_vector<unsigned char>(body_str),
+                        network::RequestCategory::standard_small,
+                        20s},
+                [this, sid = std::move(sid)](
+                        bool success,
+                        bool /*timeout*/,
+                        int16_t /*status_code*/,
+                        std::vector<std::pair<std::string, std::string>> /*headers*/,
+                        std::optional<std::string> body) {
+                    if (!success || !body) {
+                        log::debug(cat, "prefetch_pfs_keys: request failed");
+                        if (callbacks.pfs_keys_fetched)
+                            callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
+                        return;
+                    }
+
+                    try {
+                        auto json = nlohmann::json::parse(*body);
+                        auto msgs_it = json.find("messages");
+                        if (msgs_it == json.end() || !msgs_it->is_array()) {
+                            log::warning(
+                                    cat,
+                                    "prefetch_pfs_keys: response missing or invalid "
+                                    "'messages' array");
+                            return;
+                        }
+
+                        // Strip the 0x05 prefix to get the x25519 pubkey for
+                        // signature verification.
+                        std::span<const unsigned char, 32> x25519_pub{sid.data() + 1, 32};
+
+                        // Track the most recently valid pubkeys seen across all messages.
+                        std::optional<std::array<std::byte, 32>> pk_x25519;
+                        std::optional<std::array<std::byte, MLKEM768_PUBLICKEYBYTES>> pk_mlkem768;
+
+                        for (const auto& msg : *msgs_it) {
+                            auto data_it = msg.find("data");
+                            if (data_it == msg.end() || !data_it->is_string()) {
+                                log::warning(
+                                        cat,
+                                        "prefetch_pfs_keys: message missing or "
+                                        "non-string 'data' field");
+                                continue;
                             }
-
+                            auto b64 = data_it->get<std::string_view>();
+                            std::vector<std::byte> decoded;
+                            decoded.reserve(oxenc::from_base64_size(b64.size()));
+                            oxenc::from_base64(b64.begin(), b64.end(), std::back_inserter(decoded));
                             try {
-                                auto json = nlohmann::json::parse(*body);
-                                auto msgs_it = json.find("messages");
-                                if (msgs_it == json.end() || !msgs_it->is_array()) {
-                                    log::warning(
-                                            cat,
-                                            "prefetch_pfs_keys: response missing or invalid "
-                                            "'messages' array");
-                                    return;
-                                }
+                                oxenc::bt_dict_consumer in{decoded};
+                                auto M = in.require_span<std::byte, MLKEM768_PUBLICKEYBYTES>("M");
+                                auto X = in.require_span<std::byte, 32>("X");
+                                in.require_signature(
+                                        "~",
+                                        [&x25519_pub](
+                                                std::span<const unsigned char> b,
+                                                std::span<const unsigned char> sig) {
+                                            if (!xed25519::verify(sig, x25519_pub, b))
+                                                throw std::runtime_error{
+                                                        "signature verification "
+                                                        "failed"};
+                                        });
+                                std::ranges::copy(X, pk_x25519.emplace().begin());
+                                std::ranges::copy(M, pk_mlkem768.emplace().begin());
+                            } catch (const std::exception& e) {
+                                log::warning(
+                                        cat,
+                                        "Ignoring malformed remote account pubkey "
+                                        "message: {}",
+                                        e.what());
+                            }
+                        }
 
-                                // Strip the 0x05 prefix to get the x25519 pubkey for
-                                // signature verification.
-                                std::span<const unsigned char, 32> x25519_pub{sid.data() + 1, 32};
+                        auto now_s = epoch_seconds(clock_now_s());
 
-                                // Track the most recently valid pubkeys seen across all messages.
-                                std::optional<std::array<std::byte, 32>> pk_x25519;
-                                std::optional<std::array<std::byte, MLKEM768_PUBLICKEYBYTES>>
-                                        pk_mlkem768;
-
-                                for (const auto& msg : *msgs_it) {
-                                    auto data_it = msg.find("data");
-                                    if (data_it == msg.end() || !data_it->is_string()) {
-                                        log::warning(
-                                                cat,
-                                                "prefetch_pfs_keys: message missing or "
-                                                "non-string 'data' field");
-                                        continue;
-                                    }
-                                    auto b64 = data_it->get<std::string_view>();
-                                    std::vector<std::byte> decoded;
-                                    decoded.reserve(oxenc::from_base64_size(b64.size()));
-                                    oxenc::from_base64(
-                                            b64.begin(), b64.end(), std::back_inserter(decoded));
-                                    try {
-                                        oxenc::bt_dict_consumer in{decoded};
-                                        auto M = in.require_span<
-                                                std::byte,
-                                                MLKEM768_PUBLICKEYBYTES>("M");
-                                        auto X = in.require_span<std::byte, 32>("X");
-                                        in.require_signature(
-                                                "~",
-                                                [&x25519_pub](
-                                                        std::span<const unsigned char> b,
-                                                        std::span<const unsigned char> sig) {
-                                                    if (!xed25519::verify(sig, x25519_pub, b))
-                                                        throw std::runtime_error{
-                                                                "signature verification "
-                                                                "failed"};
-                                                });
-                                        std::ranges::copy(X, pk_x25519.emplace().begin());
-                                        std::ranges::copy(M, pk_mlkem768.emplace().begin());
-                                    } catch (const std::exception& e) {
-                                        log::warning(
-                                                cat,
-                                                "Ignoring malformed remote account pubkey "
-                                                "message: {}",
-                                                e.what());
-                                    }
-                                }
-
-                                auto now_s = epoch_seconds(clock_now_s());
-
-                                if (!pk_x25519 || !pk_mlkem768) {
-                                    log::debug(
-                                            cat,
-                                            "prefetch_pfs_keys: no valid account pubkey message "
-                                            "found in response");
-                                    // Record a NAK.  If a valid entry already exists, update only
-                                    // nak_at and leave fetched_at and pubkeys untouched.
-                                    db.conn().prepared_exec(
-                                            R"(
+                        if (!pk_x25519 || !pk_mlkem768) {
+                            log::debug(
+                                    cat,
+                                    "prefetch_pfs_keys: no valid account pubkey message "
+                                    "found in response");
+                            // Record a NAK.  If a valid entry already exists, update only
+                            // nak_at and leave fetched_at and pubkeys untouched.
+                            db.conn().prepared_exec(
+                                    R"(
 INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
 VALUES (?, NULL, ?, NULL, NULL)
 ON CONFLICT(session_id) DO UPDATE SET nak_at = excluded.nak_at
 )",
-                                            sid,
-                                            now_s);
-                                    if (callbacks.pfs_keys_fetched)
-                                        callbacks.pfs_keys_fetched(sid, PfsKeyFetch::not_found);
-                                    return;
-                                }
+                                    sid,
+                                    now_s);
+                            if (callbacks.pfs_keys_fetched)
+                                callbacks.pfs_keys_fetched(sid, PfsKeyFetch::not_found);
+                            return;
+                        }
 
-                                auto conn = db.conn();
-                                SQLite::Transaction tx{conn.sql};
+                        auto conn = db.conn();
+                        SQLite::Transaction tx{conn.sql};
 
-                                bool is_unchanged = conn.prepared_maybe_get<int>(
-                                                                "SELECT 1 FROM pfs_key_cache"
-                                                                " WHERE session_id = ?"
-                                                                " AND pubkey_x25519 = ? AND "
-                                                                "pubkey_mlkem768 = ?",
-                                                                sid,
-                                                                *pk_x25519,
-                                                                *pk_mlkem768)
-                                                            .has_value();
+                        bool is_unchanged = conn.prepared_maybe_get<int>(
+                                                        R"(
+SELECT 1 FROM pfs_key_cache
+WHERE session_id = ? AND pubkey_x25519 = ? AND pubkey_mlkem768 = ?
+)",
+                                                        sid,
+                                                        *pk_x25519,
+                                                        *pk_mlkem768)
+                                                    .has_value();
 
-                                conn.prepared_exec(
-                                        R"(
+                        conn.prepared_exec(
+                                R"(
 INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
 VALUES (?, ?, NULL, ?, ?)
 ON CONFLICT(session_id) DO UPDATE SET
@@ -486,24 +486,20 @@ ON CONFLICT(session_id) DO UPDATE SET
     pubkey_x25519 = excluded.pubkey_x25519,
     pubkey_mlkem768 = excluded.pubkey_mlkem768
 )",
-                                        sid,
-                                        now_s,
-                                        *pk_x25519,
-                                        *pk_mlkem768);
-                                tx.commit();
-                                if (callbacks.pfs_keys_fetched)
-                                    callbacks.pfs_keys_fetched(
-                                            sid,
-                                            is_unchanged ? PfsKeyFetch::unchanged
-                                                         : PfsKeyFetch::new_key);
-                            } catch (const std::exception& e) {
-                                log::warning(
-                                        cat,
-                                        "Failed to process PFS key fetch response: {}",
-                                        e.what());
-                            }
-                        });
-            });
+                                sid,
+                                now_s,
+                                *pk_x25519,
+                                *pk_mlkem768);
+                        tx.commit();
+                        if (callbacks.pfs_keys_fetched)
+                            callbacks.pfs_keys_fetched(
+                                    sid,
+                                    is_unchanged ? PfsKeyFetch::unchanged : PfsKeyFetch::new_key);
+                    } catch (const std::exception& e) {
+                        log::warning(cat, "Failed to process PFS key fetch response: {}", e.what());
+                    }
+                });
+    });
     return status;
 }
 
@@ -578,11 +574,7 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
             for (auto& key : keys) {
                 try {
                     auto result = decrypt_incoming_v2(
-                            session_id,
-                            key.x25519_sec,
-                            key.x25519_pub,
-                            key.mlkem768_sec,
-                            data);
+                            session_id, key.x25519_sec, key.x25519_pub, key.mlkem768_sec, data);
                     ReceivedMessage out;
                     out.hash = msg.hash;
                     out.timestamp = msg.timestamp;
@@ -633,9 +625,7 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
 }
 
 void Core::receive_messages(
-        std::span<const SwarmMessage> messages,
-        config::Namespace ns,
-        bool is_final) {
+        std::span<const SwarmMessage> messages, config::Namespace ns, bool is_final) {
     using config::Namespace;
     switch (ns) {
         case Namespace::Default: _handle_direct_messages(messages); break;

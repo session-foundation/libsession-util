@@ -35,19 +35,20 @@ enum class MessageDecryptFailure {
     no_pfs_key,      ///< Version 2 message but no account key with a matching key indicator exists
     decrypt_failed,  ///< Decryption failed (either version); key was found but did not work
     bad_format,      ///< Message is structurally malformed (e.g. invalid bencode, truncated fields)
-    unknown_version, ///< Message starts with 0x00 but carries an unrecognised version byte;
-                     ///< likely a future protocol version this build does not understand
+    unknown_version,  ///< Message starts with 0x00 but carries an unrecognised version byte;
+                      ///< likely a future protocol version this build does not understand
 };
 
 /// A successfully decrypted one-to-one message from Namespace::Default.
 struct ReceivedMessage {
-    std::string hash;    ///< Swarm-assigned message hash
-    sys_ms timestamp;    ///< Server-reported upload timestamp
-    sys_ms expiry;       ///< Server-reported expiry timestamp
+    std::string hash;                                 ///< Swarm-assigned message hash
+    sys_ms timestamp;                                 ///< Server-reported upload timestamp
+    sys_ms expiry;                                    ///< Server-reported expiry timestamp
     std::array<unsigned char, 33> sender_session_id;  ///< 0x05-prefixed sender session ID
-    int version;                                       ///< Protocol version: 1 or 2
+    int version;                                      ///< Protocol version: 1 or 2
     std::vector<unsigned char> content;               ///< Decrypted protobuf-encoded payload
-    std::optional<std::array<unsigned char, 64>> pro_signature;  ///< Session Pro signature, if present
+    std::optional<std::array<unsigned char, 64>>
+            pro_signature;  ///< Session Pro signature, if present
 };
 
 /// Struct holding application callbacks to fire when libsession Core events happen to allow the

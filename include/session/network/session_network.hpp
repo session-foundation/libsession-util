@@ -53,7 +53,7 @@ class Network : public std::enable_shared_from_this<Network> {
         requires(!std::is_same_v<
                  std::decay_t<std::tuple_element_t<0, std::tuple<Opt...>>>,
                  config::Config>)
-    Network(Opt&&... opts) : Network{config::Config{std::forward<Opt>(opts)...}}{};
+    Network(Opt&&... opts) : Network{config::Config{std::forward<Opt>(opts)...}} {};
     explicit Network(config::Config config);
     virtual ~Network();
 

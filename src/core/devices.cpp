@@ -218,8 +218,8 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys(
             sqlite::blobn<32>>;
 
     for (auto [id, created, rotated, seed, pk_ml, pk_x] :
-            key_indicator ? cols_t{c.prepared_bind(query_ki, *key_indicator)}
-                          : cols_t{c.prepared_bind(query_all)}) {
+         key_indicator ? cols_t{c.prepared_bind(query_ki, *key_indicator)}
+                       : cols_t{c.prepared_bind(query_all)}) {
         auto& k = keys.emplace_back(keys_from_seed<AccountKeys>(seed));
         k.created = std::chrono::sys_seconds{std::chrono::seconds{created}};
         if (rotated)
@@ -1065,9 +1065,7 @@ Devices::LinkRequestResult Devices::build_link_request() {
     std::memcpy(encrypted.data(), plaintext.data(), plaintext.size());
     auto seed = core.globals.account_seed();
     config::encrypt_prealloced(
-            as_span<unsigned char>(std::span{encrypted}),
-            seed.seed(),
-            "link-request");
+            as_span<unsigned char>(std::span{encrypted}), seed.seed(), "link-request");
 
     // Wrap in outer bt-dict: {"": "L", "L": <encrypted>}
     std::vector<std::byte> out(
@@ -1240,8 +1238,7 @@ void Devices::receive_link_request(std::span<const unsigned char> data) {
     std::vector<unsigned char> plaintext;
     try {
         auto seed = core.globals.account_seed();
-        plaintext = config::decrypt(
-                encrypted, seed.seed(), "link-request");
+        plaintext = config::decrypt(encrypted, seed.seed(), "link-request");
     } catch (const config::decrypt_error& e) {
         log::warning(cat, "Ignoring incoming link request: decryption failed: {}", e.what());
         return;
@@ -1314,8 +1311,7 @@ void Devices::receive_link_request(std::span<const unsigned char> data) {
     tx.commit();
 }
 
-void Devices::parse_device_messages(
-        std::span<const SwarmMessage> messages, bool is_final) {
+void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool is_final) {
     for (const auto& msg : messages) {
         try {
             oxenc::bt_dict_consumer in{msg.data};
@@ -1452,8 +1448,7 @@ void Devices::parse_device_messages(
             epoch_seconds(clock_now_s() - LINK_REQUEST_MAX_AGE));
 }
 
-void Devices::parse_account_pubkeys(
-        std::span<const SwarmMessage> messages, bool /*is_final*/) {
+void Devices::parse_account_pubkeys(std::span<const SwarmMessage> messages, bool /*is_final*/) {
     if (messages.empty())
         return;
 

@@ -243,11 +243,11 @@ class Devices final : detail::CoreComponent {
     // Returns the current active account keys after pruning obsolete ones: that is, the current key
     // plus all keys that were rotated away fewer than ACCOUNT_KEY_RETENTION ago.  Keys are returned
     // sorted from newest to oldest.  If there are no keys at all, generates an initial one.
-    // Returns account keys, ordered with the active (unrotated) key first then most-recently-rotated
-    // first.  Expired rotated keys are pruned before querying.  If key_indicator is given, only
-    // keys whose ML-KEM-768 pubkey begins with those two bytes are returned (using the indexed
-    // key_indicator virtual column); otherwise all retained keys are returned and a new key is
-    // auto-generated if none is currently active.
+    // Returns account keys, ordered with the active (unrotated) key first then
+    // most-recently-rotated first.  Expired rotated keys are pruned before querying.  If
+    // key_indicator is given, only keys whose ML-KEM-768 pubkey begins with those two bytes are
+    // returned (using the indexed key_indicator virtual column); otherwise all retained keys are
+    // returned and a new key is auto-generated if none is currently active.
     std::vector<AccountKeys> active_account_keys(
             std::optional<std::span<const unsigned char, 2>> key_indicator = std::nullopt);
 

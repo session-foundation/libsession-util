@@ -162,7 +162,8 @@ bool ProProof::verify_signature(const std::span<const unsigned char>& verify_pub
     return result;
 }
 
-bool ProProof::verify_message(std::span<const unsigned char> sig, std::span<const unsigned char> msg) const {
+bool ProProof::verify_message(
+        std::span<const unsigned char> sig, std::span<const unsigned char> msg) const {
     if (sig.size() != crypto_sign_ed25519_BYTES)
         throw std::invalid_argument{fmt::format(
                 "Invalid signed_msg: Signature must be 64 bytes (was: {})", sig.size())};
@@ -277,8 +278,9 @@ std::vector<unsigned char> encode_for_1o1(
         std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::SyncOr1o1;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
-                                                                     : std::span<const unsigned char>{};
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
+                                              ? *pro_rotating_ed25519_privkey
+                                              : std::span<const unsigned char>{};
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     return encode_for_destination(plaintext, &ed25519_privkey, dest);
@@ -293,8 +295,9 @@ std::vector<unsigned char> encode_for_community_inbox(
         std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::CommunityInbox;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
-                                                                     : std::span<const unsigned char>{};
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
+                                              ? *pro_rotating_ed25519_privkey
+                                              : std::span<const unsigned char>{};
     dest.sent_timestamp_ms = sent_timestamp;
     dest.recipient_pubkey = recipient_pubkey;
     dest.community_inbox_server_pubkey = community_pubkey;
@@ -306,8 +309,9 @@ std::vector<unsigned char> encode_for_community(
         std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::Community;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
-                                                                     : std::span<const unsigned char>{};
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
+                                              ? *pro_rotating_ed25519_privkey
+                                              : std::span<const unsigned char>{};
     return encode_for_destination(plaintext, nullptr, dest);
 }
 
@@ -320,8 +324,9 @@ std::vector<unsigned char> encode_for_group(
         std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
     Destination dest = {};
     dest.type = DestinationType::Group;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
-                                                                     : std::span<const unsigned char>{};
+    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
+                                              ? *pro_rotating_ed25519_privkey
+                                              : std::span<const unsigned char>{};
     dest.sent_timestamp_ms = sent_timestamp;
     dest.group_ed25519_pubkey = group_ed25519_pubkey;
     dest.group_enc_key = group_enc_key;
@@ -373,7 +378,8 @@ static std::span<const unsigned char> unpad_message(std::span<const unsigned cha
     }
 
     assert(size_without_padding <= payload.size());
-    auto result = std::span<const unsigned char>(payload.data(), payload.data() + size_without_padding);
+    auto result =
+            std::span<const unsigned char>(payload.data(), payload.data() + size_without_padding);
     return result;
 }
 
@@ -383,7 +389,8 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
         const Ed25519PrivKeySpan* ed25519_privkey,
         DestinationType dest_type,
         std::span<const unsigned char> dest_pro_rotating_ed25519_privkey,
-        std::span<const unsigned char, 33 /*prefix + [x25519 or ed25519] pubkey*/> dest_recipient_pubkey,
+        std::span<const unsigned char, 33 /*prefix + [x25519 or ed25519] pubkey*/>
+                dest_recipient_pubkey,
         std::chrono::milliseconds dest_sent_timestamp_ms,
         std::span<const unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES>
                 dest_community_inbox_server_pubkey,
@@ -425,8 +432,8 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
     switch (dest_type) {
         case DestinationType::Group: /*FALLTHRU*/
         case DestinationType::SyncOr1o1: {
-            if (is_group &&
-                dest_group_ed25519_pubkey[0] != static_cast<unsigned char>(SessionIDPrefix::group)) {
+            if (is_group && dest_group_ed25519_pubkey[0] !=
+                                    static_cast<unsigned char>(SessionIDPrefix::group)) {
                 // Legacy groups which have a 05 prefixed key
                 throw std::runtime_error{
                         "Unsupported configuration, encrypting for a legacy group (0x05 prefix) is "
@@ -602,7 +609,8 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
                 if (use_malloc == UseMalloc::Yes) {
                     result.ciphertext_c = span_u8_copy_or_throw(content.data(), content.size());
                 } else {
-                    result.ciphertext_cpp = std::vector<unsigned char>(content.begin(), content.end());
+                    result.ciphertext_cpp =
+                            std::vector<unsigned char>(content.begin(), content.end());
                 }
             }
         } break;
@@ -1433,8 +1441,9 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     // Setup decryption keys and decrypt
     DecodeEnvelopeKey keys_cpp = {};
     if (keys->group_ed25519_pubkey.size == crypto_sign_ed25519_PUBLICKEYBYTES) {
-        keys_cpp.group_ed25519_pubkey = std::span<const unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES>{
-                keys->group_ed25519_pubkey.data, crypto_sign_ed25519_PUBLICKEYBYTES};
+        keys_cpp.group_ed25519_pubkey =
+                std::span<const unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES>{
+                        keys->group_ed25519_pubkey.data, crypto_sign_ed25519_PUBLICKEYBYTES};
     } else if (keys->group_ed25519_pubkey.size) {
         result.error_len_incl_null_terminator =
                 snprintf_clamped(

@@ -1,3 +1,4 @@
+#include <oxenc/hex.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -6,8 +7,6 @@
 #include <session/core.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
-
-#include <oxenc/hex.h>
 
 #include "test_helper.hpp"
 
@@ -53,8 +52,7 @@ struct OwnedMessage {
 // Cast the std::byte pubkeys returned by TestHelper into unsigned-char spans.
 template <std::size_t N>
 std::span<const unsigned char, N> as_uc(const std::array<std::byte, N>& a) {
-    return std::span<const unsigned char, N>{
-            reinterpret_cast<const unsigned char*>(a.data()), N};
+    return std::span<const unsigned char, N>{reinterpret_cast<const unsigned char*>(a.data()), N};
 }
 
 }  // namespace
@@ -192,8 +190,12 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
         std::ranges::copy(other->globals.session_id(), other_session_id.begin());
 
         auto ct = encrypt_for_recipient_v2(
-                sender.ed_sk, other_session_id, as_uc(x25519_bytes), as_uc(mlkem_bytes),
-                "01"_hex_u, std::nullopt);
+                sender.ed_sk,
+                other_session_id,
+                as_uc(x25519_bytes),
+                as_uc(mlkem_bytes),
+                "01"_hex_u,
+                std::nullopt);
         deliver(std::span{ct});
         CHECK(received.empty());
         REQUIRE(failures.size() == 1);
@@ -209,8 +211,12 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
         std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
 
         auto ct = encrypt_for_recipient_v2(
-                sender.ed_sk, recip_session_id, as_uc(x25519_bytes), as_uc(mlkem_bytes),
-                "01"_hex_u, std::nullopt);
+                sender.ed_sk,
+                recip_session_id,
+                as_uc(x25519_bytes),
+                as_uc(mlkem_bytes),
+                "01"_hex_u,
+                std::nullopt);
         // Wire format: [0,1]=version, [2,3]=ki, [4,35]=E, [36,1123]=mlkem_ct, [1124+]=xchacha.
         // Flip the final byte of the xchacha ciphertext to corrupt the AEAD tag.
         REQUIRE(ct.size() > 1124 + 16);

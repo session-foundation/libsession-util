@@ -132,7 +132,8 @@ class ProProof {
     ///
     /// Outputs:
     /// - `bool` - True if the message was signed by the embedded `rotating_pubkey` false otherwise.
-    bool verify_message(std::span<const unsigned char> sig, const std::span<const unsigned char> msg) const;
+    bool verify_message(
+            std::span<const unsigned char> sig, const std::span<const unsigned char> msg) const;
 
     /// API: pro/Proof::is_active
     ///
@@ -326,7 +327,8 @@ struct DecodeEnvelopeKey {
     // payload is encrypted (e.g. groups v2) and that the contents are unencrypted. If this key is
     // not set the it's assumed the envelope is not encrypted but the contents are encrypted (e.g.:
     // 1o1 or legacy group).
-    std::optional<std::span<const unsigned char, 32 /*crypto_sign_ed25519_PUBLICKEYBYTES*/>> group_ed25519_pubkey;
+    std::optional<std::span<const unsigned char, 32 /*crypto_sign_ed25519_PUBLICKEYBYTES*/>>
+            group_ed25519_pubkey;
 
     // List of libsodium-style secret key to decrypt the envelope from. Can also be passed as a 32
     // byte secret key. The public key component is not used.

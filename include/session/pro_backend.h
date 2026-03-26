@@ -114,7 +114,8 @@ struct session_pro_backend_response_header {
     /// Array of error messages (NULL if no errors), with errors_count elements
     string8* errors;
     size_t errors_count;
-    unsigned char* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
+    unsigned char*
+            internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
 };
 
 typedef struct session_pro_backend_to_json session_pro_backend_to_json;

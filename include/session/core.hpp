@@ -303,9 +303,7 @@ class Core {
     // messages after a non-final call, the caller should still call this with an empty span and
     // is_final=true to flush any actions that are deferred until the end of a fetch.
     void receive_messages(
-            std::span<const SwarmMessage> messages,
-            config::Namespace ns,
-            bool is_final);
+            std::span<const SwarmMessage> messages, config::Namespace ns, bool is_final);
 };
 
 }  // namespace session::core
