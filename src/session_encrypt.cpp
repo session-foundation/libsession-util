@@ -1320,7 +1320,7 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
     session_encrypt_group_message result = {};
     try {
         std::vector<unsigned char> result_cpp = encrypt_for_group(
-                Ed25519PrivKeySpan::from(user_ed25519_privkey, user_ed25519_privkey_len),
+                {user_ed25519_privkey, user_ed25519_privkey_len},
                 cspan<32>(group_ed25519_pubkey),
                 cspan(group_enc_key, group_enc_key_len),
                 cspan(plaintext, plaintext_len),

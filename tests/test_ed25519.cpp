@@ -126,8 +126,7 @@ TEST_CASE("Ed25519", "[ed25519][signature]") {
     constexpr auto ed_invalid = "010203040506070809"_hex_u;
 
     auto sig1 = session::ed25519::sign(ed_seed, to_span("hello"));
-    CHECK_THROWS(session::ed25519::sign(
-            Ed25519PrivKeySpan::from(ed_invalid.data(), ed_invalid.size()), to_span("hello")));
+    CHECK_THROWS(session::ed25519::sign({ed_invalid.data(), ed_invalid.size()}, to_span("hello")));
 
     auto expected_sig_hex =
             "e03b6e87a53d83f202f2501e9b52193dbe4a64c6503f88244948dee53271"

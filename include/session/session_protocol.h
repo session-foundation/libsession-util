@@ -127,25 +127,6 @@ typedef enum SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS {  // See session::Pro
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
 } SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS;
 
-typedef enum SESSION_PROTOCOL_DESTINATION_TYPE {  // See session::DestinationType
-    SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1,
-    SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
-    SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
-    SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY,
-} SESSION_PROTOCOL_DESTINATION_TYPE;
-
-typedef struct session_protocol_destination session_protocol_destination;
-struct session_protocol_destination {  // See session::Destination
-    SESSION_PROTOCOL_DESTINATION_TYPE type;
-    const void* pro_rotating_ed25519_privkey;
-    size_t pro_rotating_ed25519_privkey_len;
-    bytes33 recipient_pubkey;
-    uint64_t sent_timestamp_ms;
-    bytes32 community_inbox_server_pubkey;
-    bytes33 group_ed25519_pubkey;
-    bytes32 group_enc_key;
-};
-
 // Indicates which optional fields in the envelope has been populated out of the optional fields in
 // an envelope after it has been parsed off the wire.
 typedef uint32_t SESSION_PROTOCOL_ENVELOPE_FLAGS;
@@ -405,13 +386,13 @@ LIBSESSION_EXPORT
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
         uint16_t const* utf, size_t utf_size) NON_NULL_ARG(1);
 
-/// API: session_protocol_encode_for_1o1
+/// API: session_protocol_encode_dm_v1
 ///
 /// Encode a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
 /// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
 /// transmission to a single recipient.
 ///
-/// See: session_protocol/encode_for_1o1 for more information
+/// See: session_protocol/encode_dm_v1 for more information
 ///
 /// The encoded result must be freed with session_protocol_encrypt_for_destination_free when
 /// the caller is done with the result.
@@ -451,7 +432,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
 ///   required to write the error. Both counts include the null-terminator. The user must allocate
 ///   at minimum the requested length for the error message to be preserved in full.
 LIBSESSION_EXPORT
-session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
+session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -638,55 +619,6 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
         size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
-
-/// API: session_protocol/session_protocol_encrypt_for_destination
-///
-/// Given an unencrypted plaintext representation of the content (i.e.: protobuf encoded stream of
-/// `Content`), encrypt and/or wrap the plaintext in the necessary structures for transmission on
-/// the Session Protocol.
-///
-/// See: session_protocol/encrypt_for_destination for more information
-///
-/// The encoded result must be freed with `session_protocol_encrypt_for_destination_free` when
-/// the caller is done with the result.
-///
-/// Inputs:
-/// - `plaintext` -- the protobuf serialised payload containing the protobuf encoded stream,
-///   `Content`. It must not be already be encrypted.
-/// - `ed25519_privkey` -- the libsodium-style secret key of the sender, 64 bytes. Can also be
-///   passed as a 32-byte seed. Used to encrypt the plaintext.
-/// - `dest` -- the extra metadata indicating the destination of the message and the necessary data
-///   to encrypt a message for that destination.
-/// - `error` -- Pointer to the character buffer to be populated with the error message if the
-///   returned `success` was false, untouched otherwise. If this is set to `NULL`, then on failure,
-///   the returned `error_len_incl_null_terminator` is the number of bytes required by the user to
-///   receive the error. The message may be truncated if the buffer is too small, but it's always
-///   guaranteed that `error` is null-terminated on failure when a buffer is passed in even if the
-///   error must be truncated to fit in the buffer.
-/// - `error_len` -- The capacity of the character buffer passed by the user. This should be 0 if
-///   `error` is NULL. This function will fill the buffer up to `error_len - 1` characters with the
-///   last character reserved for the null-terminator.
-///
-/// Outputs:
-/// - `success` -- True if encoding was successful, if the underlying implementation threw
-///   an exception then this is caught internally and success is set to false. All remaining fields
-///   are to be ignored in the result on failure.
-/// - `ciphertext` -- Encryption result for the plaintext. The retured payload is suitable for
-///   sending on the wire (i.e: it has been protobuf encoded/wrapped if necessary).
-/// - `error_len_incl_null_terminator` The length of the error message if `success` was false. If
-///   the user passes in an non-`NULL` error buffer this is amount of characters written to the
-///   error buffer. If the user passes in a `NULL` error buffer, this is the amount of characters
-///   required to write the error. Both counts include the null-terminator. The user must allocate
-///   at minimum the requested length for the error message to be preserved in full.
-LIBSESSION_EXPORT
-session_protocol_encoded_for_destination session_protocol_encode_for_destination(
-        const void* plaintext,
-        size_t plaintext_len,
-        OPTIONAL const void* ed25519_privkey,
-        size_t ed25519_privkey_len,
-        const session_protocol_destination* dest,
-        OPTIONAL char* error,
-        size_t error_len) NON_NULL_ARG(1, 5);
 
 /// API: session_protocol/session_protocol_encrypt_for_destination_free
 ///

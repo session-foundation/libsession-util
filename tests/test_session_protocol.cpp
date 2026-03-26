@@ -192,7 +192,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Withhold the pro signature
         char error[256];
         session_protocol_encoded_for_destination encrypt_without_pro_sig =
-                session_protocol_encode_for_1o1(
+                session_protocol_encode_dm_v1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
@@ -208,7 +208,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Set the pro signature
         session_protocol_encoded_for_destination encrypt_with_pro_sig =
-                session_protocol_encode_for_1o1(
+                session_protocol_encode_dm_v1(
                         data_body.data(),
                         data_body.size(),
                         keys.ed_sk0.data(),
@@ -252,7 +252,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         {
             bytes33 recipient_pubkey = {};
             std::memcpy(recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
-            encrypt_result = session_protocol_encode_for_1o1(
+            encrypt_result = session_protocol_encode_dm_v1(
                     plaintext.data(),
                     plaintext.size(),
                     keys.ed_sk0.data(),
@@ -327,43 +327,51 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             protobuf_content.sig_over_plaintext_with_user_pro_key.data(),
             sizeof(base_pro_sig.data));
 
-    session_protocol_destination base_dest = {};
-    base_dest.sent_timestamp_ms = timestamp_ms.time_since_epoch().count();
-    base_dest.pro_rotating_ed25519_privkey = user_pro_ed_sk.data();
-    base_dest.pro_rotating_ed25519_privkey_len = user_pro_ed_sk.size();
-
-    REQUIRE(sizeof(base_dest.recipient_pubkey.data) == keys.session_pk1.size());
-    std::memcpy(base_dest.recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
+    uint64_t base_sent_timestamp_ms = timestamp_ms.time_since_epoch().count();
+    bytes33 base_recipient_pubkey = {};
+    REQUIRE(sizeof(base_recipient_pubkey.data) == keys.session_pk1.size());
+    std::memcpy(base_recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
 
     SECTION("Check non-encryptable messages produce only plaintext") {
-        auto dest_list = {
-                SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
-                SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1};
-
-        for (auto dest_type : dest_list) {
-            if (dest_type == SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX)
-                INFO("Trying community inbox");
-            else
-                INFO("Trying contacts to non-default namespace");
-
-            session_protocol_destination dest = base_dest;
-            dest.type = dest_type;
-            if (dest_type == SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX) {
-                auto [blind15_pk, blind15_sk] = session::blind15_key_pair(
-                        keys.ed_sk1, keys.ed_pk1, /*blind factor*/ nullptr);
-                dest.recipient_pubkey.data[0] = 0x15;
-                std::memcpy(dest.recipient_pubkey.data + 1, blind15_pk.data(), blind15_pk.size());
-            }
+        SECTION("Community inbox") {
+            auto [blind15_pk, blind15_sk] =
+                    session::blind15_key_pair(keys.ed_sk1, keys.ed_pk1, /*blind factor*/ nullptr);
+            bytes33 blind15_recipient = {};
+            blind15_recipient.data[0] = 0x15;
+            std::memcpy(blind15_recipient.data + 1, blind15_pk.data(), blind15_pk.size());
+            bytes32 community_pubkey = {};
 
             session_protocol_encoded_for_destination encrypt_result =
-                    session_protocol_encode_for_destination(
+                    session_protocol_encode_for_community_inbox(
                             protobuf_content.plaintext.data(),
                             protobuf_content.plaintext.size(),
                             keys.ed_sk0.data(),
                             keys.ed_sk0.size(),
-                            &dest,
+                            base_sent_timestamp_ms,
+                            &blind15_recipient,
+                            &community_pubkey,
+                            user_pro_ed_sk.data(),
+                            user_pro_ed_sk.size(),
                             error,
                             sizeof(error));
+            INFO("ERROR: " << error);
+            REQUIRE(encrypt_result.ciphertext.size > 0);
+            REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
+            session_protocol_encode_for_destination_free(&encrypt_result);
+        }
+
+        SECTION("Contact in non-default namespace") {
+            session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_dm_v1(
+                    protobuf_content.plaintext.data(),
+                    protobuf_content.plaintext.size(),
+                    keys.ed_sk0.data(),
+                    keys.ed_sk0.size(),
+                    base_sent_timestamp_ms,
+                    &base_recipient_pubkey,
+                    user_pro_ed_sk.data(),
+                    user_pro_ed_sk.size(),
+                    error,
+                    sizeof(error));
             INFO("ERROR: " << error);
             REQUIRE(encrypt_result.ciphertext.size > 0);
             REQUIRE(encrypt_result.error_len_incl_null_terminator == 0);
@@ -373,13 +381,13 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encrypt/decrypt for contact in default namespace with Pro") {
         // Encrypt content
-        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_dm_v1(
                 protobuf_content.plaintext.data(),
                 protobuf_content.plaintext.size(),
                 keys.ed_sk0.data(),
                 keys.ed_sk0.size(),
-                base_dest.sent_timestamp_ms,
-                &base_dest.recipient_pubkey,
+                base_sent_timestamp_ms,
+                &base_recipient_pubkey,
                 user_pro_ed_sk.data(),
                 user_pro_ed_sk.size(),
                 error,
@@ -446,13 +454,13 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         /*proilfe_bitset*/ profile_bitset);
 
         // Encrypt content
-        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_dm_v1(
                 protobuf_content_with_pro_and_features.plaintext.data(),
                 protobuf_content_with_pro_and_features.plaintext.size(),
                 keys.ed_sk0.data(),
                 keys.ed_sk0.size(),
-                base_dest.sent_timestamp_ms,
-                &base_dest.recipient_pubkey,
+                base_sent_timestamp_ms,
+                &base_recipient_pubkey,
                 user_pro_ed_sk.data(),
                 user_pro_ed_sk.size(),
                 error,
@@ -476,7 +484,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         INFO("ERROR: " << error);
         REQUIRE(decrypt_result.success);
         REQUIRE(decrypt_result.error_len_incl_null_terminator == 0);
-        REQUIRE(decrypt_result.envelope.timestamp_ms == base_dest.sent_timestamp_ms);
+        REQUIRE(decrypt_result.envelope.timestamp_ms == base_sent_timestamp_ms);
         session_protocol_encode_for_destination_free(&encrypt_result);
 
         // Verify pro
@@ -503,19 +511,21 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     }
 
     SECTION("Encrypt/decrypt for legacy groups is rejected") {
-        session_protocol_destination dest = base_dest;
-        dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_GROUP;
-        assert(dest.recipient_pubkey.data[0] == 0x05);
+        CHECK(base_recipient_pubkey.data[0] == 0x05);
+        bytes32 group_enc_key = {};
 
-        session_protocol_encoded_for_destination encrypt_result =
-                session_protocol_encode_for_destination(
-                        protobuf_content.plaintext.data(),
-                        protobuf_content.plaintext.size(),
-                        keys.ed_sk0.data(),
-                        keys.ed_sk0.size(),
-                        &dest,
-                        error,
-                        sizeof(error));
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_group(
+                protobuf_content.plaintext.data(),
+                protobuf_content.plaintext.size(),
+                keys.ed_sk0.data(),
+                keys.ed_sk0.size(),
+                base_sent_timestamp_ms,
+                &base_recipient_pubkey,
+                &group_enc_key,
+                nullptr,
+                0,
+                error,
+                sizeof(error));
         REQUIRE(encrypt_result.error_len_incl_null_terminator > 0);
         REQUIRE(encrypt_result.error_len_incl_null_terminator <= sizeof(error));
         REQUIRE(!encrypt_result.success);
@@ -546,7 +556,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     protobuf_content.plaintext.size(),
                     keys.ed_sk0.data(),
                     keys.ed_sk0.size(),
-                    base_dest.sent_timestamp_ms,
+                    base_sent_timestamp_ms,
                     &group_v2_session_pk,
                     &group_v2_session_sk,
                     user_pro_ed_sk.data(),
@@ -591,13 +601,13 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encrypt/decrypt for sync messages with Pro") {
         // Encrypt
-        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_1o1(
+        session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_dm_v1(
                 protobuf_content.plaintext.data(),
                 protobuf_content.plaintext.size(),
                 keys.ed_sk0.data(),
                 keys.ed_sk0.size(),
-                base_dest.sent_timestamp_ms,
-                &base_dest.recipient_pubkey,
+                base_sent_timestamp_ms,
+                &base_recipient_pubkey,
                 user_pro_ed_sk.data(),
                 user_pro_ed_sk.size(),
                 error,
@@ -664,13 +674,13 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                             /*profile_bitset*/ {});
 
             session_protocol_encoded_for_destination encrypt_bad_result =
-                    session_protocol_encode_for_1o1(
+                    session_protocol_encode_dm_v1(
                             bad_protobuf_content.plaintext.data(),
                             bad_protobuf_content.plaintext.size(),
                             keys.ed_sk0.data(),
                             keys.ed_sk0.size(),
                             bad_timestamp_ms.count(),
-                            &base_dest.recipient_pubkey,
+                            &base_recipient_pubkey,
                             user_pro_ed_sk.data(),
                             user_pro_ed_sk.size(),
                             error,

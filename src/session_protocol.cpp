@@ -270,77 +270,6 @@ ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size) {
     return result;
 }
 
-std::vector<unsigned char> encode_for_1o1(
-        std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
-        const uc33& recipient_pubkey,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
-    Destination dest = {};
-    dest.type = DestinationType::SyncOr1o1;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
-                                              ? *pro_rotating_ed25519_privkey
-                                              : std::span<const unsigned char>{};
-    dest.sent_timestamp_ms = sent_timestamp;
-    dest.recipient_pubkey = recipient_pubkey;
-    return encode_for_destination(plaintext, &ed25519_privkey, dest);
-}
-
-std::vector<unsigned char> encode_for_community_inbox(
-        std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
-        const uc33& recipient_pubkey,
-        const uc32& community_pubkey,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
-    Destination dest = {};
-    dest.type = DestinationType::CommunityInbox;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
-                                              ? *pro_rotating_ed25519_privkey
-                                              : std::span<const unsigned char>{};
-    dest.sent_timestamp_ms = sent_timestamp;
-    dest.recipient_pubkey = recipient_pubkey;
-    dest.community_inbox_server_pubkey = community_pubkey;
-    return encode_for_destination(plaintext, &ed25519_privkey, dest);
-}
-
-std::vector<unsigned char> encode_for_community(
-        std::span<const unsigned char> plaintext,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
-    Destination dest = {};
-    dest.type = DestinationType::Community;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
-                                              ? *pro_rotating_ed25519_privkey
-                                              : std::span<const unsigned char>{};
-    return encode_for_destination(plaintext, nullptr, dest);
-}
-
-std::vector<unsigned char> encode_for_group(
-        std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
-        const uc33& group_ed25519_pubkey,
-        const cleared_uc32& group_enc_key,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey) {
-    Destination dest = {};
-    dest.type = DestinationType::Group;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey
-                                              ? *pro_rotating_ed25519_privkey
-                                              : std::span<const unsigned char>{};
-    dest.sent_timestamp_ms = sent_timestamp;
-    dest.group_ed25519_pubkey = group_ed25519_pubkey;
-    dest.group_enc_key = group_enc_key;
-    return encode_for_destination(plaintext, &ed25519_privkey, dest);
-}
-
-// Interop between the C and CPP API. The C api will request malloc which writes to `ciphertext_c`.
-// This pointer is taken verbatim and avoids requiring a copy from the CPP vector. The CPP api will
-// steal the contents from `ciphertext_cpp`.
-struct EncryptedForDestinationInternal {
-    std::vector<unsigned char> ciphertext_cpp;
-    span_u8 ciphertext_c;
-};
-
 constexpr char PADDING_TERMINATING_BYTE = 0x80;
 std::vector<unsigned char> pad_message(std::span<const unsigned char> payload) {
 
@@ -383,260 +312,163 @@ static std::span<const unsigned char> unpad_message(std::span<const unsigned cha
     return result;
 }
 
-enum class UseMalloc { No, Yes };
-static EncryptedForDestinationInternal encode_for_destination_internal(
+// Attaches a Session Pro signature to an envelope.  If no pro key is provided, a dummy
+// (unverifiable) signature from a throwaway key is used so that pro and non-pro messages are
+// indistinguishable on the wire.
+static void attach_pro_sig_to_envelope(
+        SessionProtos::Envelope& envelope,
+        std::span<const unsigned char> content,
+        const OptionalEd25519PrivKeySpan& pro_key) {
+    std::string* pro_sig = envelope.mutable_prosig();
+    pro_sig->resize(crypto_sign_ed25519_BYTES);
+    if (!pro_key) {
+        uc32 ignore_pk;
+        cleared_uc64 dummy_ed_sk;
+        crypto_sign_ed25519_keypair(ignore_pk.data(), dummy_ed_sk.data());
+        crypto_sign_ed25519_detached(
+                reinterpret_cast<unsigned char*>(pro_sig->data()),
+                nullptr,
+                content.data(),
+                content.size(),
+                dummy_ed_sk.data());
+    } else {
+        crypto_sign_ed25519_detached(
+                reinterpret_cast<unsigned char*>(pro_sig->data()),
+                nullptr,
+                content.data(),
+                content.size(),
+                pro_key->data());
+    }
+}
+
+// TODO: We don't need to actually pad the community message since that's unencrypted,
+// there's no need to make the message sizes uniform but we need it for backwards
+// compat. We can remove this eventually, first step is to unify the clients.
+std::vector<unsigned char> encode_for_community(
         std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan* ed25519_privkey,
-        DestinationType dest_type,
-        std::span<const unsigned char> dest_pro_rotating_ed25519_privkey,
-        std::span<const unsigned char, 33 /*prefix + [x25519 or ed25519] pubkey*/>
-                dest_recipient_pubkey,
-        std::chrono::milliseconds dest_sent_timestamp_ms,
-        std::span<const unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES>
-                dest_community_inbox_server_pubkey,
-        std::span<const unsigned char, 1 + crypto_sign_ed25519_PUBLICKEYBYTES>
-                dest_group_ed25519_pubkey,
-        std::span<const unsigned char> dest_group_enc_key,
-        UseMalloc use_malloc) {
-    assert(dest_group_enc_key.size() == 32 || dest_group_enc_key.size() == 64);
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey) {
+    if (!pro_rotating_ed25519_privkey)
+        return pad_message(plaintext);
 
-    bool is_group = dest_type == DestinationType::Group;
-    bool is_1o1 = dest_type == DestinationType::SyncOr1o1;
-    bool is_community_inbox = dest_type == DestinationType::CommunityInbox;
-    bool is_community = dest_type == DestinationType::Community;
-    assert(is_community || ed25519_privkey);
+    // TODO: Sub-optimal, but we parse the content again to make sure it's valid. Sign
+    // the blob then, fill in the signature in-place as part of the transitioning of
+    // open groups messages to envelopes. As part of that, libsession is going to take
+    // responsibility of constructing community messages so that eventually all
+    // platforms switch over to envelopes and we can change the implementation across
+    // all platforms in one swoop and remove this.
+    //
+    // Parse the content blob
+    SessionProtos::Content content_w_sig;
+    if (!content_w_sig.ParseFromArray(plaintext.data(), plaintext.size()))
+        throw std::runtime_error{"Parsing community message failed"};
 
-    // Ensure the Session Pro rotating key is a 64 byte key if given
-    cleared_uc64 pro_ed_sk_from_seed;
-    if (dest_pro_rotating_ed25519_privkey.size()) {
-        if (dest_pro_rotating_ed25519_privkey.size() == 32) {
-            uc32 ignore_pk;
-            crypto_sign_ed25519_seed_keypair(
-                    ignore_pk.data(),
-                    pro_ed_sk_from_seed.data(),
-                    dest_pro_rotating_ed25519_privkey.data());
-            dest_pro_rotating_ed25519_privkey = to_span(pro_ed_sk_from_seed);
-        } else if (dest_pro_rotating_ed25519_privkey.size() == 64) {
-            dest_pro_rotating_ed25519_privkey = to_span(dest_pro_rotating_ed25519_privkey);
-        } else {
-            throw std::runtime_error{fmt::format(
-                    "Invalid dest_pro_rotating_ed25519_privkey: expected 32 or 64 bytes, received "
-                    "{}",
-                    dest_pro_rotating_ed25519_privkey.size())};
-        }
-    }
+    if (content_w_sig.has_prosigforcommunitymessageonly())
+        throw std::runtime_error{
+                "Pro signature for community message must not be set. Libsession's "
+                "responsible for generating the signature and setting it"};
 
-    std::span<const unsigned char> content = plaintext;
+    // We need to sign the padded content, so we pad the `Content` then sign it
+    std::vector<unsigned char> padded = pad_message(plaintext);
+    uc64 pro_sig;
+    [[maybe_unused]] bool ok = crypto_sign_ed25519_detached(
+                                       pro_sig.data(),
+                                       nullptr,
+                                       padded.data(),
+                                       padded.size(),
+                                       pro_rotating_ed25519_privkey->data()) == 0;
+    assert(ok);
 
-    EncryptedForDestinationInternal result = {};
-    switch (dest_type) {
-        case DestinationType::Group: /*FALLTHRU*/
-        case DestinationType::SyncOr1o1: {
-            if (is_group && dest_group_ed25519_pubkey[0] !=
-                                    static_cast<unsigned char>(SessionIDPrefix::group)) {
-                // Legacy groups which have a 05 prefixed key
-                throw std::runtime_error{
-                        "Unsupported configuration, encrypting for a legacy group (0x05 prefix) is "
-                        "no longer supported"};
-            }
+    // Now assign the community specific pro signature field, reserialize it and we have
+    // to, yes, pad it again. This is all temporary wasted work whilst transitioning
+    // open groups.
+    content_w_sig.set_prosigforcommunitymessageonly(pro_sig.data(), pro_sig.size());
+    std::vector<unsigned char> reserialized(content_w_sig.ByteSizeLong());
+    ok = content_w_sig.SerializeToArray(reserialized.data(), reserialized.size());
+    assert(ok);
+    return pad_message(reserialized);
+}
 
-            // For Sync or 1o1 mesasges, we need to pad the contents to 160 bytes, see:
-            //   https://github.com/session-foundation/session-desktop/blob/a04e62427034a6b6fee39dcff7dbabf0d0131b13/ts/session/crypto/BufferPadding.ts#L49
-            std::vector<unsigned char> tmp_content_buffer;
-            if (is_1o1) {  // Encrypt the padded output
-                std::vector<unsigned char> padded_payload = pad_message(content);
-                tmp_content_buffer = encrypt_for_recipient(
-                        *ed25519_privkey, dest_recipient_pubkey, padded_payload);
-                content = tmp_content_buffer;
-            }
+std::vector<unsigned char> encode_for_community_inbox(
+        std::span<const unsigned char> plaintext,
+        const Ed25519PrivKeySpan& ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        std::span<const unsigned char, 33> recipient_pubkey,
+        std::span<const unsigned char, 32> community_pubkey,
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey) {
+    std::vector<unsigned char> content =
+            encode_for_community(plaintext, pro_rotating_ed25519_privkey);
+    return encrypt_for_blinded_recipient(
+            ed25519_privkey, community_pubkey, recipient_pubkey, content);
+}
 
-            // Create envelope
-            // Set sourcedevice to 1 as per:
-            // https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Utilities/MessageWrapper.swift#L57
-            SessionProtos::Envelope envelope = {};
-            envelope.set_type(
-                    is_1o1 ? SessionProtos::Envelope_Type_SESSION_MESSAGE
-                           : SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE);
-            envelope.set_sourcedevice(1);
-            envelope.set_timestamp(dest_sent_timestamp_ms.count());
-            envelope.set_content(content.data(), content.size());
+std::vector<unsigned char> encode_dm_v1(
+        std::span<const unsigned char> plaintext,
+        const Ed25519PrivKeySpan& ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        std::span<const unsigned char, 33> recipient_pubkey,
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey) {
+    // For 1o1 messages, encrypt the padded payload for the recipient. See:
+    //   https://github.com/session-foundation/session-desktop/blob/a04e62427034a6b6fee39dcff7dbabf0d0131b13/ts/session/crypto/BufferPadding.ts#L49
+    std::vector<unsigned char> encrypted =
+            encrypt_for_recipient(ed25519_privkey, recipient_pubkey, pad_message(plaintext));
 
-            // Generate the session pro signature. If there's no pro ed25519 key specified, we still
-            // fill out the pro signature with a valid but unverifiable signature by creating a
-            // throw-away key. This makes pro and non-pro messages indistinguishable on the wire.
-            {
-                std::string* pro_sig = envelope.mutable_prosig();
-                pro_sig->resize(crypto_sign_ed25519_BYTES);
+    // Create envelope.
+    // Set sourcedevice to 1 as per:
+    //   https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Utilities/MessageWrapper.swift#L57
+    SessionProtos::Envelope envelope;
+    envelope.set_type(SessionProtos::Envelope_Type_SESSION_MESSAGE);
+    envelope.set_sourcedevice(1);
+    envelope.set_timestamp(sent_timestamp.count());
+    envelope.set_content(encrypted.data(), encrypted.size());
+    attach_pro_sig_to_envelope(envelope, encrypted, pro_rotating_ed25519_privkey);
 
-                if (dest_pro_rotating_ed25519_privkey.empty()) {
-                    uc32 ignore_pk;
-                    cleared_uc64 dummy_pro_ed_sk;
-                    crypto_sign_ed25519_keypair(ignore_pk.data(), dummy_pro_ed_sk.data());
-                    crypto_sign_ed25519_detached(
-                            reinterpret_cast<unsigned char*>(pro_sig->data()),
-                            nullptr,
-                            content.data(),
-                            content.size(),
-                            dummy_pro_ed_sk.data());
-                } else {
-                    crypto_sign_ed25519_detached(
-                            reinterpret_cast<unsigned char*>(pro_sig->data()),
-                            nullptr,
-                            content.data(),
-                            content.size(),
-                            dest_pro_rotating_ed25519_privkey.data());
-                }
-            }
+    // Wrap in websocket message
+    WebSocketProtos::WebSocketMessage msg;
+    msg.set_type(WebSocketProtos::WebSocketMessage_Type::WebSocketMessage_Type_REQUEST);
+    WebSocketProtos::WebSocketRequestMessage* req_msg = msg.mutable_request();
+    req_msg->set_verb("");      // Required but unused on iOS
+    req_msg->set_path("");      // Required but unused on iOS
+    req_msg->set_requestid(0);  // Required but unused on iOS
+    req_msg->set_body(envelope.SerializeAsString());
 
-            if (is_group) {
-                std::string bytes = envelope.SerializeAsString();
-                std::vector<unsigned char> ciphertext = encrypt_for_group(
-                        *ed25519_privkey,
-                        dest_group_ed25519_pubkey.subspan<1>(),
-                        dest_group_enc_key,
-                        to_span(bytes),
-                        /*compress*/ true,
-                        /*padding*/ 256);
-
-                if (use_malloc == UseMalloc::Yes) {
-                    result.ciphertext_c =
-                            session::span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
-                } else {
-                    result.ciphertext_cpp = std::move(ciphertext);
-                }
-            } else {
-                // 1o1, Wrap in websocket message
-                WebSocketProtos::WebSocketMessage msg = {};
-                msg.set_type(WebSocketProtos::WebSocketMessage_Type::WebSocketMessage_Type_REQUEST);
-
-                // Make request
-                WebSocketProtos::WebSocketRequestMessage* req_msg = msg.mutable_request();
-                req_msg->set_verb("");      // Required but unused on iOS
-                req_msg->set_path("");      // Required but unused on iOS
-                req_msg->set_requestid(0);  // Required but unused on iOS
-                req_msg->set_body(envelope.SerializeAsString());
-
-                // Write message as ciphertext
-                [[maybe_unused]] bool serialized = false;
-                if (use_malloc == UseMalloc::Yes) {
-                    result.ciphertext_c = span_u8_alloc_or_throw(msg.ByteSizeLong());
-                    serialized = msg.SerializeToArray(
-                            result.ciphertext_c.data, result.ciphertext_c.size);
-                } else {
-                    result.ciphertext_cpp.resize(msg.ByteSizeLong());
-                    serialized = msg.SerializeToArray(
-                            result.ciphertext_cpp.data(), result.ciphertext_cpp.size());
-                }
-                assert(serialized);
-            }
-        } break;
-
-        case DestinationType::Community: /*FALLTHRU*/
-        case DestinationType::CommunityInbox: {
-            // Setup the pro signature for the community message
-            std::vector<unsigned char> tmp_content_buffer;
-
-            // Sign the message with the Session Pro key if given and then pad the message (both
-            // community message types require it)
-            //   https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Sending%20%26%20Receiving/MessageSender.swift#L398
-            if (dest_pro_rotating_ed25519_privkey.size()) {
-                // Key should be verified by the time we hit this branch
-                assert(dest_pro_rotating_ed25519_privkey.size() ==
-                       crypto_sign_ed25519_SECRETKEYBYTES);
-
-                // TODO: Sub-optimal, but we parse the content again to make sure it's valid. Sign
-                // the blob then, fill in the signature in-place as part of the transitioning of
-                // open groups messages to envelopes. As part of that, libsession is going to take
-                // responsibility of constructing community messages so that eventually all
-                // platforms switch over to envelopes and we can change the implementation across
-                // all platforms in one swoop and remove this.
-                //
-                // Parse the content blob
-                SessionProtos::Content content_w_sig = {};
-                if (!content_w_sig.ParseFromArray(content.data(), content.size()))
-                    throw std::runtime_error{"Parsing community message failed"};
-
-                if (content_w_sig.has_prosigforcommunitymessageonly())
-                    throw std::runtime_error{
-                            "Pro signature for community message must not be set. Libsession's "
-                            "responsible for generating the signature and setting it"};
-
-                // We need to sign the padded content, so we pad the `Content` then sign it
-                tmp_content_buffer = pad_message(content);
-                uc64 pro_sig;
-                bool was_signed = crypto_sign_ed25519_detached(
-                                          pro_sig.data(),
-                                          nullptr,
-                                          tmp_content_buffer.data(),
-                                          tmp_content_buffer.size(),
-                                          dest_pro_rotating_ed25519_privkey.data()) == 0;
-                assert(was_signed);
-
-                // Now assign the community specific pro signature field, reserialize it and we have
-                // to, yes, pad it again. This is all temporary wasted work whilst transitioning
-                // open groups.
-                content_w_sig.set_prosigforcommunitymessageonly(pro_sig.data(), pro_sig.size());
-                tmp_content_buffer.resize(content_w_sig.ByteSizeLong());
-                bool serialized = content_w_sig.SerializeToArray(
-                        tmp_content_buffer.data(), tmp_content_buffer.size());
-                assert(serialized);
-
-                tmp_content_buffer = pad_message(tmp_content_buffer);
-                content = tmp_content_buffer;
-            } else {
-                tmp_content_buffer = pad_message(to_span(content));
-                content = tmp_content_buffer;
-            }
-
-            // TODO: We don't need to actually pad the community message since that's unencrypted,
-            // there's no need to make the message sizes uniform but we need it for backwards
-            // compat. We can remove this eventually, first step is to unify the clients.
-
-            if (is_community_inbox) {
-                std::vector<unsigned char> ciphertext = encrypt_for_blinded_recipient(
-                        *ed25519_privkey,
-                        dest_community_inbox_server_pubkey,
-                        dest_recipient_pubkey,  // 33-byte blinded pubkey
-                        content);
-
-                if (use_malloc == UseMalloc::Yes) {
-                    result.ciphertext_c =
-                            span_u8_copy_or_throw(ciphertext.data(), ciphertext.size());
-                } else {
-                    result.ciphertext_cpp = std::move(ciphertext);
-                }
-            } else {
-                if (use_malloc == UseMalloc::Yes) {
-                    result.ciphertext_c = span_u8_copy_or_throw(content.data(), content.size());
-                } else {
-                    result.ciphertext_cpp =
-                            std::vector<unsigned char>(content.begin(), content.end());
-                }
-            }
-        } break;
-    }
+    std::vector<unsigned char> result(msg.ByteSizeLong());
+    [[maybe_unused]] bool ok = msg.SerializeToArray(result.data(), result.size());
+    assert(ok);
     return result;
 }
 
-std::vector<unsigned char> encode_for_destination(
+std::vector<unsigned char> encode_for_group(
         std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan* ed25519_privkey,
-        const Destination& dest) {
+        const Ed25519PrivKeySpan& ed25519_privkey,
+        std::chrono::milliseconds sent_timestamp,
+        std::span<const unsigned char, 33> group_ed25519_pubkey,
+        std::span<const unsigned char, 32> group_enc_key,
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey) {
+    if (group_ed25519_pubkey[0] != static_cast<unsigned char>(SessionIDPrefix::group)) {
+        // Legacy groups which have a 05 prefixed key
+        throw std::runtime_error{
+                "Unsupported configuration, encrypting for a legacy group (0x05 prefix) is "
+                "no longer supported"};
+    }
 
-    EncryptedForDestinationInternal result_internal = encode_for_destination_internal(
-            /*plaintext=*/plaintext,
-            /*ed25519_privkey=*/ed25519_privkey,
-            /*dest_type=*/dest.type,
-            /*dest_pro_rotating_ed25519_privkey=*/dest.pro_rotating_ed25519_privkey,
-            /*dest_recipient_pubkey=*/dest.recipient_pubkey,
-            /*dest_sent_timestamp_ms=*/dest.sent_timestamp_ms,
-            /*dest_community_inbox_server_pubkey=*/dest.community_inbox_server_pubkey,
-            /*dest_group_ed25519_pubkey=*/dest.group_ed25519_pubkey,
-            /*dest_group_enc_key=*/dest.group_enc_key,
-            /*use_malloc=*/UseMalloc::No);
+    // Create envelope.
+    // Set sourcedevice to 1 as per:
+    //   https://github.com/session-foundation/session-ios/blob/82deef869d0f7389b799295817f42ad14f8a1316/SessionMessagingKit/Utilities/MessageWrapper.swift#L57
+    SessionProtos::Envelope envelope;
+    envelope.set_type(SessionProtos::Envelope_Type_CLOSED_GROUP_MESSAGE);
+    envelope.set_sourcedevice(1);
+    envelope.set_timestamp(sent_timestamp.count());
+    envelope.set_content(plaintext.data(), plaintext.size());
+    attach_pro_sig_to_envelope(envelope, plaintext, pro_rotating_ed25519_privkey);
 
-    std::vector<unsigned char> result = std::move(result_internal.ciphertext_cpp);
-    return result;
+    std::string bytes = envelope.SerializeAsString();
+    return encrypt_for_group(
+            ed25519_privkey,
+            group_ed25519_pubkey.subspan<1>(),
+            group_enc_key,
+            to_span(bytes),
+            /*compress*/ true,
+            /*padding*/ 256);
 }
 
 DecodedEnvelope decode_envelope(
@@ -1235,8 +1067,32 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
     return result;
 }
 
+// Shared try/catch wrapper for all C encode functions.
+template <typename Fn>
+static session_protocol_encoded_for_destination c_encode_impl(
+        char* error, size_t error_len, Fn&& fn) {
+    session_protocol_encoded_for_destination result = {};
+    try {
+        auto ciphertext = fn();
+        result = {
+                .success = true,
+                .ciphertext = span_u8_copy_or_throw(ciphertext.data(), ciphertext.size()),
+        };
+    } catch (const std::exception& e) {
+        std::string error_cpp = e.what();
+        result.error_len_incl_null_terminator = snprintf_clamped(
+                                                        error,
+                                                        error_len,
+                                                        "%.*s",
+                                                        static_cast<int>(error_cpp.size()),
+                                                        error_cpp.data()) +
+                                                1;
+    }
+    return result;
+}
+
 LIBSESSION_C_API
-session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
+session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
         const void* plaintext,
         size_t plaintext_len,
         const void* ed25519_privkey,
@@ -1247,23 +1103,15 @@ session_protocol_encoded_for_destination session_protocol_encode_for_1o1(
         size_t pro_rotating_ed25519_privkey_len,
         char* error,
         size_t error_len) {
-
-    session_protocol_destination dest = {};
-    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
-    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
-    dest.recipient_pubkey = *recipient_pubkey;
-    dest.sent_timestamp_ms = sent_timestamp_ms;
-
-    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
-            plaintext,
-            plaintext_len,
-            ed25519_privkey,
-            ed25519_privkey_len,
-            &dest,
-            error,
-            error_len);
-    return result;
+    return c_encode_impl(error, error_len, [&] {
+        return encode_dm_v1(
+                {static_cast<const unsigned char*>(plaintext), plaintext_len},
+                {static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
+                std::chrono::milliseconds(sent_timestamp_ms),
+                recipient_pubkey->data,
+                {static_cast<const unsigned char*>(pro_rotating_ed25519_privkey),
+                 pro_rotating_ed25519_privkey_len});
+    });
 }
 
 LIBSESSION_C_API
@@ -1279,24 +1127,16 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         size_t pro_rotating_ed25519_privkey_len,
         char* error,
         size_t error_len) {
-
-    session_protocol_destination dest = {};
-    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
-    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
-    dest.sent_timestamp_ms = sent_timestamp_ms;
-    dest.recipient_pubkey = *recipient_pubkey;
-    dest.community_inbox_server_pubkey = *community_pubkey;
-
-    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
-            plaintext,
-            plaintext_len,
-            ed25519_privkey,
-            ed25519_privkey_len,
-            &dest,
-            error,
-            error_len);
-    return result;
+    return c_encode_impl(error, error_len, [&] {
+        return encode_for_community_inbox(
+                {static_cast<const unsigned char*>(plaintext), plaintext_len},
+                {static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
+                std::chrono::milliseconds(sent_timestamp_ms),
+                recipient_pubkey->data,
+                community_pubkey->data,
+                {static_cast<const unsigned char*>(pro_rotating_ed25519_privkey),
+                 pro_rotating_ed25519_privkey_len});
+    });
 }
 
 LIBSESSION_C_API
@@ -1307,15 +1147,12 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community(
         size_t pro_rotating_ed25519_privkey_len,
         char* error,
         size_t error_len) {
-
-    session_protocol_destination dest = {};
-    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
-    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
-
-    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
-            plaintext, plaintext_len, nullptr, 0, &dest, error, error_len);
-    return result;
+    return c_encode_impl(error, error_len, [&] {
+        return encode_for_community(
+                {static_cast<const unsigned char*>(plaintext), plaintext_len},
+                {static_cast<const unsigned char*>(pro_rotating_ed25519_privkey),
+                 pro_rotating_ed25519_privkey_len});
+    });
 }
 
 LIBSESSION_C_API
@@ -1331,78 +1168,16 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         size_t pro_rotating_ed25519_privkey_len,
         char* error,
         size_t error_len) {
-
-    session_protocol_destination dest = {};
-    dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_GROUP;
-    dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
-    dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
-    dest.group_ed25519_pubkey = *group_ed25519_pubkey;
-    dest.group_enc_key = *group_enc_key;
-    dest.sent_timestamp_ms = sent_timestamp_ms;
-
-    session_protocol_encoded_for_destination result = session_protocol_encode_for_destination(
-            plaintext,
-            plaintext_len,
-            ed25519_privkey,
-            ed25519_privkey_len,
-            &dest,
-            error,
-            error_len);
-    return result;
-}
-
-LIBSESSION_C_API session_protocol_encoded_for_destination session_protocol_encode_for_destination(
-        const void* plaintext,
-        size_t plaintext_len,
-        const void* ed25519_privkey,
-        size_t ed25519_privkey_len,
-        const session_protocol_destination* dest,
-        char* error,
-        size_t error_len) {
-
-    session_protocol_encoded_for_destination result = {};
-
-    try {
-        std::span<const unsigned char> dest_pro_rotating_ed25519_privkey = std::span(
-                reinterpret_cast<const unsigned char*>(dest->pro_rotating_ed25519_privkey),
-                reinterpret_cast<const unsigned char*>(dest->pro_rotating_ed25519_privkey) +
-                        dest->pro_rotating_ed25519_privkey_len);
-
-        std::optional<Ed25519PrivKeySpan> privkey;
-        if (ed25519_privkey_len)
-            privkey.emplace(
-                    static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len);
-
-        EncryptedForDestinationInternal result_internal = encode_for_destination_internal(
-                /*plaintext=*/{static_cast<const unsigned char*>(plaintext), plaintext_len},
-                /*ed25519_privkey=*/privkey ? &*privkey : nullptr,
-                /*dest_type=*/static_cast<DestinationType>(dest->type),
-                /*dest_pro_rotating_ed25519_privkey=*/dest_pro_rotating_ed25519_privkey,
-                /*dest_recipient_pubkey=*/dest->recipient_pubkey.data,
-                /*dest_sent_timestamp_ms=*/
-                std::chrono::milliseconds(dest->sent_timestamp_ms),
-                /*dest_community_inbox_server_pubkey=*/
-                dest->community_inbox_server_pubkey.data,
-                /*dest_group_ed25519_pubkey=*/dest->group_ed25519_pubkey.data,
-                /*dest_group_enc_key=*/dest->group_enc_key.data,
-                /*use_malloc=*/UseMalloc::Yes);
-
-        result = {
-                .success = true,
-                .ciphertext = result_internal.ciphertext_c,
-        };
-    } catch (const std::exception& e) {
-        std::string error_cpp = e.what();
-        result.error_len_incl_null_terminator = snprintf_clamped(
-                                                        error,
-                                                        error_len,
-                                                        "%.*s",
-                                                        static_cast<int>(error_cpp.size()),
-                                                        error_cpp.data()) +
-                                                1;
-    }
-
-    return result;
+    return c_encode_impl(error, error_len, [&] {
+        return encode_for_group(
+                {static_cast<const unsigned char*>(plaintext), plaintext_len},
+                {static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
+                std::chrono::milliseconds(sent_timestamp_ms),
+                group_ed25519_pubkey->data,
+                group_enc_key->data,
+                {static_cast<const unsigned char*>(pro_rotating_ed25519_privkey),
+                 pro_rotating_ed25519_privkey_len});
+    });
 }
 
 LIBSESSION_C_API void session_protocol_encode_for_destination_free(

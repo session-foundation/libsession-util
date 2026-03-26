@@ -2,6 +2,7 @@
 
 #include <array>
 #include <span>
+#include <stdexcept>
 #include <vector>
 
 #include "session/sodium_array.hpp"
@@ -28,9 +29,9 @@ struct Ed25519PrivKeySpan {
         }
     }
 
-    // Explicit constructor for runtime-known sizes (e.g. at C API boundaries).
+    // Constructor for runtime-known sizes (e.g. at C API boundaries).
     // Throws std::invalid_argument if size is not 32 or 64.
-    explicit Ed25519PrivKeySpan(const unsigned char* data, size_t size) {
+    Ed25519PrivKeySpan(const unsigned char* data, size_t size) {
         if (size == 64)
             data_ = data;
         else if (size == 32) {
@@ -40,12 +41,9 @@ struct Ed25519PrivKeySpan {
             throw std::invalid_argument{"Ed25519 private key must be 32 or 64 bytes"};
     }
 
-    // Named factory aliases for the explicit constructor above, for readability at call sites.
+    // Named factory alias for dynamic-span input.
     static Ed25519PrivKeySpan from(std::span<const unsigned char> key) {
-        return Ed25519PrivKeySpan{key.data(), key.size()};
-    }
-    static Ed25519PrivKeySpan from(const unsigned char* data, size_t size) {
-        return Ed25519PrivKeySpan{data, size};
+        return {key.data(), key.size()};
     }
 
     Ed25519PrivKeySpan(const Ed25519PrivKeySpan&) = delete;
@@ -72,6 +70,47 @@ struct Ed25519PrivKeySpan {
 
     const unsigned char* data_ = nullptr;
     std::optional<cleared_uc64> storage_;
+};
+
+/// Like Ed25519PrivKeySpan but with an optional (nullable) state.  Use this when a private key
+/// parameter is optional; Ed25519PrivKeySpan retains its always-has-value guarantee.
+///
+/// Implicitly constructible from the same 32- or 64-byte sources as Ed25519PrivKeySpan, plus from
+/// default/nullopt for the empty state.  Non-copyable and non-moveable for the same reason as
+/// Ed25519PrivKeySpan.
+struct OptionalEd25519PrivKeySpan {
+    /// Constructs a null (no-key) state.
+    OptionalEd25519PrivKeySpan() = default;
+    OptionalEd25519PrivKeySpan(std::nullopt_t) {}
+
+    template <typename T>
+        requires(
+                std::constructible_from<std::span<const unsigned char, 64>, const T&> ||
+                std::constructible_from<std::span<const unsigned char, 32>, const T&>)
+    OptionalEd25519PrivKeySpan(const T& src) : key_{std::in_place, src} {}
+
+    // Constructor for runtime-known sizes (e.g. at C API boundaries).
+    // size == 0 produces the null state; size == 32 or 64 constructs the key.
+    // Throws std::invalid_argument if size is not 0, 32, or 64.
+    OptionalEd25519PrivKeySpan(const unsigned char* data, size_t size) {
+        if (size)
+            key_.emplace(data, size);
+    }
+
+    OptionalEd25519PrivKeySpan(const OptionalEd25519PrivKeySpan&) = delete;
+    OptionalEd25519PrivKeySpan& operator=(const OptionalEd25519PrivKeySpan&) = delete;
+    OptionalEd25519PrivKeySpan(OptionalEd25519PrivKeySpan&&) = delete;
+    OptionalEd25519PrivKeySpan& operator=(OptionalEd25519PrivKeySpan&&) = delete;
+
+    bool has_value() const { return key_.has_value(); }
+    explicit operator bool() const { return has_value(); }
+
+    const Ed25519PrivKeySpan& value() const { return key_.value(); }
+    const Ed25519PrivKeySpan& operator*() const { return *key_; }
+    const Ed25519PrivKeySpan* operator->() const { return &*key_; }
+
+  private:
+    std::optional<Ed25519PrivKeySpan> key_;
 };
 
 }  // namespace session

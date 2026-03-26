@@ -218,43 +218,6 @@ struct ProFeaturesForMsg {
     size_t codepoint_count;
 };
 
-enum class DestinationType {
-    SyncOr1o1 = SESSION_PROTOCOL_DESTINATION_TYPE_SYNC_OR_1O1,
-    /// Both legacy and non-legacy groups are to be identified as `Group`. A non-legacy
-    /// group is detected by the (0x03) prefix byte on the given `dest_group_pubkey` specified in
-    /// Destination.
-    Group = SESSION_PROTOCOL_DESTINATION_TYPE_GROUP,
-    CommunityInbox = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX,
-    Community = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY,
-};
-
-struct Destination {
-    DestinationType type;
-
-    // Optional rotating Session Pro Ed25519 private key to sign the message with on behalf of the
-    // caller. The Session Pro signature must _not_ be set in the plaintext content passed into the
-    // encoding function.
-    std::span<const unsigned char> pro_rotating_ed25519_privkey;
-
-    // The timestamp to assign to the message envelope
-    std::chrono::milliseconds sent_timestamp_ms;
-
-    // When type => (CommunityInbox || SyncMessage || Contact): set to the recipient's Session
-    // public key
-    uc33 recipient_pubkey;
-
-    // When type => CommunityInbox: set this pubkey to the server's key
-    uc32 community_inbox_server_pubkey;
-
-    // When type => Group: set to the group public keys for a 0x03 prefix (e.g. groups v2)
-    // `group_pubkey` to encrypt the message for.
-    uc33 group_ed25519_pubkey;
-
-    // When type => Group: Set the encryption key of the group for groups v2 messages. Typically
-    // the latest key for the group, e.g: `Keys::group_enc_key` or `groups_keys_group_enc_key`
-    cleared_uc32 group_enc_key;
-};
-
 struct Envelope {
     SESSION_PROTOCOL_ENVELOPE_FLAGS flags;
     std::chrono::milliseconds timestamp;
@@ -395,48 +358,41 @@ ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size);
 /// for the padding-terminating byte.
 std::vector<unsigned char> pad_message(std::span<const unsigned char> payload);
 
-/// API: session_protocol/encode_for_1o1
+/// API: session_protocol/encode_dm_v1
 ///
-/// Encode a plaintext message for a one-on-one (1o1) conversation or sync message in the Session
-/// Protocol. This function wraps the plaintext in the necessary structures and encrypts it for
-/// transmission to a single recipient.
-///
-/// This is a high-level convenience function that internally calls encode_for_destination with
-/// the appropriate Destination configuration for a 1o1 or sync message.
+/// Encode a plaintext "v1" message for a one-on-one conversation message (either text message, or
+/// conversation metadata) in the Session Protocol. This function wraps the plaintext in the
+/// necessary structures and encrypts it for transmission to a single recipient.
 ///
 /// This function throws if any input argument is invalid (e.g., incorrect key sizes).
 ///
 /// Inputs:
-/// - plaintext -- The protobuf serialized payload containing the Content to be encrypted. Must
-///   not be already encrypted and must not be padded.
+/// - plaintext -- The protobuf serialized Content plaintext, unpadded payload of the message.
 /// - ed25519_privkey -- The sender's Ed25519 private key; accepts a 32-byte seed or 64-byte
-///   libsodium key. Used to encrypt the plaintext.
-/// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds. This
-///   should match the protobuf encoded Content's `sigtimestamp` in the given `plaintext`.
-/// - recipient_pubkey -- The recipient's Session public key (33 bytes).
-/// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
-///   secret component of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to
-///   entitle the message with Pro features by signing it. Can also be passed as a 32-byte seed.
-///   Pass in the empty span to opt-out of Pro feature entitlement.
+///   libsodium "secret".  Used to identify the sender and sign the payload.
+/// - sent_timestamp -- The timestamp to assign to the message envelope, in unix epoch milliseconds.
+///   This must match the protobuf encoded Content's `sigTimestamp` in the given `plaintext`.
+/// - recipient_pubkey -- The recipient's Session ID (33 bytes: 0x05 prefix + X25519 pubkey).
+/// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) or seed (32
+///   bytes) of the user's Session Pro Proof `rotating_pubkey`. This key is authorised to entitle
+///   the message with Pro features by signing it.  Can also be passed as a 32-byte seed.  Omit
+///   (or pass std::nullopt) to opt-out of Pro feature entitlement.
 ///
 /// Outputs:
-/// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
-///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<unsigned char> encode_for_1o1(
+/// - Encrypted, encoded payload, with all required protobuf encoding and wrapping.
+std::vector<unsigned char> encode_dm_v1(
         std::span<const unsigned char> plaintext,
         const Ed25519PrivKeySpan& ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const uc33& recipient_pubkey,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey);
+        std::span<const unsigned char, 33> recipient_pubkey,
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey = std::nullopt);
 
 /// API: session_protocol/encode_for_community_inbox
 ///
-/// Encode a plaintext message for a community inbox in the Session Protocol. This function wraps
-/// the plaintext in the necessary structures and encrypts it for transmission to a community inbox
-/// server.
-///
-/// This is a high-level convenience function that internally calls encode_for_destination with
-/// the appropriate Destination configuration for a community inbox message.
+/// Encode a plaintext message for a community-handled direct message in the Session Protocol.  Such
+/// DMs are used to initiate contact with blinded users without needing to expose their Session ID
+/// unless they accept the contact.  This function wraps the plaintext in the necessary structures
+/// and encrypts it for transmission to a community inbox server.
 ///
 /// This function throws if any input argument is invalid (e.g., incorrect key sizes).
 ///
@@ -460,16 +416,16 @@ std::vector<unsigned char> encode_for_community_inbox(
         std::span<const unsigned char> plaintext,
         const Ed25519PrivKeySpan& ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const uc33& recipient_pubkey,
-        const uc32& community_pubkey,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey);
+        std::span<const unsigned char, 33> recipient_pubkey,
+        std::span<const unsigned char, 32> community_pubkey,
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey);
 
-/// API: session_protocol/encode_for_community
+/// API: session_protocol/encode_community_message
 ///
-/// Encode a plaintext `Content` message for a community in the Session Protocol. This function
-/// encodes Session Pro metadata including generating and embedding the Session Pro signature, when
-/// given a Session Pro rotating Ed25519 key into the final payload suitable for transmission on the
-/// wire.
+/// Encode a plaintext `Content` message for sending to a community in the Session Protocol. This
+/// function encodes Session Pro metadata including generating and embedding the Session Pro
+/// signature, when given a Session Pro rotating Ed25519 key into the final payload suitable for
+/// transmission on the wire.
 ///
 /// This function throws if any input argument is invalid (e.g., incorrect key sizes). It also
 /// throws if the pro signature is already set in the plaintext `Content` or the `plaintext` cannot
@@ -488,17 +444,14 @@ std::vector<unsigned char> encode_for_community_inbox(
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
 std::vector<unsigned char> encode_for_community(
         std::span<const unsigned char> plaintext,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey);
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_group
 ///
 /// Encode a plaintext message for a group in the Session Protocol. This function wraps the
 /// plaintext in the necessary structures and encrypts it for transmission to a group, using the
-/// group's encryption key. Only v2 groups, (0x03) prefixed keys are supported. Passing a legacy
-/// group (0x05) prefixed key will cause the function to throw.
-///
-/// This is a high-level convenience function that internally calls encode_for_destination with
-/// the appropriate Destination configuration for a group message.
+/// group's encryption key. Only v2 groups (with 0x03 prefixed keys) are supported. Passing a legacy
+/// group (0x05 prefix) will cause the function to throw.
 ///
 /// This function throws if any input argument is invalid (e.g., incorrect key sizes).
 ///
@@ -523,41 +476,9 @@ std::vector<unsigned char> encode_for_group(
         std::span<const unsigned char> plaintext,
         const Ed25519PrivKeySpan& ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        const uc33& group_ed25519_pubkey,
-        const cleared_uc32& group_enc_key,
-        std::optional<std::span<const unsigned char>> pro_rotating_ed25519_privkey);
-
-/// API: session_protocol/encode_for_destination
-///
-/// Given an unencrypted plaintext representation of the content (i.e.: protobuf encoded stream of
-/// `Content`), encrypt and/or wrap the plaintext in the necessary structures for transmission on
-/// the Session Protocol.
-///
-/// Calling this function requires filling out the options in the `Destination` struct with the
-/// appropriate values for the desired destination. Check the annotation on `Destination` for more
-/// information on how to fill this struct. Alternatively, there are higher level functions, encrypt
-/// for 1o1, group and community functions which thunk into this low-level function for convenience.
-///
-/// This function throws if the API is misused (i.e.: A field was not set, but was required to be
-/// set for the given destination and namespace. For example the group keys not being set
-/// when sending to a group prefixed [0x3] key in a group)
-/// but otherwise returns a struct with values.
-///
-/// Inputs:
-/// - `plaintext` -- the protobuf serialised payload containing the protobuf encoded stream,
-///   `Content`. It must not be already be encrypted and must not be padded.
-/// - `ed25519_privkey` -- the sender's Ed25519 private key; accepts a 32-byte seed or 64-byte
-///   libsodium key. Null for community (unencrypted) destinations.
-/// - `dest` -- the extra metadata indicating the destination of the message and the necessary data
-///   to encrypt a message for that destination.
-///
-/// Outputs:
-/// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
-///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<unsigned char> encode_for_destination(
-        std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan* ed25519_privkey,
-        const Destination& dest);
+        std::span<const unsigned char, 33> group_ed25519_pubkey,
+        std::span<const unsigned char, 32> group_enc_key,
+        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/decode_envelope
 ///
