@@ -44,6 +44,8 @@ constexpr std::string_view ENDPOINT_FILE = "file";
 constexpr std::string_view ENDPOINT_FILE_INDIVIDUAL = "file/{}";
 constexpr std::string_view ENDPOINT_EXTEND = "file/{}/extend";
 
+constexpr std::string_view LEGACY_ENDPOINT_FILE_INDIVIDUAL = "files/{}";
+
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {scheme}://{host}/file/{file_id}(?:#p={customPubkey})(?:d)
     // Examples:
@@ -55,8 +57,14 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
 
     auto match = backends::match_endpoint(ENDPOINT_FILE_INDIVIDUAL, url);
 
-    if (!match || match->base.empty() || match->captures.size() != 1)
-        return std::nullopt;
+    if (!match || match->base.empty() || match->captures.size() != 1) {
+        // Need to fallback to checking the legacy endpoint because some clients seem to still be
+        // generating download urls with it
+        match = backends::match_endpoint(LEGACY_ENDPOINT_FILE_INDIVIDUAL, url);
+
+        if (!match || match->base.empty() || match->captures.size() != 1)
+            return std::nullopt;
+    }
 
     info.file_id = match->captures[0];
 

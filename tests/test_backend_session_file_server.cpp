@@ -78,6 +78,11 @@ TEST_CASE("Download url parsing", "[backend][session_file_server]") {
           "0123456789abcdef0123456789abcdef00000000000000000000000000000000"sv);
     CHECK(parsed_download_url->wants_stream_decryption);
 
+    // Doesn't have an issue with a legacy url
+    parsed_download_url = file_server::parse_download_url(
+            "http://filev2.getsession.org/files/2478430809375318"sv);
+    CHECK(parsed_download_url.has_value());
+
     // Doesn't have an issue with a url that isn't in the right format
     parsed_download_url = file_server::parse_download_url("https://example.com/test/test2"sv);
     CHECK_FALSE(parsed_download_url.has_value());

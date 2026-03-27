@@ -119,8 +119,7 @@ class Network : public std::enable_shared_from_this<Network> {
     void _handle_421_retry(Request original_request, network_response_callback_t final_callback);
 
     void _resync_clock(
-            std::optional<Request> original_request,
-            std::optional<network_response_callback_t> request_callback);
+            std::optional<Request> original_request, network_response_callback_t request_callback);
     void _launch_next_clock_out_of_sync_request(
             const std::string& request_id,
             const uint8_t index,

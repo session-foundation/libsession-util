@@ -57,12 +57,13 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::quic_disable_mtu_discovery);
 
         // Onion request router options
-        HANDLE_TYPE(opt::onionreq_edge_node_cache_duration);
         HANDLE_TYPE(opt::onionreq_path_strike_threshold);
+        HANDLE_TYPE(opt::onionreq_min_path_count);
+        HANDLE_TYPE(opt::onionreq_single_path_mode);
+        HANDLE_TYPE(opt::onionreq_disable_pre_build_paths);
         HANDLE_TYPE(opt::onionreq_path_build_retry_limit);
         HANDLE_TYPE(opt::onionreq_path_rotation_frequency);
-        HANDLE_TYPE(opt::onionreq_min_path_count);
-        HANDLE_TYPE(opt::onionreq_disable_pre_build_paths);
+        HANDLE_TYPE(opt::onionreq_edge_node_cache_duration);
 
         log::warning(cat, "Ignoring unknown option type in Config constructor");
 #undef HANDLE_TYPE

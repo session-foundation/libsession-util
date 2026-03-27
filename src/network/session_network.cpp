@@ -244,7 +244,7 @@ Network::Network(config::Config _conf) :
     _transport->on_status_changed = [this] { _recalculate_status(); };
 
     // Perform a clock resync
-    _loop->call_soon([this] { _resync_clock(std::nullopt, std::nullopt); });
+    _loop->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
 }
 
 Network::~Network() {
@@ -334,7 +334,7 @@ void Network::resume(bool automatically_reconnect) {
                 log::info(
                         cat,
                         "Performing clock resync as enough time has passed since the last resync.");
-                _resync_clock(std::nullopt, std::nullopt);
+                _resync_clock(std::nullopt, nullptr);
             });
         }
 
@@ -526,7 +526,7 @@ void Network::upload(UploadRequest request) {
             // request
             if (*status_code == ERROR_TOO_EARLY) {
                 log::info(cat, "Upload received 425, triggering clock resync.");
-                _resync_clock(std::nullopt, std::nullopt);
+                _resync_clock(std::nullopt, nullptr);
 
                 // Can't retry an upload as the data stream has already been consumed, so
                 // just return the error
@@ -581,7 +581,7 @@ void Network::download(DownloadRequest request) {
                             std::function<void(std::variant<file_metadata, int16_t>, bool)>>>>();
 
                 _clock_resync_download_queue->emplace_back(req, user_callback);
-                _resync_clock(std::nullopt, std::nullopt);
+                _resync_clock(std::nullopt, nullptr);
                 return;
             }
         }
@@ -855,18 +855,28 @@ void Network::_handle_421_retry(
 }
 
 void Network::_resync_clock(
-        std::optional<Request> original_request,
-        std::optional<network_response_callback_t> request_callback) {
+        std::optional<Request> original_request, network_response_callback_t request_callback) {
     if (_suspended) {
         log::info(cat, "Ignoring clock resync attempt as network is suspended.");
         if (request_callback)
-            (*request_callback)(
+            request_callback(
                     false,
                     false,
                     ERROR_NETWORK_SUSPENDED,
                     {content_type_plain_text},
                     "Network is suspended.");
         return;
+    }
+
+    if (!_snode_pool) {
+        log::info(cat, "Ignoring clock resync attempt as SnodePool has been destroyed.");
+        if (request_callback)
+            request_callback(
+                    false,
+                    false,
+                    ERROR_NO_SNODE_POOL,
+                    {content_type_plain_text},
+                    "SnodePool was destroyed.");
     }
 
     // Add the request to the request queue, we do this so we can trigger it's callback after the
@@ -877,8 +887,7 @@ void Network::_resync_clock(
         if (!_clock_resync_request_queue)
             _clock_resync_request_queue = detail::RequestQueue::make(_loop);
 
-        _clock_resync_request_queue->add(
-                std::move(*original_request), std::move(*request_callback));
+        _clock_resync_request_queue->add(std::move(*original_request), std::move(request_callback));
     }
 
     // Only allow a single clock resync at a time
@@ -896,13 +905,18 @@ void Network::_resync_clock(
     _current_clock_resync_id = request_id;
     _clock_resync_results.clear();
 
-    // Pick the random nodes we want to use for retrying (these won't change for this resync
-    // attempt)
-    auto resync_nodes = _snode_pool->get_unused_nodes(config.num_nodes_to_check_for_network_offset);
+    // Refresh the snode pool if needed to ensure we have the most up-to-date cache
+    std::vector<service_node> nodes_to_exclude = _router->get_all_used_nodes();
+    _snode_pool->refresh_if_needed(std::move(nodes_to_exclude), [this, request_id] {
+        // Pick the random nodes we want to use for retrying (these won't change for this resync
+        // attempt)
+        auto resync_nodes =
+                _snode_pool->get_unused_nodes(config.num_nodes_to_check_for_network_offset);
 
-    for (uint8_t i = 0; i < resync_nodes.size(); ++i)
-        _launch_next_clock_out_of_sync_request(
-                request_id, i, resync_nodes[i], config.num_nodes_to_check_for_network_offset);
+        for (uint8_t i = 0; i < resync_nodes.size(); ++i)
+            _launch_next_clock_out_of_sync_request(
+                    request_id, i, resync_nodes[i], config.num_nodes_to_check_for_network_offset);
+    });
 }
 
 void Network::_launch_next_clock_out_of_sync_request(
