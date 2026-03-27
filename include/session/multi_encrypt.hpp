@@ -34,9 +34,9 @@ namespace detail {
 
     void encrypt_multi_key(
             std::array<unsigned char, 32>& key_out,
-            const unsigned char* a,
-            const unsigned char* A,
-            const unsigned char* B,
+            std::span<const unsigned char, 32> a,
+            std::span<const unsigned char, 32> A,
+            std::span<const unsigned char, 32> B,
             bool encrypting,
             std::string_view domain);
 
@@ -139,7 +139,8 @@ void encrypt_for_multiple(
         if (messages.size() > 1)
             ++msg_it;
         try {
-            detail::encrypt_multi_key(key, privkey.data(), pubkey.data(), r.data(), true, domain);
+            detail::encrypt_multi_key(
+                    key, privkey.first<32>(), pubkey.first<32>(), r.first<32>(), true, domain);
         } catch (const std::exception&) {
             if (ignore_invalid_recipient)
                 continue;
@@ -213,7 +214,7 @@ std::optional<std::vector<unsigned char>> decrypt_for_multiple(
 
     sodium_cleared<std::array<unsigned char, 32>> key;
     detail::encrypt_multi_key(
-            key, privkey.data(), pubkey.data(), sender_pubkey.data(), false, domain);
+            key, privkey.first<32>(), pubkey.first<32>(), sender_pubkey.first<32>(), false, domain);
 
     auto decrypted = std::make_optional<std::vector<unsigned char>>();
 

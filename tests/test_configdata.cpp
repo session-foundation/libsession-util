@@ -1,11 +1,11 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_exception.hpp>
 #include <session/config.hpp>
+#include <session/hash.hpp>
 #include <session/util.hpp>
 
 #include "session/bt_merge.hpp"
@@ -105,13 +105,6 @@ auto& d(config::dict_value& v) {
 // or set
 auto& s(config::dict_value& v) {
     return std::get<config::set>(v);
-}
-
-std::vector<unsigned char> blake2b(std::span<const unsigned char> data) {
-    std::vector<unsigned char> result;
-    result.resize(32);
-    crypto_generichash_blake2b(result.data(), 32, data.data(), data.size(), nullptr, 0);
-    return result;
 }
 
 TEST_CASE("config diff", "[config][diff]") {
@@ -556,7 +549,7 @@ TEST_CASE("config message example 1", "[config][example]") {
 
     CHECK(printable(m118.serialize()) == printable(m118_expected));
 
-    CHECK(to_hex(m118.hash()) == to_hex(blake2b(m118_expected)));
+    CHECK(to_hex(m118.hash()) == to_hex(hash::blake2b<32>(m118_expected)));
 
     // Increment 5 times so that our diffs will be empty.
     auto m123 = m118.increment();
@@ -760,7 +753,7 @@ TEST_CASE("config message example 2", "[config][example]") {
             "l" "i122e" "32:"+to_string(h122)+ "de" "e"
             "l"
               "i123e"
-              "32:"+to_string(blake2b(m123_expected))+
+              "32:"+to_string(hash::blake2b<32>(m123_expected))+
               "d"
                 "4:int0" "1:-"
                 "4:int1" "0:"

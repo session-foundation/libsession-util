@@ -26,6 +26,9 @@ namespace session::hash {
 /// - `msg` -- the message to generate a hash for.
 /// - `key` -- an optional key to be used when generating the hash.  Can be omitted or an empty
 ///   string for an unkeyed hash.  Must be less than 64 bytes long.
+///
+/// Deprecated: prefer hash::blake2b (unkeyed) or hash::blake2b_key (keyed) instead.
+[[deprecated("Use hash::blake2b or hash::blake2b_key instead")]]
 void hash(
         std::span<unsigned char> hash,
         std::span<const unsigned char> msg,
@@ -44,6 +47,9 @@ void hash(
 ///
 /// Outputs:
 /// - a `size` byte hash.
+///
+/// Deprecated: prefer hash::blake2b (unkeyed) or hash::blake2b_key (keyed) instead.
+[[deprecated("Use hash::blake2b or hash::blake2b_key instead")]]
 std::vector<unsigned char> hash(
         const size_t size,
         std::span<const unsigned char> msg,
@@ -126,7 +132,8 @@ concept Blake2BOutputContainer = HashOutputContainer<T> && detail::container_ext
 template <typename T>
 concept Blake2BKey =
         std::ranges::contiguous_range<T> && oxenc::basic_char<std::ranges::range_value_t<T>> &&
-        detail::container_extent_v<T> != std::dynamic_extent && detail::container_extent_v<T> <= 64;
+        (detail::container_extent_v<T> == std::dynamic_extent ||
+         detail::container_extent_v<T> <= 64);
 
 /// Helper value to pass a null `key` to blake2b or blake2b_pers.
 inline constexpr std::span<unsigned char, 0> nullkey{};
@@ -135,18 +142,31 @@ inline constexpr std::span<unsigned char, 0> nullkey{};
 ///
 /// This version of blake2b() takes a key as the second argument and computes a keyed hash.  The key
 /// must be between 0 and 64 characters long.  (A 0-length key is equivalent to no key).
+///
+/// Two overloads are provided:
+/// - write-to-output: `blake2b_key(out, key, args...)` writes the hash into `out`
+/// - return-value: `blake2b_key<N>(key, args...)` returns a `std::array<unsigned char, N>`
 template <Blake2BOutputContainer Out, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_key(Out& out, const Key& key, const T&... args) {
     crypto_generichash_blake2b_state st;
+    // Dynamic-extent keys are silently truncated to 64 bytes (the blake2b key size limit); static-
+    // extent keys are guaranteed ≤ 64 at compile time by the Blake2BKey concept.
     crypto_generichash_blake2b_init(
             &st,
             reinterpret_cast<const unsigned char*>(std::ranges::data(key)),
-            std::ranges::size(key),
+            std::min<size_t>(std::ranges::size(key), 64),
             std::ranges::size(out));
     update_all(st, args...);
     crypto_generichash_blake2b_final(
             &st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), std::ranges::size(out));
+}
+template <size_t N, Blake2BKey Key, HashInput... T>
+    requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
+std::array<unsigned char, N> blake2b_key(const Key& key, const T&... args) {
+    std::array<unsigned char, N> result;
+    blake2b_key(result, key, args...);
+    return result;
 }
 
 /// API: hash/blake2b
@@ -164,10 +184,21 @@ void blake2b_key(Out& out, const Key& key, const T&... args) {
 ///
 /// It is permitted for overlap between the output and input containers; the output container is not
 /// written until all input containers have been consumed.
+///
+/// Two overloads are provided:
+/// - write-to-output: `blake2b(out, args...)` writes the hash into `out`
+/// - return-value: `blake2b<N>(args...)` returns a `std::array<unsigned char, N>`
 template <Blake2BOutputContainer Out, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b(Out& out, const T&... args) {
     return blake2b_key(out, nullkey, args...);
+}
+template <size_t N, HashInput... T>
+    requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
+std::array<unsigned char, N> blake2b(const T&... args) {
+    std::array<unsigned char, N> result;
+    blake2b(result, args...);
+    return result;
 }
 
 /// API: hash/blake2b_key_pers
@@ -176,6 +207,11 @@ void blake2b(Out& out, const T&... args) {
 /// and third arguments and computes a keyed hash with a personalisation string.  The
 /// personalisation string must be exact 16 bytes, and is typically constructed with "..."_b2b_pers
 /// for compile-time validation.  The key must be between 0 and 64 bytes long.
+///
+/// Two overloads are provided:
+/// - write-to-output: `blake2b_key_pers(out, key, pers, args...)` writes the hash into `out`
+/// - return-value: `blake2b_key_pers<N>(key, pers, args...)` returns a `std::array<unsigned char,
+/// N>`
 template <Blake2BOutputContainer Out, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_key_pers(
@@ -184,7 +220,7 @@ void blake2b_key_pers(
     crypto_generichash_blake2b_init_salt_personal(
             &st,
             reinterpret_cast<const unsigned char*>(std::ranges::data(key)),
-            std::ranges::size(key),
+            std::min<size_t>(std::ranges::size(key), 64),
             std::ranges::size(out),
             /*salt=*/nullptr,
             pers.data());
@@ -192,16 +228,36 @@ void blake2b_key_pers(
     crypto_generichash_blake2b_final(
             &st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), std::ranges::size(out));
 }
+template <size_t N, Blake2BKey Key, HashInput... T>
+    requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
+std::array<unsigned char, N> blake2b_key_pers(
+        const Key& key, std::span<const unsigned char, 16> pers, const T&... args) {
+    std::array<unsigned char, N> result;
+    blake2b_key_pers(result, key, pers, args...);
+    return result;
+}
 
 /// API: hash/blake2b_pers
 ///
 /// This version of blake2b() takes a 16-byte personality string as the second argument and computes
 /// a unkeyed hash with a personalisation string.  The personalization string must be exact 16
 /// bytes, and is typically constructed with "..."_b2b_pers for compile-time validation.
+///
+/// Two overloads are provided:
+/// - write-to-output: `blake2b_pers(out, pers, args...)` writes the hash into `out`
+/// - return-value: `blake2b_pers<N>(pers, args...)` returns a `std::array<unsigned char, N>`
 template <Blake2BOutputContainer Out, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_pers(Out& out, std::span<const unsigned char, 16> pers, const T&... args) {
     return blake2b_key_pers(out, nullkey, pers, args...);
+}
+template <size_t N, HashInput... T>
+    requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
+std::array<unsigned char, N> blake2b_pers(
+        std::span<const unsigned char, 16> pers, const T&... args) {
+    std::array<unsigned char, N> result;
+    blake2b_pers(result, pers, args...);
+    return result;
 }
 
 /// API: hash/shake256
@@ -252,6 +308,15 @@ struct [[nodiscard]] shake256 {
          ...);
         return *this;
     }
+
+    /// Squeezes N bytes from the state and returns them as a `std::array<unsigned char, N>`.
+    template <size_t N>
+        requires(N >= 1)
+    std::array<unsigned char, N> squeeze() {
+        std::array<unsigned char, N> result;
+        (*this)(result);
+        return result;
+    }
 };
 
 /// API: hash/sha3_256
@@ -274,6 +339,10 @@ struct [[nodiscard]] shake256 {
 /// use of init_with_domain, not a workaround.
 ///
 /// The temporary keccak state is zeroed before this function returns.
+///
+/// Two overloads are provided:
+/// - write-to-output: `sha3_256(out, args...)` writes the hash into `out`
+/// - return-value: `sha3_256<32>(args...)` returns a `std::array<unsigned char, 32>`
 template <HashOutputContainer Out, HashInput... T>
     requires(detail::container_extent_v<Out> == 32 && sizeof...(T) > 0)
 void sha3_256(Out& out, const T&... args) {
@@ -281,6 +350,13 @@ void sha3_256(Out& out, const T&... args) {
     detail::keccak_absorb(st, 0x06, args...);
     crypto_xof_shake256_squeeze(&st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), 32);
     sodium_memzero(&st, sizeof(st));
+}
+template <size_t N, HashInput... T>
+    requires(N == 32 && sizeof...(T) > 0)
+std::array<unsigned char, 32> sha3_256(const T&... args) {
+    std::array<unsigned char, 32> result;
+    sha3_256(result, args...);
+    return result;
 }
 
 // Helper callable usable with unordered_map and similar to hash an array of chars by simply copying

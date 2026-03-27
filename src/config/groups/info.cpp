@@ -1,7 +1,6 @@
 #include "session/config/groups/info.hpp"
 
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 
 #include <variant>
 

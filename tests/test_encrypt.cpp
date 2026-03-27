@@ -1,5 +1,4 @@
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
 #include <catch2/catch_test_macros.hpp>

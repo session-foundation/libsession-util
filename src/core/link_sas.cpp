@@ -10,8 +10,7 @@ using namespace session::literals;
 namespace session::core {
 
 std::array<std::byte, 16> derive_sas_seed(std::span<const std::byte> plaintext) {
-    std::array<unsigned char, 16> salt;
-    hash::blake2b_pers(salt, "SessionLinkEmoji"_b2b_pers, plaintext);
+    auto salt = hash::blake2b_pers<16>("SessionLinkEmoji"_b2b_pers, plaintext);
 
     std::array<std::byte, 16> seed;
     if (0 != crypto_pwhash(

@@ -225,9 +225,7 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
 
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L171
-    uc32 hash_to_sign;
-    hash::blake2b_pers(
-            hash_to_sign,
+    auto hash_to_sign = hash::blake2b_pers<32>(
             ADD_PRO_PAYMENT_PERS,
             version,
             master_privkey.subspan(
@@ -389,9 +387,7 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
     uint8_t version = 0;
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
-    uc32 hash_to_sign;
-    hash::blake2b_pers(
-            hash_to_sign,
+    auto hash_to_sign = hash::blake2b_pers<32>(
             GENERATE_PROOF_PERS,
             version,
             master_privkey.last<32>(),
@@ -551,14 +547,8 @@ uc64 GetProDetailsRequest::build_sig(
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
-    uc32 hash_to_sign;
-    hash::blake2b_pers(
-            hash_to_sign,
-            GET_PRO_DETAILS_PERS,
-            version,
-            master_privkey.last<32>(),
-            unix_ts_ms,
-            count);
+    auto hash_to_sign = hash::blake2b_pers<32>(
+            GET_PRO_DETAILS_PERS, version, master_privkey.last<32>(), unix_ts_ms, count);
 
     // Sign the hash
     uc64 result = {};
@@ -784,11 +774,9 @@ uc64 SetPaymentRefundRequestedRequest::build_sig(
 
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5962925d7f18f83a3ff5774885495e5dd55ecb0a/server.py#L634
-    uc32 hash_to_sign;
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
     uint64_t refund_requested_unix_ts_ms = epoch_ms(refund_requested_unix_ts);
-    hash::blake2b_pers(
-            hash_to_sign,
+    auto hash_to_sign = hash::blake2b_pers<32>(
             SET_PAYMENT_REFUND_REQUESTED_PERS,
             version,
             master_privkey.subspan(

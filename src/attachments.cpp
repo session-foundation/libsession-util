@@ -2,7 +2,6 @@
 
 #include <session/attachments.h>
 #include <sodium/crypto_core_hchacha20.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_secretstream_xchacha20poly1305.h>
 
 #include <concepts>
@@ -313,19 +312,16 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
     crypto_generichash_blake2b_state b_st;
     const auto domain_byte = static_cast<unsigned char>(domain);
     crypto_generichash_blake2b_init(&b_st, &domain_byte, 1, nonce_key.size());
-    crypto_generichash_blake2b_update(
-            &b_st, reinterpret_cast<const unsigned char*>(seed.data()), 32);
+    hash::update_all(b_st, seed.first(32));
 
     size_t in_size = 0;
     std::array<std::byte, 4096> chunk;
     while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size())) {
-        crypto_generichash_blake2b_update(
-                &b_st, reinterpret_cast<const unsigned char*>(chunk.data()), chunk.size());
+        hash::update_all(b_st, chunk);
         in_size += chunk.size();
     }
     if (in.gcount() > 0) {
-        crypto_generichash_blake2b_update(
-                &b_st, reinterpret_cast<const unsigned char*>(chunk.data()), in.gcount());
+        hash::update_all(b_st, std::span{chunk}.first(in.gcount()));
         in_size += in.gcount();
     }
 

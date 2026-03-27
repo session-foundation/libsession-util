@@ -5,7 +5,6 @@
 #include <sodium/core.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
 #include <sodium/crypto_core_ed25519.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_scalarmult_curve25519.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
 #include <sodium/crypto_sign_ed25519.h>
@@ -298,14 +297,11 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
     crypto_generichash_blake2b_init(
             &st, enc_key_hash_key.data(), enc_key_hash_key.size(), h1.size());
     for (const auto& m : members)
-        crypto_generichash_blake2b_update(
-                &st, to_unsigned(m.session_id.data()), m.session_id.size());
+        hash::update_all(st, m.session_id);
 
     auto gen = keys_.empty() ? 0 : keys_.back().generation + 1;
     auto gen_str = std::to_string(gen);
-    crypto_generichash_blake2b_update(&st, to_unsigned(gen_str.data()), gen_str.size());
-
-    crypto_generichash_blake2b_update(&st, h2.data(), 32);
+    hash::update_all(st, gen_str, h2);
 
     crypto_generichash_blake2b_final(&st, h1.data(), h1.size());
 
@@ -373,8 +369,8 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
             std::vector<unsigned char> junk_data;
             junk_data.resize(encrypted.size() * n_junk);
 
-            std::array<unsigned char, randombytes_SEEDBYTES> rng_seed;
-            hash::blake2b_key(rng_seed, junk_seed_hash_key, h1, _sign_sk);
+            auto rng_seed =
+                    hash::blake2b_key<randombytes_SEEDBYTES>(junk_seed_hash_key, h1, _sign_sk);
 
             randombytes_buf_deterministic(junk_data.data(), junk_data.size(), rng_seed.data());
             std::string_view junk_view = to_string_view(junk_data);
@@ -469,12 +465,10 @@ std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& 
             &st, enc_key_hash_key.data(), enc_key_hash_key.size(), h1.size());
 
     for (const auto& sid : sids)
-        crypto_generichash_blake2b_update(&st, to_unsigned(sid.data()), sid.size());
-
-    crypto_generichash_blake2b_update(&st, to_unsigned(supp_keys.data()), supp_keys.size());
+        hash::update_all(st, sid);
 
     std::array<unsigned char, 32> h2 = seed_hash(seed_hash_key);
-    crypto_generichash_blake2b_update(&st, h2.data(), h2.size());
+    hash::update_all(st, supp_keys, h2);
 
     crypto_generichash_blake2b_final(&st, h1.data(), h1.size());
 
@@ -537,9 +531,7 @@ std::array<unsigned char, 32> Keys::subaccount_blind_factor(
     auto mask = seed_hash("SessionGroupSubaccountMask");
     static_assert(mask.size() == crypto_generichash_blake2b_KEYBYTES);
 
-    std::array<unsigned char, 64> h;
-    hash::blake2b_key(
-            h,
+    auto h = hash::blake2b_key<64>(
             mask,
             std::array<unsigned char, 1>{'\x05'},
             session_xpk,

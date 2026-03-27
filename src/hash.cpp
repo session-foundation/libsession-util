@@ -5,9 +5,9 @@
 #include "session/export.h"
 #include "session/util.hpp"
 
-namespace session::hash {
+namespace {
 
-void hash(
+void hash_impl(
         std::span<unsigned char> hash,
         std::span<const unsigned char> msg,
         std::optional<std::span<const unsigned char>> key) {
@@ -27,14 +27,23 @@ void hash(
             key ? key->size() : 0);
 }
 
+}  // namespace
+
+namespace session::hash {
+
+void hash(
+        std::span<unsigned char> hash,
+        std::span<const unsigned char> msg,
+        std::optional<std::span<const unsigned char>> key) {
+    hash_impl(hash, msg, key);
+}
+
 std::vector<unsigned char> hash(
         const size_t size,
         std::span<const unsigned char> msg,
         std::optional<std::span<const unsigned char>> key) {
-    std::vector<unsigned char> result;
-    result.resize(size);
-    hash(result, msg, key);
-
+    std::vector<unsigned char> result(size);
+    hash_impl(result, msg, key);
     return result;
 }
 
@@ -55,8 +64,7 @@ LIBSESSION_C_API bool session_hash(
         if (key_in && key_len)
             key = {key_in, key_len};
 
-        std::vector<unsigned char> result = session::hash::hash(size, {msg_in, msg_len}, key);
-        std::memcpy(hash_out, result.data(), size);
+        hash_impl({hash_out, size}, {msg_in, msg_len}, key);
         return true;
     } catch (...) {
         return false;

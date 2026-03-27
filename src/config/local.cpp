@@ -1,7 +1,5 @@
 #include "session/config/local.h"
 
-#include <sodium/crypto_generichash_blake2b.h>
-
 #include "internal.hpp"
 #include "session/config/error.h"
 #include "session/config/local.hpp"

@@ -56,15 +56,8 @@ session::uc32 proof_hash_internal(
 
     // This must match the hashing routine at
     // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
-    session::uc32 result = {};
-    session::hash::blake2b_pers(
-            result,
-            session::BUILD_PROOF_PERS,
-            version,
-            gen_index_hash,
-            rotating_pubkey,
-            expiry_unix_ts_ms);
-    return result;
+    return session::hash::blake2b_pers<32>(
+            session::BUILD_PROOF_PERS, version, gen_index_hash, rotating_pubkey, expiry_unix_ts_ms);
 }
 
 bool proof_verify_signature_internal(

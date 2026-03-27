@@ -6,7 +6,6 @@
 #include <oxenc/hex.h>
 #include <sodium/crypto_aead_chacha20poly1305.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_scalarmult_curve25519.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/crypto_stream_xchacha20.h>
@@ -1140,8 +1139,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
     auto active_keys = active_device_keys();
 
-    std::array<unsigned char, 24> devices_nonce;
-    hash::blake2b_pers(devices_nonce, PERS_DEV_NONCE, ciphertext_raw);
+    auto devices_nonce = hash::blake2b_pers<24>(PERS_DEV_NONCE, ciphertext_raw);
 
     cleared_uc32 ml_ss, aB, ki, key_base;
 
@@ -1159,8 +1157,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
         auto ekey = enc_key[i];
         auto eind = enc_indicator[i];
 
-        std::array<unsigned char, 24> knonce;
-        hash::blake2b_key_pers(knonce, A, PERS_KEY_NONCE, ct, enc_devices);
+        auto knonce = hash::blake2b_key_pers<24>(A, PERS_KEY_NONCE, ct, enc_devices);
 
         for (int active_i = 0; active_i < active_keys.size(); active_i++) {
             const auto& k = active_keys[active_i];
@@ -1170,9 +1167,8 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
             // First work out the checksum hash; the vast majority of the time this won't match for
             // a key other than our own (only 1/65535 chance of collision), and so we can short
             // circuit and save a bunch of calculations.
-            std::array<unsigned char, 2> our_ind;
-            hash::blake2b_pers(our_ind, PERS_KEY_KEY_IND, A, B, M, ct, ekey);
-            if (!std::ranges::equal(our_ind, eind))
+            if (!std::ranges::equal(
+                        hash::blake2b_pers<2>(PERS_KEY_KEY_IND, A, B, M, ct, ekey), eind))
                 continue;
 
             if (0 != crypto_scalarmult_curve25519(aB.data(), k.x25519_sec.data(), A.data())) {

@@ -2,7 +2,6 @@
 
 #include <oxenc/hex.h>
 #include <sodium/crypto_core_ed25519.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
 #include <sodium/crypto_sign_ed25519.h>
 
@@ -23,8 +22,7 @@ using namespace std::literals;
 std::array<unsigned char, 32> blind15_factor(std::span<const unsigned char> server_pk) {
     assert(server_pk.size() == 32);
 
-    uc64 blind_hash;
-    hash::blake2b(blind_hash, server_pk);
+    auto blind_hash = hash::blake2b<64>(server_pk);
 
     uc32 k;
     crypto_core_ed25519_scalar_reduce(k.data(), blind_hash.data());
@@ -36,16 +34,11 @@ std::array<unsigned char, 32> blind25_factor(
     assert(session_id.size() == 32 || session_id.size() == 33);
     assert(server_pk.size() == 32);
 
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init(&st, nullptr, 0, 64);
-    if (session_id.size() == 32) {
-        constexpr unsigned char prefix = 0x05;
-        crypto_generichash_blake2b_update(&st, &prefix, 1);
-    }
-    crypto_generichash_blake2b_update(&st, session_id.data(), session_id.size());
-    crypto_generichash_blake2b_update(&st, server_pk.data(), server_pk.size());
     uc64 blind_hash;
-    crypto_generichash_blake2b_final(&st, blind_hash.data(), blind_hash.size());
+    if (session_id.size() == 32)
+        hash::blake2b(blind_hash, "05"_hex_b, session_id, server_pk);
+    else
+        hash::blake2b(blind_hash, session_id, server_pk);
 
     uc32 k;
     crypto_core_ed25519_scalar_reduce(k.data(), blind_hash.data());

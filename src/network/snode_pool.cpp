@@ -70,8 +70,9 @@ SnodePool::SnodePool(
                 for (const auto& node : _config.seed_nodes)
                     node.to_disk(std::back_inserter(seed_node_data));
 
-                auto hash_bytes = session::hash::hash(32, session::to_span(seed_node_data));
-                cache_file_name = "snode_pool_devnet_" + oxenc::to_hex(hash_bytes);
+                cache_file_name =
+                        "snode_pool_devnet_" +
+                        oxenc::to_hex(session::hash::blake2b<32>(session::to_span(seed_node_data)));
                 break;
         }
 

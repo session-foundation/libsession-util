@@ -10,7 +10,6 @@
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_core_ed25519.h>
 #include <sodium/crypto_generichash.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_pwhash.h>
 #include <sodium/crypto_scalarmult.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
@@ -113,8 +112,7 @@ static void v2_derive_xwing_key_nonce(
         cleared_uc32& nonce_buf,
         std::span<const unsigned char, 32> E,
         std::span<const unsigned char, 32> X) {
-    std::array<unsigned char, 32> ss;
-    hash::sha3_256(ss, key_buf, nonce_buf, E, X, V2_XWING_LABEL);
+    auto ss = hash::sha3_256<32>(key_buf, nonce_buf, E, X, V2_XWING_LABEL);
     hash::shake256(V2_SS_DOMAIN, ss)(
             key_buf, std::span<unsigned char, V2_NONCE_SIZE>{nonce_buf.data(), V2_NONCE_SIZE});
     sodium_memzero(ss.data(), ss.size());
@@ -133,9 +131,7 @@ static std::array<unsigned char, 2> v2_kiss(
     cleared_uc32 dh;
     if (0 != crypto_scalarmult(dh.data(), sec.data(), encrypting ? S.data() : E.data()))
         throw std::runtime_error{"X25519 DH (KISS) failed"};
-    std::array<unsigned char, 2> kiss;
-    hash::blake2b_key_pers(kiss, dh, V2_KISS_PERS, E, S);
-    return kiss;
+    return hash::blake2b_key_pers<2>(dh, V2_KISS_PERS, E, S);
 }
 
 std::vector<unsigned char> sign_for_recipient(
@@ -1079,16 +1075,8 @@ std::string decrypt_ons_response(
     // key = H(name, key=H(name))
     uc32 key;
     uc32 name_hash;
-    auto name_bytes = to_unsigned(lowercase_name.data());
-    crypto_generichash_blake2b(
-            name_hash.data(), name_hash.size(), name_bytes, lowercase_name.size(), nullptr, 0);
-    crypto_generichash_blake2b(
-            key.data(),
-            key.size(),
-            name_bytes,
-            lowercase_name.size(),
-            name_hash.data(),
-            name_hash.size());
+    hash::blake2b(name_hash, lowercase_name);
+    hash::blake2b_key(key, name_hash, lowercase_name);
 
     std::vector<unsigned char> buf;
     unsigned long long buf_len = 0;

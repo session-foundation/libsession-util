@@ -1,6 +1,5 @@
 #include <session/config/pro.h>
 #include <session/pro_backend.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <session/config/pro.hpp>

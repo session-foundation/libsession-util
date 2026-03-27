@@ -1,6 +1,5 @@
 #include "session/config/user_profile.h"
 
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include "internal.hpp"

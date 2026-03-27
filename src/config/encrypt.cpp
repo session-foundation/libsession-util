@@ -2,7 +2,6 @@
 
 #include <oxenc/endian.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_generichash_blake2b.h>
 
 #include <array>
 #include <cassert>
@@ -57,34 +56,28 @@ void encrypt_prealloced(
     if (message.size() < ENCRYPT_DATA_OVERHEAD)
         throw std::invalid_argument{
                 "encrypt_prealloced: buffer is smaller than ENCRYPT_DATA_OVERHEAD"};
-    size_t plaintext_len = message.size() - ENCRYPT_DATA_OVERHEAD;
-    auto key = make_encrypt_key(key_base, plaintext_len, domain);
+    auto plaintext = message.first(message.size() - ENCRYPT_DATA_OVERHEAD);
+    auto key = make_encrypt_key(key_base, plaintext.size(), domain);
 
     std::string nonce_key{NONCE_KEY_PREFIX};
     nonce_key += domain;
 
-    std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
-    crypto_generichash_blake2b(
-            nonce.data(),
-            nonce.size(),
-            message.data(),
-            plaintext_len,
-            to_unsigned(nonce_key.data()),
-            nonce_key.size());
+    auto nonce =
+            hash::blake2b_key<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>(nonce_key, plaintext);
 
     unsigned long long outlen = 0;
     crypto_aead_xchacha20poly1305_ietf_encrypt(
             message.data(),
             &outlen,
-            message.data(),
-            plaintext_len,
+            plaintext.data(),
+            plaintext.size(),
             nullptr,
             0,
             nullptr,
             nonce.data(),
             key.data());
 
-    assert(outlen == plaintext_len + crypto_aead_xchacha20poly1305_ietf_ABYTES);
+    assert(outlen == plaintext.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
     std::memcpy(message.data() + outlen, nonce.data(), nonce.size());
 }
 

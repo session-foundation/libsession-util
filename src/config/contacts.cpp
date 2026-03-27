@@ -3,7 +3,6 @@
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>

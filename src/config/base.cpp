@@ -6,7 +6,6 @@
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/utils.h>
 
@@ -25,6 +24,7 @@
 #include "session/config/encrypt.hpp"
 #include "session/config/protos.hpp"
 #include "session/export.h"
+#include "session/hash.hpp"
 #include "session/util.hpp"
 
 using namespace std::literals;
@@ -214,8 +214,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const unsigned 
             }
 
             {
-                hash_t actual_hash;
-                hash::hash(actual_hash, recombined);
+                auto actual_hash = hash::blake2b<32>(recombined);
                 if (actual_hash != final_hash)
                     throw std::runtime_error{
                             "recombined message hash ({}) does not match part hash ({})"_format(
@@ -729,8 +728,7 @@ ConfigBase::push() {
         //   - element 3 is the chunk of data (and so, when ordered by sequence number, each data
         //   chunk
         //     concatenated together gives us the `msg` value we have right now in this function).
-        hash_t final_hash;
-        hash::hash(final_hash, msg);
+        auto final_hash = hash::blake2b<32>(msg);
 
         constexpr size_t ENCODE_OVERHEAD =
                 1         // The `m` prefix indicating a multipart message part
@@ -1121,15 +1119,7 @@ void ConfigBase::set_signer(ConfigMessage::sign_callable s) {
 std::array<unsigned char, 32> ConfigSig::seed_hash(std::string_view key) const {
     if (!_sign_sk)
         throw std::runtime_error{"Cannot make a seed hash without a signing secret key"};
-    std::array<unsigned char, 32> out;
-    crypto_generichash_blake2b(
-            out.data(),
-            out.size(),
-            _sign_sk.data(),
-            32,  // Just the seed part of the value, not the last half (which is just the pubkey)
-            reinterpret_cast<const unsigned char*>(key.data()),
-            std::min<size_t>(key.size(), 64));
-    return out;
+    return hash::blake2b_key<32>(key, std::span{_sign_sk.data(), 32});
 }
 
 void set_error(config_object* conf, std::string e) {

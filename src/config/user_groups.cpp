@@ -3,7 +3,6 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 
 #include <charconv>
