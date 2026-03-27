@@ -244,7 +244,7 @@ Network::Network(config::Config _conf) :
     _transport->on_status_changed = [this] { _recalculate_status(); };
 
     // Perform a clock resync
-    _loop->call_soon([this] { _resync_clock(std::nullopt, std::nullopt); });
+    _loop->call_soon([this] { _resync_clock(std::nullopt, nullptr); });
 }
 
 Network::~Network() {
@@ -334,7 +334,7 @@ void Network::resume(bool automatically_reconnect) {
                 log::info(
                         cat,
                         "Performing clock resync as enough time has passed since the last resync.");
-                _resync_clock(std::nullopt, std::nullopt);
+                _resync_clock(std::nullopt, nullptr);
             });
         }
 
@@ -526,7 +526,7 @@ void Network::upload(UploadRequest request) {
             // request
             if (*status_code == ERROR_TOO_EARLY) {
                 log::info(cat, "Upload received 425, triggering clock resync.");
-                _resync_clock(std::nullopt, std::nullopt);
+                _resync_clock(std::nullopt, nullptr);
 
                 // Can't retry an upload as the data stream has already been consumed, so
                 // just return the error
@@ -581,7 +581,7 @@ void Network::download(DownloadRequest request) {
                             std::function<void(std::variant<file_metadata, int16_t>, bool)>>>>();
 
                 _clock_resync_download_queue->emplace_back(req, user_callback);
-                _resync_clock(std::nullopt, std::nullopt);
+                _resync_clock(std::nullopt, nullptr);
                 return;
             }
         }
@@ -855,12 +855,11 @@ void Network::_handle_421_retry(
 }
 
 void Network::_resync_clock(
-        std::optional<Request> original_request,
-        std::optional<network_response_callback_t> request_callback) {
+        std::optional<Request> original_request, network_response_callback_t request_callback) {
     if (_suspended) {
         log::info(cat, "Ignoring clock resync attempt as network is suspended.");
         if (request_callback)
-            (*request_callback)(
+            request_callback(
                     false,
                     false,
                     ERROR_NETWORK_SUSPENDED,
@@ -872,7 +871,7 @@ void Network::_resync_clock(
     if (!_snode_pool) {
         log::info(cat, "Ignoring clock resync attempt as SnodePool has been destroyed.");
         if (request_callback)
-            (*request_callback)(
+            request_callback(
                     false,
                     false,
                     ERROR_NO_SNODE_POOL,
@@ -888,8 +887,7 @@ void Network::_resync_clock(
         if (!_clock_resync_request_queue)
             _clock_resync_request_queue = detail::RequestQueue::make(_loop);
 
-        _clock_resync_request_queue->add(
-                std::move(*original_request), std::move(*request_callback));
+        _clock_resync_request_queue->add(std::move(*original_request), std::move(request_callback));
     }
 
     // Only allow a single clock resync at a time
