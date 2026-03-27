@@ -94,12 +94,15 @@ class Globals final : detail::CoreComponent {
 
       public:
         /// The raw 32-byte account seed (identical to ed25519_secret().first<32>()).
-        std::span<const unsigned char, 32> seed() const { return ubuf().first<32>(); }
+        std::span<const unsigned char, 32> seed() const& { return ubuf().first<32>(); }
+        std::span<const unsigned char, 32> seed() const&& = delete;
         /// The 64-byte Ed25519 secret key in libsodium format (seed || pubkey).
-        std::span<const unsigned char, 64> ed25519_secret() const { return ubuf().first<64>(); }
+        std::span<const unsigned char, 64> ed25519_secret() const& { return ubuf().first<64>(); }
+        std::span<const unsigned char, 64> ed25519_secret() const&& = delete;
         /// The 32-byte X25519 secret key derived from the account seed.  This is also the clamped
         /// private scalar of the Ed25519 key, usable for advanced scalar-multiplication operations.
-        std::span<const unsigned char, 32> x25519_key() const { return ubuf().last<32>(); }
+        std::span<const unsigned char, 32> x25519_key() const& { return ubuf().last<32>(); }
+        std::span<const unsigned char, 32> x25519_key() const&& = delete;
     };
 
     AccountSeedAccess account_seed() {

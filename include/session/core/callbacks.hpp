@@ -32,7 +32,8 @@ enum class PfsKeyFetch {
 
 /// Reason code passed to the message_decrypt_failed callback.
 enum class MessageDecryptFailure {
-    no_pfs_key,      ///< Version 2 message but no account key with a matching key indicator exists
+    no_pfs_key,      ///< Version 2 message: no PFS account key matched the key indicator AND the
+                     ///< non-PFS fallback decryption also failed; the message cannot be read.
     decrypt_failed,  ///< Decryption failed (either version); key was found but did not work
     bad_format,      ///< Message is structurally malformed (e.g. invalid bencode, truncated fields)
     unknown_version,  ///< Message starts with 0x00 but carries an unrecognised version byte;
@@ -48,7 +49,9 @@ struct ReceivedMessage {
     int version;                                      ///< Protocol version: 1 or 2
     std::vector<unsigned char> content;               ///< Decrypted protobuf-encoded payload
     std::optional<std::array<unsigned char, 64>>
-            pro_signature;  ///< Session Pro signature, if present
+            pro_signature;       ///< Session Pro signature, if present
+    bool pfs_encrypted = false;  ///< True iff decrypted via PFS+PQ (X-Wing) key derivation;
+                                 ///< false for v1 messages and v2 non-PFS fallback messages.
 };
 
 /// Struct holding application callbacks to fire when libsession Core events happen to allow the

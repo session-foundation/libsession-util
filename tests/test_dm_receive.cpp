@@ -137,6 +137,7 @@ TEST_CASE("_handle_direct_messages: v2 receive", "[core][dm]") {
     CHECK(msg.sender_session_id == sender.session_id);
     CHECK(std::ranges::equal(msg.content, content));
     CHECK_FALSE(msg.pro_signature.has_value());
+    CHECK(msg.pfs_encrypted);
 }
 
 // ── Failure paths ────────────────────────────────────────────────────────────────────────────────
@@ -202,9 +203,10 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
         CHECK(failures[0] == MessageDecryptFailure::no_pfs_key);
     }
 
-    SECTION("v2 key indicator matches but AEAD MAC fails → decrypt_failed") {
+    SECTION("v2 AEAD MAC corrupted → no_pfs_key") {
         // Encrypt a valid v2 message for recipient, then corrupt the xchacha ciphertext tail to
-        // cause MAC authentication failure (DecryptV2Error), exhausting all candidate keys.
+        // cause MAC authentication failure on both the PFS key loop and the non-PFS fallback.
+        // Both paths throw DecryptV2Error, so no_pfs_key is fired (nothing could decrypt it).
         recipient->devices.active_account_keys();
         auto [x25519_bytes, mlkem_bytes] = TestHelper::active_account_pubkeys(*recipient);
         std::array<unsigned char, 33> recip_session_id;
@@ -224,7 +226,7 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
         deliver(std::span{ct});
         CHECK(received.empty());
         REQUIRE(failures.size() == 1);
-        CHECK(failures[0] == MessageDecryptFailure::decrypt_failed);
+        CHECK(failures[0] == MessageDecryptFailure::no_pfs_key);
     }
 
     SECTION("v1 malformed ciphertext → decrypt_failed") {
@@ -233,6 +235,178 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
         REQUIRE(failures.size() == 1);
         CHECK(failures[0] == MessageDecryptFailure::decrypt_failed);
     }
+}
+
+// ── Non-PFS fallback ─────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("_handle_direct_messages: v2 non-PFS fallback receive", "[core][dm]") {
+    SenderKeys sender;
+
+    std::vector<ReceivedMessage> received;
+    std::vector<MessageDecryptFailure> failures;
+    callbacks cbs;
+    cbs.message_received = [&](ReceivedMessage&& m) { received.push_back(std::move(m)); };
+    cbs.message_decrypt_failed = [&](const SwarmMessage&, MessageDecryptFailure r) {
+        failures.push_back(r);
+    };
+
+    TempCore recipient{cbs};
+    // Do NOT call active_account_keys() — sender has no PFS keys for this recipient.
+
+    std::array<unsigned char, 33> recip_session_id;
+    std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
+
+    constexpr auto content = "cafebabe"_hex_u;
+    auto ct = encrypt_for_recipient_v2_nopfs(sender.ed_sk, recip_session_id, content, std::nullopt);
+
+    OwnedMessage om{std::span{ct}, "hash_nopfs", from_epoch_ms(3333), from_epoch_ms(7777)};
+    recipient->receive_messages({&om.msg, 1}, config::Namespace::Default, true);
+
+    REQUIRE(failures.empty());
+    REQUIRE(received.size() == 1);
+    const auto& msg = received[0];
+    CHECK(msg.hash == "hash_nopfs");
+    CHECK(msg.timestamp == from_epoch_ms(3333));
+    CHECK(msg.expiry == from_epoch_ms(7777));
+    CHECK(msg.version == 2);
+    CHECK(msg.sender_session_id == sender.session_id);
+    CHECK(std::ranges::equal(msg.content, content));
+    CHECK_FALSE(msg.pro_signature.has_value());
+    CHECK_FALSE(msg.pfs_encrypted);
+}
+
+TEST_CASE(
+        "_handle_direct_messages: v2 non-PFS fallback succeeds when ki collides with PFS key",
+        "[core][dm]") {
+    // A non-PFS message whose decrypted ki happens to match the 2-byte ML-KEM prefix of one of
+    // the recipient's real PFS account keys.  The PFS key loop runs but throws DecryptV2Error
+    // (wrong key derivation); the non-PFS fallback then succeeds.
+    //
+    // The ki is XOR-encrypted: wire_ki = plaintext_ki ⊕ kiss, where kiss is derived from the
+    // ephemeral key pair.  decrypt_incoming_v2_prefix recovers plaintext_ki.  We construct
+    // the collision deterministically by patching the wire_ki bytes after encrypting:
+    //   new_wire_ki[i] = wire_ki[i] ⊕ plaintext_ki[i] ⊕ target_ki[i]
+    // which sets plaintext_ki to target_ki without touching E or the ciphertext body.
+    SenderKeys sender;
+
+    std::vector<ReceivedMessage> received;
+    std::vector<MessageDecryptFailure> failures;
+    callbacks cbs;
+    cbs.message_received = [&](ReceivedMessage&& m) { received.push_back(std::move(m)); };
+    cbs.message_decrypt_failed = [&](const SwarmMessage&, MessageDecryptFailure r) {
+        failures.push_back(r);
+    };
+
+    TempCore recipient{cbs};
+    recipient->devices.active_account_keys();
+
+    std::array<unsigned char, 33> recip_session_id;
+    std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
+    auto seed_access = recipient->globals.account_seed();
+    auto x25519_sec = seed_access.x25519_key();
+    std::span<const unsigned char, 32> x25519_pub{recip_session_id.data() + 1, 32};
+
+    // The target ki is the first 2 bytes of the recipient's active ML-KEM public key.
+    auto [x25519_bytes, mlkem_bytes] = TestHelper::active_account_pubkeys(*recipient);
+    std::array<unsigned char, 2> target_ki{
+            static_cast<unsigned char>(mlkem_bytes[0]), static_cast<unsigned char>(mlkem_bytes[1])};
+
+    constexpr auto content = "deadc0de"_hex_u;
+    auto ct = encrypt_for_recipient_v2_nopfs(sender.ed_sk, recip_session_id, content, std::nullopt);
+
+    // Recover the current plaintext ki so we can XOR it out and XOR the target in.
+    auto current_ki = decrypt_incoming_v2_prefix(x25519_sec, x25519_pub, ct);
+    ct[2] ^= current_ki[0] ^ target_ki[0];
+    ct[3] ^= current_ki[1] ^ target_ki[1];
+
+    // Verify the patch: the decrypted ki should now equal target_ki.
+    REQUIRE(decrypt_incoming_v2_prefix(x25519_sec, x25519_pub, ct) == target_ki);
+
+    OwnedMessage om{std::span{ct}, "hash_ki_collision"};
+    recipient->receive_messages({&om.msg, 1}, config::Namespace::Default, true);
+
+    REQUIRE(failures.empty());
+    REQUIRE(received.size() == 1);
+    CHECK(std::ranges::equal(received[0].content, content));
+    CHECK_FALSE(received[0].pfs_encrypted);
+}
+
+// ── PFS ki-prefix collision within the loop ──────────────────────────────────────────────────────
+
+TEST_CASE(
+        "_handle_direct_messages: PFS decryption succeeds when ki collides within the PFS loop",
+        "[core][dm]") {
+    // Verify that when active_account_keys(ki) returns multiple candidates (because two account
+    // keys share the same 2-byte ML-KEM prefix), the loop continues past a DecryptV2Error on the
+    // wrong key and succeeds with the correct key.
+    //
+    // We find a colliding pair via the birthday paradox: rotating account keys until any two
+    // generated keys share the same 2-byte ML-KEM prefix.  Expected ~321 rotations on average
+    // (sqrt(pi * 65536 / 2)), each taking < 1 ms, so the total cost is well under a second.
+    SenderKeys sender;
+
+    std::vector<ReceivedMessage> received;
+    std::vector<MessageDecryptFailure> failures;
+    callbacks cbs;
+    cbs.message_received = [&](ReceivedMessage&& m) { received.push_back(std::move(m)); };
+    cbs.message_decrypt_failed = [&](const SwarmMessage&, MessageDecryptFailure r) {
+        failures.push_back(r);
+    };
+
+    TempCore recipient{cbs};
+
+    std::array<unsigned char, 33> recip_session_id;
+    std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
+
+    // Generate the first account key and record (prefix → pubkeys) as we rotate.
+    recipient->devices.active_account_keys();
+
+    using Prefix = std::array<unsigned char, 2>;
+    using PubkeyPair = std::pair<std::array<std::byte, 32>, std::array<std::byte, 1184>>;
+    std::map<Prefix, PubkeyPair> seen;
+
+    // Record the current active key; returns the earlier key's pubkeys if its prefix collides.
+    auto record_active = [&]() -> std::optional<PubkeyPair> {
+        auto [x, m] = TestHelper::active_account_pubkeys(*recipient);
+        Prefix pfx{static_cast<unsigned char>(m[0]), static_cast<unsigned char>(m[1])};
+        if (auto it = seen.find(pfx); it != seen.end())
+            return it->second;
+        seen.emplace(pfx, PubkeyPair{x, m});
+        return std::nullopt;
+    };
+
+    record_active();
+
+    PubkeyPair target_pubkeys;
+    bool found = false;
+    for (int i = 0; i < 500'000 && !found; ++i) {
+        recipient->devices.rotate_account_keys();
+        if (auto match = record_active()) {
+            target_pubkeys = *match;
+            found = true;
+        }
+    }
+    REQUIRE(found);
+
+    // Encrypt with the earlier (now-rotated) key that shares the active key's ki prefix.
+    // active_account_keys(ki) returns [active_key (wrong), rotated_target (right)], so Core
+    // tries the wrong key first (DecryptV2Error), then succeeds with the right one.
+    constexpr auto content = "feedface"_hex_u;
+    auto ct = encrypt_for_recipient_v2(
+            sender.ed_sk,
+            recip_session_id,
+            as_uc(target_pubkeys.first),
+            as_uc(target_pubkeys.second),
+            content,
+            std::nullopt);
+
+    OwnedMessage om{std::span{ct}, "hash_ki_pfs_collision"};
+    recipient->receive_messages({&om.msg, 1}, config::Namespace::Default, true);
+
+    REQUIRE(failures.empty());
+    REQUIRE(received.size() == 1);
+    CHECK(std::ranges::equal(received[0].content, content));
+    CHECK(received[0].pfs_encrypted);
 }
 
 // ── Callback exception safety ────────────────────────────────────────────────────────────────────

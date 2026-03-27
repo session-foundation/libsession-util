@@ -579,10 +579,6 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
             }
 
             auto keys = devices.active_account_keys(ki);
-            if (keys.empty()) {
-                fire_fail(msg, MessageDecryptFailure::no_pfs_key);
-                continue;
-            }
 
             bool decrypted = false;
             for (auto& key : keys) {
@@ -597,6 +593,7 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
                     out.version = 2;
                     out.content = std::move(result.content);
                     out.pro_signature = result.pro_signature;
+                    out.pfs_encrypted = true;
                     fire_received(std::move(out));
                     decrypted = true;
                     break;
@@ -606,12 +603,33 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
                     // Unrecoverable structural error in the message itself.
                     log::warning(cat, "v2 direct message format error: {}", e.what());
                     fire_fail(msg, MessageDecryptFailure::bad_format);
-                    decrypted = true;  // Prevent the generic "no key worked" fallback.
+                    decrypted = true;  // Prevent the non-PFS fallback attempt.
                     break;
                 }
             }
-            if (!decrypted)
-                fire_fail(msg, MessageDecryptFailure::decrypt_failed);
+            if (!decrypted) {
+                // No PFS key matched; try the non-PFS fallback (sender had no PFS keys).
+                try {
+                    auto result =
+                            decrypt_incoming_v2_nopfs(session_id, x25519_sec, x25519_pub, data);
+                    ReceivedMessage out;
+                    out.hash = msg.hash;
+                    out.timestamp = msg.timestamp;
+                    out.expiry = msg.expiry;
+                    out.sender_session_id = result.sender_session_id;
+                    out.version = 2;
+                    out.content = std::move(result.content);
+                    out.pro_signature = result.pro_signature;
+                    // pfs_encrypted remains false (default)
+                    fire_received(std::move(out));
+                } catch (const DecryptV2Error&) {
+                    // Non-PFS fallback also failed: message cannot be read.
+                    fire_fail(msg, MessageDecryptFailure::no_pfs_key);
+                } catch (const std::exception& e) {
+                    log::warning(cat, "v2 direct message format error: {}", e.what());
+                    fire_fail(msg, MessageDecryptFailure::bad_format);
+                }
+            }
 
         } else {
             // Version 1: protobuf WebSocketMessage → Envelope wire format.

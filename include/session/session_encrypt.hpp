@@ -234,6 +234,60 @@ DecryptV2Result decrypt_incoming_v2(
         std::span<const unsigned char, 2400> account_pfs_mlkem768_sec,
         std::span<const unsigned char> ciphertext);
 
+/// API: crypto/encrypt_for_recipient_v2_nopfs
+///
+/// Encrypts a v2 Session DM using the non-PFS fallback (long-term X25519 DH only).
+///
+/// Wire format is identical to `encrypt_for_recipient_v2`:
+///   0x00 0x02 | ki (2B) | E (32B) | outer_ct (1088B) | xchacha20poly1305_ciphertext
+///
+/// but `ki` and `outer_ct` carry no key material — they are random bytes used only to make
+/// non-PFS messages externally indistinguishable from PFS+PQ messages.  The actual shared
+/// secret is derived as:
+///   ss  = eR   (X25519 DH with ephemeral secret e and recipient long-term pubkey R)
+///   ss  = SHA3-256(ss || R || E || "SessionV2NonPFS")
+///   k,n = SHAKE256("SessionV2NonPFSSS", ss)   → 32-byte key + 24-byte nonce
+///
+/// Inputs:
+/// - `sender_ed25519_privkey` -- sender's 32-byte seed or 64-byte Ed25519 secret key
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed long-term X25519 pubkey of the recipient
+/// - `content` -- the plaintext message content to encrypt
+/// - `pro_signature` -- optional 64-byte Session Pro signature
+///
+/// Outputs:
+/// - Wire-format v2 ciphertext (non-PFS).
+/// - Throws on key or encryption failure.
+std::vector<unsigned char> encrypt_for_recipient_v2_nopfs(
+        const Ed25519PrivKeySpan& sender_ed25519_privkey,
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char> content,
+        std::optional<std::span<const unsigned char, 64>> pro_signature = std::nullopt);
+
+/// API: crypto/decrypt_incoming_v2_nopfs
+///
+/// Decrypts a v2 Session DM using the non-PFS fallback (long-term X25519 DH only).
+///
+/// Performs the inverse of `encrypt_for_recipient_v2_nopfs`.  The `ki` and ML-KEM fields in
+/// the wire format are ignored; only the ephemeral pubkey E and the recipient's long-term
+/// X25519 key pair are used.
+///
+/// Inputs:
+/// - `recipient_session_id` -- 33-byte 0x05-prefixed Session ID of the recipient (used to
+///   verify the inner Ed25519 message signature).
+/// - `x25519_sec` -- 32-byte long-term X25519 secret key of the recipient.
+/// - `x25519_pub` -- 32-byte long-term X25519 public key of the recipient.
+/// - `ciphertext` -- wire-format v2 ciphertext.
+///
+/// Outputs:
+/// - `DecryptV2Result` with the decrypted content, sender Session ID, and optional Pro sig.
+/// - Throws `DecryptV2Error` if AEAD authentication fails (wrong key — try PFS path instead).
+/// - Throws `std::runtime_error` for unrecoverable errors (invalid format, signature failure).
+DecryptV2Result decrypt_incoming_v2_nopfs(
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char, 32> x25519_sec,
+        std::span<const unsigned char, 32> x25519_pub,
+        std::span<const unsigned char> ciphertext);
+
 static constexpr size_t GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE = 1'000'000;
 
 /// API: crypto/encrypt_for_group

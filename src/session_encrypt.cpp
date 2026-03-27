@@ -102,19 +102,18 @@ static void v2_check_header(std::span<const unsigned char> ciphertext) {
         throw std::runtime_error{"v2 ciphertext has wrong version prefix"};
 }
 
-// X-Wing KDF: computes ss = SHA3-256(ssm||ssx||E||X||V2_XWING_LABEL) from key_buf (=ssm) and
-// nonce_buf (=ssx), then squeezes k (32B) back into key_buf and n (V2_NONCE_SIZE B) into the
-// first V2_NONCE_SIZE bytes of nonce_buf, overwriting the shared secrets with derived key material.
-// E is the ephemeral X25519 pubkey; X is the account PFS X25519 pubkey.
+// X-Wing KDF: computes ss = SHA3-256(ssm||ssx||E||X||V2_XWING_LABEL), then squeezes k (32B) into
+// key_buf (overwriting ssm) and n (V2_NONCE_SIZE B) into nonce_out.  Callers are responsible for
+// storing these outputs in cleared buffers.  E is the ephemeral X25519 pubkey; X is the PFS pubkey.
 static void v2_derive_xwing_key_nonce(
-        cleared_uc32& key_buf,
-        cleared_uc32& nonce_buf,
+        std::span<unsigned char, 32> key_buf,
+        std::span<unsigned char, V2_NONCE_SIZE> nonce_out,
+        std::span<const unsigned char, 32> ssx,
         std::span<const unsigned char, 32> E,
         std::span<const unsigned char, 32> X) {
-    auto ss = hash::sha3_256<32>(key_buf, nonce_buf, E, X, V2_XWING_LABEL);
-    hash::shake256(V2_SS_DOMAIN, ss)(
-            key_buf, std::span<unsigned char, V2_NONCE_SIZE>{nonce_buf.data(), V2_NONCE_SIZE});
-    sodium_memzero(ss.data(), ss.size());
+    cleared_uc32 ss;
+    hash::sha3_256(ss, key_buf, ssx, E, X, V2_XWING_LABEL);
+    hash::shake256(V2_SS_DOMAIN, ss)(key_buf, nonce_out);
 }
 
 // Computes the 2-byte Key Indicator Shared Secret (KISS):
@@ -236,60 +235,22 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
     return result;
 }
 
-std::vector<unsigned char> encrypt_for_recipient_v2(
+// Builds and returns a complete v2 DM wire-format ciphertext from already-derived header fields
+// and encryption key material.  Used by both encrypt_for_recipient_v2 (PFS+PQ) and
+// encrypt_for_recipient_v2_nopfs (non-PFS fallback).
+static std::vector<unsigned char> v2_encrypt_inner(
+        std::array<unsigned char, 2> ki,
+        std::span<const unsigned char, 32> E,
+        std::span<const unsigned char, MLKEM768_CIPHERTEXTBYTES> outer_ct,
+        std::span<const unsigned char, 32> enc_key,
+        std::span<const unsigned char, V2_NONCE_SIZE> enc_nonce,
         const Ed25519PrivKeySpan& sender_ed25519_privkey,
         std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char, 32> recipient_account_x25519,
-        std::span<const unsigned char, 1184> recipient_account_mlkem768,
         std::span<const unsigned char> content,
         std::optional<std::span<const unsigned char, 64>> pro_signature) {
 
     auto sender_ed_pk = sender_ed25519_privkey.pubkey();
 
-    // S = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
-    std::span<const unsigned char, 32> S{recipient_session_id.data() + 1, 32};
-
-    // Step 1: Generate ephemeral X25519 keypair e/E
-    cleared_uc32 e;
-    uc32 E;
-    crypto_box_keypair(E.data(), e.data());
-
-    // Two multi-purpose key buffers — each plays sequential, non-overlapping roles:
-    //
-    // enc_key_buf: ML-KEM shared secret ssm (step 4) → SHAKE256-derived enc key k (step 8)
-    // enc_nonce_buf: eS DH result (step 2) → ML-KEM coins (step 4) → ssx DH result (step 5)
-    //             → SHAKE256-derived enc nonce n in first 24 bytes (step 8)
-    cleared_uc32 enc_key_buf;
-    cleared_uc32 enc_nonce_buf;
-
-    // Step 2: KISS = BLAKE2b_2(E || S, key=eS, pers="Session-Msg-KISS")
-    // eS is the X25519 DH with the long-term key, used only for cheap key indicator obfuscation
-    auto kiss = v2_kiss(e, E, S, /*encrypting=*/true);
-
-    // Step 3: ki = M[0:2] ⊕ kiss  (encrypted key indicator; lets recipient quickly identify key)
-    std::array<unsigned char, 2> ki{
-            static_cast<unsigned char>(recipient_account_mlkem768[0] ^ kiss[0]),
-            static_cast<unsigned char>(recipient_account_mlkem768[1] ^ kiss[1])};
-
-    // Step 4: ML-KEM-768 encapsulate: ssₘ, mlkem_ct = Encapsulate(M)
-    std::array<unsigned char, MLKEM768_CIPHERTEXTBYTES> mlkem_ct;
-    random::fill(enc_nonce_buf);  // repurpose enc_nonce_buf as random ML-KEM coins
-    if (0 != sr_mlkem768_enc_derand(
-                     mlkem_ct.data(),
-                     enc_key_buf.data(),
-                     recipient_account_mlkem768.data(),
-                     enc_nonce_buf.data()))
-        throw std::runtime_error{"ML-KEM-768 encapsulation failed"};
-
-    // Step 5: ssx = eX  (X25519 DH with account PFS key X, not long-term key S)
-    if (0 != crypto_scalarmult(enc_nonce_buf.data(), e.data(), recipient_account_x25519.data()))
-        throw std::runtime_error{"X25519 DH (account key) failed"};
-
-    // Step 6: X-Wing KDF → enc key k (in enc_key_buf) and enc nonce n (in enc_nonce_buf[0:24])
-    v2_derive_xwing_key_nonce(enc_key_buf, enc_nonce_buf, E, recipient_account_x25519);
-
-    // Step 7: Build inner bt-encoded dict directly into the final result buffer.
-    //
     // bt_bytes_encoded(n): total bytes to represent an n-byte bt string: decimal digits of n + 1 +
     // n
     constexpr auto bt_bytes_encoded = [](size_t n) constexpr -> size_t {
@@ -313,7 +274,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
             (std::max(V2_MIN_FINAL_SIZE, V2_OUTER_OVERHEAD + inner_dict_size) + 255) & ~size_t{255};
     size_t padded_inner_size = final_size - V2_OUTER_OVERHEAD;
 
-    // Step 8: Allocate result (zero-initialized so padding bytes are already 0), write header,
+    // Allocate result (zero-initialized so padding bytes are already 0), write header,
     // build inner dict directly into result buffer, then encrypt in-place.
     // (c == m is explicitly supported by libsodium for AEAD functions)
     std::vector<unsigned char> result(final_size, 0);
@@ -323,7 +284,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
     result[2] = ki[0];
     result[3] = ki[1];
     std::memcpy(result.data() + 4, E.data(), 32);
-    std::memcpy(result.data() + 36, mlkem_ct.data(), MLKEM768_CIPHERTEXTBYTES);
+    std::memcpy(result.data() + 36, outer_ct.data(), MLKEM768_CIPHERTEXTBYTES);
 
     {
         oxenc::bt_dict_producer dict{
@@ -354,11 +315,73 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
                      nullptr,
                      0,
                      nullptr,
-                     enc_nonce_buf.data(),  // nonce (24B read from 32B buffer)
-                     enc_key_buf.data()))   // key
+                     enc_nonce.data(),  // 24-byte nonce
+                     enc_key.data()))   // key
         throw std::runtime_error{"v2 message encryption failed"};
 
     return result;
+}
+
+std::vector<unsigned char> encrypt_for_recipient_v2(
+        const Ed25519PrivKeySpan& sender_ed25519_privkey,
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char, 32> recipient_account_x25519,
+        std::span<const unsigned char, 1184> recipient_account_mlkem768,
+        std::span<const unsigned char> content,
+        std::optional<std::span<const unsigned char, 64>> pro_signature) {
+
+    // S = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
+    std::span<const unsigned char, 32> S{recipient_session_id.data() + 1, 32};
+
+    // Step 1: Generate ephemeral X25519 keypair e/E
+    cleared_uc32 e;
+    uc32 E;
+    crypto_box_keypair(E.data(), e.data());
+
+    // Three cleared buffers for key material:
+    // enc_key_buf: ML-KEM shared secret ssm (step 4) → SHAKE256-derived enc key k (step 6)
+    // ssx_buf: eS DH result (step 2) → ML-KEM coins (step 4) → ssx DH result (step 5)
+    // enc_nonce: SHAKE256-derived enc nonce n (step 6)
+    cleared_uc32 enc_key_buf;
+    cleared_uc32 ssx_buf;
+    cleared_uchars<V2_NONCE_SIZE> enc_nonce;
+
+    // Step 2: KISS = BLAKE2b_2(E || S, key=eS, pers="Session-Msg-KISS")
+    // eS is the X25519 DH with the long-term key, used only for cheap key indicator obfuscation
+    auto kiss = v2_kiss(e, E, S, /*encrypting=*/true);
+
+    // Step 3: ki = M[0:2] ⊕ kiss  (encrypted key indicator; lets recipient quickly identify key)
+    std::array<unsigned char, 2> ki{
+            static_cast<unsigned char>(recipient_account_mlkem768[0] ^ kiss[0]),
+            static_cast<unsigned char>(recipient_account_mlkem768[1] ^ kiss[1])};
+
+    // Step 4: ML-KEM-768 encapsulate: ssₘ, mlkem_ct = Encapsulate(M)
+    std::array<unsigned char, MLKEM768_CIPHERTEXTBYTES> mlkem_ct;
+    random::fill(ssx_buf);  // repurpose ssx_buf as random ML-KEM coins
+    if (0 != sr_mlkem768_enc_derand(
+                     mlkem_ct.data(),
+                     enc_key_buf.data(),
+                     recipient_account_mlkem768.data(),
+                     ssx_buf.data()))
+        throw std::runtime_error{"ML-KEM-768 encapsulation failed"};
+
+    // Step 5: ssx = eX  (X25519 DH with account PFS key X, not long-term key S)
+    if (0 != crypto_scalarmult(ssx_buf.data(), e.data(), recipient_account_x25519.data()))
+        throw std::runtime_error{"X25519 DH (account key) failed"};
+
+    // Step 6: X-Wing KDF → enc key k (in enc_key_buf) and enc nonce n (in enc_nonce)
+    v2_derive_xwing_key_nonce(enc_key_buf, enc_nonce, ssx_buf, E, recipient_account_x25519);
+
+    return v2_encrypt_inner(
+            ki,
+            E,
+            mlkem_ct,
+            enc_key_buf,
+            enc_nonce,
+            sender_ed25519_privkey,
+            recipient_session_id,
+            content,
+            pro_signature);
 }
 
 std::array<unsigned char, 2> decrypt_incoming_v2_prefix(
@@ -372,32 +395,15 @@ std::array<unsigned char, 2> decrypt_incoming_v2_prefix(
             static_cast<unsigned char>(ciphertext[3] ^ kiss[1])};
 }
 
-DecryptV2Result decrypt_incoming_v2(
+// Decrypts the v2 AEAD payload and parses the inner bt-encoded dict.  Used by both
+// decrypt_incoming_v2 (PFS+PQ) and decrypt_incoming_v2_nopfs (non-PFS fallback).
+// Throws DecryptV2Error on AEAD failure; std::runtime_error on structural/format errors.
+static DecryptV2Result v2_aead_decrypt_and_parse(
         std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char, 32> account_pfs_x25519_sec,
-        std::span<const unsigned char, 32> account_pfs_x25519_pub,
-        std::span<const unsigned char, 2400> account_pfs_mlkem768_sec,
+        std::span<const unsigned char, 32> key,
+        std::span<const unsigned char, V2_NONCE_SIZE> nonce,
         std::span<const unsigned char> ciphertext) {
-    v2_check_header(ciphertext);
 
-    auto E = ciphertext.subspan<4, 32>();
-    auto mlkem_ct = ciphertext.subspan<36, MLKEM768_CIPHERTEXTBYTES>();
-
-    cleared_uc32 key_buf;    // ssm → k
-    cleared_uc32 nonce_buf;  // ssx → n
-
-    // Step 1: ML-KEM-768 decapsulate → shared secret ssm in key_buf
-    if (0 != sr_mlkem768_dec(key_buf.data(), mlkem_ct.data(), account_pfs_mlkem768_sec.data()))
-        throw DecryptV2Error{"ML-KEM-768 decapsulation failed"};
-
-    // Step 2: X25519 DH with account PFS key → shared secret ssx in nonce_buf
-    if (0 != crypto_scalarmult(nonce_buf.data(), account_pfs_x25519_sec.data(), E.data()))
-        throw DecryptV2Error{"X25519 DH (account key) failed"};
-
-    // Step 3: X-Wing KDF → enc key k (in key_buf) and enc nonce n (in nonce_buf[0:24])
-    v2_derive_xwing_key_nonce(key_buf, nonce_buf, E, account_pfs_x25519_pub);
-
-    // Step 4: AEAD decrypt the inner payload
     size_t enc_size = ciphertext.size() - V2_HEADER_SIZE;
     std::vector<unsigned char> plain(enc_size - V2_AEAD_OVERHEAD);
     if (0 != crypto_aead_xchacha20poly1305_ietf_decrypt(
@@ -408,15 +414,15 @@ DecryptV2Result decrypt_incoming_v2(
                      enc_size,
                      nullptr,
                      0,
-                     nonce_buf.data(),
-                     key_buf.data()))
+                     nonce.data(),
+                     key.data()))
         throw DecryptV2Error{"v2 message decryption failed"};
 
     // Strip zero padding from end (the plaintext was padded to a multiple of 256 bytes)
     while (!plain.empty() && plain.back() == 0)
         plain.pop_back();
 
-    // Step 5: Parse the bencoded inner dict
+    // Parse the bencoded inner dict
     oxenc::bt_dict_consumer dict{plain};
 
     auto sender_ed_pk = dict.require_span<unsigned char, 32>("S");
@@ -453,6 +459,110 @@ DecryptV2Result decrypt_incoming_v2(
     if (pro_sv)
         std::ranges::copy(*pro_sv, result.pro_signature.emplace().begin());
     return result;
+}
+
+DecryptV2Result decrypt_incoming_v2(
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char, 32> account_pfs_x25519_sec,
+        std::span<const unsigned char, 32> account_pfs_x25519_pub,
+        std::span<const unsigned char, 2400> account_pfs_mlkem768_sec,
+        std::span<const unsigned char> ciphertext) {
+    v2_check_header(ciphertext);
+
+    auto E = ciphertext.subspan<4, 32>();
+    auto mlkem_ct = ciphertext.subspan<36, MLKEM768_CIPHERTEXTBYTES>();
+
+    cleared_uc32 key_buf;  // ssm → k
+    cleared_uc32 ssx_buf;
+    cleared_uchars<V2_NONCE_SIZE> nonce;
+
+    // Step 1: ML-KEM-768 decapsulate → shared secret ssm in key_buf
+    if (0 != sr_mlkem768_dec(key_buf.data(), mlkem_ct.data(), account_pfs_mlkem768_sec.data()))
+        throw DecryptV2Error{"ML-KEM-768 decapsulation failed"};
+
+    // Step 2: X25519 DH with account PFS key → shared secret ssx in ssx_buf
+    if (0 != crypto_scalarmult(ssx_buf.data(), account_pfs_x25519_sec.data(), E.data()))
+        throw DecryptV2Error{"X25519 DH (account key) failed"};
+
+    // Step 3: X-Wing KDF → enc key k (in key_buf) and enc nonce n (in nonce)
+    v2_derive_xwing_key_nonce(key_buf, nonce, ssx_buf, E, account_pfs_x25519_pub);
+
+    return v2_aead_decrypt_and_parse(recipient_session_id, key_buf, nonce, ciphertext);
+}
+
+// Non-PFS fallback key derivation domain labels (private to this translation unit).
+// The outer wire format is identical to a PFS+PQ v2 message; only the key derivation differs.
+constexpr auto V2_NONPFS_KDF_LABEL = "SessionV2NonPFS"_uc;    // SHA3-256 input domain
+constexpr auto V2_NONPFS_SS_DOMAIN = "SessionV2NonPFSSS"_uc;  // SHAKE256 output domain
+
+std::vector<unsigned char> encrypt_for_recipient_v2_nopfs(
+        const Ed25519PrivKeySpan& sender_ed25519_privkey,
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char> content,
+        std::optional<std::span<const unsigned char, 64>> pro_signature) {
+
+    // R = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
+    auto R = recipient_session_id.last<32>();
+
+    // Generate ephemeral X25519 keypair e/E
+    cleared_uc32 e;
+    uc32 E;
+    crypto_box_keypair(E.data(), e.data());
+
+    // ki and the outer "mlkem_ct" slot are random: the message is externally indistinguishable
+    // from a PFS+PQ v2 message, but carries no actual ML-KEM ciphertext.
+    std::array<unsigned char, 2> ki;
+    std::array<unsigned char, MLKEM768_CIPHERTEXTBYTES> outer_ct;
+    random::fill(ki);
+    random::fill(outer_ct);
+
+    // ss = eR, then overwritten in-place with SHA3-256(ss || R || E || V2_NONPFS_KDF_LABEL).
+    // Using the output-buffer overload writes directly into the cleared buffer.
+    cleared_uc32 ss;
+    if (0 != crypto_scalarmult(ss.data(), e.data(), R.data()))
+        throw std::runtime_error{"X25519 DH (non-PFS) failed"};
+    hash::sha3_256(ss, ss, R, E, V2_NONPFS_KDF_LABEL);
+
+    // k, n = SHAKE256(V2_NONPFS_SS_DOMAIN, ss) → 32-byte key + 24-byte nonce
+    cleared_uc32 enc_key;
+    cleared_uchars<V2_NONCE_SIZE> enc_nonce;
+    hash::shake256(V2_NONPFS_SS_DOMAIN, ss)(enc_key, enc_nonce);
+
+    return v2_encrypt_inner(
+            ki,
+            E,
+            outer_ct,
+            enc_key,
+            enc_nonce,
+            sender_ed25519_privkey,
+            recipient_session_id,
+            content,
+            pro_signature);
+}
+
+DecryptV2Result decrypt_incoming_v2_nopfs(
+        std::span<const unsigned char, 33> recipient_session_id,
+        std::span<const unsigned char, 32> x25519_sec,
+        std::span<const unsigned char, 32> x25519_pub,
+        std::span<const unsigned char> ciphertext) {
+    v2_check_header(ciphertext);
+
+    // E = ephemeral X25519 pubkey from bytes 4-35; bytes 36-1123 (fake mlkem_ct) are ignored.
+    auto E = ciphertext.subspan<4, 32>();
+
+    // ss = rE, then overwritten in-place with SHA3-256(ss || R || E || V2_NONPFS_KDF_LABEL).
+    // Using the output-buffer overload writes directly into the cleared buffer.
+    cleared_uc32 ss;
+    if (0 != crypto_scalarmult(ss.data(), x25519_sec.data(), E.data()))
+        throw DecryptV2Error{"X25519 DH (non-PFS) failed"};
+    hash::sha3_256(ss, ss, x25519_pub, E, V2_NONPFS_KDF_LABEL);
+
+    // k, n = SHAKE256(V2_NONPFS_SS_DOMAIN, ss) → 32-byte key + 24-byte nonce
+    cleared_uc32 key;
+    cleared_uchars<V2_NONCE_SIZE> nonce;
+    hash::shake256(V2_NONPFS_SS_DOMAIN, ss)(key, nonce);
+
+    return v2_aead_decrypt_and_parse(recipient_session_id, key, nonce, ciphertext);
 }
 
 // Calculate the shared encryption key, sending from blinded sender kS (k = S's blinding factor) to
