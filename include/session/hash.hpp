@@ -2,7 +2,9 @@
 
 #include <oxenc/common.h>
 #include <oxenc/endian.h>
+#include <sodium/crypto_auth_hmacsha256.h>
 #include <sodium/crypto_generichash_blake2b.h>
+#include <sodium/crypto_hash_sha512.h>
 #include <sodium/crypto_xof_shake256.h>
 #include <sodium/utils.h>
 
@@ -370,6 +372,45 @@ struct identity_hasher {
         return out;
     }
 };
+
+// ─── SHA-512 ─────────────────────────────────────────────────────────────────
+
+/// One-shot SHA-512 hasher.  Takes a fixed-size 64-byte output container and any number of
+/// contiguous byte containers or integer values, computes the SHA-512 hash of their concatenation
+/// (in argument order), and writes the result into the output container.
+template <HashOutputContainer Out, HashInput... T>
+    requires(detail::container_extent_v<Out> == crypto_hash_sha512_BYTES && sizeof...(T) > 0)
+void sha512(Out& out, const T&... args) {
+    crypto_hash_sha512_state st;
+    crypto_hash_sha512_init(&st);
+    auto update = [&st](std::span<const unsigned char> arg) {
+        crypto_hash_sha512_update(&st, arg.data(), arg.size());
+    };
+    (update(detail::make_hashable(args)), ...);
+    crypto_hash_sha512_final(&st, reinterpret_cast<unsigned char*>(std::ranges::data(out)));
+    sodium_memzero(&st, sizeof(st));
+}
+
+// ─── HMAC-SHA-256 ────────────────────────────────────────────────────────────
+
+/// One-shot HMAC-SHA-256.  Takes a fixed-size 32-byte output container, a key (any byte
+/// container), and any number of contiguous byte containers or integer values, computes the
+/// HMAC-SHA-256 of their concatenation and writes the result into the output container.
+template <HashOutputContainer Out, ByteContainer Key, HashInput... T>
+    requires(detail::container_extent_v<Out> == crypto_auth_hmacsha256_BYTES && sizeof...(T) > 0)
+void hmac_sha256(Out& out, const Key& key, const T&... args) {
+    crypto_auth_hmacsha256_state st;
+    crypto_auth_hmacsha256_init(
+            &st,
+            reinterpret_cast<const unsigned char*>(std::ranges::data(key)),
+            std::ranges::size(key));
+    auto update = [&st](std::span<const unsigned char> arg) {
+        crypto_auth_hmacsha256_update(&st, arg.data(), arg.size());
+    };
+    (update(detail::make_hashable(args)), ...);
+    crypto_auth_hmacsha256_final(&st, reinterpret_cast<unsigned char*>(std::ranges::data(out)));
+    sodium_memzero(&st, sizeof(st));
+}
 
 }  // namespace session::hash
 

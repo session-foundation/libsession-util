@@ -9,7 +9,6 @@
 #include <sodium/crypto_aead_xchacha20poly1305.h>
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_core_ed25519.h>
-#include <sodium/crypto_generichash.h>
 #include <sodium/crypto_pwhash.h>
 #include <sodium/crypto_scalarmult.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
@@ -1135,38 +1134,6 @@ std::vector<unsigned char> decrypt_push_notification(
         buf.resize(buf.size() - std::distance(buf.rbegin(), it));
 
     return buf;
-}
-
-template <typename Func, typename... T>
-std::string compute_hash(Func hasher, const T&... args) {
-    // Allocate a buffer of 20 bytes per integral value (which is the largest the any integral
-    // value can be when stringified).
-    std::array<
-            char,
-            (0 + ... +
-             (std::is_integral_v<T> || std::is_same_v<T, std::chrono::system_clock::time_point>
-                      ? 20
-                      : 0))>
-            buffer;
-    auto* b = buffer.data();
-    return hasher({detail::to_hashable(args, b)...});
-}
-
-std::string compute_hash_blake2b_b64(std::vector<std::string_view> parts) {
-    constexpr size_t HASH_SIZE = 32;
-    crypto_generichash_state state;
-    crypto_generichash_init(&state, nullptr, 0, HASH_SIZE);
-    for (const auto& s : parts)
-        crypto_generichash_update(
-                &state, reinterpret_cast<const unsigned char*>(s.data()), s.size());
-    std::array<unsigned char, HASH_SIZE> hash;
-    crypto_generichash_final(&state, hash.data(), HASH_SIZE);
-
-    std::string b64hash = oxenc::to_base64(hash.begin(), hash.end());
-    // Trim padding:
-    while (!b64hash.empty() && b64hash.back() == '=')
-        b64hash.pop_back();
-    return b64hash;
 }
 
 std::vector<unsigned char> encrypt_xchacha20(

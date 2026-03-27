@@ -6,7 +6,6 @@
 #include <sodium/crypto_aead_xchacha20poly1305.h>
 #include <sodium/crypto_auth_hmacsha256.h>
 #include <sodium/crypto_box.h>
-#include <sodium/crypto_generichash.h>
 #include <sodium/crypto_scalarmult.h>
 #include <sodium/randombytes.h>
 #include <sodium/utils.h>
@@ -17,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "session/export.h"
+#include "session/hash.hpp"
 #include "session/network/key_types.hpp"
 #include "session/onionreq/builder.hpp"
 #include "session/util.hpp"
@@ -67,14 +67,11 @@ namespace {
                          local_sec.data(),
                          remote_pub.data()))  // Use key as tmp storage for aB
             throw std::runtime_error{"Failed to compute shared key for xchacha20"};
-        crypto_generichash_state h;
-        crypto_generichash_init(&h, nullptr, 0, key.size());
-        crypto_generichash_update(&h, key.data(), crypto_scalarmult_BYTES);
-        crypto_generichash_update(
-                &h, (local_first ? local_pub : remote_pub).data(), local_pub.size());
-        crypto_generichash_update(
-                &h, (local_first ? remote_pub : local_pub).data(), local_pub.size());
-        crypto_generichash_final(&h, key.data(), key.size());
+        hash::blake2b(
+                key,
+                key,
+                local_first ? local_pub : remote_pub,
+                local_first ? remote_pub : local_pub);
         return key;
     }
 

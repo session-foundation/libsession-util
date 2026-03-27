@@ -131,6 +131,17 @@ inline unsigned char* to_unsigned(unsigned char* x) {
     return x;
 }
 
+/// Returns the data pointer of a std::byte span as an `unsigned char*`, for passing to C APIs
+/// that expect `unsigned char*`.  The const overload returns `const unsigned char*`.
+template <size_t N>
+inline unsigned char* ucdata(std::span<std::byte, N> sp) {
+    return reinterpret_cast<unsigned char*>(sp.data());
+}
+template <size_t N>
+inline const unsigned char* ucdata(std::span<const std::byte, N> sp) {
+    return reinterpret_cast<const unsigned char*>(sp.data());
+}
+
 /// Returns true if the first string is equal to the second string, compared case-insensitively.
 inline bool string_iequal(std::string_view s1, std::string_view s2) {
     return std::equal(s1.begin(), s1.end(), s2.begin(), s2.end(), [](char a, char b) {
