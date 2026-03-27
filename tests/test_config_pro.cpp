@@ -45,7 +45,7 @@ TEST_CASE("Pro", "[config][pro]") {
         // Generate the hashes
         static_assert(crypto_sign_ed25519_BYTES == pro_cpp.proof.sig.max_size());
         std::array<unsigned char, 32> hash_to_sign_cpp = pro_cpp.proof.hash();
-        bytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
+        cbytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
 
         static_assert(hash_to_sign_cpp.size() == sizeof(hash_to_sign));
         CHECK(std::memcmp(hash_to_sign_cpp.data(), hash_to_sign.data, hash_to_sign_cpp.size()) ==

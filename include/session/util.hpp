@@ -150,6 +150,10 @@ inline bool string_iequal(std::string_view s1, std::string_view s2) {
     });
 }
 
+using b32 = std::array<std::byte, 32>;
+using b33 = std::array<std::byte, 33>;
+using b64 = std::array<std::byte, 64>;
+
 using uc32 = std::array<unsigned char, 32>;
 using uc33 = std::array<unsigned char, 33>;
 using uc64 = std::array<unsigned char, 64>;

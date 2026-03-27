@@ -969,8 +969,8 @@ LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
     value->data &= ~(1ULL << features);
 }
 
-LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
-    bytes32 result = {};
+LIBSESSION_C_API cbytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
+    cbytes32 result = {};
     session::uc32 hash = proof_hash_internal(
             proof->version,
             proof->gen_index_hash.data,
@@ -1090,7 +1090,7 @@ session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
-        const bytes33* recipient_pubkey,
+        const cbytes33* recipient_pubkey,
         const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         char* error,
@@ -1113,8 +1113,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
-        const bytes33* recipient_pubkey,
-        const bytes32* community_pubkey,
+        const cbytes33* recipient_pubkey,
+        const cbytes32* community_pubkey,
         const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         char* error,
@@ -1154,8 +1154,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
-        const bytes33* group_ed25519_pubkey,
-        const bytes32* group_enc_key,
+        const cbytes33* group_ed25519_pubkey,
+        const cbytes32* group_enc_key,
         const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         char* error,

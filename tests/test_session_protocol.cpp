@@ -20,8 +20,8 @@ struct SerialisedProtobufContentWithProForTesting {
     uc64 sig_over_plaintext_with_user_pro_key;
     uc64 sig_over_plaintext_padded_with_user_pro_key;
     uc32 pro_proof_hash;
-    bytes64 sig_over_plaintext_with_user_pro_key_c;
-    bytes32 pro_proof_hash_c;
+    cbytes64 sig_over_plaintext_with_user_pro_key_c;
+    cbytes32 pro_proof_hash_c;
 };
 
 static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_session_pro(
@@ -186,7 +186,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Encrypt with and w/o pro sig produce same payload size") {
         // Same payload size because the encrypt function should put in a dummy signature if one
         // wasn't specific to make pro and non-pro envelopes indistinguishable.
-        bytes33 recipient_pubkey = {};
+        cbytes33 recipient_pubkey = {};
         std::memcpy(recipient_pubkey.data, keys.session_pk1.data(), sizeof(recipient_pubkey.data));
 
         // Withhold the pro signature
@@ -250,7 +250,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Encrypt
         session_protocol_encoded_for_destination encrypt_result = {};
         {
-            bytes33 recipient_pubkey = {};
+            cbytes33 recipient_pubkey = {};
             std::memcpy(recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
             encrypt_result = session_protocol_encode_dm_v1(
                     plaintext.data(),
@@ -287,7 +287,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Verify pro
         ProProof nil_proof = {};
         uc32 nil_hash = nil_proof.hash();
-        bytes32 decrypt_result_pro_hash =
+        cbytes32 decrypt_result_pro_hash =
                 session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(decrypt_result.pro.status ==
                 SESSION_PROTOCOL_PRO_STATUS_NIL);  // Pro was not attached
@@ -321,14 +321,14 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     /*profile_bitset*/ {});
 
     // Setup base destination object with the pro signature w/ Session pubkey 1 as the recipient
-    bytes64 base_pro_sig = {};
+    cbytes64 base_pro_sig = {};
     std::memcpy(
             base_pro_sig.data,
             protobuf_content.sig_over_plaintext_with_user_pro_key.data(),
             sizeof(base_pro_sig.data));
 
     uint64_t base_sent_timestamp_ms = timestamp_ms.time_since_epoch().count();
-    bytes33 base_recipient_pubkey = {};
+    cbytes33 base_recipient_pubkey = {};
     REQUIRE(sizeof(base_recipient_pubkey.data) == keys.session_pk1.size());
     std::memcpy(base_recipient_pubkey.data, keys.session_pk1.data(), keys.session_pk1.size());
 
@@ -336,10 +336,10 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         SECTION("Community inbox") {
             auto [blind15_pk, blind15_sk] =
                     session::blind15_key_pair(keys.ed_sk1, keys.ed_pk1, /*blind factor*/ nullptr);
-            bytes33 blind15_recipient = {};
+            cbytes33 blind15_recipient = {};
             blind15_recipient.data[0] = 0x15;
             std::memcpy(blind15_recipient.data + 1, blind15_pk.data(), blind15_pk.size());
-            bytes32 community_pubkey = {};
+            cbytes32 community_pubkey = {};
 
             session_protocol_encoded_for_destination encrypt_result =
                     session_protocol_encode_for_community_inbox(
@@ -414,7 +414,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Verify pro
         REQUIRE(decrypt_result.pro.status ==
                 SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
-        bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
+        cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
                 0);
         REQUIRE(decrypt_result.pro.msg_bitset.data == 0);      // No features requested
@@ -490,7 +490,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Verify pro
         REQUIRE(decrypt_result.pro.status ==
                 SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
-        bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
+        cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
                 0);
         REQUIRE(session_protocol_pro_profile_bitset_is_set(
@@ -512,7 +512,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encrypt/decrypt for legacy groups is rejected") {
         CHECK(base_recipient_pubkey.data[0] == 0x05);
-        bytes32 group_enc_key = {};
+        cbytes32 group_enc_key = {};
 
         session_protocol_encoded_for_destination encrypt_result = session_protocol_encode_for_group(
                 protobuf_content.plaintext.data(),
@@ -544,8 +544,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Encrypt
         session_protocol_encoded_for_destination encrypt_result = {};
         {
-            bytes33 group_v2_session_pk = {};
-            bytes32 group_v2_session_sk = {};
+            cbytes33 group_v2_session_pk = {};
+            cbytes32 group_v2_session_sk = {};
             group_v2_session_pk.data[0] = 0x03;
             std::memcpy(group_v2_session_pk.data + 1, group_v2_pk.data(), group_v2_pk.size());
             std::memcpy(
@@ -634,7 +634,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             // Verify pro
             REQUIRE(decrypt_result.pro.status ==
                     SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
-            bytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
+            cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
             REQUIRE(std::memcmp(
                             hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
                     0);
@@ -865,8 +865,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         crypto_sign_ed25519_seed_keypair(
                 community_pk.data(), community_sk.data(), community_seed.data());
 
-        bytes32 session_blind15_sk0 = {};
-        bytes33 session_blind15_pk0 = {};
+        cbytes32 session_blind15_sk0 = {};
+        cbytes33 session_blind15_pk0 = {};
         session_blind15_pk0.data[0] = 0x15;
         session_blind15_key_pair(
                 keys.ed_sk0.data(),
@@ -874,8 +874,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 session_blind15_pk0.data + 1,
                 session_blind15_sk0.data);
 
-        bytes32 session_blind15_sk1 = {};
-        bytes33 session_blind15_pk1 = {};
+        cbytes32 session_blind15_sk1 = {};
+        cbytes33 session_blind15_pk1 = {};
         session_blind15_pk1.data[0] = 0x15;
         session_blind15_key_pair(
                 keys.ed_sk1.data(),
@@ -883,8 +883,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 session_blind15_pk1.data + 1,
                 session_blind15_sk1.data);
 
-        bytes33 recipient_pubkey = session_blind15_pk1;
-        bytes32 community_pubkey = {};
+        cbytes33 recipient_pubkey = session_blind15_pk1;
+        cbytes32 community_pubkey = {};
         std::memcpy(community_pubkey.data, community_pk.data(), community_pk.size());
 
         session_protocol_encoded_for_destination encoded =

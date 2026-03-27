@@ -28,18 +28,18 @@ struct string8 {
 
 #define string8_literal(literal) {(char*)literal, sizeof(literal) - 1}
 
-typedef struct bytes32 bytes32;
-struct bytes32 {
+typedef struct cbytes32 cbytes32;
+struct cbytes32 {
     unsigned char data[32];
 };
 
-typedef struct bytes33 bytes33;
-struct bytes33 {
+typedef struct cbytes33 cbytes33;
+struct cbytes33 {
     unsigned char data[33];
 };
 
-typedef struct bytes64 bytes64;
-struct bytes64 {
+typedef struct cbytes64 cbytes64;
+struct cbytes64 {
     unsigned char data[64];
 };
 

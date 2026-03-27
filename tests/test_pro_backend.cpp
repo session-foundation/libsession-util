@@ -78,12 +78,12 @@ static bool string8_equals(string8 s8, std::string_view str) {
 
 TEST_CASE("Pro Backend C API", "[pro_backend]") {
     // Setup: Generate keys and payment token hash
-    bytes32 master_pubkey = {};
-    bytes64 master_privkey = {};
+    cbytes32 master_pubkey = {};
+    cbytes64 master_privkey = {};
     crypto_sign_ed25519_keypair(master_pubkey.data, master_privkey.data);
 
-    bytes32 rotating_pubkey = {};
-    bytes64 rotating_privkey = {};
+    cbytes32 rotating_pubkey = {};
+    cbytes64 rotating_privkey = {};
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
@@ -922,12 +922,12 @@ std::string curl_do_basic_blocking_post_request(
 
 TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     // Setup: Generate keys and payment token hash
-    bytes32 master_pubkey = {};
-    bytes64 master_privkey = {};
+    cbytes32 master_pubkey = {};
+    cbytes64 master_privkey = {};
     crypto_sign_ed25519_keypair(master_pubkey.data, master_privkey.data);
 
-    bytes32 rotating_pubkey = {};
-    bytes64 rotating_privkey = {};
+    cbytes32 rotating_pubkey = {};
+    cbytes64 rotating_privkey = {};
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     const auto DEV_BACKEND_PUBKEY =

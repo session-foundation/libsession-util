@@ -132,8 +132,8 @@ struct session_pro_backend_master_rotating_signatures {
     bool success;
     char error[256];
     size_t error_count;
-    bytes64 master_sig;
-    bytes64 rotating_sig;
+    cbytes64 master_sig;
+    cbytes64 rotating_sig;
 };
 
 typedef struct session_pro_backend_signature session_pro_backend_signature;
@@ -141,7 +141,7 @@ struct session_pro_backend_signature {
     bool success;
     char error[256];
     size_t error_count;
-    bytes64 sig;
+    cbytes64 sig;
 };
 
 typedef struct session_pro_backend_add_pro_payment_user_transaction
@@ -158,22 +158,22 @@ typedef struct session_pro_backend_add_pro_payment_request
         session_pro_backend_add_pro_payment_request;
 struct session_pro_backend_add_pro_payment_request {
     uint8_t version;
-    bytes32 master_pkey;
-    bytes32 rotating_pkey;
+    cbytes32 master_pkey;
+    cbytes32 rotating_pkey;
     session_pro_backend_add_pro_payment_user_transaction payment_tx;
-    bytes64 master_sig;
-    bytes64 rotating_sig;
+    cbytes64 master_sig;
+    cbytes64 rotating_sig;
 };
 
 typedef struct session_pro_backend_generate_pro_proof_request
         session_pro_backend_generate_pro_proof_request;
 struct session_pro_backend_generate_pro_proof_request {
     uint8_t version;
-    bytes32 master_pkey;
-    bytes32 rotating_pkey;
+    cbytes32 master_pkey;
+    cbytes32 rotating_pkey;
     uint64_t unix_ts_ms;
-    bytes64 master_sig;
-    bytes64 rotating_sig;
+    cbytes64 master_sig;
+    cbytes64 rotating_sig;
 };
 
 typedef struct session_pro_backend_add_pro_payment_or_generate_pro_proof_response
@@ -192,7 +192,7 @@ struct session_pro_backend_get_pro_revocations_request {
 
 typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
 struct session_pro_backend_pro_revocation_item {
-    bytes32 gen_index_hash;
+    cbytes32 gen_index_hash;
     uint64_t expiry_unix_ts_ms;
 };
 
@@ -210,8 +210,8 @@ typedef struct session_pro_backend_get_pro_details_request
         session_pro_backend_get_pro_details_request;
 struct session_pro_backend_get_pro_details_request {
     uint8_t version;
-    bytes32 master_pkey;
-    bytes64 master_sig;
+    cbytes32 master_pkey;
+    cbytes64 master_sig;
     uint64_t unix_ts_ms;
     uint32_t count;
 };
@@ -268,8 +268,8 @@ typedef struct session_pro_backend_set_payment_refund_requested_request
         session_pro_backend_set_payment_refund_requested_request;
 struct session_pro_backend_set_payment_refund_requested_request {
     uint8_t version;
-    bytes32 master_pkey;
-    bytes64 master_sig;
+    cbytes32 master_pkey;
+    cbytes64 master_sig;
     uint64_t unix_ts_ms;
     uint64_t refund_requested_unix_ts_ms;
     session_pro_backend_add_pro_payment_user_transaction payment_tx;

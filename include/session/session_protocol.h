@@ -79,10 +79,10 @@ struct session_protocol_pro_signed_message {
 typedef struct session_protocol_pro_proof session_protocol_pro_proof;
 struct session_protocol_pro_proof {
     uint8_t version;
-    bytes32 gen_index_hash;
-    bytes32 rotating_pubkey;
+    cbytes32 gen_index_hash;
+    cbytes32 rotating_pubkey;
     uint64_t expiry_unix_ts_ms;
-    bytes64 sig;
+    cbytes64 sig;
 };
 
 // Feature flags for profile features where each enum value indicates the bit position in the
@@ -142,10 +142,10 @@ typedef struct session_protocol_envelope session_protocol_envelope;
 struct session_protocol_envelope {
     SESSION_PROTOCOL_ENVELOPE_FLAGS flags;
     uint64_t timestamp_ms;
-    bytes33 source;
+    cbytes33 source;
     uint32_t source_device;
     uint64_t server_timestamp;
-    bytes64 pro_sig;
+    cbytes64 pro_sig;
 };
 
 typedef struct session_protocol_decode_envelope_keys session_protocol_decode_envelope_keys;
@@ -170,8 +170,8 @@ struct session_protocol_decoded_envelope {
     bool success;
     session_protocol_envelope envelope;
     span_u8 content_plaintext;
-    bytes32 sender_ed25519_pubkey;
-    bytes32 sender_x25519_pubkey;
+    cbytes32 sender_ed25519_pubkey;
+    cbytes32 sender_x25519_pubkey;
     session_protocol_decoded_pro pro;
     size_t error_len_incl_null_terminator;
 };
@@ -193,7 +193,7 @@ struct session_protocol_decoded_community_message {
     session_protocol_envelope envelope;
     span_u8 content_plaintext;
     bool has_pro;
-    bytes64 pro_sig;
+    cbytes64 pro_sig;
     session_protocol_decoded_pro pro;
     size_t error_len_incl_null_terminator;
 };
@@ -244,8 +244,8 @@ LIBSESSION_EXPORT void session_protocol_pro_message_bitset_unset(
 /// - `proof` -- Proof to calculate the hash from
 ///
 /// Outputs:
-/// - `bytes32` -- The 32 byte hash calculated from the proof
-LIBSESSION_EXPORT bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof)
+/// - `cbytes32` -- The 32 byte hash calculated from the proof
+LIBSESSION_EXPORT cbytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof)
         NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_pro_proof_verify_signature
@@ -438,7 +438,7 @@ session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
-        const bytes33* recipient_pubkey,
+        const cbytes33* recipient_pubkey,
         OPTIONAL const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
@@ -499,8 +499,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
-        const bytes33* recipient_pubkey,
-        const bytes32* community_pubkey,
+        const cbytes33* recipient_pubkey,
+        const cbytes32* community_pubkey,
         OPTIONAL const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
@@ -613,8 +613,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
         uint64_t sent_timestamp_ms,
-        const bytes33* group_ed25519_pubkey,
-        const bytes32* group_enc_key,
+        const cbytes33* group_ed25519_pubkey,
+        const cbytes32* group_enc_key,
         OPTIONAL const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
