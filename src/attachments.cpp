@@ -935,7 +935,8 @@ LIBSESSION_C_API bool session_attachment_encrypt(
         sodium_zero_buffer(key.data(), key.size());
         return true;
     } catch (const std::exception& e) {
-        return set_error(error, e);
+        copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 
@@ -959,7 +960,8 @@ LIBSESSION_C_API bool session_attachment_decrypt(
                 std::span{reinterpret_cast<std::byte*>(out), *max_size});
         return true;
     } catch (const std::exception& e) {
-        return set_error(error, e);
+        copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 
@@ -987,7 +989,8 @@ LIBSESSION_C_API bool session_attachment_decrypt_alloc(
     } catch (const std::exception& e) {
         if (decrypted)
             std::free(decrypted);
-        return set_error(error, e);
+        copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 
@@ -1021,7 +1024,7 @@ LIBSESSION_C_API size_t session_attachment_encrypt_file(
         sodium_zero_buffer(key.data(), key.size());
         return enc_size;
     } catch (const std::exception& e) {
-        set_error(error, e);
+        copy_c_str(error, 256, e.what());
         return 0;
     }
 }
@@ -1046,7 +1049,7 @@ LIBSESSION_C_API size_t session_attachment_decrypt_file(
                     return std::span{reinterpret_cast<std::byte*>(buf), s};
                 });
     } catch (const std::exception& e) {
-        set_error(error, e);
+        copy_c_str(error, 256, e.what());
         return std::numeric_limits<size_t>::max();
     }
 }
@@ -1066,7 +1069,8 @@ LIBSESSION_C_API bool session_attachment_decrypt_to_file(
                 std::filesystem::path{file_out});
         return true;
     } catch (const std::exception& e) {
-        return set_error(error, e);
+        copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 
@@ -1081,7 +1085,8 @@ LIBSESSION_C_API bool session_attachment_decrypt_file_to_file(
                 std::filesystem::path{file_out});
         return true;
     } catch (const std::exception& e) {
-        return set_error(error, e);
+        copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 }

@@ -51,24 +51,6 @@ struct arena_t {
     size_t max;
 };
 
-/// A wrapper around snprintf that fixes a common bug in the value the printing function returns
-/// when a buffer is passed in. Irrespective of whether a buffer is passed in, snprintf is defined
-/// to return:
-///
-///  number of characters (not including the terminating null character) which would have been
-///  written to buffer if bufsz was ignored
-///
-/// This means if the user passes in a buffer to small, the return value is always the amount of
-/// bytes required. This means the user always has to calculate the number of bytes written as:
-///
-///   size_t bytes_written = min(snprintf(buffer, size, ...), size);
-///
-/// This is error prone. This function does the `min(...)` for you so that this function
-/// _always_ calculates the actual number of bytes written (not including the null-terminator). If a
-/// NULL is passed in then this function returns the number of bytes actually needed to write the
-/// entire string (as per normal snprintf behaviour).
-int snprintf_clamped(char* buffer, size_t size, char const* fmt, ...);
-
 /// Allocate memory from the basic bump allocating arena. Returns a null pointer on failure.
 void* arena_alloc(arena_t* arena, size_t bytes);
 

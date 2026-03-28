@@ -11,6 +11,7 @@
 #include <ranges>
 #include <vector>
 
+#include "../internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/network/backends/session_file_server.hpp"
 #include "session/network/network_config.hpp"
@@ -1129,17 +1130,6 @@ inline std::shared_ptr<session::network::Network> unbox(network_object* network_
     return *static_cast<std::shared_ptr<session::network::Network>*>(network_->internals);
 }
 
-inline bool set_error(char* error, const std::exception& e) {
-    if (!error)
-        return false;
-
-    std::string msg = e.what();
-    if (msg.size() > 255)
-        msg.resize(255);
-    std::memcpy(error, msg.c_str(), msg.size() + 1);
-    return false;
-}
-
 }  // namespace
 
 extern "C" {
@@ -1239,8 +1229,10 @@ LIBSESSION_C_API session_network_config session_network_config_default() {
 
 LIBSESSION_C_API bool session_network_init(
         network_object** network, const session_network_config* config, char* error) {
-    if (!network || !config)
-        return set_error(error, std::invalid_argument{"network or config were null."});
+    if (!network || !config) {
+        session::copy_c_str(error, 256, "network or config were null.");
+        return false;
+    }
 
     try {
         // Build the configuration options (ordered this way for the debug logs to make the most
@@ -1433,7 +1425,8 @@ LIBSESSION_C_API bool session_network_init(
         *network = n_object.release();
         return true;
     } catch (const std::exception& e) {
-        return set_error(error, e);
+        session::copy_c_str(error, 256, e.what());
+        return false;
     }
 }
 

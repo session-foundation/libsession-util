@@ -1,7 +1,6 @@
 #include <fmt/core.h>
 #include <session/types.h>
 
-#include <cstdarg>
 #include <session/types.hpp>
 
 namespace session {
@@ -39,18 +38,6 @@ string8 string8_copy_or_throw(const void* data, size_t size) {
     return result;
 }
 };  // namespace session
-
-int snprintf_clamped(char* buffer, size_t size, char const* fmt, ...) {
-    va_list args;
-    va_start(args, fmt);
-    int bytes_required_not_incl_null = vsnprintf(buffer, size, fmt, args);
-    va_end(args);
-
-    int result = bytes_required_not_incl_null;
-    if (buffer && size && bytes_required_not_incl_null >= (size - 1))
-        result = size - 1;
-    return result;
-}
 
 void* arena_alloc(arena_t* arena, size_t bytes) {
     void* result = nullptr;

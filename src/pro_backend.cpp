@@ -13,6 +13,8 @@
 #include <session/types.hpp>
 #include <session/util.hpp>
 
+#include "internal-util.hpp"
+
 // clang-format off
 const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT] = {
     /*SESSION_PRO_PAYMENT_PROVIDER_NIL*/ {
@@ -929,13 +931,7 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
     return result;
 }
@@ -973,13 +969,7 @@ session_pro_backend_add_pro_payment_request_build_to_json(
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
 
     return result;
@@ -1010,13 +1000,7 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
     return result;
 }
@@ -1044,13 +1028,7 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
     return result;
 }
@@ -1072,13 +1050,7 @@ session_pro_backend_get_pro_details_request_build_sig(
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
     return result;
 }
@@ -1100,13 +1072,7 @@ session_pro_backend_get_pro_details_request_build_to_json(
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
     return result;
 }
@@ -1135,13 +1101,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
 
     return result;
@@ -1168,13 +1128,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_generate_pro_pr
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
 
     return result;
@@ -1197,13 +1151,7 @@ session_pro_backend_get_pro_revocations_request_to_json(
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
 
     return result;
@@ -1230,13 +1178,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_details
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
 
     return result;
@@ -1437,27 +1379,22 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
-                dest.google_payment_token_count = snprintf_clamped(
-                        dest.google_payment_token,
-                        sizeof(dest.google_payment_token),
-                        src.google_payment_token.data());
-                dest.google_order_id_count = snprintf_clamped(
-                        dest.google_order_id,
-                        sizeof(dest.google_order_id),
-                        src.google_order_id.data());
+                dest.google_payment_token_count =
+                        session::copy_c_str(dest.google_payment_token, src.google_payment_token) -
+                        1;
+                dest.google_order_id_count =
+                        session::copy_c_str(dest.google_order_id, src.google_order_id) - 1;
             } break;
 
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
-                dest.apple_original_tx_id_count = snprintf_clamped(
-                        dest.apple_original_tx_id,
-                        sizeof(dest.apple_original_tx_id),
-                        src.apple_original_tx_id.data());
-                dest.apple_tx_id_count = snprintf_clamped(
-                        dest.apple_tx_id, sizeof(dest.apple_tx_id), src.apple_tx_id.data());
-                dest.apple_web_line_order_id_count = snprintf_clamped(
-                        dest.apple_web_line_order_id,
-                        sizeof(dest.apple_web_line_order_id),
-                        src.apple_web_line_order_id.data());
+                dest.apple_original_tx_id_count =
+                        session::copy_c_str(dest.apple_original_tx_id, src.apple_original_tx_id) -
+                        1;
+                dest.apple_tx_id_count = session::copy_c_str(dest.apple_tx_id, src.apple_tx_id) - 1;
+                dest.apple_web_line_order_id_count =
+                        session::copy_c_str(
+                                dest.apple_web_line_order_id, src.apple_web_line_order_id) -
+                        1;
             } break;
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
                 dest.rangeproof_order_id_count = snprintf_clamped(
@@ -1517,13 +1454,7 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
     return result;
 }
@@ -1564,13 +1495,7 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
     return result;
 }
@@ -1603,13 +1528,7 @@ session_pro_backend_set_payment_refund_requested_request_to_json(
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
 
     return result;

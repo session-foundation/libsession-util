@@ -15,6 +15,7 @@
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
+#include "internal-util.hpp"
 #include "session/export.h"
 
 // clang-format off
@@ -1072,14 +1073,7 @@ static session_protocol_encoded_for_destination c_encode_impl(
                 .ciphertext = span_u8_copy_or_throw(ciphertext.data(), ciphertext.size()),
         };
     } catch (const std::exception& e) {
-        std::string error_cpp = e.what();
-        result.error_len_incl_null_terminator = snprintf_clamped(
-                                                        error,
-                                                        error_len,
-                                                        "%.*s",
-                                                        static_cast<int>(error_cpp.size()),
-                                                        error_cpp.data()) +
-                                                1;
+        result.error_len_incl_null_terminator = copy_c_str(error, error_len, e.what());
     }
     return result;
 }
@@ -1196,13 +1190,11 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     array_uc32_from_ptr_result pro_backend_pubkey_cpp =
             array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
     if (!pro_backend_pubkey_cpp.success) {
-        result.error_len_incl_null_terminator = snprintf_clamped(
-                                                        error,
-                                                        error_len,
-                                                        "Invalid pro_backend_pubkey: Key was "
-                                                        "set but was not 32 bytes, was: %zu",
-                                                        pro_backend_pubkey_len) +
-                                                1;
+        result.error_len_incl_null_terminator = format_c_str(
+                error,
+                error_len,
+                "Invalid pro_backend_pubkey: Key was set but was not 32 bytes, was: {}",
+                pro_backend_pubkey_len);
         return result;
     }
 
@@ -1213,13 +1205,11 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
                 std::span<const unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES>{
                         keys->group_ed25519_pubkey.data, crypto_sign_ed25519_PUBLICKEYBYTES};
     } else if (keys->group_ed25519_pubkey.size) {
-        result.error_len_incl_null_terminator =
-                snprintf_clamped(
-                        error,
-                        error_len,
-                        "Invalid group_ed25519_pubkey: must be exactly 32 bytes, was: %zu",
-                        keys->group_ed25519_pubkey.size) +
-                1;
+        result.error_len_incl_null_terminator = format_c_str(
+                error,
+                error_len,
+                "Invalid group_ed25519_pubkey: must be exactly 32 bytes, was: {}",
+                keys->group_ed25519_pubkey.size);
         return result;
     }
 
@@ -1236,20 +1226,13 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
             result.success = true;
             break;
         } catch (const std::exception& e) {
-            std::string error_cpp = e.what();
-            result.error_len_incl_null_terminator = snprintf_clamped(
-                                                            error,
-                                                            error_len,
-                                                            "%.*s",
-                                                            static_cast<int>(error_cpp.size()),
-                                                            error_cpp.data()) +
-                                                    1;
+            result.error_len_incl_null_terminator = copy_c_str(error, error_len, e.what());
         }
     }
 
     if (keys->decrypt_keys_len == 0) {
         result.error_len_incl_null_terminator =
-                snprintf_clamped(error, error_len, "No keys ed25519_privkeys were provided") + 1;
+                copy_c_str(error, error_len, "No keys ed25519_privkeys were provided");
     }
 
     // Marshall into c type
@@ -1257,15 +1240,8 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
         result.content_plaintext = session::span_u8_copy_or_throw(
                 result_cpp.content_plaintext.data(), result_cpp.content_plaintext.size());
     } catch (const std::exception& e) {
-        std::string error_cpp = e.what();
         result.success = false;
-        result.error_len_incl_null_terminator = snprintf_clamped(
-                                                        error,
-                                                        error_len,
-                                                        "%.*s",
-                                                        static_cast<int>(error_cpp.size()),
-                                                        error_cpp.data()) +
-                                                1;
+        result.error_len_incl_null_terminator = copy_c_str(error, error_len, e.what());
     }
 
     result.envelope = envelope_from_cpp(result_cpp.envelope);
@@ -1317,13 +1293,11 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
     array_uc32_from_ptr_result pro_backend_pubkey_cpp =
             array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
     if (!pro_backend_pubkey_cpp.success) {
-        result.error_len_incl_null_terminator = snprintf_clamped(
-                                                        error,
-                                                        error_len,
-                                                        "Invalid pro_backend_pubkey: Key was "
-                                                        "set but was not 32 bytes, was: %zu",
-                                                        pro_backend_pubkey_len) +
-                                                1;
+        result.error_len_incl_null_terminator = format_c_str(
+                error,
+                error_len,
+                "Invalid pro_backend_pubkey: Key was set but was not 32 bytes, was: {}",
+                pro_backend_pubkey_len);
         return result;
     }
 
@@ -1342,15 +1316,8 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
             result.pro = decoded_pro_from_cpp(*decoded.pro);
         result.success = true;
     } catch (const std::exception& e) {
-        std::string error_cpp = e.what();
         result.success = false;
-        result.error_len_incl_null_terminator = snprintf_clamped(
-                                                        error,
-                                                        error_len,
-                                                        "%.*s",
-                                                        static_cast<int>(error_cpp.size()),
-                                                        error_cpp.data()) +
-                                                1;
+        result.error_len_incl_null_terminator = copy_c_str(error, error_len, e.what());
     }
 
     return result;

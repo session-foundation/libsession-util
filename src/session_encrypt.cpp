@@ -24,6 +24,7 @@
 #include <stdexcept>
 #include <vector>
 
+#include "internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/clock.hpp"
 #include "session/hash.hpp"
@@ -1396,11 +1397,7 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
                 .ciphertext = session::span_u8_copy_or_throw(result_cpp.data(), result_cpp.size()),
         };
     } catch (const std::exception& e) {
-        std::string error_cpp = e.what();
-        result.error_len_incl_null_terminator =
-                snprintf_clamped(
-                        error, error_len, "%.*s", (int)error_cpp.size(), error_cpp.data()) +
-                1;
+        result.error_len_incl_null_terminator = copy_c_str(error, error_len, e.what());
     }
     return result;
 }
@@ -1509,11 +1506,7 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
             std::memcpy(result.session_id, result_cpp.session_id.data(), sizeof(result.session_id));
             break;
         } catch (const std::exception& e) {
-            std::string error_cpp = e.what();
-            result.error_len_incl_null_terminator =
-                    snprintf_clamped(
-                            error, error_len, "%.*s", (int)error_cpp.size(), error_cpp.data()) +
-                    1;
+            result.error_len_incl_null_terminator = copy_c_str(error, error_len, e.what());
         }
     }
     return result;
