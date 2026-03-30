@@ -343,23 +343,9 @@ OnionRequestRouter::OnionRequestRouter(
 }
 
 OnionRequestRouter::~OnionRequestRouter() {
-    std::vector<std::thread> threads_to_join;
-
     // Use 'call_get' to force this to be synchronous
     if (_loop)
-        _loop->call_get([this, &threads_to_join] {
-            // Harvest upload thread handles *before* _close_connections clears the map
-            for (auto& [_, upload] : _active_uploads)
-                if (upload.second.joinable())
-                    threads_to_join.push_back(std::move(upload.second));
-
-            _close_connections();
-        });
-
-    // Block until upload threads have finished
-    for (auto& t : threads_to_join)
-        if (t.joinable())
-            t.join();
+        _loop->call_get([this] { _close_connections(); });
 
     log::debug(cat, "Destroyed.");
 }
@@ -662,8 +648,13 @@ void OnionRequestRouter::_pre_build_paths_if_needed() {
 }
 
 void OnionRequestRouter::_close_connections() {
+    std::vector<std::thread> threads_to_join;
+
     // Cancel any uploads and downloads
     for (auto& [id, request_and_thread] : _active_uploads) {
+        if (request_and_thread.second.joinable())
+            threads_to_join.push_back(std::move(request_and_thread.second));
+
         request_and_thread.first.cancel();
 
         if (request_and_thread.first.on_complete)
@@ -720,6 +711,12 @@ void OnionRequestRouter::_close_connections() {
     _path_rotation_schedule.clear();
     _pending_rotation_paths.clear();
     _update_status();
+
+    // Block until upload threads have finished
+    for (auto& t : threads_to_join)
+        if (t.joinable())
+            t.join();
+
     log::info(cat, "Closed all connections.");
 }
 
