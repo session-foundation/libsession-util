@@ -260,6 +260,17 @@ Network::~Network() {
 
         _update_status(ConnectionStatus::disconnected);
     });
+
+    // Explicitly destroy in dependency order while _loop is still alive. Their destructors post
+    // final cleanup via call_get so the loop must be running when they destruct.
+    _router.reset();
+    _snode_pool.reset();
+    _transport.reset();
+
+    // Now shut down the loops (these destructors join their threads)
+    _disk_loop.reset();
+    _loop.reset();
+
     log::debug(cat, "Destroyed.");
 }
 
