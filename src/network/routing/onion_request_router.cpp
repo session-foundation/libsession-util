@@ -1435,6 +1435,15 @@ void OnionRequestRouter::_on_edge_connectivity_response(
 }
 
 OnionPath* OnionRequestRouter::_find_valid_path(const Request& request) {
+    // If we are in `single_path_mode` then just return the first path we have (don't care about
+    // category as there should only be one path)
+    if (_config.single_path_mode) {
+        for (auto& [category, category_paths] : _paths)
+            if (!category_paths.empty())
+                return &category_paths.front();
+        return nullptr;
+    }
+
     auto it = _paths.find(to_path_category(request.category));
     if (it == _paths.end() || it->second.empty())
         return nullptr;
