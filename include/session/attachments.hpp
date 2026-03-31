@@ -110,7 +110,7 @@ std::optional<size_t> decrypted_max_size(size_t encrypted_size);
 ///
 /// - `data` -- the buffer of data to encrypt.
 ///
-/// - `domain` -- domain separator; uploads of funamentally different types should use a different
+/// - `domain` -- domain separator; uploads of fundamentally different types should use a different
 ///   value, so that an identical upload used for different purposes will have unrelated key/nonce
 ///   values.
 ///

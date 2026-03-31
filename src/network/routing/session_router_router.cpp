@@ -551,22 +551,246 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     _send_direct_request(std::move(proxy_request), std::move(proxy_callback));
 }
 
+// Extracts the Ed25519 pubkey from a resolved session-router address like "b32zpubkey.sesh"
+// or "b32zpubkey.snode".  Returns nullopt if the address is not a valid pubkey-based address.
+static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_view address) {
+    auto dot = address.find('.');
+    if (dot == std::string_view::npos || dot == 0)
+        return std::nullopt;
+
+    auto b32z = address.substr(0, dot);
+    if (!oxenc::is_base32z(b32z) || oxenc::from_base32z_size(b32z.size()) != 32)
+        return std::nullopt;
+
+    std::optional<ed25519_pubkey> result{std::in_place};
+    oxenc::from_base32z(b32z.begin(), b32z.end(), result->begin());
+    return result;
+}
+
+void SessionRouter::_cleanup_upload(const std::string& upload_id) {
+    auto node = _active_uploads.extract(upload_id);
+    if (!node.empty()) {
+        auto& thread = node.mapped().second;
+        if (thread.joinable())
+            thread.join();
+    }
+}
+
+QuicFileClient& SessionRouter::_get_file_client(
+        const ed25519_pubkey& pubkey, std::string_view address, uint16_t port) {
+    auto [it, inserted] = _file_clients.try_emplace(pubkey, nullptr);
+    if (inserted)
+        it->second = std::make_unique<QuicFileClient>(
+                _loop, pubkey, std::string{address}, port);
+    else
+        it->second->set_target(pubkey, std::string{address}, port);
+    return *it->second;
+}
+
+void SessionRouter::_quic_upload_via_tunnel(
+        UploadRequest upload_request,
+        std::string upload_id,
+        std::vector<std::byte> data,
+        router::tunnel_info info) {
+    auto pubkey = pubkey_from_srouter_address(info.remote);
+    if (!pubkey) {
+        log::error(
+                cat,
+                "[Upload {}]: Could not extract pubkey from resolved address {}",
+                upload_id,
+                info.remote);
+        upload_request.on_complete(ERROR_UNKNOWN, false);
+        _cleanup_upload(upload_id);
+        return;
+    }
+
+    _get_file_client(*pubkey, "::1", info.local_port)
+            .upload(
+                    std::move(data),
+                    upload_request.ttl,
+                    [weak_self = weak_from_this(), this, upload_request, upload_id](
+                            std::variant<file_metadata, int16_t> result) {
+                        auto self = weak_self.lock();
+                        if (!self)
+                            return;
+
+                        if (auto* meta = std::get_if<file_metadata>(&result))
+                            log::info(
+                                    cat,
+                                    "[Upload {}]: Success, file ID: {}",
+                                    upload_id,
+                                    meta->id);
+                        else
+                            log::error(
+                                    cat,
+                                    "[Upload {}]: Failed with error {}",
+                                    upload_id,
+                                    std::get<int16_t>(result));
+
+                        upload_request.on_complete(std::move(result), false);
+                        _cleanup_upload(upload_id);
+                    });
+}
+
+void SessionRouter::_quic_download_via_tunnel(
+        DownloadRequest request,
+        std::string download_id,
+        std::string file_id,
+        router::tunnel_info info) {
+    auto pubkey = pubkey_from_srouter_address(info.remote);
+    if (!pubkey) {
+        log::error(
+                cat,
+                "[Download {}]: Could not extract pubkey from resolved address {}",
+                download_id,
+                info.remote);
+        _active_downloads.erase(download_id);
+        request.on_complete(ERROR_UNKNOWN, false);
+        return;
+    }
+
+    _get_file_client(*pubkey, "::1", info.local_port)
+            .download(
+                    std::move(file_id),
+                    request.on_data,
+                    [weak_self = weak_from_this(), this, request, download_id](
+                            std::variant<file_metadata, int16_t> result) {
+                        auto self = weak_self.lock();
+                        if (!self)
+                            return;
+
+                        _active_downloads.erase(download_id);
+
+                        if (auto* meta = std::get_if<file_metadata>(&result))
+                            log::info(
+                                    cat,
+                                    "[Download {}]: Success, file ID: {} ({} bytes)",
+                                    download_id,
+                                    meta->id,
+                                    meta->size);
+                        else
+                            log::error(
+                                    cat,
+                                    "[Download {}]: Failed with error {}",
+                                    download_id,
+                                    std::get<int16_t>(result));
+
+                        request.on_complete(std::move(result), false);
+                    });
+}
+
 void SessionRouter::_upload_internal(UploadRequest request) {
-    // TODO: Update this to use streaming approach
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
 
-    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
-    // network shutdown cancelling the request and the transport shutdown automatically triggering
-    // callbacks)
     request.on_complete = make_callback_atomic(std::move(request.on_complete));
-    auto& [_, upload_thread] =
-            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
-                    .first->second;
 
-    // Accumulate data on a background thread as we don't know whether `next_data` is doing file I/O
-    // or just reading from memory (it's a bit of a waste if it's in-memory data but loading from
-    // disk should be prioritised)
+    auto quic_target = file_server::default_quic_target(_config.file_server_config, _config.netid);
+    if (!quic_target) {
+        _upload_internal_legacy(std::move(request), std::move(upload_id));
+        return;
+    }
+
+    // QUIC upload: accumulate data on background thread, then tunnel and upload
+    auto& upload_thread =
+            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                    .first->second.second;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 upload_request = request,
+                                 upload_id,
+                                 target = std::move(*quic_target)] {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        try {
+            std::vector<std::byte> all_data;
+            while (true) {
+                if (upload_request.is_cancelled())
+                    throw cancellation_exception{"Cancelled during data accumulation."};
+                auto chunk = upload_request.next_data();
+                if (chunk.empty())
+                    break;
+                auto* p = reinterpret_cast<const std::byte*>(chunk.data());
+                all_data.insert(all_data.end(), p, p + chunk.size());
+            }
+
+            if (all_data.empty())
+                throw std::runtime_error{"No data to upload"};
+
+            log::debug(
+                    cat,
+                    "[Upload {}]: Accumulated {} bytes, establishing tunnel to {}.",
+                    upload_id,
+                    all_data.size(),
+                    target.address);
+
+            _loop->call([weak_self,
+                         this,
+                         upload_request,
+                         upload_id,
+                         target,
+                         data = std::move(all_data)]() mutable {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                if (upload_request.is_cancelled()) {
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
+                    _cleanup_upload(upload_id);
+                    return;
+                }
+
+                srouter->establish_udp(
+                        target.address,
+                        target.port,
+                        [weak_self, this, upload_request, upload_id, data = std::move(data)](
+                                router::tunnel_info info) mutable {
+                            if (auto self = weak_self.lock())
+                                _quic_upload_via_tunnel(
+                                        upload_request,
+                                        upload_id,
+                                        std::move(data),
+                                        std::move(info));
+                        },
+                        [weak_self, this, upload_request, upload_id]() {
+                            if (auto self = weak_self.lock()) {
+                                log::error(
+                                        cat,
+                                        "[Upload {}]: Tunnel establishment timed out.",
+                                        upload_id);
+                                upload_request.on_complete(ERROR_BUILD_TIMEOUT, true);
+                                _cleanup_upload(upload_id);
+                            }
+                        });
+            });
+        } catch (const cancellation_exception&) {
+            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
+                if (auto self = weak_self.lock()) {
+                    upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
+                    _cleanup_upload(upload_id);
+                }
+            });
+        } catch (const std::exception& e) {
+            log::error(cat, "[Upload {}]: Exception: {}", upload_id, e.what());
+            _loop->call([weak_self = weak_from_this(), this, upload_request, upload_id] {
+                if (auto self = weak_self.lock()) {
+                    upload_request.on_complete(ERROR_UNKNOWN, false);
+                    _cleanup_upload(upload_id);
+                }
+            });
+        }
+    });
+}
+
+// Legacy HTTP-based upload path, used when no QUIC file server target is available.
+void SessionRouter::_upload_internal_legacy(UploadRequest request, std::string upload_id) {
+    auto& upload_thread =
+            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                    .first->second.second;
+
     upload_thread = std::thread([weak_self = weak_from_this(),
                                  this,
                                  upload_request = request,
@@ -576,8 +800,6 @@ void SessionRouter::_upload_internal(UploadRequest request) {
         if (!self)
             return;
 
-        // Onion requests don't support streaming data so we need to load all the data from the
-        // streaming source into memory
         try {
             Request request =
                     file_server::to_request(upload_id, file_server_config, upload_request);
@@ -590,11 +812,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 if (upload_request.is_cancelled() || !req.body) {
                     log::debug(cat, "[Upload {}]: Cancelled before sending request.", upload_id);
                     upload_request.on_complete(ERROR_REQUEST_CANCELLED, false);
-
-                    auto active_upload_node = _active_uploads.extract(upload_id);
-                    if (!active_upload_node.empty() &&
-                        active_upload_node.mapped().second.joinable())
-                        active_upload_node.mapped().second.join();
+                    _cleanup_upload(upload_id);
                     return;
                 }
 
@@ -617,11 +835,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                             if (!self)
                                 return;
 
-                            // Join the thread to keep it alive during callback handling
-                            auto active_upload_node = _active_uploads.extract(upload_id);
-                            if (!active_upload_node.empty() &&
-                                active_upload_node.mapped().second.joinable())
-                                active_upload_node.mapped().second.join();
+                            _cleanup_upload(upload_id);
 
                             try {
                                 if (upload_request.is_cancelled())
@@ -677,12 +891,7 @@ void SessionRouter::_upload_internal(UploadRequest request) {
                 auto self = weak_self.lock();
                 if (!self)
                     return;
-
-                // Join the thread to keep it alive during callback handling
-                auto active_upload_node = _active_uploads.extract(upload_id);
-                if (!active_upload_node.empty() && active_upload_node.mapped().second.joinable())
-                    active_upload_node.mapped().second.join();
-
+                _cleanup_upload(upload_id);
                 upload_request.on_complete(ERROR_UNKNOWN, false);
             });
         }
@@ -693,10 +902,49 @@ void SessionRouter::_download_internal(DownloadRequest request) {
     const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
 
-    // Make the callback atomic so we don't need to worry about it being called multiple times (eg.
-    // network shutdown cancelling the request and the transport shutdown automatically triggering
-    // callbacks)
     request.on_complete = make_callback_atomic(std::move(request.on_complete));
+
+    // Check for a QUIC target: first from the URL's sr= fragment, then from default mapping
+    std::optional<file_server::SRouterTarget> quic_target;
+    auto download_info = file_server::parse_download_url(request.download_url);
+    if (download_info && download_info->srouter_target)
+        quic_target = std::move(download_info->srouter_target);
+    else
+        quic_target =
+                file_server::default_quic_target(_config.file_server_config, _config.netid);
+
+    if (!quic_target || !download_info) {
+        _download_internal_legacy(std::move(request), std::move(download_id));
+        return;
+    }
+
+    // QUIC download path
+    _active_downloads[download_id] = request;
+    auto file_id = download_info->file_id;
+
+    srouter->establish_udp(
+            quic_target->address,
+            quic_target->port,
+            [weak_self = weak_from_this(), this, request, download_id, file_id](
+                    router::tunnel_info info) mutable {
+                if (auto self = weak_self.lock())
+                    _quic_download_via_tunnel(
+                            request, download_id, std::move(file_id), std::move(info));
+            },
+            [weak_self = weak_from_this(), this, request, download_id]() {
+                if (auto self = weak_self.lock()) {
+                    log::error(
+                            cat,
+                            "[Download {}]: Tunnel establishment timed out.",
+                            download_id);
+                    _active_downloads.erase(download_id);
+                    request.on_complete(ERROR_BUILD_TIMEOUT, true);
+                }
+            });
+}
+
+// Legacy HTTP-based download path, used when no QUIC file server target is available.
+void SessionRouter::_download_internal_legacy(DownloadRequest request, std::string download_id) {
     _active_downloads[download_id] = request;
 
     try {
@@ -742,7 +990,7 @@ void SessionRouter::_download_internal(DownloadRequest request) {
                                 metadata.id);
 
                         if (request.on_data)
-                            request.on_data(metadata, std::move(data));
+                            request.on_data(metadata, to_span<const std::byte>(data));
 
                         request.on_complete(std::move(metadata), false);
                     } catch (const cancellation_exception&) {

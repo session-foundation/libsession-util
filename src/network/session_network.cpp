@@ -43,7 +43,10 @@ namespace {
     constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
     config::FileServer build_file_server_config(const config::Config& main_config) {
-        config::FileServer file_server_config = file_server::DEFAULT_CONFIG;
+        config::FileServer file_server_config =
+                main_config.netid == opt::netid::Target::testnet
+                        ? file_server::TESTNET_CONFIG
+                        : file_server::DEFAULT_CONFIG;
         file_server_config.use_stream_encryption = main_config.file_server_use_stream_encryption;
 
         if (main_config.custom_file_server_scheme)
@@ -85,7 +88,12 @@ namespace {
 
     config::DirectRouter build_direct_router_config(
             const config::Config& main_config, const config::FileServer& file_server_config) {
-        return {file_server_config};
+        return {file_server_config,
+                main_config.netid,
+                main_config.quic_file_server_address,
+                main_config.quic_file_server_ed_pubkey,
+                main_config.quic_file_server_port.value_or(
+                        file_server::QUIC_DEFAULT_PORT)};
     }
 
     config::SessionRouter build_session_router_config(
@@ -1894,7 +1902,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         if (on_data_fn)
             cpp_request.on_data = [on_data_fn, ctx](
                                           const file_metadata& metadata,
-                                          std::vector<unsigned char> data) {
+                                          std::span<const std::byte> data) {
                 session_file_metadata c_meta{};
                 std::strncpy(c_meta.file_id, metadata.id.c_str(), sizeof(c_meta.file_id) - 1);
                 c_meta.file_id[sizeof(c_meta.file_id) - 1] = '\0';
@@ -1902,7 +1910,11 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                 c_meta.uploaded_timestamp = epoch_seconds(metadata.uploaded);
                 c_meta.expiry_timestamp = epoch_seconds(metadata.expiry);
 
-                on_data_fn(&c_meta, data.data(), data.size(), ctx);
+                on_data_fn(
+                        &c_meta,
+                        reinterpret_cast<const unsigned char*>(data.data()),
+                        data.size(),
+                        ctx);
             };
 
         cpp_request.on_complete = [on_complete_fn,

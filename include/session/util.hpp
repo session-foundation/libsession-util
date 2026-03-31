@@ -197,6 +197,9 @@ std::vector<std::span<const unsigned char>> to_view_vector(const Container& c) {
 /// vector of string_views each viewing one character.  If `trim` is true then leading and trailing
 /// empty values will be suppressed.
 ///
+/// The returned vector always contains at least one element when `trim` is false (even for an empty
+/// input string).  With `trim` true, an empty input returns an empty vector.
+///
 ///     auto v = split("ab--c----de", "--"); // v is {"ab", "c", "", "de"}
 ///     auto v = split("abc", ""); // v is {"a", "b", "c"}
 ///     auto v = split("abc", "c"); // v is {"ab", ""}
@@ -320,6 +323,14 @@ std::vector<unsigned char> zstd_compress(
 /// then this returns nullopt if the decompressed size would exceed that limit.
 std::optional<std::vector<unsigned char>> zstd_decompress(
         std::span<const unsigned char> data, size_t max_size = 0);
+/// Wrapper for formatting byte sizes with SI prefixes via fmt/oxen-logging.  Provides a
+/// `format_as` friend function discoverable via ADL, so no fmt headers are needed here.
+/// Usage: `log::info(cat, "Size: {}", human_size{12345});` => "Size: 12.3 kB"
+struct human_size {
+    int64_t bytes;
+    friend std::string format_as(human_size s);
+};
+
 }  // namespace session
 
 #ifndef _WIN32

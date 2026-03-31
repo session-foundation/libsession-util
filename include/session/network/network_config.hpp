@@ -27,6 +27,11 @@ struct Config {
     std::optional<uint64_t> custom_file_server_max_file_size = std::nullopt;
     bool file_server_use_stream_encryption = false;
 
+    // QUIC file server options
+    std::optional<std::string> quic_file_server_ed_pubkey;
+    std::optional<std::string> quic_file_server_address;
+    std::optional<uint16_t> quic_file_server_port;
+
     // General options
     bool increase_no_file_limit = false;
     uint8_t path_length = 3;
@@ -117,6 +122,11 @@ struct Config {
     void handle_config_opt(opt::cache_num_nodes_to_use_for_refresh nnr);
     void handle_config_opt(opt::cache_min_num_refresh_presence_to_include_node mnrp);
     void handle_config_opt(opt::cache_node_strike_threshold nst);
+
+    // QUIC file server options
+    void handle_config_opt(opt::quic_file_server_ed_pubkey qfep);
+    void handle_config_opt(opt::quic_file_server_address qfa);
+    void handle_config_opt(opt::quic_file_server_port qfp);
 
     // Quic transport options
     void handle_config_opt(opt::quic_handshake_timeout qht);

@@ -19,6 +19,7 @@
 #include <session/network/session_network_types.hpp>
 #include <session/util.hpp>
 
+#include "../dns_utils.hpp"
 #include "../test_helper.hpp"
 
 using namespace std::literals;
@@ -26,13 +27,32 @@ using namespace std::literals;
 // Defined in live/main.cpp; consumed here and in all live test files.
 extern session::network::opt::router live_router_mode;
 
+// Testnet QUIC file server direct-connect hostname and Ed25519 pubkey (for --direct mode).
+// These are test-only values; the library code uses .sesh addresses for session-router mode.
+inline constexpr auto TESTNET_QUIC_FS_HOST = "angus.oxen.io";
+inline constexpr auto TESTNET_QUIC_FS_ED_PUBKEY =
+        "929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602";
+
 // Creates a Network instance pointed at testnet using the current live_router_mode.
 inline std::shared_ptr<session::network::Network> make_testnet_network(
         std::filesystem::path cache_dir) {
-    return std::make_shared<session::network::Network>(
-            session::network::opt::netid::testnet(),
-            live_router_mode,
-            session::network::opt::cache_directory{std::move(cache_dir)});
+    namespace opt = session::network::opt;
+
+    std::vector<std::any> net_opts;
+    net_opts.push_back(opt::netid::testnet());
+    net_opts.push_back(live_router_mode);
+    net_opts.push_back(opt::cache_directory{std::move(cache_dir)});
+
+    // For direct mode, configure the QUIC file server address so DirectRouter uses the
+    // quic-files protocol instead of the legacy HTTP path.  We resolve the hostname here
+    // because libquic does not do DNS resolution.
+    if (live_router_mode.type == opt::router::Type::direct) {
+        net_opts.push_back(opt::quic_file_server_ed_pubkey{TESTNET_QUIC_FS_ED_PUBKEY});
+        net_opts.push_back(opt::quic_file_server_address{
+                session::test::resolve_host(TESTNET_QUIC_FS_HOST)});
+    }
+
+    return std::make_shared<session::network::Network>(net_opts);
 }
 
 // Creates a session::TempCore connected to a fresh testnet Network.  A unique temporary directory

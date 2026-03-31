@@ -362,6 +362,26 @@ namespace opt {
         cache_node_strike_threshold(uint16_t count) : count{count} {}
     };
 
+    // MARK: QUIC File Server Options
+
+    /// Can be used to override the default QUIC file server Ed25519 pubkey (hex).
+    struct quic_file_server_ed_pubkey : base {
+        std::string pubkey_hex;
+        quic_file_server_ed_pubkey(std::string pubkey_hex) : pubkey_hex{std::move(pubkey_hex)} {}
+    };
+
+    /// Can be used to specify the direct address (IP:PORT) of the QUIC file server for direct mode.
+    struct quic_file_server_address : base {
+        std::string address;
+        quic_file_server_address(std::string address) : address{std::move(address)} {}
+    };
+
+    /// Can be used to override the default (11235) QUIC file server port.
+    struct quic_file_server_port : base {
+        uint16_t port;
+        quic_file_server_port(uint16_t port) : port{port} {}
+    };
+
     // MARK: Quic Transport Options
 
     /// Can be used to override the default (10s) handshake timeout duration for Quic connections.

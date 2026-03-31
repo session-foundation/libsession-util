@@ -108,10 +108,18 @@ if(BUILD_LIVE_TESTS)
     add_executable(testLive
         live/main.cpp
         live/test_swarm.cpp
-        live/test_pubkey_xfer.cpp)
+        live/test_pubkey_xfer.cpp
+        live/test_file_transfer.cpp)
     target_link_libraries(testLive PRIVATE
         test_libs
         Catch2::Catch2)
+endif()
+
+if(BUILD_LIVE_TESTS)
+    add_executable(quic-files EXCLUDE_FROM_ALL quic-files.cpp)
+    target_link_libraries(quic-files PRIVATE test_libs)
+    target_include_directories(quic-files PRIVATE
+        ${CMAKE_SOURCE_DIR}/external/session-router/external/CLI11/include)
 endif()
 
 add_executable(swarm-auth-test EXCLUDE_FROM_ALL swarm-auth-test.cpp)

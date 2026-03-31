@@ -34,6 +34,16 @@ const config::FileServer DEFAULT_CONFIG = {
         .pubkey_hex = "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59",
         .max_file_size = 10'000'000};
 
+// Testnet file server config.  The X25519 pubkey is derived from the Ed25519 key
+// 929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602 via
+// crypto_sign_ed25519_pk_to_curve25519.
+const config::FileServer TESTNET_CONFIG = {
+        .scheme = "http",
+        .host = "superduperfiles.oxen.io",
+        .port = 80,
+        .pubkey_hex = "16d6c60aebb0851de7e6f4dc0a4734671dbf80f73664c008596511454cb6576d",
+        .max_file_size = 10'000'000};
+
 constexpr std::string_view HEADER_CONTENT_TYPE = "Content-Type";
 constexpr std::string_view HEADER_CONTENT_DISPOSITION = "Content-Disposition";
 constexpr std::string_view HEADER_PUBKEY = "X-FS-Pubkey";
@@ -93,10 +103,42 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
                 oxenc::is_hex(fragment.substr(2)) &&
                 fragment.substr(2) != file_server::DEFAULT_CONFIG.pubkey_hex)
             info.custom_pubkey_hex = fragment.substr(2);
+        else if (fragment.starts_with("sr=")) {
+            // sr=address or sr=address:port (port defaults to 11235 if omitted)
+            auto parts = split(fragment.substr(3), ":");
+            if (parts.size() <= 2 && !parts[0].empty()) {
+                uint16_t port = QUIC_DEFAULT_PORT;
+                if (parts.size() == 2 && (!quic::parse_int(parts[1], port) || port == 0))
+                    continue;  // Invalid port, skip
+                info.srouter_target = SRouterTarget{std::string{parts[0]}, port};
+            }
+        }
         // else ignore (unknown or invalid fragment)
     }
 
     return info;
+}
+
+// Default QUIC file server session-router addresses for known networks.
+// Mainnet: Ed25519 pubkey b8eef9821445ae16e2e97ef8aa6fe782fd11ad5253cd6723b281341dba22e371
+static constexpr auto MAINNET_QUIC_FS_SESH_ADDRESS =
+        "zdzxuyoweszbpazjx5hkw598om6tdmk1kxgsqe71or4b5qtnhpao.sesh"sv;
+// Testnet: Ed25519 pubkey 929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602
+static constexpr auto TESTNET_QUIC_FS_SESH_ADDRESS =
+        "1kxd8zsom31u95yrs1mrkrm9kgnt6rbk1t9yjyd81g9rn5szcaby.sesh"sv;
+
+std::optional<SRouterTarget> default_quic_target(
+        const config::FileServer& http_config, opt::netid::Target netid) {
+    // Map known HTTP file server pubkeys to their QUIC file server .sesh addresses.
+    if (http_config.pubkey_hex == DEFAULT_CONFIG.pubkey_hex &&
+        netid == opt::netid::Target::mainnet)
+        return SRouterTarget{std::string{MAINNET_QUIC_FS_SESH_ADDRESS}, QUIC_DEFAULT_PORT};
+
+    if (http_config.pubkey_hex == TESTNET_CONFIG.pubkey_hex &&
+        netid == opt::netid::Target::testnet)
+        return SRouterTarget{std::string{TESTNET_QUIC_FS_SESH_ADDRESS}, QUIC_DEFAULT_PORT};
+
+    return std::nullopt;
 }
 
 std::string generate_download_url(std::string_view file_id, const config::FileServer& config) {

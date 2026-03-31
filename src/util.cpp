@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <fmt/format.h>
 #include <session/util.h>
 #include <simdutf.h>
 #include <zstd.h>
@@ -37,6 +38,19 @@ std::vector<std::string_view> split(std::string_view str, const std::string_view
         while (!results.empty() && results.back().empty())
             results.pop_back();
     return results;
+}
+
+std::string format_as(human_size s) {
+    if (s.bytes < 1000)
+        return fmt::format("{} B", s.bytes);
+    constexpr std::array prefixes = {'k', 'M', 'G', 'T'};
+    double b = s.bytes;
+    for (auto prefix : prefixes) {
+        b /= 1000.;
+        if (b < 1000.)
+            return fmt::format("{:.{}f} {}B", b, b < 10. ? 2 : b < 100. ? 1 : 0, prefix);
+    }
+    return fmt::format("{:.0f} {}B", b, prefixes.back());
 }
 
 std::tuple<std::string, std::string, std::optional<uint16_t>, std::optional<std::string>> parse_url(

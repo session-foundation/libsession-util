@@ -197,6 +197,21 @@ local windows_cross_pipeline(name,
                  }] else [])
 );
 
+local live_test_step(image, mode) = {
+  name: 'live tests (' + mode + ')',
+  image: image,
+  pull: 'always',
+  commands:
+    [apt_get_quiet + ' install -y eatmydata'] +
+    add_stf_repo(image) + [
+      'eatmydata ' + apt_get_quiet + ' update',
+      'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
+      'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y ' + std.join(' ', default_test_deps),
+      'cd build',
+      './tests/testLive --' + mode + ' --log-level warning --colour-mode ansi -d yes "[file]"',
+    ],
+};
+
 local clang(version) = debian_build(
   'Debian sid/clang-' + version,
   docker_base + 'debian-sid-clang',
@@ -351,6 +366,20 @@ local static_build(name,
 
   // Various debian builds
   debian_build('Debian sid', docker_base + 'debian-sid'),
+
+  // Debian sid with session-router + live file transfer tests
+  local live_image = docker_base + 'debian-sid';
+  debian_build(
+    'Debian sid (live tests)',
+    live_image,
+    cmake_extra='-DENABLE_NETWORKING=ON -DENABLE_NETWORKING_SROUTER=ON -DBUILD_LIVE_TESTS=ON',
+  ) + {
+    steps: super.steps + [
+      live_test_step(live_image, 'onionreq'),
+      live_test_step(live_image, 'srouter'),
+      live_test_step(live_image, 'direct'),
+    ],
+  },
   debian_build('Debian sid/Debug', docker_base + 'debian-sid', build_type='Debug'),
   debian_build('Debian testing', docker_base + 'debian-testing'),
   clang(19),

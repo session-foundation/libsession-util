@@ -241,8 +241,8 @@ struct UploadRequest : FileTransferRequest {
 struct DownloadRequest : FileTransferRequest {
     std::string download_url;
 
-    // Called as data arrives (can be called multiple times)
-    std::function<void(const file_metadata& info, std::vector<unsigned char> data)> on_data;
+    // Called as data arrives (can be called multiple times) with a non-owning view of the chunk
+    std::function<void(const file_metadata& info, std::span<const std::byte> data)> on_data;
 
     // Minimum interval between on_data calls (to control callback overhead vs memory usage)
     std::chrono::milliseconds partial_min_interval = 250ms;

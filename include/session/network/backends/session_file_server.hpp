@@ -1,6 +1,7 @@
 #pragma once
 
 #include "session/network/key_types.hpp"
+#include "session/network/network_opt.hpp"
 #include "session/network/session_network_types.hpp"
 #include "session/platform.hpp"
 
@@ -18,7 +19,17 @@ struct FileServer {
 
 namespace session::network::file_server {
 
+/// Default QUIC file server port (first 5 non-zero Fibonacci digits).
+constexpr uint16_t QUIC_DEFAULT_PORT = 11235;
+
 extern const config::FileServer DEFAULT_CONFIG;
+extern const config::FileServer TESTNET_CONFIG;
+
+/// Parsed session-router address from an `sr=` URL fragment, e.g. `sr=abcdef.sesh:11235`.
+struct SRouterTarget {
+    std::string address;  // e.g. "abcdef...xyz.sesh" or "name.loki"
+    uint16_t port;
+};
 
 struct DownloadInfo {
     std::string scheme;
@@ -26,6 +37,7 @@ struct DownloadInfo {
     std::string file_id;
     std::optional<std::string> custom_pubkey_hex;  // If 'p' fragment present
     bool wants_stream_decryption;                  // If 'd' fragment present
+    std::optional<SRouterTarget> srouter_target;   // If 'sr' fragment present
 };
 
 /// API: file_server/parse_download_url
@@ -38,6 +50,14 @@ struct DownloadInfo {
 /// Outputs:
 /// - returns struct containing the information required to download the file.
 std::optional<DownloadInfo> parse_download_url(std::string_view url);
+
+/// Returns a default session-router target for the QUIC file server, if the given HTTP file
+/// server config matches a known default.  This provides the fallback mapping when a download
+/// URL doesn't contain an explicit `sr=` fragment.
+///
+/// Returns nullopt if the HTTP file server is not a known QUIC-capable server.
+std::optional<SRouterTarget> default_quic_target(
+        const config::FileServer& http_config, opt::netid::Target netid);
 
 /// API: file_server/generate_download_url
 ///

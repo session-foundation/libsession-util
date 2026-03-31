@@ -31,6 +31,11 @@ Config::Config(const std::vector<std::any>& opts) {
         HANDLE_TYPE(opt::file_server_max_file_size);
         HANDLE_TYPE(opt::file_server_use_stream_encryption);
 
+        // QUIC file server options
+        HANDLE_TYPE(opt::quic_file_server_ed_pubkey);
+        HANDLE_TYPE(opt::quic_file_server_address);
+        HANDLE_TYPE(opt::quic_file_server_port);
+
         // General options
         HANDLE_TYPE(opt::increase_no_file_limit);
         HANDLE_TYPE(opt::path_length);
@@ -158,6 +163,26 @@ void Config::handle_config_opt(opt::file_server_use_stream_encryption fsuse) {
             cat,
             "Network config file use stream encryption set to {}",
             fsuse.use_stream_encryption);
+}
+
+// MARK: QUIC file server options
+
+void Config::handle_config_opt(opt::quic_file_server_ed_pubkey qfep) {
+    quic_file_server_ed_pubkey = std::move(qfep.pubkey_hex);
+    log::debug(cat, "Network config QUIC file server Ed25519 pubkey set");
+}
+
+void Config::handle_config_opt(opt::quic_file_server_address qfa) {
+    quic_file_server_address = std::move(qfa.address);
+    log::debug(
+            cat,
+            "Network config QUIC file server address set to {}",
+            *quic_file_server_address);
+}
+
+void Config::handle_config_opt(opt::quic_file_server_port qfp) {
+    quic_file_server_port = qfp.port;
+    log::debug(cat, "Network config QUIC file server port set to {}", qfp.port);
 }
 
 // MARK: General options

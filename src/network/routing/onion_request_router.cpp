@@ -1040,7 +1040,7 @@ void OnionRequestRouter::_download_internal(DownloadRequest request) {
                                 metadata.id);
 
                         if (request.on_data)
-                            request.on_data(metadata, std::move(data));
+                            request.on_data(metadata, to_span<const std::byte>(data));
 
                         request.on_complete(std::move(metadata), false);
                     } catch (const cancellation_exception&) {

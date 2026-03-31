@@ -151,6 +151,7 @@ if(ENABLE_NETWORKING)
         network/session_network.cpp
         network/snode_pool.cpp
         network/swarm.cpp
+        network/backends/quic_file_client.cpp
         network/backends/session_file_server.cpp
         network/backends/session_open_group_server.cpp
         network/transport/quic_transport.cpp
