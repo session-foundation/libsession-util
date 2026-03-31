@@ -124,249 +124,81 @@ secretstream_xchacha20poly1305_init_push_with_nonce(
     return st;
 }
 
-// Encryption implementation function.  `get_chunk(N)` returns a pair of [span<const unordered
-// char>, bool] of the next N (max ENCRYPT_CHUNK_SIZE) bytes, less than N only at the end of the
-// input, where the bool is true if there is at least 1 byte more of data to be retrieved (i.e.
-// false means the end of the data).  It may not return an empty chunk except for the very first
-// call.
-template <std::invocable<size_t> ReadData>
-static void encrypt_impl(
-        std::span<std::byte> out,
-        size_t data_size,
-        std::span<const unsigned char, ENCRYPT_HEADER + ENCRYPT_KEY_SIZE> nonce_key,
-        ReadData get_chunk) {
-    size_t padding = encrypted_padding(data_size);
-    assert(padding >= 1);
-    size_t padded_size = data_size + padding;
-
-    assert(out.size() == encrypted_size(data_size));
-    out[0] = std::byte{'S'};
-
-    std::span<unsigned char> uout{reinterpret_cast<unsigned char*>(out.data()), out.size()};
-
-    std::span<unsigned char, ENCRYPT_HEADER> header{uout.data() + 1, ENCRYPT_HEADER};
-
-    auto st = secretstream_xchacha20poly1305_init_push_with_nonce(
-            header, nonce_key.last<ENCRYPT_KEY_SIZE>(), nonce_key.first<ENCRYPT_HEADER>());
-
-    auto* outpos = uout.data() + 1 + ENCRYPT_HEADER;
-    auto* const outend = uout.data() + uout.size();
-
-    // Now we build a buffer containing padding, plus whatever initial actual data goes on the end
-    // of the last chunk of padding:
-    bool done = false;
-    {
-        std::vector<unsigned char> buf;
-        buf.reserve(std::min(ENCRYPT_CHUNK_SIZE, padded_size));
-        for (size_t padding_remaining = padding; padding_remaining;) {
-            unsigned char tag = 0;
-            if (padding_remaining > ENCRYPT_CHUNK_SIZE) {
-                // Full chunk of 0x00 padding (with more padding in the next chunk)
-                buf.resize(ENCRYPT_CHUNK_SIZE);
-                padding_remaining -= ENCRYPT_CHUNK_SIZE;
-            } else {
-                buf.resize(padding_remaining - 1);  // 0x00 padding
-                buf.push_back(0x01);                // padding terminator
-                auto [chunk, more] = get_chunk(ENCRYPT_CHUNK_SIZE - padding_remaining);
-                assert(chunk.size() == ENCRYPT_CHUNK_SIZE - padding_remaining || !more);
-                if (!chunk.empty())
-                    buf.insert(buf.end(), chunk.begin(), chunk.end());
-                padding_remaining = 0;
-                if (!more) {
-                    tag = crypto_secretstream_xchacha20poly1305_TAG_FINAL;
-                    done = true;
-                }
-            }
-
-            assert(outpos + buf.size() + crypto_secretstream_xchacha20poly1305_ABYTES <= outend);
-
-            unsigned long long out_len;
-            crypto_secretstream_xchacha20poly1305_push(
-                    &st, outpos, &out_len, buf.data(), buf.size(), nullptr, 0, tag);
-            assert(out_len == buf.size() + crypto_secretstream_xchacha20poly1305_ABYTES);
-            outpos += out_len;
-        }
-    }
-
-    // Now we're through the initial padding (and probably some initial data): now all we need to do
-    // is push the rest of the data
-
-    while (!done) {
-        auto [chunk, more] = get_chunk(ENCRYPT_CHUNK_SIZE);
-        assert(!chunk.empty());
-        assert(chunk.size() == ENCRYPT_CHUNK_SIZE || !more);
-        assert(outpos + chunk.size() + crypto_secretstream_xchacha20poly1305_ABYTES <= outend);
-
-        unsigned char tag = more ? 0 : crypto_secretstream_xchacha20poly1305_TAG_FINAL;
-
-        unsigned long long out_len;
-        crypto_secretstream_xchacha20poly1305_push(
-                &st, outpos, &out_len, chunk.data(), chunk.size(), nullptr, 0, tag);
-        assert(out_len == chunk.size() + crypto_secretstream_xchacha20poly1305_ABYTES);
-        outpos += out_len;
-        if (!more)
-            done = true;
-    }
-}
-
-static std::tuple<
-        std::array<unsigned char, ENCRYPT_HEADER + ENCRYPT_KEY_SIZE>,
-        std::array<std::byte, ENCRYPT_KEY_SIZE>,
-        const unsigned char*,
-        const unsigned char*>
-encrypt_buffer_init(
-        std::span<const std::byte> seed,
-        std::span<const std::byte> data,
-        Domain domain,
-        bool allow_large) {
-    std::tuple<
-            std::array<unsigned char, ENCRYPT_HEADER + ENCRYPT_KEY_SIZE>,
-            std::array<std::byte, ENCRYPT_KEY_SIZE>,
-            const unsigned char*,
-            const unsigned char*>
-            result;
-    auto& [nonce_key, key, inpos, inend] = result;
-
-    if (seed.size() < 32)
-        throw std::invalid_argument{"attachment::encrypt requires a 32-byte uploader seed"};
-
-    if (data.size() > MAX_REGULAR_SIZE && !allow_large)
-        throw std::invalid_argument{"data to encrypt is too large"};
-
-    std::span<const unsigned char> udata{
-            reinterpret_cast<const unsigned char*>(data.data()), data.size()};
-
-    const auto domain_byte = static_cast<unsigned char>(domain);
-    hash::blake2b_key(
-            nonce_key, std::span<const unsigned char, 1>{&domain_byte, 1}, seed.first(32), udata);
-    std::memcpy(key.data(), nonce_key.data() + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE);
-
-    inpos = udata.data();
-    inend = inpos + udata.size();
-
-    return result;
-}
-
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+// Helper: creates an Encryptor from in-memory data, encrypts, and writes output into a span.
+static std::pair<cleared_b32, size_t> encrypt_to_span(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
         std::span<std::byte> out,
         bool allow_large) {
+    Encryptor enc{seed, domain};
+    enc.update_key(data);
 
-    auto [nonce_key, key, inpos, inend] = encrypt_buffer_init(seed, data, domain, allow_large);
+    size_t pos = 0;
+    auto key = enc.start_encryption(
+            [&](std::span<std::byte> buf) -> size_t {
+                size_t avail = std::min(buf.size(), data.size() - pos);
+                std::memcpy(buf.data(), data.data() + pos, avail);
+                pos += avail;
+                return avail;
+            },
+            allow_large);
 
-    encrypt_impl(
-            out,
-            data.size(),
-            nonce_key,
-            [&inpos, &inend](size_t size) -> std::pair<std::span<const unsigned char>, bool> {
-                auto* start = inpos;
-                auto* end = std::min(inpos + size, inend);
-                inpos = end;
-                return {{start, end}, inpos != inend};
-            });
+    size_t written = 0;
+    for (auto chunk = enc.next(); !chunk.empty(); chunk = enc.next()) {
+        assert(written + chunk.size() <= out.size());
+        std::memcpy(out.data() + written, chunk.data(), chunk.size());
+        written += chunk.size();
+    }
 
-    return key;
+    return {std::move(key), written};
 }
 
-std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encrypt(
+cleared_b32 encrypt(
+        std::span<const std::byte> seed,
+        std::span<const std::byte> data,
+        Domain domain,
+        std::span<std::byte> out,
+        bool allow_large) {
+    return encrypt_to_span(seed, data, domain, out, allow_large).first;
+}
+
+std::pair<std::vector<std::byte>, cleared_b32> encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
         bool allow_large) {
-
-    if (seed.size() < 32)
-        throw std::invalid_argument{"attachment::encrypt requires a 32-byte uploader seed"};
-
-    if (data.size() > MAX_REGULAR_SIZE && !allow_large)
-        throw std::invalid_argument{"data to encrypt is too large"};
-
-    std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> result;
-    auto& [out, key] = result;
-
-    out.resize(encrypted_size(data.size()));
-
-    key = encrypt(seed, data, domain, out, allow_large);
-
-    return result;
+    std::vector<std::byte> out(encrypted_size(data.size()));
+    auto key = encrypt_to_span(seed, data, domain, out, allow_large).first;
+    return {std::move(out), std::move(key)};
 }
 
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         const std::filesystem::path& file,
         Domain domain,
         std::function<std::span<std::byte>(size_t enc_size)> make_buffer,
         bool allow_large) {
+    auto [enc, key] = Encryptor::from_file(seed, domain, file, allow_large);
 
-    std::ifstream in;
-    in.exceptions(std::ios::badbit);
-    in.open(file, std::ios::binary | std::ios::ate);
-    size_t size = in.tellg();
-    in.seekg(0, std::ios::beg);
+    auto out = make_buffer(encrypted_size(enc.data_size()));
 
-    size = encrypted_size(size);
-
-    std::array<unsigned char, ENCRYPT_HEADER + ENCRYPT_KEY_SIZE> nonce_key;
-
-    crypto_generichash_blake2b_state b_st;
-    const auto domain_byte = static_cast<unsigned char>(domain);
-    crypto_generichash_blake2b_init(&b_st, &domain_byte, 1, nonce_key.size());
-    hash::update_all(b_st, seed.first(32));
-
-    size_t in_size = 0;
-    std::array<std::byte, 4096> chunk;
-    while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size())) {
-        hash::update_all(b_st, chunk);
-        in_size += chunk.size();
+    size_t written = 0;
+    for (auto chunk = enc.next(); !chunk.empty(); chunk = enc.next()) {
+        assert(written + chunk.size() <= out.size());
+        std::memcpy(out.data() + written, chunk.data(), chunk.size());
+        written += chunk.size();
     }
-    if (in.gcount() > 0) {
-        hash::update_all(b_st, std::span{chunk}.first(in.gcount()));
-        in_size += in.gcount();
-    }
-
-    crypto_generichash_blake2b_final(&b_st, nonce_key.data(), nonce_key.size());
-
-    std::array<std::byte, ENCRYPT_KEY_SIZE> key;
-    std::memcpy(key.data(), nonce_key.data() + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE);
-
-    in.clear();
-    in.exceptions(std::ios::badbit | std::ios::failbit);
-    in.seekg(0, std::ios::beg);
-
-    auto encrypted = make_buffer(size);
-    if (encrypted.size() != size)
-        throw std::logic_error{
-                "make_buffer returned span of invalid size: expected {}, got {}"_format(
-                        size, encrypted.size())};
-
-    std::array<unsigned char, ENCRYPT_CHUNK_SIZE> buf;
-    encrypt_impl(
-            encrypted,
-            in_size,
-            nonce_key,
-            [&in, &in_size, &buf](size_t size) -> std::pair<std::span<const unsigned char>, bool> {
-                size_t consumed = in.tellg();
-                if (consumed + size > in_size)
-                    size = in_size - consumed;
-
-                if (size > 0)
-                    in.read(reinterpret_cast<char*>(buf.data()), size);
-
-                in.peek();
-                return {std::span{buf}.first(size), !in.eof()};
-            });
 
     return key;
 }
 
-std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encrypt(
+std::pair<std::vector<std::byte>, cleared_b32> encrypt(
         std::span<const std::byte> seed,
         const std::filesystem::path& file,
         Domain domain,
         bool allow_large) {
-
-    std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> result;
+    std::pair<std::vector<std::byte>, cleared_b32> result;
     auto& [encrypted, key] = result;
 
     key = encrypt(
@@ -382,82 +214,33 @@ std::pair<std::vector<std::byte>, std::array<std::byte, ENCRYPT_KEY_SIZE>> encry
     return result;
 }
 
-std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
+cleared_b32 encrypt(
         std::span<const std::byte> seed,
         std::span<const std::byte> data,
         Domain domain,
         const std::filesystem::path& file,
         bool allow_large) {
+    Encryptor enc{seed, domain};
+    enc.update_key(data);
 
-    auto [nonce_key, key, inpos, inend] = encrypt_buffer_init(seed, data, domain, allow_large);
-
-    size_t padding = encrypted_padding(data.size());
-    assert(padding >= 1);
-    size_t padded_size = data.size() + padding;
+    size_t pos = 0;
+    auto key = enc.start_encryption(
+            [&](std::span<std::byte> buf) -> size_t {
+                size_t avail = std::min(buf.size(), data.size() - pos);
+                std::memcpy(buf.data(), data.data() + pos, avail);
+                pos += avail;
+                return avail;
+            },
+            allow_large);
 
     try {
         std::ofstream out;
         out.exceptions(std::ios::failbit | std::ios::badbit);
         out.open(file, std::ios::binary | std::ios::trunc);
-        out.write("S", 1);
 
-        std::array<char, ENCRYPTED_CHUNK_TOTAL> cbuf;
-        std::span ubuf{reinterpret_cast<unsigned char*>(cbuf.data()), cbuf.size()};
-
-        auto st = secretstream_xchacha20poly1305_init_push_with_nonce(
-                ubuf.first<ENCRYPT_HEADER>(),
-                std::span{nonce_key}.last<ENCRYPT_KEY_SIZE>(),
-                std::span{nonce_key}.first<ENCRYPT_HEADER>());
-
-        out.write(cbuf.data(), ENCRYPT_HEADER);
-
-        // Now we build a buffer containing padding, plus whatever initial actual data goes on the
-        // end of the last chunk of padding, and write those encrypted padding chunks to the file:
-        {
-            std::vector<unsigned char> buf;
-            buf.reserve(std::min(ENCRYPT_CHUNK_SIZE, padded_size));
-            for (size_t padding_remaining = padding; padding_remaining;) {
-                if (padding_remaining > ENCRYPT_CHUNK_SIZE) {
-                    // Full chunk of 0x00 padding (with more padding in the next chunk)
-                    buf.resize(ENCRYPT_CHUNK_SIZE);
-                    padding_remaining -= ENCRYPT_CHUNK_SIZE;
-                } else {
-                    buf.resize(padding_remaining - 1);  // 0x00 padding
-                    buf.push_back(0x01);                // padding terminator
-                    if (size_t first_data =
-                                std::min(ENCRYPT_CHUNK_SIZE - padding_remaining, data.size())) {
-                        buf.insert(buf.end(), inpos, inpos + first_data);
-                        inpos += first_data;
-                    }
-                    padding_remaining = 0;
-                }
-
-                unsigned char tag =
-                        inpos < inend ? 0 : crypto_secretstream_xchacha20poly1305_TAG_FINAL;
-
-                unsigned long long out_len;
-                crypto_secretstream_xchacha20poly1305_push(
-                        &st, ubuf.data(), &out_len, buf.data(), buf.size(), nullptr, 0, tag);
-                assert(out_len == buf.size() + crypto_secretstream_xchacha20poly1305_ABYTES);
-                out.write(cbuf.data(), out_len);
-            }
-        }
-
-        // Now we're through the initial padding (and probably some initial data): now all we need
-        // to do is write the rest of the data in chunks
-        while (inpos < inend) {
-            auto* chunk_start = inpos;
-            inpos = std::min(chunk_start + ENCRYPT_CHUNK_SIZE, inend);
-            unsigned char tag = inpos < inend ? 0 : crypto_secretstream_xchacha20poly1305_TAG_FINAL;
-
-            unsigned long long out_len;
-            crypto_secretstream_xchacha20poly1305_push(
-                    &st, ubuf.data(), &out_len, chunk_start, inpos - chunk_start, nullptr, 0, tag);
-            assert(out_len == inpos - chunk_start + crypto_secretstream_xchacha20poly1305_ABYTES);
-
-            out.write(cbuf.data(), out_len);
-        }
-    } catch (const std::exception& e) {
+        for (auto chunk = enc.next(); !chunk.empty(); chunk = enc.next())
+            out.write(reinterpret_cast<const char*>(chunk.data()), chunk.size());
+    } catch (const std::exception&) {
         std::error_code ec;
         std::filesystem::remove(file, ec);
         throw;
@@ -896,6 +679,217 @@ void decrypt(
         std::filesystem::remove(file_out, ec);
         throw;
     }
+}
+
+// -- Encryptor --
+
+static_assert(
+        sizeof(crypto_generichash_blake2b_state) == 384 &&
+                alignof(crypto_generichash_blake2b_state) == 64,
+        "blake2b state size/alignment changed; update Encryptor::hash_st_data");
+
+static_assert(
+        sizeof(crypto_secretstream_xchacha20poly1305_state) == 52,
+        "secretstream state size changed; update Encryptor::ss_st_data");
+
+namespace {
+    using namespace session::literals;
+
+    constexpr auto PERS_ATTACHMENT = "SessionAttachmnt"_b2b_pers;
+    constexpr auto PERS_PROFILE_PIC = "Session_Prof_Pic"_b2b_pers;
+
+    const auto& domain_pers(Domain domain) {
+        switch (domain) {
+            case Domain::ATTACHMENT: return PERS_ATTACHMENT;
+            case Domain::PROFILE_PIC: return PERS_PROFILE_PIC;
+        }
+        throw std::invalid_argument{"Invalid encryption domain"};
+    }
+
+    auto& b2b_st(std::byte (&data)[384]) {
+        return *reinterpret_cast<crypto_generichash_blake2b_state*>(data);
+    }
+    auto& ss_st(std::byte (&data)[52]) {
+        return *reinterpret_cast<crypto_secretstream_xchacha20poly1305_state*>(data);
+    }
+    auto* uc(std::byte* p) { return reinterpret_cast<unsigned char*>(p); }
+    auto* uc(const std::byte* p) { return reinterpret_cast<const unsigned char*>(p); }
+}  // namespace
+
+Encryptor::Encryptor(std::span<const std::byte> seed, Domain domain) {
+    if (seed.size() < 32)
+        throw std::invalid_argument{"attachment::Encryptor requires a 32-byte uploader seed"};
+
+    const auto& pers = domain_pers(domain);
+    crypto_generichash_blake2b_init_salt_personal(
+            &b2b_st(hash_st_data),
+            uc(seed.data()),
+            32,
+            nonce_key.size(),
+            nullptr,
+            pers.data());
+}
+
+void Encryptor::update_key(std::span<const std::byte> data) {
+    if (phase1_done)
+        throw std::logic_error{"Encryptor::update() called after start_encryption()"};
+
+    crypto_generichash_blake2b_update(&b2b_st(hash_st_data), uc(data.data()), data.size());
+    hashed_size += data.size();
+}
+
+cleared_b32 Encryptor::start_encryption(
+        std::function<size_t(std::span<std::byte> buffer)> src,
+        bool allow_large,
+        std::optional<size_t> enc_size) {
+    if (phase1_done)
+        throw std::logic_error{"start_encryption() called twice"};
+    phase1_done = true;
+
+    crypto_generichash_blake2b_final(&b2b_st(hash_st_data), uc(nonce_key.data()), nonce_key.size());
+
+    cleared_b32 key;
+    std::memcpy(key.data(), nonce_key.data() + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE);
+
+    encrypt_size = enc_size.value_or(hashed_size);
+
+    if (encrypt_size > MAX_REGULAR_SIZE && !allow_large)
+        throw std::invalid_argument{"data to encrypt is too large"};
+
+    source = std::move(src);
+    padding = encrypted_padding(encrypt_size);
+    padding_remaining = padding;
+
+    // Write 'S' prefix + header into out_buf; initialize secretstream
+    out_buf[0] = std::byte{'S'};
+    auto* header = uc(out_buf.data()) + 1;
+    ss_st(ss_st_data) = secretstream_xchacha20poly1305_init_push_with_nonce(
+            std::span<unsigned char, ENCRYPT_HEADER>{header, ENCRYPT_HEADER},
+            std::span<const unsigned char, ENCRYPT_KEY_SIZE>{
+                    uc(nonce_key.data()) + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE},
+            std::span<const unsigned char, ENCRYPT_HEADER>{uc(nonce_key.data()), ENCRYPT_HEADER});
+    out_size = 1 + ENCRYPT_HEADER;
+
+    plaintext_buf.reserve(ENCRYPT_CHUNK_SIZE);
+
+    return key;
+}
+
+bool Encryptor::produce_next() {
+    if (done)
+        return false;
+    if (!source)
+        throw std::logic_error{"Encryptor::next() requires a data source"};
+
+    plaintext_buf.clear();
+
+    size_t need = ENCRYPT_CHUNK_SIZE;
+
+    // Fill with padding first
+    if (padding_remaining > 0) {
+        if (padding_remaining > ENCRYPT_CHUNK_SIZE) {
+            plaintext_buf.resize(ENCRYPT_CHUNK_SIZE, std::byte{0});
+            padding_remaining -= ENCRYPT_CHUNK_SIZE;
+            need = 0;
+        } else {
+            plaintext_buf.resize(padding_remaining - 1, std::byte{0});
+            plaintext_buf.push_back(std::byte{0x01});
+            need = ENCRYPT_CHUNK_SIZE - padding_remaining;
+            padding_remaining = 0;
+        }
+    }
+
+    // Fill the rest from the data source
+    if (need > 0) {
+        size_t before = plaintext_buf.size();
+        plaintext_buf.resize(before + need);
+        size_t got = source(std::span{plaintext_buf}.subspan(before, need));
+        plaintext_buf.resize(before + got);
+        encrypted_so_far += got;
+
+        bool source_done = got < need;
+
+        if (encrypted_so_far > encrypt_size)
+            throw std::runtime_error{
+                    "Encryptor data source provided too much data: expected {} bytes, got at least {}"_format(
+                            encrypt_size, encrypted_so_far)};
+
+        if (source_done && encrypted_so_far < encrypt_size)
+            throw std::runtime_error{
+                    "Encryptor data source ended prematurely: expected {} bytes, got {}"_format(
+                            encrypt_size, encrypted_so_far)};
+    }
+
+    if (plaintext_buf.empty()) {
+        done = true;
+        return false;
+    }
+
+    bool is_final = encrypted_so_far >= encrypt_size && padding_remaining == 0;
+    unsigned char tag = is_final ? crypto_secretstream_xchacha20poly1305_TAG_FINAL : 0;
+
+    unsigned long long enc_len;
+    crypto_secretstream_xchacha20poly1305_push(
+            &ss_st(ss_st_data),
+            uc(out_buf.data()),
+            &enc_len,
+            uc(plaintext_buf.data()),
+            plaintext_buf.size(),
+            nullptr,
+            0,
+            tag);
+    out_size = static_cast<size_t>(enc_len);
+
+    if (is_final)
+        done = true;
+
+    return true;
+}
+
+std::span<const std::byte> Encryptor::next() {
+    if (!phase1_done)
+        throw std::logic_error{"Encryptor::next() called before start_encryption()"};
+
+    // First call returns the 'S' prefix + header
+    if (!header_emitted) {
+        header_emitted = true;
+        return {out_buf.data(), out_size};
+    }
+
+    if (!produce_next())
+        return {};
+
+    return {out_buf.data(), out_size};
+}
+
+std::pair<Encryptor, cleared_b32> Encryptor::from_file(
+        std::span<const std::byte> seed,
+        Domain domain,
+        const std::filesystem::path& file,
+        bool allow_large) {
+    Encryptor enc{seed, domain};
+
+    auto in = std::make_shared<std::ifstream>();
+    in->exceptions(std::ios::badbit);
+    in->open(file, std::ios::binary);
+
+    std::array<std::byte, 4096> chunk;
+    while (in->read(reinterpret_cast<char*>(chunk.data()), chunk.size()))
+        enc.update_key(chunk);
+    if (in->gcount() > 0)
+        enc.update_key(std::span{chunk}.first(in->gcount()));
+
+    in->clear();
+    in->seekg(0, std::ios::beg);
+
+    auto key = enc.start_encryption(
+            [in](std::span<std::byte> buffer) -> size_t {
+                in->read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+                return in->gcount();
+            },
+            allow_large);
+
+    return {std::move(enc), std::move(key)};
 }
 
 }  // namespace session::attachment
