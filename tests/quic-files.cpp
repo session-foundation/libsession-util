@@ -36,21 +36,9 @@ namespace net = session::network;
 namespace fs = net::file_server;
 namespace attachment = session::attachment;
 
-using transfer_result = std::variant<net::file_metadata, int16_t>;
-using on_complete_t = std::function<void(transfer_result)>;
-using on_data_t =
-        std::function<void(const net::file_metadata&, std::span<const std::byte>)>;
-
-std::vector<std::byte> read_file(const std::filesystem::path& path) {
-    std::ifstream f{path, std::ios::binary | std::ios::ate};
-    if (!f)
-        throw std::runtime_error{fmt::format("Failed to open {}", path.string())};
-    auto size = f.tellg();
-    f.seekg(0);
-    std::vector<std::byte> data(size);
-    f.read(reinterpret_cast<char*>(data.data()), size);
-    return data;
-}
+using upload_result = std::variant<std::pair<net::file_metadata, session::cleared_b32>, int16_t>;
+using download_result = std::variant<net::file_metadata, int16_t>;
+using on_data_t = std::function<void(const net::file_metadata&, std::span<const std::byte>)>;
 
 using session::test::resolve_host;
 
@@ -60,41 +48,41 @@ int do_upload(
         const std::string& filename,
         attachment::Domain domain,
         std::optional<std::chrono::seconds> ttl,
-        std::function<void(std::vector<std::byte>, std::optional<std::chrono::seconds>, on_complete_t)>
-                initiate,
+        std::shared_ptr<net::Network> network,
         std::string download_cmd_hint) {
     auto path = std::filesystem::path{filename};
-    log::info(logcat, "Reading {}...", path.string());
-    auto plaintext = read_file(path);
-    log::info(logcat, "Plaintext size: {}", human_size{static_cast<int64_t>(plaintext.size())});
+    if (!std::filesystem::exists(path)) {
+        log::error(logcat, "File not found: {}", path.string());
+        return 1;
+    }
+    auto file_size = static_cast<int64_t>(std::filesystem::file_size(path));
+    log::info(logcat, "Uploading {} ({})...", path.string(), human_size{file_size});
 
     std::array<std::byte, 32> seed;
     randombytes_buf(seed.data(), seed.size());
 
-    log::info(
-            logcat,
-            "Encrypting (domain: {})...",
-            domain == attachment::Domain::PROFILE_PIC ? "profile-pic" : "attachment");
-    auto [encrypted, key] = attachment::encrypt(seed, plaintext, domain, true);
-    auto enc_size = static_cast<int64_t>(encrypted.size());
-    log::info(logcat, "Encrypted size: {}", human_size{enc_size});
-
     auto start = clock::now();
-    std::promise<transfer_result> promise;
+    std::promise<upload_result> promise;
     auto future = promise.get_future();
 
-    log::info(logcat, "Uploading {}...", human_size{enc_size});
-    initiate(
-            std::move(encrypted),
-            ttl,
-            [&](transfer_result r) { promise.set_value(std::move(r)); });
+    net::FileUploadRequest req;
+    req.file = path;
+    req.domain = domain;
+    req.allow_large = true;
+    req.ttl = ttl;
+    req.request_timeout = 60s;
+    req.overall_timeout = 300s;
+    req.on_complete = [&](auto result, bool) { promise.set_value(std::move(result)); };
+
+    network->upload_file(std::move(req), seed);
 
     auto result = future.get();
     auto elapsed_s = std::chrono::duration<double>(clock::now() - start).count();
 
-    if (auto* meta = std::get_if<net::file_metadata>(&result)) {
+    if (auto* pair = std::get_if<std::pair<net::file_metadata, session::cleared_b32>>(&result)) {
+        auto& [meta, key] = *pair;
         auto key_hex = oxenc::to_hex(key.begin(), key.end());
-        auto speed = human_size{static_cast<int64_t>(enc_size / std::max(elapsed_s, 0.001))};
+        auto speed = human_size{static_cast<int64_t>(meta.size / std::max(elapsed_s, 0.001))};
 
         log::info(
                 logcat,
@@ -107,13 +95,13 @@ int do_upload(
                 "\n"
                 "To download:\n"
                 "{} {} {}",
-                meta->id,
+                meta.id,
                 key_hex,
-                human_size{meta->size},
+                human_size{meta.size},
                 elapsed_s,
                 speed,
                 download_cmd_hint,
-                meta->id,
+                meta.id,
                 key_hex);
         return 0;
     }
@@ -125,7 +113,7 @@ int do_upload(
 int do_download(
         const std::string& key_hex,
         const std::string& output,
-        std::function<void(on_data_t, on_complete_t)> initiate) {
+        std::function<void(on_data_t, std::function<void(download_result)>)> initiate) {
     if (key_hex.size() != 64 || !oxenc::is_hex(key_hex)) {
         log::error(logcat, "Invalid key: expected 64 hex characters");
         return 1;
@@ -145,12 +133,14 @@ int do_download(
 
     int64_t decrypted_bytes = 0;
     attachment::Decryptor decryptor{key, [&](std::span<const std::byte> decrypted) {
-        out_stream->write(reinterpret_cast<const char*>(decrypted.data()), decrypted.size());
-        decrypted_bytes += decrypted.size();
-    }};
+                                        out_stream->write(
+                                                reinterpret_cast<const char*>(decrypted.data()),
+                                                decrypted.size());
+                                        decrypted_bytes += decrypted.size();
+                                    }};
 
     auto start = clock::now();
-    std::promise<transfer_result> promise;
+    std::promise<download_result> promise;
     auto future = promise.get_future();
     int64_t received_bytes = 0;
     bool first_data = true;
@@ -193,7 +183,7 @@ int do_download(
                     last_progress_bytes = received_bytes;
                 }
             },
-            [&](transfer_result r) { promise.set_value(std::move(r)); });
+            [&](download_result r) { promise.set_value(std::move(r)); });
 
     auto result = future.get();
     auto elapsed_s = std::chrono::duration<double>(clock::now() - start).count();
@@ -208,8 +198,7 @@ int do_download(
             return 1;
         }
 
-        auto speed = human_size{
-                static_cast<int64_t>(received_bytes / std::max(elapsed_s, 0.001))};
+        auto speed = human_size{static_cast<int64_t>(received_bytes / std::max(elapsed_s, 0.001))};
         log::info(
                 logcat,
                 "Download complete: {} encrypted, {} decrypted in {:.1f}s ({}/s)",
@@ -272,7 +261,8 @@ int run(const CliArgs& args, bool is_upload) {
     if (!args.srouter) {
         if (args.server_pubkey_hex.empty() || args.server_pubkey_hex.size() != 64 ||
             !oxenc::is_hex(args.server_pubkey_hex)) {
-            fmt::print(stderr, "Error: --server (64 hex Ed25519 pubkey) is required for --direct\n");
+            fmt::print(
+                    stderr, "Error: --server (64 hex Ed25519 pubkey) is required for --direct\n");
             return 1;
         }
         if (args.server_address.empty()) {
@@ -297,36 +287,22 @@ int run(const CliArgs& args, bool is_upload) {
 
     auto network = std::make_shared<net::Network>(net_opts);
 
-    std::string mode_hint = args.srouter
-            ? fmt::format("{} --srouter{}", args.argv0, args.testnet ? " --testnet" : "")
-            : fmt::format("{} --direct --server {} --address {} --port {}",
-                    args.argv0, args.server_pubkey_hex, args.server_address, args.server_port);
+    std::string mode_hint =
+            args.srouter
+                    ? fmt::format("{} --srouter{}", args.argv0, args.testnet ? " --testnet" : "")
+                    : fmt::format(
+                              "{} --direct --server {} --address {} --port {}",
+                              args.argv0,
+                              args.server_pubkey_hex,
+                              args.server_address,
+                              args.server_port);
 
     if (is_upload) {
         return do_upload(
                 args.upload_filename,
                 args.domain,
                 args.ttl,
-                [&](auto data, auto ttl, auto cb) {
-                    auto uc = std::make_shared<std::vector<unsigned char>>(
-                            reinterpret_cast<const unsigned char*>(data.data()),
-                            reinterpret_cast<const unsigned char*>(data.data() + data.size()));
-                    bool consumed = false;
-                    net::UploadRequest req;
-                    req.request_timeout = 60s;
-                    req.overall_timeout = 300s;
-                    req.ttl = ttl;
-                    req.next_data = [uc, consumed]() mutable -> std::vector<unsigned char> {
-                        if (consumed)
-                            return {};
-                        consumed = true;
-                        return std::move(*uc);
-                    };
-                    req.on_complete = [cb = std::move(cb)](auto r, bool) {
-                        cb(std::move(r));
-                    };
-                    network->upload(std::move(req));
-                },
+                network,
                 fmt::format("{} download", mode_hint));
     }
 
@@ -338,7 +314,7 @@ int run(const CliArgs& args, bool is_upload) {
         download_url = fs::generate_download_url(args.dl_source, network->file_server_config);
 
     log::info(logcat, "Downloading: {}", download_url);
-    return do_download(args.dl_key_hex, args.dl_output, [&](auto on_data, auto cb) {
+    return do_download(args.dl_key_hex, args.dl_output, [&](on_data_t on_data, auto cb) {
         net::DownloadRequest req;
         req.download_url = download_url;
         req.request_timeout = 60s;
@@ -387,7 +363,8 @@ int main(int argc, char* argv[]) {
     upload_cmd->add_option("filename", args.upload_filename, "File to upload")->required();
     upload_cmd->add_flag("--profile-pic", profile_pic, "Use PROFILE_PIC encryption domain");
     upload_cmd->add_flag("--max-ttl", max_ttl, "Use server's maximum TTL instead of default 1h");
-    upload_cmd->add_option("--ttl", ttl_seconds, "TTL in seconds (default: 3600; ignored if --max-ttl)");
+    upload_cmd->add_option(
+            "--ttl", ttl_seconds, "TTL in seconds (default: 3600; ignored if --max-ttl)");
 
     auto* download_cmd = app.add_subcommand("download", "Download and decrypt a file");
     download_cmd
@@ -421,8 +398,8 @@ int main(int argc, char* argv[]) {
         namespace log = oxen::log;
         auto log_type = std::count(print_vals.begin(), print_vals.end(), log_file)
                               ? log::Type::Print
-                        : log_file == "syslog" ? log::Type::System
-                                               : log::Type::File;
+                      : log_file == "syslog" ? log::Type::System
+                                             : log::Type::File;
         log::add_sink(log_type, log_file);
 
         auto cats = log::extract_categories(log_level);

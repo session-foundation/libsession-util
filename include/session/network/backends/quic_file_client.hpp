@@ -39,13 +39,19 @@ constexpr uint64_t QUIC_FILES_CLIENT_ABORT = 499;
 /// The caller is responsible for determining the connection address (which may be a direct address
 /// or a session-router tunnel proxy port) and the Ed25519 pubkey of the file server.
 class QuicFileClient {
+    friend void streaming_file_upload(
+            std::shared_ptr<oxen::quic::Loop>,
+            attachment::Encryptor,
+            FileUploadRequest,
+            std::function<QuicFileClient*(void)>);
+
   public:
     using ticket_store_cb = std::function<void(
             std::string remote_key_hex,
             std::vector<unsigned char> ticket_data,
             std::chrono::sys_seconds expiry)>;
-    using ticket_extract_cb =
-            std::function<std::optional<std::vector<unsigned char>>(std::string_view remote_key_hex)>;
+    using ticket_extract_cb = std::function<std::optional<std::vector<unsigned char>>(
+            std::string_view remote_key_hex)>;
 
     /// Construct a QuicFileClient for the given file server.
     /// \param loop     The event loop to use.
@@ -112,5 +118,24 @@ class QuicFileClient {
     void _start_idle_timer();
     void _touch();
 };
+
+/// Performs a complete streaming file upload from a background thread.  This function blocks
+/// until the upload completes or fails.  It:
+/// 1. Reads the file to derive the encryption key (Encryptor phase 1)
+/// 2. Opens a QUIC stream on the loop thread and sends the PUT command
+/// 3. Pulls encrypted chunks from the Encryptor and pushes them to the stream,
+///    using watermarks for backpressure
+/// 4. Waits for the server response
+///
+/// Must be called from a background thread (not the loop thread).  The `on_complete` callback
+/// fires on the loop thread when done.
+///
+/// `get_client` is called on the loop thread to obtain the QuicFileClient to use; this allows
+/// the caller to do any router-specific setup (e.g. tunnel establishment) before the upload.
+void streaming_file_upload(
+        std::shared_ptr<oxen::quic::Loop> loop,
+        attachment::Encryptor enc,
+        FileUploadRequest request,
+        std::function<QuicFileClient*(void)> get_client);
 
 }  // namespace session::network

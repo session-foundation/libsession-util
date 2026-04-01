@@ -92,6 +92,49 @@ void DirectRouter::upload(UploadRequest request) {
     });
 }
 
+void DirectRouter::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    if (!_config.quic_file_server_address || !_config.quic_file_server_ed_pubkey) {
+        if (request.on_complete)
+            request.on_complete(ERROR_FILE_SERVER_UNAVAILABLE, false);
+        return;
+    }
+
+    attachment::Encryptor enc{seed, request.domain};
+    auto address = *_config.quic_file_server_address;
+    auto pubkey_hex = *_config.quic_file_server_ed_pubkey;
+    auto port = _config.quic_file_server_port;
+    const auto upload_id = random::unique_id("UPL");
+
+    auto& upload_thread =
+            _active_uploads.emplace(upload_id, std::make_pair(UploadRequest{}, std::thread{}))
+                    .first->second.second;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 enc = std::move(enc),
+                                 request = std::move(request),
+                                 address,
+                                 pubkey_hex,
+                                 port,
+                                 upload_id]() mutable {
+        streaming_file_upload(
+                _loop,
+                std::move(enc),
+                std::move(request),
+                [weak_self, this, address, pubkey_hex, port]() -> QuicFileClient* {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return nullptr;
+                    return &_get_file_client(ed25519_pubkey::from_hex(pubkey_hex), address, port);
+                });
+
+        _loop->call([weak_self = weak_from_this(), this, upload_id] {
+            if (auto self = weak_self.lock())
+                _cleanup_upload(upload_id);
+        });
+    });
+}
+
 void DirectRouter::download(DownloadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
@@ -178,8 +221,7 @@ QuicFileClient& DirectRouter::_get_file_client(
         const ed25519_pubkey& pubkey, std::string_view address, uint16_t port) {
     auto [it, inserted] = _file_clients.try_emplace(pubkey, nullptr);
     if (inserted)
-        it->second = std::make_unique<QuicFileClient>(
-                _loop, pubkey, std::string{address}, port);
+        it->second = std::make_unique<QuicFileClient>(_loop, pubkey, std::string{address}, port);
     else
         it->second->set_target(pubkey, std::string{address}, port);
     return *it->second;
@@ -197,9 +239,8 @@ void DirectRouter::_upload_internal(UploadRequest request) {
         return;
     }
 
-    auto& upload_thread =
-            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
-                    .first->second.second;
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
 
     auto address = *_config.quic_file_server_address;
     auto pubkey_hex = *_config.quic_file_server_ed_pubkey;
@@ -306,9 +347,8 @@ void DirectRouter::_upload_internal(UploadRequest request) {
 }
 
 void DirectRouter::_upload_internal_legacy(UploadRequest request, std::string upload_id) {
-    auto& upload_thread =
-            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
-                    .first->second.second;
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
 
     upload_thread = std::thread([weak_self = weak_from_this(),
                                  this,
@@ -445,7 +485,8 @@ void DirectRouter::_download_internal(DownloadRequest request) {
 
     auto& client = _get_file_client(pubkey, address, port);
 
-    log::debug(cat, "[Download {}]: Downloading {} from {}:{}.", download_id, file_id, address, port);
+    log::debug(
+            cat, "[Download {}]: Downloading {} from {}:{}.", download_id, file_id, address, port);
 
     client.download(
             std::move(file_id),

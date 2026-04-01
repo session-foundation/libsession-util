@@ -1,13 +1,16 @@
 #pragma once
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "session/attachments.hpp"
 #include "session/network/key_types.hpp"
 #include "session/network/service_node.hpp"
 #include "session/network/session_network_types.h"
+#include "session/sodium_array.hpp"
 
 namespace session::network {
 
@@ -30,6 +33,7 @@ constexpr int16_t ERROR_FAILED_GENERATE_ONION_PAYLOAD = -10010;
 constexpr int16_t ERROR_FAILED_TO_GET_STREAM = -10011;
 constexpr int16_t ERROR_BUILD_TIMEOUT = -10100;
 constexpr int16_t ERROR_REQUEST_CANCELLED = -10200;
+constexpr int16_t ERROR_FILE_SERVER_UNAVAILABLE = -10300;
 constexpr int16_t ERROR_UNKNOWN = -11000;
 
 const std::pair<std::string, std::string> content_type_plain_text = {
@@ -236,6 +240,19 @@ struct UploadRequest : FileTransferRequest {
     std::function<std::vector<unsigned char>()> next_data;
     std::optional<std::string> file_name;
     std::optional<std::chrono::seconds> ttl;
+};
+
+struct FileUploadRequest : FileTransferRequest {
+    std::filesystem::path file;
+    attachment::Domain domain = attachment::Domain::ATTACHMENT;
+    bool allow_large = false;
+    std::optional<std::chrono::seconds> ttl;
+
+    // Hides FileTransferRequest::on_complete: this version includes the decryption key
+    // alongside the file metadata on success.
+    std::function<void(
+            std::variant<std::pair<file_metadata, cleared_b32>, int16_t> result, bool timeout)>
+            on_complete;
 };
 
 struct DownloadRequest : FileTransferRequest {

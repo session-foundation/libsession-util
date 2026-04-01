@@ -403,9 +403,22 @@ class Encryptor {
     /// the next call to next().  Returns an empty span when all data has been encrypted.
     std::span<const std::byte> next();
 
-    /// Factory: opens a file, runs phase 1 (hashing), and returns an Encryptor ready for
-    /// next() calls along with the decryption key.  The file remains open as the data source
-    /// for phase 2.
+    /// Runs both phases from a file: hashes the file contents (phase 1), then sets up
+    /// streaming encryption with the file as the data source (phase 2).  After this call,
+    /// next() returns encrypted chunks.  The file is held open internally for phase 2 reads.
+    ///
+    /// Must be called on a freshly constructed Encryptor (i.e. before any update_key() calls).
+    ///
+    /// If `progress` is provided, it is called periodically during phase 1 with (bytes_read,
+    /// total_size).  If the callback throws, the operation is aborted and the exception
+    /// propagates to the caller.
+    cleared_b32 load_key_from_file(
+            const std::filesystem::path& file,
+            bool allow_large = false,
+            std::function<void(int64_t bytes_read, int64_t total_size)> progress = nullptr);
+
+    /// Factory: constructs an Encryptor, runs load_from_file, and returns the ready Encryptor
+    /// along with the decryption key.
     static std::pair<Encryptor, cleared_b32> from_file(
             std::span<const std::byte> seed,
             Domain domain,

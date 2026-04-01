@@ -22,6 +22,8 @@ using namespace oxen::log::literals;
 
 namespace session::network {
 
+static std::optional<ed25519_pubkey> pubkey_from_srouter_address(std::string_view address);
+
 namespace {
     auto cat = oxen::log::Cat("session-router");
 
@@ -219,6 +221,61 @@ void SessionRouter::upload(UploadRequest request) {
     _loop->call([weak_self = weak_from_this(), req = std::move(request)] {
         if (auto self = weak_self.lock())
             self->_upload_internal(std::move(req));
+    });
+}
+
+void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    auto quic_target = file_server::default_quic_target(_config.file_server_config, _config.netid);
+    if (!quic_target) {
+        // TODO: legacy file upload fallback
+        if (request.on_complete)
+            request.on_complete(ERROR_FILE_SERVER_UNAVAILABLE, false);
+        return;
+    }
+
+    // Construct the Encryptor now, consuming the seed.
+    attachment::Encryptor enc{seed, request.domain};
+    auto target = std::move(*quic_target);
+
+    const std::string upload_id = random::unique_id("UPL");
+    auto& upload_thread =
+            _active_uploads.emplace(upload_id, std::make_pair(UploadRequest{}, std::thread{}))
+                    .first->second.second;
+
+    upload_thread = std::thread([weak_self = weak_from_this(),
+                                 this,
+                                 enc = std::move(enc),
+                                 request = std::move(request),
+                                 target = std::move(target),
+                                 upload_id]() mutable {
+        // The get_client callback runs on the loop thread: it establishes the tunnel
+        // and returns the QuicFileClient.  This blocks (via promise/future) until the
+        // tunnel is established.
+        auto client_promise = std::make_shared<std::promise<QuicFileClient*>>();
+        auto client_future = client_promise->get_future();
+
+        streaming_file_upload(
+                _loop,
+                std::move(enc),
+                std::move(request),
+                [weak_self, this, target, client_promise]() -> QuicFileClient* {
+                    auto self = weak_self.lock();
+                    if (!self)
+                        return nullptr;
+
+                    // Establish tunnel synchronously (we're on the loop thread here)
+                    auto info = srouter->establish_udp(target.address, target.port);
+                    auto pubkey = pubkey_from_srouter_address(info.remote);
+                    if (!pubkey)
+                        return nullptr;
+
+                    return &_get_file_client(*pubkey, "::1", info.local_port);
+                });
+
+        _loop->call([weak_self = weak_from_this(), this, upload_id] {
+            if (auto self = weak_self.lock())
+                _cleanup_upload(upload_id);
+        });
     });
 }
 
@@ -580,8 +637,7 @@ QuicFileClient& SessionRouter::_get_file_client(
         const ed25519_pubkey& pubkey, std::string_view address, uint16_t port) {
     auto [it, inserted] = _file_clients.try_emplace(pubkey, nullptr);
     if (inserted)
-        it->second = std::make_unique<QuicFileClient>(
-                _loop, pubkey, std::string{address}, port);
+        it->second = std::make_unique<QuicFileClient>(_loop, pubkey, std::string{address}, port);
     else
         it->second->set_target(pubkey, std::string{address}, port);
     return *it->second;
@@ -605,8 +661,7 @@ void SessionRouter::_quic_upload_via_tunnel(
     }
 
     _get_file_client(*pubkey, "::1", info.local_port)
-            .upload(
-                    std::move(data),
+            .upload(std::move(data),
                     upload_request.ttl,
                     [weak_self = weak_from_this(), this, upload_request, upload_id](
                             std::variant<file_metadata, int16_t> result) {
@@ -616,10 +671,7 @@ void SessionRouter::_quic_upload_via_tunnel(
 
                         if (auto* meta = std::get_if<file_metadata>(&result))
                             log::info(
-                                    cat,
-                                    "[Upload {}]: Success, file ID: {}",
-                                    upload_id,
-                                    meta->id);
+                                    cat, "[Upload {}]: Success, file ID: {}", upload_id, meta->id);
                         else
                             log::error(
                                     cat,
@@ -692,9 +744,8 @@ void SessionRouter::_upload_internal(UploadRequest request) {
     }
 
     // QUIC upload: accumulate data on background thread, then tunnel and upload
-    auto& upload_thread =
-            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
-                    .first->second.second;
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
 
     upload_thread = std::thread([weak_self = weak_from_this(),
                                  this,
@@ -787,9 +838,8 @@ void SessionRouter::_upload_internal(UploadRequest request) {
 
 // Legacy HTTP-based upload path, used when no QUIC file server target is available.
 void SessionRouter::_upload_internal_legacy(UploadRequest request, std::string upload_id) {
-    auto& upload_thread =
-            _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
-                    .first->second.second;
+    auto& upload_thread = _active_uploads.emplace(upload_id, std::make_pair(request, std::thread{}))
+                                  .first->second.second;
 
     upload_thread = std::thread([weak_self = weak_from_this(),
                                  this,
@@ -910,8 +960,7 @@ void SessionRouter::_download_internal(DownloadRequest request) {
     if (download_info && download_info->srouter_target)
         quic_target = std::move(download_info->srouter_target);
     else
-        quic_target =
-                file_server::default_quic_target(_config.file_server_config, _config.netid);
+        quic_target = file_server::default_quic_target(_config.file_server_config, _config.netid);
 
     if (!quic_target || !download_info) {
         _download_internal_legacy(std::move(request), std::move(download_id));
@@ -933,10 +982,7 @@ void SessionRouter::_download_internal(DownloadRequest request) {
             },
             [weak_self = weak_from_this(), this, request, download_id]() {
                 if (auto self = weak_self.lock()) {
-                    log::error(
-                            cat,
-                            "[Download {}]: Tunnel establishment timed out.",
-                            download_id);
+                    log::error(cat, "[Download {}]: Tunnel establishment timed out.", download_id);
                     _active_downloads.erase(download_id);
                     request.on_complete(ERROR_BUILD_TIMEOUT, true);
                 }

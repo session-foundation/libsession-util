@@ -105,7 +105,9 @@ class Network : public std::enable_shared_from_this<Network> {
             uint16_t count, std::function<void(std::vector<service_node> nodes)> callback);
 
     virtual void send_request(Request request, network_response_callback_t callback);
+    [[deprecated("use upload_file() instead")]]
     void upload(UploadRequest request);
+    void upload_file(FileUploadRequest request, std::span<const std::byte> seed);
     void download(DownloadRequest request);
 
   private:

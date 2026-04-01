@@ -7,12 +7,15 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 
+#include <fstream>
+#include <mutex>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 #include <oxen/quic/btstream.hpp>
 #include <oxen/quic/endpoint.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
 
+#include "session/clock.hpp"
 #include "session/ed25519.hpp"
 
 using namespace oxen;
@@ -47,9 +50,8 @@ QuicFileClient::QuicFileClient(
 
     // Set up TLS credentials
     auto key_pair = ed25519::ed25519_key_pair();
-    _creds = quic::GNUTLSCreds::make_from_ed_seckey(
-            std::string_view{reinterpret_cast<const char*>(key_pair.second.data()),
-                             key_pair.second.size()});
+    _creds = quic::GNUTLSCreds::make_from_ed_seckey(std::string_view{
+            reinterpret_cast<const char*>(key_pair.second.data()), key_pair.second.size()});
 
     // Enable 0RTT if callbacks are provided
     if (_ticket_store && _ticket_extract) {
@@ -60,8 +62,8 @@ QuicFileClient::QuicFileClient(
                         std::chrono::sys_seconds expiry) {
                     store(oxenc::to_hex(remote.view_remote_key()), std::move(data), expiry);
                 },
-                [extract = _ticket_extract](
-                        const quic::RemoteAddress& remote) -> std::optional<std::vector<unsigned char>> {
+                [extract = _ticket_extract](const quic::RemoteAddress& remote)
+                        -> std::optional<std::vector<unsigned char>> {
                     return extract(oxenc::to_hex(remote.view_remote_key()));
                 });
     }
@@ -115,10 +117,7 @@ std::shared_ptr<quic::Connection> QuicFileClient::_ensure_connection() {
     if (_conn)
         return _conn;
 
-    auto remote = quic::RemoteAddress{
-            oxenc::from_hex(_ed_pubkey.hex()),
-            _address,
-            _port};
+    auto remote = quic::RemoteAddress{oxenc::from_hex(_ed_pubkey.hex()), _address, _port};
 
     log::info(cat, "Connecting to QUIC file server at {}:{}", _address, _port);
 
@@ -128,9 +127,7 @@ std::shared_ptr<quic::Connection> QuicFileClient::_ensure_connection() {
             quic::opt::outbound_alpn(QUIC_FILES_ALPN),
             quic::opt::handshake_timeout{10s},
             quic::opt::keep_alive{10s},
-            [this](quic::Connection&) {
-                log::info(cat, "Connected to QUIC file server.");
-            },
+            [this](quic::Connection&) { log::info(cat, "Connected to QUIC file server."); },
             [this](quic::Connection&, uint64_t ec) {
                 if (ec)
                     log::warning(cat, "Connection to QUIC file server failed (error {}).", ec);
@@ -306,8 +303,7 @@ void QuicFileClient::download(
                 // Phase 2: accumulate metadata bytes
                 if (!state->metadata_parsed) {
                     try {
-                        if (!quic::data_accumulator(
-                                    state->meta_buf, data, state->meta_size))
+                        if (!quic::data_accumulator(state->meta_buf, data, state->meta_size))
                             return;
                     } catch (const std::exception& e) {
                         log::error(cat, "Download metadata accumulation error: {}", e.what());
@@ -350,10 +346,7 @@ void QuicFileClient::download(
                         try {
                             state->on_data(state->metadata, data);
                         } catch (const std::exception& e) {
-                            log::warning(
-                                    cat,
-                                    "Download aborted by on_data callback: {}",
-                                    e.what());
+                            log::warning(cat, "Download aborted by on_data callback: {}", e.what());
                             s.close(QUIC_FILES_CLIENT_ABORT);
                             return;
                         }
@@ -391,10 +384,7 @@ void QuicFileClient::download(
                 }
 
                 log::info(
-                        cat,
-                        "Download complete: {} ({} bytes).",
-                        state->file_id,
-                        state->received);
+                        cat, "Download complete: {} ({} bytes).", state->file_id, state->received);
                 state->on_complete(state->metadata);
             };
 
@@ -419,4 +409,177 @@ void QuicFileClient::download(
     });
 }
 
+void streaming_file_upload(
+        std::shared_ptr<quic::Loop> loop,
+        attachment::Encryptor enc,
+        FileUploadRequest request,
+        std::function<QuicFileClient*(void)> get_client) {
+
+    struct upload_state {
+        std::mutex mutex;
+        std::condition_variable cv;
+        bool paused = false;
+        bool done = false;
+        QuicFileClient* client = nullptr;
+        std::shared_ptr<quic::Stream> stream;
+        std::string response_data;
+        std::optional<std::variant<file_metadata, int16_t>> result;
+    };
+    auto state = std::make_shared<upload_state>();
+
+    auto fail = [&](int16_t err) {
+        if (request.on_complete)
+            loop->call([request, err] { request.on_complete(err, false); });
+    };
+
+    loop->call([state, get_client = std::move(get_client)] {
+        auto* client = get_client();
+        std::lock_guard lock{state->mutex};
+        if (client)
+            state->client = client;
+        else
+            state->done = true;
+        state->cv.notify_one();
+    });
+
+    auto key = enc.load_key_from_file(request.file, request.allow_large);
+    auto upload_size = attachment::encrypted_size(enc.data_size());
+    auto enc_ptr = std::make_shared<attachment::Encryptor>(std::move(enc));
+
+    {
+        std::unique_lock lock{state->mutex};
+        state->cv.wait(
+                lock, [&] { return state->client || state->done || request.is_cancelled(); });
+        if (request.is_cancelled())
+            return fail(ERROR_REQUEST_CANCELLED);
+        if (state->done)
+            return fail(ERROR_FILE_SERVER_UNAVAILABLE);
+    }
+
+    loop->call_get([&] {
+        auto conn = state->client->_ensure_connection();
+        if (!conn) {
+            std::lock_guard lock{state->mutex};
+            state->done = true;
+            return;
+        }
+
+        auto str = conn->open_stream(
+                [state](quic::Stream&, std::span<const std::byte> incoming) {
+                    state->response_data += std::string_view{
+                            reinterpret_cast<const char*>(incoming.data()), incoming.size()};
+                },
+                [state, upload_size](quic::Stream&, uint64_t error_code) {
+                    std::lock_guard lock{state->mutex};
+                    if (error_code != 0) {
+                        state->result = static_cast<int16_t>(error_code);
+                    } else if (state->response_data.empty()) {
+                        state->result = static_cast<int16_t>(ERROR_UNKNOWN);
+                    } else {
+                        try {
+                            oxenc::bt_dict_consumer resp{state->response_data};
+                            file_metadata meta{};
+                            meta.id = resp.require<std::string>("#");
+                            meta.size = upload_size;
+                            meta.uploaded = from_epoch_s(resp.require<int64_t>("u"));
+                            meta.expiry = from_epoch_s(resp.require<int64_t>("x"));
+                            resp.finish();
+                            state->result = std::move(meta);
+                        } catch (const std::exception& e) {
+                            log::warning(
+                                    cat, "Failed to parse streaming upload response: {}", e.what());
+                            state->result = static_cast<int16_t>(ERROR_UNKNOWN);
+                        }
+                    }
+                    state->done = true;
+                    state->cv.notify_one();
+                });
+
+        constexpr size_t WATERMARK_ALARM = 512 * 1024;
+        constexpr size_t WATERMARK_CLEAR = 128 * 1024;
+        str->enable_watermarks(
+                WATERMARK_ALARM,
+                [state](quic::Stream&) {
+                    std::lock_guard lock{state->mutex};
+                    state->paused = true;
+                },
+                WATERMARK_CLEAR,
+                [state](quic::Stream&) {
+                    {
+                        std::lock_guard lock{state->mutex};
+                        state->paused = false;
+                    }
+                    state->cv.notify_one();
+                });
+
+        oxenc::bt_dict_producer cmd;
+        cmd.append("!", "PUT");
+        cmd.append("s", static_cast<int64_t>(upload_size));
+        if (request.ttl)
+            cmd.append("t", static_cast<int64_t>(request.ttl->count()));
+        auto cmd_view = cmd.view();
+        str->send(fmt::format("{}:{}", cmd_view.size(), cmd_view));
+
+        state->stream = std::move(str);
+    });
+
+    {
+        std::lock_guard lock{state->mutex};
+        if (state->done)
+            return fail(ERROR_FILE_SERVER_UNAVAILABLE);
+    }
+
+    auto check_cancelled = [&]() -> bool {
+        if (!request.is_cancelled())
+            return false;
+        log::debug(cat, "Streaming file upload cancelled");
+        loop->call([state, request] {
+            if (state->stream)
+                state->stream->close(QUIC_FILES_CLIENT_ABORT);
+            if (request.on_complete)
+                request.on_complete(ERROR_REQUEST_CANCELLED, false);
+        });
+        return true;
+    };
+
+    for (auto chunk = enc_ptr->next(); !chunk.empty(); chunk = enc_ptr->next()) {
+        if (check_cancelled())
+            return;
+
+        {
+            std::unique_lock lock{state->mutex};
+            state->cv.wait(
+                    lock, [&] { return !state->paused || state->done || request.is_cancelled(); });
+            if (check_cancelled())
+                return;
+            if (state->done)
+                break;
+        }
+
+        auto data = std::make_shared<std::vector<std::byte>>(chunk.begin(), chunk.end());
+        loop->call([state, data] {
+            if (state->stream)
+                state->stream->send(*data, data);
+        });
+    }
+
+    loop->call([state] {
+        if (state->stream)
+            state->stream->send_fin();
+    });
+
+    {
+        std::unique_lock lock{state->mutex};
+        state->cv.wait(lock, [&] { return state->done; });
+    }
+
+    if (request.on_complete && state->result) {
+        loop->call([request, result = std::move(*state->result), key] {
+            if (auto* meta = std::get_if<file_metadata>(&result))
+                request.on_complete(std::make_pair(std::move(*meta), key), false);
+            else
+                request.on_complete(std::get<int16_t>(result), false);
+        });
+    }
+}
 }  // namespace session::network

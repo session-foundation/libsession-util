@@ -67,7 +67,8 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     ConnectionStatus get_status() const override { return _status.load(); };
     std::vector<PathInfo> get_active_paths() override;
     void send_request(Request request, network_response_callback_t callback) override;
-    void upload(UploadRequest request) override;
+    void upload(UploadRequest request) override;  // deprecated: use upload_file()
+    void upload_file(FileUploadRequest request, std::span<const std::byte> seed) override;
     void download(DownloadRequest request) override;
 
   private:

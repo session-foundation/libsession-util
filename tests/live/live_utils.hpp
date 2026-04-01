@@ -48,8 +48,8 @@ inline std::shared_ptr<session::network::Network> make_testnet_network(
     // because libquic does not do DNS resolution.
     if (live_router_mode.type == opt::router::Type::direct) {
         net_opts.push_back(opt::quic_file_server_ed_pubkey{TESTNET_QUIC_FS_ED_PUBKEY});
-        net_opts.push_back(opt::quic_file_server_address{
-                session::test::resolve_host(TESTNET_QUIC_FS_HOST)});
+        net_opts.push_back(
+                opt::quic_file_server_address{session::test::resolve_host(TESTNET_QUIC_FS_HOST)});
     }
 
     return std::make_shared<session::network::Network>(net_opts);

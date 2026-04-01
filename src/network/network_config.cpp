@@ -174,10 +174,7 @@ void Config::handle_config_opt(opt::quic_file_server_ed_pubkey qfep) {
 
 void Config::handle_config_opt(opt::quic_file_server_address qfa) {
     quic_file_server_address = std::move(qfa.address);
-    log::debug(
-            cat,
-            "Network config QUIC file server address set to {}",
-            *quic_file_server_address);
+    log::debug(cat, "Network config QUIC file server address set to {}", *quic_file_server_address);
 }
 
 void Config::handle_config_opt(opt::quic_file_server_port qfp) {

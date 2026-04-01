@@ -130,12 +130,10 @@ static constexpr auto TESTNET_QUIC_FS_SESH_ADDRESS =
 std::optional<SRouterTarget> default_quic_target(
         const config::FileServer& http_config, opt::netid::Target netid) {
     // Map known HTTP file server pubkeys to their QUIC file server .sesh addresses.
-    if (http_config.pubkey_hex == DEFAULT_CONFIG.pubkey_hex &&
-        netid == opt::netid::Target::mainnet)
+    if (http_config.pubkey_hex == DEFAULT_CONFIG.pubkey_hex && netid == opt::netid::Target::mainnet)
         return SRouterTarget{std::string{MAINNET_QUIC_FS_SESH_ADDRESS}, QUIC_DEFAULT_PORT};
 
-    if (http_config.pubkey_hex == TESTNET_CONFIG.pubkey_hex &&
-        netid == opt::netid::Target::testnet)
+    if (http_config.pubkey_hex == TESTNET_CONFIG.pubkey_hex && netid == opt::netid::Target::testnet)
         return SRouterTarget{std::string{TESTNET_QUIC_FS_SESH_ADDRESS}, QUIC_DEFAULT_PORT};
 
     return std::nullopt;

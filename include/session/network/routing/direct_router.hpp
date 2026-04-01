@@ -54,7 +54,8 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
 
     ConnectionStatus get_status() const override { return _status.load(); };
     void send_request(Request request, network_response_callback_t callback) override;
-    void upload(UploadRequest request) override;
+    void upload(UploadRequest request) override;  // deprecated: use upload_file()
+    void upload_file(FileUploadRequest request, std::span<const std::byte> seed) override;
     void download(DownloadRequest request) override;
 
   private:
@@ -67,7 +68,8 @@ class DirectRouter : public IRouter, public std::enable_shared_from_this<DirectR
     void _download_internal(DownloadRequest request);
     void _download_internal_legacy(DownloadRequest request, std::string download_id);
     void _cleanup_upload(const std::string& upload_id);
-    QuicFileClient& _get_file_client(const ed25519_pubkey& pubkey, std::string_view address, uint16_t port);
+    QuicFileClient& _get_file_client(
+            const ed25519_pubkey& pubkey, std::string_view address, uint16_t port);
     void _handle_transport_response(
             bool success,
             bool timeout,

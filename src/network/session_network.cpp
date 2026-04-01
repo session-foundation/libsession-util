@@ -42,11 +42,19 @@ namespace {
             "da21e1d886c6fbaea313f75298bd64aab03a97ce985b46bb2dad9f2089c8ee59"sv;
     constexpr auto clock_out_of_sync_error = "Clock out of sync";
 
+    // Checks a precondition and, if true, fires the request's on_complete with the given error.
+    // Returns true if the condition was met (i.e. the caller should return).
+    template <typename Req>
+    bool fail_if(Req& req, bool cond, int16_t err) {
+        if (cond && req.on_complete)
+            req.on_complete(err, false);
+        return cond;
+    }
+
     config::FileServer build_file_server_config(const config::Config& main_config) {
-        config::FileServer file_server_config =
-                main_config.netid == opt::netid::Target::testnet
-                        ? file_server::TESTNET_CONFIG
-                        : file_server::DEFAULT_CONFIG;
+        config::FileServer file_server_config = main_config.netid == opt::netid::Target::testnet
+                                                      ? file_server::TESTNET_CONFIG
+                                                      : file_server::DEFAULT_CONFIG;
         file_server_config.use_stream_encryption = main_config.file_server_use_stream_encryption;
 
         if (main_config.custom_file_server_scheme)
@@ -92,8 +100,7 @@ namespace {
                 main_config.netid,
                 main_config.quic_file_server_address,
                 main_config.quic_file_server_ed_pubkey,
-                main_config.quic_file_server_port.value_or(
-                        file_server::QUIC_DEFAULT_PORT)};
+                main_config.quic_file_server_port.value_or(file_server::QUIC_DEFAULT_PORT)};
     }
 
     config::SessionRouter build_session_router_config(
@@ -516,21 +523,12 @@ void Network::send_request(Request request, network_response_callback_t callback
 }
 
 void Network::upload(UploadRequest request) {
-    if (_suspended) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
         return;
-    }
-    if (!_transport) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
         return;
-    }
-    if (!_router) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
         return;
-    }
 
     auto user_callback = request.on_complete;
     request.on_complete = [weak_self = weak_from_this(), this, user_callback](
@@ -561,25 +559,54 @@ void Network::upload(UploadRequest request) {
             user_callback(std::move(result), timeout);
     };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     _router->upload(std::move(request));
+#pragma GCC diagnostic pop
+}
+
+void Network::upload_file(FileUploadRequest request, std::span<const std::byte> seed) {
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
+        return;
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
+        return;
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
+        return;
+
+    auto user_callback = request.on_complete;
+    request.on_complete =
+            [weak_self = weak_from_this(), this, user_callback](
+                    std::variant<std::pair<file_metadata, cleared_b32>, int16_t> result,
+                    bool timeout) {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+
+                if (auto* status_code = std::get_if<int16_t>(&result)) {
+                    if (*status_code == ERROR_TOO_EARLY) {
+                        log::info(cat, "File upload received 425, triggering clock resync.");
+                        _resync_clock(std::nullopt, std::nullopt);
+
+                        if (user_callback)
+                            user_callback(*status_code, timeout);
+                        return;
+                    }
+                }
+
+                if (user_callback)
+                    user_callback(std::move(result), timeout);
+            };
+
+    _router->upload_file(std::move(request), seed);
 }
 
 void Network::download(DownloadRequest request) {
-    if (_suspended) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NETWORK_SUSPENDED, false);
+    if (fail_if(request, _suspended, ERROR_NETWORK_SUSPENDED))
         return;
-    }
-    if (!_transport) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_TRANSPORT_LAYER, false);
+    if (fail_if(request, !_transport, ERROR_NO_TRANSPORT_LAYER))
         return;
-    }
-    if (!_router) {
-        if (request.on_complete)
-            request.on_complete(ERROR_NO_ROUTING_LAYER, false);
+    if (fail_if(request, !_router, ERROR_NO_ROUTING_LAYER))
         return;
-    }
 
     auto user_callback = request.on_complete;
     request.on_complete = [weak_self = weak_from_this(), this, user_callback, req = request](
@@ -1858,8 +1885,11 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
                     result);
         };
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         handle->cancelled = cpp_request.cancelled;
         unbox(network)->upload(std::move(cpp_request));
+#pragma GCC diagnostic pop
 
         return handle.release();
     } catch (...) {

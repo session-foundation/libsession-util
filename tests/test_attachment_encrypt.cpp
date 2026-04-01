@@ -464,16 +464,7 @@ TEST_CASE(
 
 TEST_CASE("Streaming Encryptor", "[attachments][encryptor]") {
 
-    auto DATA_SIZE = GENERATE(
-            0,
-            1,
-            100,
-            1000,
-            4053,
-            8150,
-            32768,
-            65536,
-            100000);
+    auto DATA_SIZE = GENERATE(0, 1, 100, 1000, 4053, 8150, 32768, 65536, 100000);
 
     auto seed = "9123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
     const auto data = make_data(DATA_SIZE);
@@ -492,13 +483,12 @@ TEST_CASE("Streaming Encryptor", "[attachments][encryptor]") {
 
         // Phase 2: start encryption with a pull source
         size_t src_pos = 0;
-        auto key = enc.start_encryption(
-                [&](std::span<std::byte> buf) -> size_t {
-                    size_t avail = std::min(buf.size(), data.size() - src_pos);
-                    std::memcpy(buf.data(), data.data() + src_pos, avail);
-                    src_pos += avail;
-                    return avail;
-                });
+        auto key = enc.start_encryption([&](std::span<std::byte> buf) -> size_t {
+            size_t avail = std::min(buf.size(), data.size() - src_pos);
+            std::memcpy(buf.data(), data.data() + src_pos, avail);
+            src_pos += avail;
+            return avail;
+        });
 
         // Collect all encrypted output
         std::vector<std::byte> encrypted;
@@ -514,8 +504,8 @@ TEST_CASE("Streaming Encryptor", "[attachments][encryptor]") {
         // Decrypt with the streaming Decryptor and verify round-trip
         std::vector<std::byte> decrypted;
         attachment::Decryptor dec{key, [&](std::span<const std::byte> d) {
-            decrypted.insert(decrypted.end(), d.begin(), d.end());
-        }};
+                                      decrypted.insert(decrypted.end(), d.begin(), d.end());
+                                  }};
         REQUIRE(dec.update(encrypted));
         REQUIRE(dec.finalize());
         REQUIRE(decrypted.size() == data.size());

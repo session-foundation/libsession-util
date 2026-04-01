@@ -712,8 +712,12 @@ namespace {
     auto& ss_st(std::byte (&data)[52]) {
         return *reinterpret_cast<crypto_secretstream_xchacha20poly1305_state*>(data);
     }
-    auto* uc(std::byte* p) { return reinterpret_cast<unsigned char*>(p); }
-    auto* uc(const std::byte* p) { return reinterpret_cast<const unsigned char*>(p); }
+    auto* uc(std::byte* p) {
+        return reinterpret_cast<unsigned char*>(p);
+    }
+    auto* uc(const std::byte* p) {
+        return reinterpret_cast<const unsigned char*>(p);
+    }
 }  // namespace
 
 Encryptor::Encryptor(std::span<const std::byte> seed, Domain domain) {
@@ -722,12 +726,7 @@ Encryptor::Encryptor(std::span<const std::byte> seed, Domain domain) {
 
     const auto& pers = domain_pers(domain);
     crypto_generichash_blake2b_init_salt_personal(
-            &b2b_st(hash_st_data),
-            uc(seed.data()),
-            32,
-            nonce_key.size(),
-            nullptr,
-            pers.data());
+            &b2b_st(hash_st_data), uc(seed.data()), 32, nonce_key.size(), nullptr, pers.data());
 }
 
 void Encryptor::update_key(std::span<const std::byte> data) {
@@ -862,33 +861,52 @@ std::span<const std::byte> Encryptor::next() {
     return {out_buf.data(), out_size};
 }
 
+cleared_b32 Encryptor::load_key_from_file(
+        const std::filesystem::path& file,
+        bool allow_large,
+        std::function<void(int64_t bytes_read, int64_t total_size)> progress) {
+    auto in = std::make_shared<std::ifstream>();
+    in->exceptions(std::ios::badbit);
+    in->open(file, std::ios::binary | std::ios::ate);
+    int64_t total = in->tellg();
+    in->seekg(0, std::ios::beg);
+
+    // Phase 1: hash the file
+    constexpr size_t READ_SIZE = 65536;
+    std::vector<std::byte> chunk(READ_SIZE);
+    int64_t read_so_far = 0;
+    while (in->read(reinterpret_cast<char*>(chunk.data()), chunk.size())) {
+        update_key(chunk);
+        read_so_far += chunk.size();
+        if (progress)
+            progress(read_so_far, total);
+    }
+    if (in->gcount() > 0) {
+        update_key(std::span{chunk}.first(in->gcount()));
+        read_so_far += in->gcount();
+        if (progress)
+            progress(read_so_far, total);
+    }
+
+    // Seek back for phase 2
+    in->clear();
+    in->seekg(0, std::ios::beg);
+
+    return start_encryption(
+            [in](std::span<std::byte> buffer) -> size_t {
+                in->read(reinterpret_cast<char*>(buffer.data()), buffer.size());
+                return in->gcount();
+            },
+            allow_large);
+}
+
 std::pair<Encryptor, cleared_b32> Encryptor::from_file(
         std::span<const std::byte> seed,
         Domain domain,
         const std::filesystem::path& file,
         bool allow_large) {
     Encryptor enc{seed, domain};
-
-    auto in = std::make_shared<std::ifstream>();
-    in->exceptions(std::ios::badbit);
-    in->open(file, std::ios::binary);
-
-    std::array<std::byte, 4096> chunk;
-    while (in->read(reinterpret_cast<char*>(chunk.data()), chunk.size()))
-        enc.update_key(chunk);
-    if (in->gcount() > 0)
-        enc.update_key(std::span{chunk}.first(in->gcount()));
-
-    in->clear();
-    in->seekg(0, std::ios::beg);
-
-    auto key = enc.start_encryption(
-            [in](std::span<std::byte> buffer) -> size_t {
-                in->read(reinterpret_cast<char*>(buffer.data()), buffer.size());
-                return in->gcount();
-            },
-            allow_large);
-
+    auto key = enc.load_key_from_file(file, allow_large);
     return {std::move(enc), std::move(key)};
 }
 

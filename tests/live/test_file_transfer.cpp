@@ -1,9 +1,11 @@
-#include <catch2/catch_test_macros.hpp>
 #include <sodium/randombytes.h>
 
+#include <catch2/catch_test_macros.hpp>
+#include <fstream>
 #include <session/attachments.hpp>
 #include <session/network/backends/session_file_server.hpp>
 #include <session/network/session_network.hpp>
+#include <session/sodium_array.hpp>
 #include <session/util.hpp>
 
 #include "live_utils.hpp"
@@ -69,6 +71,53 @@ TEST_CASE("Live: file upload via QUIC", "[live][file]") {
     CHECK(meta.size > 0);
 }
 
+TEST_CASE("Live: streaming file upload via upload_file", "[live][file]") {
+    auto core = make_live_core();
+    auto net = core->network();
+    REQUIRE(net);
+
+    // Write test data to a temp file
+    auto tmp = std::filesystem::temp_directory_path() / "upload_file_test.dat";
+    {
+        std::vector<std::byte> plaintext(8192);
+        randombytes_buf(plaintext.data(), plaintext.size());
+        std::ofstream f{tmp, std::ios::binary};
+        REQUIRE(f);
+        f.write(reinterpret_cast<const char*>(plaintext.data()), plaintext.size());
+    }
+
+    std::array<std::byte, 32> seed;
+    randombytes_buf(seed.data(), seed.size());
+
+    std::promise<std::variant<std::pair<network::file_metadata, session::cleared_b32>, int16_t>>
+            promise;
+    auto future = promise.get_future();
+
+    network::FileUploadRequest req;
+    req.file = tmp;
+    req.domain = attachment::Domain::ATTACHMENT;
+    req.allow_large = true;
+    req.ttl = 1min;
+    req.request_timeout = 30s;
+    req.overall_timeout = LIVE_TIMEOUT;
+    req.on_complete = [&](auto result, bool) { promise.set_value(std::move(result)); };
+
+    net->upload_file(std::move(req), seed);
+
+    REQUIRE(future.wait_for(LIVE_TIMEOUT) == std::future_status::ready);
+    auto result = future.get();
+
+    std::filesystem::remove(tmp);
+
+    using pair_t = std::pair<network::file_metadata, session::cleared_b32>;
+    REQUIRE(std::holds_alternative<pair_t>(result));
+
+    auto& [meta, key] = std::get<pair_t>(result);
+    CHECK(!meta.id.empty());
+    CHECK(meta.size > 0);
+    CHECK(!key.empty());
+}
+
 TEST_CASE("Live: file upload and download round-trip via QUIC", "[live][file]") {
     // Works under all routing modes: --srouter and --direct use the QUIC file server protocol,
     // --onionreq falls back to the legacy HTTP proxy path.
@@ -107,7 +156,9 @@ TEST_CASE("Live: file upload and download round-trip via QUIC", "[live][file]") 
                 reinterpret_cast<const unsigned char*>(encrypted.data() + encrypted.size())};
     };
     upload_req.ttl = 1min;
-    upload_req.on_complete = [&](auto result, bool) { upload_promise.set_value(std::move(result)); };
+    upload_req.on_complete = [&](auto result, bool) {
+        upload_promise.set_value(std::move(result));
+    };
 
     net->upload(std::move(upload_req));
 
@@ -129,8 +180,7 @@ TEST_CASE("Live: file upload and download round-trip via QUIC", "[live][file]") 
     download_req.request_timeout = 30s;
     download_req.overall_timeout = LIVE_TIMEOUT;
     download_req.on_data = [&](auto&, std::span<const std::byte> data) {
-        downloaded_data.insert(
-                downloaded_data.end(), data.begin(), data.end());
+        downloaded_data.insert(downloaded_data.end(), data.begin(), data.end());
     };
     download_req.on_complete = [&](auto result, bool) {
         download_promise.set_value(std::move(result));
@@ -143,8 +193,7 @@ TEST_CASE("Live: file upload and download round-trip via QUIC", "[live][file]") 
     REQUIRE(std::holds_alternative<network::file_metadata>(download_result));
 
     // Decrypt and verify
-    auto decrypted = attachment::decrypt(
-            std::span<const std::byte>{downloaded_data}, key);
+    auto decrypted = attachment::decrypt(std::span<const std::byte>{downloaded_data}, key);
     REQUIRE(decrypted.size() == plaintext.size());
     CHECK(decrypted == plaintext);
 }
