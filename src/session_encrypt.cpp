@@ -248,7 +248,7 @@ static std::vector<unsigned char> v2_encrypt_inner(
         const Ed25519PrivKeySpan& sender_ed25519_privkey,
         std::span<const unsigned char, 33> recipient_session_id,
         std::span<const unsigned char> content,
-        std::optional<std::span<const unsigned char, 64>> pro_signature) {
+        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey) {
 
     auto sender_ed_pk = sender_ed25519_privkey.pubkey();
 
@@ -268,7 +268,7 @@ static std::vector<unsigned char> v2_encrypt_inner(
     size_t inner_dict_size = 2                                // d...e dict delimiters
                            + S_KEY_VAL + 3 +
                              bt_bytes_encoded(content.size())  // "1:c" + "<content>"
-                           + SIG_KEY_VAL + (pro_signature ? PRO_KEY_VAL : 0);
+                           + SIG_KEY_VAL + (pro_ed25519_privkey ? PRO_KEY_VAL : 0);
 
     // Total message must be a multiple of 256 bytes and at least V2_MIN_FINAL_SIZE bytes.
     size_t final_size =
@@ -303,8 +303,18 @@ static std::vector<unsigned char> v2_encrypt_inner(
                 throw std::runtime_error{"Failed to sign v2 message"};
             return sig;
         });
-        if (pro_signature)
-            dict.append("~P", *pro_signature);
+        if (pro_ed25519_privkey)
+            dict.append_signature("~P", [&](std::span<const unsigned char> body) {
+                uc64 sig;
+                if (0 != crypto_sign_ed25519_detached(
+                                 sig.data(),
+                                 nullptr,
+                                 body.data(),
+                                 body.size(),
+                                 pro_ed25519_privkey->data()))
+                    throw std::runtime_error{"Failed to sign v2 pro signature"};
+                return sig;
+            });
         assert(dict.view().size() == inner_dict_size);
     }
 
@@ -329,7 +339,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
         std::span<const unsigned char, 32> recipient_account_x25519,
         std::span<const unsigned char, 1184> recipient_account_mlkem768,
         std::span<const unsigned char> content,
-        std::optional<std::span<const unsigned char, 64>> pro_signature) {
+        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey) {
 
     // S = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
     std::span<const unsigned char, 32> S{recipient_session_id.data() + 1, 32};
@@ -382,7 +392,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
             sender_ed25519_privkey,
             recipient_session_id,
             content,
-            pro_signature);
+            pro_ed25519_privkey);
 }
 
 std::array<unsigned char, 2> decrypt_incoming_v2_prefix(
@@ -441,10 +451,15 @@ static DecryptV2Result v2_aead_decrypt_and_parse(
                     throw std::runtime_error{"v2 message signature verification failed"};
             });
 
-    // Optional "~P" pro signature (span into plain, copied once into result below)
-    std::optional<std::span<const unsigned char, 64>> pro_sv;
+    // Optional "~P" pro signature.  Extracted but not verified here — the Pro public key is
+    // inside the protobuf Content, so verification is deferred to the message parsing layer.
+    std::optional<std::array<std::byte, 64>> pro_sig;
     if (dict.skip_until("~P"))
-        pro_sv = dict.consume_span<unsigned char, 64>();
+        dict.consume_signature([&](std::span<const std::byte>, std::span<const std::byte> sig) {
+            if (sig.size() != 64)
+                throw std::runtime_error{"v2 ~P pro signature has wrong size"};
+            std::memcpy(pro_sig.emplace().data(), sig.data(), 64);
+        });
 
     dict.finish();
 
@@ -457,8 +472,8 @@ static DecryptV2Result v2_aead_decrypt_and_parse(
     result.content.assign(content_sv.begin(), content_sv.end());
     result.sender_session_id[0] = 0x05;
     std::ranges::copy(sender_x25519, result.sender_session_id.begin() + 1);
-    if (pro_sv)
-        std::ranges::copy(*pro_sv, result.pro_signature.emplace().begin());
+    if (pro_sig)
+        std::memcpy(result.pro_signature.emplace().data(), pro_sig->data(), 64);
     return result;
 }
 
@@ -500,7 +515,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2_nopfs(
         const Ed25519PrivKeySpan& sender_ed25519_privkey,
         std::span<const unsigned char, 33> recipient_session_id,
         std::span<const unsigned char> content,
-        std::optional<std::span<const unsigned char, 64>> pro_signature) {
+        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey) {
 
     // R = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
     auto R = recipient_session_id.last<32>();
@@ -538,7 +553,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2_nopfs(
             sender_ed25519_privkey,
             recipient_session_id,
             content,
-            pro_signature);
+            pro_ed25519_privkey);
 }
 
 DecryptV2Result decrypt_incoming_v2_nopfs(

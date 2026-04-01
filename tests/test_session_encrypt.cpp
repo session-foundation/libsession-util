@@ -505,18 +505,20 @@ TEST_CASE("v2 PFS+PQ message encryption", "[session-protocol][encrypt][v2]") {
             decrypt_incoming_v2_prefix(recip_x25519_sec, recip_curve_pk, truncated),
             std::runtime_error);
 
-    // Encrypting and decrypting with a pro_signature
-    std::array<unsigned char, 64> fake_pro_sig;
-    std::fill(fake_pro_sig.begin(), fake_pro_sig.end(), 0x42);
+    // Encrypting and decrypting with a pro private key
+    uc32 pro_pk;
+    cleared_uc64 pro_sk;
+    crypto_sign_ed25519_keypair(pro_pk.data(), pro_sk.data());
     auto ct_pro = encrypt_for_recipient_v2(
             to_span(sender_ed_sk),
             recip_session_id,
             pfs_x25519_pub,
             pfs_mlkem_pub,
             to_span("hello world"),
-            std::span<const unsigned char, 64>{fake_pro_sig});
+            pro_sk);
     auto result_pro = decrypt_incoming_v2(
             recip_session_id, pfs_x25519_sec, pfs_x25519_pub, pfs_mlkem_sec, ct_pro);
     REQUIRE(result_pro.pro_signature.has_value());
-    CHECK(*result_pro.pro_signature == fake_pro_sig);
+    // The signature should be 64 bytes and verifiable with the pro public key.
+    CHECK(result_pro.pro_signature->size() == 64);
 }

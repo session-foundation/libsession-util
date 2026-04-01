@@ -1,7 +1,9 @@
 #pragma once
 #include <array>
+#include <chrono>
 #include <functional>
 #include <optional>
+#include <session/config/namespaces.hpp>
 #include <session/core/devices.hpp>
 #include <session/core/swarm_message.hpp>
 #include <span>
@@ -52,6 +54,19 @@ struct ReceivedMessage {
             pro_signature;       ///< Session Pro signature, if present
     bool pfs_encrypted = false;  ///< True iff decrypted via PFS+PQ (X-Wing) key derivation;
                                  ///< false for v1 messages and v2 non-PFS fallback messages.
+};
+
+/// Status of a send operation initiated by Core::send_dm().
+enum class MessageSendStatus {
+    awaiting_keys,   ///< Waiting for a PFS+PQ pubkey fetch to complete before encrypting.
+    sending,         ///< Encryption complete; the store request has been dispatched.
+    retrying,        ///< A previous send attempt failed; retrying.  (Not yet implemented:
+                     ///< currently a failed send goes directly to network_error.  TODO:
+                     ///< implement automatic retry with a maximum retry count.)
+    success,         ///< The store request was accepted by a swarm node.
+    network_error,   ///< The swarm lookup or store request failed (terminal).
+    no_network,      ///< No send_to_swarm callback is set and no network object is attached.
+    encrypt_failed,  ///< Encryption failed (should not normally happen).
 };
 
 /// Struct holding application callbacks to fire when libsession Core events happen to allow the
@@ -130,7 +145,7 @@ struct callbacks {
     /// Parameters:
     /// - session_id -- 33-byte session ID (0x05 prefix + X25519 pubkey) of the remote user
     /// - result -- the outcome of the fetch: new_key, unchanged, not_found, or failed
-    std::function<void(std::span<const unsigned char, 33> session_id, PfsKeyFetch result)>
+    std::function<void(std::span<const std::byte, 33> session_id, PfsKeyFetch result)>
             pfs_keys_fetched;
 
     /// Callback invoked when a one-to-one message from Namespace::Default is successfully
@@ -154,6 +169,37 @@ struct callbacks {
     /// - reason -- why decryption failed
     std::function<void(const SwarmMessage& msg, MessageDecryptFailure reason)>
             message_decrypt_failed;
+
+    /// Application-provided swarm store function.  If set, Core calls this to deliver outgoing
+    /// messages instead of using its attached network object.
+    ///
+    /// The implementation MUST call on_stored with success (true) or failure (false) when the
+    /// store operation completes or fails.
+    ///
+    /// Parameters:
+    /// - recipient_pubkey -- 33-byte (0x05-prefixed) session ID whose swarm should receive the
+    ///   message
+    /// - ns -- the swarm namespace to store into (e.g. Namespace::Default for DMs)
+    /// - payload -- the fully-encoded message bytes (envelope-wrapped, encrypted)
+    /// - ttl -- requested time-to-live for the stored message
+    /// - on_stored -- callback that MUST be invoked with the outcome
+    std::function<void(
+            std::span<const std::byte, 33> recipient_pubkey,
+            config::Namespace ns,
+            std::vector<std::byte> payload,
+            std::chrono::milliseconds ttl,
+            std::function<void(bool success)> on_stored)>
+            send_to_swarm;
+
+    /// Callback fired as a send operation initiated by Core::send_dm() progresses.  This is
+    /// typically invoked multiple times for a single message — once or more for intermediate
+    /// states (awaiting_keys, sending, retrying) followed by a terminal state (success,
+    /// network_error, no_network, or encrypt_failed).
+    ///
+    /// Parameters:
+    /// - message_id -- the value returned by the originating send_dm() call
+    /// - status -- the current state of the send
+    std::function<void(int64_t message_id, MessageSendStatus status)> message_send_status;
 };
 
 }  // namespace session::core

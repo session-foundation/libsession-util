@@ -132,6 +132,20 @@ class TestHelper {
         return count > 0;
     }
 
+    // Seeds the pfs_key_cache with PFS keys for a remote session_id.
+    static void seed_pfs_cache(
+            core::Core& core,
+            std::span<const std::byte, 33> remote_session_id,
+            std::span<const std::byte, 32> x25519_pub,
+            std::span<const std::byte, 1184> mlkem768_pub) {
+        core._store_pfs_keys(remote_session_id, x25519_pub, mlkem768_pub);
+    }
+
+    // Seeds a NAK entry in the pfs_key_cache (remote has no published PFS keys).
+    static void seed_pfs_nak(core::Core& core, std::span<const std::byte, 33> remote_session_id) {
+        core._store_pfs_nak(remote_session_id);
+    }
+
     // Returns the pfs_key_cache entry for the given session_id, or nullopt if absent.
     static std::optional<PfsCacheEntry> pfs_cache_entry(
             core::Core& core, std::span<const unsigned char, 33> session_id) {

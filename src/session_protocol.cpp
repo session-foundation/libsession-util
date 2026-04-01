@@ -398,7 +398,7 @@ std::vector<unsigned char> encode_for_community_inbox(
 std::vector<unsigned char> encode_dm_v1(
         std::span<const unsigned char> plaintext,
         const Ed25519PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
+        sys_ms sent_timestamp,
         std::span<const unsigned char, 33> recipient_pubkey,
         const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey) {
     // For 1o1 messages, encrypt the padded payload for the recipient. See:
@@ -412,7 +412,7 @@ std::vector<unsigned char> encode_dm_v1(
     SessionProtos::Envelope envelope;
     envelope.set_type(SessionProtos::Envelope_Type_SESSION_MESSAGE);
     envelope.set_sourcedevice(1);
-    envelope.set_timestamp(sent_timestamp.count());
+    envelope.set_timestamp(epoch_ms(sent_timestamp));
     envelope.set_content(encrypted.data(), encrypted.size());
     attach_pro_sig_to_envelope(envelope, encrypted, pro_rotating_ed25519_privkey);
 
@@ -1094,7 +1094,7 @@ session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
         return encode_dm_v1(
                 {static_cast<const unsigned char*>(plaintext), plaintext_len},
                 {static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
-                std::chrono::milliseconds(sent_timestamp_ms),
+                from_epoch_ms(sent_timestamp_ms),
                 recipient_pubkey->data,
                 {static_cast<const unsigned char*>(pro_rotating_ed25519_privkey),
                  pro_rotating_ed25519_privkey_len});

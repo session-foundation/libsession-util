@@ -98,11 +98,21 @@ void Core::set_network(std::shared_ptr<network::Network> network) {
 
 void Core::_update_polling() {
     if (_network && !_poll_ticker) {
-        _poll_ticker = _loop->call_every(20s, [this] { _poll(); });
+        _poll_ticker = _loop->call_every(_poll_interval, [this] { _poll(); });
     } else if (!_network && _poll_ticker) {
         _poll_ticker->stop();
         _poll_ticker.reset();
     }
+}
+
+void Core::set_poll_interval(std::chrono::milliseconds interval) {
+    _poll_interval = interval;
+    if (_poll_ticker) {
+        _poll_ticker->stop();
+        _poll_ticker.reset();
+    }
+    if (_network)
+        _poll_ticker = _loop->call_every(_poll_interval, [this] { _poll(); });
 }
 
 void Core::_poll() {
@@ -298,9 +308,8 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
         throw std::logic_error{"prefetch_pfs_keys called without a network object"};
 
     // One copy of session_id for async use; subsequently moved into lambdas.
-    // sid must be unsigned char because xed25519::verify requires it for the x25519 pubkey span.
-    std::array<unsigned char, 33> sid;
-    std::ranges::copy(session_id, sid.begin());
+    std::array<std::byte, 33> sid;
+    std::memcpy(sid.data(), session_id.data(), 33);
 
     // Skip the fetch if the cached entry is still fresh, or a recent NAK suppresses retrying.
     // Otherwise determine whether we have a stale (but usable) key or no key at all.
@@ -404,7 +413,54 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
     return status;
 }
 
-void Core::_handle_pfs_response(std::span<const unsigned char, 33> sid, std::string body) {
+bool Core::_store_pfs_keys(
+        std::span<const std::byte, 33> session_id,
+        std::span<const std::byte, 32> x25519_pub,
+        std::span<const std::byte, 1184> mlkem768_pub) {
+    auto now_s = epoch_seconds(clock_now_s());
+    auto conn = db.conn();
+    SQLite::Transaction tx{conn.sql};
+
+    bool is_unchanged = conn.prepared_maybe_get<int>(
+                                    R"(
+SELECT 1 FROM pfs_key_cache
+WHERE session_id = ? AND pubkey_x25519 = ? AND pubkey_mlkem768 = ?
+)",
+                                    session_id,
+                                    x25519_pub,
+                                    mlkem768_pub)
+                                .has_value();
+
+    conn.prepared_exec(
+            R"(
+INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
+VALUES (?, ?, NULL, ?, ?)
+ON CONFLICT(session_id) DO UPDATE SET
+    fetched_at = excluded.fetched_at,
+    pubkey_x25519 = excluded.pubkey_x25519,
+    pubkey_mlkem768 = excluded.pubkey_mlkem768
+)",
+            session_id,
+            now_s,
+            x25519_pub,
+            mlkem768_pub);
+    tx.commit();
+    return !is_unchanged;
+}
+
+void Core::_store_pfs_nak(std::span<const std::byte, 33> session_id) {
+    auto now_s = epoch_seconds(clock_now_s());
+    db.conn().prepared_exec(
+            R"(
+INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
+VALUES (?, NULL, ?, NULL, NULL)
+ON CONFLICT(session_id) DO UPDATE SET nak_at = excluded.nak_at
+)",
+            session_id,
+            now_s);
+}
+
+void Core::_handle_pfs_response(std::span<const std::byte, 33> sid, std::string body) {
     try {
         auto json = nlohmann::json::parse(body);
         auto msgs_it = json.find("messages");
@@ -444,8 +500,7 @@ void Core::_handle_pfs_response(std::span<const unsigned char, 33> sid, std::str
                 in.require_signature(
                         "~",
                         [&x25519_pub](
-                                std::span<const unsigned char> b,
-                                std::span<const unsigned char> sig) {
+                                std::span<const std::byte> b, std::span<const std::byte> sig) {
                             if (!xed25519::verify(sig, x25519_pub, b))
                                 throw std::runtime_error{"signature verification failed"};
                         });
@@ -460,61 +515,288 @@ void Core::_handle_pfs_response(std::span<const unsigned char, 33> sid, std::str
             }
         }
 
-        auto now_s = epoch_seconds(clock_now_s());
-
         if (!pk_x25519 || !pk_mlkem768) {
             log::debug(
                     cat,
                     "prefetch_pfs_keys: no valid account pubkey message "
                     "found in response");
-            // Record a NAK.  If a valid entry already exists, update only
-            // nak_at and leave fetched_at and pubkeys untouched.
-            db.conn().prepared_exec(
-                    R"(
-INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
-VALUES (?, NULL, ?, NULL, NULL)
-ON CONFLICT(session_id) DO UPDATE SET nak_at = excluded.nak_at
-)",
-                    sid,
-                    now_s);
+            _store_pfs_nak(sid);
             if (callbacks.pfs_keys_fetched)
                 callbacks.pfs_keys_fetched(sid, PfsKeyFetch::not_found);
             return;
         }
 
-        auto conn = db.conn();
-        SQLite::Transaction tx{conn.sql};
-
-        bool is_unchanged = conn.prepared_maybe_get<int>(
-                                        R"(
-SELECT 1 FROM pfs_key_cache
-WHERE session_id = ? AND pubkey_x25519 = ? AND pubkey_mlkem768 = ?
-)",
-                                        sid,
-                                        *pk_x25519,
-                                        *pk_mlkem768)
-                                    .has_value();
-
-        conn.prepared_exec(
-                R"(
-INSERT INTO pfs_key_cache (session_id, fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768)
-VALUES (?, ?, NULL, ?, ?)
-ON CONFLICT(session_id) DO UPDATE SET
-    fetched_at = excluded.fetched_at,
-    pubkey_x25519 = excluded.pubkey_x25519,
-    pubkey_mlkem768 = excluded.pubkey_mlkem768
-)",
-                sid,
-                now_s,
-                *pk_x25519,
-                *pk_mlkem768);
-        tx.commit();
+        bool changed = _store_pfs_keys(sid, *pk_x25519, *pk_mlkem768);
         if (callbacks.pfs_keys_fetched)
             callbacks.pfs_keys_fetched(
-                    sid, is_unchanged ? PfsKeyFetch::unchanged : PfsKeyFetch::new_key);
+                    sid, changed ? PfsKeyFetch::new_key : PfsKeyFetch::unchanged);
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to process PFS key fetch response: {}", e.what());
     }
+}
+
+void Core::_send_to_swarm(
+        std::span<const std::byte, 33> dest_pubkey,
+        config::Namespace ns,
+        std::vector<std::byte> payload,
+        std::chrono::milliseconds ttl,
+        std::function<void(bool success)> on_complete) {
+    if (callbacks.send_to_swarm) {
+        callbacks.send_to_swarm(dest_pubkey, ns, std::move(payload), ttl, std::move(on_complete));
+        return;
+    }
+
+    auto net = _network;
+    if (!net)
+        throw std::logic_error{"_send_to_swarm: no send_to_swarm callback and no network object"};
+
+    // Build signed store request.
+    auto session_id_hex = oxenc::to_hex(globals.session_id());
+    auto ed25519_hex = globals.pubkey_ed25519().hex();
+    auto ns_val = static_cast<int16_t>(ns);
+    auto now_ms = epoch_ms(clock_now_ms());
+
+    std::string to_sign = "store{}{}"_format(ns_val, now_ms);
+    std::array<unsigned char, 64> sig;
+    {
+        auto seed = globals.account_seed();
+        crypto_sign_ed25519_detached(
+                sig.data(),
+                nullptr,
+                reinterpret_cast<const unsigned char*>(to_sign.data()),
+                to_sign.size(),
+                seed.ed25519_secret().data());
+    }
+
+    nlohmann::json params = {
+            {"pubkey", session_id_hex},
+            {"pubkey_ed25519", ed25519_hex},
+            {"namespace", ns_val},
+            {"data", oxenc::to_base64(payload)},
+            {"timestamp", now_ms},
+            {"sig_timestamp", now_ms},
+            {"signature", oxenc::to_base64(sig)},
+            {"ttl", ttl.count()},
+    };
+
+    auto body = to_vector<unsigned char>(params.dump());
+
+    // Resolve the recipient's swarm and send.
+    network::x25519_pubkey x25519_pub;
+    std::memcpy(x25519_pub.data(), dest_pubkey.data() + 1, 32);
+
+    net->get_swarm(
+            x25519_pub,
+            false,
+            [net, body = std::move(body), on_complete = std::move(on_complete)](
+                    auto, auto swarm) mutable {
+                if (swarm.empty()) {
+                    if (on_complete)
+                        on_complete(false);
+                    return;
+                }
+                net->send_request(
+                        network::Request{
+                                swarm.front(),
+                                "store",
+                                std::move(body),
+                                network::RequestCategory::standard_small,
+                                20s},
+                        [on_complete = std::move(on_complete)](
+                                bool success, bool, int16_t, auto, auto) {
+                            if (on_complete)
+                                on_complete(success);
+                        });
+            });
+}
+
+void Core::_do_send_dm(
+        int64_t message_id,
+        std::span<const std::byte, 33> recipient,
+        std::span<const std::byte> content,
+        sys_ms sent_timestamp,
+        const OptionalEd25519PrivKeySpan& pro_privkey,
+        std::chrono::milliseconds ttl,
+        bool force_v2) {
+    auto fire_status = [&](MessageSendStatus status) {
+        if (callbacks.message_send_status) {
+            try {
+                callbacks.message_send_status(message_id, status);
+            } catch (const std::exception& e) {
+                log::warning(cat, "message_send_status callback threw: {}", e.what());
+            }
+        }
+    };
+
+    // TODO: remove these casts once the encrypt/encode APIs are migrated to std::byte.
+    std::span<const unsigned char, 33> recipient_uc{
+            reinterpret_cast<const unsigned char*>(recipient.data()), 33};
+    std::span<const unsigned char> content_uc{
+            reinterpret_cast<const unsigned char*>(content.data()), content.size()};
+
+    // Look up cached PFS keys for the recipient.
+    using X = sqlite::blob_guts<std::array<unsigned char, 32>>;
+    using M = sqlite::blob_guts<std::array<unsigned char, 1184>>;
+    auto row = db.conn()
+                       .prepared_maybe_get<
+                               std::optional<int64_t>,
+                               std::optional<int64_t>,
+                               std::optional<X>,
+                               std::optional<M>>(
+                               "SELECT fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768"
+                               " FROM pfs_key_cache WHERE session_id = ?",
+                               recipient_uc);
+
+    const std::array<unsigned char, 32>* pfs_x25519 = nullptr;
+    const std::array<unsigned char, 1184>* pfs_mlkem768 = nullptr;
+    if (row) {
+        auto& [fetched_at, nak_at, pk_x, pk_m] = *row;
+        if (fetched_at && pk_x && pk_m) {
+            pfs_x25519 = &static_cast<const std::array<unsigned char, 32>&>(*pk_x);
+            pfs_mlkem768 = &static_cast<const std::array<unsigned char, 1184>&>(*pk_m);
+        }
+    }
+
+    // Encrypt the message.  v2 (PFS or nopfs) produces the complete wire format directly
+    // (0x00 0x02 | ki | E | mlkem_ct | encrypted_inner) — no protobuf wrapping.  v1 uses
+    // encode_dm_v1 which wraps in Envelope + WebSocketMessage protobufs.
+    std::vector<unsigned char> encrypted;
+    try {
+        auto seed = globals.account_seed();
+        auto ed_sec = seed.ed25519_secret();
+
+        if (pfs_x25519)
+            encrypted = encrypt_for_recipient_v2(
+                    ed_sec, recipient_uc, *pfs_x25519, *pfs_mlkem768, content_uc, pro_privkey);
+        else if (force_v2)
+            encrypted =
+                    encrypt_for_recipient_v2_nopfs(ed_sec, recipient_uc, content_uc, pro_privkey);
+        else
+            encrypted = encode_dm_v1(content_uc, ed_sec, sent_timestamp, recipient_uc, pro_privkey);
+    } catch (const std::exception& e) {
+        log::warning(cat, "send_dm: encryption failed for message {}: {}", message_id, e.what());
+        fire_status(MessageSendStatus::encrypt_failed);
+        return;
+    }
+
+    std::vector<std::byte> payload(encrypted.size());
+    std::memcpy(payload.data(), encrypted.data(), encrypted.size());
+
+    // Dispatch to swarm.
+    fire_status(MessageSendStatus::sending);
+    try {
+        _send_to_swarm(
+                recipient,
+                config::Namespace::Default,
+                std::move(payload),
+                ttl,
+                [this, message_id](bool success) {
+                    if (callbacks.message_send_status) {
+                        try {
+                            callbacks.message_send_status(
+                                    message_id,
+                                    success ? MessageSendStatus::success
+                                            : MessageSendStatus::network_error);
+                        } catch (const std::exception& e) {
+                            log::warning(cat, "message_send_status callback threw: {}", e.what());
+                        }
+                    }
+                });
+    } catch (const std::logic_error&) {
+        fire_status(MessageSendStatus::no_network);
+    }
+}
+
+void Core::_flush_pending_sends(std::span<const std::byte, 33> session_id) {
+    auto it = _pending_sends.begin();
+    while (it != _pending_sends.end()) {
+        if (std::ranges::equal(it->recipient, session_id)) {
+            auto pending = std::move(*it);
+            it = _pending_sends.erase(it);
+            _do_send_dm(
+                    pending.id,
+                    pending.recipient,
+                    pending.content,
+                    pending.sent_timestamp,
+                    pending.pro_privkey ? OptionalEd25519PrivKeySpan{*pending.pro_privkey}
+                                        : OptionalEd25519PrivKeySpan{},
+                    pending.ttl,
+                    pending.force_v2);
+        } else {
+            ++it;
+        }
+    }
+}
+
+int64_t Core::send_dm(
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte> content,
+        sys_ms sent_timestamp,
+        const OptionalEd25519PrivKeySpan& pro_privkey,
+        std::chrono::milliseconds ttl,
+        bool force_v2) {
+    auto id = _next_message_id++;
+
+    // Reinterpret for the DB query which still takes unsigned char.
+    std::span<const unsigned char, 33> recipient_uc{
+            reinterpret_cast<const unsigned char*>(recipient_session_id.data()), 33};
+
+    // Check cache state to decide whether we can send immediately or must queue.
+    auto conn = db.conn();
+    auto row = conn.prepared_maybe_get<std::optional<int64_t>, std::optional<int64_t>>(
+            "SELECT fetched_at, nak_at FROM pfs_key_cache WHERE session_id = ?", recipient_uc);
+
+    bool have_cached_key = false;
+    bool is_nak = false;
+
+    if (row) {
+        auto& [fetched_at, nak_at] = *row;
+        if (fetched_at)
+            have_cached_key = true;
+        else if (nak_at)
+            is_nak = true;
+    }
+
+    if (have_cached_key || is_nak) {
+        // Can send immediately: either we have keys (use v2 PFS) or it's a NAK (use v1 or v2
+        // nopfs).
+        _do_send_dm(id, recipient_session_id, content, sent_timestamp, pro_privkey, ttl, force_v2);
+    } else if (_network) {
+        // No cache entry at all: need to fetch keys first.  Queue the send and initiate a
+        // prefetch.  The pfs_keys_fetched callback will flush it.
+        PendingSend pending;
+        pending.id = id;
+        std::ranges::copy(recipient_session_id, pending.recipient.begin());
+        pending.content.assign(content.begin(), content.end());
+        pending.sent_timestamp = sent_timestamp;
+        if (pro_privkey) {
+            auto& stored = pending.pro_privkey.emplace();
+            std::memcpy(stored.data(), pro_privkey->data(), 64);
+        }
+        pending.ttl = ttl;
+        pending.force_v2 = force_v2;
+        _pending_sends.push_back(std::move(pending));
+
+        if (callbacks.message_send_status)
+            callbacks.message_send_status(id, MessageSendStatus::awaiting_keys);
+
+        // Wire up flushing: wrap the existing callback to also flush pending sends.
+        auto existing_cb = callbacks.pfs_keys_fetched;
+        callbacks.pfs_keys_fetched =
+                [this, existing_cb](std::span<const std::byte, 33> sid, PfsKeyFetch result) {
+                    if (existing_cb)
+                        existing_cb(sid, result);
+                    _flush_pending_sends(sid);
+                };
+
+        prefetch_pfs_keys(recipient_uc);
+    } else {
+        // No cache and no network: fire immediate failure.
+        if (callbacks.message_send_status)
+            callbacks.message_send_status(id, MessageSendStatus::no_network);
+    }
+
+    return id;
 }
 
 void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {

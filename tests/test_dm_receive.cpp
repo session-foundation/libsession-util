@@ -77,7 +77,8 @@ TEST_CASE("_handle_direct_messages: v1 receive", "[core][dm]") {
 
     // Minimal valid SessionProtos::Content: field 15 (sigTimestamp) = 1.
     constexpr auto plaintext = "7801"_hex_u;
-    auto encoded = encode_dm_v1(plaintext, sender.ed_sk, 1234ms, recip_session_id, std::nullopt);
+    auto encoded =
+            encode_dm_v1(plaintext, sender.ed_sk, clock_now_ms(), recip_session_id, std::nullopt);
 
     OwnedMessage om{std::span{encoded}, "hash_v1", from_epoch_ms(1234), from_epoch_ms(9999)};
     recipient->receive_messages({&om.msg, 1}, config::Namespace::Default, true);
@@ -431,8 +432,8 @@ TEST_CASE(
 
     // Minimal valid SessionProtos::Content: field 15 (sigTimestamp) = 1.
     constexpr auto plaintext = "7801"_hex_u;
-    auto e1 = encode_dm_v1(plaintext, sender.ed_sk, 1000ms, recip_session_id, std::nullopt);
-    auto e2 = encode_dm_v1(plaintext, sender.ed_sk, 2000ms, recip_session_id, std::nullopt);
+    auto e1 = encode_dm_v1(plaintext, sender.ed_sk, clock_now_ms(), recip_session_id, std::nullopt);
+    auto e2 = encode_dm_v1(plaintext, sender.ed_sk, clock_now_ms(), recip_session_id, std::nullopt);
 
     OwnedMessage om1{std::span{e1}, "h1"};
     OwnedMessage om2{std::span{e2}, "h2"};

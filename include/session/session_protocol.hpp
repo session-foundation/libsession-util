@@ -383,7 +383,7 @@ std::vector<unsigned char> pad_message(std::span<const unsigned char> payload);
 std::vector<unsigned char> encode_dm_v1(
         std::span<const unsigned char> plaintext,
         const Ed25519PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
+        sys_ms sent_timestamp,
         std::span<const unsigned char, 33> recipient_pubkey,
         const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey = std::nullopt);
 

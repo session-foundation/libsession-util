@@ -142,8 +142,9 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
 /// - `recipient_account_x25519` -- 32-byte recently-fetched PFS account X25519 pubkey (X)
 /// - `recipient_account_mlkem768` -- 1184-byte recently-fetched PFS account ML-KEM-768 pubkey (M)
 /// - `content` -- the plaintext message content to encrypt (typically a serialized protobuf)
-/// - `pro_signature` -- optional 64-byte Session Pro Ed25519 signature.  Pass nullopt when the
-///                      sender is not using Session Pro features.
+/// - `pro_ed25519_privkey` -- optional Session Pro rotating Ed25519 private key (32-byte seed or
+///   64-byte libsodium key).  When provided, a `~P` signature is appended to the inner bt-dict,
+///   signing all preceding dict content.  Pass nullopt / omit when not using Session Pro.
 ///
 /// Outputs:
 /// - The encrypted v2 ciphertext to send to the swarm.
@@ -154,7 +155,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
         std::span<const unsigned char, 32> recipient_account_x25519,
         std::span<const unsigned char, 1184> recipient_account_mlkem768,
         std::span<const unsigned char> content,
-        std::optional<std::span<const unsigned char, 64>> pro_signature = std::nullopt);
+        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey = std::nullopt);
 
 /// Exception thrown when a v2 message could not be decrypted with a given account key.  The
 /// caller should catch this and try the next candidate key.  Other exceptions (e.g.,
@@ -252,7 +253,8 @@ DecryptV2Result decrypt_incoming_v2(
 /// - `sender_ed25519_privkey` -- sender's 32-byte seed or 64-byte Ed25519 secret key
 /// - `recipient_session_id` -- 33-byte 0x05-prefixed long-term X25519 pubkey of the recipient
 /// - `content` -- the plaintext message content to encrypt
-/// - `pro_signature` -- optional 64-byte Session Pro signature
+/// - `pro_ed25519_privkey` -- optional Session Pro rotating Ed25519 private key.  When provided,
+///   a `~P` signature is appended to the inner bt-dict.  Pass nullopt / omit when not using Pro.
 ///
 /// Outputs:
 /// - Wire-format v2 ciphertext (non-PFS).
@@ -261,7 +263,7 @@ std::vector<unsigned char> encrypt_for_recipient_v2_nopfs(
         const Ed25519PrivKeySpan& sender_ed25519_privkey,
         std::span<const unsigned char, 33> recipient_session_id,
         std::span<const unsigned char> content,
-        std::optional<std::span<const unsigned char, 64>> pro_signature = std::nullopt);
+        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey = std::nullopt);
 
 /// API: crypto/decrypt_incoming_v2_nopfs
 ///

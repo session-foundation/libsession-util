@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory>
+#include <session/clock.hpp>
 #include <session/config/namespaces.hpp>
+#include <session/ed25519.hpp>
 #include <session/mnemonics.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
@@ -203,6 +205,7 @@ class Core {
     void init();
 
     // Polling-related members and methods
+    std::chrono::milliseconds _poll_interval = 20s;
     std::shared_ptr<oxen::quic::Ticker> _poll_ticker;
     void _update_polling();
     void _poll();
@@ -215,7 +218,57 @@ class Core {
     void _handle_direct_messages(std::span<const SwarmMessage> messages);
 
     // Handles a PFS fetch response
-    void _handle_pfs_response(std::span<const unsigned char, 33> sid, std::string body);
+    void _handle_pfs_response(std::span<const std::byte, 33> sid, std::string body);
+
+    // Stores PFS keys for a remote session_id in the pfs_key_cache.  Returns true if the keys
+    // differ from the previously cached entry (or no entry existed).
+    bool _store_pfs_keys(
+            std::span<const std::byte, 33> session_id,
+            std::span<const std::byte, 32> x25519_pub,
+            std::span<const std::byte, 1184> mlkem768_pub);
+
+    // Stores a NAK (no keys found) for a remote session_id in the pfs_key_cache.
+    void _store_pfs_nak(std::span<const std::byte, 33> session_id);
+
+    // Monotonic message ID counter for send_dm().
+    int64_t _next_message_id{1};
+
+    // Queued sends waiting for a PFS key fetch to complete.
+    struct PendingSend {
+        int64_t id;
+        std::array<std::byte, 33> recipient;
+        std::vector<std::byte> content;
+        sys_ms sent_timestamp;
+        std::optional<cleared_uc64> pro_privkey;
+        std::chrono::milliseconds ttl;
+        bool force_v2;
+    };
+    std::vector<PendingSend> _pending_sends;
+
+    // Drains pending sends whose PFS key fetch has completed.
+    void _flush_pending_sends(std::span<const std::byte, 33> session_id);
+
+    // Encrypts, envelopes, and dispatches a single DM.  Called from send_dm() and from
+    // _flush_pending_sends() when a queued send is ready.  Fires the message_send_status
+    // callback on completion.
+    void _do_send_dm(
+            int64_t message_id,
+            std::span<const std::byte, 33> recipient,
+            std::span<const std::byte> content,
+            sys_ms sent_timestamp,
+            const OptionalEd25519PrivKeySpan& pro_privkey,
+            std::chrono::milliseconds ttl,
+            bool force_v2);
+
+    // Dispatches a fully-encoded payload to a swarm for storage.  Tries the send_to_swarm
+    // callback first; falls back to the attached network object; fires on_complete with the
+    // outcome.  Throws std::logic_error if neither delivery path is available.
+    void _send_to_swarm(
+            std::span<const std::byte, 33> dest_pubkey,
+            config::Namespace ns,
+            std::vector<std::byte> payload,
+            std::chrono::milliseconds ttl,
+            std::function<void(bool success)> on_complete);
 
     // Extracts an option of type T from a pack; returns the first match wrapped in optional, or
     // nullopt if not present.  Mirrors the same helper in session::sqlite::Database.
@@ -290,6 +343,41 @@ class Core {
     /// - nak     -- a recent fetch returned no keys; re-fetching is suppressed for
     ///              PFS_KEY_NAK_DURATION (1h).
     PfsKeyStatus prefetch_pfs_keys(std::span<const unsigned char, 33> session_id);
+
+    /// Sets the polling interval used when a network object is attached.  The default is 20s.
+    /// Takes effect by replacing the active ticker (if any); safe to call at any time.
+    void set_poll_interval(std::chrono::milliseconds interval);
+
+    /// Encrypt and send a direct message to the given recipient.
+    ///
+    /// Returns a unique message_id that will later be reported via the message_send_status
+    /// callback.
+    ///
+    /// Version selection:
+    /// - If fresh/stale PFS+PQ account keys are cached for the recipient, a v2 PFS message is
+    ///   sent.
+    /// - If no keys are cached (NAK) and force_v2 is false, falls back to a v1 message.
+    /// - If no keys are cached and force_v2 is true, sends a v2 non-PFS message.
+    /// - If a key fetch is in progress, the send is queued and dispatched when the fetch
+    ///   completes, using the above rules.
+    ///
+    /// Parameters:
+    /// - recipient_session_id -- 33-byte 0x05-prefixed session ID of the recipient
+    /// - content -- serialised SessionProtos::Content protobuf (the inner plaintext)
+    /// - sent_timestamp -- the message timestamp as a time point (should match sigTimestamp
+    ///   inside the Content protobuf); used in the v1 Envelope when falling back to v1
+    /// - pro_privkey -- optional Session Pro rotating Ed25519 private key (32-byte seed or
+    ///   64-byte libsodium key).  When provided, a Pro signature is attached to the message.
+    /// - ttl -- time-to-live for the stored message; defaults to 14 days
+    /// - force_v2 -- when true, never fall back to v1; use v2 non-PFS if no PFS keys are
+    ///   available
+    int64_t send_dm(
+            std::span<const std::byte, 33> recipient_session_id,
+            std::span<const std::byte> content,
+            sys_ms sent_timestamp,
+            const OptionalEd25519PrivKeySpan& pro_privkey = std::nullopt,
+            std::chrono::milliseconds ttl = 14 * 24h,
+            bool force_v2 = false);
 
     /// Returns the optional network interface, if set.
     const std::shared_ptr<network::Network>& network() const { return _network; }
