@@ -22,12 +22,7 @@
 
 using namespace std::literals;
 
-static constexpr auto STATUS_CAT = "file";
-
 namespace {
-
-namespace log = oxen::log;
-static auto logcat = log::Cat(STATUS_CAT);
 
 using session::human_size;
 using clock = std::chrono::steady_clock;
@@ -52,11 +47,11 @@ int do_upload(
         std::string download_cmd_hint) {
     auto path = std::filesystem::path{filename};
     if (!std::filesystem::exists(path)) {
-        log::error(logcat, "File not found: {}", path.string());
+        fmt::print(stderr, "File not found: {}\n", path.string());
         return 1;
     }
     auto file_size = static_cast<int64_t>(std::filesystem::file_size(path));
-    log::info(logcat, "Uploading {} ({})...", path.string(), human_size{file_size});
+    fmt::print(stderr, "Uploading {} ({})...\n", path.string(), human_size{file_size});
 
     std::array<std::byte, 32> seed;
     randombytes_buf(seed.data(), seed.size());
@@ -72,7 +67,23 @@ int do_upload(
     req.ttl = ttl;
     req.request_timeout = 60s;
     req.overall_timeout = 300s;
+    req.progress_interval = 250ms;
     req.on_complete = [&](auto result, bool) { promise.set_value(std::move(result)); };
+
+    auto last_progress = start;
+    int64_t last_progress_bytes = 0;
+    req.on_progress = [&](int64_t acked, int64_t total) {
+        auto now = clock::now();
+        auto since_last = std::chrono::duration<double>(now - last_progress).count();
+        auto recent_speed =
+                since_last > 0 ? human_size{static_cast<int64_t>((acked - last_progress_bytes) /
+                                                                  since_last)}
+                               : human_size{0};
+        auto pct = total > 0 ? 100.0 * acked / total : 0.0;
+        fmt::print(stderr, "[{}/{}] {:.1f}% {}/s\n", human_size{acked}, human_size{total}, pct, recent_speed);
+        last_progress = now;
+        last_progress_bytes = acked;
+    };
 
     network->upload_file(std::move(req), seed);
 
@@ -84,8 +95,7 @@ int do_upload(
         auto key_hex = oxenc::to_hex(key.begin(), key.end());
         auto speed = human_size{static_cast<int64_t>(meta.size / std::max(elapsed_s, 0.001))};
 
-        log::info(
-                logcat,
+        fmt::print(
                 "\nUpload complete!\n"
                 "  File ID:  {}\n"
                 "  Key:      {}\n"
@@ -94,7 +104,7 @@ int do_upload(
                 "  Speed:    {}/s\n"
                 "\n"
                 "To download:\n"
-                "{} {} {}",
+                "{} {} {}\n",
                 meta.id,
                 key_hex,
                 human_size{meta.size},
@@ -106,7 +116,7 @@ int do_upload(
         return 0;
     }
 
-    log::error(logcat, "Upload failed with error {}", std::get<int16_t>(result));
+    fmt::print(stderr, "Upload failed with error {}\n", std::get<int16_t>(result));
     return 1;
 }
 
@@ -115,7 +125,7 @@ int do_download(
         const std::string& output,
         std::function<void(on_data_t, std::function<void(download_result)>)> initiate) {
     if (key_hex.size() != 64 || !oxenc::is_hex(key_hex)) {
-        log::error(logcat, "Invalid key: expected 64 hex characters");
+        fmt::print(stderr, "Invalid key: expected 64 hex characters\n");
         return 1;
     }
 
@@ -154,9 +164,9 @@ int do_download(
                 if (first_data) {
                     first_data = false;
                     auto latency = std::chrono::duration<double, std::milli>(now - start);
-                    log::info(
-                            logcat,
-                            "Transfer started after {:.0f}ms (file size: {})",
+                    fmt::print(
+                            stderr,
+                            "Transfer started after {:.0f}ms (file size: {})\n",
                             latency.count(),
                             human_size{info.size});
                     last_progress = now;
@@ -173,9 +183,9 @@ int do_download(
                     auto since_last_s = std::chrono::duration<double>(since_last).count();
                     auto recent_speed = human_size{static_cast<int64_t>(
                             (received_bytes - last_progress_bytes) / since_last_s)};
-                    log::info(
-                            logcat,
-                            "[{}/{}] {}/s",
+                    fmt::print(
+                            stderr,
+                            "[{}/{}] {}/s\n",
                             human_size{received_bytes},
                             human_size{info.size},
                             recent_speed);
@@ -194,21 +204,20 @@ int do_download(
                 out_file.close();
                 std::filesystem::remove(output);
             }
-            log::error(logcat, "Download succeeded but decryption finalization failed");
+            fmt::print(stderr, "Download succeeded but decryption finalization failed\n");
             return 1;
         }
 
         auto speed = human_size{static_cast<int64_t>(received_bytes / std::max(elapsed_s, 0.001))};
-        log::info(
-                logcat,
-                "Download complete: {} encrypted, {} decrypted in {:.1f}s ({}/s)",
+        fmt::print(
+                "Download complete: {} encrypted, {} decrypted in {:.1f}s ({}/s)\n",
                 human_size{received_bytes},
                 human_size{decrypted_bytes},
                 elapsed_s,
                 speed);
 
         if (!output.empty())
-            log::info(logcat, "Written to {}", output);
+            fmt::print("Written to {}\n", output);
         return 0;
     }
 
@@ -216,7 +225,7 @@ int do_download(
         out_file.close();
         std::filesystem::remove(output);
     }
-    log::error(logcat, "Download failed with error {}", std::get<int16_t>(result));
+    fmt::print(stderr, "Download failed with error {}\n", std::get<int16_t>(result));
     return 1;
 }
 
@@ -225,12 +234,13 @@ int do_download(
 struct CliArgs {
     // Mode
     bool srouter = false;
-    bool testnet = false;
+    bool testnet = true;
 
     // Direct mode
     std::string server_pubkey_hex;
     std::string server_address = "::1";
     uint16_t server_port = fs::QUIC_DEFAULT_PORT;
+    size_t max_udp_payload = 0;
 
     // Upload
     std::string upload_filename;
@@ -248,7 +258,8 @@ struct CliArgs {
 int run(const CliArgs& args, bool is_upload) {
     auto netid = args.testnet ? net::opt::netid::testnet() : net::opt::netid::mainnet();
     auto router = args.srouter ? net::opt::router::session_router() : net::opt::router::direct();
-    auto cache_dir = std::filesystem::temp_directory_path() / "quic_files_cache";
+    auto cache_dir = std::filesystem::temp_directory_path() /
+                      (args.testnet ? "quic_files_cache_testnet" : "quic_files_cache");
     std::filesystem::create_directories(cache_dir);
 
     std::vector<std::any> net_opts;
@@ -259,43 +270,31 @@ int run(const CliArgs& args, bool is_upload) {
     // For direct mode, pass the QUIC file server address/pubkey/port so that DirectRouter
     // uses the QUIC protocol instead of the legacy HTTP path.
     if (!args.srouter) {
-        if (args.server_pubkey_hex.empty() || args.server_pubkey_hex.size() != 64 ||
-            !oxenc::is_hex(args.server_pubkey_hex)) {
-            fmt::print(
-                    stderr, "Error: --server (64 hex Ed25519 pubkey) is required for --direct\n");
-            return 1;
-        }
-        if (args.server_address.empty()) {
-            fmt::print(stderr, "Error: --address is required for --direct\n");
-            return 1;
-        }
-
         auto resolved = resolve_host(args.server_address);
         if (resolved != args.server_address)
-            log::info(logcat, "Resolved {} -> {}", args.server_address, resolved);
+            fmt::print(stderr, "Resolved {} -> {}\n", args.server_address, resolved);
 
         net_opts.push_back(net::opt::quic_file_server_ed_pubkey{args.server_pubkey_hex});
         net_opts.push_back(net::opt::quic_file_server_address{resolved});
         net_opts.push_back(net::opt::quic_file_server_port{args.server_port});
     }
 
-    log::info(
-            logcat,
-            "Starting network ({}, {})...",
+    if (args.max_udp_payload > 0)
+        net_opts.push_back(net::opt::quic_max_udp_payload{args.max_udp_payload});
+
+    fmt::print(
+            stderr,
+            "Starting network ({}, {})...\n",
             args.testnet ? "testnet" : "mainnet",
             args.srouter ? "session-router" : "direct");
 
     auto network = std::make_shared<net::Network>(net_opts);
 
-    std::string mode_hint =
-            args.srouter
-                    ? fmt::format("{} --srouter{}", args.argv0, args.testnet ? " --testnet" : "")
-                    : fmt::format(
-                              "{} --direct --server {} --address {} --port {}",
-                              args.argv0,
-                              args.server_pubkey_hex,
-                              args.server_address,
-                              args.server_port);
+    std::string mode_hint = fmt::format(
+            "{}{}{}",
+            args.argv0,
+            args.srouter ? " --srouter" : "",
+            args.testnet ? "" : " --mainnet");
 
     if (is_upload) {
         return do_upload(
@@ -313,7 +312,7 @@ int run(const CliArgs& args, bool is_upload) {
     else
         download_url = fs::generate_download_url(args.dl_source, network->file_server_config);
 
-    log::info(logcat, "Downloading: {}", download_url);
+    fmt::print(stderr, "Downloading: {}\n", download_url);
     return do_download(args.dl_key_hex, args.dl_output, [&](on_data_t on_data, auto cb) {
         net::DownloadRequest req;
         req.download_url = download_url;
@@ -330,24 +329,27 @@ int run(const CliArgs& args, bool is_upload) {
 int main(int argc, char* argv[]) {
     CLI::App app{"QUIC file server upload/download tool"};
     app.require_subcommand(1);
+    app.fallthrough();  // Allow global options after subcommand
 
     CliArgs args;
     args.argv0 = argv[0];
 
-    bool use_direct = false;
-    app.add_flag("--srouter", args.srouter, "Route via session-router (onion-routed)");
-    app.add_flag("--direct", use_direct, "Connect directly to the file server (no routing)");
-    app.add_flag("--testnet", args.testnet, "Use testnet (default: mainnet; only for --srouter)");
+    bool use_direct = false, use_mainnet = false;
+    app.add_flag("--srouter", args.srouter, "Route via session-router (default: direct)");
+    app.add_flag("--direct", use_direct, "Connect directly to the file server");
+    app.add_flag("--mainnet", use_mainnet, "Use mainnet (default: testnet)");
 
     app.add_option("--server", args.server_pubkey_hex, "Ed25519 pubkey of the file server (hex)");
-    app.add_option(
-            "--address",
-            args.server_address,
-            "Server address; hostnames are resolved via DNS (default: ::1)");
+    app.add_option("--address", args.server_address, "Server address (hostname or IP)");
     app.add_option(
             "--port",
             args.server_port,
             fmt::format("Server port (default: {})", fs::QUIC_DEFAULT_PORT));
+
+    app.add_option(
+            "--max-udp-payload",
+            args.max_udp_payload,
+            "Cap network-level QUIC UDP payload size (limits path MTU discovery; minimum 1200)");
 
     std::string log_level = "warning";
     std::string log_file = "stderr";
@@ -384,6 +386,21 @@ int main(int argc, char* argv[]) {
     }
     if (!args.srouter && !use_direct)
         use_direct = true;
+    if (use_mainnet)
+        args.testnet = false;
+
+    // For direct mode, default the server pubkey and address from the known file server configs.
+    if (!args.srouter) {
+        if (args.server_pubkey_hex.empty()) {
+            auto& pk = args.testnet ? fs::QUIC_FS_ED_PUBKEY_TESTNET
+                                    : fs::QUIC_FS_ED_PUBKEY_MAINNET;
+            args.server_pubkey_hex = oxenc::to_hex(pk.begin(), pk.end());
+        }
+        if (args.server_address == "::1") {
+            args.server_address =
+                    args.testnet ? "superduperfiles.oxen.io" : "anna.session.foundation";
+        }
+    }
 
     if (profile_pic)
         args.domain = attachment::Domain::PROFILE_PIC;
@@ -403,8 +420,6 @@ int main(int argc, char* argv[]) {
         log::add_sink(log_type, log_file);
 
         auto cats = log::extract_categories(log_level);
-        if (!cats.cat_levels.count(STATUS_CAT))
-            cats.cat_levels[STATUS_CAT] = log::Level::info;
         cats.apply();
     }
 

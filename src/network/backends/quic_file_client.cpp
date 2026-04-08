@@ -35,18 +35,25 @@ QuicFileClient::QuicFileClient(
         ed25519_pubkey ed_pubkey,
         std::string address,
         uint16_t port,
+        std::optional<size_t> max_udp_payload,
         ticket_store_cb ticket_store,
         ticket_extract_cb ticket_extract) :
         _loop{std::move(loop)},
         _ed_pubkey{std::move(ed_pubkey)},
         _address{std::move(address)},
         _port{port},
+        _max_udp_payload{max_udp_payload},
         _ticket_store{std::move(ticket_store)},
         _ticket_extract{std::move(ticket_extract)},
         _last_activity{std::chrono::steady_clock::now()} {
 
     // Create a dedicated endpoint for file server connections
-    _ep = quic::Endpoint::endpoint(*_loop, quic::Address{});
+    _ep = quic::Endpoint::endpoint(
+            *_loop,
+            quic::Address{},
+            (_max_udp_payload
+                     ? std::make_optional<quic::opt::max_udp_payload>(*_max_udp_payload)
+                     : std::nullopt));
 
     // Set up TLS credentials
     auto key_pair = ed25519::ed25519_key_pair();
@@ -424,12 +431,19 @@ void streaming_file_upload(
         std::shared_ptr<quic::Stream> stream;
         std::string response_data;
         std::optional<std::variant<file_metadata, int16_t>> result;
+        // Tracked on the loop thread by the progress timer
+        int64_t preamble_size = 0;
+        int64_t last_acked = 0;  // file-relative (preamble subtracted)
+        std::chrono::steady_clock::time_point last_ack_time;
+        std::chrono::steady_clock::time_point start_time;
     };
     auto state = std::make_shared<upload_state>();
+    state->last_ack_time = std::chrono::steady_clock::now();
+    state->start_time = state->last_ack_time;
 
-    auto fail = [&](int16_t err) {
+    auto fail = [&](int16_t err, bool timeout = false) {
         if (request.on_complete)
-            loop->call([request, err] { request.on_complete(err, false); });
+            loop->call([request, err, timeout] { request.on_complete(err, timeout); });
     };
 
     loop->call([state, get_client = std::move(get_client)] {
@@ -518,15 +532,76 @@ void streaming_file_upload(
         if (request.ttl)
             cmd.append("t", static_cast<int64_t>(request.ttl->count()));
         auto cmd_view = cmd.view();
-        str->send(fmt::format("{}:{}", cmd_view.size(), cmd_view));
+        auto preamble = fmt::format("{}:{}", cmd_view.size(), cmd_view);
+        state->preamble_size = static_cast<int64_t>(preamble.size());
+        str->send(std::move(preamble));
 
         state->stream = std::move(str);
+
+        // Disable the idle timer during the upload; stall detection replaces it.
+        state->client->_idle_timer.reset();
     });
 
     {
         std::lock_guard lock{state->mutex};
         if (state->done)
             return fail(ERROR_FILE_SERVER_UNAVAILABLE);
+    }
+
+    // Periodic timer for progress reporting and stall/overall timeout detection.
+    // Runs on the loop thread where get_stats() is a direct member access (no queuing).
+    std::shared_ptr<quic::Ticker> progress_timer;
+    if (request.progress_interval > 0ms) {
+        progress_timer = loop->call_every(
+                request.progress_interval,
+                [state, &request, upload_size] {
+                    if (state->done || !state->stream)
+                        return;
+
+                    auto now = std::chrono::steady_clock::now();
+                    auto [acked, unacked, unsent] = state->stream->get_stats();
+                    auto file_acked =
+                            std::max<int64_t>(0, static_cast<int64_t>(acked) - state->preamble_size);
+
+                    if (file_acked > state->last_acked) {
+                        state->last_acked = file_acked;
+                        state->last_ack_time = now;
+
+                        if (request.on_progress)
+                            request.on_progress(file_acked, upload_size);
+                    }
+
+                    // Stall detection: no ack progress for stall_timeout
+                    if (request.stall_timeout > 0ms &&
+                        now - state->last_ack_time >= request.stall_timeout) {
+                        log::warning(
+                                cat,
+                                "Streaming upload stalled: no ack progress for {}",
+                                request.stall_timeout);
+                        state->stream->close(QUIC_FILES_CLIENT_ABORT);
+                        {
+                            std::lock_guard lock{state->mutex};
+                            state->result = static_cast<int16_t>(ERROR_REQUEST_TIMEOUT);
+                            state->done = true;
+                        }
+                        state->cv.notify_one();
+                        return;
+                    }
+
+                    // Overall timeout
+                    if (request.overall_timeout &&
+                        now - state->start_time >= *request.overall_timeout) {
+                        log::warning(cat, "Streaming upload exceeded overall timeout");
+                        state->stream->close(QUIC_FILES_CLIENT_ABORT);
+                        {
+                            std::lock_guard lock{state->mutex};
+                            state->result = static_cast<int16_t>(ERROR_REQUEST_TIMEOUT);
+                            state->done = true;
+                        }
+                        state->cv.notify_one();
+                        return;
+                    }
+                });
     }
 
     auto check_cancelled = [&]() -> bool {
@@ -573,12 +648,20 @@ void streaming_file_upload(
         state->cv.wait(lock, [&] { return state->done; });
     }
 
+    // Stop the progress timer and restart the idle timer for connection reuse
+    progress_timer.reset();
+    if (state->client)
+        loop->call([state] { state->client->_start_idle_timer(); });
+
     if (request.on_complete && state->result) {
-        loop->call([request, result = std::move(*state->result), key] {
-            if (auto* meta = std::get_if<file_metadata>(&result))
+        loop->call([state, request, result = std::move(*state->result), key, upload_size] {
+            if (auto* meta = std::get_if<file_metadata>(&result)) {
+                if (request.on_progress && state->last_acked < upload_size)
+                    request.on_progress(upload_size, upload_size);
                 request.on_complete(std::make_pair(std::move(*meta), key), false);
-            else
+            } else {
                 request.on_complete(std::get<int16_t>(result), false);
+            }
         });
     }
 }

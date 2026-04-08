@@ -1,5 +1,7 @@
 #pragma once
 
+#include <oxenc/hex.h>
+
 #include "session/network/key_types.hpp"
 #include "session/network/network_opt.hpp"
 #include "session/network/session_network_types.hpp"
@@ -24,6 +26,17 @@ constexpr uint16_t QUIC_DEFAULT_PORT = 11235;
 
 extern const config::FileServer DEFAULT_CONFIG;
 extern const config::FileServer TESTNET_CONFIG;
+
+/// Ed25519 pubkeys of the QUIC file servers.
+using namespace oxenc::literals;
+constexpr auto QUIC_FS_ED_PUBKEY_MAINNET =
+        "b8eef9821445ae16e2e97ef8aa6fe782fd11ad5253cd6723b281341dba22e371"_hex_b;
+constexpr auto QUIC_FS_ED_PUBKEY_TESTNET =
+        "929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602"_hex_b;
+
+/// Session-router .sesh addresses of the QUIC file servers (derived from Ed25519 pubkeys).
+extern const std::string QUIC_FS_SESH_ADDRESS_MAINNET;
+extern const std::string QUIC_FS_SESH_ADDRESS_TESTNET;
 
 /// Parsed session-router address from an `sr=` URL fragment, e.g. `sr=abcdef.sesh:11235`.
 struct SRouterTarget {

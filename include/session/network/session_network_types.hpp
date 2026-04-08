@@ -217,9 +217,10 @@ struct file_metadata {
 };
 
 struct FileTransferRequest {
-    std::chrono::milliseconds stall_timeout;
+    std::chrono::milliseconds stall_timeout = 25s;
     std::chrono::milliseconds request_timeout;
     std::optional<std::chrono::milliseconds> overall_timeout;
+    std::chrono::milliseconds progress_interval = 1s;
     std::optional<int8_t> desired_path_index;
 
     // This shared ptr is designed to be held by the caller (without the rest of the request object)
@@ -234,6 +235,12 @@ struct FileTransferRequest {
 
     // Called when transfer completes (file_metadata) or fails (int16_t error code)
     std::function<void(std::variant<file_metadata, int16_t> result, bool timeout)> on_complete;
+
+    // Called periodically during a transfer with progress information, at most once per
+    // progress_interval, and only when progress has been made since the last call.
+    // For uploads, progress_bytes is total bytes acked by the remote; for downloads, it is
+    // total bytes received.
+    std::function<void(int64_t progress_bytes, int64_t total_bytes)> on_progress;
 };
 
 struct UploadRequest : FileTransferRequest {

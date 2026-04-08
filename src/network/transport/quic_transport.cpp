@@ -148,8 +148,9 @@ void QuicTransport::_recreate_endpoint() {
     _endpoint = quic::Endpoint::endpoint(
             *_loop,
             quic::Address{},
-            (_config.disable_mtu_discovery ? std::optional<quic::opt::disable_mtu_discovery>{}
-                                           : std::nullopt));
+            (_config.max_udp_payload
+                     ? std::make_optional<quic::opt::max_udp_payload>(*_config.max_udp_payload)
+                     : std::nullopt));
 }
 
 void QuicTransport::_close_connections() {

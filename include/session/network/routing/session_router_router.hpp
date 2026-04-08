@@ -48,6 +48,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     std::unordered_map<std::string, session::router::tunnel_info> _active_tunnels;
     std::unordered_map<std::string, std::vector<std::pair<Request, network_response_callback_t>>>
             _pending_requests;
+    std::vector<std::function<void()>> _pending_operations;
     std::unordered_map<std::string, std::pair<UploadRequest, std::thread>> _active_uploads;
     std::unordered_map<std::string, DownloadRequest> _active_downloads;
 
@@ -89,12 +90,20 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
     void _send_direct_request(Request request, network_response_callback_t callback);
     void _send_proxy_request(Request request, network_response_callback_t callback);
     void _upload_internal(UploadRequest request);
+    void _start_file_upload(
+            std::shared_ptr<attachment::Encryptor> enc,
+            FileUploadRequest request,
+            file_server::SRouterTarget target);
     void _upload_internal_legacy(UploadRequest request, std::string upload_id);
     void _download_internal(DownloadRequest request);
     void _download_internal_legacy(DownloadRequest request, std::string download_id);
     void _cleanup_upload(const std::string& upload_id);
     QuicFileClient& _get_file_client(
-            const ed25519_pubkey& pubkey, std::string_view address, uint16_t port);
+            const ed25519_pubkey& pubkey,
+            std::string_view address,
+            uint16_t port,
+            std::optional<size_t> max_udp_payload = std::nullopt);
+
     void _quic_upload_via_tunnel(
             UploadRequest upload_request,
             std::string upload_id,

@@ -312,10 +312,17 @@ void Config::handle_config_opt(opt::quic_keep_alive qka) {
     log::debug(cat, "Network config quic keep alive set to {}s", qka.duration.count());
 }
 
-void Config::handle_config_opt(opt::quic_disable_mtu_discovery qdmd) {
-    quic_disable_mtu_discovery = true;
-    log::debug(cat, "Network config disabled MTU discovery for Quic");
+void Config::handle_config_opt(opt::quic_max_udp_payload qmup) {
+    quic_max_udp_payload = qmup.size;
+    log::debug(cat, "Network config max QUIC UDP payload set to {} bytes", qmup.size);
 }
+
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+void Config::handle_config_opt(opt::quic_disable_mtu_discovery qdmd) {
+    handle_config_opt(static_cast<opt::quic_max_udp_payload&>(qdmd));
+}
+#pragma GCC diagnostic pop
 
 // MARK: Onion Request Router Options
 

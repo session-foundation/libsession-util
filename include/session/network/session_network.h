@@ -94,7 +94,10 @@ typedef struct session_network_config {
     // Quic transport options (for transport == SESSION_NETWORK_TRANSPORT_QUIC)
     uint32_t quic_handshake_timeout_seconds;
     uint32_t quic_keep_alive_seconds;
-    bool quic_disable_mtu_discovery;
+    bool quic_disable_mtu_discovery;  // deprecated: use quic_max_udp_payload instead
+    /// Maximum QUIC UDP payload size for PMTUD; 0 for default (no cap).
+    /// If quic_disable_mtu_discovery is true and this is 0, acts as if set to 1200.
+    size_t quic_max_udp_payload;
 
 } session_network_config;
 

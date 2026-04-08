@@ -396,8 +396,18 @@ namespace opt {
         quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
     };
 
-    /// Can be used to disable Quic MTU discovery.
-    struct quic_disable_mtu_discovery : base {};
+    /// Caps the maximum QUIC UDP payload size for path MTU discovery.  PMTUD will still
+    /// probe upward from 1200, but will not exceed this value.  Must be at least 1200.
+    struct quic_max_udp_payload : base {
+        size_t size;
+        explicit quic_max_udp_payload(size_t s) : size{s} {}
+    };
+
+    /// Deprecated: use quic_max_udp_payload{1200} instead.
+    struct [[deprecated("use quic_max_udp_payload{1200} instead")]] quic_disable_mtu_discovery
+            : quic_max_udp_payload {
+        quic_disable_mtu_discovery() : quic_max_udp_payload{1200} {}
+    };
 
     // MARK: Onion Request Router Options
 

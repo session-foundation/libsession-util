@@ -233,10 +233,44 @@ void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::
         return;
     }
 
-    // Construct the Encryptor now, consuming the seed.
-    attachment::Encryptor enc{seed, request.domain};
+    // Construct the Encryptor now (on the caller's thread), consuming the seed.
+    auto enc = std::make_shared<attachment::Encryptor>(seed, request.domain);
     auto target = std::move(*quic_target);
 
+    // Dispatch to the loop thread so we wait for _ready before spawning the upload thread.
+    _loop->call([weak_self = weak_from_this(),
+                 this,
+                 enc = std::move(enc),
+                 request = std::move(request),
+                 target = std::move(target)]() mutable {
+        auto self = weak_self.lock();
+        if (!self)
+            return;
+
+        if (!_ready) {
+            log::debug(cat, "Router not ready, queueing upload_file.");
+            _pending_operations.emplace_back(
+                    [weak_self,
+                     this,
+                     enc = std::move(enc),
+                     request = std::move(request),
+                     target = std::move(target)]() mutable {
+                        auto self = weak_self.lock();
+                        if (!self)
+                            return;
+                        _start_file_upload(std::move(enc), std::move(request), std::move(target));
+                    });
+            return;
+        }
+
+        _start_file_upload(std::move(enc), std::move(request), std::move(target));
+    });
+}
+
+void SessionRouter::_start_file_upload(
+        std::shared_ptr<attachment::Encryptor> enc,
+        FileUploadRequest request,
+        file_server::SRouterTarget target) {
     const std::string upload_id = random::unique_id("UPL");
     auto& upload_thread =
             _active_uploads.emplace(upload_id, std::make_pair(UploadRequest{}, std::thread{}))
@@ -256,7 +290,7 @@ void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::
 
         streaming_file_upload(
                 _loop,
-                std::move(enc),
+                std::move(*enc),
                 std::move(request),
                 [weak_self, this, target, client_promise]() -> QuicFileClient* {
                     auto self = weak_self.lock();
@@ -269,7 +303,8 @@ void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::
                     if (!pubkey)
                         return nullptr;
 
-                    return &_get_file_client(*pubkey, "::1", info.local_port);
+                    return &_get_file_client(
+                            *pubkey, "::1", info.local_port, info.suggested_mtu);
                 });
 
         _loop->call([weak_self = weak_from_this(), this, upload_id] {
@@ -294,14 +329,16 @@ void SessionRouter::_finish_setup() {
     log::debug(cat, "Finishing setup, router is now ready.");
 
     auto requests_to_process = std::move(_pending_requests);
-    if (requests_to_process.empty())
+    auto ops_to_process = std::move(_pending_operations);
+
+    size_t pending_count = ops_to_process.size();
+    for (auto& [_, reqs] : requests_to_process)
+        pending_count += reqs.size();
+
+    if (pending_count == 0)
         return;
 
-    // Process any requests that were queued before we were ready
-    log::debug(
-            cat,
-            "Processing {} requests queued during initialization.",
-            requests_to_process.size());
+    log::debug(cat, "Processing {} operations queued during initialization.", pending_count);
 
     for (auto& [address, requests] : requests_to_process) {
         if (!requests.empty()) {
@@ -312,6 +349,9 @@ void SessionRouter::_finish_setup() {
                 _send_request_internal(std::move(req), std::move(cb));
         }
     }
+
+    for (auto& op : ops_to_process)
+        op();
 }
 
 void SessionRouter::_close_connections() {
@@ -634,10 +674,14 @@ void SessionRouter::_cleanup_upload(const std::string& upload_id) {
 }
 
 QuicFileClient& SessionRouter::_get_file_client(
-        const ed25519_pubkey& pubkey, std::string_view address, uint16_t port) {
+        const ed25519_pubkey& pubkey,
+        std::string_view address,
+        uint16_t port,
+        std::optional<size_t> max_udp_payload) {
     auto [it, inserted] = _file_clients.try_emplace(pubkey, nullptr);
     if (inserted)
-        it->second = std::make_unique<QuicFileClient>(_loop, pubkey, std::string{address}, port);
+        it->second = std::make_unique<QuicFileClient>(
+                _loop, pubkey, std::string{address}, port, max_udp_payload);
     else
         it->second->set_target(pubkey, std::string{address}, port);
     return *it->second;
@@ -660,7 +704,7 @@ void SessionRouter::_quic_upload_via_tunnel(
         return;
     }
 
-    _get_file_client(*pubkey, "::1", info.local_port)
+    _get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu)
             .upload(std::move(data),
                     upload_request.ttl,
                     [weak_self = weak_from_this(), this, upload_request, upload_id](
@@ -701,7 +745,7 @@ void SessionRouter::_quic_download_via_tunnel(
         return;
     }
 
-    _get_file_client(*pubkey, "::1", info.local_port)
+    _get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu)
             .download(
                     std::move(file_id),
                     request.on_data,
@@ -732,6 +776,16 @@ void SessionRouter::_quic_download_via_tunnel(
 }
 
 void SessionRouter::_upload_internal(UploadRequest request) {
+    if (!_ready) {
+        log::debug(cat, "Router not ready, queueing upload.");
+        _pending_operations.emplace_back(
+                [weak_self = weak_from_this(), req = std::move(request)]() mutable {
+                    if (auto self = weak_self.lock())
+                        self->_upload_internal(std::move(req));
+                });
+        return;
+    }
+
     const std::string upload_id = random::unique_id("UP");
     log::info(cat, "[Upload {}]: Starting upload.", upload_id);
 
@@ -949,6 +1003,16 @@ void SessionRouter::_upload_internal_legacy(UploadRequest request, std::string u
 }
 
 void SessionRouter::_download_internal(DownloadRequest request) {
+    if (!_ready) {
+        log::debug(cat, "Router not ready, queueing download.");
+        _pending_operations.emplace_back(
+                [weak_self = weak_from_this(), req = std::move(request)]() mutable {
+                    if (auto self = weak_self.lock())
+                        self->_download_internal(std::move(req));
+                });
+        return;
+    }
+
     const std::string download_id = random::unique_id("DL");
     log::info(cat, "[Download {}]: Starting download.", download_id);
 

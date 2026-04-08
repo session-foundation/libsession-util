@@ -63,6 +63,7 @@ class QuicFileClient {
             ed25519_pubkey ed_pubkey,
             std::string address,
             uint16_t port,
+            std::optional<size_t> max_udp_payload = std::nullopt,
             ticket_store_cb ticket_store = nullptr,
             ticket_extract_cb ticket_extract = nullptr);
 
@@ -102,6 +103,7 @@ class QuicFileClient {
     ed25519_pubkey _ed_pubkey;
     std::string _address;
     uint16_t _port;
+    std::optional<size_t> _max_udp_payload;
 
     // 0RTT ticket callbacks (optional; if not provided, 0RTT is not used)
     ticket_store_cb _ticket_store;

@@ -1,6 +1,7 @@
 #include "session/network/backends/session_file_server.hpp"
 
 #include <fmt/ranges.h>
+#include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 
 #include <oxen/log.hpp>
@@ -119,22 +120,19 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     return info;
 }
 
-// Default QUIC file server session-router addresses for known networks.
-// Mainnet: Ed25519 pubkey b8eef9821445ae16e2e97ef8aa6fe782fd11ad5253cd6723b281341dba22e371
-static constexpr auto MAINNET_QUIC_FS_SESH_ADDRESS =
-        "zdzxuyoweszbpazjx5hkw598om6tdmk1kxgsqe71or4b5qtnhpao.sesh"sv;
-// Testnet: Ed25519 pubkey 929e33ded05e653fec04b49645117f51851f102a947e04806791be416ed76602
-static constexpr auto TESTNET_QUIC_FS_SESH_ADDRESS =
-        "1kxd8zsom31u95yrs1mrkrm9kgnt6rbk1t9yjyd81g9rn5szcaby.sesh"sv;
+const std::string QUIC_FS_SESH_ADDRESS_MAINNET =
+        oxenc::to_base32z(QUIC_FS_ED_PUBKEY_MAINNET) + ".sesh";
+const std::string QUIC_FS_SESH_ADDRESS_TESTNET =
+        oxenc::to_base32z(QUIC_FS_ED_PUBKEY_TESTNET) + ".sesh";
 
 std::optional<SRouterTarget> default_quic_target(
         const config::FileServer& http_config, opt::netid::Target netid) {
     // Map known HTTP file server pubkeys to their QUIC file server .sesh addresses.
     if (http_config.pubkey_hex == DEFAULT_CONFIG.pubkey_hex && netid == opt::netid::Target::mainnet)
-        return SRouterTarget{std::string{MAINNET_QUIC_FS_SESH_ADDRESS}, QUIC_DEFAULT_PORT};
+        return SRouterTarget{QUIC_FS_SESH_ADDRESS_MAINNET, QUIC_DEFAULT_PORT};
 
     if (http_config.pubkey_hex == TESTNET_CONFIG.pubkey_hex && netid == opt::netid::Target::testnet)
-        return SRouterTarget{std::string{TESTNET_QUIC_FS_SESH_ADDRESS}, QUIC_DEFAULT_PORT};
+        return SRouterTarget{QUIC_FS_SESH_ADDRESS_TESTNET, QUIC_DEFAULT_PORT};
 
     return std::nullopt;
 }
