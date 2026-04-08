@@ -136,10 +136,6 @@ namespace {
                 main_config.onionreq_min_path_counts};
     }
 
-}  // namespace
-
-namespace detail {
-
     std::vector<network_service_node> convert_service_nodes(
             std::vector<session::network::service_node> nodes) {
         std::vector<network_service_node> converted_nodes;
@@ -152,7 +148,7 @@ namespace detail {
         return converted_nodes;
     }
 
-}  // namespace detail
+}  // namespace
 
 Network::Network(config::Config _conf) :
         config{std::move(_conf)}, file_server_config{std::move(build_file_server_config(config))} {
@@ -1687,7 +1683,7 @@ LIBSESSION_C_API void session_network_get_swarm(
             x25519_pubkey::from_hex({swarm_pubkey_hex, 64}),
             ignore_strike_count,
             [cb = std::move(callback), ctx](swarm_id_t, std::vector<service_node> nodes) {
-                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                auto c_nodes = convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
             });
 }
@@ -1700,7 +1696,7 @@ LIBSESSION_C_API void session_network_get_random_nodes(
     assert(callback);
     unbox(network)->get_random_nodes(
             count, [cb = std::move(callback), ctx](std::vector<service_node> nodes) {
-                auto c_nodes = network::detail::convert_service_nodes(nodes);
+                auto c_nodes = convert_service_nodes(nodes);
                 cb(c_nodes.data(), c_nodes.size(), ctx);
             });
 }

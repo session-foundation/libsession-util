@@ -18,7 +18,7 @@ using namespace oxen::log::literals;
 
 std::regex timestamp_re{R"(\[\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\] \[\+[\d.hms]+\])"};
 // Clears timestamps out of a log statement for testing reproducibility
-std::string fixup_log(std::string_view log) {
+static std::string fixup_log(std::string_view log) {
     std::string fixed;
     std::regex_replace(
             std::back_inserter(fixed),

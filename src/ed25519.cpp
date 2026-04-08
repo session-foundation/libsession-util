@@ -1,4 +1,5 @@
 #include "session/ed25519.hpp"
+#include "session/ed25519.h"
 
 #include <sodium/crypto_sign.h>
 #include <sodium/crypto_sign_ed25519.h>

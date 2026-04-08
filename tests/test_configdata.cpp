@@ -98,6 +98,8 @@ TEST_CASE("config pruning", "[config][prune]") {
                       });
 }
 
+namespace {
+
 // shortcut to access a nested dict
 auto& d(config::dict_value& v) {
     return std::get<config::dict>(v);
@@ -106,6 +108,8 @@ auto& d(config::dict_value& v) {
 auto& s(config::dict_value& v) {
     return std::get<config::set>(v);
 }
+
+}  // namespace
 
 TEST_CASE("config diff", "[config][diff]") {
     MutableConfigMessage m;
@@ -690,7 +694,7 @@ TEST_CASE("config message empty set/list deserialization", "[config][deserializa
             Message("Failed to parse config file: Data contains an unpruned, empty dict"));
 }
 
-void updates_124(MutableConfigMessage& m) {
+static void updates_124(MutableConfigMessage& m) {
     m.data()["dictA"] = config::dict{
             {"hello", 123},
             {"goodbye", config::set{{123, 456}}},

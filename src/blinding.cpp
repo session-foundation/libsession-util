@@ -1,4 +1,5 @@
 #include "session/blinding.hpp"
+#include "session/blinding.h"
 
 #include <oxenc/hex.h>
 #include <sodium/crypto_core_ed25519.h>

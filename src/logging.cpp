@@ -1,4 +1,5 @@
 #include "session/logging.hpp"
+#include "session/logging.h"
 
 #include <spdlog/common.h>
 

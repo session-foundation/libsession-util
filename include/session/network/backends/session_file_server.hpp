@@ -147,6 +147,28 @@ std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
         const std::vector<std::pair<std::string, std::string>>& headers,
         const std::string& body);
 
+/// API: file_server/extend_ttl
+///
+/// Constructs a request to extend the TTL of an existing file on the file server.
+///
+/// Inputs:
+/// - `file_id` -- [in] the file ID whose TTL should be extended.
+/// - `ttl` -- [in] the new TTL duration to request.
+/// - `config` -- [in] file server configuration to use for the request.
+/// - `request_timeout` -- [in] timeout in milliseconds to use for the request.  This won't take any
+/// pre-flight operations into account so the request will never timeout if pre-flight operations
+/// never complete.
+/// - `overall_timeout` -- [in] timeout in milliseconds to use for the request and any pre-flight
+/// operations that may need to occur (eg. path building).  This value takes presedence over
+/// `request_timeout` if provided, the request itself will be given a timeout of this value
+/// subtracting however long the pre-flight operations took.
+Request extend_ttl(
+        std::string_view file_id,
+        std::chrono::seconds ttl,
+        const config::FileServer& config,
+        std::chrono::milliseconds request_timeout,
+        std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt);
+
 /// API: file_server/get_client_version
 ///
 /// Constructs a request to retrieve the version information for the given platform.

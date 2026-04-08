@@ -18,6 +18,15 @@ if(WARNINGS_AS_ERRORS)
     endif()
 endif()
 
+if(FATAL_MISSING_DECLARATIONS)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(common INTERFACE -Werror=missing-declarations)
+        message(STATUS "Compiling with -Werror=missing-declarations")
+    else()
+        message(WARNING "FATAL_MISSING_DECLARATIONS is not supported by this compiler (${CMAKE_CXX_COMPILER_ID}); ignoring")
+    endif()
+endif()
+
 
 set(export_targets)
 macro(add_libsession_util_library name)

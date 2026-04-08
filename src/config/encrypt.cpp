@@ -1,4 +1,5 @@
 #include "session/config/encrypt.hpp"
+#include "session/config/encrypt.h"
 
 #include <oxenc/endian.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>

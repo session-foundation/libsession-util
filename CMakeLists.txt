@@ -85,6 +85,7 @@ else()
 endif()
 
 option(WARNINGS_AS_ERRORS "Treat all compiler warnings as errors" OFF)
+option(FATAL_MISSING_DECLARATIONS "Developer/CI option: fatal error on non-static definitions without prior declarations (-Werror=missing-declarations)" OFF)
 
 option(STATIC_LIBSTD "Statically link libstdc++/libgcc" ${default_static_libstd})
 

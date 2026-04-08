@@ -11,6 +11,7 @@
 #include <session/sodium_array.hpp>
 #include <session/types.hpp>
 #include <span>
+#include <string_view>
 
 /// A complimentary file to session encrypt (which has the low level encryption function for Session
 /// protocol types). This file contains high-level helper functions for decoding payloads on the
@@ -317,10 +318,8 @@ struct DecodeEnvelopeKey {
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `utf` -- the UTF8 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `utf_size` -- the size of the message in UTF8 code units to determine if the message requires
-///   access to the higher character limit available in Session Pro
+/// - `msg` -- the UTF-8 string view to count the number of codepoints in to determine if it needs
+///   the higher character limit available in Session Pro
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
@@ -330,17 +329,17 @@ struct DecodeEnvelopeKey {
 /// - `features` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size);
+ProFeaturesForMsg pro_features_for_utf8(std::u8string_view msg);
+ProFeaturesForMsg pro_features_for_utf8(std::string_view msg);
+ProFeaturesForMsg pro_features_for_utf8(std::span<const std::byte> msg);
 
 /// API: session_protocol/pro_features_for_utf16
 ///
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `utf` -- the UTF16 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `utf_size` -- the size of the message in UTF16 code units to determine if the message requires
-///   access to the higher character limit available in Session Pro
+/// - `msg` -- the UTF-16 string view to count the number of codepoints in to determine if it needs
+///   the higher character limit available in Session Pro
 ///
 /// Outputs:
 /// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
@@ -350,7 +349,7 @@ ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size);
 /// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size);
+ProFeaturesForMsg pro_features_for_utf16(std::u16string_view msg);
 
 /// API: session_protocol/pad_message
 ///

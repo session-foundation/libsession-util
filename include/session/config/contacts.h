@@ -371,7 +371,7 @@ LIBSESSION_EXPORT bool contacts_set_blinded(
 ///
 /// Outputs:
 /// - `bool` -- True if erasing was successful
-LIBSESSION_EXPORT bool contacts_erase_blinded_contact(
+LIBSESSION_EXPORT bool contacts_erase_blinded(
         config_object* conf, const char* community_base_url, const char* blinded_id);
 
 typedef struct contacts_iterator {

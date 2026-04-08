@@ -12,6 +12,7 @@
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <session/util.hpp>
+#include <string_view>
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
@@ -223,18 +224,16 @@ bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) co
     return result;
 }
 
-session::ProFeaturesForMsg pro_features_for_utf8_or_16(
-        const void* utf, size_t utf_size, bool is_utf8) {
+};  // namespace session
+
+namespace {
+
+session::ProFeaturesForMsg pro_features_check(
+        const simdutf::result& validation, size_t codepoints) {
     session::ProFeaturesForMsg result = {};
-    simdutf::result validate = is_utf8 ? simdutf::validate_utf8_with_errors(
-                                                 reinterpret_cast<const char*>(utf), utf_size)
-                                       : simdutf::validate_utf16_with_errors(
-                                                 reinterpret_cast<const char16_t*>(utf), utf_size);
-    if (validate.is_ok()) {
+    if (validation.is_ok()) {
         result.status = session::ProFeaturesForMsgStatus::Success;
-        result.codepoint_count =
-                is_utf8 ? simdutf::count_utf8(reinterpret_cast<const char*>(utf), utf_size)
-                        : simdutf::count_utf16(reinterpret_cast<const char16_t*>(utf), utf_size);
+        result.codepoint_count = codepoints;
 
         if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
             if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
@@ -246,22 +245,29 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
         }
     } else {
         result.status = session::ProFeaturesForMsgStatus::UTFDecodingError;
-        result.error = simdutf::error_to_string(validate.error);
+        result.error = simdutf::error_to_string(validation.error);
     }
     return result;
 }
-};  // namespace session
+
+}  // namespace
 
 namespace session {
 
-ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
-    return result;
+ProFeaturesForMsg pro_features_for_utf8(std::span<const std::byte> msg) {
+    auto v = simdutf::validate_utf8_with_errors(msg);
+    return pro_features_check(v, v.is_ok() ? simdutf::count_utf8(msg) : 0);
+}
+ProFeaturesForMsg pro_features_for_utf8(std::u8string_view msg) {
+    return pro_features_for_utf8({reinterpret_cast<const std::byte*>(msg.data()), msg.size()});
+}
+ProFeaturesForMsg pro_features_for_utf8(std::string_view msg) {
+    return pro_features_for_utf8({reinterpret_cast<const std::byte*>(msg.data()), msg.size()});
 }
 
-ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
-    return result;
+ProFeaturesForMsg pro_features_for_utf16(std::u16string_view msg) {
+    auto v = simdutf::validate_utf16_with_errors(msg);
+    return pro_features_check(v, v.is_ok() ? simdutf::count_utf16(msg) : 0);
 }
 
 constexpr char PADDING_TERMINATING_BYTE = 0x80;
@@ -1037,28 +1043,27 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        const char* utf, size_t utf_size) {
-    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
-    session_protocol_pro_features_for_msg result = {
+        const char* msg, size_t msg_size) {
+    auto result_cpp = pro_features_for_utf8({msg, msg_size});
+    return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
             .bitset = {result_cpp.bitset.data},
             .codepoint_count = result_cpp.codepoint_count,
     };
-    return result;
 }
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        const uint16_t* utf, size_t utf_size) {
-    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
-    session_protocol_pro_features_for_msg result = {
+        const uint16_t* msg, size_t msg_size) {
+    auto result_cpp = pro_features_for_utf16(
+            {std::launder(reinterpret_cast<const char16_t*>(msg)), msg_size});
+    return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
             .bitset = {result_cpp.bitset.data},
             .codepoint_count = result_cpp.codepoint_count,
     };
-    return result;
 }
 
 // Shared try/catch wrapper for all C encode functions.

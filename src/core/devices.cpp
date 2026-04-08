@@ -88,6 +88,8 @@ static Keys keys_from_seed(std::span<const std::byte, 32> seed) {
     return keys;
 }
 
+namespace {
+
 // Lightweight formattable wrapper for logging a brief "aabb…xxyy" hex summary of a key.  The
 // hex computation is deferred to when the formatter is invoked, so it is skipped entirely if
 // the log level is disabled.
@@ -104,6 +106,8 @@ std::string format_as(const key_summary& ks) {
             oxenc::to_hex(ks.key.begin(), ks.key.begin() + 2),
             oxenc::to_hex(ks.key.end() - 2, ks.key.end()));
 }
+
+}  // namespace
 
 // format_as for XWingKeys-derived types (DeviceKeys, AccountKeys), defined in session::core so
 // that fmtlib's ADL-based lookup can find it when logging these types.

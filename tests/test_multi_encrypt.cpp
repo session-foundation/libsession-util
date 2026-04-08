@@ -11,7 +11,7 @@
 using x_pair = std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>>;
 
 // Returns X25519 privkey, pubkey from an Ed25519 seed
-x_pair to_x_keys(std::span<const unsigned char> ed_seed) {
+static x_pair to_x_keys(std::span<const unsigned char> ed_seed) {
     std::array<unsigned char, 32> ed_pk;
     std::array<unsigned char, 64> ed_sk;
     crypto_sign_ed25519_seed_keypair(ed_pk.data(), ed_sk.data(), ed_seed.data());

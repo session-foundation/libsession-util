@@ -1,4 +1,5 @@
 #include "session/curve25519.hpp"
+#include "session/curve25519.h"
 
 #include <sodium/crypto_box.h>
 #include <sodium/crypto_sign_ed25519.h>

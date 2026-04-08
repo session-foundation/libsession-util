@@ -1,4 +1,5 @@
 #include "session/onionreq/response_parser.hpp"
+#include "session/onionreq/response_parser.h"
 
 #include <oxenc/base64.h>
 #include <oxenc/endian.h>

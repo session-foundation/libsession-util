@@ -1,4 +1,5 @@
 #include "session/random.hpp"
+#include "session/random.h"
 
 #include <fmt/ranges.h>
 #include <sodium/randombytes.h>

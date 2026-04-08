@@ -38,7 +38,8 @@ foreach(f IN LISTS SCHEMA_FILES)
     string(APPEND SCHEMA_ENTRIES "    Migration{\"${basename}\", &${FUNC_NAME}},\n")
 endforeach()
 
-# Write all of the migration names, declarations, and function pointers:
+# Write the generated header with all migration function declarations, then the registry .cpp:
+configure_file("schema_migrations.hpp.in" "${CMAKE_CURRENT_BINARY_DIR}/schema_migrations.hpp" @ONLY)
 configure_file("schema_registry.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/schema_registry.cpp" @ONLY)
 list(APPEND SCHEMA_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/schema_registry.cpp")
 

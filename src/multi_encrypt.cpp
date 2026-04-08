@@ -78,6 +78,10 @@ namespace detail {
                             key);
     }
 
+}  // namespace detail
+
+namespace {
+
     std::pair<sodium_cleared<std::array<unsigned char, 32>>, std::array<unsigned char, 32>> x_keys(
             std::span<const unsigned char> ed25519_secret_key) {
         if (ed25519_secret_key.size() != 64)
@@ -93,7 +97,7 @@ namespace detail {
         return ret;
     }
 
-}  // namespace detail
+}  // namespace
 
 std::optional<std::vector<unsigned char>> decrypt_for_multiple(
         const std::vector<std::span<const unsigned char>>& ciphertexts,
@@ -174,7 +178,7 @@ std::vector<unsigned char> encrypt_for_multiple_simple(
         std::span<const unsigned char> nonce,
         int pad) {
 
-    auto [x_privkey, x_pubkey] = detail::x_keys(ed25519_secret_key);
+    auto [x_privkey, x_pubkey] = x_keys(ed25519_secret_key);
 
     return encrypt_for_multiple_simple(
             messages, recipients, to_span(x_privkey), to_span(x_pubkey), domain, nonce, pad);
@@ -215,7 +219,7 @@ std::optional<std::vector<unsigned char>> decrypt_for_multiple_simple(
         std::span<const unsigned char> sender_pubkey,
         std::string_view domain) {
 
-    auto [x_privkey, x_pubkey] = detail::x_keys(ed25519_secret_key);
+    auto [x_privkey, x_pubkey] = x_keys(ed25519_secret_key);
 
     return decrypt_for_multiple_simple(
             encoded, to_span(x_privkey), to_span(x_pubkey), sender_pubkey, domain);
@@ -300,7 +304,7 @@ LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple_ed25519(
 
     try {
         auto [priv, pub] =
-                session::detail::x_keys(std::span<const unsigned char>{ed25519_secret_key, 64});
+                session::x_keys(std::span<const unsigned char>{ed25519_secret_key, 64});
         return session_encrypt_for_multiple_simple(
                 out_len,
                 messages,

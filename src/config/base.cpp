@@ -1122,11 +1122,15 @@ std::array<unsigned char, 32> ConfigSig::seed_hash(std::string_view key) const {
     return hash::blake2b_key<32>(key, std::span{_sign_sk.data(), 32});
 }
 
+namespace {
+
 void set_error(config_object* conf, std::string e) {
     auto& error = unbox(conf).error;
     error = std::move(e);
     conf->last_error = error.c_str();
 }
+
+}  // namespace
 
 }  // namespace session::config
 

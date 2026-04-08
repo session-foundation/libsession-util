@@ -19,7 +19,7 @@ const std::vector<Namespace> groups{
 const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
 std::array<unsigned char, 32> ed_pk_raw;
 std::array<unsigned char, 64> ed_sk_raw;
-std::span<const unsigned char> load_seed() {
+static std::span<const unsigned char> load_seed() {
     crypto_sign_ed25519_seed_keypair(ed_pk_raw.data(), ed_sk_raw.data(), seed.data());
     return {ed_sk_raw.data(), ed_sk_raw.size()};
 }

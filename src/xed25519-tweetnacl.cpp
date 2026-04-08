@@ -4,6 +4,8 @@
 // this subset of the portable TweetNaCl for that single function, and libsodium for everything
 // else.
 
+#include "session/xed25519.hpp"
+
 #include <array>
 #include <cstdint>
 #include <span>
