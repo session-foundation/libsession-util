@@ -149,7 +149,7 @@ namespace {
     std::optional<std::pair<ErrorBehaviour, std::optional<std::string_view>>> parse_error_response(
             uint16_t status_code,
             const std::optional<std::string>& error_body,
-            std::optional<std::span<const unsigned char>> destination_pubkey) {
+            std::optional<std::span<const std::byte>> destination_pubkey) {
         for (const auto& pattern : error_patterns) {
             if (pattern.code != status_code)
                 continue;
@@ -1604,7 +1604,7 @@ void OnionRequestRouter::_send_on_path(
         OnionPath& path, Request request, network_response_callback_t callback) {
     log::trace(cat, "[Request {}]: Sending on path {}", request.request_id, path.id);
 
-    std::vector<unsigned char> encrypted_blob;
+    std::vector<std::byte> encrypted_blob;
     std::shared_ptr<session::onionreq::ResponseParser> parser;
 
     try {

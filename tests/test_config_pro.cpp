@@ -6,16 +6,15 @@
 #include <catch2/catch_test_macros.hpp>
 #include <iostream>
 #include <session/config/pro.hpp>
+
+#include "session/crypto/ed25519.hpp"
+#include "utils.hpp"
 using namespace oxenc::literals;
 
 TEST_CASE("Pro", "[config][pro]") {
     // Setup keys
-    std::array<unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
-    session::cleared_uc64 rotating_sk, signing_sk;
-    {
-        crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
-        crypto_sign_ed25519_keypair(signing_pk.data(), signing_sk.data());
-    }
+    auto [rotating_pk, rotating_sk] = ed25519::keypair();
+    auto [signing_pk, signing_sk] = ed25519::keypair();
 
     // Setup the Pro data structure
     session::config::ProConfig pro_cpp = {};
@@ -44,7 +43,7 @@ TEST_CASE("Pro", "[config][pro]") {
     {
         // Generate the hashes
         static_assert(crypto_sign_ed25519_BYTES == pro_cpp.proof.sig.max_size());
-        std::array<unsigned char, 32> hash_to_sign_cpp = pro_cpp.proof.hash();
+        b32 hash_to_sign_cpp = pro_cpp.proof.hash();
         cbytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
 
         static_assert(hash_to_sign_cpp.size() == sizeof(hash_to_sign));
@@ -52,21 +51,8 @@ TEST_CASE("Pro", "[config][pro]") {
               0);
 
         // Write the signature into the proof
-        int sig_result = crypto_sign_ed25519_detached(
-                pro_cpp.proof.sig.data(),
-                nullptr,
-                hash_to_sign_cpp.data(),
-                hash_to_sign_cpp.size(),
-                signing_sk.data());
-        CHECK(sig_result == 0);
-
-        sig_result = crypto_sign_ed25519_detached(
-                pro.proof.sig.data,
-                nullptr,
-                hash_to_sign.data,
-                sizeof(hash_to_sign.data),
-                signing_sk.data());
-        CHECK(sig_result == 0);
+        ed25519::sign(pro_cpp.proof.sig, signing_sk, hash_to_sign_cpp);
+        ed25519::sign(to_byte_span(pro.proof.sig.data), signing_sk, to_byte_span(hash_to_sign.data));
     }
 
     // Verify expiry
@@ -82,18 +68,11 @@ TEST_CASE("Pro", "[config][pro]") {
     // Verify it can verify messages signed with the rotating public key
     {
         std::string_view body = "hello world";
-        std::array<unsigned char, crypto_sign_ed25519_BYTES> sig = {};
-        int sign_result = crypto_sign_ed25519_detached(
-                sig.data(),
-                nullptr,
-                reinterpret_cast<const unsigned char*>(body.data()),
-                body.size(),
-                rotating_sk.data());
-        CHECK(sign_result == 0);
-        CHECK(pro_cpp.proof.verify_message(sig, session::to_span(body)));
+        auto sig = ed25519::sign(rotating_sk, to_span(body));
+        CHECK(pro_cpp.proof.verify_message(sig, to_span(body)));
         CHECK(session_protocol_pro_proof_verify_message(
                 &pro.proof,
-                sig.data(),
+                to_unsigned(sig.data()),
                 sig.size(),
                 reinterpret_cast<const unsigned char*>(body.data()),
                 body.size()));
@@ -128,7 +107,7 @@ TEST_CASE("Pro", "[config][pro]") {
 
     // Try loading a proof with a bad signature in it from dict
     {
-        std::array<unsigned char, 64> broken_sig = pro_cpp.proof.sig;
+        b64 broken_sig = pro_cpp.proof.sig;
         broken_sig[0] = ~broken_sig[0];  // Break the sig
         const session::ProProof& proof = pro_cpp.proof;
 

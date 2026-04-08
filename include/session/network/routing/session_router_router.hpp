@@ -115,7 +115,7 @@ class SessionRouter : public IRouter, public std::enable_shared_from_this<Sessio
             std::string file_id,
             session::router::tunnel_info info);
     void _establish_tunnel(
-            std::span<const unsigned char>& remote_pubkey,
+            std::span<const std::byte, 32> remote_pubkey,
             const uint16_t remote_port,
             const std::string& initiating_req_id);
     void _send_via_tunnel(

@@ -1,15 +1,15 @@
 #include "session/blinding.hpp"
 #include "session/blinding.h"
 
+#include <fmt/format.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_core_ed25519.h>
-#include <sodium/crypto_scalarmult_ed25519.h>
+#include <oxen/log/format.hpp>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <cassert>
 #include <stdexcept>
 
-#include "session/ed25519.hpp"
+#include "session/crypto/ed25519.hpp"
 #include "session/export.h"
 #include "session/hash.hpp"
 #include "session/platform.h"
@@ -19,82 +19,111 @@
 namespace session {
 
 using namespace std::literals;
+using namespace oxen::log::literals;
 
-std::array<unsigned char, 32> blind15_factor(std::span<const unsigned char> server_pk) {
-    assert(server_pk.size() == 32);
-
+b32 blind15_factor(std::span<const std::byte, 32> server_pk) {
     auto blind_hash = hash::blake2b<64>(server_pk);
 
-    uc32 k;
-    crypto_core_ed25519_scalar_reduce(k.data(), blind_hash.data());
+    b32 k;
+    ed25519::scalar_reduce(k, blind_hash);
     return k;
 }
 
-std::array<unsigned char, 32> blind25_factor(
-        std::span<const unsigned char> session_id, std::span<const unsigned char> server_pk) {
-    assert(session_id.size() == 32 || session_id.size() == 33);
-    assert(server_pk.size() == 32);
+b32 blind25_factor(
+        std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk) {
 
-    uc64 blind_hash;
+    b64 blind_hash;
     if (session_id.size() == 32)
         hash::blake2b(blind_hash, "05"_hex_b, session_id, server_pk);
     else
         hash::blake2b(blind_hash, session_id, server_pk);
 
-    uc32 k;
-    crypto_core_ed25519_scalar_reduce(k.data(), blind_hash.data());
+    b32 k;
+    ed25519::scalar_reduce(k, blind_hash);
     return k;
 }
 
 namespace {
 
-    void blind15_id_impl(
-            std::span<const unsigned char> session_id,
-            std::span<const unsigned char> server_pk,
-            unsigned char* out) {
-        auto k = blind15_factor(server_pk);
+    void blind_id_impl(
+            std::span<const std::byte> session_id,
+            std::span<const std::byte> server_pk,
+            std::span<const std::byte, 32> blind_factor,
+            std::span<std::byte, 33> out,
+            std::byte prefix) {
         if (session_id.size() == 33)
             session_id = session_id.subspan(1);
         if (session_id.size() != 32)
             throw std::invalid_argument{"Invalid session id"};
-        auto ed_pk = xed25519::pubkey(session_id.first<32>());
-        if (0 != crypto_scalarmult_ed25519_noclamp(out + 1, k.data(), ed_pk.data()))
-            throw std::runtime_error{"Cannot blind: invalid session_id (not on main subgroup)"};
-        out[0] = 0x15;
+
+        ed25519::scalarmult_noclamp(out.last<32>(), blind_factor, xed25519::pubkey(session_id.first<32>()));
+        out[0] = prefix;
+    }
+
+    void blind15_id_impl(
+            std::span<const std::byte> session_id,
+            std::span<const std::byte, 32> server_pk,
+            std::span<std::byte, 33> out) {
+        blind_id_impl(session_id, server_pk, blind15_factor(server_pk), out, std::byte{0x15});
     }
 
     void blind25_id_impl(
-            std::span<const unsigned char> session_id,
-            std::span<const unsigned char> server_pk,
-            unsigned char* out) {
-        auto k = blind25_factor(session_id, server_pk);
-        if (session_id.size() == 33)
-            session_id = session_id.subspan(1);
-        if (session_id.size() != 32)
-            throw std::invalid_argument{"Invalid session id"};
-        auto ed_pk = xed25519::pubkey(session_id.first<32>());
-        if (0 != crypto_scalarmult_ed25519_noclamp(out + 1, k.data(), ed_pk.data()))
-            throw std::runtime_error{"Cannot blind: invalid session_id (not on main subgroup)"};
-        out[0] = 0x25;
+            std::span<const std::byte> session_id,
+            std::span<const std::byte, 32> server_pk,
+            std::span<std::byte, 33> out) {
+        blind_id_impl(session_id, server_pk, blind25_factor(session_id, server_pk), out, std::byte{0x25});
+    }
+
+    // Parses server_pk from either 32 raw bytes or 64 hex digits.
+    b32 parse_server_pk(std::string_view server_pk_in, std::string_view func_name) {
+        b32 server_pk;
+        if (server_pk_in.size() == 32)
+            std::memcpy(server_pk.data(), server_pk_in.data(), 32);
+        else if (server_pk_in.size() == 64 && oxenc::is_hex(server_pk_in))
+            oxenc::from_hex(server_pk_in.begin(), server_pk_in.end(), server_pk.begin());
+        else
+            throw std::invalid_argument{
+                    "{}: Invalid server_pk: expected 32 bytes or 64 hex"_format(func_name)};
+        return server_pk;
+    }
+
+    // Common final portion of blind15/blind25 signing: given blinded pubkey A, blinded scalar a,
+    // nonce r, and message, computes and returns the 64-byte signature.
+    b64 blinded_sign_finish(
+            std::span<const std::byte, 32> A,
+            std::span<const std::byte, 32> a,
+            std::span<const std::byte, 32> r,
+            std::span<const std::byte> message) {
+        b64 result;
+        auto sig_R = std::span{result}.first<32>();
+        auto sig_S = std::span{result}.last<32>();
+
+        ed25519::scalarmult_base_noclamp(sig_R, r);
+
+        b64 hram;
+        hash::sha512(hram, sig_R, A, message);
+
+        ed25519::scalar_reduce(sig_S, hram);     // S = H(R||A||M)
+        ed25519::scalar_mul(sig_S, sig_S, a);    // S = H(R||A||M) a
+        ed25519::scalar_add(sig_S, sig_S, r);    // S = r + H(R||A||M) a
+
+        return result;
     }
 
 }  // namespace
 
-std::vector<unsigned char> blind15_id(
-        std::span<const unsigned char> session_id, std::span<const unsigned char> server_pk) {
+b33 blind15_id(
+        std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk) {
     if (session_id.size() == 33) {
-        if (session_id[0] != 0x05)
+        if (session_id[0] != std::byte{0x05})
             throw std::invalid_argument{"blind15_id: session_id must start with 0x05"};
         session_id = session_id.subspan(1);
     } else if (session_id.size() != 32) {
         throw std::invalid_argument{"blind15_id: session_id must be 32 or 33 bytes"};
     }
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"blind15_id: server_pk must be 32 bytes"};
 
-    std::vector<unsigned char> result;
-    result.resize(33);
-    blind15_id_impl(session_id, server_pk, result.data());
+    b33 result;
+    blind15_id_impl(session_id, server_pk, result);
     return result;
 }
 
@@ -106,34 +135,31 @@ std::array<std::string, 2> blind15_id(std::string_view session_id, std::string_v
     if (server_pk.size() != 64 || !oxenc::is_hex(server_pk))
         throw std::invalid_argument{"blind15_id: server_pk must be hex (64 digits)"};
 
-    uc33 raw_sid;
+    b33 raw_sid;
     oxenc::from_hex(session_id.begin(), session_id.end(), raw_sid.begin());
-    uc32 raw_server_pk;
+    b32 raw_server_pk;
     oxenc::from_hex(server_pk.begin(), server_pk.end(), raw_server_pk.begin());
 
-    uc33 blinded;
-    blind15_id_impl(to_span(raw_sid), to_span(raw_server_pk), blinded.data());
+    b33 blinded;
+    blind15_id_impl(raw_sid, raw_server_pk, blinded);
     std::array<std::string, 2> result;
     result[0] = oxenc::to_hex(blinded.begin(), blinded.end());
-    blinded.back() ^= 0x80;
+    blinded.back() ^= std::byte{0x80};
     result[1] = oxenc::to_hex(blinded.begin(), blinded.end());
     return result;
 }
 
-std::vector<unsigned char> blind25_id(
-        std::span<const unsigned char> session_id, std::span<const unsigned char> server_pk) {
+b33 blind25_id(
+        std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk) {
     if (session_id.size() == 33) {
-        if (session_id[0] != 0x05)
+        if (session_id[0] != std::byte{0x05})
             throw std::invalid_argument{"blind25_id: session_id must start with 0x05"};
     } else if (session_id.size() != 32) {
         throw std::invalid_argument{"blind25_id: session_id must be 32 or 33 bytes"};
     }
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"blind25_id: server_pk must be 32 bytes"};
 
-    std::vector<unsigned char> result;
-    result.resize(33);
-    blind25_id_impl(session_id, server_pk, result.data());
+    b33 result;
+    blind25_id_impl(session_id, server_pk, result);
     return result;
 }
 
@@ -145,361 +171,217 @@ std::string blind25_id(std::string_view session_id, std::string_view server_pk) 
     if (server_pk.size() != 64 || !oxenc::is_hex(server_pk))
         throw std::invalid_argument{"blind25_id: server_pk must be hex (64 digits)"};
 
-    uc33 raw_sid;
+    b33 raw_sid;
     oxenc::from_hex(session_id.begin(), session_id.end(), raw_sid.begin());
-    uc32 raw_server_pk;
+    b32 raw_server_pk;
     oxenc::from_hex(server_pk.begin(), server_pk.end(), raw_server_pk.begin());
 
-    uc33 blinded;
-    blind25_id_impl(to_span(raw_sid), to_span(raw_server_pk), blinded.data());
+    b33 blinded;
+    blind25_id_impl(raw_sid, raw_server_pk, blinded);
     return oxenc::to_hex(blinded.begin(), blinded.end());
 }
 
-std::vector<unsigned char> blinded15_id_from_ed(
-        std::span<const unsigned char> ed_pubkey,
-        std::span<const unsigned char> server_pk,
-        std::vector<unsigned char>* session_id) {
-    if (ed_pubkey.size() != 32)
-        throw std::invalid_argument{"blind15_id_from_ed: ed_pubkey must be 32 bytes"};
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"blind15_id_from_ed: server_pk must be 32 bytes"};
-    if (session_id && !session_id->empty())
-        throw std::invalid_argument{
-                "blind15_id_from_ed: session_id pointer must be an empty string"};
+b33 blinded15_id_from_ed(
+        std::span<const std::byte, 32> ed_pubkey,
+        std::span<const std::byte, 32> server_pk,
+        std::optional<b33>* session_id) {
+    if (session_id && !session_id->has_value())
+        session_id->emplace(ed25519::pk_to_session_id(ed_pubkey));
 
-    if (session_id) {
-        session_id->resize(33);
-        session_id->front() = 0x05;
-        if (0 != crypto_sign_ed25519_pk_to_curve25519(session_id->data() + 1, ed_pubkey.data()))
-            throw std::runtime_error{"ed25519 pubkey to x25519 pubkey conversion failed"};
-    }
-
-    std::vector<unsigned char> result;
-    result.resize(33);
+    b33 result;
     auto k = blind15_factor(server_pk);
-    if (0 != crypto_scalarmult_ed25519_noclamp(result.data() + 1, k.data(), ed_pubkey.data()))
-        throw std::runtime_error{"Cannot blind: invalid session_id (not on main subgroup)"};
-    result[0] = 0x15;
+    ed25519::scalarmult_noclamp(
+            std::span<std::byte, 32>{result.data() + 1, 32}, k, ed_pubkey);
+    result[0] = std::byte{0x15};
     return result;
 }
 
-std::vector<unsigned char> blinded25_id_from_ed(
-        std::span<const unsigned char> ed_pubkey,
-        std::span<const unsigned char> server_pk,
-        std::vector<unsigned char>* session_id) {
-    if (ed_pubkey.size() != 32)
-        throw std::invalid_argument{"blind25_id_from_ed: ed_pubkey must be 32 bytes"};
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"blind25_id_from_ed: server_pk must be 32 bytes"};
-    if (session_id && session_id->size() != 0 && session_id->size() != 33)
-        throw std::invalid_argument{"blind25_id_from_ed: session_id pointer must be 0 or 33 bytes"};
-
-    std::vector<unsigned char> tmp_session_id;
+b33 blinded25_id_from_ed(
+        std::span<const std::byte, 32> ed_pubkey,
+        std::span<const std::byte, 32> server_pk,
+        std::optional<b33>* session_id) {
+    std::optional<b33> tmp_session_id;
     if (!session_id)
         session_id = &tmp_session_id;
-    if (session_id->size() == 0) {
-        session_id->resize(33);
-        session_id->front() = 0x05;
-        if (0 != crypto_sign_ed25519_pk_to_curve25519(session_id->data() + 1, ed_pubkey.data()))
-            throw std::runtime_error{"ed25519 pubkey to x25519 pubkey conversion failed"};
-    }
+    if (!session_id->has_value())
+        session_id->emplace(ed25519::pk_to_session_id(ed_pubkey));
 
-    auto k = blind25_factor(*session_id, server_pk);
+    auto k = blind25_factor(**session_id, server_pk);
 
-    std::vector<unsigned char> result;
-    result.resize(33);
+    b33 result;
     // Blinded25 ids are always constructed using the absolute value of the ed pubkey, so if
     // negative we need to clear the sign bit to make it positive before computing the blinded
     // pubkey.
-    uc32 pos_ed_pubkey;
-    std::memcpy(pos_ed_pubkey.data(), ed_pubkey.data(), 32);
-    pos_ed_pubkey[31] &= 0x7f;
+    b32 pos_ed_pubkey;
+    std::ranges::copy(ed_pubkey, pos_ed_pubkey.begin());
+    pos_ed_pubkey[31] &= std::byte{0x7f};
 
-    if (0 != crypto_scalarmult_ed25519_noclamp(result.data() + 1, k.data(), pos_ed_pubkey.data()))
-        throw std::runtime_error{"Cannot blind: invalid session_id (not on main subgroup)"};
-    result[0] = 0x25;
+    ed25519::scalarmult_noclamp(
+            std::span<std::byte, 32>{result.data() + 1, 32}, k, pos_ed_pubkey);
+    result[0] = std::byte{0x25};
     return result;
 }
 
-std::pair<uc32, cleared_uc32> blind15_key_pair(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> server_pk,
-        uc32* k) {
-    std::array<unsigned char, 64> ed_sk_tmp;
-    if (ed25519_sk.size() == 32) {
-        std::array<unsigned char, 32> pk_ignore;
-        crypto_sign_ed25519_seed_keypair(pk_ignore.data(), ed_sk_tmp.data(), ed25519_sk.data());
-        ed25519_sk = {ed_sk_tmp.data(), 64};
-    }
-    if (ed25519_sk.size() != 64)
-        throw std::invalid_argument{
-                "blind15_key_pair: Invalid ed25519_sk is not the expected 32- or 64-byte value"};
-
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"blind15_key_pair: server_pk must be 32 bytes"};
-
-    std::pair<uc32, cleared_uc32> result;
+std::pair<b32, cleared_b32> blind15_key_pair(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        b32* k) {
+    std::pair<b32, cleared_b32> result;
     auto& [A, a] = result;
 
     /// Generate the blinding factor (storing into `*k`, if a pointer was provided)
-    uc32 k_tmp;
+    b32 k_tmp;
     if (!k)
         k = &k_tmp;
     *k = blind15_factor(server_pk);
 
     /// Generate a scalar for the private key
-    if (0 != crypto_sign_ed25519_sk_to_curve25519(a.data(), ed25519_sk.data()))
+    if (0 != crypto_sign_ed25519_sk_to_curve25519(
+                     to_unsigned(a.data()), to_unsigned(ed25519_sk.data())))
         throw std::runtime_error{
                 "blind15_key_pair: Invalid ed25519_sk; conversion to curve25519 seckey failed"};
 
     // Turn a, A into their blinded versions
-    crypto_core_ed25519_scalar_mul(a.data(), k->data(), a.data());
-    crypto_scalarmult_ed25519_base_noclamp(A.data(), a.data());
+    ed25519::scalar_mul(a, *k, a);
+    ed25519::scalarmult_base_noclamp(A, a);
 
     return result;
 }
 
-std::pair<uc32, cleared_uc32> blind25_key_pair(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> server_pk,
-        uc32* k_prime) {
-    std::array<unsigned char, 64> ed_sk_tmp;
-    if (ed25519_sk.size() == 32) {
-        std::array<unsigned char, 32> pk_ignore;
-        crypto_sign_ed25519_seed_keypair(pk_ignore.data(), ed_sk_tmp.data(), ed25519_sk.data());
-        ed25519_sk = {ed_sk_tmp.data(), 64};
-    }
-    if (ed25519_sk.size() != 64)
-        throw std::invalid_argument{
-                "blind15_key_pair: Invalid ed25519_sk is not the expected 32- or 64-byte value"};
+std::pair<b32, cleared_b32> blind25_key_pair(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        b32* k_prime) {
+    b33 session_id;
+    session_id[0] = std::byte{0x05};
+    ed25519::pk_to_x25519(std::span{session_id}.last<32>(), ed25519_sk.pubkey());
 
-    if (server_pk.size() != 32)
-        throw std::invalid_argument{"blind15_key_pair: server_pk must be 32 bytes"};
-
-    uc33 session_id;
-    session_id[0] = 0x05;
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(session_id.data() + 1, ed25519_sk.data() + 32))
-        throw std::runtime_error{
-                "blind25_key_pair: Invalid ed25519_sk; conversion to curve25519 pubkey failed"};
-
-    std::span<const unsigned char> X{session_id.data() + 1, 32};
+    auto X = std::span{session_id}.last<32>();
 
     /// Generate the blinding factor (storing into `*k`, if a pointer was provided)
-    uc32 k_tmp;
+    b32 k_tmp;
     if (!k_prime)
         k_prime = &k_tmp;
-    *k_prime = blind25_factor(X, {server_pk.data(), server_pk.size()});
+    *k_prime = blind25_factor(X, server_pk);
 
     // For a negative pubkey we use k' = -k so that k'A == kA when A is positive, and k'A = -kA =
     // k|A| when A is negative.
-    if (*(ed25519_sk.data() + 63) & 0x80)
-        crypto_core_ed25519_scalar_negate(k_prime->data(), k_prime->data());
+    if ((ed25519_sk.pubkey()[31] & std::byte{0x80}) != std::byte{})
+        ed25519::scalar_negate(*k_prime, *k_prime);
 
-    std::pair<uc32, cleared_uc32> result;
+    std::pair<b32, cleared_b32> result;
     auto& [A, a] = result;
 
     // Generate the private key (scalar), a; (the sodium function naming here is misleading; this
     // call actually has nothing to do with conversion to X25519, it just so happens that the
     // conversion method is the easiest way to get `a` out of libsodium).
-    if (0 != crypto_sign_ed25519_sk_to_curve25519(a.data(), ed25519_sk.data()))
-        throw std::runtime_error{
-                "blind25_key_pair: Invalid ed25519_sk; conversion to curve25519 seckey failed"};
+    a = ed25519::sk_to_x25519(ed25519_sk);
 
     // Turn a, A into their blinded versions
-    crypto_core_ed25519_scalar_mul(a.data(), k_prime->data(), a.data());
-    crypto_scalarmult_ed25519_base_noclamp(A.data(), a.data());
+    ed25519::scalar_mul(a, *k_prime, a);
+    ed25519::scalarmult_base_noclamp(A, a);
 
     return result;
 }
 
-static constexpr auto version_blinding_hash_key_sig = "VersionCheckKey_sig"_uc;
+static constexpr auto version_blinding_hash_key_sig = "VersionCheckKey_sig"_bytes;
 
-std::pair<uc32, cleared_uc64> blind_version_key_pair(std::span<const unsigned char> ed25519_sk) {
-    if (ed25519_sk.size() != 32 && ed25519_sk.size() != 64)
-        throw std::invalid_argument{
-                "blind_version_key_pair: Invalid ed25519_sk is not the expected 32- or 64-byte "
-                "value"};
-
-    std::pair<uc32, cleared_uc64> result;
-    cleared_uc32 blind_seed;
-    auto& [pk, sk] = result;
-    hash::blake2b_key(blind_seed, version_blinding_hash_key_sig, ed25519_sk.first(32));
-
-    // Reuse `sk` to avoid needing extra secure erasing:
-    if (0 != crypto_sign_ed25519_seed_keypair(pk.data(), sk.data(), blind_seed.data()))
-        throw std::runtime_error{"blind_version_key_pair: ed25519 generation from seed failed"};
-
-    return result;
+std::pair<b32, cleared_b64> blind_version_key_pair(const ed25519::PrivKeySpan& ed25519_sk) {
+    cleared_b32 blind_seed;
+    hash::blake2b_key(blind_seed, version_blinding_hash_key_sig, ed25519_sk.seed());
+    return ed25519::keypair(blind_seed);
 }
 
-static constexpr auto hash_key_seed = "SessCommBlind25_seed"_uc;
-static constexpr auto hash_key_sig = "SessCommBlind25_sig"_uc;
+static constexpr auto hash_key_seed = "SessCommBlind25_seed"_bytes;
+static constexpr auto hash_key_sig = "SessCommBlind25_sig"_bytes;
 
-std::vector<unsigned char> blind25_sign(
-        std::span<const unsigned char> ed25519_sk,
-        std::string_view server_pk_in,
-        std::span<const unsigned char> message) {
-    std::array<unsigned char, 64> ed_sk_tmp;
-    if (ed25519_sk.size() == 32) {
-        std::array<unsigned char, 32> pk_ignore;
-        crypto_sign_ed25519_seed_keypair(pk_ignore.data(), ed_sk_tmp.data(), ed25519_sk.data());
-        ed25519_sk = {ed_sk_tmp.data(), 64};
-    }
-    if (ed25519_sk.size() != 64)
-        throw std::invalid_argument{
-                "blind25_sign: Invalid ed25519_sk is not the expected 32- or 64-byte value"};
-    uc32 server_pk;
-    if (server_pk_in.size() == 32)
-        std::memcpy(server_pk.data(), server_pk_in.data(), 32);
-    else if (server_pk_in.size() == 64 && oxenc::is_hex(server_pk_in))
-        oxenc::from_hex(server_pk_in.begin(), server_pk_in.end(), server_pk.begin());
-    else
-        throw std::invalid_argument{"blind25_sign: Invalid server_pk: expected 32 bytes or 64 hex"};
+b64 blind25_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte> message) {
+    auto [A, a] = blind25_key_pair(ed25519_sk, server_pk);
 
-    auto [A, a] = blind25_key_pair(ed25519_sk, to_span(server_pk));
+    b32 seedhash;
+    hash::blake2b_key(seedhash, hash_key_seed, ed25519_sk.seed());
 
-    uc32 seedhash;
-    hash::blake2b_key(seedhash, hash_key_seed, ed25519_sk.first(32));
-
-    uc64 r_hash;
+    b64 r_hash;
     hash::blake2b_key(r_hash, hash_key_sig, seedhash, A, message);
 
-    uc32 r;
-    crypto_core_ed25519_scalar_reduce(r.data(), r_hash.data());
+    b32 r;
+    ed25519::scalar_reduce(r, r_hash);
 
-    std::vector<unsigned char> result;
-    result.resize(64);
-    auto* sig_R = result.data();
-    auto* sig_S = result.data() + 32;
-    crypto_scalarmult_ed25519_base_noclamp(sig_R, r.data());
-
-    crypto_hash_sha512_state st2;
-    crypto_hash_sha512_init(&st2);
-    crypto_hash_sha512_update(&st2, sig_R, 32);
-    crypto_hash_sha512_update(&st2, A.data(), A.size());
-    crypto_hash_sha512_update(&st2, message.data(), message.size());
-    uc64 hram;
-    crypto_hash_sha512_final(&st2, hram.data());
-
-    crypto_core_ed25519_scalar_reduce(sig_S, hram.data());  // S = H(R||A||M)
-
-    crypto_core_ed25519_scalar_mul(sig_S, sig_S, a.data());  // S = H(R||A||M) a
-    crypto_core_ed25519_scalar_add(sig_S, sig_S, r.data());  // S = r + H(R||A||M) a
-
-    return result;
+    return blinded_sign_finish(A, a, r, message);
 }
 
-std::vector<unsigned char> blind15_sign(
-        std::span<const unsigned char> ed25519_sk,
+b64 blind25_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
         std::string_view server_pk_in,
-        std::span<const unsigned char> message) {
-    std::array<unsigned char, 64> ed_sk_tmp;
-    if (ed25519_sk.size() == 32) {
-        std::array<unsigned char, 32> pk_ignore;
-        crypto_sign_ed25519_seed_keypair(pk_ignore.data(), ed_sk_tmp.data(), ed25519_sk.data());
-        ed25519_sk = {ed_sk_tmp.data(), 64};
-    }
-    if (ed25519_sk.size() != 64)
-        throw std::invalid_argument{
-                "blind15_sign: Invalid ed25519_sk is not the expected 32- or 64-byte value"};
+        std::span<const std::byte> message) {
+    return blind25_sign(ed25519_sk, parse_server_pk(server_pk_in, "blind25_sign"), message);
+}
 
-    uc32 server_pk;
-    if (server_pk_in.size() == 32)
-        std::memcpy(server_pk.data(), server_pk_in.data(), 32);
-    else if (server_pk_in.size() == 64 && oxenc::is_hex(server_pk_in))
-        oxenc::from_hex(server_pk_in.begin(), server_pk_in.end(), server_pk.begin());
-    else
-        throw std::invalid_argument{"blind15_sign: Invalid server_pk: expected 32 bytes or 64 hex"};
-
-    auto [blind_15_pk, blind_15_sk] = blind15_key_pair(ed25519_sk, {server_pk.data(), 32});
+b64 blind15_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte> message) {
+    auto [blind_15_pk, blind_15_sk] = blind15_key_pair(ed25519_sk, server_pk);
 
     // H_rh = sha512(s.encode()).digest()[32:]
-    uc64 hrh;
-    crypto_hash_sha512_state st1;
-    crypto_hash_sha512_init(&st1);
-    crypto_hash_sha512_update(&st1, ed25519_sk.data(), 64);
-    crypto_hash_sha512_final(&st1, hrh.data());
+    b64 hrh;
+    hash::sha512(hrh, ed25519_sk);
 
     // r = salt.crypto_core_ed25519_scalar_reduce(sha512_multipart(H_rh, kA, message_parts))
-    auto hrh_suffix = hrh.data() + 32;
-    uc32 r;
-    uc64 r_hash;
-    crypto_hash_sha512_state st2;
-    crypto_hash_sha512_init(&st2);
-    crypto_hash_sha512_update(&st2, hrh_suffix, 32);
-    crypto_hash_sha512_update(&st2, blind_15_pk.data(), blind_15_pk.size());
-    crypto_hash_sha512_update(&st2, message.data(), message.size());
-    crypto_hash_sha512_final(&st2, r_hash.data());
-    crypto_core_ed25519_scalar_reduce(r.data(), r_hash.data());
+    b64 r_hash;
+    hash::sha512(r_hash, std::span{hrh}.last<32>(), blind_15_pk, message);
 
-    // sig_R = salt.crypto_scalarmult_ed25519_base_noclamp(r)
-    std::vector<unsigned char> result;
-    result.resize(64);
-    auto* sig_R = result.data();
-    auto* sig_S = result.data() + 32;
-    crypto_scalarmult_ed25519_base_noclamp(sig_R, r.data());
+    b32 r;
+    ed25519::scalar_reduce(r, r_hash);
 
-    // HRAM = salt.crypto_core_ed25519_scalar_reduce(sha512_multipart(sig_R, kA, message_parts))
-    uc64 hram;
-    crypto_hash_sha512_state st3;
-    crypto_hash_sha512_init(&st3);
-    crypto_hash_sha512_update(&st3, sig_R, 32);
-    crypto_hash_sha512_update(&st3, blind_15_pk.data(), blind_15_pk.size());
-    crypto_hash_sha512_update(&st3, message.data(), message.size());
-    crypto_hash_sha512_final(&st3, hram.data());
-
-    // sig_s = salt.crypto_core_ed25519_scalar_add(r, salt.crypto_core_ed25519_scalar_mul(HRAM, ka))
-    crypto_core_ed25519_scalar_reduce(sig_S, hram.data());             // S = H(R||A||M)
-    crypto_core_ed25519_scalar_mul(sig_S, sig_S, blind_15_sk.data());  // S = H(R||A||M) a
-    crypto_core_ed25519_scalar_add(sig_S, sig_S, r.data());            // S = r + H(R||A||M) a
-
-    return result;
+    return blinded_sign_finish(blind_15_pk, blind_15_sk, r, message);
 }
 
-std::vector<unsigned char> blind_version_sign_request(
-        std::span<const unsigned char> ed25519_sk,
+b64 blind15_sign(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::string_view server_pk_in,
+        std::span<const std::byte> message) {
+    return blind15_sign(ed25519_sk, parse_server_pk(server_pk_in, "blind15_sign"), message);
+}
+
+b64 blind_version_sign_request(
+        const ed25519::PrivKeySpan& ed25519_sk,
         uint64_t timestamp,
         std::string_view method,
         std::string_view path,
-        std::optional<std::span<const unsigned char>> body) {
+        std::optional<std::span<const std::byte>> body) {
     auto [pk, sk] = blind_version_key_pair(ed25519_sk);
 
     // Signature should be on `TIMESTAMP || METHOD || PATH || BODY`
-    std::vector<unsigned char> ts = to_vector(std::to_string(timestamp));
-    std::vector<unsigned char> buf;
-    buf.reserve(10 /* timestamp */ + method.size() + path.size() + (body ? body->size() : 0));
-    buf.insert(buf.end(), ts.begin(), ts.end());
-    buf.insert(buf.end(), method.begin(), method.end());
-    buf.insert(buf.end(), path.begin(), path.end());
-
+    auto ts = "{}"_format(timestamp);
+    std::vector<std::byte> buf;
+    buf.reserve(ts.size() + method.size() + path.size() + (body ? body->size() : 0));
+    auto app = [&](std::string_view sv) {
+        auto s = to_span(sv);
+        buf.insert(buf.end(), s.begin(), s.end());
+    };
+    app(ts);
+    app(method);
+    app(path);
     if (body)
         buf.insert(buf.end(), body->begin(), body->end());
 
     return ed25519::sign(sk, buf);
 }
 
-std::vector<unsigned char> blind_version_sign(
-        std::span<const unsigned char> ed25519_sk, Platform platform, uint64_t timestamp) {
-    auto [pk, sk] = blind_version_key_pair(ed25519_sk);
-
-    // Signature should be on `TIMESTAMP || METHOD || PATH`
-    std::vector<unsigned char> ts = to_vector(std::to_string(timestamp));
-    std::vector<unsigned char> method = to_vector("GET");
-    std::vector<unsigned char> buf;
-    buf.reserve(10 + 6 + 33);
-    buf.insert(buf.end(), ts.begin(), ts.end());
-    buf.insert(buf.end(), method.begin(), method.end());
-
-    std::vector<unsigned char> url;
+b64 blind_version_sign(
+        const ed25519::PrivKeySpan& ed25519_sk, Platform platform, uint64_t timestamp) {
+    std::string_view url;
     switch (platform) {
-        case Platform::android: url = to_vector("/session_version?platform=android"); break;
-        case Platform::desktop: url = to_vector("/session_version?platform=desktop"); break;
-        case Platform::ios: url = to_vector("/session_version?platform=ios"); break;
-        default: url = to_vector("/session_version?platform=desktop"); break;
+        case Platform::android: url = "/session_version?platform=android"; break;
+        case Platform::ios: url = "/session_version?platform=ios"; break;
+        case Platform::desktop:
+        default: url = "/session_version?platform=desktop"; break;
     }
-    buf.insert(buf.end(), url.begin(), url.end());
-
-    return ed25519::sign(sk, buf);
+    return blind_version_sign_request(ed25519_sk, timestamp, "GET", url, std::nullopt);
 }
 
 bool session_id_matches_blinded_id(
@@ -517,7 +399,7 @@ bool session_id_matches_blinded_id(
                 "session_id_matches_blinded_id: server_pk must be hex (64 digits)"};
 
     std::string converted_blind_id1, converted_blind_id2;
-    std::vector<unsigned char> converted_blind_id1_raw;
+    std::vector<std::byte> converted_blind_id1_raw;
 
     switch (blinded_id[0]) {
         case '1': {
@@ -541,7 +423,8 @@ LIBSESSION_C_API bool session_blind15_key_pair(
         unsigned char* blinded_pk_out,
         unsigned char* blinded_sk_out) {
     try {
-        auto [b_pk, b_sk] = session::blind15_key_pair({ed25519_seckey, 64}, {server_pk, 32});
+        auto [b_pk, b_sk] = session::blind15_key_pair(
+                {ed25519_seckey, 64}, to_byte_span<32>(server_pk));
         std::memcpy(blinded_pk_out, b_pk.data(), b_pk.size());
         std::memcpy(blinded_sk_out, b_sk.data(), b_sk.size());
         return true;
@@ -556,7 +439,8 @@ LIBSESSION_C_API bool session_blind25_key_pair(
         unsigned char* blinded_pk_out,
         unsigned char* blinded_sk_out) {
     try {
-        auto [b_pk, b_sk] = session::blind25_key_pair({ed25519_seckey, 64}, {server_pk, 32});
+        auto [b_pk, b_sk] = session::blind25_key_pair(
+                {ed25519_seckey, 64}, to_byte_span<32>(server_pk));
         std::memcpy(blinded_pk_out, b_pk.data(), b_pk.size());
         std::memcpy(blinded_sk_out, b_sk.data(), b_sk.size());
         return true;
@@ -589,7 +473,7 @@ LIBSESSION_C_API bool session_blind15_sign(
         auto sig = session::blind15_sign(
                 {ed25519_seckey, 64},
                 {reinterpret_cast<const char*>(server_pk), 32},
-                {msg, msg_len});
+                to_byte_span(msg, msg_len));
         std::memcpy(blinded_sig_out, sig.data(), sig.size());
         return true;
     } catch (...) {
@@ -607,7 +491,7 @@ LIBSESSION_C_API bool session_blind25_sign(
         auto sig = session::blind25_sign(
                 {ed25519_seckey, 64},
                 {reinterpret_cast<const char*>(server_pk), 32},
-                {msg, msg_len});
+                to_byte_span(msg, msg_len));
         std::memcpy(blinded_sig_out, sig.data(), sig.size());
         return true;
     } catch (...) {
@@ -626,9 +510,9 @@ LIBSESSION_C_API bool session_blind_version_sign_request(
     std::string_view method_sv{method};
     std::string_view path_sv{path};
 
-    std::optional<std::span<const unsigned char>> body_sv{std::nullopt};
+    std::optional<std::span<const std::byte>> body_sv{std::nullopt};
     if (body)
-        body_sv = std::span<const unsigned char>{body, body_len};
+        body_sv = to_byte_span(body, body_len);
 
     try {
         auto sig = session::blind_version_sign_request(

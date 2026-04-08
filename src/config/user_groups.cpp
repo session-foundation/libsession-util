@@ -57,7 +57,7 @@ legacy_group_info::legacy_group_info(std::string sid) : session_id{std::move(sid
 }
 
 community_info::community_info(const ugroups_community_info& c) :
-        community_info{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}} {
+        community_info{c.base_url, c.room, std::as_bytes(std::span{c.pubkey})} {
     base_from(*this, c);
 }
 
@@ -79,8 +79,8 @@ legacy_group_info::legacy_group_info(const ugroups_legacy_group_info& c, impl_t)
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
     base_from(*this, c);
     if (c.have_enc_keys) {
-        enc_pubkey.assign(c.enc_pubkey, c.enc_pubkey + 32);
-        enc_seckey.assign(c.enc_seckey, c.enc_seckey + 32);
+        enc_pubkey = to_vector(to_byte_span(c.enc_pubkey));
+        enc_seckey = to_vector(to_byte_span(c.enc_seckey));
     }
 }
 
@@ -204,9 +204,9 @@ group_info::group_info(const ugroups_group_info& c) : id{c.id, 66} {
     assert(name.size() <= NAME_MAX_LENGTH);  // Otherwise the caller messed up
 
     if (c.have_secretkey)
-        secretkey.assign(c.secretkey, c.secretkey + 64);
+        secretkey = to_vector(to_byte_span(c.secretkey));
     if (c.have_auth_data)
-        auth_data.assign(c.auth_data, c.auth_data + sizeof(c.auth_data));
+        auth_data = to_vector(to_byte_span(c.auth_data));
 }
 
 void group_info::into(ugroups_group_info& c) const {
@@ -230,10 +230,12 @@ void group_info::load(const dict& info_dict) {
         name.clear();
 
     if (auto seed = maybe_vector(info_dict, "K"); seed && seed->size() == 32) {
-        std::array<unsigned char, 33> pk;
-        pk[0] = 0x03;
+        b33 pk;
+        pk[0] = std::byte{0x03};
         secretkey.resize(64);
-        crypto_sign_seed_keypair(pk.data() + 1, secretkey.data(), seed->data());
+        crypto_sign_seed_keypair(
+                to_unsigned(pk.data() + 1), to_unsigned(secretkey.data()),
+                to_unsigned(seed->data()));
         if (id != oxenc::to_hex(pk.begin(), pk.end()))
             secretkey.clear();
     }
@@ -279,20 +281,20 @@ void community_info::load(const dict& info_dict) {
 }
 
 UserGroups::UserGroups(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
 
 ConfigBase::DictFieldProxy UserGroups::community_field(
-        const community_info& og, std::span<const unsigned char>* get_pubkey) const {
+        const community_info& og, std::span<const std::byte>* get_pubkey) const {
     auto record = data["o"][og.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey = std::span<const unsigned char>{
-                    reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+            *get_pubkey = std::span<const std::byte>{
+                    reinterpret_cast<const std::byte*>(pk.data()), pk.size()};
     }
     return record["R"][og.room_norm()];
 }
@@ -301,11 +303,11 @@ std::optional<community_info> UserGroups::get_community(
         std::string_view base_url, std::string_view room) const {
     community_info og{base_url, room};
 
-    std::span<const unsigned char> pubkey;
+    std::span<const std::byte> pubkey;
     if (auto* info_dict = community_field(og, &pubkey).dict()) {
         og.load(*info_dict);
         if (!pubkey.empty())
-            og.set_pubkey(pubkey);
+            og.set_pubkey(pubkey.first<32>());
         return og;
     }
     return std::nullopt;
@@ -319,8 +321,8 @@ std::optional<community_info> UserGroups::get_community(std::string_view partial
 community_info UserGroups::get_or_construct_community(
         std::string_view base_url,
         std::string_view room,
-        std::span<const unsigned char> pubkey) const {
-    community_info result{base_url, room, pubkey};
+        std::span<const std::byte> pubkey) const {
+    community_info result{base_url, room, pubkey.first<32>()};
 
     if (auto* info_dict = community_field(result).dict())
         result.load(*info_dict);
@@ -382,10 +384,10 @@ group_info UserGroups::get_or_construct_group(std::string_view pubkey_hex) const
 }
 
 group_info UserGroups::create_group() const {
-    std::array<unsigned char, 32> pk;
-    std::vector<unsigned char> sk;
+    b32 pk;
+    std::vector<std::byte> sk;
     sk.resize(64);
-    crypto_sign_keypair(pk.data(), sk.data());
+    crypto_sign_keypair(to_unsigned(pk.data()), to_unsigned(sk.data()));
     std::string pk_hex;
     pk_hex.reserve(66);
     pk_hex += "03";
@@ -445,13 +447,13 @@ void UserGroups::set(const group_info& g) {
 
     if (g.secretkey.size() == 64 &&
         // Make sure the secretkey's embedded pubkey matches the group id:
-        to_string_view(std::span<const unsigned char>{g.secretkey.data() + 32, 32}) ==
-                to_string_view(std::span<const unsigned char>{
-                        reinterpret_cast<const unsigned char*>(pk_bytes.data() + 1),
+        to_string_view(std::span<const std::byte>{g.secretkey.data() + 32, 32}) ==
+                to_string_view(std::span<const std::byte>{
+                        reinterpret_cast<const std::byte*>(pk_bytes.data() + 1),
                         pk_bytes.size() - 1}))
-        info["K"] = std::span<const unsigned char>{g.secretkey.data(), 32};
+        info["K"] = std::span<const std::byte>{g.secretkey.data(), 32};
     else {
-        info["K"] = std::span<const unsigned char>{};
+        info["K"] = std::span<const std::byte>{};
         if (g.auth_data.size() == 100)
             info["s"] = g.auth_data;
         else
@@ -667,7 +669,10 @@ LIBSESSION_C_API bool user_groups_get_or_construct_community(
             [&] {
                 unbox<UserGroups>(conf)
                         ->get_or_construct_community(
-                                base_url, room, std::span<const unsigned char>{pubkey, 32})
+                                base_url,
+                                room,
+                                std::span<const std::byte>{
+                                        reinterpret_cast<const std::byte*>(pubkey), 32})
                         .into(*comm);
                 return true;
             },

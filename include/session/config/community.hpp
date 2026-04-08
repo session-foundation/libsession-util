@@ -30,7 +30,7 @@ struct community {
     community(
             std::string_view base_url,
             std::string_view room,
-            std::span<const unsigned char> pubkey);
+            std::span<const std::byte, 32> pubkey);
 
     // Same as above, but takes pubkey as an encoded (hex or base32z or base64) string.
     community(std::string_view base_url, std::string_view room, std::string_view pubkey_encoded);
@@ -92,13 +92,13 @@ struct community {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_pubkey(std::span<const unsigned char> pubkey);
+    /// void set_pubkey(std::span<const std::byte, 32> pubkey);
     /// void set_pubkey(std::string_view pubkey);
     /// ```
     ///
     /// Inputs:
     /// - `pubkey` -- Pubkey to be stored
-    void set_pubkey(std::span<const unsigned char> pubkey);
+    void set_pubkey(std::span<const std::byte, 32> pubkey);
     void set_pubkey(std::string_view pubkey);
 
     /// API: community/community::base_url
@@ -140,8 +140,8 @@ struct community {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `const std::vector<unsigned char>&` -- Returns the pubkey
-    const std::vector<unsigned char>& pubkey() const { return pubkey_; }
+    /// - `const std::vector<std::byte>&` -- Returns the pubkey
+    const std::vector<std::byte>& pubkey() const { return pubkey_; }
 
     /// API: community/community::pubkey_hex
     ///
@@ -201,7 +201,7 @@ struct community {
     static std::string full_url(
             std::string_view base_url,
             std::string_view room,
-            std::span<const unsigned char> pubkey);
+            std::span<const std::byte> pubkey);
 
     /// API: community/community::canonical_url
     ///
@@ -269,8 +269,8 @@ struct community {
     /// - `std::tuple` -- Tuple of 3 components of the url
     ///     - `std::string` -- canonical url, normalized
     ///     - `std::string` -- room name, *not* normalized
-    ///     - `std::vector<unsigned char>` -- binary of the server pubkey
-    static std::tuple<std::string, std::string, std::vector<unsigned char>> parse_full_url(
+    ///     - `std::vector<std::byte>` -- binary of the server pubkey
+    static std::tuple<std::string, std::string, std::vector<std::byte>> parse_full_url(
             std::string_view full_url);
 
     /// API: community/community::parse_partial_url
@@ -285,9 +285,9 @@ struct community {
     /// - `std::tuple` -- Tuple of 3 components of the url
     ///     - `std::string` -- canonical url, normalized
     ///     - `std::string` -- room name, *not* normalized
-    ///     - `std::optional<std::vector<unsigned char>>` -- optional binary of the server pubkey if
+    ///     - `std::optional<std::vector<std::byte>>` -- optional binary of the server pubkey if
     ///     present
-    static std::tuple<std::string, std::string, std::optional<std::vector<unsigned char>>>
+    static std::tuple<std::string, std::string, std::optional<std::vector<std::byte>>>
     parse_partial_url(std::string_view url);
 
   protected:
@@ -297,7 +297,7 @@ struct community {
     // `someroom` and this could `SomeRoom`).  Omitted if not available.
     std::optional<std::string> localized_room_;
     // server pubkey
-    std::vector<unsigned char> pubkey_;
+    std::vector<std::byte> pubkey_;
 
     // Construction without a pubkey for when pubkey isn't known yet but will be set shortly
     // after constructing (or when isn't needed, such as when deleting).
@@ -349,8 +349,12 @@ struct comm_iterator_helper {
                 continue;
             }
 
-            std::span<const unsigned char> pubkey{
-                    reinterpret_cast<const unsigned char*>(pubkey_raw->data()), pubkey_raw->size()};
+            if (pubkey_raw->size() != 32) {
+                next_server();
+                continue;
+            }
+            auto pubkey = std::span<const std::byte, 32>{
+                    reinterpret_cast<const std::byte*>(pubkey_raw->data()), 32};
 
             if (!it_room) {
                 if (auto rit = server_info_dict->find("R");

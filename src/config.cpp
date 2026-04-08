@@ -345,7 +345,7 @@ namespace {
         return std::string_view{reinterpret_cast<const char*>(hash.data()), hash.size()};
     }
 
-    hash_t& hash_msg(hash_t& into, std::span<const unsigned char> serialized) {
+    hash_t& hash_msg(hash_t& into, std::span<const std::byte> serialized) {
         hash::blake2b(into, serialized);
         return into;
     }
@@ -428,11 +428,11 @@ namespace {
 void verify_config_sig(
         oxenc::bt_dict_consumer dict,
         const ConfigMessage::verify_callable& verifier,
-        std::optional<std::array<unsigned char, 64>>* verified_signature,
+        std::optional<b64>* verified_signature,
         bool trust_signature) {
     if (dict.skip_until("~")) {
         dict.consume_signature(
-                [&](std::span<const unsigned char> to_verify, std::span<const unsigned char> sig) {
+                [&](std::span<const std::byte> to_verify, std::span<const std::byte> sig) {
                     if (sig.size() != 64)
                         throw signature_error{"Config signature is invalid (not 64B)"};
                     if (verifier && !verifier(to_verify, sig))
@@ -481,7 +481,7 @@ void MutableConfigMessage::increment_impl() {
     // Append the source config's diff to the new object
     lagged_diffs_.emplace_hint(lagged_diffs_.end(), seqno_hash_, std::move(diff_));
     seqno_hash_.first++;
-    seqno_hash_.second.fill(0);  // Not strictly necessary, but makes it obvious if used
+    seqno_hash_.second.fill(std::byte{0});  // Not strictly necessary, but makes it obvious if used
     diff_.clear();
 }
 
@@ -522,7 +522,7 @@ ConfigMessage::ConfigMessage() {
 }
 
 ConfigMessage::ConfigMessage(
-        std::span<const unsigned char> serialized,
+        std::span<const std::byte> serialized,
         verify_callable verifier_,
         sign_callable signer_,
         int lag,
@@ -560,7 +560,7 @@ ConfigMessage::ConfigMessage(
 }
 
 ConfigMessage::ConfigMessage(
-        const std::vector<std::span<const unsigned char>>& serialized_confs,
+        const std::vector<std::span<const std::byte>>& serialized_confs,
         verify_callable verifier_,
         sign_callable signer_,
         int lag,
@@ -690,7 +690,7 @@ ConfigMessage::ConfigMessage(
 }
 
 MutableConfigMessage::MutableConfigMessage(
-        const std::vector<std::span<const unsigned char>>& serialized_confs,
+        const std::vector<std::span<const std::byte>>& serialized_confs,
         verify_callable verifier,
         sign_callable signer,
         int lag,
@@ -706,7 +706,7 @@ MutableConfigMessage::MutableConfigMessage(
 }
 
 MutableConfigMessage::MutableConfigMessage(
-        std::span<const unsigned char> config,
+        std::span<const std::byte> config,
         verify_callable verifier,
         sign_callable signer,
         int lag) :
@@ -728,13 +728,13 @@ const oxenc::bt_dict& MutableConfigMessage::diff() {
     return diff_;
 }
 
-std::vector<unsigned char> ConfigMessage::serialize(bool enable_signing) {
+std::vector<std::byte> ConfigMessage::serialize(bool enable_signing) {
     return serialize_impl(
             diff(),  // implicitly prunes (if actually a mutable instance)
             enable_signing);
 }
 
-std::vector<unsigned char> ConfigMessage::serialize_impl(
+std::vector<std::byte> ConfigMessage::serialize_impl(
         const oxenc::bt_dict& curr_diff, bool enable_signing) {
     oxenc::bt_dict_producer outer{};
 
@@ -775,7 +775,7 @@ std::vector<unsigned char> ConfigMessage::serialize_impl(
                         reinterpret_cast<const char*>(verified_signature_->data()),
                         verified_signature_->size()});
     } else if (signer && enable_signing) {
-        outer.append_signature("~", [this](std::span<const unsigned char> to_sign) {
+        outer.append_signature("~", [this](std::span<const std::byte> to_sign) {
             auto sig = signer(to_sign);
             if (sig.size() != 64)
                 throw std::logic_error{
@@ -783,13 +783,13 @@ std::vector<unsigned char> ConfigMessage::serialize_impl(
             return sig;
         });
     }
-    return to_vector(outer.view());
+    return to_vector<std::byte>(outer.view());
 }
 
 const hash_t& MutableConfigMessage::hash() {
     return hash(serialize());
 }
-const hash_t& MutableConfigMessage::hash(std::span<const unsigned char> serialized) {
+const hash_t& MutableConfigMessage::hash(std::span<const std::byte> serialized) {
     return hash_msg(seqno_hash_.second, serialized);
 }
 

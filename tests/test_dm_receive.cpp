@@ -8,6 +8,7 @@
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
 
+#include "session/crypto/ed25519.hpp"
 #include "test_helper.hpp"
 
 using namespace session;
@@ -22,38 +23,29 @@ constexpr auto SENDER_SEED =
         "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"_hex_u;
 
 struct SenderKeys {
-    std::array<unsigned char, 32> ed_pk;
-    std::array<unsigned char, 64> ed_sk;
-    std::array<unsigned char, 33> session_id;  // 0x05-prefixed long-term X25519 pubkey
+    b32 ed_pk;
+    b64 ed_sk;
+    b33 session_id;  // 0x05-prefixed long-term X25519 pubkey
 
     SenderKeys() {
-        crypto_sign_ed25519_seed_keypair(ed_pk.data(), ed_sk.data(), SENDER_SEED.data());
-        std::array<unsigned char, 32> curve_pk;
-        REQUIRE(0 == crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data()));
-        session_id[0] = 0x05;
-        std::ranges::copy(curve_pk, session_id.begin() + 1);
+        ed25519::keypair(ed_pk, ed_sk);
+        ed25519::pk_to_session_id(session_id, ed_pk);
     }
 };
 
 // Bundles an owned data buffer with a SwarmMessage whose data span points into it,
 // keeping lifetime correct: the buffer must outlive any SwarmMessage referencing it.
 struct OwnedMessage {
-    std::vector<unsigned char> data;
+    std::vector<std::byte> data;
     SwarmMessage msg;
 
     explicit OwnedMessage(
-            std::span<const unsigned char> d,
+            std::span<const std::byte> d,
             std::string hash = "testhash",
             sys_ms ts = from_epoch_ms(1000),
             sys_ms exp = from_epoch_ms(9999)) :
             data{d.begin(), d.end()}, msg{data, std::move(hash), ts, exp} {}
 };
-
-// Cast the std::byte pubkeys returned by TestHelper into unsigned-char spans.
-template <std::size_t N>
-std::span<const unsigned char, N> as_uc(const std::array<std::byte, N>& a) {
-    return std::span<const unsigned char, N>{reinterpret_cast<const unsigned char*>(a.data()), N};
-}
 
 }  // namespace
 
@@ -72,11 +64,11 @@ TEST_CASE("_handle_direct_messages: v1 receive", "[core][dm]") {
 
     TempCore recipient{cbs};
 
-    uc33 recip_session_id;
+    b33 recip_session_id;
     std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
 
     // Minimal valid SessionProtos::Content: field 15 (sigTimestamp) = 1.
-    constexpr auto plaintext = "7801"_hex_u;
+    constexpr auto plaintext = "7801"_hex_b;
     auto encoded =
             encode_dm_v1(plaintext, sender.ed_sk, clock_now_ms(), recip_session_id, std::nullopt);
 
@@ -113,17 +105,12 @@ TEST_CASE("_handle_direct_messages: v2 receive", "[core][dm]") {
     recipient->devices.active_account_keys();
 
     auto [x25519_bytes, mlkem_bytes] = TestHelper::active_account_pubkeys(*recipient);
-    std::array<unsigned char, 33> recip_session_id;
+    b33 recip_session_id;
     std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
 
-    constexpr auto content = "deadbeef"_hex_u;
+    constexpr auto content = "deadbeef"_hex_b;
     auto ct = encrypt_for_recipient_v2(
-            sender.ed_sk,
-            recip_session_id,
-            as_uc(x25519_bytes),
-            as_uc(mlkem_bytes),
-            content,
-            std::nullopt);
+            sender.ed_sk, recip_session_id, x25519_bytes, mlkem_bytes, content, std::nullopt);
 
     OwnedMessage om{std::span{ct}, "hash_v2", from_epoch_ms(5678), from_epoch_ms(8888)};
     recipient->receive_messages({&om.msg, 1}, config::Namespace::Default, true);
@@ -156,20 +143,20 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
 
     TempCore recipient{cbs};
 
-    auto deliver = [&](std::span<const unsigned char> data) {
+    auto deliver = [&](std::span<const std::byte> data) {
         OwnedMessage om{data};
         recipient->receive_messages({&om.msg, 1}, config::Namespace::Default, true);
     };
 
     SECTION("empty data → bad_format") {
-        deliver(std::span<const unsigned char>{});
+        deliver(std::span<const std::byte>{});
         CHECK(received.empty());
         REQUIRE(failures.size() == 1);
         CHECK(failures[0] == MessageDecryptFailure::bad_format);
     }
 
     SECTION("0x00 0x03 → unknown_version") {
-        deliver("0003010203"_hex_u);
+        deliver("0003010203"_hex_b);
         CHECK(received.empty());
         REQUIRE(failures.size() == 1);
         CHECK(failures[0] == MessageDecryptFailure::unknown_version);
@@ -177,7 +164,7 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
 
     SECTION("v2 too short for prefix decryption → bad_format") {
         // Prefix decryption needs at least version(2) + ki(2) + ephemeral_E(32) = 36 bytes.
-        deliver("00020102030405060708"_hex_u);
+        deliver("00020102030405060708"_hex_b);
         CHECK(received.empty());
         REQUIRE(failures.size() == 1);
         CHECK(failures[0] == MessageDecryptFailure::bad_format);
@@ -188,15 +175,15 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
         TempCore other;
         other->devices.active_account_keys();
         auto [x25519_bytes, mlkem_bytes] = TestHelper::active_account_pubkeys(*other);
-        std::array<unsigned char, 33> other_session_id;
+        b33 other_session_id;
         std::ranges::copy(other->globals.session_id(), other_session_id.begin());
 
         auto ct = encrypt_for_recipient_v2(
                 sender.ed_sk,
                 other_session_id,
-                as_uc(x25519_bytes),
-                as_uc(mlkem_bytes),
-                "01"_hex_u,
+                x25519_bytes,
+                mlkem_bytes,
+                "01"_hex_b,
                 std::nullopt);
         deliver(std::span{ct});
         CHECK(received.empty());
@@ -210,20 +197,20 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
         // Both paths throw DecryptV2Error, so no_pfs_key is fired (nothing could decrypt it).
         recipient->devices.active_account_keys();
         auto [x25519_bytes, mlkem_bytes] = TestHelper::active_account_pubkeys(*recipient);
-        std::array<unsigned char, 33> recip_session_id;
+        b33 recip_session_id;
         std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
 
         auto ct = encrypt_for_recipient_v2(
                 sender.ed_sk,
                 recip_session_id,
-                as_uc(x25519_bytes),
-                as_uc(mlkem_bytes),
-                "01"_hex_u,
+                x25519_bytes,
+                mlkem_bytes,
+                "01"_hex_b,
                 std::nullopt);
         // Wire format: [0,1]=version, [2,3]=ki, [4,35]=E, [36,1123]=mlkem_ct, [1124+]=xchacha.
         // Flip the final byte of the xchacha ciphertext to corrupt the AEAD tag.
         REQUIRE(ct.size() > 1124 + 16);
-        ct.back() ^= 0xff;
+        ct.back() ^= std::byte{0xff};
         deliver(std::span{ct});
         CHECK(received.empty());
         REQUIRE(failures.size() == 1);
@@ -231,7 +218,7 @@ TEST_CASE("_handle_direct_messages: failure paths", "[core][dm]") {
     }
 
     SECTION("v1 malformed ciphertext → decrypt_failed") {
-        deliver("0102030405060708"_hex_u);
+        deliver("0102030405060708"_hex_b);
         CHECK(received.empty());
         REQUIRE(failures.size() == 1);
         CHECK(failures[0] == MessageDecryptFailure::decrypt_failed);
@@ -427,11 +414,11 @@ TEST_CASE(
 
     TempCore recipient{cbs};
 
-    uc33 recip_session_id;
+    b33 recip_session_id;
     std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
 
     // Minimal valid SessionProtos::Content: field 15 (sigTimestamp) = 1.
-    constexpr auto plaintext = "7801"_hex_u;
+    constexpr auto plaintext = "7801"_hex_b;
     auto e1 = encode_dm_v1(plaintext, sender.ed_sk, clock_now_ms(), recip_session_id, std::nullopt);
     auto e2 = encode_dm_v1(plaintext, sender.ed_sk, clock_now_ms(), recip_session_id, std::nullopt);
 

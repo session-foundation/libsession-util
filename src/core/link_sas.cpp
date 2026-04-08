@@ -18,7 +18,7 @@ std::array<std::byte, 16> derive_sas_seed(std::span<const std::byte> plaintext) 
                      seed.size(),
                      reinterpret_cast<const char*>(plaintext.data()),
                      plaintext.size(),
-                     salt.data(),
+                     reinterpret_cast<const unsigned char*>(salt.data()),
                      /*opslimit=*/2,
                      /*memlimit=*/16ULL * 1024 * 1024,
                      crypto_pwhash_ALG_ARGON2ID13))

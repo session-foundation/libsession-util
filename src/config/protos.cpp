@@ -3,6 +3,9 @@
 #include <sodium/crypto_scalarmult.h>
 #include <sodium/crypto_sign_ed25519.h>
 
+#include <oxen/log.hpp>
+#include <oxenc/hex.h>
+
 #include <array>
 #include <stdexcept>
 #include <vector>
@@ -10,6 +13,7 @@
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
 #include "session/session_encrypt.hpp"
+#include "session/util.hpp"
 
 namespace session::config::protos {
 
@@ -33,24 +37,12 @@ namespace {
 
 }  // namespace
 
-std::vector<unsigned char> wrap_config(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> data,
+std::vector<std::byte> wrap_config(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte> data,
         int64_t seqno,
         config::Namespace t) {
-    std::array<unsigned char, 64> tmp_sk;
-    if (ed25519_sk.size() == 32) {
-        std::array<unsigned char, 32> ignore_pk;
-        crypto_sign_ed25519_seed_keypair(ignore_pk.data(), tmp_sk.data(), ed25519_sk.data());
-        ed25519_sk = {tmp_sk.data(), 64};
-    } else if (ed25519_sk.size() != 64)
-        throw std::invalid_argument{
-                "Error: ed25519_sk is not the expected 64-byte Ed25519 secret key"};
-
-    std::array<unsigned char, 32> my_xpk;
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(my_xpk.data(), ed25519_sk.data() + 32))
-        throw std::invalid_argument{
-                "Failed to convert Ed25519 pubkey to X25519; invalid secret key?"};
+    auto my_xpk = ed25519::pk_to_x25519(ed25519_sk.pubkey());
 
     if (static_cast<int16_t>(t) > 5)
         throw std::invalid_argument{"Error: received invalid outgoing SharedConfigMessage type"};
@@ -91,7 +83,7 @@ std::vector<unsigned char> wrap_config(
     // derived from our private key, but old Session clients expect this.
     // NOTE: This is dumb.
     auto enc_shared_conf = encrypt_for_recipient_deterministic(
-            ed25519_sk, {my_xpk.data(), my_xpk.size()}, to_span(shared_conf));
+            ed25519_sk, my_xpk, to_span<std::byte>(shared_conf));
 
     // This is the point in session client code where this value got base64-encoded, passed to
     // another function, which then base64-decoded that value to put into the envelope.  We're going
@@ -121,24 +113,16 @@ std::vector<unsigned char> wrap_config(
     msg.set_type(WebSocketProtos::WebSocketMessage_Type_REQUEST);
     *msg.mutable_request() = webreq;
 
-    return to_vector(msg.SerializeAsString());
+    return to_vector<std::byte>(msg.SerializeAsString());
 }
 
-std::vector<unsigned char> unwrap_config(
-        std::span<const unsigned char> ed25519_sk,
-        std::span<const unsigned char> data,
+std::vector<std::byte> unwrap_config(
+        const ed25519::PrivKeySpan& ed25519_sk,
+        std::span<const std::byte> data,
         config::Namespace ns) {
     // Hurray, we get to undo everything from the above!
 
-    std::array<unsigned char, 64> tmp_sk;
-    if (ed25519_sk.size() == 32) {
-        std::array<unsigned char, 32> ignore_pk;
-        crypto_sign_ed25519_seed_keypair(ignore_pk.data(), tmp_sk.data(), ed25519_sk.data());
-        ed25519_sk = {tmp_sk.data(), 64};
-    } else if (ed25519_sk.size() != 64)
-        throw std::invalid_argument{
-                "Error: ed25519_sk is not the expected 64-byte Ed25519 secret key"};
-    auto ed25519_pk = ed25519_sk.subspan(32);
+    auto ed25519_pk = ed25519_sk.pubkey();
 
     WebSocketProtos::WebSocketMessage req{};
 
@@ -152,19 +136,19 @@ std::vector<unsigned char> unwrap_config(
     if (!envelope.ParseFromString(req.request().body()))
         throw std::runtime_error{"Failed to parse Envelope"};
 
-    auto [content, sender] = decrypt_incoming(ed25519_sk, to_span(envelope.content()));
+    auto [content, sender] = decrypt_incoming(ed25519_sk, to_span<std::byte>(envelope.content()));
     if (to_string_view(sender) != to_string_view(ed25519_pk))
         throw std::runtime_error{"Incoming config data was not from us; ignoring"};
 
     if (content.empty())
         throw std::runtime_error{"Incoming config data decrypted to empty string"};
 
-    if (!(content.back() == 0x00 || content.back() == 0x80))
+    if (!(content.back() == std::byte{0x00} || content.back() == std::byte{0x80}))
         throw std::runtime_error{"Incoming config data doesn't have required padding"};
 
     if (auto it = std::find_if(
-                content.rbegin(), content.rend(), [](unsigned char c) { return c != 0; });
-        it != content.rend() && *it == 0x80)
+                content.rbegin(), content.rend(), [](std::byte c) { return c != std::byte{0}; });
+        it != content.rend() && *it == std::byte{0x80})
         content.resize(content.size() - std::distance(content.rbegin(), it) - 1);
     else
         throw std::runtime_error{"Incoming config data has invalid padding"};
@@ -180,7 +164,7 @@ std::vector<unsigned char> unwrap_config(
         throw std::runtime_error{"SharedConfig has wrong kind for config namespace"};
 
     // if ParseFromString fails, we have a raw (not protobuf encoded) message
-    return to_vector(shconf.data());
+    return to_vector<std::byte>(shconf.data());
 }
 
 }  // namespace session::config::protos

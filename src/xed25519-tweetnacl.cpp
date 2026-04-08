@@ -121,9 +121,9 @@ void inv25519(gf o,const gf i)
 
 }  // namespace
 
-std::array<unsigned char, 32> pubkey(std::span<const unsigned char, 32> x_pk) noexcept {
+std::array<std::byte, 32> pubkey(std::span<const std::byte, 32> x_pk) noexcept {
     gf u;
-    unpack25519(u, x_pk.data());
+    unpack25519(u, reinterpret_cast<const uint8_t*>(x_pk.data()));
 
     //  u - 1
     gf u_minus_one;
@@ -142,8 +142,8 @@ std::array<unsigned char, 32> pubkey(std::span<const unsigned char, 32> x_pk) no
     M(y, u_minus_one, u_plus_one_inv);
 
     // Encode to 32 bytes (sign bit is naturally 0)
-    std::array<unsigned char, 32> ed_pk;
-    pack25519(ed_pk.data(), y);
+    std::array<std::byte, 32> ed_pk;
+    pack25519(reinterpret_cast<uint8_t*>(ed_pk.data()), y);
     return ed_pk;
 }
 

@@ -1,5 +1,4 @@
 #include <fmt/format.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <session/config/contacts.hpp>
@@ -10,13 +9,9 @@ using namespace session::config;
 
 TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -25,14 +20,14 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts c1{session::to_span(seed), std::nullopt};
+    session::config::Contacts c1{seed, std::nullopt};
     c1.set_name("050000000000000000000000000000000000000000000000000000000000000000", "alfonso");
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
     c1.confirm_pushed(seqno, {"fakehash1"});
 
-    session::config::Contacts c2{session::to_span(seed), c1.dump()};
-    session::config::Contacts c3{session::to_span(seed), c1.dump()};
+    session::config::Contacts c2{seed, c1.dump()};
+    session::config::Contacts c3{seed, c1.dump()};
 
     CHECK_FALSE(c2.needs_dump());
     CHECK_FALSE(c2.needs_push());
@@ -53,7 +48,7 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
     REQUIRE(seqno3 == 2);
     CHECK(as_set(obs3) == make_set("fakehash1"s));
 
-    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const std::byte>>>{
             {{"fakehash2", data2[0]}, {"fakehash3", data3[0]}}});
     CHECK(r == std::unordered_set{{"fakehash2"s, "fakehash3"s}});
     CHECK(c1.needs_dump());
@@ -77,13 +72,9 @@ TEST_CASE("Dirty/Mutable test case", "[config][dirty]") {
 // included in the old_hashes (which would result in clients deleting the current config from the
 // swarm)
 TEST_CASE("Merge existing config into clean state", "[config][merge_existing]") {
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -92,7 +83,7 @@ TEST_CASE("Merge existing config into clean state", "[config][merge_existing]") 
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts c1{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Contacts c1{seed, std::nullopt};
     c1.set_name("050000000000000000000000000000000000000000000000000000000000000000", "alfonso");
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
@@ -101,7 +92,7 @@ TEST_CASE("Merge existing config into clean state", "[config][merge_existing]") 
     CHECK(!c1.needs_dump());
     CHECK(!c1.needs_push());
 
-    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const std::byte>>>{
             {{"fakehash1"s, session::to_span(data[0])}}});
     CHECK(as_set(r) == make_set("fakehash1"s));
 
@@ -114,13 +105,9 @@ TEST_CASE("Merge existing config into clean state", "[config][merge_existing]") 
 // in old_hashes (which ends up being the same hash the dirty config gets after pushing, resulting
 // in the current config getting deleted from the swarm)
 TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]") {
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -129,13 +116,13 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::Contacts c1{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::Contacts c1{seed, std::nullopt};
     c1.set_name("050000000000000000000000000000000000000000000000000000000000000000", "alfonso");
     auto [seqno, data, obsolete] = c1.push();
     CHECK(obsolete == std::vector<std::string>{});
     c1.confirm_pushed(seqno, {"fakehash1"s});
 
-    session::config::Contacts c2{std::span<const unsigned char>{seed}, c1.dump()};
+    session::config::Contacts c2{seed, c1.dump()};
 
     CHECK_FALSE(c2.needs_dump());
     CHECK_FALSE(c2.needs_push());
@@ -151,7 +138,7 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     c2.confirm_pushed(seqno2, {"fakehash2"s});
 
     CHECK(c1.is_dirty());  // already dirty before the merge
-    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+    auto r = c1.merge(std::vector<std::pair<std::string, std::span<const std::byte>>>{
             {{"fakehash2"s, session::to_span(data2[0])}}});
     CHECK(r == std::unordered_set{{"fakehash2"s}});
     CHECK(c1.needs_dump());
@@ -171,7 +158,7 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     c2.confirm_pushed(seqno3, {"fakehash3"s});
 
     CHECK(c1.is_dirty());  // already dirty before the merge
-    auto r2 = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+    auto r2 = c1.merge(std::vector<std::pair<std::string, std::span<const std::byte>>>{
             {{"fakehash3", session::to_span(data3[0])}}});
     CHECK(r2 == std::unordered_set{{"fakehash3"s}});
     CHECK(c1.needs_dump());
@@ -203,7 +190,7 @@ TEST_CASE("Merge config matching local changse", "[config][merge_matching_dirty]
     c1.set_name("051111111111111111111111111111111111111111111111111111111111111140", "barney40");
     auto size_before_merge = c1.size();  // retrieve size before trying to merge
     CHECK(c1.is_dirty());                // already dirty before the merge
-    auto r4 = c1.merge(std::vector<std::pair<std::string, std::span<const unsigned char>>>{
+    auto r4 = c1.merge(std::vector<std::pair<std::string, std::span<const std::byte>>>{
             {{"fakehash21", session::to_span(data4[0])}}});
     CHECK(r4 == std::unordered_set{{"fakehash21"s}});
     CHECK(c1.needs_dump());

@@ -57,9 +57,9 @@ std::string session_id_to_bytes(std::string_view session_id, std::string_view pr
     return oxenc::from_hex(session_id);
 }
 
-std::array<unsigned char, 32> session_id_pk(std::string_view session_id, std::string_view prefix) {
+b32 session_id_pk(std::string_view session_id, std::string_view prefix) {
     check_session_id(session_id, prefix);
-    std::array<unsigned char, 32> pk;
+    b32 pk;
     session_id.remove_prefix(2);
     oxenc::from_hex(session_id.begin(), session_id.end(), pk.begin());
     return pk;
@@ -72,8 +72,8 @@ void check_encoded_pubkey(std::string_view pk) {
         throw std::invalid_argument{"Invalid encoded pubkey: expected hex, base32z or base64"};
 }
 
-std::vector<unsigned char> decode_pubkey(std::string_view pk) {
-    std::vector<unsigned char> pubkey;
+std::vector<std::byte> decode_pubkey(std::string_view pk) {
+    std::vector<std::byte> pubkey;
     pubkey.reserve(32);
     if (pk.size() == 64 && oxenc::is_hex(pk))
         oxenc::from_hex(pk.begin(), pk.end(), std::back_inserter(pubkey));
@@ -187,13 +187,11 @@ std::string_view sv_or_empty(const session::config::dict& d, const char* key) {
     return ""sv;
 }
 
-std::optional<std::vector<unsigned char>> maybe_vector(
+std::optional<std::vector<std::byte>> maybe_vector(
         const session::config::dict& d, const char* key) {
-    std::optional<std::vector<unsigned char>> result;
+    std::optional<std::vector<std::byte>> result;
     if (auto* s = maybe_scalar<std::string>(d, key))
-        result.emplace(
-                reinterpret_cast<const unsigned char*>(s->data()),
-                reinterpret_cast<const unsigned char*>(s->data()) + s->size());
+        result = to_vector(*s);
     return result;
 }
 

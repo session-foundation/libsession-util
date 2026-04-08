@@ -15,8 +15,8 @@ namespace opt {
     using namespace std::chrono_literals;
 
     namespace {
-        inline std::vector<unsigned char> from_hex(std::string_view s) {
-            std::vector<unsigned char> out;
+        inline std::vector<std::byte> from_hex(std::string_view s) {
+            std::vector<std::byte> out;
             out.reserve(s.size() / 2);
             oxenc::from_hex(s.begin(), s.end(), std::back_inserter(out));
 

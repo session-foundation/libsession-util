@@ -103,15 +103,15 @@ class decryption_failure : public std::runtime_error {
 // the randomness.
 static crypto_secretstream_xchacha20poly1305_state
 secretstream_xchacha20poly1305_init_push_with_nonce(
-        std::span<unsigned char, ENCRYPT_HEADER> header,
-        std::span<const unsigned char, ENCRYPT_KEY_SIZE> key,
-        std::span<const unsigned char, ENCRYPT_HEADER> nonce) {
+        std::span<std::byte, ENCRYPT_HEADER> header,
+        std::span<const std::byte, ENCRYPT_KEY_SIZE> key,
+        std::span<const std::byte, ENCRYPT_HEADER> nonce) {
 
     crypto_secretstream_xchacha20poly1305_state st;
 
     std::memcpy(header.data(), nonce.data(), ENCRYPT_HEADER);
     crypto_core_hchacha20(
-            st.k, header.data(), reinterpret_cast<const unsigned char*>(key.data()), nullptr);
+            st.k, to_unsigned(header.data()), to_unsigned(key.data()), nullptr);
     static_assert(sizeof(st) == 52);
     std::memset(st.nonce, 0, 4 /*crypto_secretstream_xchacha20poly1305_COUNTERBYTES*/);
     st.nonce[0] = 1;
@@ -267,12 +267,11 @@ size_t decrypt(
         throw std::logic_error{
                 "Attachment decryption failed: output buffer too small to decrypt contents"};
 
-    std::span<const unsigned char> uenc{
-            reinterpret_cast<const unsigned char*>(encrypted.data()), encrypted.size()};
+    auto uenc = encrypted;
 
     crypto_secretstream_xchacha20poly1305_state st;
     crypto_secretstream_xchacha20poly1305_init_pull(
-            &st, uenc.data() + 1, reinterpret_cast<const unsigned char*>(key.data()));
+            &st, to_unsigned(uenc.data() + 1), to_unsigned(key.data()));
 
     auto* inpos = uenc.data() + 1 + ENCRYPT_HEADER;
     auto* const inend = uenc.data() + uenc.size();
@@ -302,7 +301,7 @@ size_t decrypt(
                         reinterpret_cast<unsigned char*>(padbuf.data()),
                         nullptr,
                         &tag,
-                        inpos,
+                        to_unsigned(inpos),
                         chunk_size + ENCRYPT_CHUNK_OVERHEAD,
                         nullptr,
                         0) != 0)
@@ -361,7 +360,7 @@ size_t decrypt(
                     reinterpret_cast<unsigned char*>(decrypted),
                     nullptr,
                     &tag,
-                    inpos,
+                    to_unsigned(inpos),
                     chunk_size + ENCRYPT_CHUNK_OVERHEAD,
                     nullptr,
                     0) != 0)

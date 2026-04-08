@@ -5,15 +5,19 @@
 #include <sodium/crypto_auth_hmacsha256.h>
 #include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_hash_sha512.h>
+#include <sodium/crypto_pwhash.h>
 #include <sodium/crypto_xof_shake256.h>
 #include <sodium/utils.h>
 
 #include <array>
+#include <cassert>
 #include <optional>
 #include <ranges>
 #include <span>
 #include <type_traits>
 #include <vector>
+
+#include "session/util.hpp"
 
 namespace session::hash {
 
@@ -32,9 +36,9 @@ namespace session::hash {
 /// Deprecated: prefer hash::blake2b (unkeyed) or hash::blake2b_key (keyed) instead.
 [[deprecated("Use hash::blake2b or hash::blake2b_key instead")]]
 void hash(
-        std::span<unsigned char> hash,
-        std::span<const unsigned char> msg,
-        std::optional<std::span<const unsigned char>> key = std::nullopt);
+        std::span<std::byte> hash,
+        std::span<const std::byte> msg,
+        std::optional<std::span<const std::byte>> key = std::nullopt);
 
 /// API: hash/hash
 ///
@@ -52,16 +56,17 @@ void hash(
 ///
 /// Deprecated: prefer hash::blake2b (unkeyed) or hash::blake2b_key (keyed) instead.
 [[deprecated("Use hash::blake2b or hash::blake2b_key instead")]]
-std::vector<unsigned char> hash(
+std::vector<std::byte> hash(
         const size_t size,
-        std::span<const unsigned char> msg,
-        std::optional<std::span<const unsigned char>> key = std::nullopt);
+        std::span<const std::byte> msg,
+        std::optional<std::span<const std::byte>> key = std::nullopt);
 
 template <typename T>
 concept ByteContainer =
         std::ranges::contiguous_range<T> && oxenc::basic_char<std::ranges::range_value_t<T>>;
 template <typename T>
-concept HashInput = ByteContainer<T> || oxenc::endian_swappable_integer<T>;
+concept HashInput =
+        ByteContainer<T> || oxenc::endian_swappable_integer<T> || std::same_as<T, std::byte>;
 
 namespace detail {
 
@@ -137,8 +142,97 @@ concept Blake2BKey =
         (detail::container_extent_v<T> == std::dynamic_extent ||
          detail::container_extent_v<T> <= 64);
 
-/// Helper value to pass a null `key` to blake2b or blake2b_pers.
-inline constexpr std::span<unsigned char, 0> nullkey{};
+/// Helper value to pass a null key to blake2b_key, blake2b_key_pers, or blake2b_hasher (e.g. when
+/// only a personalisation string is wanted).
+inline constexpr std::span<std::byte, 0> nullkey{};
+
+/// API: hash/blake2b_hasher
+///
+/// Streaming (piecewise) BLAKE2b hasher with a compile-time fixed output size N (in [1, 64]).
+/// Construct with an optional key and/or personalisation string, call update() with data pieces
+/// in any order, then call finalize() to produce the result.
+///
+/// The output size N is a template parameter and is fixed at construction, so init and finalize
+/// always agree on the size.
+///
+/// Like shake256, non-copyable and non-moveable; the internal state is zeroed on destruction.
+///
+/// Constructors:
+///   blake2b_hasher<N>{}              — no key, no pers
+///   blake2b_hasher<N>{key, nullopt}  — key only
+///   blake2b_hasher<N>{nullkey, pers} — pers only
+///   blake2b_hasher<N>{key, pers}     — key + pers
+///
+/// The two-argument constructor has no default for pers to force explicit intent: if you want
+/// only a key, you must write `std::nullopt`; if you want only a pers, you must write `nullkey`.
+/// This prevents accidentally passing a `_b2b_pers` value as a key.
+///
+/// Example:
+///
+///     hash::blake2b_hasher<32> h{my_key, std::nullopt};
+///     h.update(part1, part2);  // update with multiple args at once
+///     h.update(part3);         // or call update multiple times
+///     auto result = h.finalize();
+///
+template <size_t N>
+    requires(N >= 1 && N <= 64)
+struct blake2b_hasher {
+    crypto_generichash_blake2b_state st;
+
+    /// No-key, no-pers constructor.
+    blake2b_hasher() {
+        crypto_generichash_blake2b_init_salt_personal(&st, nullptr, 0, N, nullptr, nullptr);
+    }
+
+    /// Key + optional personalisation constructor.  Pass `nullkey` as key for pers-only;
+    /// pass `std::nullopt` as pers for key-only.
+    ///
+    /// Dynamic-extent keys are silently truncated to 64 bytes (the blake2b key size limit);
+    /// static-extent keys are guaranteed ≤ 64 at compile time by the Blake2BKey concept.
+    template <Blake2BKey Key>
+    blake2b_hasher(const Key& key, std::optional<std::span<const std::byte, 16>> pers) {
+        crypto_generichash_blake2b_init_salt_personal(
+                &st,
+                reinterpret_cast<const unsigned char*>(std::ranges::data(key)),
+                std::min<size_t>(std::ranges::size(key), 64),
+                N,
+                /*salt=*/nullptr,
+                pers ? reinterpret_cast<const unsigned char*>(pers->data()) : nullptr);
+    }
+
+    ~blake2b_hasher() { sodium_memzero(&st, sizeof(st)); }
+
+    blake2b_hasher(const blake2b_hasher&) = delete;
+    blake2b_hasher& operator=(const blake2b_hasher&) = delete;
+    blake2b_hasher(blake2b_hasher&&) = delete;
+    blake2b_hasher& operator=(blake2b_hasher&&) = delete;
+
+    /// Feeds one or more contiguous byte containers or integer values into the hash state, in
+    /// argument order.  Integer values are written as raw bytes in little-endian encoding (i.e.
+    /// they will be byte-swapped on big-endian platforms if necessary).  May be called multiple
+    /// times; each call appends to the state from previous calls.
+    template <HashInput... T>
+        requires(sizeof...(T) > 0)
+    blake2b_hasher& update(const T&... args) {
+        update_all(st, args...);
+        return *this;
+    }
+
+    /// Write-to-output finalize: writes the N-byte hash into `out`.
+    template <HashOutputContainer Out>
+        requires(detail::container_extent_v<Out> == N)
+    void finalize(Out& out) {
+        crypto_generichash_blake2b_final(
+                &st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), N);
+    }
+
+    /// Return-value finalize: returns a `std::array<std::byte, N>`.
+    std::array<std::byte, N> finalize() {
+        std::array<std::byte, N> result;
+        finalize(result);
+        return result;
+    }
+};
 
 /// API: hash/blake2b_key
 ///
@@ -151,22 +245,12 @@ inline constexpr std::span<unsigned char, 0> nullkey{};
 template <Blake2BOutputContainer Out, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_key(Out& out, const Key& key, const T&... args) {
-    crypto_generichash_blake2b_state st;
-    // Dynamic-extent keys are silently truncated to 64 bytes (the blake2b key size limit); static-
-    // extent keys are guaranteed ≤ 64 at compile time by the Blake2BKey concept.
-    crypto_generichash_blake2b_init(
-            &st,
-            reinterpret_cast<const unsigned char*>(std::ranges::data(key)),
-            std::min<size_t>(std::ranges::size(key), 64),
-            std::ranges::size(out));
-    update_all(st, args...);
-    crypto_generichash_blake2b_final(
-            &st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), std::ranges::size(out));
+    blake2b_hasher<detail::container_extent_v<Out>>{key, std::nullopt}.update(args...).finalize(out);
 }
 template <size_t N, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
-std::array<unsigned char, N> blake2b_key(const Key& key, const T&... args) {
-    std::array<unsigned char, N> result;
+std::array<std::byte, N> blake2b_key(const Key& key, const T&... args) {
+    std::array<std::byte, N> result;
     blake2b_key(result, key, args...);
     return result;
 }
@@ -197,8 +281,8 @@ void blake2b(Out& out, const T&... args) {
 }
 template <size_t N, HashInput... T>
     requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
-std::array<unsigned char, N> blake2b(const T&... args) {
-    std::array<unsigned char, N> result;
+std::array<std::byte, N> blake2b(const T&... args) {
+    std::array<std::byte, N> result;
     blake2b(result, args...);
     return result;
 }
@@ -207,8 +291,8 @@ std::array<unsigned char, N> blake2b(const T&... args) {
 ///
 /// This version of blake2b() takes a both a key and a 16-byte personalisation string as the second
 /// and third arguments and computes a keyed hash with a personalisation string.  The
-/// personalisation string must be exact 16 bytes, and is typically constructed with "..."_b2b_pers
-/// for compile-time validation.  The key must be between 0 and 64 bytes long.
+/// personalisation string must be exactly 16 bytes, and is typically constructed with
+/// "..."_b2b_pers for compile-time validation.  The key must be between 0 and 64 bytes long.
 ///
 /// Two overloads are provided:
 /// - write-to-output: `blake2b_key_pers(out, key, pers, args...)` writes the hash into `out`
@@ -217,24 +301,14 @@ std::array<unsigned char, N> blake2b(const T&... args) {
 template <Blake2BOutputContainer Out, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_key_pers(
-        Out& out, const Key& key, std::span<const unsigned char, 16> pers, const T&... args) {
-    crypto_generichash_blake2b_state st;
-    crypto_generichash_blake2b_init_salt_personal(
-            &st,
-            reinterpret_cast<const unsigned char*>(std::ranges::data(key)),
-            std::min<size_t>(std::ranges::size(key), 64),
-            std::ranges::size(out),
-            /*salt=*/nullptr,
-            pers.data());
-    update_all(st, args...);
-    crypto_generichash_blake2b_final(
-            &st, reinterpret_cast<unsigned char*>(std::ranges::data(out)), std::ranges::size(out));
+        Out& out, const Key& key, std::span<const std::byte, 16> pers, const T&... args) {
+    blake2b_hasher<detail::container_extent_v<Out>>{key, pers}.update(args...).finalize(out);
 }
 template <size_t N, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
-std::array<unsigned char, N> blake2b_key_pers(
-        const Key& key, std::span<const unsigned char, 16> pers, const T&... args) {
-    std::array<unsigned char, N> result;
+std::array<std::byte, N> blake2b_key_pers(
+        const Key& key, std::span<const std::byte, 16> pers, const T&... args) {
+    std::array<std::byte, N> result;
     blake2b_key_pers(result, key, pers, args...);
     return result;
 }
@@ -250,14 +324,13 @@ std::array<unsigned char, N> blake2b_key_pers(
 /// - return-value: `blake2b_pers<N>(pers, args...)` returns a `std::array<unsigned char, N>`
 template <Blake2BOutputContainer Out, HashInput... T>
     requires(sizeof...(T) > 0)
-void blake2b_pers(Out& out, std::span<const unsigned char, 16> pers, const T&... args) {
+void blake2b_pers(Out& out, std::span<const std::byte, 16> pers, const T&... args) {
     return blake2b_key_pers(out, nullkey, pers, args...);
 }
 template <size_t N, HashInput... T>
     requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
-std::array<unsigned char, N> blake2b_pers(
-        std::span<const unsigned char, 16> pers, const T&... args) {
-    std::array<unsigned char, N> result;
+std::array<std::byte, N> blake2b_pers(std::span<const std::byte, 16> pers, const T&... args) {
+    std::array<std::byte, N> result;
     blake2b_pers(result, pers, args...);
     return result;
 }
@@ -277,10 +350,10 @@ std::array<unsigned char, N> blake2b_pers(
 /// Example:
 ///
 ///     // Squeeze two outputs in one call:
-///     hash::shake256("SessionMyKey"_uc, seed)(out_a, out_b);
+///     hash::shake256("SessionMyKey"_bytes, seed)(out_a, out_b);
 ///
 ///     // Or squeeze incrementally:
-///     hash::shake256 sq{"SessionMyKey"_uc, seed};
+///     hash::shake256 sq{"SessionMyKey"_bytes, seed};
 ///     sq(out_a);
 ///     sq(out_b);
 ///
@@ -311,11 +384,11 @@ struct [[nodiscard]] shake256 {
         return *this;
     }
 
-    /// Squeezes N bytes from the state and returns them as a `std::array<unsigned char, N>`.
+    /// Squeezes N bytes from the state and returns them as a `std::array<std::byte, N>`.
     template <size_t N>
         requires(N >= 1)
-    std::array<unsigned char, N> squeeze() {
-        std::array<unsigned char, N> result;
+    std::array<std::byte, N> squeeze() {
+        std::array<std::byte, N> result;
         (*this)(result);
         return result;
     }
@@ -344,7 +417,7 @@ struct [[nodiscard]] shake256 {
 ///
 /// Two overloads are provided:
 /// - write-to-output: `sha3_256(out, args...)` writes the hash into `out`
-/// - return-value: `sha3_256<32>(args...)` returns a `std::array<unsigned char, 32>`
+/// - return-value: `sha3_256<32>(args...)` returns a `std::array<std::byte, 32>`
 template <HashOutputContainer Out, HashInput... T>
     requires(detail::container_extent_v<Out> == 32 && sizeof...(T) > 0)
 void sha3_256(Out& out, const T&... args) {
@@ -355,8 +428,8 @@ void sha3_256(Out& out, const T&... args) {
 }
 template <size_t N, HashInput... T>
     requires(N == 32 && sizeof...(T) > 0)
-std::array<unsigned char, 32> sha3_256(const T&... args) {
-    std::array<unsigned char, 32> result;
+std::array<std::byte, 32> sha3_256(const T&... args) {
+    std::array<std::byte, 32> result;
     sha3_256(result, args...);
     return result;
 }
@@ -412,53 +485,55 @@ void hmac_sha256(Out& out, const Key& key, const T&... args) {
     sodium_memzero(&st, sizeof(st));
 }
 
+// ─── Argon2id (password hashing / KDF) ───────────────────────────────────────
+
+/// Derives a key from a password using Argon2id (libsodium crypto_pwhash).
+/// Throws std::runtime_error if the derivation fails (e.g. out of memory).
+///
+/// Inputs:
+/// - `out`      -- writable byte container to receive the derived key (between 16 and 4294967295
+///                 bytes).
+/// - `password` -- the password/input data.
+/// - `salt`     -- the 16-byte Argon2 salt (`crypto_pwhash_SALTBYTES`).
+/// - `opslimit` -- CPU cost parameter (e.g. `crypto_pwhash_OPSLIMIT_MODERATE`).
+/// - `memlimit` -- memory cost parameter (e.g. `crypto_pwhash_MEMLIMIT_MODERATE`).
+/// - `alg`      -- algorithm selector (e.g. `crypto_pwhash_ALG_ARGON2ID13`).
+template <HashOutputContainer Out>
+    requires(detail::container_extent_v<Out> >= crypto_pwhash_BYTES_MIN)
+void argon2(
+        Out& out,
+        std::span<const char> password,
+        std::span<const std::byte, crypto_pwhash_SALTBYTES> salt,
+        unsigned long long opslimit,
+        size_t memlimit,
+        int alg) {
+    if (0 != crypto_pwhash(
+                     reinterpret_cast<unsigned char*>(std::ranges::data(out)),
+                     std::ranges::size(out),
+                     password.data(),
+                     password.size(),
+                     reinterpret_cast<const unsigned char*>(salt.data()),
+                     opslimit,
+                     memlimit,
+                     alg))
+        throw std::runtime_error{"crypto_pwhash failed (out of memory?)"};
+}
+
 }  // namespace session::hash
 
-namespace session {
+namespace session { inline namespace literals {
 
-template <size_t N>
-struct StringLiteral {
-    std::array<char, N - 1> chars;
-    constexpr StringLiteral(const char (&s)[N]) {
-        for (size_t i = 0; i < N - 1; ++i)
-            chars[i] = s[i];
-    }
-    static constexpr size_t size() { return N; }
-};
-
-inline namespace literals {
-
-    /// User-defined literal for a 16-byte, unsigned char array intended for use as a BLAKE2b
-    /// personality value. Example:
+    /// User-defined literal for a 16-byte personalization value for use with BLAKE2b.
+    /// Enforces the 16-byte length at compile time via the requires clause.  Returns a
+    /// fixed-extent span so it passes directly to blake2b_pers / blake2b_key_pers.  Example:
     ///
-    ///     using namespace session::literals;
+    ///     using namespace session::literals;  // or `using namespace session;`
     ///     constexpr auto PERS_XYZ = "XYZ-XYZ-XYZ-WXYZ"_b2b_pers;
     ///
-    template <StringLiteral Str>
-    constexpr auto operator""_b2b_pers() {
-        static_assert(
-                Str.chars.size() == 16,
-                "BLAKE2b personalization strings must be exactly 16 bytes long");
-        std::array<unsigned char, 16> pers;
-        for (size_t i = 0; i < pers.size(); i++)
-            pers[i] = static_cast<unsigned char>(Str.chars[i]);
-        return pers;
+    template <BytesLiteral Lit>
+        requires(Lit.size == 16)
+    consteval auto operator""_b2b_pers() {
+        return operator""_bytes<Lit>();
     }
 
-    /// User-defined literal for an arbitrary-length, unsigned char array; this is primarily
-    /// intended for fixed keys with BLAKE2b hash.  Example:
-    ///
-    ///     using namespace session::literals;
-    ///     constexpr auto HASH_KEY_42 = "forty-two"_uc;
-    ///
-    template <StringLiteral Str>
-    constexpr auto operator""_uc() {
-        std::array<unsigned char, Str.chars.size()> pers;
-        for (size_t i = 0; i < pers.size(); i++)
-            pers[i] = static_cast<unsigned char>(Str.chars[i]);
-        return pers;
-    }
-
-}  // namespace literals
-
-}  // namespace session
+} }  // namespace session::literals

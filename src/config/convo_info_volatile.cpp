@@ -62,7 +62,7 @@ namespace convo {
     }
 
     community::community(const convo_info_volatile_community& c) :
-            config::community{c.base_url, c.room, std::span<const unsigned char>{c.pubkey, 32}},
+            config::community{c.base_url, c.room, std::as_bytes(std::span{c.pubkey})},
             base(c.last_read, c.unread) {}
 
     void community::into(convo_info_volatile_community& c) const {
@@ -161,7 +161,7 @@ namespace convo {
         base::load(info_dict);
 
         auto pro_expiry = int_or_0(info_dict, "e");
-        std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
+        std::optional<std::vector<std::byte>> maybe_pro_gen_index_hash =
                 maybe_vector(info_dict, "g");
         if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
             pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
@@ -182,8 +182,8 @@ namespace convo {
 }  // namespace convo
 
 ConvoInfoVolatile::ConvoInfoVolatile(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
@@ -208,12 +208,12 @@ convo::one_to_one ConvoInfoVolatile::get_or_construct_1to1(std::string_view pubk
 }
 
 ConfigBase::DictFieldProxy ConvoInfoVolatile::community_field(
-        const convo::community& comm, std::span<const unsigned char>* get_pubkey) const {
+        const convo::community& comm, std::span<const std::byte>* get_pubkey) const {
     auto record = data["o"][comm.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey = to_span(pk);
+            *get_pubkey = to_span<std::byte>(pk);
     }
     return record["R"][comm.room_norm()];
 }
@@ -222,11 +222,11 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
         std::string_view base_url, std::string_view room) const {
     convo::community og{base_url, community::canonical_room(room)};
 
-    std::span<const unsigned char> pubkey;
+    std::span<const std::byte> pubkey;
     if (auto* info_dict = community_field(og, &pubkey).dict()) {
         og.load(*info_dict);
         if (!pubkey.empty())
-            og.set_pubkey(pubkey);
+            og.set_pubkey(pubkey.first<32>());
         return og;
     }
     return std::nullopt;
@@ -241,8 +241,8 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
 convo::community ConvoInfoVolatile::get_or_construct_community(
         std::string_view base_url,
         std::string_view room,
-        std::span<const unsigned char> pubkey) const {
-    convo::community result{base_url, community::canonical_room(room), pubkey};
+        std::span<const std::byte> pubkey) const {
+    convo::community result{base_url, community::canonical_room(room), pubkey.first<32>()};
 
     if (auto* info_dict = community_field(result).dict())
         result.load(*info_dict);
@@ -340,7 +340,7 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     auto pro_expiry = epoch_ms(c.pro_expiry_unix_ts);
     if (pro_expiry > 0 && c.pro_gen_index_hash) {
         set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_gen_index_hash;
+        info["g"] = to_span<std::byte>(*c.pro_gen_index_hash);
     }
 }
 
@@ -410,7 +410,7 @@ void ConvoInfoVolatile::prune_stale(std::chrono::milliseconds prune) {
         erase_community(base, room);
 }
 
-std::tuple<seqno_t, std::vector<std::vector<unsigned char>>, std::vector<std::string>>
+std::tuple<seqno_t, std::vector<std::vector<std::byte>>, std::vector<std::string>>
 ConvoInfoVolatile::push() {
     // Prune off any conversations with last_read timestamps more than PRUNE_HIGH ago (unless they
     // also have a `unread` flag set, in which case we keep them indefinitely).
@@ -446,7 +446,7 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
     auto pro_expiry = epoch_ms(c.pro_expiry_unix_ts);
     if (pro_expiry > 0 && c.pro_gen_index_hash) {
         set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_gen_index_hash;
+        info["g"] = to_span<std::byte>(*c.pro_gen_index_hash);
     }
 }
 
@@ -742,7 +742,10 @@ LIBSESSION_C_API bool convo_info_volatile_get_or_construct_community(
             [&] {
                 unbox<ConvoInfoVolatile>(conf)
                         ->get_or_construct_community(
-                                base_url, room, std::span<const unsigned char>{pubkey, 32})
+                                base_url,
+                                room,
+                                std::span<const std::byte>{
+                                        reinterpret_cast<const std::byte*>(pubkey), 32})
                         .into(*convo);
                 return true;
             },

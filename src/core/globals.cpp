@@ -139,18 +139,20 @@ void Globals::init() {
 
     auto* rw_uc = reinterpret_cast<unsigned char*>(rw.buf.data());
     crypto_sign_ed25519_seed_keypair(
-            _pubkey_ed25519.data(),
+            to_unsigned(_pubkey_ed25519.data()),
             rw_uc,
             reinterpret_cast<const unsigned char*>(seed_to_use->data()));
     crypto_sign_ed25519_sk_to_curve25519(rw_uc + 64, rw_uc);
 
     _predefined_seed.reset();  // Clear now that it has been consumed
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(_pubkey_x25519.data(), _pubkey_ed25519.data()))
+    if (0 != crypto_sign_ed25519_pk_to_curve25519(
+                     to_unsigned(_pubkey_x25519.data()),
+                     to_unsigned(_pubkey_ed25519.data())))
         // This *should* be impossible when starting from a seed because that would mean the seed
         // generation produced an invalid Ed pubkey!
         log::critical(cat, "Failed to convert seed-extracted Ed25519 pubkey to X25519 session ID!");
 
-    _session_id[0] = 0x05;
+    _session_id[0] = std::byte{0x05};
     std::copy(_pubkey_x25519.begin(), _pubkey_x25519.end(), _session_id.data() + 1);
 
     if (!have_seed) {

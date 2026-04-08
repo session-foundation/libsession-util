@@ -42,7 +42,7 @@ class Globals final : detail::CoreComponent {
     session::secure_buffer _account_seed;
     network::ed25519_pubkey _pubkey_ed25519;
     network::x25519_pubkey _pubkey_x25519;
-    std::array<unsigned char, 33> _session_id;  // AKA pubkey_x25519 with a 0x05 byte prefix
+    std::array<std::byte, 33> _session_id;  // AKA pubkey_x25519 with a 0x05 byte prefix
 
     void init() override;
 
@@ -87,22 +87,19 @@ class Globals final : detail::CoreComponent {
         explicit AccountSeedAccess(const session::secure_buffer::r_accessor& acc) : _acc{acc} {}
         session::secure_buffer::r_accessor _acc;
 
-        auto ubuf() const {
-            return std::span<const unsigned char, 96>{
-                    reinterpret_cast<const unsigned char*>(_acc.buf.data()), 96};
-        }
+        auto buf() const { return _acc.buf.first<96>(); }
 
       public:
         /// The raw 32-byte account seed (identical to ed25519_secret().first<32>()).
-        std::span<const unsigned char, 32> seed() const& { return ubuf().first<32>(); }
-        std::span<const unsigned char, 32> seed() const&& = delete;
+        std::span<const std::byte, 32> seed() const& { return buf().first<32>(); }
+        std::span<const std::byte, 32> seed() const&& = delete;
         /// The 64-byte Ed25519 secret key in libsodium format (seed || pubkey).
-        std::span<const unsigned char, 64> ed25519_secret() const& { return ubuf().first<64>(); }
-        std::span<const unsigned char, 64> ed25519_secret() const&& = delete;
+        std::span<const std::byte, 64> ed25519_secret() const& { return buf().first<64>(); }
+        std::span<const std::byte, 64> ed25519_secret() const&& = delete;
         /// The 32-byte X25519 secret key derived from the account seed.  This is also the clamped
         /// private scalar of the Ed25519 key, usable for advanced scalar-multiplication operations.
-        std::span<const unsigned char, 32> x25519_key() const& { return ubuf().last<32>(); }
-        std::span<const unsigned char, 32> x25519_key() const&& = delete;
+        std::span<const std::byte, 32> x25519_key() const& { return buf().last<32>(); }
+        std::span<const std::byte, 32> x25519_key() const&& = delete;
     };
 
     AccountSeedAccess account_seed() {
@@ -110,7 +107,7 @@ class Globals final : detail::CoreComponent {
         return AccountSeedAccess{acc};
     }
     // These are computed from the account_seed during construction:
-    std::span<const unsigned char, 33> session_id() { return _session_id; }
+    std::span<const std::byte, 33> session_id() { return _session_id; }
     const network::ed25519_pubkey& pubkey_ed25519() const { return _pubkey_ed25519; }
     const network::x25519_pubkey& pubkey_x25519() const { return _pubkey_x25519; }
 

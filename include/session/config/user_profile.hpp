@@ -59,8 +59,8 @@ class UserProfile : public ConfigBase {
     /// Outputs:
     /// - `UserProfile` - Constructor
     UserProfile(
-            std::span<const unsigned char> ed25519_secretkey,
-            std::optional<std::span<const unsigned char>> dumped);
+            const ed25519::PrivKeySpan& ed25519_secretkey,
+            std::optional<std::span<const std::byte>> dumped);
 
     /// API: user_profile/UserProfile::storage_namespace
     ///
@@ -128,7 +128,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_profile_pic(std::string_view url, std::span<const std::byte> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -138,7 +138,7 @@ class UserProfile : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_profile_pic(std::string_view url, std::span<const std::byte> key);
     void set_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::set_reupload_profile_pic
@@ -147,7 +147,7 @@ class UserProfile : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key);
     /// void set_reupload_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -157,7 +157,7 @@ class UserProfile : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key);
     void set_reupload_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::get_nts_priority

@@ -1,17 +1,18 @@
 #include <oxenc/hex.h>
 #include <session/config/encrypt.h>
 #include <session/config/user_profile.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
 #include <session/config/base.hpp>
 #include <session/config/user_profile.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
 
+using namespace session;
 using namespace std::literals;
 
 namespace {
@@ -51,13 +52,9 @@ struct UserProfileTester {
 
 TEST_CASE("UserProfile", "[config][user_profile]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
@@ -66,7 +63,7 @@ TEST_CASE("UserProfile", "[config][user_profile]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserProfile profile{seed, std::nullopt};
 
     CHECK_THROWS(
             profile.set_name("123456789012345678901234567890123456789012345678901234567890123456789"
@@ -93,24 +90,19 @@ TEST_CASE("UserProfile", "[config][user_profile]") {
 
 TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex;
-    std::array<unsigned char, 32> ed_pk, curve_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(
-            ed_pk.data(), ed_sk.data(), reinterpret_cast<const unsigned char*>(seed.data()));
-    int rc = crypto_sign_ed25519_pk_to_curve25519(curve_pk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+    auto [ed_pk, ed_sk] = ed25519::keypair(seed);
+    auto curve_pk = ed25519::pk_to_x25519(ed_pk);
 
     REQUIRE(oxenc::to_hex(ed_pk.begin(), ed_pk.end()) ==
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
     REQUIRE(oxenc::to_hex(curve_pk.begin(), curve_pk.end()) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
-    CHECK(oxenc::to_hex(seed) == oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
     // Initialize a brand new, empty config because we have no dump data to deal with.
     char err[256];
     config_object* conf;
-    rc = user_profile_init(&conf, ed_sk.data(), NULL, 0, err);
+    int rc = user_profile_init(&conf, to_unsigned(ed_sk.data()), NULL, 0, err);
     REQUIRE(rc == 0);
 
     // We don't need to push anything, since this is an empty config
@@ -171,10 +163,8 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     pic = user_profile_get_pic(conf);
     REQUIRE(pic.url != ""s);
-    REQUIRE(pic.key != session::to_vector("").data());
     CHECK(pic.url == "http://example.org/omg-pic-123.bmp"sv);
-    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
-          "secret78901234567890123456789012"_bytes);
+    CHECK(std::ranges::equal(to_byte_span(pic.key), "secret78901234567890123456789012"_bytes));
 
     CHECK(user_profile_get_nts_priority(conf) == 9);
 
@@ -188,7 +178,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
                                  // between dumps; even though we changed two fields here).
 
     // The hash of a completely empty, initial seqno=0 message:
-    auto exp_hash0 = "ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hexbytes;
+    auto exp_hash0 = "ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hex_b;
 
     // The data to be actually pushed, expanded like this to make it somewhat human-readable:
     // clang-format off
@@ -221,7 +211,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "2d146da44915063a07a78556ab5eff4f67f6aa26211e8d330b53d28567a931028c393709a325425d"
             "e7486ccde24416a7fd4a8ba5fa73899c65f4276dfaddd5b2100adcf0f793104fb235b31ce32ec656"
             "056009a9ebf58d45d7d696b74e0c7ff0499c4d23204976f19561dc0dba6dc53a2497d28ce03498ea"
-            "49bf122762d7bc1d6d9c02f6d54f8384"_hexbytes;
+            "49bf122762d7bc1d6d9c02f6d54f8384"_hex_b;
 
     // Copy this out; we need to hold onto it to do the confirmation later on
     seqno_t seqno = to_push->seqno;
@@ -285,7 +275,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Start with an empty config, as above:
     config_object* conf2;
-    REQUIRE(user_profile_init(&conf2, ed_sk.data(), NULL, 0, err) == 0);
+    REQUIRE(user_profile_init(&conf2, to_unsigned(ed_sk.data()), NULL, 0, err) == 0);
     CHECK_FALSE(config_needs_dump(conf2));
 
     // Now imagine we just pulled down the encrypted string from the swarm; we merge it into conf2:
@@ -293,7 +283,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     const char* merge_hash[1];
     size_t merge_size[1];
     merge_hash[0] = "fakehash1";
-    merge_data[0] = exp_push1_encrypted.data();
+    merge_data[0] = to_unsigned(exp_push1_encrypted.data());
     merge_size[0] = exp_push1_encrypted.size();
     config_string_list* accepted = config_merge(conf2, merge_hash, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
@@ -415,7 +405,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 #else
     REQUIRE(pic.key != nullptr);
 #endif
-    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
+    CHECK(oxenc::to_hex(to_byte_span(pic.key)) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
     pic = user_profile_get_pic(conf2);
 #if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
@@ -429,7 +419,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 #else
     REQUIRE(pic.key != nullptr);
 #endif
-    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
+    CHECK(oxenc::to_hex(to_byte_span(pic.key)) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
 
     CHECK(user_profile_get_nts_priority(conf) == 9);
@@ -456,10 +446,9 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     // Check the current pic
     pic = user_profile_get_pic(conf);
     REQUIRE(pic.url != ""s);
-    REQUIRE(pic.key != session::to_vector("").data());
+
     CHECK(pic.url == "http://new.example.com/pic"sv);
-    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
-          "qwert\0yuio1234567890123456789012"_bytes);
+    CHECK(std::ranges::equal(to_byte_span(pic.key), "qwert\0yuio1234567890123456789012"_bytes));
 
     // Reupload the "current" pic and confirm it gets returned
     strcpy(p.url, "testUrl");
@@ -468,10 +457,9 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     pic = user_profile_get_pic(conf);
     REQUIRE(pic.url != ""s);
-    REQUIRE(pic.key != session::to_vector("").data());
+
     CHECK(pic.url == "testUrl"sv);
-    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
-          "secret78901234567890123456789000"_bytes);
+    CHECK(std::ranges::equal(to_byte_span(pic.key), "secret78901234567890123456789000"_bytes));
 
     // Upload a "new" pic and it now gets returned
     strcpy(p.url, "testNewUrl");
@@ -479,10 +467,9 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(0 == user_profile_set_pic(conf, p));
     pic = user_profile_get_pic(conf);
     REQUIRE(pic.url != ""s);
-    REQUIRE(pic.key != session::to_vector("").data());
+
     CHECK(pic.url == "testNewUrl"sv);
-    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
-          "secret78901234567890123456789111"_bytes);
+    CHECK(std::ranges::equal(to_byte_span(pic.key), "secret78901234567890123456789111"_bytes));
 
     // Ensure the timestamp for the last modified pic gets updated correctly when the name gets set
     UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
@@ -538,13 +525,13 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
 TEST_CASE("user profile timestamp update bug", "[config][user_profile]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
 
-    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserProfile profile{seed, std::nullopt};
 
     // Initially the code would update `profile_updated` even if the data hadn't changed, this test
     // verifies that no longer happens
-    std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
+    auto key = to_vector("qwerty78901234567890123456789012"_bytes);
     std::string url = "http://example.com/huge.bmp";
     profile.set_name("Nibbler");
     profile.set_blinded_msgreqs(true);
@@ -564,9 +551,9 @@ TEST_CASE("user profile timestamp update bug", "[config][user_profile]") {
 
 TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
 
-    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
 
-    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+    session::config::UserProfile profile{seed, std::nullopt};
 
     // Ensure the bitset is being updated correctly
     CHECK(profile.get_profile_bitset().data == 0);
@@ -596,7 +583,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
             SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
 
     {
-        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        session::config::UserProfile profile2{seed, profile.dump()};
         CHECK(profile2.get_profile_bitset().is_set(
                 SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
         CHECK_FALSE(profile2.get_profile_bitset().is_set(
@@ -604,12 +591,8 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     }
 
     // Ensure the pro config is being stored correctly
-    std::array<unsigned char, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
-    session::cleared_uc64 rotating_sk, signing_sk;
-    {
-        crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
-        crypto_sign_ed25519_keypair(signing_pk.data(), signing_sk.data());
-    }
+    auto [rotating_pk, rotating_sk] = ed25519::keypair();
+    auto [signing_pk, signing_sk] = ed25519::keypair();
 
     session::config::ProConfig pro_cpp = {};
     pro_pro_config pro = {};
@@ -620,7 +603,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
         constexpr auto gen_index_hash =
-                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
         static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
         std::memcpy(
                 pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
@@ -641,7 +624,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     CHECK(profile.get_profile_updated().time_since_epoch().count() != 123);
 
     {
-        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        session::config::UserProfile profile2{seed, profile.dump()};
         CHECK(profile.get_pro_config() == pro_cpp);
     }
 

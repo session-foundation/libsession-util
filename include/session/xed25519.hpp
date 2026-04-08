@@ -5,33 +5,21 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <vector>
+
+#include "util.hpp"
 
 namespace session::xed25519 {
 
 /// XEd25519-signs a message given the curve25519 privkey and message.
-std::array<unsigned char, 64> sign(
-        std::span<const unsigned char> curve25519_privkey /* 32 bytes */,
-        std::span<const unsigned char> msg);
-
-/// std::byte overload; returns a std::byte array.
-std::array<std::byte, 64> sign(
-        std::span<const std::byte> curve25519_privkey /* 32 bytes */,
-        std::span<const std::byte> msg);
+b64 sign(std::span<const std::byte, 32> curve25519_privkey, std::span<const std::byte> msg);
 
 /// "Softer" version that takes and returns strings of regular chars
 std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string_view msg);
 
 /// Verifies a curve25519 message allegedly signed by the given curve25519 pubkey
 [[nodiscard]] bool verify(
-        std::span<const unsigned char> signature /* 64 bytes */,
-        std::span<const unsigned char> curve25519_pubkey /* 32 bytes */,
-        std::span<const unsigned char> msg);
-
-/// std::byte overload
-[[nodiscard]] bool verify(
-        std::span<const std::byte> signature /* 64 bytes */,
-        std::span<const std::byte> curve25519_pubkey /* 32 bytes */,
+        std::span<const std::byte, 64> signature,
+        std::span<const std::byte, 32> curve25519_pubkey,
         std::span<const std::byte> msg);
 
 /// "Softer" version that takes strings of regular chars
@@ -44,10 +32,7 @@ std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string
 /// however, that there are *two* possible Ed25519 pubkeys that could result in a given curve25519
 /// pubkey: this always returns the positive value.  You can get the other possibility (the
 /// negative) by setting the sign bit, i.e. `returned_pubkey[31] |= 0x80`.
-std::array<unsigned char, 32> pubkey(std::span<const unsigned char, 32> curve25519_pubkey) noexcept;
-
-/// std::byte overload; returns a std::byte array.
-std::array<std::byte, 32> pubkey(std::span<const std::byte, 32> curve25519_pubkey) noexcept;
+b32 pubkey(std::span<const std::byte, 32> curve25519_pubkey) noexcept;
 
 /// "Softer" version that takes/returns strings of regular chars.  Throws invalid_argument if the
 /// input is not 32 bytes.
@@ -56,11 +41,11 @@ std::string pubkey(std::string_view curve25519_pubkey);
 /// Utility function that provides a constant-time `if (b) f = g;` implementation for byte arrays.
 template <size_t N>
 void constant_time_conditional_assign(
-        std::array<unsigned char, N>& f, const std::array<unsigned char, N>& g, bool b) {
-    std::array<unsigned char, N> x;
+        std::array<std::byte, N>& f, const std::array<std::byte, N>& g, bool b) {
+    std::array<std::byte, N> x;
     for (size_t i = 0; i < x.size(); i++)
         x[i] = f[i] ^ g[i];
-    unsigned char mask = (unsigned char)(-(signed char)b);
+    auto mask = static_cast<std::byte>(-(signed char)b);
     for (size_t i = 0; i < x.size(); i++)
         x[i] &= mask;
     for (size_t i = 0; i < x.size(); i++)

@@ -1760,9 +1760,9 @@ LIBSESSION_C_API void session_network_send_request(
             throw std::invalid_argument(
                     "Invalid request: Must have either 'snode_dest' or 'server_dest' set.");
 
-        std::optional<std::vector<unsigned char>> body;
+        std::optional<std::vector<std::byte>> body;
         if (params->body && params->body_size > 0)
-            body.emplace(params->body, params->body + params->body_size);
+            body = to_vector(to_byte_span(params->body, params->body_size));
 
         std::optional<std::string> request_id;
         if (params->request_id)
@@ -1851,9 +1851,9 @@ LIBSESSION_C_API session_upload_handle_t* session_network_upload(
         const auto on_complete_fn = callbacks->on_complete;
         const auto ctx = callbacks->ctx;
 
-        cpp_request.next_data = [next_data_fn, ctx]() -> std::vector<unsigned char> {
-            std::vector<unsigned char> buffer(64 * 1024);  // 64KB chunks
-            size_t bytes = next_data_fn(buffer.data(), buffer.size(), ctx);
+        cpp_request.next_data = [next_data_fn, ctx]() -> std::vector<std::byte> {
+            std::vector<std::byte> buffer(64 * 1024);  // 64KB chunks
+            size_t bytes = next_data_fn(to_unsigned(buffer.data()), buffer.size(), ctx);
 
             if (bytes == 0 || bytes == static_cast<size_t>(-1))
                 return {};
@@ -1939,11 +1939,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
                 c_meta.uploaded_timestamp = epoch_seconds(metadata.uploaded);
                 c_meta.expiry_timestamp = epoch_seconds(metadata.expiry);
 
-                on_data_fn(
-                        &c_meta,
-                        reinterpret_cast<const unsigned char*>(data.data()),
-                        data.size(),
-                        ctx);
+                on_data_fn(&c_meta, to_unsigned(data.data()), data.size(), ctx);
             };
 
         cpp_request.on_complete = [on_complete_fn,

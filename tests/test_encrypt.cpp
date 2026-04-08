@@ -14,8 +14,8 @@ using namespace session;
 
 TEST_CASE("config message encryption", "[config][encrypt]") {
     auto message1 = "some message 1"_bytes;
-    auto key1 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"_hexbytes;
-    auto key2 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hexbytes;
+    auto key1 = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"_hex_b;
+    auto key2 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
     auto enc1 = config::encrypt(message1, key1, "test-suite1");
     CHECK(oxenc::to_hex(enc1.begin(), enc1.end()) ==
           "f14f242a26638f3305707d1035e734577f943cd7d28af58e32637e"
@@ -24,19 +24,19 @@ TEST_CASE("config message encryption", "[config][encrypt]") {
     CHECK(to_hex(enc2) != to_hex(enc1));
     auto enc3 = config::encrypt(message1, key2, "test-suite1");
     CHECK(to_hex(enc3) != to_hex(enc1));
-    auto nonce = std::vector<unsigned char>{enc1.begin() + (enc1.size() - 24), enc1.end()};
-    auto nonce2 = std::vector<unsigned char>{enc2.begin() + (enc2.size() - 24), enc2.end()};
-    auto nonce3 = std::vector<unsigned char>{enc3.begin() + (enc3.size() - 24), enc3.end()};
+    auto nonce = std::vector<std::byte>{enc1.begin() + (enc1.size() - 24), enc1.end()};
+    auto nonce2 = std::vector<std::byte>{enc2.begin() + (enc2.size() - 24), enc2.end()};
+    auto nonce3 = std::vector<std::byte>{enc3.begin() + (enc3.size() - 24), enc3.end()};
     CHECK(to_hex(nonce) == "af2f4860cb4d0f8ba7e09d29e31f5e4a18f65847287a54a0");
     CHECK(to_hex(nonce2) == "277e639d36ba46470dfff509a68cb73d9a96386c51739bdd");
     CHECK(to_hex(nonce3) == to_hex(nonce));
 
     auto plain = config::decrypt(enc1, key1, "test-suite1");
-    CHECK(plain == message1);
+    CHECK(std::ranges::equal(plain, message1));
     CHECK_THROWS_AS(config::decrypt(enc1, key1, "test-suite2"), config::decrypt_error);
     CHECK_THROWS_AS(config::decrypt(enc1, key2, "test-suite1"), config::decrypt_error);
 
-    enc1[3] = '\x42';
+    enc1[3] = std::byte{0x42};
     CHECK_THROWS_AS(config::decrypt(enc1, key1, "test-suite1"), config::decrypt_error);
 }
 

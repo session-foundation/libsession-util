@@ -240,7 +240,7 @@ typedef struct session_decrypt_group_message_result {
     size_t index;         // Index of the key that successfully decrypted the message
     char session_id[66];  // In hex
     span_u8 plaintext;    // Decrypted message on success. Must be freed by calling the CRT's `free`
-    char error_len_incl_null_terminator;
+    size_t error_len_incl_null_terminator;
 } session_decrypt_group_message_result;
 
 /// API: crypto/session_decrypt_group_message

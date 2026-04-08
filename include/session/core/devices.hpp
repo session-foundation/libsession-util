@@ -143,8 +143,8 @@ class Devices final : detail::CoreComponent {
 
     // Processes a single incoming device group ("D") or link request ("L") message.  `data` is the
     // full raw message bytes including the outer bt-dict wrapper with the "" type key.
-    void receive_device_group_message(std::span<const unsigned char> data);
-    void receive_link_request(std::span<const unsigned char> data);
+    void receive_device_group_message(std::span<const std::byte> data);
+    void receive_link_request(std::span<const std::byte> data);
 
     // Handlers for incoming swarm messages by namespace, called from Core::receive_messages.
     void parse_device_messages(std::span<const SwarmMessage> messages, bool is_final);
@@ -193,10 +193,10 @@ class Devices final : detail::CoreComponent {
 
     // Stores the X25519 + MLKEM768 keys that make up an "X-Wing" key
     struct XWingKeys {
-        cleared_uc32 x25519_sec;
-        std::array<unsigned char, 32> x25519_pub;
-        cleared_array<unsigned char, 2400> mlkem768_sec;
-        std::array<unsigned char, 1184> mlkem768_pub;
+        cleared_b32 x25519_sec;
+        std::array<std::byte, 32> x25519_pub;
+        cleared_array<std::byte, 2400> mlkem768_sec;
+        std::array<std::byte, 1184> mlkem768_pub;
     };
 
     struct DeviceKeys : XWingKeys {
@@ -249,7 +249,7 @@ class Devices final : detail::CoreComponent {
     // returned (using the indexed key_indicator virtual column); otherwise all retained keys are
     // returned and a new key is auto-generated if none is currently active.
     std::vector<AccountKeys> active_account_keys(
-            std::optional<std::span<const unsigned char, 2>> key_indicator = std::nullopt);
+            std::optional<std::span<const std::byte, 2>> key_indicator = std::nullopt);
 
     // Returns the time when this device's unique device key is due to be rotated.  Returns nullopt
     // if this device is not currently part of the device group.

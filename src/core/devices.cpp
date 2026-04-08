@@ -1,15 +1,13 @@
 #include <fmt/ranges.h>
-#include <mlkem_native.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_aead_chacha20poly1305.h>
-#include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_scalarmult_curve25519.h>
-#include <sodium/crypto_sign_ed25519.h>
-#include <sodium/crypto_stream_xchacha20.h>
-#include <sodium/utils.h>
+
+#include <session/crypto/x25519.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/encrypt.hpp>
+#include <session/crypto/mlkem768.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -61,11 +59,11 @@ template <typename T>
 consteval auto KEY_DOMAIN() = delete;
 template <>
 consteval auto KEY_DOMAIN<Devices::DeviceKeys>() {
-    return "SessionDeviceKeys"_uc;
+    return "SessionDeviceKeys"_bytes;
 }
 template <>
 consteval auto KEY_DOMAIN<Devices::AccountKeys>() {
-    return "SessionAccountKeys"_uc;
+    return "SessionAccountKeys"_bytes;
 }
 
 template <std::derived_from<Devices::XWingKeys> Keys>
@@ -73,17 +71,16 @@ static Keys keys_from_seed(std::span<const std::byte, 32> seed) {
     Keys keys;
     auto& [x_sec, x_pub, ml_sec, ml_pub] = static_cast<Devices::XWingKeys&>(keys);
 
-    static_assert(MLKEM768_PUBLICKEYBYTES == sizeof(ml_pub));
-    static_assert(MLKEM768_SECRETKEYBYTES == sizeof(ml_sec));
+    static_assert(mlkem768::PUBLICKEYBYTES == sizeof(ml_pub));
+    static_assert(mlkem768::SECRETKEYBYTES == sizeof(ml_sec));
 
     // Use SHAKE256 to expand the seed into separate X25519 and MLKEM-768 seeds.  Domain
     // separation is achieved by prepending the domain string before the seed.
-    cleared_array<unsigned char, 2 * MLKEM_SYMBYTES> ml_seed;
+    cleared_array<std::byte, mlkem768::SEEDBYTES> ml_seed;
     hash::shake256(KEY_DOMAIN<Keys>(), seed)(x_sec, ml_seed);
-    crypto_scalarmult_curve25519_base(x_pub.data(), x_sec.data());
+    x25519::scalarmult_base(x_pub, x_sec);
 
-    if (0 != sr_mlkem768_keypair_derand(ml_pub.data(), ml_sec.data(), ml_seed.data()))
-        throw std::runtime_error{"ML-KEM-768 keygen failed!"};
+    mlkem768::keygen(ml_pub, ml_sec, ml_seed);
 
     return keys;
 }
@@ -191,7 +188,7 @@ std::vector<Devices::DeviceKeys> Devices::active_device_keys() {
 }
 
 std::vector<Devices::AccountKeys> Devices::active_account_keys(
-        std::optional<std::span<const unsigned char, 2>> key_indicator) {
+        std::optional<std::span<const std::byte, 2>> key_indicator) {
     auto c = conn();
     SQLite::Transaction tx{c.sql};
 
@@ -217,7 +214,7 @@ std::vector<Devices::AccountKeys> Devices::active_account_keys(
             int64_t,
             std::optional<int64_t>,
             sqlite::blobn<32>,
-            sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+            sqlite::blobn<mlkem768::PUBLICKEYBYTES>,
             sqlite::blobn<32>>;
 
     for (auto [id, created, rotated, seed, pk_ml, pk_x] :
@@ -263,7 +260,7 @@ namespace {
             std::string type,
             std::string desc,
             int64_t ver,
-            const sqlite::blobn<MLKEM768_PUBLICKEYBYTES>& pk_ml,
+            const sqlite::blobn<mlkem768::PUBLICKEYBYTES>& pk_ml,
             const sqlite::blobn<32>& pk_x) {
         device::Info info;
         std::memcpy(info.id.data(), devid.data(), info.id.size());
@@ -391,7 +388,7 @@ device::map Devices::devices(
                  std::string,
                  std::string,
                  int64_t,
-                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+                 sqlite::blobn<mlkem768::PUBLICKEYBYTES>,
                  sqlite::blobn<32>>{std::move(st)}) {
         auto& info = devs[devid];
         info = fill_device_info(
@@ -624,7 +621,7 @@ namespace {
         info.timestamp = std::chrono::sys_seconds{std::chrono::seconds{dev.require<int64_t>("@")}};
 
         read_extras(dev, "M", info.extra);
-        auto M = dev.require_span<std::byte, MLKEM768_PUBLICKEYBYTES>("M");
+        auto M = dev.require_span<std::byte, mlkem768::PUBLICKEYBYTES>("M");
         std::memcpy(info.pk_mlkem768.data(), M.data(), M.size());
 
         read_extras(dev, "X", info.extra);
@@ -752,11 +749,10 @@ namespace {
 }  // namespace
 
 std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) {
-    cleared_uc32 a;
+    cleared_b32 a;
     random::fill(a);
 
-    std::array<unsigned char, 32> A;
-    crypto_scalarmult_curve25519_base(A.data(), a.data());
+    auto A = x25519::scalarmult_base(a);
 
     int padded_count = devices.size();
     padded_count = (padded_count + 3) / 4 * 4;
@@ -769,61 +765,56 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     std::ranges::shuffle(pos_map, csrng);
 
     // Holds MLKEM ciphertexts:
-    std::vector<unsigned char> ciphertext_raw;
-    ciphertext_raw.resize(MLKEM768_CIPHERTEXTBYTES * padded_count);
+    std::vector<std::byte> ciphertext_raw;
+    ciphertext_raw.resize(mlkem768::CIPHERTEXTBYTES * padded_count);
     // Holds per-device-encrypted copies of the base key, each prefixed with a 2-byte key indicator
     // hash:
-    std::vector<unsigned char> enc_key_raw;
+    std::vector<std::byte> enc_key_raw;
     enc_key_raw.resize((2 + 32) * padded_count);
 
     // Accessor for the relevant, position-mapped subspan of ciphertext_raw/enc_key_raw containing
     // the location of index i as a subspan of the raw vector:
     auto ciphertext = indices | std::views::transform([&](int i) {
-                          return std::span<unsigned char, MLKEM768_CIPHERTEXTBYTES>{
-                                  ciphertext_raw.data() + pos_map[i] * MLKEM768_CIPHERTEXTBYTES,
-                                  MLKEM768_CIPHERTEXTBYTES};
+                          return std::span<std::byte, mlkem768::CIPHERTEXTBYTES>{
+                                  ciphertext_raw.data() + pos_map[i] * mlkem768::CIPHERTEXTBYTES,
+                                  mlkem768::CIPHERTEXTBYTES};
                       });
 
     auto enc_indicator =
             indices | std::views::transform([&](int i) {
-                return std::span<unsigned char, 2>{enc_key_raw.data() + pos_map[i] * (2 + 32), 2};
+                return std::span<std::byte, 2>{enc_key_raw.data() + pos_map[i] * (2 + 32), 2};
             });
 
     auto enc_key = indices | std::views::transform([&](int i) {
-                       return std::span<unsigned char, 32>{
+                       return std::span<std::byte, 32>{
                                enc_key_raw.data() + pos_map[i] * (2 + 32) + 2, 32};
                    });
 
-    sodium_array<unsigned char> ml_ss_raw{MLKEM768_BYTES * devices.size()};
+    cleared_vector<std::byte> ml_ss_raw(mlkem768::SHAREDSECRETBYTES * devices.size());
 
     // Dynamic ss subspan accessor of ml_ss_raw, but *doesn't* go through the pos_map (unlike the
     // above constructs), and only goes up to the actual number of devices, not the padded number
     // (because this is never transmitted, and so not shuffled or padded).
     auto ml_ss = std::views::iota(size_t{0}, devices.size()) | std::views::transform([&](size_t i) {
-                     return std::span<unsigned char, MLKEM768_BYTES>{
-                             ml_ss_raw.data() + i * MLKEM768_BYTES, MLKEM768_BYTES};
+                     return std::span<std::byte, mlkem768::SHAREDSECRETBYTES>{
+                             ml_ss_raw.data() + i * mlkem768::SHAREDSECRETBYTES, mlkem768::SHAREDSECRETBYTES};
                  });
 
-    cleared_uc32 rnd;
+    cleared_b32 rnd;
     int i = -1;
     for (auto& [devid, info] : devices) {
         ++i;
         random::fill(rnd);
-        if (0 != sr_mlkem768_enc_derand(
-                         ciphertext[i].data(),
-                         ml_ss[i].data(),
-                         reinterpret_cast<const unsigned char*>(info.pk_mlkem768.data()),
-                         rnd.data()))
-            throw std::runtime_error{"ML-KEM-768 encapsulation failed!"};
+        mlkem768::encapsulate(ciphertext[i], ml_ss[i], info.pk_mlkem768, rnd);
     }
     // Fill padding entries with randomness:
     for (; i < padded_count; i++)
         random::fill(ciphertext[i]);
 
-    std::array<unsigned char, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
+    std::array<std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
     hash::blake2b_key_pers(nonce, A, PERS_DEV_NONCE, ciphertext_raw);
 
-    cleared_uc32 key_base;
+    cleared_b32 key_base;
     random::fill(key_base);
 
     // Fetch account key seeds for inclusion in the payload.
@@ -839,21 +830,12 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     }
 
     auto plaintext_devices = encode_group_payload(devices, acc_keys);
-    std::vector<unsigned char> enc_devices;
+    std::vector<std::byte> enc_devices;
     enc_devices.resize(plaintext_devices.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
-    crypto_aead_xchacha20poly1305_ietf_encrypt(
-            enc_devices.data(),
-            nullptr,
-            reinterpret_cast<const unsigned char*>(plaintext_devices.data()),
-            plaintext_devices.size(),
-            nullptr,
-            0,
-            nullptr,
-            nonce.data(),
-            key_base.data());
+    encrypt::xchacha20poly1305_encrypt(enc_devices, to_span(plaintext_devices), nonce, key_base);
 
-    cleared_uc32 ki;
-    cleared_uc32 aB;
+    cleared_b32 ki;
+    cleared_b32 aB;
     i = -1;
     for (auto& [devid, info] : devices) {
         ++i;
@@ -861,8 +843,8 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
         auto ekey = enc_key[i];
         auto ct = ciphertext[i];
 
-        auto B = to_span<unsigned char>(info.pk_x25519);
-        if (0 != crypto_scalarmult_curve25519(aB.data(), a.data(), B.data())) {
+        auto& B = info.pk_x25519;
+        if (!x25519::scalarmult(aB, a, B)) {
             // This really shouldn't happen: we shouldn't have accepted an invalid pubkey in the
             // first place.
             log::error(
@@ -882,8 +864,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
         hash::blake2b_pers(ki, PERS_KEY_KEY, aB, A, B, ml_ss[i], info.pk_mlkem768);
 
         static_assert(decltype(ekey)::extent == key_base.size());
-        crypto_stream_xchacha20_xor(
-                ekey.data(), key_base.data(), key_base.size(), nonce.data(), ki.data());
+        encrypt::xchacha20_xor(ekey, key_base, nonce, ki);
 
         // Hash a bunch of stuff together as a checksum to let decryption skip most not-for-me
         // values.
@@ -915,15 +896,8 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     o.append("K", enc_key_raw);
     o.append("d", enc_devices);
     o.append_signature(
-            "~", [seed = core.globals.account_seed()](std::span<const unsigned char> body) {
-                std::array<unsigned char, 64> sig;
-                crypto_sign_ed25519_detached(
-                        sig.data(),
-                        nullptr,
-                        body.data(),
-                        body.size(),
-                        seed.ed25519_secret().data());
-                return sig;
+            "~", [seed = core.globals.account_seed()](std::span<const std::byte> body) {
+                return ed25519::sign(seed.ed25519_secret(), body);
             });
 
     assert(o.view().size() == out.size());  // Ensure we calculated exactly the right size above
@@ -946,7 +920,7 @@ static const std::string REGISTER_DEVICE_SQL =
         "UPDATE devices SET processing = {}, broadcast_needed = 1 WHERE id = ?"_format(
                 static_cast<int>(Processing::Registered));
 
-void Devices::receive_device_group_message(std::span<const unsigned char> data) {
+void Devices::receive_device_group_message(std::span<const std::byte> data) {
     GroupPayload payload;
     try {
         auto raw = decrypt_device_data(std::as_bytes(data));
@@ -1064,11 +1038,10 @@ Devices::LinkRequestResult Devices::build_link_request() {
     auto sas = link_request_sas(to_span<std::byte>(plaintext));
 
     // Encrypt the plaintext
-    std::vector<unsigned char> encrypted(plaintext.size() + config::ENCRYPT_DATA_OVERHEAD);
+    std::vector<std::byte> encrypted(plaintext.size() + config::ENCRYPT_DATA_OVERHEAD);
     std::memcpy(encrypted.data(), plaintext.data(), plaintext.size());
     auto seed = core.globals.account_seed();
-    config::encrypt_prealloced(
-            as_span<unsigned char>(std::span{encrypted}), seed.seed(), "link-request");
+    config::encrypt_prealloced(encrypted, seed.seed(), "link-request");
 
     // Wrap in outer bt-dict: {"": "L", "L": <encrypted>}
     std::vector<std::byte> out(
@@ -1078,7 +1051,7 @@ Devices::LinkRequestResult Devices::build_link_request() {
     );
     oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};
     o.append("", "L");
-    o.append("L", std::span<const unsigned char>{encrypted});
+    o.append("L", std::span<const std::byte>{encrypted});
     assert(o.view().size() == out.size());
 
     return {std::move(out), sas};
@@ -1088,29 +1061,26 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
     oxenc::bt_dict_consumer in{enc_data};
     in.require<std::string_view>("");  // skip the "" type key added by the outer wrapper
-    auto A = in.require_span<unsigned char, 32>("A");
-    auto ciphertext_raw = in.require_span<unsigned char>("C");
-    auto enc_key_raw = in.require_span<unsigned char>("K");
+    auto A = in.require_span<std::byte, 32>("A");
+    auto ciphertext_raw = in.require_span<std::byte>("C");
+    auto enc_key_raw = in.require_span<std::byte>("K");
     auto enc_devices = in.require_span<std::byte>("d");
 
     in.require_signature(
-            "~", [this](std::span<const unsigned char> body, std::span<const unsigned char> sig) {
-                if (0 != crypto_sign_ed25519_verify_detached(
-                                 sig.data(),
-                                 body.data(),
-                                 body.size(),
-                                 core.globals.pubkey_ed25519().data()))
+            "~", [this](std::span<const std::byte> body, std::span<const std::byte> sig) {
+                if (sig.size() != 64 ||
+                    !ed25519::verify(sig.first<64>(), core.globals.pubkey_ed25519(), body))
                     throw std::runtime_error{
                             "Invalid encrypted device message: signature verification failed"};
             });
 
     in.finish();
 
-    if (ciphertext_raw.size() % MLKEM768_CIPHERTEXTBYTES != 0)
+    if (ciphertext_raw.size() % mlkem768::CIPHERTEXTBYTES != 0)
         throw std::runtime_error{
                 "Invalid encrypted device group data: invalid ciphertext size ({} is not N*{})"_format(
-                        ciphertext_raw.size(), MLKEM768_CIPHERTEXTBYTES)};
-    const int count = ciphertext_raw.size() / MLKEM768_CIPHERTEXTBYTES;
+                        ciphertext_raw.size(), mlkem768::CIPHERTEXTBYTES)};
+    const int count = ciphertext_raw.size() / mlkem768::CIPHERTEXTBYTES;
     if (enc_key_raw.size() % (32 + 2) != 0)
         throw std::runtime_error{
                 "Invalid encrypted device group data: invalid encrypted keys size ({} is not N*34)"_format(
@@ -1128,16 +1098,16 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
     // Accessors for chunk-by-chunk access to the ciphertext_raw/enc_key_raw spans:
     auto ciphertext = indices | std::views::transform([&](int i) {
-                          return std::span<const unsigned char, MLKEM768_CIPHERTEXTBYTES>{
-                                  ciphertext_raw.data() + i * MLKEM768_CIPHERTEXTBYTES,
-                                  MLKEM768_CIPHERTEXTBYTES};
+                          return std::span<const std::byte, mlkem768::CIPHERTEXTBYTES>{
+                                  ciphertext_raw.data() + i * mlkem768::CIPHERTEXTBYTES,
+                                  mlkem768::CIPHERTEXTBYTES};
                       });
     auto enc_indicator =
             indices | std::views::transform([&](int i) {
-                return std::span<const unsigned char, 2>{enc_key_raw.data() + i * (2 + 32), 2};
+                return std::span<const std::byte, 2>{enc_key_raw.data() + i * (2 + 32), 2};
             });
     auto enc_key = indices | std::views::transform([&](int i) {
-                       return std::span<const unsigned char, 32>{
+                       return std::span<const std::byte, 32>{
                                enc_key_raw.data() + i * (2 + 32) + 2, 32};
                    });
 
@@ -1145,7 +1115,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
     auto devices_nonce = hash::blake2b_pers<24>(PERS_DEV_NONCE, ciphertext_raw);
 
-    cleared_uc32 ml_ss, aB, ki, key_base;
+    cleared_b32 ml_ss, aB, ki, key_base;
 
     std::vector<std::byte> plaintext_devices;
     plaintext_devices.resize(enc_devices.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
@@ -1165,6 +1135,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
         for (int active_i = 0; active_i < active_keys.size(); active_i++) {
             const auto& k = active_keys[active_i];
+            const auto& b = k.x25519_sec;
             const auto& B = k.x25519_pub;
             const auto& M = k.mlkem768_pub;
 
@@ -1175,12 +1146,12 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
                         hash::blake2b_pers<2>(PERS_KEY_KEY_IND, A, B, M, ct, ekey), eind))
                 continue;
 
-            if (0 != crypto_scalarmult_curve25519(aB.data(), k.x25519_sec.data(), A.data())) {
+            if (!x25519::scalarmult(aB, b, A)) {
                 log::warning(cat, "X25519 multiplication failed; ignoring encrypted entry");
                 continue;
             }
 
-            if (0 != sr_mlkem768_dec(ml_ss.data(), ct.data(), k.mlkem768_sec.data())) {
+            if (!mlkem768::decapsulate(ml_ss, ct, k.mlkem768_sec)) {
                 log::warning(cat, "MLKEM768 decapsulation failed; skipping device entry");
                 continue;
             }
@@ -1191,20 +1162,11 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
             // and then use it to recover the key_base:
             static_assert(decltype(ekey)::extent == key_base.size());
-            crypto_stream_xchacha20_xor(
-                    key_base.data(), ekey.data(), ekey.size(), knonce.data(), ki.data());
+            encrypt::xchacha20_xor(key_base, ekey, knonce, ki);
 
             // Now we can decrypt the encrypted payload:
-            if (0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                             reinterpret_cast<unsigned char*>(plaintext_devices.data()),
-                             nullptr,
-                             nullptr,
-                             reinterpret_cast<const unsigned char*>(enc_devices.data()),
-                             enc_devices.size(),
-                             nullptr,
-                             0,
-                             devices_nonce.data(),
-                             key_base.data())) {
+            if (encrypt::xchacha20poly1305_decrypt(
+                        plaintext_devices, enc_devices, devices_nonce, key_base)) {
                 found = true;
                 break;
             }
@@ -1228,14 +1190,14 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
     return plaintext_devices;
 }
 
-void Devices::receive_link_request(std::span<const unsigned char> data) {
+void Devices::receive_link_request(std::span<const std::byte> data) {
     // Parse outer bt-dict: {"": "L", "L": <encrypted>}
     oxenc::bt_dict_consumer outer{data};
     outer.require<std::string_view>("");  // skip type indicator
-    auto encrypted = outer.require_span<unsigned char>("L");
+    auto encrypted = outer.require_span<std::byte>("L");
 
     // Decrypt using the account seed
-    std::vector<unsigned char> plaintext;
+    std::vector<std::byte> plaintext;
     try {
         auto seed = core.globals.account_seed();
         plaintext = config::decrypt(encrypted, seed.seed(), "link-request");
@@ -1247,7 +1209,7 @@ void Devices::receive_link_request(std::span<const unsigned char> data) {
     // Parse plaintext: {"I": <32-byte device id>, "i": {device info dict}}
     device::Info info;
     try {
-        oxenc::bt_dict_consumer pt{std::span<const unsigned char>{plaintext}};
+        oxenc::bt_dict_consumer pt{std::span<const std::byte>{plaintext}};
         auto in_id = pt.require_span<unsigned char, 32>("I");
         std::memcpy(info.id.data(), in_id.data(), info.id.size());
 
@@ -1363,7 +1325,7 @@ void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool
                  std::string,
                  std::string,
                  int64_t,
-                 sqlite::blobn<MLKEM768_PUBLICKEYBYTES>,
+                 sqlite::blobn<mlkem768::PUBLICKEYBYTES>,
                  sqlite::blobn<32>,
                  std::optional<int64_t>>(
                  "SELECT id, unique_id, processing, state, seqno, timestamp, device_type,"
@@ -1459,14 +1421,15 @@ void Devices::parse_account_pubkeys(std::span<const SwarmMessage> messages, bool
     for (const auto& msg : messages) {
         try {
             oxenc::bt_dict_consumer in{msg.data};
-            auto M = in.require_span<unsigned char, MLKEM768_PUBLICKEYBYTES>("M");
+            auto M = in.require_span<unsigned char, mlkem768::PUBLICKEYBYTES>("M");
             auto X = in.require_span<unsigned char, 32>("X");
             in.require_signature(
                     "~",
                     [&x25519_pub](
-                            std::span<const unsigned char> body,
-                            std::span<const unsigned char> sig) {
-                        if (!xed25519::verify(sig, x25519_pub, body))
+                            std::span<const std::byte> body,
+                            std::span<const std::byte> sig) {
+                        if (sig.size() != 64 ||
+                            !xed25519::verify(sig.first<64>(), x25519_pub, body))
                             throw std::runtime_error{
                                     "Invalid account pubkey message: signature verification "
                                     "failed"};
@@ -1581,7 +1544,7 @@ std::vector<std::byte> Devices::build_account_pubkey_message() {
     o.append("M", k.mlkem768_pub);
     o.append("X", k.x25519_pub);
     o.append_signature(
-            "~", [seed = core.globals.account_seed()](std::span<const unsigned char> body) {
+            "~", [seed = core.globals.account_seed()](std::span<const std::byte> body) {
                 return xed25519::sign(seed.x25519_key(), body);
             });
 

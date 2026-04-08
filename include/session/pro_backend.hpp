@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <session/clock.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <span>
@@ -63,7 +64,11 @@ namespace session::pro_backend {
 
 /// TODO: Assign the Session Pro backend public key for verifying proofs to allow users of the
 /// library to have the pubkey available for verifying proofs.
-constexpr auto PUBKEY = "0000000000000000000000000000000000000000000000000000000000000000"_hex_u;
+constexpr auto PUBKEY = "0000000000000000000000000000000000000000000000000000000000000000"_hex_b;
+
+/// Domain used with ed25519::derive_subkey to derive the Session Pro signing keypair from the
+/// account's root Ed25519 seed.
+constexpr auto pro_subkey_domain = "SessionProRandom"_bytes;
 
 enum struct AddProPaymentResponseStatus {
     /// Payment was claimed and the pro proof was successfully generated
@@ -100,8 +105,8 @@ struct ResponseHeader {
 };
 
 struct MasterRotatingSignatures {
-    uc64 master_sig;
-    uc64 rotating_sig;
+    b64 master_sig;
+    b64 rotating_sig;
 };
 
 struct AddProPaymentUserTransaction {
@@ -131,20 +136,20 @@ struct AddProPaymentRequest {
 
     /// 32-byte Ed25519 Session Pro master public key derived from the Session account seed to
     /// register a Session Pro payment under.
-    uc32 master_pkey;
+    b32 master_pkey;
 
     /// 32-byte Ed25519 Session Pro rotating public key to authorise to use the generated Session
     /// Pro proof
-    uc32 rotating_pkey;
+    b32 rotating_pkey;
 
     /// Transaction containing the payment details to register on the Session Pro backend
     AddProPaymentUserTransaction payment_tx;
 
     /// 64-byte signature proving knowledge of the master key's secret component
-    uc64 master_sig;
+    b64 master_sig;
 
     /// 64-byte signature proving knowledge of the rotating key's secret component
-    uc64 rotating_sig;
+    b64 rotating_sig;
 
     /// API: pro/AddProPaymentRequest::to_json
     ///
@@ -175,11 +180,11 @@ struct AddProPaymentRequest {
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
     static MasterRotatingSignatures build_sigs(
             std::uint8_t request_version,
-            std::span<const unsigned char> master_privkey,
-            std::span<const unsigned char> rotating_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
+            const ed25519::PrivKeySpan& rotating_privkey,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const unsigned char> payment_tx_payment_id,
-            std::span<const unsigned char> payment_tx_order_id);
+            std::span<const std::byte> payment_tx_payment_id,
+            std::span<const std::byte> payment_tx_order_id);
 
     /// API: pro/AddProPaymentRequest::build_to_json
     ///
@@ -201,11 +206,11 @@ struct AddProPaymentRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t request_version,
-            std::span<const unsigned char> master_privkey,
-            std::span<const unsigned char> rotating_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
+            const ed25519::PrivKeySpan& rotating_privkey,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const unsigned char> payment_tx_payment_id,
-            std::span<const unsigned char> payment_tx_order_id);
+            std::span<const std::byte> payment_tx_payment_id,
+            std::span<const std::byte> payment_tx_order_id);
 };
 
 /// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
@@ -238,19 +243,19 @@ struct GenerateProProofRequest {
     /// 32-byte Ed25519 Session Pro master public key to generate a Session Pro proof from. This key
     /// must have had a prior, and still active payment registered under it for a new proof to be
     /// generated successfully.
-    uc32 master_pkey;
+    b32 master_pkey;
 
     /// 32-byte Ed25519 Session Pro rotating public key authorized to use the generated proof
-    uc32 rotating_pkey;
+    b32 rotating_pkey;
 
     /// Unix timestamp of the request
     sys_ms unix_ts;
 
     /// 64-byte signature proving knowledge of the master key's secret component
-    uc64 master_sig;
+    b64 master_sig;
 
     /// 64-byte signature proving knowledge of the rotating key's secret component
-    uc64 rotating_sig;
+    b64 rotating_sig;
 
     /// API: pro/GenerateProProofRequest::build_sigs
     ///
@@ -268,8 +273,8 @@ struct GenerateProProofRequest {
     /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
     static MasterRotatingSignatures build_sigs(
             std::uint8_t request_version,
-            std::span<const unsigned char> master_privkey,
-            std::span<const unsigned char> rotating_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
+            const ed25519::PrivKeySpan& rotating_privkey,
             sys_ms unix_ts);
 
     /// API: pro/GenerateProProofRequest::build_to_json
@@ -287,8 +292,8 @@ struct GenerateProProofRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t request_version,
-            std::span<const unsigned char> master_privkey,
-            std::span<const unsigned char> rotating_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
+            const ed25519::PrivKeySpan& rotating_privkey,
             sys_ms unix_ts);
 
     /// API: pro/GenerateProProofRequest::to_json
@@ -323,7 +328,7 @@ struct GetProRevocationsRequest {
 
 struct ProRevocationItem {
     /// 32-byte hash of the generation index, identifying a proof
-    uc32 gen_index_hash;
+    b32 gen_index_hash;
 
     /// Unix timestamp when the proof expires
     sys_ms expiry_unix_ts;
@@ -355,10 +360,10 @@ struct GetProDetailsRequest {
     std::uint8_t version;
 
     /// 32-byte Ed25519 master public key to retrieve payments for
-    uc32 master_pkey;
+    b32 master_pkey;
 
     /// 64-byte signature proving knowledge of the master public key's secret component
-    uc64 master_sig;
+    b64 master_sig;
 
     /// Unix timestamp of the request
     sys_ms unix_ts;
@@ -379,10 +384,10 @@ struct GetProDetailsRequest {
     /// - `count` -- Amount of historical payments to request
     ///
     /// Outputs:
-    /// - `uc64` - the 64-byte signature
-    static uc64 build_sig(
+    /// - `b64` - the 64-byte signature
+    static b64 build_sig(
             uint8_t version,
-            std::span<const unsigned char> master_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
             sys_ms unix_ts,
             uint32_t count);
 
@@ -401,7 +406,7 @@ struct GetProDetailsRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t version,
-            std::span<const unsigned char> master_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
             sys_ms unix_ts,
             uint32_t count);
 
@@ -566,10 +571,10 @@ struct SetPaymentRefundRequestedRequest {
     std::uint8_t version;
 
     /// 32-byte Ed25519 master public key to retrieve payments for
-    uc32 master_pkey;
+    b32 master_pkey;
 
     /// 64-byte signature proving knowledge of the master public key's secret component
-    uc64 master_sig;
+    b64 master_sig;
 
     /// Unix timestamp of the current time
     sys_ms unix_ts;
@@ -602,15 +607,15 @@ struct SetPaymentRefundRequestedRequest {
     ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
-    /// - `uc64` - the 64-byte signature
-    static uc64 build_sig(
+    /// - `b64` - the 64-byte signature
+    static b64 build_sig(
             uint8_t version,
-            std::span<const unsigned char> master_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
             sys_ms unix_ts,
             sys_ms refund_requested_unix_ts,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const unsigned char> payment_tx_payment_id,
-            std::span<const unsigned char> payment_tx_order_id);
+            std::span<const std::byte> payment_tx_payment_id,
+            std::span<const std::byte> payment_tx_order_id);
 
     /// API: pro/SetPaymentRefundRequested::build_to_json
     ///
@@ -635,12 +640,12 @@ struct SetPaymentRefundRequestedRequest {
     /// - `std::string` -- Request serialised to JSON
     static std::string build_to_json(
             std::uint8_t version,
-            std::span<const unsigned char> master_privkey,
+            const ed25519::PrivKeySpan& master_privkey,
             sys_ms unix_ts,
             sys_ms refund_requested_unix_ts,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const unsigned char> payment_tx_payment_id,
-            std::span<const unsigned char> payment_tx_order_id);
+            std::span<const std::byte> payment_tx_payment_id,
+            std::span<const std::byte> payment_tx_order_id);
 
     /// API: pro/SetPaymentRefundRequested::to_json
     ///

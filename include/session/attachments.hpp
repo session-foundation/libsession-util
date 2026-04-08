@@ -288,7 +288,7 @@ class Decryptor {
     bool failed = false;
     bool finished = false;
     bool hit_final = false;
-    cleared_uc32 key;
+    cleared_b32 key;
     unsigned char st_data[52];  // crypto_secretstream_xchacha20poly1305_state data
 
     void process_header(std::span<const std::byte, 1 + ENCRYPT_HEADER> chunk);

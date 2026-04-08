@@ -10,27 +10,27 @@
 #include "utils.hpp"
 
 namespace session::config {
-void compress_message(std::vector<unsigned char>& msg, int level);
+void compress_message(std::vector<std::byte>& msg, int level);
 }
 
 TEST_CASE("compression", "[config][compression]") {
 
-    auto data =
+    auto data = session::to_vector(
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hexbytes;
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hex_b);
 
     CHECK(data.size() == 81);
 
     auto d = data;
     session::config::compress_message(d, 1);
 
-    CHECK(d[0] == 'z');
+    CHECK(d[0] == std::byte{'z'});
     CHECK(d.size() == 18);
     CHECK(to_hex(d) == "7a28b52ffd205145000010aaaa01008c022c");
 
     d = data;
     session::config::compress_message(d, 5);
-    CHECK(d[0] == 'z');
+    CHECK(d[0] == std::byte{'z'});
     CHECK(d.size() == 17);
     CHECK(to_hex(d) == "7a28b52ffd20513d000008aa01000dea84");
 
@@ -49,7 +49,7 @@ TEST_CASE("compression", "[config][compression]") {
             "l"
               "i0e"
               "32:" +
-                session::to_string("ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hexbytes) +
+                session::to_string("ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hex_b) +
               "de"
             "e"
           "e"
@@ -73,7 +73,7 @@ TEST_CASE("compression", "[config][compression]") {
             "l"
               "i0e"
               "32:" +
-                session::to_string("ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hexbytes) +
+                session::to_string("ea173b57beca8af18c3519a7bbf69c3e7a05d1c049fa9558341d8ebb48b0c965"_hex_b) +
               "de"
             "e"
           "e"
@@ -91,7 +91,7 @@ TEST_CASE("compression", "[config][compression]") {
     // Doesn't compress, so shouldn't change:
     CHECK(d.size() == 142);
     session::config::compress_message(d, 1);
-    CHECK(d[0] == 'd');
+    CHECK(d[0] == std::byte{'d'});
     CHECK(d.size() == 142);
     CHECK(reinterpret_cast<intptr_t>(d.data()) == dptr);
 
@@ -100,7 +100,7 @@ TEST_CASE("compression", "[config][compression]") {
     // version of zstd).
     d = data2;
     session::config::compress_message(d, 1);
-    CHECK(d[0] == 'z');
+    CHECK(d[0] == std::byte{'z'});
     CHECK(d.size() == 161);
     CHECK(d.size() < data2.size());
     CHECK(to_hex(d) ==
@@ -111,7 +111,7 @@ TEST_CASE("compression", "[config][compression]") {
 
     d = data2;
     session::config::compress_message(d, 5);
-    CHECK(d[0] == 'z');
+    CHECK(d[0] == std::byte{'z'});
     CHECK(d.size() == 156);
     CHECK(d.size() < data2.size());
     CHECK(to_hex(d) ==
@@ -122,7 +122,7 @@ TEST_CASE("compression", "[config][compression]") {
 
     d = data2;
     session::config::compress_message(d, 19);
-    CHECK(d[0] == 'z');
+    CHECK(d[0] == std::byte{'z'});
     CHECK(d.size() == 156);
     CHECK(d.size() < data2.size());
     CHECK(to_hex(d) ==

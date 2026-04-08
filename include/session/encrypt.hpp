@@ -16,47 +16,37 @@
 
 namespace session::encrypt {
 
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+inline constexpr size_t XCHACHA20_KEYBYTES = 32;
+inline constexpr size_t XCHACHA20_NONCEBYTES = 24;
+inline constexpr size_t XCHACHA20_ABYTES = 16;  // authentication tag size
+
 // ─── XChaCha20-Poly1305 AEAD ─────────────────────────────────────────────────
 
 /// Encrypts `msg` with `key` and `nonce`, writing ciphertext (msg.size() + ABYTES bytes) into
-/// `out`.  Additional data `ad` is authenticated but not encrypted; pass an empty span for none.
+/// `out`.
 inline void xchacha20poly1305_encrypt(
         std::span<std::byte> out,
         std::span<const std::byte> msg,
-        std::span<const std::byte> ad,
         std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce,
         std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> key) {
     crypto_aead_xchacha20poly1305_ietf_encrypt(
-            ucdata(out),
-            nullptr,
-            ucdata(msg),
-            msg.size(),
-            ad.empty() ? nullptr : ucdata(ad),
-            ad.size(),
-            nullptr,
-            ucdata(nonce),
-            ucdata(key));
+            ucdata(out), nullptr, ucdata(msg), msg.size(), nullptr, 0, nullptr,
+            ucdata(nonce), ucdata(key));
 }
 
 /// Decrypts `ciphertext` with `key` and `nonce`, writing plaintext (ciphertext.size() - ABYTES
-/// bytes) into `out`.  Additional data `ad` must match what was passed at encryption time.
-/// Returns false if authentication fails.
+/// bytes) into `out`.  Returns false if authentication fails.
 inline bool xchacha20poly1305_decrypt(
         std::span<std::byte> out,
         std::span<const std::byte> ciphertext,
-        std::span<const std::byte> ad,
         std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce,
         std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> key) {
     return 0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                        ucdata(out),
-                        nullptr,
-                        nullptr,
-                        ucdata(ciphertext),
-                        ciphertext.size(),
-                        ad.empty() ? nullptr : ucdata(ad),
-                        ad.size(),
-                        ucdata(nonce),
-                        ucdata(key));
+                        ucdata(out), nullptr, nullptr,
+                        ucdata(ciphertext), ciphertext.size(), nullptr, 0,
+                        ucdata(nonce), ucdata(key));
 }
 
 // ─── XChaCha20 stream ────────────────────────────────────────────────────────

@@ -6,6 +6,7 @@
 #include <session/config/namespaces.hpp>
 #include <session/core/devices.hpp>
 #include <session/core/swarm_message.hpp>
+#include <session/util.hpp>
 #include <span>
 #include <string_view>
 #include <vector>
@@ -47,11 +48,10 @@ struct ReceivedMessage {
     std::string hash;                                 ///< Swarm-assigned message hash
     sys_ms timestamp;                                 ///< Server-reported upload timestamp
     sys_ms expiry;                                    ///< Server-reported expiry timestamp
-    std::array<unsigned char, 33> sender_session_id;  ///< 0x05-prefixed sender session ID
-    int version;                                      ///< Protocol version: 1 or 2
-    std::vector<unsigned char> content;               ///< Decrypted protobuf-encoded payload
-    std::optional<std::array<unsigned char, 64>>
-            pro_signature;       ///< Session Pro signature, if present
+    b33 sender_session_id;              ///< 0x05-prefixed sender session ID
+    int version;                        ///< Protocol version: 1 or 2
+    std::vector<std::byte> content;     ///< Decrypted protobuf-encoded payload
+    std::optional<b64> pro_signature;   ///< Session Pro signature, if present
     bool pfs_encrypted = false;  ///< True iff decrypted via PFS+PQ (X-Wing) key derivation;
                                  ///< false for v1 messages and v2 non-PFS fallback messages.
 };

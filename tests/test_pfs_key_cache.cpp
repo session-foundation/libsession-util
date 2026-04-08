@@ -36,7 +36,7 @@ TEST_CASE("prefetch_pfs_keys throws without network", "[core][pfs]") {
     TempCore c;
     TempCore remote;
     auto session_id = remote->globals.session_id();
-    std::array<unsigned char, 33> sid;
+    b33 sid;
     std::ranges::copy(session_id, sid.begin());
     CHECK_THROWS_AS(c->prefetch_pfs_keys(sid), std::logic_error);
 }
@@ -51,7 +51,7 @@ TEST_CASE("prefetch_pfs_keys fetches and caches remote account pubkeys", "[core]
     auto remote_msg = remote->devices.build_account_pubkey_message();
 
     auto session_id_span = remote->globals.session_id();
-    std::array<unsigned char, 33> sid;
+    b33 sid;
     std::ranges::copy(session_id_span, sid.begin());
 
     SECTION("Fetches and stores pubkeys when cache is absent") {
@@ -119,7 +119,7 @@ TEST_CASE("prefetch_pfs_keys NAK handling", "[core][pfs]") {
 
     TempCore remote;
     auto session_id_span = remote->globals.session_id();
-    std::array<unsigned char, 33> sid;
+    b33 sid;
     std::ranges::copy(session_id_span, sid.begin());
 
     // Helper: fire the pending request with an empty-messages response (NAK condition).
@@ -219,7 +219,7 @@ TEST_CASE("prefetch_pfs_keys handles malformed responses gracefully", "[core][pf
 
     TempCore remote;
     auto session_id_span = remote->globals.session_id();
-    std::array<unsigned char, 33> sid;
+    b33 sid;
     std::ranges::copy(session_id_span, sid.begin());
 
     SECTION("Garbage bt-dict data: NAK written, no valid pubkeys stored") {

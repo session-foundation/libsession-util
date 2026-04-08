@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <session/clock.hpp>
-#include <session/ed25519.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/hash.hpp>
 #include <session/sodium_array.hpp>
 #include <session/types.hpp>
@@ -79,8 +79,8 @@ enum class ProStatus {
 };
 
 struct ProSignedMessage {
-    std::span<const unsigned char> sig;
-    std::span<const unsigned char> msg;
+    std::span<const std::byte, 64> sig;
+    std::span<const std::byte> msg;
 };
 
 class ProProof {
@@ -89,12 +89,12 @@ class ProProof {
     std::uint8_t version;
 
     /// Hash of the generation index set by the Session Pro Backend
-    uc32 gen_index_hash;
+    b32 gen_index_hash;
 
     /// The public key that the Session client registers their Session Pro entitlement under.
     /// Session clients must sign messages with this key along side the sending of this proof for
     /// the network to authenticate their usage of the proof
-    uc32 rotating_pubkey;
+    b32 rotating_pubkey;
 
     /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid to
     sys_ms expiry_unix_ts;
@@ -102,7 +102,7 @@ class ProProof {
     /// Signature over the contents of the proof. It is signed by the Session Pro Backend key which
     /// is the entity responsible for issueing tamper-proof Sesison Pro certificates for Session
     /// clients.
-    uc64 sig;
+    b64 sig;
 
     /// API: pro/Proof::verify_signature
     ///
@@ -118,7 +118,7 @@ class ProProof {
     ///
     /// Outputs:
     /// - `bool` - True if the given key was the signatory of the proof, false otherwise
-    bool verify_signature(const std::span<const unsigned char>& verify_pubkey) const;
+    bool verify_signature(std::span<const std::byte, 32> verify_pubkey) const;
 
     /// API: pro/Proof::verify_message
     ///
@@ -134,7 +134,7 @@ class ProProof {
     /// Outputs:
     /// - `bool` - True if the message was signed by the embedded `rotating_pubkey` false otherwise.
     bool verify_message(
-            std::span<const unsigned char> sig, const std::span<const unsigned char> msg) const;
+            std::span<const std::byte, 64> sig, std::span<const std::byte> msg) const;
 
     /// API: pro/Proof::is_active
     ///
@@ -172,14 +172,14 @@ class ProProof {
     ///   not set then this function can never return `ProStatus::InvalidUserSig` from the set of
     ///   possible enum values. Otherwise this funtion can return all possible values.
     ProStatus status(
-            std::span<const unsigned char> verify_pubkey,
+            std::span<const std::byte, 32> verify_pubkey,
             sys_ms unix_ts,
             const std::optional<ProSignedMessage>& signed_msg);
 
     /// API: pro/Proof::hash
     ///
     /// Create a 32-byte hash from the proof. This hash is the payload that is signed in the proof.
-    uc32 hash() const;
+    b32 hash() const;
 
     bool operator==(const ProProof& other) const {
         return version == other.version && gen_index_hash == other.gen_index_hash &&
@@ -226,12 +226,12 @@ struct Envelope {
     // Optional fields. These fields are set if the appropriate flag has been set in `flags`
     // otherwise the corresponding values are to be ignored and those fields will be
     // zero-initialised.
-    uc33 source;
+    b33 source;
     uint32_t source_device;
     uint64_t server_timestamp;
 
     // Signature by the sending client's rotating key
-    uc64 pro_sig;
+    b64 pro_sig;
 };
 
 struct DecodedPro {
@@ -248,16 +248,16 @@ struct DecodedEnvelope {
     Envelope envelope;
 
     // Decoded envelope content into plaintext with padding stripped
-    std::vector<unsigned char> content_plaintext;
+    std::vector<std::byte> content_plaintext;
 
     // Sender public key extracted from the encrypted content payload. This is not set if the
     // envelope was a groups v2 envelope where the envelope was encrypted and only the x25519 pubkey
     // was available.
-    uc32 sender_ed25519_pubkey;
+    b32 sender_ed25519_pubkey;
 
     // The x25519 pubkey, always populated on successful parse. Either it's present from decrypting
     // a Groups v2 envelope or it's re-derived from the Ed25519 pubkey.
-    uc32 sender_x25519_pubkey;
+    b32 sender_x25519_pubkey;
 
     // Set if the envelope included a pro payload. The caller must check the status to determine if
     // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
@@ -272,46 +272,20 @@ struct DecodedCommunityMessage {
     std::optional<Envelope> envelope;
 
     // The protobuf encoded `Content` with padding stripped
-    std::vector<unsigned char> content_plaintext;
+    std::vector<std::byte> content_plaintext;
 
     // The signature if it was present in the payload. If the envelope is set and the envelope has
     // the pro signature flag set, then this signature was extracted from the envelope. When the
     // signature is sourced from the envelope, the envelope's `pro_sig` field is also set to the
     // same signature as this instance for consistency. Otherwise the signature, if set was
     // extracted from the community-exclusive pro signature field in the content message.
-    std::optional<uc64> pro_sig;
+    std::optional<b64> pro_sig;
 
     // Set if the envelope included a pro payload. The caller must check the status to determine if
     // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
     std::optional<DecodedPro> pro;
 };
 
-struct DecodeEnvelopeKey {
-    // Set the key to decrypt the envelope. If this key is set then it's assumed that the envelope
-    // payload is encrypted (e.g. groups v2) and that the contents are unencrypted. If this key is
-    // not set the it's assumed the envelope is not encrypted but the contents are encrypted (e.g.:
-    // 1o1 or legacy group).
-    std::optional<std::span<const unsigned char, 32 /*crypto_sign_ed25519_PUBLICKEYBYTES*/>>
-            group_ed25519_pubkey;
-
-    // List of libsodium-style secret key to decrypt the envelope from. Can also be passed as a 32
-    // byte secret key. The public key component is not used.
-    //
-    // If the `group_ed25519_pubkey` is set then a list of keys is accepted to attempt to decrypt
-    // the envelope. For envelopes generated by a group message, we assume that the envelope is
-    // encrypted and must be decrypted by the group keys associated with it (of which there may be
-    // many candidate keys depending on how many times the group has been rekeyed). It's recommended
-    // to pass `Keys::group_keys()` or in the C API use the `groups_keys_size` and
-    // `group_keys_get_keys` combo to retrieve the keys to attempt to use to decrypt this message.
-    //
-    // If `group_ed25519_pubkey` is _not_ set then this function assumes the envelope is unencrypted
-    // but the content is encrypted (e.g.: 1o1 and legacy group messages). The function will attempt
-    // to decrypt the envelope's contents with the given keys. Typically in these cases you will
-    // pass exactly 1 ed25519 private key for decryption but this function makes no pre
-    // existing assumptions on the number of keys and will attempt all given keys specified
-    // regardless until it finds one that successfully decrypts the envelope contents.
-    std::span<std::span<const unsigned char>> decrypt_keys;
-};
 
 /// API: session_protocol/pro_features_for_utf8
 ///
@@ -355,7 +329,7 @@ ProFeaturesForMsg pro_features_for_utf16(std::u16string_view msg);
 ///
 /// Pad a message to the required alignment for 1o1/community messages (160 bytes) including space
 /// for the padding-terminating byte.
-std::vector<unsigned char> pad_message(std::span<const unsigned char> payload);
+std::vector<std::byte> pad_message(std::span<const std::byte> payload);
 
 /// API: session_protocol/encode_dm_v1
 ///
@@ -379,12 +353,12 @@ std::vector<unsigned char> pad_message(std::span<const unsigned char> payload);
 ///
 /// Outputs:
 /// - Encrypted, encoded payload, with all required protobuf encoding and wrapping.
-std::vector<unsigned char> encode_dm_v1(
-        std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan& ed25519_privkey,
+std::vector<std::byte> encode_dm_v1(
+        std::span<const std::byte> plaintext,
+        const ed25519::PrivKeySpan& ed25519_privkey,
         sys_ms sent_timestamp,
-        std::span<const unsigned char, 33> recipient_pubkey,
-        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey = std::nullopt);
+        std::span<const std::byte, 33> recipient_pubkey,
+        const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey = std::nullopt);
 
 /// API: session_protocol/encode_for_community_inbox
 ///
@@ -411,13 +385,13 @@ std::vector<unsigned char> encode_dm_v1(
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<unsigned char> encode_for_community_inbox(
-        std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan& ed25519_privkey,
+std::vector<std::byte> encode_for_community_inbox(
+        std::span<const std::byte> plaintext,
+        const ed25519::PrivKeySpan& ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        std::span<const unsigned char, 33> recipient_pubkey,
-        std::span<const unsigned char, 32> community_pubkey,
-        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey);
+        std::span<const std::byte, 33> recipient_pubkey,
+        std::span<const std::byte, 32> community_pubkey,
+        const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_community_message
 ///
@@ -441,9 +415,9 @@ std::vector<unsigned char> encode_for_community_inbox(
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<unsigned char> encode_for_community(
-        std::span<const unsigned char> plaintext,
-        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey);
+std::vector<std::byte> encode_for_community(
+        std::span<const std::byte> plaintext,
+        const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/encode_for_group
 ///
@@ -471,13 +445,13 @@ std::vector<unsigned char> encode_for_community(
 /// Outputs:
 /// - Encryption result for the plaintext. The retured payload is suitable for sending on the wire
 ///   (i.e: it has been protobuf encoded/wrapped if necessary).
-std::vector<unsigned char> encode_for_group(
-        std::span<const unsigned char> plaintext,
-        const Ed25519PrivKeySpan& ed25519_privkey,
+std::vector<std::byte> encode_for_group(
+        std::span<const std::byte> plaintext,
+        const ed25519::PrivKeySpan& ed25519_privkey,
         std::chrono::milliseconds sent_timestamp,
-        std::span<const unsigned char, 33> group_ed25519_pubkey,
-        std::span<const unsigned char, 32> group_enc_key,
-        const OptionalEd25519PrivKeySpan& pro_rotating_ed25519_privkey);
+        std::span<const std::byte, 33> group_ed25519_pubkey,
+        std::span<const std::byte, 32> group_enc_key,
+        const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey);
 
 /// API: session_protocol/decode_envelope
 ///
@@ -535,10 +509,28 @@ std::vector<unsigned char> encode_for_group(
 ///
 ///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
 ///   access to pro features if it's using any.
-DecodedEnvelope decode_envelope(
-        const DecodeEnvelopeKey& keys,
-        std::span<const unsigned char> envelope_payload,
-        std::span<const unsigned char, 32> pro_backend_pubkey);
+/// Decodes a 1-on-1 or legacy group envelope.  The envelope payload is a WebSocket-wrapped
+/// protobuf whose inner content is encrypted with the Session protocol (Ed25519 DH).
+///
+/// Throws on parse or decryption failure.
+DecodedEnvelope decode_dm_envelope(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> envelope_payload,
+        std::span<const std::byte, 32> pro_backend_pubkey);
+
+/// Decodes a groups v2 envelope.  The envelope payload is encrypted with a group symmetric key
+/// and decrypted via `decrypt_group_message`.  The inner content is plaintext.
+///
+/// `group_keys` is a list of recent symmetric group encryption keys to try; multiple keys are
+/// needed because the key rotates periodically, and retrieved messages may still be encrypted
+/// with a pre-rotation key if they were sent before the rotation occurred.
+///
+/// Throws on parse or decryption failure.
+DecodedEnvelope decode_group_envelope(
+        std::span<std::span<const std::byte>> group_keys,
+        std::span<const std::byte, 32> group_ed25519_pubkey,
+        std::span<const std::byte> envelope_payload,
+        std::span<const std::byte, 32> pro_backend_pubkey);
 
 /// API: session_protocol/decode_for_community
 ///
@@ -570,8 +562,8 @@ DecodedEnvelope decode_envelope(
 ///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
 ///   access to pro features if it's using any.
 DecodedCommunityMessage decode_for_community(
-        std::span<const unsigned char> content_or_envelope_payload,
+        std::span<const std::byte> content_or_envelope_payload,
         sys_ms unix_ts,
-        std::span<const unsigned char, 32> pro_backend_pubkey);
+        std::span<const std::byte, 32> pro_backend_pubkey);
 
 }  // namespace session

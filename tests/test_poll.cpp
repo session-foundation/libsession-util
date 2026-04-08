@@ -16,7 +16,7 @@ using namespace session;
 // slots are empty.  The ns parameter is accepted for readability at call sites but is otherwise
 // unused.
 static nlohmann::json make_response(
-        int16_t /*ns*/, std::vector<unsigned char> msg_data, std::string hash) {
+        int16_t /*ns*/, std::vector<std::byte> msg_data, std::string hash) {
     nlohmann::json msg_item;
     msg_item["data"] = oxenc::to_base64(msg_data);
     msg_item["hash"] = std::move(hash);
@@ -44,7 +44,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
     TempCore core{cbs};
     auto mock_net = std::make_shared<MockNetwork>();
     // Use a fixed non-zero pubkey for the node.
-    mock_net->current_node.remote_pubkey[0] = 0x01;
+    mock_net->current_node.remote_pubkey[0] = std::byte{0x01};
 
     core->set_network(mock_net);
 
@@ -84,9 +84,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
         std::ranges::copy(std::as_bytes(seed_acc.seed()), seed_bytes.begin());
     }
     TempCore linker{core::predefined_seed{std::span<const std::byte, 32>{seed_bytes}}};
-    auto link_msg = linker->devices.build_link_request().message;
-    const auto* p = reinterpret_cast<const unsigned char*>(link_msg.data());
-    std::vector<unsigned char> outer_msg{p, p + link_msg.size()};
+    auto outer_msg = linker->devices.build_link_request().message;
 
     sent.callback(true, false, 200, {}, make_response(21, outer_msg, "hash1").dump());
 
@@ -112,8 +110,8 @@ TEST_CASE(
 
     // Two distinct service nodes with different pubkeys.
     network::service_node node_a, node_b;
-    node_a.remote_pubkey[0] = 0xAA;
-    node_b.remote_pubkey[0] = 0xBB;
+    node_a.remote_pubkey[0] = std::byte{0xAA};
+    node_b.remote_pubkey[0] = std::byte{0xBB};
 
     c->set_network(mock_net);
 
@@ -129,7 +127,7 @@ TEST_CASE(
     }
     // Respond with hash "xyz" from node A.
     mock_net->sent_requests[0].callback(
-            true, false, 200, {}, make_response(21, {0x01}, "xyz").dump());
+            true, false, 200, {}, make_response(21, {std::byte{0x01}}, "xyz").dump());
     CHECK(TestHelper::namespace_last_hash(*c, 21, node_a.remote_pubkey) == "xyz");
     CHECK_FALSE(TestHelper::namespace_last_hash(*c, 21, node_b.remote_pubkey).has_value());
 
@@ -156,7 +154,7 @@ TEST_CASE(
     }
     // Respond with hash "zyx" from node B (the message that B happens to have seen first).
     mock_net->sent_requests[0].callback(
-            true, false, 200, {}, make_response(21, {0x02}, "zyx").dump());
+            true, false, 200, {}, make_response(21, {std::byte{0x02}}, "zyx").dump());
     CHECK(TestHelper::namespace_last_hash(*c, 21, node_b.remote_pubkey) == "zyx");
     // A's hash is untouched.
     CHECK(TestHelper::namespace_last_hash(*c, 21, node_a.remote_pubkey) == "xyz");

@@ -16,17 +16,11 @@ const std::vector<Namespace> groups{
         Namespace::ConvoInfoVolatile,
         Namespace::UserGroups};
 
-const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
-std::array<unsigned char, 32> ed_pk_raw;
-std::array<unsigned char, 64> ed_sk_raw;
-static std::span<const unsigned char> load_seed() {
-    crypto_sign_ed25519_seed_keypair(ed_pk_raw.data(), ed_sk_raw.data(), seed.data());
-    return {ed_sk_raw.data(), ed_sk_raw.size()};
-}
-auto ed_sk = load_seed();
+const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
+auto [ed_pk, ed_sk] = ed25519::keypair(seed);
 
 TEST_CASE("Protobuf Handling - Wrap, Unwrap", "[config][proto][wrap]") {
-    auto msg = "Hello from the other side"_bytes;
+    auto msg = to_vector("Hello from the other side"_bytes);
 
     SECTION("Wrap/unwrap message types") {
         for (auto& n : groups) {
@@ -60,7 +54,7 @@ TEST_CASE("Protobuf Handling - Wrap, Unwrap", "[config][proto][wrap]") {
 }
 
 TEST_CASE("Protobuf Handling - Error Handling", "[config][proto][error]") {
-    auto msg = "Hello from the other side"_bytes;
+    auto msg = to_vector("Hello from the other side"_bytes);
     auto addendum = "jfeejj0ifdoesam"_bytes;
 
     const auto user_profile_msg = protos::wrap_config(ed_sk, msg, 1, Namespace::UserProfile);
@@ -79,11 +73,8 @@ TEST_CASE("Protobuf Handling - Error Handling", "[config][proto][error]") {
 
 TEST_CASE("Protobuf old config loading test", "[config][proto][old]") {
 
-    const auto seed = "f887566576de6c16d9ec251d55e24c1400000000000000000000000000000000"_hexbytes;
-    std::array<unsigned char, 32> ed_pk_raw;
-    std::array<unsigned char, 64> ed_sk_raw;
-    crypto_sign_ed25519_seed_keypair(ed_pk_raw.data(), ed_sk_raw.data(), seed.data());
-    std::span<const unsigned char> ed_sk{ed_sk_raw.data(), ed_sk_raw.size()};
+    const auto seed = "f887566576de6c16d9ec251d55e24c1400000000000000000000000000000000"_hex_b;
+    auto [local_ed_pk, local_ed_sk] = ed25519::keypair(seed);
 
     auto old_conf =
             "080112c2060a03505554120f2f6170692f76312f6d6573736167651a9f060806120028e1c5a0beaf313801"
@@ -105,7 +96,7 @@ TEST_CASE("Protobuf old config loading test", "[config][proto][old]") {
             "51bbd320ba901ff6110dad0c70442286cf6220a53c6f9693636a42d5523eeb1e5fb3453169581384fb8a8f"
             "3914fb6c01900a4f872f55742b117ddd7bd40c4c5911bb214e28eb9450dbdd0d831a93054c63f9a04bf50c"
             "db9aac0032c484062d7ba7bbe64e07bcd633eec8378d5d914732693c5e298f015ebde2ae45769ed319e267"
-            "f0528f5cc6da268343b6647b20bae6e9ee8d92cca702"_hexbytes;
+            "f0528f5cc6da268343b6647b20bae6e9ee8d92cca702"_hex_b;
 
-    CHECK_NOTHROW(protos::unwrap_config(ed_sk, old_conf, Namespace::UserProfile));
+    CHECK_NOTHROW(protos::unwrap_config(local_ed_sk, old_conf, Namespace::UserProfile));
 }

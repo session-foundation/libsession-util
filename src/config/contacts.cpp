@@ -59,8 +59,8 @@ void contact_info::set_nickname_truncated(std::string n) {
 }
 
 Contacts::Contacts(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
@@ -154,7 +154,9 @@ contact_info::contact_info(const contacts_contact& c) : session_id{c.session_id,
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(c.profile_pic.url)) {
         profile_picture.url = c.profile_pic.url;
-        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
+        profile_picture.key.assign(
+                reinterpret_cast<const std::byte*>(c.profile_pic.key),
+                reinterpret_cast<const std::byte*>(c.profile_pic.key) + 32);
     }
     profile_updated = to_sys_seconds(c.profile_updated);
     approved = c.approved;
@@ -321,7 +323,7 @@ size_t Contacts::size() const {
 
 blinded_contact_info::blinded_contact_info(
         std::string_view community_base_url,
-        std::span<const unsigned char> community_pubkey,
+        std::span<const std::byte, 32> community_pubkey,
         std::string_view blinded_id) :
         comm{community(
                 std::move(community_base_url), blinded_id.substr(2), std::move(community_pubkey))} {
@@ -378,13 +380,15 @@ void blinded_contact_info::into(contacts_blinded_contact& c) const {
 }
 
 blinded_contact_info::blinded_contact_info(const contacts_blinded_contact& c) {
-    comm = community(c.base_url, {c.session_id + 2, 64}, c.pubkey);
+    comm = community(c.base_url, {c.session_id + 2, 64}, std::as_bytes(std::span{c.pubkey}));
     assert(std::strlen(c.name) <= contact_info::MAX_NAME_LENGTH);
     name = c.name;
     assert(std::strlen(c.profile_pic.url) <= profile_pic::MAX_URL_LENGTH);
     if (std::strlen(c.profile_pic.url)) {
         profile_picture.url = c.profile_pic.url;
-        profile_picture.key.assign(c.profile_pic.key, c.profile_pic.key + 32);
+        profile_picture.key.assign(
+                reinterpret_cast<const std::byte*>(c.profile_pic.key),
+                reinterpret_cast<const std::byte*>(c.profile_pic.key) + 32);
     }
     profile_updated = to_sys_seconds(c.profile_updated);
     priority = c.priority;
@@ -416,7 +420,7 @@ void blinded_contact_info::set_room(std::string_view room) {
     comm.set_room(room);
 }
 
-void blinded_contact_info::set_pubkey(std::span<const unsigned char> pubkey) {
+void blinded_contact_info::set_pubkey(std::span<const std::byte, 32> pubkey) {
     comm.set_pubkey(pubkey);
 }
 
@@ -425,13 +429,13 @@ void blinded_contact_info::set_pubkey(std::string_view pubkey) {
 }
 
 ConfigBase::DictFieldProxy Contacts::blinded_contact_field(
-        const blinded_contact_info& bc, std::span<const unsigned char>* get_pubkey) const {
+        const blinded_contact_info& bc, std::span<const std::byte>* get_pubkey) const {
     auto record = data["b"][bc.comm.base_url()];
     if (get_pubkey) {
         auto pkrec = record["#"];
         if (auto pk = pkrec.string_view_or(""); pk.size() == 32)
-            *get_pubkey = std::span<const unsigned char>{
-                    reinterpret_cast<const unsigned char*>(pk.data()), pk.size()};
+            *get_pubkey = std::span<const std::byte>{
+                    reinterpret_cast<const std::byte*>(pk.data()), pk.size()};
     }
     return record["R"][bc.comm.room()];  // The `room` value is the blinded id without the prefix
 }
@@ -464,8 +468,11 @@ blinded_contact_info Contacts::get_or_construct_blinded(
     if (auto maybe = get_blinded(blinded_id_hex))
         return *std::move(maybe);
 
+    auto pk = oxenc::from_hex(community_pubkey_hex);
     return blinded_contact_info{
-            community_base_url, to_span(oxenc::from_hex(community_pubkey_hex)), blinded_id_hex};
+            community_base_url,
+            std::span<const std::byte, 32>{reinterpret_cast<const std::byte*>(pk.data()), 32},
+            blinded_id_hex};
 }
 
 std::vector<blinded_contact_info> Contacts::blinded() const {

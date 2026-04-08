@@ -6,7 +6,7 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
-#include <sodium/crypto_sign_ed25519.h>
+#include <session/crypto/ed25519.hpp>
 
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
@@ -139,13 +139,7 @@ void Core::_poll() {
             if (!ns_requires_auth(ns_val))
                 continue;
             std::string to_sign = "retrieve{}{}"_format(ns_val, now_ms);
-            std::array<unsigned char, 64> sig;
-            crypto_sign_ed25519_detached(
-                    sig.data(),
-                    nullptr,
-                    reinterpret_cast<const unsigned char*>(to_sign.data()),
-                    to_sign.size(),
-                    seed.ed25519_secret().data());
+            auto sig = ed25519::sign(seed.ed25519_secret(), to_span(to_sign));
             ns_sig[i] = oxenc::to_base64(sig);
         }
     }
@@ -200,7 +194,7 @@ void Core::_poll() {
                         network::Request{
                                 node,
                                 "batch",
-                                to_vector<unsigned char>(body_str),
+                                to_vector(body_str),
                                 network::RequestCategory::standard_small,
                                 20s},
                         [this, sn_pubkey = node.remote_pubkey, namespaces](
@@ -254,7 +248,7 @@ void Core::_handle_poll_response(
             // Decode each message; keep the decoded bytes alive until after
             // receive_messages() returns, since SwarmMessage::data spans
             // into them.
-            std::vector<std::vector<unsigned char>> messages_data;
+            std::vector<std::vector<std::byte>> messages_data;
             std::vector<SwarmMessage> swarm_messages;
             std::string newest_hash;
 
@@ -302,14 +296,14 @@ ON CONFLICT(namespace, sn_pubkey) DO UPDATE SET last_hash = excluded.last_hash
     }
 }
 
-PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_id) {
+PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) {
     auto net = _network;
     if (!net)
         throw std::logic_error{"prefetch_pfs_keys called without a network object"};
 
     // One copy of session_id for async use; subsequently moved into lambdas.
-    std::array<std::byte, 33> sid;
-    std::memcpy(sid.data(), session_id.data(), 33);
+    b33 sid;
+    std::ranges::copy(session_id, sid.begin());
 
     // Skip the fetch if the cached entry is still fresh, or a recent NAK suppresses retrying.
     // Otherwise determine whether we have a stale (but usable) key or no key at all.
@@ -385,7 +379,7 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const unsigned char, 33> session_
                 network::Request{
                         swarm.front(),
                         "retrieve",
-                        to_vector<unsigned char>(body_str),
+                        to_vector(body_str),
                         network::RequestCategory::standard_small,
                         20s},
                 [this, sid = std::move(sid)](
@@ -500,8 +494,10 @@ void Core::_handle_pfs_response(std::span<const std::byte, 33> sid, std::string 
                 in.require_signature(
                         "~",
                         [&x25519_pub](
-                                std::span<const std::byte> b, std::span<const std::byte> sig) {
-                            if (!xed25519::verify(sig, x25519_pub, b))
+                                std::span<const std::byte> b,
+                                std::span<const std::byte> sig) {
+                            if (sig.size() != 64 ||
+                                !xed25519::verify(sig.first<64>(), x25519_pub, b))
                                 throw std::runtime_error{"signature verification failed"};
                         });
                 std::ranges::copy(X, pk_x25519.emplace().begin());
@@ -557,15 +553,11 @@ void Core::_send_to_swarm(
     auto now_ms = epoch_ms(clock_now_ms());
 
     std::string to_sign = "store{}{}"_format(ns_val, now_ms);
-    std::array<unsigned char, 64> sig;
+    b64 sig;
     {
         auto seed = globals.account_seed();
-        crypto_sign_ed25519_detached(
-                sig.data(),
-                nullptr,
-                reinterpret_cast<const unsigned char*>(to_sign.data()),
-                to_sign.size(),
-                seed.ed25519_secret().data());
+        auto to_sign_bytes = std::as_bytes(std::span{to_sign});
+        ed25519::sign(sig, seed.ed25519_secret(), to_sign_bytes);
     }
 
     nlohmann::json params = {
@@ -579,7 +571,7 @@ void Core::_send_to_swarm(
             {"ttl", ttl.count()},
     };
 
-    auto body = to_vector<unsigned char>(params.dump());
+    auto body = to_vector<std::byte>(params.dump());
 
     // Resolve the recipient's swarm and send.
     network::x25519_pubkey x25519_pub;
@@ -615,7 +607,7 @@ void Core::_do_send_dm(
         std::span<const std::byte, 33> recipient,
         std::span<const std::byte> content,
         sys_ms sent_timestamp,
-        const OptionalEd25519PrivKeySpan& pro_privkey,
+        const ed25519::OptionalPrivKeySpan& pro_privkey,
         std::chrono::milliseconds ttl,
         bool force_v2) {
     auto fire_status = [&](MessageSendStatus status) {
@@ -628,15 +620,9 @@ void Core::_do_send_dm(
         }
     };
 
-    // TODO: remove these casts once the encrypt/encode APIs are migrated to std::byte.
-    std::span<const unsigned char, 33> recipient_uc{
-            reinterpret_cast<const unsigned char*>(recipient.data()), 33};
-    std::span<const unsigned char> content_uc{
-            reinterpret_cast<const unsigned char*>(content.data()), content.size()};
-
     // Look up cached PFS keys for the recipient.
-    using X = sqlite::blob_guts<std::array<unsigned char, 32>>;
-    using M = sqlite::blob_guts<std::array<unsigned char, 1184>>;
+    using X = sqlite::blob_guts<b32>;
+    using M = sqlite::blob_guts<std::array<std::byte, 1184>>;
     auto row = db.conn()
                        .prepared_maybe_get<
                                std::optional<int64_t>,
@@ -645,42 +631,38 @@ void Core::_do_send_dm(
                                std::optional<M>>(
                                "SELECT fetched_at, nak_at, pubkey_x25519, pubkey_mlkem768"
                                " FROM pfs_key_cache WHERE session_id = ?",
-                               recipient_uc);
+                               recipient);
 
-    const std::array<unsigned char, 32>* pfs_x25519 = nullptr;
-    const std::array<unsigned char, 1184>* pfs_mlkem768 = nullptr;
+    const b32* pfs_x25519 = nullptr;
+    const std::array<std::byte, 1184>* pfs_mlkem768 = nullptr;
     if (row) {
         auto& [fetched_at, nak_at, pk_x, pk_m] = *row;
         if (fetched_at && pk_x && pk_m) {
-            pfs_x25519 = &static_cast<const std::array<unsigned char, 32>&>(*pk_x);
-            pfs_mlkem768 = &static_cast<const std::array<unsigned char, 1184>&>(*pk_m);
+            pfs_x25519 = &static_cast<const b32&>(*pk_x);
+            pfs_mlkem768 = &static_cast<const std::array<std::byte, 1184>&>(*pk_m);
         }
     }
 
     // Encrypt the message.  v2 (PFS or nopfs) produces the complete wire format directly
     // (0x00 0x02 | ki | E | mlkem_ct | encrypted_inner) — no protobuf wrapping.  v1 uses
     // encode_dm_v1 which wraps in Envelope + WebSocketMessage protobufs.
-    std::vector<unsigned char> encrypted;
+    std::vector<std::byte> payload;
     try {
         auto seed = globals.account_seed();
         auto ed_sec = seed.ed25519_secret();
 
         if (pfs_x25519)
-            encrypted = encrypt_for_recipient_v2(
-                    ed_sec, recipient_uc, *pfs_x25519, *pfs_mlkem768, content_uc, pro_privkey);
+            payload = encrypt_for_recipient_v2(
+                    ed_sec, recipient, *pfs_x25519, *pfs_mlkem768, content, pro_privkey);
         else if (force_v2)
-            encrypted =
-                    encrypt_for_recipient_v2_nopfs(ed_sec, recipient_uc, content_uc, pro_privkey);
+            payload = encrypt_for_recipient_v2_nopfs(ed_sec, recipient, content, pro_privkey);
         else
-            encrypted = encode_dm_v1(content_uc, ed_sec, sent_timestamp, recipient_uc, pro_privkey);
+            payload = encode_dm_v1(content, ed_sec, sent_timestamp, recipient, pro_privkey);
     } catch (const std::exception& e) {
         log::warning(cat, "send_dm: encryption failed for message {}: {}", message_id, e.what());
         fire_status(MessageSendStatus::encrypt_failed);
         return;
     }
-
-    std::vector<std::byte> payload(encrypted.size());
-    std::memcpy(payload.data(), encrypted.data(), encrypted.size());
 
     // Dispatch to swarm.
     fire_status(MessageSendStatus::sending);
@@ -718,8 +700,8 @@ void Core::_flush_pending_sends(std::span<const std::byte, 33> session_id) {
                     pending.recipient,
                     pending.content,
                     pending.sent_timestamp,
-                    pending.pro_privkey ? OptionalEd25519PrivKeySpan{*pending.pro_privkey}
-                                        : OptionalEd25519PrivKeySpan{},
+                    pending.pro_privkey ? ed25519::OptionalPrivKeySpan{*pending.pro_privkey}
+                                        : ed25519::OptionalPrivKeySpan{},
                     pending.ttl,
                     pending.force_v2);
         } else {
@@ -732,19 +714,16 @@ int64_t Core::send_dm(
         std::span<const std::byte, 33> recipient_session_id,
         std::span<const std::byte> content,
         sys_ms sent_timestamp,
-        const OptionalEd25519PrivKeySpan& pro_privkey,
+        const ed25519::OptionalPrivKeySpan& pro_privkey,
         std::chrono::milliseconds ttl,
         bool force_v2) {
     auto id = _next_message_id++;
 
-    // Reinterpret for the DB query which still takes unsigned char.
-    std::span<const unsigned char, 33> recipient_uc{
-            reinterpret_cast<const unsigned char*>(recipient_session_id.data()), 33};
-
     // Check cache state to decide whether we can send immediately or must queue.
     auto conn = db.conn();
     auto row = conn.prepared_maybe_get<std::optional<int64_t>, std::optional<int64_t>>(
-            "SELECT fetched_at, nak_at FROM pfs_key_cache WHERE session_id = ?", recipient_uc);
+            "SELECT fetched_at, nak_at FROM pfs_key_cache WHERE session_id = ?",
+            recipient_session_id);
 
     bool have_cached_key = false;
     bool is_nak = false;
@@ -789,7 +768,7 @@ int64_t Core::send_dm(
                     _flush_pending_sends(sid);
                 };
 
-        prefetch_pfs_keys(recipient_uc);
+        prefetch_pfs_keys(recipient_session_id);
     } else {
         // No cache and no network: fire immediate failure.
         if (callbacks.message_send_status)
@@ -806,15 +785,11 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
     auto seed = globals.account_seed();
     auto session_id = globals.session_id();
     // Long-term X25519 pub/sec used for v2 key-indicator prefix decryption.
-    std::span<const unsigned char, 32> x25519_pub{session_id.data() + 1, 32};
+    std::span<const std::byte, 32> x25519_pub{session_id.data() + 1, 32};
     auto x25519_sec = seed.x25519_key();
 
     // Ed25519 secret key used for v1 envelope decryption.
-    // TODO: DecodeEnvelopeKey is an ugly API; refactor it (see project memory).
     auto ed_sec = seed.ed25519_secret();
-    std::array<std::span<const uint8_t>, 1> ed_sec_arr{ed_sec};
-    DecodeEnvelopeKey v1_keys;
-    v1_keys.decrypt_keys = ed_sec_arr;
 
     auto fire_received = [&](ReceivedMessage out) {
         if (!callbacks.message_received)
@@ -843,15 +818,15 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
             continue;
         }
 
-        if (data[0] == 0x00) {
+        if (data[0] == std::byte{0x00}) {
             // Version 2 (PFS+PQ) or an unrecognised future version.
-            if (data.size() < 2 || data[1] != 0x02) {
+            if (data.size() < 2 || data[1] != std::byte{0x02}) {
                 fire_fail(msg, MessageDecryptFailure::unknown_version);
                 continue;
             }
 
             // Extract the 2-byte ML-KEM key indicator, then look up matching account keys.
-            std::array<unsigned char, 2> ki;
+            std::array<std::byte, 2> ki;
             try {
                 ki = decrypt_incoming_v2_prefix(x25519_sec, x25519_pub, data);
             } catch (const std::exception&) {
@@ -916,7 +891,7 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
         } else {
             // Version 1: protobuf WebSocketMessage → Envelope wire format.
             try {
-                auto decoded = decode_envelope(v1_keys, data, pro_backend::PUBKEY);
+                auto decoded = decode_dm_envelope(ed_sec, data, pro_backend::PUBKEY);
 
                 ReceivedMessage out;
                 out.hash = msg.hash;
@@ -924,7 +899,7 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
                 out.expiry = msg.expiry;
                 out.version = 1;
                 // Reconstruct the 33-byte (0x05-prefixed) session ID from the x25519 pubkey.
-                out.sender_session_id[0] = 0x05;
+                out.sender_session_id[0] = std::byte{0x05};
                 std::ranges::copy(decoded.sender_x25519_pubkey, out.sender_session_id.begin() + 1);
                 out.content = std::move(decoded.content_plaintext);
                 if (decoded.envelope.flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG)

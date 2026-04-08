@@ -204,6 +204,9 @@ struct sodium_array {
     bool empty() const { return len == 0; }
     explicit operator bool() const { return !empty(); }
 
+    operator std::span<T>() { return {buf, len}; }
+    operator std::span<const T>() const { return {buf, len}; }
+
     T* begin() { return buf; }
     const T* begin() const { return buf; }
     T* end() { return buf + len; }
@@ -242,5 +245,29 @@ struct sodium_allocator {
 /// Vector that uses sodium's secure (but heavy) memory allocations
 template <typename T>
 using sodium_vector = std::vector<T, sodium_allocator<T>>;
+
+// Like std::allocator but zeros memory before freeing.  Lighter weight than sodium_allocator
+// (uses regular heap allocation) but still ensures sensitive data is wiped on deallocation.
+template <typename T>
+struct clearing_allocator {
+    using value_type = T;
+
+    [[nodiscard]] static T* allocate(std::size_t n) {
+        return std::allocator<T>{}.allocate(n);
+    }
+
+    static void deallocate(T* p, std::size_t n) {
+        sodium_zero_buffer(p, n * sizeof(T));
+        std::allocator<T>{}.deallocate(p, n);
+    }
+
+    template <typename T2>
+    bool operator==(const clearing_allocator<T2>&) const noexcept { return true; }
+};
+
+/// Vector that zeros its buffer on deallocation (including when resizing).  Lighter weight
+/// than sodium_vector but still suitable for short-lived sensitive data.
+template <typename T>
+using cleared_vector = std::vector<T, clearing_allocator<T>>;
 
 }  // namespace session

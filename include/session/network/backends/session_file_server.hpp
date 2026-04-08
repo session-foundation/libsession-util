@@ -155,7 +155,7 @@ file_metadata parse_upload_response(const std::string& body, size_t upload_size)
 /// Outputs:
 /// - returns a pair of the parsed `file_metadata` and the raw file data.
 /// - throws `invalid_url_exception` if the URL cannot be parsed.
-std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
+std::pair<file_metadata, std::vector<std::byte>> parse_download_response(
         std::string_view download_url,
         const std::vector<std::pair<std::string, std::string>>& headers,
         const std::string& body);

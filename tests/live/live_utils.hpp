@@ -3,7 +3,6 @@
 #include <fmt/format.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <atomic>
 #include <filesystem>
@@ -11,12 +10,14 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <session/clock.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
 #include <session/network/network_opt.hpp>
 #include <session/network/session_network.hpp>
 #include <session/network/session_network_types.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/util.hpp>
 
 #include "../dns_utils.hpp"
@@ -76,21 +77,15 @@ inline session::TempCore make_live_core(Opts&&... opts) {
 // routing layer adds the wrapper as required by the transport.
 //
 // See session-storage-server client_rpc_endpoints.h for the store endpoint spec.
-inline std::vector<unsigned char> build_account_pubkeys_store_params(session::core::Core& core) {
+inline std::vector<std::byte> build_account_pubkeys_store_params(session::core::Core& core) {
     auto session_id_hex = oxenc::to_hex(core.globals.session_id());
     auto now_ms = session::epoch_ms(session::clock_now_ms());
     constexpr auto ns = static_cast<int16_t>(session::config::Namespace::AccountPubkeys);
 
     // Signature covers: "store" || namespace (decimal) || sig_timestamp (decimal)
     auto to_sign = fmt::format("store{}{}", ns, now_ms);
-    std::array<unsigned char, 64> sig;
     auto seed = core.globals.account_seed();
-    crypto_sign_ed25519_detached(
-            sig.data(),
-            nullptr,
-            reinterpret_cast<const unsigned char*>(to_sign.data()),
-            to_sign.size(),
-            seed.ed25519_secret().data());
+    auto sig = session::ed25519::sign(seed.ed25519_secret(), session::to_span(to_sign));
 
     auto msg = core.devices.build_account_pubkey_message();
 
@@ -106,7 +101,7 @@ inline std::vector<unsigned char> build_account_pubkeys_store_params(session::co
             {"signature", oxenc::to_base64(sig)},
             {"ttl", int64_t{2592000000}},  // 30 days in ms
     };
-    return session::to_vector<unsigned char>(params.dump());
+    return session::to_vector(params.dump());
 }
 
 // Pushes Core's AccountPubkeys message to its swarm.  Resolves the swarm, sends the signed store

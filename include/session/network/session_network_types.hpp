@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <optional>
@@ -150,7 +151,7 @@ struct Request {
     std::string request_id;
     network_destination destination;
     std::string endpoint;
-    std::optional<std::vector<unsigned char>> body;
+    std::optional<std::vector<std::byte>> body;
     RequestCategory category;
 
     /// Timeout for an in-flight request after it has been sent via the transport mechanism.
@@ -179,7 +180,7 @@ struct Request {
     Request(std::string request_id,
             network_destination destination,
             std::string endpoint,
-            std::optional<std::vector<unsigned char>> body,
+            std::optional<std::vector<std::byte>> body,
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
@@ -188,7 +189,7 @@ struct Request {
 
     Request(network_destination destination,
             std::string endpoint,
-            std::optional<std::vector<unsigned char>> body,
+            std::optional<std::vector<std::byte>> body,
             RequestCategory category,
             std::chrono::milliseconds request_timeout,
             std::optional<std::chrono::milliseconds> overall_timeout = std::nullopt,
@@ -244,7 +245,7 @@ struct FileTransferRequest {
 };
 
 struct UploadRequest : FileTransferRequest {
-    std::function<std::vector<unsigned char>()> next_data;
+    std::function<std::vector<std::byte>()> next_data;
     std::optional<std::string> file_name;
     std::optional<std::chrono::seconds> ttl;
 };

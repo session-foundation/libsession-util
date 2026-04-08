@@ -54,8 +54,10 @@ add_libsession_util_library(util
 add_libsession_util_library(crypto
     attachments.cpp
     blinding.cpp
+    crypto/ed25519.cpp
+    crypto/mlkem768.cpp
+    crypto/x25519.cpp
     curve25519.cpp
-    ed25519.cpp
     hash.cpp
     multi_encrypt.cpp
     random.cpp

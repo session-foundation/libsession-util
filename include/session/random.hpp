@@ -45,8 +45,13 @@ namespace session::random {
 ///
 /// Outputs: None.
 void fill(std::span<std::byte> buf);
-void fill(std::span<unsigned char> buf);
 void fill(std::span<char> buf);
+
+/// API: random/random_fill_deterministic
+///
+/// Wrapper around randombytes_buf_deterministic: fills `buf` with deterministic pseudorandom
+/// bytes derived from the given 32-byte seed.
+void fill_deterministic(std::span<std::byte> buf, std::span<const std::byte, 32> seed);
 
 /// API: random/random
 ///
@@ -57,7 +62,7 @@ void fill(std::span<char> buf);
 ///
 /// Outputs:
 /// - random bytes of the specified length.
-std::vector<unsigned char> random(size_t size);
+std::vector<std::byte> random(size_t size);
 
 /// API: random/random_base32
 ///

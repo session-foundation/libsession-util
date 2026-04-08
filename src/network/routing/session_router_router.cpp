@@ -51,31 +51,30 @@ namespace {
         return *key;
     }
 
-    std::pair<std::span<const unsigned char>, uint16_t> remote_info_for_destination(
+    std::pair<std::span<const std::byte, 32>, uint16_t> remote_info_for_destination(
             const network_destination& dest, const std::string& request_id) {
-        std::optional<std::pair<std::span<const unsigned char>, uint16_t>> result;
+        std::optional<std::pair<std::span<const std::byte, 32>, uint16_t>> result;
 
         std::visit(
                 [&result, &request_id]<typename T>(const T& arg) {
                     if constexpr (std::is_same_v<T, oxen::quic::RemoteAddress>) {
                         log::trace(
                                 cat, "[Request {}]: Using pre-resolved RemoteAddress.", request_id);
-                        result.emplace(arg.view_remote_key(), arg.port());
+                        result.emplace(
+                                as_span(arg.view_remote_key()).template first<32>(),
+                                arg.port());
                     } else if constexpr (std::is_same_v<T, service_node>) {
                         log::trace(
                                 cat,
                                 "[Request {}]: Resolving service_node to RemoteAddress.",
                                 request_id);
-                        result.emplace(arg.remote_pubkey, arg.omq_port);
+                        result.emplace(arg.view_remote_key(), arg.omq_port);
                     }
                 },
                 dest);
 
         if (!result)
             throw std::runtime_error{"Invalid destination"};
-
-        if (result->first.size() != 32)
-            throw std::runtime_error{"Invalid remote key"};
 
         return *result;
     }
@@ -584,7 +583,7 @@ void SessionRouter::_send_proxy_request(Request request, network_response_callba
     }
 
     service_node proxy_node = proxy_nodes[0];
-    std::vector<unsigned char> encrypted_blob;
+    std::vector<std::byte> encrypted_blob;
     std::shared_ptr<onionreq::ResponseParser> parser;
     log::debug(
             cat, "[Request {}]: Selected {} as proxy.", request.request_id, proxy_node.to_string());
@@ -1134,7 +1133,7 @@ void SessionRouter::_download_internal_legacy(DownloadRequest request, std::stri
 }
 
 void SessionRouter::_establish_tunnel(
-        std::span<const unsigned char>& remote_pubkey,
+        std::span<const std::byte, 32> remote_pubkey,
         const uint16_t remote_port,
         const std::string& initiating_req_id) {
     auto address_pubkey_hex = oxenc::to_hex(remote_pubkey);
@@ -1174,9 +1173,9 @@ void SessionRouter::_establish_tunnel(
     // }
 
     std::string srouter_address;
-    srouter_address.reserve(oxenc::to_base32z_size(32UL) + ".snode"sv.size());
+    srouter_address.reserve(oxenc::to_base32z_size(remote_pubkey.size()) + ".snode"sv.size());
     oxenc::to_base32z(
-            remote_pubkey.begin(), remote_pubkey.begin() + 32, std::back_inserter(srouter_address));
+            remote_pubkey.begin(), remote_pubkey.end(), std::back_inserter(srouter_address));
     srouter_address += ".snode"sv;
 
     // srouter::RouterID router_id{remote_pubkey.first<32>()};
@@ -1291,7 +1290,7 @@ void SessionRouter::_send_via_tunnel(
     // auto test_key =
     // oxenc::from_base64("1n+DAM9hKyJhtXSPR5L/HdemIKPiHs8dZsPn2kEQuMs="); auto test_key
     // = oxenc::from_base32z("55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo");
-    auto router_target = oxen::quic::RemoteAddress{test_key, "::1", tunnel.local_port};
+    auto router_target = oxen::quic::RemoteAddress{as_span<unsigned char>(test_key), "::1", tunnel.local_port};
 
     // Construct the actual request to send
     std::optional<std::chrono::milliseconds> remaining_overall_timeout =

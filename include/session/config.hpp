@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "types.hpp"
+#include "util.hpp"
 
 namespace session::config {
 
@@ -50,7 +51,7 @@ constexpr inline const dict_variant& unwrap(const dict_value& v) {
     return static_cast<const dict_variant&>(v);
 }
 
-using hash_t = std::array<unsigned char, 32>;
+using hash_t = std::array<std::byte, 32>;
 using seqno_hash_t = std::pair<seqno_t, hash_t>;
 
 class MutableConfigMessage;
@@ -102,9 +103,9 @@ class ConfigMessage {
 
     /// Seqno and hash of the message; we calculate this when loading.  Subclasses put the hash here
     /// (so that they can return a reference to it).
-    seqno_hash_t seqno_hash_{0, {0}};
+    seqno_hash_t seqno_hash_{0, {}};
 
-    std::optional<std::array<unsigned char, 64>> verified_signature_;
+    std::optional<b64> verified_signature_;
 
     // This will be set during construction from configs based on the merge result:
     // nullopt means we had to merge one or more configs together into a new merged config
@@ -121,11 +122,11 @@ class ConfigMessage {
     /// the message when loading multiple messages, but can still continue with other messages;
     /// throwing aborts the entire construction).
     using verify_callable = std::function<bool(
-            std::span<const unsigned char> data, std::span<const unsigned char> signature)>;
+            std::span<const std::byte> data, std::span<const std::byte> signature)>;
 
     /// Signing function: this is passed the data to be signed and returns the 64-byte signature.
     using sign_callable =
-            std::function<std::vector<unsigned char>(std::span<const unsigned char> data)>;
+            std::function<std::vector<std::byte>(std::span<const std::byte> data)>;
 
     ConfigMessage();
     ConfigMessage(const ConfigMessage&) = default;
@@ -138,7 +139,7 @@ class ConfigMessage {
     /// Initializes a config message by parsing a serialized message.  Throws on any error.  See the
     /// vector version below for argument descriptions.
     explicit ConfigMessage(
-            std::span<const unsigned char> serialized,
+            std::span<const std::byte> serialized,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -174,7 +175,7 @@ class ConfigMessage {
     /// `[](size_t, const auto& e) { throw e; }` can be used to make any parse error of any message
     /// fatal.
     explicit ConfigMessage(
-            const std::vector<std::span<const unsigned char>>& configs,
+            const std::vector<std::span<const std::byte>>& configs,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -229,7 +230,7 @@ class ConfigMessage {
     /// verified signature when it was parsed.  Returns nullopt otherwise (e.g. not loaded from
     /// verification at all; loaded without a verification function; or had no signature and a
     /// signature wasn't required).
-    const std::optional<std::array<unsigned char, 64>>& verified_signature() {
+    const std::optional<b64>& verified_signature() {
         return verified_signature_;
     }
 
@@ -245,10 +246,10 @@ class ConfigMessage {
     /// typically for a local serialization value that isn't being pushed to the server).  Note that
     /// signing is always disabled if there is no signing callback set, regardless of the value of
     /// this argument.
-    virtual std::vector<unsigned char> serialize(bool enable_signing = true);
+    virtual std::vector<std::byte> serialize(bool enable_signing = true);
 
   protected:
-    std::vector<unsigned char> serialize_impl(
+    std::vector<std::byte> serialize_impl(
             const oxenc::bt_dict& diff, bool enable_signing = true);
 };
 
@@ -297,7 +298,7 @@ class MutableConfigMessage : public ConfigMessage {
     /// constructor only increments seqno once while the indirect version would increment twice in
     /// the case of a required merge conflict resolution.
     explicit MutableConfigMessage(
-            const std::vector<std::span<const unsigned char>>& configs,
+            const std::vector<std::span<const std::byte>>& configs,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS,
@@ -307,7 +308,7 @@ class MutableConfigMessage : public ConfigMessage {
     /// take an error handler and instead always throws on parse errors (the above also throws for
     /// an erroneous single message, but with a less specific "no valid config messages" error).
     explicit MutableConfigMessage(
-            std::span<const unsigned char> config,
+            std::span<const std::byte> config,
             verify_callable verifier = nullptr,
             sign_callable signer = nullptr,
             int lag = DEFAULT_DIFF_LAGS);
@@ -355,7 +356,7 @@ class MutableConfigMessage : public ConfigMessage {
   protected:
     /// Internal version of hash() that takes the already-serialized value, to avoid needing a call
     /// to `serialize()` when such a call has already been done for other reasons.
-    const hash_t& hash(std::span<const unsigned char> serialized);
+    const hash_t& hash(std::span<const std::byte> serialized);
     void increment_impl();
 };
 
@@ -396,7 +397,7 @@ class MutableConfigMessage : public ConfigMessage {
 void verify_config_sig(
         oxenc::bt_dict_consumer dict,
         const ConfigMessage::verify_callable& verifier,
-        std::optional<std::array<unsigned char, 64>>* verified_signature = nullptr,
+        std::optional<b64>* verified_signature = nullptr,
         bool trust_signature = false);
 
 }  // namespace session::config

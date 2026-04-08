@@ -10,7 +10,7 @@
 namespace session::core {
 
 bool Pro::proof_is_revoked(
-        std::span<unsigned char, 32> gen_index_hash,
+        std::span<const std::byte, 32> gen_index_hash,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
     return conn().prepared_get<int>(
             "SELECT EXISTS (SELECT 1 FROM pro_revocations"
@@ -35,7 +35,7 @@ void Pro::update_revocations(
     if (revocations_ticket_ && ticket == *revocations_ticket_)
         return;
 
-    auto already_hashed = [](const uc32& a) {
+    auto already_hashed = [](const b32& a) {
         size_t h;
         std::memcpy(&h, a.data(), sizeof(h));
         return h;
@@ -45,9 +45,9 @@ void Pro::update_revocations(
 
     SQLite::Transaction tx{c.sql};
 
-    std::unordered_set<uc32, decltype(already_hashed)> to_remove;
+    std::unordered_set<b32, decltype(already_hashed)> to_remove;
     for (auto id :
-         c.prepared_results<sqlite::blob_guts<uc32>>("SELECT gen_index_hash FROM pro_revocations"))
+         c.prepared_results<sqlite::blob_guts<b32>>("SELECT gen_index_hash FROM pro_revocations"))
         to_remove.insert(id);
 
     for (auto st = c.prepared_st(

@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "util.hpp"
+
 namespace session {
 
 using namespace std::literals;
@@ -32,10 +34,10 @@ struct Disappearing {
 /// 32-byte pubkey value (i.e. not hex, without the prefix).
 struct SessionID {
     /// The fixed session netid, 0x05
-    static constexpr unsigned char netid = 0x05;
+    static constexpr std::byte netid{0x05};
 
     /// The raw x25519 pubkey, as bytes
-    std::array<unsigned char, 32> pubkey;
+    b32 pubkey;
 
     /// Returns the full pubkey in hex, including the netid prefix.
     std::string hex() const;

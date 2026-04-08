@@ -15,7 +15,7 @@ TEST_CASE("Live: PFS key prefetch returns NAK for account with no published keys
     auto core_a = make_live_core();
     auto core_b = make_live_core();
 
-    std::array<unsigned char, 33> sid_a;
+    b33 sid_a;
     std::ranges::copy(core_a->globals.session_id(), sid_a.begin());
 
     core_b->prefetch_pfs_keys(sid_a);
@@ -37,7 +37,7 @@ TEST_CASE("Live: PFS key prefetch retrieves keys after store to swarm", "[live][
     REQUIRE(store_account_pubkeys(*core_a, LIVE_TIMEOUT));
 
     // Now fetch from Core B's perspective.
-    std::array<unsigned char, 33> sid_a;
+    b33 sid_a;
     std::ranges::copy(core_a->globals.session_id(), sid_a.begin());
 
     core_b->prefetch_pfs_keys(sid_a);

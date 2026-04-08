@@ -89,7 +89,7 @@ class TestHelper {
 
     // Returns the raw 32-byte seed for the account key identified by the given x25519 public key.
     static cleared_b32 account_key_seed(
-            core::Devices& d, std::span<const unsigned char, 32> x25519_pub) {
+            core::Devices& d, std::span<const std::byte, 32> x25519_pub) {
         cleared_b32 seed;
         auto c = d.conn();
         auto blob = c.prepared_get<sqlite::blob_guts<std::array<std::byte, 32>>>(
@@ -148,7 +148,7 @@ class TestHelper {
 
     // Returns the pfs_key_cache entry for the given session_id, or nullopt if absent.
     static std::optional<PfsCacheEntry> pfs_cache_entry(
-            core::Core& core, std::span<const unsigned char, 33> session_id) {
+            core::Core& core, std::span<const std::byte, 33> session_id) {
         using X = sqlite::blob_guts<std::array<std::byte, 32>>;
         using M = sqlite::blob_guts<std::array<std::byte, 1184>>;
         auto row = core.db.conn()

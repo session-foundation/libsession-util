@@ -1,20 +1,13 @@
 #include "session/session_encrypt.hpp"
 
-#include <mlkem_native.h>
+#include <oxen/log.hpp>
 #include <oxenc/base64.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <session/session_encrypt.h>
-#include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_box.h>
-#include <sodium/crypto_core_ed25519.h>
 #include <sodium/crypto_pwhash.h>
-#include <sodium/crypto_scalarmult.h>
-#include <sodium/crypto_scalarmult_ed25519.h>
 #include <sodium/crypto_secretbox.h>
-#include <sodium/crypto_sign_ed25519.h>
-#include <sodium/randombytes.h>
 #include <zstd.h>
 
 #include <array>
@@ -27,7 +20,11 @@
 #include "internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/clock.hpp"
+#include "session/crypto/x25519.hpp"
+#include "session/crypto/ed25519.hpp"
+#include "session/encrypt.hpp"
 #include "session/hash.hpp"
+#include "session/crypto/mlkem768.hpp"
 #include "session/random.hpp"
 #include "session/sodium_array.hpp"
 #include "session/types.hpp"
@@ -83,23 +80,23 @@ constexpr auto V2_MSG_SIG_PERS = "SessionV2Message"_b2b_pers;
 // SHA3-256(ssₘ || ssₓ || E || X || V2_XWING_LABEL) produces the combined X-Wing shared secret.
 constexpr auto V2_XWING_LABEL =  //
         R"(\./)"
-        R"(/^\)"_uc;
+        R"(/^\)"_bytes;
 
 // SHAKE256 domain prefix for deriving the XChaCha20+Poly1305 key and nonce from the X-Wing SS.
-constexpr auto V2_SS_DOMAIN = "SessionV2MessageSS"_uc;
+constexpr auto V2_SS_DOMAIN = "SessionV2MessageSS"_bytes;
 
 // Shared v2 wire-format layout constants (used in both encrypt and decrypt)
 static constexpr size_t V2_AEAD_OVERHEAD = crypto_aead_xchacha20poly1305_ietf_ABYTES;
 static constexpr size_t V2_NONCE_SIZE = crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
-static constexpr size_t V2_HEADER_SIZE = 2 + 2 + 32 + MLKEM768_CIPHERTEXTBYTES;
+static constexpr size_t V2_HEADER_SIZE = 2 + 2 + 32 + mlkem768::CIPHERTEXTBYTES;
 static constexpr size_t V2_OUTER_OVERHEAD = V2_HEADER_SIZE + V2_AEAD_OVERHEAD;
 static constexpr size_t V2_MIN_FINAL_SIZE = ((V2_OUTER_OVERHEAD + 256 + 255) / 256) * 256;
 
 // Validates the v2 ciphertext prefix and minimum size; throws std::runtime_error on failure.
-static void v2_check_header(std::span<const unsigned char> ciphertext) {
+static void v2_check_header(std::span<const std::byte> ciphertext) {
     if (ciphertext.size() < V2_MIN_FINAL_SIZE)
         throw std::runtime_error{"v2 ciphertext is too short"};
-    if (ciphertext[0] != 0x00 || ciphertext[1] != 0x02)
+    if (ciphertext[0] != std::byte{0x00} || ciphertext[1] != std::byte{0x02})
         throw std::runtime_error{"v2 ciphertext has wrong version prefix"};
 }
 
@@ -107,14 +104,14 @@ static void v2_check_header(std::span<const unsigned char> ciphertext) {
 // key_buf (overwriting ssm) and n (V2_NONCE_SIZE B) into nonce_out.  Callers are responsible for
 // storing these outputs in cleared buffers.  E is the ephemeral X25519 pubkey; X is the PFS pubkey.
 static void v2_derive_xwing_key_nonce(
-        std::span<unsigned char, 32> key_buf,
-        std::span<unsigned char, V2_NONCE_SIZE> nonce_out,
-        std::span<const unsigned char, 32> ssx,
-        std::span<const unsigned char, 32> E,
-        std::span<const unsigned char, 32> X) {
-    cleared_uc32 ss;
-    hash::sha3_256(ss, key_buf, ssx, E, X, V2_XWING_LABEL);
+        std::span<std::byte, 32> key_buf,
+        std::span<std::byte, V2_NONCE_SIZE> nonce_out,
+        std::span<const std::byte, 32> ssx,
+        std::span<const std::byte, 32> E,
+        std::span<const std::byte, 32> X) {
+    auto ss = hash::sha3_256<32>(key_buf, ssx, E, X, V2_XWING_LABEL);
     hash::shake256(V2_SS_DOMAIN, ss)(key_buf, nonce_out);
+    sodium_memzero(ss.data(), ss.size());
 }
 
 // Computes the 2-byte Key Indicator Shared Secret (KISS):
@@ -122,30 +119,28 @@ static void v2_derive_xwing_key_nonce(
 // On encrypt: sender holds ephemeral secret e, DH partner is long-term S → call with
 // encrypting=true On decrypt: recipient holds long-term secret s, DH partner is ephemeral E → call
 // with encrypting=false
-static std::array<unsigned char, 2> v2_kiss(
-        std::span<const unsigned char, 32> sec,
-        std::span<const unsigned char, 32> E,
-        std::span<const unsigned char, 32> S,
+static std::array<std::byte, 2> v2_kiss(
+        std::span<const std::byte, 32> sec,
+        std::span<const std::byte, 32> E,
+        std::span<const std::byte, 32> S,
         bool encrypting) {
-    cleared_uc32 dh;
-    if (0 != crypto_scalarmult(dh.data(), sec.data(), encrypting ? S.data() : E.data()))
-        throw std::runtime_error{"X25519 DH (KISS) failed"};
+    auto dh = x25519::scalarmult(sec, encrypting ? S : E);
     return hash::blake2b_key_pers<2>(dh, V2_KISS_PERS, E, S);
 }
 
-std::vector<unsigned char> sign_for_recipient(
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char> recipient_pubkey,
-        std::span<const unsigned char> message) {
+std::vector<std::byte> sign_for_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> recipient_pubkey,
+        std::span<const std::byte> message) {
     // If prefixed, drop it (and do this for the caller, too) so that everything after this
     // doesn't need to worry about whether it is prefixed or not.
-    if (recipient_pubkey.size() == 33 && recipient_pubkey.front() == 0x05)
+    if (recipient_pubkey.size() == 33 && recipient_pubkey.front() == std::byte{0x05})
         recipient_pubkey = recipient_pubkey.subspan(1);
     else if (recipient_pubkey.size() != 32)
         throw std::invalid_argument{
                 "Invalid recipient_pubkey: expected 32 bytes (33 with 05 prefix)"};
 
-    std::vector<unsigned char> buf;
+    std::vector<std::byte> buf;
     buf.reserve(message.size() + 96);  // 32+32 now, but 32+64 when we reuse it for the sealed box
     buf.insert(buf.end(), message.begin(), message.end());
     buf.insert(
@@ -154,10 +149,7 @@ std::vector<unsigned char> sign_for_recipient(
             ed25519_privkey.end());  // [32:] of a libsodium full seed value is the *pubkey*
     buf.insert(buf.end(), recipient_pubkey.begin(), recipient_pubkey.end());
 
-    uc64 sig;
-    if (0 != crypto_sign_ed25519_detached(
-                     sig.data(), nullptr, buf.data(), buf.size(), ed25519_privkey.data()))
-        throw std::runtime_error{"Failed to sign; perhaps the secret key is invalid?"};
+    auto sig = ed25519::sign(ed25519_privkey, buf);
 
     // We have M||A||Y for the sig, but now we want M||A||SIG so drop Y then append SIG:
     buf.resize(buf.size() - 32);
@@ -166,12 +158,12 @@ std::vector<unsigned char> sign_for_recipient(
     return buf;
 }
 
-static constexpr auto BOX_HASHKEY = "SessionBoxEphemeralHashKey"_uc;
+static constexpr auto BOX_HASHKEY = "SessionBoxEphemeralHashKey"_bytes;
 
-std::vector<unsigned char> encrypt_for_recipient(
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char> recipient_pubkey,
-        std::span<const unsigned char> message) {
+std::vector<std::byte> encrypt_for_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> recipient_pubkey,
+        std::span<const std::byte> message) {
 
     auto signed_msg = sign_for_recipient(ed25519_privkey, recipient_pubkey, message);
 
@@ -180,19 +172,17 @@ std::vector<unsigned char> encrypt_for_recipient(
                 recipient_pubkey.subspan(1);  // sign_for_recipient already checked that this is the
                                               // proper 0x05 prefix when present.
 
-    std::vector<unsigned char> result;
+    std::vector<std::byte> result;
     result.resize(signed_msg.size() + crypto_box_SEALBYTES);
-    if (0 != crypto_box_seal(
-                     result.data(), signed_msg.data(), signed_msg.size(), recipient_pubkey.data()))
-        throw std::runtime_error{"Sealed box encryption failed"};
+    encrypt::box_seal(result, signed_msg, recipient_pubkey.first<32>());
 
     return result;
 }
 
-std::vector<unsigned char> encrypt_for_recipient_deterministic(
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char> recipient_pubkey,
-        std::span<const unsigned char> message) {
+std::vector<std::byte> encrypt_for_recipient_deterministic(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> recipient_pubkey,
+        std::span<const std::byte> message) {
 
     auto signed_msg = sign_for_recipient(ed25519_privkey, recipient_pubkey, message);
 
@@ -202,36 +192,31 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
 
     // To make our ephemeral seed we're going to hash: SENDER_SEED || RECIPIENT_PK || MESSAGE with a
     // keyed blake2b hash.
-    cleared_uchars<crypto_box_SEEDBYTES> seed;
+    cleared_b32 seed;
     hash::blake2b_key(
             seed, BOX_HASHKEY, ed25519_privkey.seed(), recipient_pubkey.first(32), message);
 
-    cleared_uchars<crypto_box_SECRETKEYBYTES> eph_sk;
-    cleared_uchars<crypto_box_PUBLICKEYBYTES> eph_pk;
-
-    crypto_box_seed_keypair(eph_pk.data(), eph_sk.data(), seed.data());
+    auto [eph_pk, eph_sk] = x25519::seed_keypair(seed);
 
     // The nonce for a sealed box is not passed but is implicitly defined as the (unkeyed) blake2b
     // hash of:
     //     EPH_PUBKEY || RECIPIENT_PUBKEY
-    cleared_uchars<crypto_box_NONCEBYTES> nonce;
+    std::array<std::byte, crypto_box_NONCEBYTES> nonce;
     hash::blake2b(nonce, eph_pk, recipient_pubkey);
 
     // A sealed box is a regular box (using the ephermal keys and nonce), but with the ephemeral
     // pubkey prepended:
     static_assert(crypto_box_SEALBYTES == crypto_box_PUBLICKEYBYTES + crypto_box_MACBYTES);
 
-    std::vector<unsigned char> result;
+    std::vector<std::byte> result;
     result.resize(crypto_box_SEALBYTES + signed_msg.size());
-    std::memcpy(result.data(), eph_pk.data(), crypto_box_PUBLICKEYBYTES);
-    if (0 != crypto_box_easy(
-                     result.data() + crypto_box_PUBLICKEYBYTES,
-                     signed_msg.data(),
-                     signed_msg.size(),
-                     nonce.data(),
-                     recipient_pubkey.data(),
-                     eph_sk.data()))
-        throw std::runtime_error{"Crypto box encryption failed"};
+    std::ranges::copy(eph_pk, result.begin());
+    encrypt::box_easy(
+            std::span{result}.subspan(crypto_box_PUBLICKEYBYTES),
+            signed_msg,
+            nonce,
+            recipient_pubkey.first<32>(),
+            eph_sk);
 
     return result;
 }
@@ -239,16 +224,16 @@ std::vector<unsigned char> encrypt_for_recipient_deterministic(
 // Builds and returns a complete v2 DM wire-format ciphertext from already-derived header fields
 // and encryption key material.  Used by both encrypt_for_recipient_v2 (PFS+PQ) and
 // encrypt_for_recipient_v2_nopfs (non-PFS fallback).
-static std::vector<unsigned char> v2_encrypt_inner(
-        std::array<unsigned char, 2> ki,
-        std::span<const unsigned char, 32> E,
-        std::span<const unsigned char, MLKEM768_CIPHERTEXTBYTES> outer_ct,
-        std::span<const unsigned char, 32> enc_key,
-        std::span<const unsigned char, V2_NONCE_SIZE> enc_nonce,
-        const Ed25519PrivKeySpan& sender_ed25519_privkey,
-        std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char> content,
-        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey) {
+static std::vector<std::byte> v2_encrypt_inner(
+        std::array<std::byte, 2> ki,
+        std::span<const std::byte, 32> E,
+        std::span<const std::byte, mlkem768::CIPHERTEXTBYTES> outer_ct,
+        std::span<const std::byte, 32> enc_key,
+        std::span<const std::byte, V2_NONCE_SIZE> enc_nonce,
+        const ed25519::PrivKeySpan& sender_ed25519_privkey,
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte> content,
+        const ed25519::OptionalPrivKeySpan& pro_ed25519_privkey) {
 
     auto sender_ed_pk = sender_ed25519_privkey.pubkey();
 
@@ -278,14 +263,14 @@ static std::vector<unsigned char> v2_encrypt_inner(
     // Allocate result (zero-initialized so padding bytes are already 0), write header,
     // build inner dict directly into result buffer, then encrypt in-place.
     // (c == m is explicitly supported by libsodium for AEAD functions)
-    std::vector<unsigned char> result(final_size, 0);
+    std::vector<std::byte> result(final_size, std::byte{0});
 
-    result[0] = 0x00;
-    result[1] = 0x02;
+    result[0] = std::byte{0x00};
+    result[1] = std::byte{0x02};
     result[2] = ki[0];
     result[3] = ki[1];
     std::memcpy(result.data() + 4, E.data(), 32);
-    std::memcpy(result.data() + 36, outer_ct.data(), MLKEM768_CIPHERTEXTBYTES);
+    std::memcpy(result.data() + 36, outer_ct.data(), mlkem768::CIPHERTEXTBYTES);
 
     {
         oxenc::bt_dict_producer dict{
@@ -293,94 +278,68 @@ static std::vector<unsigned char> v2_encrypt_inner(
         dict.append("S", sender_ed_pk);
         dict.append("c", content);
         // "~" signs BLAKE2b-64(body-so-far, key=recipient_session_id_33B, pers="SessionV2Message")
-        dict.append_signature("~", [&](std::span<const unsigned char> body) {
-            cleared_uc64 h;
+        dict.append_signature("~", [&](std::span<const std::byte> body) {
+            cleared_b64 h;
             hash::blake2b_key_pers(h, recipient_session_id, V2_MSG_SIG_PERS, body);
-            uc64 sig;
-            if (0 !=
-                crypto_sign_ed25519_detached(
-                        sig.data(), nullptr, h.data(), h.size(), sender_ed25519_privkey.data()))
-                throw std::runtime_error{"Failed to sign v2 message"};
-            return sig;
+            return ed25519::sign(sender_ed25519_privkey, h);
         });
         if (pro_ed25519_privkey)
-            dict.append_signature("~P", [&](std::span<const unsigned char> body) {
-                uc64 sig;
-                if (0 != crypto_sign_ed25519_detached(
-                                 sig.data(),
-                                 nullptr,
-                                 body.data(),
-                                 body.size(),
-                                 pro_ed25519_privkey->data()))
-                    throw std::runtime_error{"Failed to sign v2 pro signature"};
-                return sig;
+            dict.append_signature("~P", [&](std::span<const std::byte> body) {
+                return ed25519::sign(*pro_ed25519_privkey, body);
             });
         assert(dict.view().size() == inner_dict_size);
     }
 
-    if (0 != crypto_aead_xchacha20poly1305_ietf_encrypt(
-                     result.data() + V2_HEADER_SIZE,  // c (output, in-place)
-                     nullptr,
-                     result.data() + V2_HEADER_SIZE,  // m (input, same buffer)
-                     padded_inner_size,
-                     nullptr,
-                     0,
-                     nullptr,
-                     enc_nonce.data(),  // 24-byte nonce
-                     enc_key.data()))   // key
-        throw std::runtime_error{"v2 message encryption failed"};
+    // In-place AEAD encrypt (libsodium explicitly supports c == m)
+    encrypt::xchacha20poly1305_encrypt(
+            std::span{result}.subspan(V2_HEADER_SIZE),
+            std::span{result}.subspan(V2_HEADER_SIZE, padded_inner_size),
+            enc_nonce,
+            enc_key);
 
     return result;
 }
 
-std::vector<unsigned char> encrypt_for_recipient_v2(
-        const Ed25519PrivKeySpan& sender_ed25519_privkey,
-        std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char, 32> recipient_account_x25519,
-        std::span<const unsigned char, 1184> recipient_account_mlkem768,
-        std::span<const unsigned char> content,
-        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey) {
+std::vector<std::byte> encrypt_for_recipient_v2(
+        const ed25519::PrivKeySpan& sender_ed25519_privkey,
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte, 32> recipient_account_x25519,
+        std::span<const std::byte, 1184> recipient_account_mlkem768,
+        std::span<const std::byte> content,
+        const ed25519::OptionalPrivKeySpan& pro_ed25519_privkey) {
 
     // S = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
-    std::span<const unsigned char, 32> S{recipient_session_id.data() + 1, 32};
+    std::span<const std::byte, 32> S{recipient_session_id.data() + 1, 32};
 
     // Step 1: Generate ephemeral X25519 keypair e/E
-    cleared_uc32 e;
-    uc32 E;
-    crypto_box_keypair(E.data(), e.data());
+    auto [E, e] = x25519::keypair();
 
     // Three cleared buffers for key material:
     // enc_key_buf: ML-KEM shared secret ssm (step 4) → SHAKE256-derived enc key k (step 6)
     // ssx_buf: eS DH result (step 2) → ML-KEM coins (step 4) → ssx DH result (step 5)
     // enc_nonce: SHAKE256-derived enc nonce n (step 6)
-    cleared_uc32 enc_key_buf;
-    cleared_uc32 ssx_buf;
-    cleared_uchars<V2_NONCE_SIZE> enc_nonce;
+    cleared_b32 enc_key_buf;
+    cleared_b32 ssx_buf;
 
     // Step 2: KISS = BLAKE2b_2(E || S, key=eS, pers="Session-Msg-KISS")
     // eS is the X25519 DH with the long-term key, used only for cheap key indicator obfuscation
     auto kiss = v2_kiss(e, E, S, /*encrypting=*/true);
 
     // Step 3: ki = M[0:2] ⊕ kiss  (encrypted key indicator; lets recipient quickly identify key)
-    std::array<unsigned char, 2> ki{
-            static_cast<unsigned char>(recipient_account_mlkem768[0] ^ kiss[0]),
-            static_cast<unsigned char>(recipient_account_mlkem768[1] ^ kiss[1])};
+    std::array<std::byte, 2> ki{
+            recipient_account_mlkem768[0] ^ kiss[0],
+            recipient_account_mlkem768[1] ^ kiss[1]};
 
     // Step 4: ML-KEM-768 encapsulate: ssₘ, mlkem_ct = Encapsulate(M)
-    std::array<unsigned char, MLKEM768_CIPHERTEXTBYTES> mlkem_ct;
+    std::array<std::byte, mlkem768::CIPHERTEXTBYTES> mlkem_ct;
     random::fill(ssx_buf);  // repurpose ssx_buf as random ML-KEM coins
-    if (0 != sr_mlkem768_enc_derand(
-                     mlkem_ct.data(),
-                     enc_key_buf.data(),
-                     recipient_account_mlkem768.data(),
-                     ssx_buf.data()))
-        throw std::runtime_error{"ML-KEM-768 encapsulation failed"};
+    mlkem768::encapsulate(mlkem_ct, enc_key_buf, recipient_account_mlkem768, ssx_buf);
 
     // Step 5: ssx = eX  (X25519 DH with account PFS key X, not long-term key S)
-    if (0 != crypto_scalarmult(ssx_buf.data(), e.data(), recipient_account_x25519.data()))
-        throw std::runtime_error{"X25519 DH (account key) failed"};
+    x25519::scalarmult(ssx_buf, e, recipient_account_x25519);
 
     // Step 6: X-Wing KDF → enc key k (in enc_key_buf) and enc nonce n (in enc_nonce)
+    std::array<std::byte, V2_NONCE_SIZE> enc_nonce;
     v2_derive_xwing_key_nonce(enc_key_buf, enc_nonce, ssx_buf, E, recipient_account_x25519);
 
     return v2_encrypt_inner(
@@ -395,65 +354,58 @@ std::vector<unsigned char> encrypt_for_recipient_v2(
             pro_ed25519_privkey);
 }
 
-std::array<unsigned char, 2> decrypt_incoming_v2_prefix(
-        std::span<const unsigned char, 32> x25519_sec,
-        std::span<const unsigned char, 32> x25519_pub,
-        std::span<const unsigned char> ciphertext) {
+std::array<std::byte, 2> decrypt_incoming_v2_prefix(
+        std::span<const std::byte, 32> x25519_sec,
+        std::span<const std::byte, 32> x25519_pub,
+        std::span<const std::byte> ciphertext) {
     v2_check_header(ciphertext);
     auto E = ciphertext.subspan<4, 32>();
     auto kiss = v2_kiss(x25519_sec, E, x25519_pub, /*encrypting=*/false);
-    return {static_cast<unsigned char>(ciphertext[2] ^ kiss[0]),
-            static_cast<unsigned char>(ciphertext[3] ^ kiss[1])};
+    return {ciphertext[2] ^ kiss[0], ciphertext[3] ^ kiss[1]};
 }
 
 // Decrypts the v2 AEAD payload and parses the inner bt-encoded dict.  Used by both
 // decrypt_incoming_v2 (PFS+PQ) and decrypt_incoming_v2_nopfs (non-PFS fallback).
 // Throws DecryptV2Error on AEAD failure; std::runtime_error on structural/format errors.
 static DecryptV2Result v2_aead_decrypt_and_parse(
-        std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char, 32> key,
-        std::span<const unsigned char, V2_NONCE_SIZE> nonce,
-        std::span<const unsigned char> ciphertext) {
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte, 32> key,
+        std::span<const std::byte, V2_NONCE_SIZE> nonce,
+        std::span<const std::byte> ciphertext) {
 
     size_t enc_size = ciphertext.size() - V2_HEADER_SIZE;
-    std::vector<unsigned char> plain(enc_size - V2_AEAD_OVERHEAD);
-    if (0 != crypto_aead_xchacha20poly1305_ietf_decrypt(
-                     plain.data(),
-                     nullptr,
-                     nullptr,
-                     ciphertext.data() + V2_HEADER_SIZE,
-                     enc_size,
-                     nullptr,
-                     0,
-                     nonce.data(),
-                     key.data()))
+    std::vector<std::byte> plain(enc_size - V2_AEAD_OVERHEAD);
+    if (!encrypt::xchacha20poly1305_decrypt(
+                plain,
+                ciphertext.subspan(V2_HEADER_SIZE, enc_size),
+                nonce,
+                key))
         throw DecryptV2Error{"v2 message decryption failed"};
 
     // Strip zero padding from end (the plaintext was padded to a multiple of 256 bytes)
-    while (!plain.empty() && plain.back() == 0)
+    while (!plain.empty() && plain.back() == std::byte{0})
         plain.pop_back();
 
     // Parse the bencoded inner dict
     oxenc::bt_dict_consumer dict{plain};
 
-    auto sender_ed_pk = dict.require_span<unsigned char, 32>("S");
-    auto content_sv = dict.require_span<unsigned char>("c");
+    auto sender_ed_pk = dict.require_span<std::byte, 32>("S");
+    auto content_sv = dict.require_span<std::byte>("c");
 
     // Verify the Ed25519 signature over BLAKE2b(body, key=recipient_session_id, pers=…)
     dict.require_signature(
-            "~", [&](std::span<const unsigned char> body, std::span<const unsigned char> sig) {
+            "~", [&](std::span<const std::byte> body, std::span<const std::byte> sig) {
                 if (sig.size() != 64)
                     throw std::runtime_error{"v2 message signature has wrong size"};
-                uc64 h;
+                b64 h;
                 hash::blake2b_key_pers(h, recipient_session_id, V2_MSG_SIG_PERS, body);
-                if (0 != crypto_sign_ed25519_verify_detached(
-                                 sig.data(), h.data(), h.size(), sender_ed_pk.data()))
+                if (!ed25519::verify(sig.first<64>(), sender_ed_pk, h))
                     throw std::runtime_error{"v2 message signature verification failed"};
             });
 
     // Optional "~P" pro signature.  Extracted but not verified here — the Pro public key is
     // inside the protobuf Content, so verification is deferred to the message parsing layer.
-    std::optional<std::array<std::byte, 64>> pro_sig;
+    std::optional<b64> pro_sig;
     if (dict.skip_until("~P"))
         dict.consume_signature([&](std::span<const std::byte>, std::span<const std::byte> sig) {
             if (sig.size() != 64)
@@ -464,13 +416,11 @@ static DecryptV2Result v2_aead_decrypt_and_parse(
     dict.finish();
 
     // Convert sender Ed25519 pubkey to X25519 and build the 33-byte session ID
-    std::array<unsigned char, 32> sender_x25519;
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(sender_x25519.data(), sender_ed_pk.data()))
-        throw std::runtime_error{"sender ed25519 pubkey is invalid"};
+    b32 sender_x25519 = ed25519::pk_to_x25519(sender_ed_pk);
 
     DecryptV2Result result;
     result.content.assign(content_sv.begin(), content_sv.end());
-    result.sender_session_id[0] = 0x05;
+    result.sender_session_id[0] = std::byte{0x05};
     std::ranges::copy(sender_x25519, result.sender_session_id.begin() + 1);
     if (pro_sig)
         std::memcpy(result.pro_signature.emplace().data(), pro_sig->data(), 64);
@@ -478,27 +428,26 @@ static DecryptV2Result v2_aead_decrypt_and_parse(
 }
 
 DecryptV2Result decrypt_incoming_v2(
-        std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char, 32> account_pfs_x25519_sec,
-        std::span<const unsigned char, 32> account_pfs_x25519_pub,
-        std::span<const unsigned char, 2400> account_pfs_mlkem768_sec,
-        std::span<const unsigned char> ciphertext) {
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte, 32> account_pfs_x25519_sec,
+        std::span<const std::byte, 32> account_pfs_x25519_pub,
+        std::span<const std::byte, 2400> account_pfs_mlkem768_sec,
+        std::span<const std::byte> ciphertext) {
     v2_check_header(ciphertext);
 
     auto E = ciphertext.subspan<4, 32>();
-    auto mlkem_ct = ciphertext.subspan<36, MLKEM768_CIPHERTEXTBYTES>();
+    auto mlkem_ct = ciphertext.subspan<36, mlkem768::CIPHERTEXTBYTES>();
 
-    cleared_uc32 key_buf;  // ssm → k
-    cleared_uc32 ssx_buf;
-    cleared_uchars<V2_NONCE_SIZE> nonce;
+    cleared_b32 key_buf;  // ssm → k
+    cleared_b32 ssx_buf;
+    std::array<std::byte, V2_NONCE_SIZE> nonce;
 
     // Step 1: ML-KEM-768 decapsulate → shared secret ssm in key_buf
-    if (0 != sr_mlkem768_dec(key_buf.data(), mlkem_ct.data(), account_pfs_mlkem768_sec.data()))
+    if (!mlkem768::decapsulate(key_buf, mlkem_ct, account_pfs_mlkem768_sec))
         throw DecryptV2Error{"ML-KEM-768 decapsulation failed"};
 
     // Step 2: X25519 DH with account PFS key → shared secret ssx in ssx_buf
-    if (0 != crypto_scalarmult(ssx_buf.data(), account_pfs_x25519_sec.data(), E.data()))
-        throw DecryptV2Error{"X25519 DH (account key) failed"};
+    x25519::scalarmult(ssx_buf, account_pfs_x25519_sec, E);
 
     // Step 3: X-Wing KDF → enc key k (in key_buf) and enc nonce n (in nonce)
     v2_derive_xwing_key_nonce(key_buf, nonce, ssx_buf, E, account_pfs_x25519_pub);
@@ -508,40 +457,36 @@ DecryptV2Result decrypt_incoming_v2(
 
 // Non-PFS fallback key derivation domain labels (private to this translation unit).
 // The outer wire format is identical to a PFS+PQ v2 message; only the key derivation differs.
-constexpr auto V2_NONPFS_KDF_LABEL = "SessionV2NonPFS"_uc;    // SHA3-256 input domain
-constexpr auto V2_NONPFS_SS_DOMAIN = "SessionV2NonPFSSS"_uc;  // SHAKE256 output domain
+constexpr auto V2_NONPFS_KDF_LABEL = "SessionV2NonPFS"_bytes;
+constexpr auto V2_NONPFS_SS_DOMAIN = "SessionV2NonPFSSS"_bytes;
 
-std::vector<unsigned char> encrypt_for_recipient_v2_nopfs(
-        const Ed25519PrivKeySpan& sender_ed25519_privkey,
-        std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char> content,
-        const OptionalEd25519PrivKeySpan& pro_ed25519_privkey) {
+std::vector<std::byte> encrypt_for_recipient_v2_nopfs(
+        const ed25519::PrivKeySpan& sender_ed25519_privkey,
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte> content,
+        const ed25519::OptionalPrivKeySpan& pro_ed25519_privkey) {
 
     // R = long-term X25519 pubkey of the recipient (session ID without the 0x05 prefix)
     auto R = recipient_session_id.last<32>();
 
     // Generate ephemeral X25519 keypair e/E
-    cleared_uc32 e;
-    uc32 E;
-    crypto_box_keypair(E.data(), e.data());
+    auto [E, e] = x25519::keypair();
 
     // ki and the outer "mlkem_ct" slot are random: the message is externally indistinguishable
     // from a PFS+PQ v2 message, but carries no actual ML-KEM ciphertext.
-    std::array<unsigned char, 2> ki;
-    std::array<unsigned char, MLKEM768_CIPHERTEXTBYTES> outer_ct;
+    std::array<std::byte, 2> ki;
+    std::array<std::byte, mlkem768::CIPHERTEXTBYTES> outer_ct;
     random::fill(ki);
     random::fill(outer_ct);
 
     // ss = eR, then overwritten in-place with SHA3-256(ss || R || E || V2_NONPFS_KDF_LABEL).
-    // Using the output-buffer overload writes directly into the cleared buffer.
-    cleared_uc32 ss;
-    if (0 != crypto_scalarmult(ss.data(), e.data(), R.data()))
-        throw std::runtime_error{"X25519 DH (non-PFS) failed"};
+    cleared_b32 ss;
+    x25519::scalarmult(ss, e, R);
     hash::sha3_256(ss, ss, R, E, V2_NONPFS_KDF_LABEL);
 
     // k, n = SHAKE256(V2_NONPFS_SS_DOMAIN, ss) → 32-byte key + 24-byte nonce
-    cleared_uc32 enc_key;
-    cleared_uchars<V2_NONCE_SIZE> enc_nonce;
+    cleared_b32 enc_key;
+    std::array<std::byte, V2_NONCE_SIZE> enc_nonce;
     hash::shake256(V2_NONPFS_SS_DOMAIN, ss)(enc_key, enc_nonce);
 
     return v2_encrypt_inner(
@@ -557,25 +502,23 @@ std::vector<unsigned char> encrypt_for_recipient_v2_nopfs(
 }
 
 DecryptV2Result decrypt_incoming_v2_nopfs(
-        std::span<const unsigned char, 33> recipient_session_id,
-        std::span<const unsigned char, 32> x25519_sec,
-        std::span<const unsigned char, 32> x25519_pub,
-        std::span<const unsigned char> ciphertext) {
+        std::span<const std::byte, 33> recipient_session_id,
+        std::span<const std::byte, 32> x25519_sec,
+        std::span<const std::byte, 32> x25519_pub,
+        std::span<const std::byte> ciphertext) {
     v2_check_header(ciphertext);
 
     // E = ephemeral X25519 pubkey from bytes 4-35; bytes 36-1123 (fake mlkem_ct) are ignored.
     auto E = ciphertext.subspan<4, 32>();
 
     // ss = rE, then overwritten in-place with SHA3-256(ss || R || E || V2_NONPFS_KDF_LABEL).
-    // Using the output-buffer overload writes directly into the cleared buffer.
-    cleared_uc32 ss;
-    if (0 != crypto_scalarmult(ss.data(), x25519_sec.data(), E.data()))
-        throw DecryptV2Error{"X25519 DH (non-PFS) failed"};
+    cleared_b32 ss;
+    x25519::scalarmult(ss, x25519_sec, E);
     hash::sha3_256(ss, ss, x25519_pub, E, V2_NONPFS_KDF_LABEL);
 
     // k, n = SHAKE256(V2_NONPFS_SS_DOMAIN, ss) → 32-byte key + 24-byte nonce
-    cleared_uc32 key;
-    cleared_uchars<V2_NONCE_SIZE> nonce;
+    cleared_b32 key;
+    std::array<std::byte, V2_NONCE_SIZE> nonce;
     hash::shake256(V2_NONPFS_SS_DOMAIN, ss)(key, nonce);
 
     return v2_aead_decrypt_and_parse(recipient_session_id, key, nonce, ciphertext);
@@ -609,11 +552,11 @@ DecryptV2Result decrypt_incoming_v2_nopfs(
 // jB -- A's 33-byte blinded id, beginning with 0x15 or 0x25 (must be the same prefix as kA).
 // server_pk -- the server's pubkey (needed to compute A's `k` value)
 // sending -- true if this for a message from A to B, false if this is from B to A.
-static cleared_uc32 blinded_shared_secret(
-        std::span<const unsigned char> seed,
-        std::span<const unsigned char, 33> kA_prefixed,
-        std::span<const unsigned char, 33> jB_prefixed,
-        std::span<const unsigned char, 32> server_pk,
+static cleared_b32 blinded_shared_secret(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte, 33> kA_prefixed,
+        std::span<const std::byte, 33> jB_prefixed,
+        std::span<const std::byte, 32> server_pk,
         bool sending) {
 
     // Because we're doing this generically, we use notation a/A/k for ourselves and b/jB for the
@@ -621,37 +564,32 @@ static cleared_uc32 blinded_shared_secret(
     // the BLAKE2b hashed value: there we have to use kA || jB if we are the sender, but reverse the
     // order to jB || kA if we are the receiver.
 
-    std::pair<uc32, cleared_uc32> blinded_key_pair;
-    cleared_uc32 k;
+    std::pair<b32, cleared_b32> blinded_key_pair;
+    cleared_b32 k;
 
-    if (seed.size() != 64 && seed.size() != 32)
-        throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
-    if (kA_prefixed[0] == 0x15 && jB_prefixed[0] == 0x15)
-        blinded_key_pair = blind15_key_pair(seed, server_pk, &k);
-    else if (kA_prefixed[0] == 0x25 && jB_prefixed[0] == 0x25)
-        blinded_key_pair = blind25_key_pair(seed, server_pk, &k);
+    if (kA_prefixed[0] == std::byte{0x15} && jB_prefixed[0] == std::byte{0x15})
+        blinded_key_pair = blind15_key_pair(ed25519_privkey, server_pk, &k);
+    else if (kA_prefixed[0] == std::byte{0x25} && jB_prefixed[0] == std::byte{0x25})
+        blinded_key_pair = blind25_key_pair(ed25519_privkey, server_pk, &k);
     else
         throw std::invalid_argument{"Both ids must start with the same 0x15 or 0x25 prefix"};
 
-    bool blind25 = kA_prefixed[0] == 0x25;
+    bool blind25 = kA_prefixed[0] == std::byte{0x25};
 
     auto kA = kA_prefixed.subspan<1>();
     auto jB = jB_prefixed.subspan<1>();
 
-    cleared_uc32 ka;
-    // Not really switching to x25519 here, this is just an easy way to compute `a`
-    crypto_sign_ed25519_sk_to_curve25519(ka.data(), seed.data());
+    cleared_b32 ka = ed25519::sk_to_private(ed25519_privkey);
 
     if (blind25)
         // Multiply a by k, so that we end up computing kajB = kjaB, which the other side can
         // compute as jkbA.
-        crypto_core_ed25519_scalar_mul(ka.data(), ka.data(), k.data());
+        ed25519::scalar_mul(ka, ka, k);
     // Else for 15 blinding we leave "ka" as just a, because j=k and so we don't need the
     // double-blind.
 
-    cleared_uc32 shared_secret;
-    if (0 != crypto_scalarmult_ed25519_noclamp(shared_secret.data(), ka.data(), jB.data()))
-        throw std::runtime_error{"Shared secret generation failed"};
+    cleared_b32 shared_secret;
+    ed25519::scalarmult_noclamp(shared_secret, ka, jB);
 
     auto& sender = sending ? kA : jB;
     auto& recipient = sending ? jB : kA;
@@ -662,39 +600,30 @@ static cleared_uc32 blinded_shared_secret(
     return shared_secret;
 }
 
-std::vector<unsigned char> encrypt_for_blinded_recipient(
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char, 32> server_pk,
-        std::span<const unsigned char, 33> recipient_blinded_id,
-        std::span<const unsigned char> message) {
+std::vector<std::byte> encrypt_for_blinded_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte, 33> recipient_blinded_id,
+        std::span<const std::byte> message) {
 
     // Generate the blinded key pair & shared encryption key
-    std::pair<uc32, cleared_uc32> blinded_key_pair;
-    switch (recipient_blinded_id[0]) {
-        case 0x15: blinded_key_pair = blind15_key_pair(ed25519_privkey, server_pk); break;
+    std::pair<b32, cleared_b32> blinded_key_pair;
+    if (recipient_blinded_id[0] == std::byte{0x15})
+        blinded_key_pair = blind15_key_pair(ed25519_privkey, server_pk);
+    else if (recipient_blinded_id[0] == std::byte{0x25})
+        blinded_key_pair = blind25_key_pair(ed25519_privkey, server_pk);
+    else
+        throw std::invalid_argument{"Invalid recipient_blinded_id: must start with 0x15 or 0x25"};
 
-        case 0x25: blinded_key_pair = blind25_key_pair(ed25519_privkey, server_pk); break;
-
-        default:
-            throw std::invalid_argument{
-                    "Invalid recipient_blinded_id: must start with 0x15 or 0x25"};
-    }
-    std::vector<unsigned char> blinded_id;
-    blinded_id.reserve(33);
-    blinded_id.insert(
-            blinded_id.end(), recipient_blinded_id.begin(), recipient_blinded_id.begin() + 1);
-    blinded_id.insert(
-            blinded_id.end(), blinded_key_pair.first.begin(), blinded_key_pair.first.end());
+    std::array<std::byte, 33> blinded_id;
+    blinded_id[0] = recipient_blinded_id[0];
+    std::ranges::copy(blinded_key_pair.first, blinded_id.begin() + 1);
 
     auto enc_key = blinded_shared_secret(
-            ed25519_privkey,
-            std::span<const unsigned char, 33>{blinded_id.data(), 33},
-            recipient_blinded_id,
-            server_pk,
-            true);
+            ed25519_privkey, blinded_id, recipient_blinded_id, server_pk, true);
 
     // Inner data: msg || A (i.e. the sender's ed25519 master pubkey, *not* kA blinded pubkey)
-    std::vector<unsigned char> buf;
+    std::vector<std::byte> buf;
     buf.reserve(message.size() + 32);
     buf.insert(buf.end(), message.begin(), message.end());
 
@@ -702,36 +631,24 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
     auto pk = ed25519_privkey.pubkey();
     buf.insert(buf.end(), pk.begin(), pk.end());
 
-    // Encrypt using xchacha20-poly1305
-    cleared_uchars<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
-    randombytes_buf(nonce.data(), nonce.size());
-
-    std::vector<unsigned char> ciphertext;
-    unsigned long long outlen = 0;
+    // Layout: version(1) || ciphertext(buf+ABYTES) || nonce(NPUBBYTES)
+    std::vector<std::byte> ciphertext;
     ciphertext.resize(
             1 + buf.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES +
             crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
 
     // Prepend with a version byte, so that the recipient can reliably detect if a future version is
     // no longer encrypting things the way it expects.
-    ciphertext[0] = BLINDED_ENCRYPT_VERSION;
+    ciphertext[0] = std::byte{BLINDED_ENCRYPT_VERSION};
 
-    if (0 != crypto_aead_xchacha20poly1305_ietf_encrypt(
-                     ciphertext.data() + 1,
-                     &outlen,
-                     buf.data(),
-                     buf.size(),
-                     nullptr,
-                     0,
-                     nullptr,
-                     nonce.data(),
-                     enc_key.data()))
-        throw std::runtime_error{"Crypto aead encryption failed"};
+    auto nonce = std::span{ciphertext}.last<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    random::fill(nonce);
 
-    assert(outlen == ciphertext.size() - 1 - crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-
-    // append the nonce, so that we have: data = b'\x00' + ciphertext + nonce
-    std::memcpy(ciphertext.data() + (1 + outlen), nonce.data(), nonce.size());
+    encrypt::xchacha20poly1305_encrypt(
+            std::span{ciphertext}.subspan(1, buf.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES),
+            buf,
+            nonce,
+            enc_key);
 
     return ciphertext;
 }
@@ -739,21 +656,20 @@ std::vector<unsigned char> encrypt_for_blinded_recipient(
 static constexpr size_t GROUPS_ENCRYPT_OVERHEAD =
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES;
 
-std::vector<unsigned char> encrypt_for_group(
-        const Ed25519PrivKeySpan& user_ed25519_privkey,
-        std::span<const unsigned char, 32> group_ed25519_pubkey,
-        std::span<const unsigned char> group_enc_key,
-        std::span<const unsigned char> plaintext,
+std::vector<std::byte> encrypt_for_group(
+        const ed25519::PrivKeySpan& user_ed25519_privkey,
+        std::span<const std::byte, 32> group_ed25519_pubkey,
+        std::span<const std::byte> group_enc_key,
+        std::span<const std::byte> plaintext,
         bool compress,
         size_t padding) {
     if (plaintext.size() > GROUPS_MAX_PLAINTEXT_MESSAGE_SIZE)
         throw std::runtime_error{"Cannot encrypt plaintext: message size is too large"};
 
-    static_assert(decltype(group_ed25519_pubkey)::extent == crypto_sign_ed25519_PUBLICKEYBYTES);
     if (group_enc_key.size() != 32 && group_enc_key.size() != 64)
         throw std::invalid_argument{"Invalid group_enc_key: expected 32 or 64 bytes"};
 
-    std::vector<unsigned char> _compressed;
+    std::vector<std::byte> _compressed;
     if (compress) {
         _compressed = zstd_compress(plaintext);
         if (_compressed.size() < plaintext.size())
@@ -775,9 +691,8 @@ std::vector<unsigned char> encrypt_for_group(
     // components to this validation: first the regular signature validation of the "s" signature we
     // add below, but then also validation that this Ed25519 converts to the Session ID of the
     // claimed sender of the message inside the encoded message data.
-    dict.append(
-            "a",
-            std::string_view{reinterpret_cast<const char*>(user_ed25519_privkey.data()) + 32, 32});
+    auto sender_pk = user_ed25519_privkey.pubkey();
+    dict.append("a", to_string_view(sender_pk));
 
     if (!compress)
         dict.append("d", to_string_view(plaintext));
@@ -786,16 +701,14 @@ std::vector<unsigned char> encrypt_for_group(
     // encrypted data will not validate if cross-posted to any other group.  We don't actually
     // include the pubkey alongside, because that is implicitly known by the group members that
     // receive it.
-    std::vector<unsigned char> to_sign(plaintext.size() + group_ed25519_pubkey.size());
+    std::vector<std::byte> to_sign(plaintext.size() + group_ed25519_pubkey.size());
     std::memcpy(to_sign.data(), plaintext.data(), plaintext.size());
     std::memcpy(
             to_sign.data() + plaintext.size(),
             group_ed25519_pubkey.data(),
             group_ed25519_pubkey.size());
 
-    std::array<unsigned char, 64> signature;
-    crypto_sign_ed25519_detached(
-            signature.data(), nullptr, to_sign.data(), to_sign.size(), user_ed25519_privkey.data());
+    auto signature = ed25519::sign(user_ed25519_privkey, to_sign);
     dict.append("s", to_string_view(signature));
 
     if (compress)
@@ -813,35 +726,26 @@ std::vector<unsigned char> encrypt_for_group(
         encoded.resize(encoded.size() + to_append);
     }
 
-    std::vector<unsigned char> ciphertext;
+    std::vector<std::byte> ciphertext;
     ciphertext.resize(GROUPS_ENCRYPT_OVERHEAD + encoded.size());
-    randombytes_buf(ciphertext.data(), crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    std::span<const unsigned char> nonce{
-            ciphertext.data(), crypto_aead_xchacha20poly1305_ietf_NPUBBYTES};
-    if (0 != crypto_aead_xchacha20poly1305_ietf_encrypt(
-                     ciphertext.data() + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-                     nullptr,
-                     to_unsigned(encoded.data()),
-                     encoded.size(),
-                     nullptr,
-                     0,
-                     nullptr,
-                     nonce.data(),
-                     group_enc_key.data()))
-        throw std::runtime_error{"Encryption failed"};
+    auto nonce = std::span{ciphertext}.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    random::fill(nonce);
+
+    encrypt::xchacha20poly1305_encrypt(
+            std::span{ciphertext}.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES),
+            to_span(encoded),
+            nonce,
+            group_enc_key.first<crypto_aead_xchacha20poly1305_ietf_KEYBYTES>());
 
     return ciphertext;
 }
 
-std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
-        const Ed25519PrivKeySpan& ed25519_privkey, std::span<const unsigned char> ciphertext) {
+std::pair<std::vector<std::byte>, std::string> decrypt_incoming_session_id(
+        const ed25519::PrivKeySpan& ed25519_privkey, std::span<const std::byte> ciphertext) {
     auto [buf, sender_ed_pk] = decrypt_incoming(ed25519_privkey, ciphertext);
 
     // Convert the sender_ed_pk to the sender's session ID
-    std::array<unsigned char, 32> sender_x_pk;
-
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(sender_x_pk.data(), sender_ed_pk.data()))
-        throw std::runtime_error{"Sender ed25519 pubkey to x25519 pubkey conversion failed"};
+    auto sender_x_pk = ed25519::pk_to_x25519(sender_ed_pk);
 
     // Everything is good, so just drop A and Y off the message and prepend the '05' prefix to
     // the sender session ID
@@ -853,17 +757,14 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
     return {buf, sender_session_id};
 }
 
-std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
-        std::span<const unsigned char, 32> x25519_pubkey,
-        std::span<const unsigned char, 32> x25519_seckey,
-        std::span<const unsigned char> ciphertext) {
+std::pair<std::vector<std::byte>, std::string> decrypt_incoming_session_id(
+        std::span<const std::byte, 32> x25519_pubkey,
+        std::span<const std::byte, 32> x25519_seckey,
+        std::span<const std::byte> ciphertext) {
     auto [buf, sender_ed_pk] = decrypt_incoming(x25519_pubkey, x25519_seckey, ciphertext);
 
     // Convert the sender_ed_pk to the sender's session ID
-    std::array<unsigned char, 32> sender_x_pk;
-
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(sender_x_pk.data(), sender_ed_pk.data()))
-        throw std::runtime_error{"Sender ed25519 pubkey to x25519 pubkey conversion failed"};
+    auto sender_x_pk = ed25519::pk_to_x25519(sender_ed_pk);
 
     // Everything is good, so just drop A and Y off the message and prepend the '05' prefix to
     // the sender session ID
@@ -875,47 +776,38 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_incoming_session_id(
     return {buf, sender_session_id};
 }
 
-std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
-        const Ed25519PrivKeySpan& ed25519_privkey, std::span<const unsigned char> ciphertext) {
-    cleared_uc32 x_sec;
-    uc32 x_pub;
-    crypto_sign_ed25519_sk_to_curve25519(x_sec.data(), ed25519_privkey.data());
-    crypto_scalarmult_base(x_pub.data(), x_sec.data());
-
+std::pair<std::vector<std::byte>, b32> decrypt_incoming(
+        const ed25519::PrivKeySpan& ed25519_privkey, std::span<const std::byte> ciphertext) {
+    auto x_sec = ed25519::sk_to_x25519(ed25519_privkey);
+    auto x_pub = x25519::scalarmult_base(x_sec);
     return decrypt_incoming(x_pub, x_sec, ciphertext);
 }
 
-std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incoming(
-        std::span<const unsigned char, 32> x25519_pubkey,
-        std::span<const unsigned char, 32> x25519_seckey,
-        std::span<const unsigned char> ciphertext) {
+std::pair<std::vector<std::byte>, b32> decrypt_incoming(
+        std::span<const std::byte, 32> x25519_pubkey,
+        std::span<const std::byte, 32> x25519_seckey,
+        std::span<const std::byte> ciphertext) {
 
     if (ciphertext.size() < crypto_box_SEALBYTES + 32 + 64)
         throw std::runtime_error{"Invalid incoming message: ciphertext is too small"};
     const size_t outer_size = ciphertext.size() - crypto_box_SEALBYTES;
     const size_t msg_size = outer_size - 32 - 64;
 
-    std::pair<std::vector<unsigned char>, std::vector<unsigned char>> result;
+    std::pair<std::vector<std::byte>, b32> result;
     auto& [buf, sender_ed_pk] = result;
 
     buf.resize(outer_size);
-    int opened = crypto_box_seal_open(
-            buf.data(),
-            ciphertext.data(),
-            ciphertext.size(),
-            x25519_pubkey.data(),
-            x25519_seckey.data());
-    if (opened != 0)
+    if (!encrypt::box_seal_open(buf, ciphertext, x25519_pubkey, x25519_seckey))
         throw std::runtime_error{"Decryption failed"};
 
-    uc64 sig;
-    sender_ed_pk.assign(buf.begin() + msg_size, buf.begin() + msg_size + 32);
-    std::memcpy(sig.data(), buf.data() + msg_size + 32, 64);
+    auto tail = std::span{buf}.subspan(msg_size);  // A(32) || SIG(64)
+    std::ranges::copy(tail.first<32>(), sender_ed_pk.begin());
+    b64 sig;
+    std::ranges::copy(tail.last<64>(), sig.begin());
     buf.resize(buf.size() - 64);  // Remove SIG, then append Y so that we get M||A||Y to verify
-    buf.insert(buf.end(), x25519_pubkey.begin(), x25519_pubkey.begin() + 32);
+    buf.insert(buf.end(), x25519_pubkey.begin(), x25519_pubkey.end());
 
-    if (0 != crypto_sign_ed25519_verify_detached(
-                     sig.data(), buf.data(), buf.size(), sender_ed_pk.data()))
+    if (!ed25519::verify(sig, sender_ed_pk, buf))
         throw std::runtime_error{"Signature verification failed"};
 
     // Everything is good, so just drop A and Y off the message
@@ -924,36 +816,36 @@ std::pair<std::vector<unsigned char>, std::vector<unsigned char>> decrypt_incomi
     return result;
 }
 
-std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipient(
-        const Ed25519PrivKeySpan& ed25519_privkey,
-        std::span<const unsigned char, 32> server_pk,
-        std::span<const unsigned char, 33> sender_id,
-        std::span<const unsigned char, 33> recipient_id,
-        std::span<const unsigned char> ciphertext) {
+std::pair<std::vector<std::byte>, std::string> decrypt_from_blinded_recipient(
+        const ed25519::PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte, 32> server_pk,
+        std::span<const std::byte, 33> sender_id,
+        std::span<const std::byte, 33> recipient_id,
+        std::span<const std::byte> ciphertext) {
     auto ed_pk = ed25519_privkey.pubkey();
     if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + 1 +
                                     crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
 
-    cleared_uc32 dec_key;
-    auto blinded_id = recipient_id[0] == 0x25 ? blinded25_id_from_ed(to_span(ed_pk), server_pk)
-                                              : blinded15_id_from_ed(to_span(ed_pk), server_pk);
+    cleared_b32 dec_key;
+    auto blinded_id = recipient_id[0] == std::byte{0x25}
+                            ? blinded25_id_from_ed(ed_pk, server_pk)
+                            : blinded15_id_from_ed(ed_pk, server_pk);
 
     if (to_string_view(sender_id) == to_string_view(blinded_id))
         dec_key = blinded_shared_secret(ed25519_privkey, sender_id, recipient_id, server_pk, true);
     else
         dec_key = blinded_shared_secret(ed25519_privkey, recipient_id, sender_id, server_pk, false);
 
-    std::pair<std::vector<unsigned char>, std::string> result;
+    std::pair<std::vector<std::byte>, std::string> result;
     auto& [buf, sender_session_id] = result;
 
     // v, ct, nc = data[0], data[1:-24], data[-24:]
-    if (ciphertext[0] != BLINDED_ENCRYPT_VERSION)
+    if (ciphertext[0] != std::byte{BLINDED_ENCRYPT_VERSION})
         throw std::invalid_argument{
                 "Invalid ciphertext: version is not " + std::to_string(BLINDED_ENCRYPT_VERSION)};
 
-    std::vector<unsigned char> nonce;
     const size_t msg_size =
             (ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES - 1 -
              crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
@@ -962,49 +854,31 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
         throw std::invalid_argument{"Invalid ciphertext: innerBytes too short"};
     buf.resize(msg_size);
 
-    unsigned long long buf_len = 0;
-
-    nonce.resize(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    std::memcpy(
-            nonce.data(),
-            ciphertext.data() + msg_size + 1 + crypto_aead_xchacha20poly1305_ietf_ABYTES,
-            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-
-    if (0 != crypto_aead_xchacha20poly1305_ietf_decrypt(
-                     buf.data(),
-                     &buf_len,
-                     nullptr,
-                     ciphertext.data() + 1,
-                     msg_size + crypto_aead_xchacha20poly1305_ietf_ABYTES,
-                     nullptr,
-                     0,
-                     nonce.data(),
-                     dec_key.data()))
+    auto nonce = ciphertext.last<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    if (!encrypt::xchacha20poly1305_decrypt(
+                buf,
+                ciphertext.subspan(1, msg_size + crypto_aead_xchacha20poly1305_ietf_ABYTES),
+                nonce,
+                dec_key))
         throw std::invalid_argument{"Decryption failed"};
 
-    assert(buf_len == buf.size());
-
     // Split up: the last 32 bytes are the sender's *unblinded* ed25519 key
-    uc32 sender_ed_pk;
-    std::memcpy(sender_ed_pk.data(), buf.data() + (buf.size() - 32), 32);
+    b32 sender_ed_pk;
+    std::ranges::copy(std::span{buf}.last<32>(), sender_ed_pk.begin());
 
     // Convert the sender_ed_pk to the sender's session ID
-    uc32 sender_x_pk;
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(sender_x_pk.data(), sender_ed_pk.data()))
-        throw std::runtime_error{"Sender ed25519 pubkey to x25519 pubkey conversion failed"};
-
-    std::vector<unsigned char> session_id;  // Gets populated by the following ..._from_ed calls
+    auto sender_x_pk = ed25519::pk_to_x25519(sender_ed_pk);
 
     // Verify that the inner sender_ed_pk (A) yields the same outer kA we got with the message
     auto extracted_sender =
-            recipient_id[0] == 0x25
-                    ? blinded25_id_from_ed(to_span(sender_ed_pk), server_pk, &session_id)
-                    : blinded15_id_from_ed(to_span(sender_ed_pk), server_pk, &session_id);
+            recipient_id[0] == std::byte{0x25}
+                    ? blinded25_id_from_ed(sender_ed_pk, server_pk)
+                    : blinded15_id_from_ed(sender_ed_pk, server_pk);
 
     bool matched = to_string_view(sender_id) == to_string_view(extracted_sender);
-    if (!matched && extracted_sender[0] == 0x15) {
+    if (!matched && extracted_sender[0] == std::byte{0x15}) {
         // With 15-blinding we might need the negative instead:
-        extracted_sender[31] ^= 0x80;
+        extracted_sender[31] ^= std::byte{0x80};
         matched = to_string_view(sender_id) == to_string_view(extracted_sender);
     }
     if (!matched)
@@ -1021,11 +895,11 @@ std::pair<std::vector<unsigned char>, std::string> decrypt_from_blinded_recipien
 }
 
 DecryptGroupMessage decrypt_group_message(
-        std::span<std::span<const unsigned char>> decrypt_ed25519_privkey_list,
-        std::span<const unsigned char, 32> group_ed25519_pubkey,
-        std::span<const unsigned char> ciphertext) {
-    static_assert(decltype(group_ed25519_pubkey)::extent == crypto_sign_ed25519_PUBLICKEYBYTES);
+        std::span<std::span<const std::byte>> decrypt_ed25519_privkey_list,
+        std::span<const std::byte, 32> group_ed25519_pubkey,
+        std::span<const std::byte> ciphertext) {
     DecryptGroupMessage result = {};
+    auto& [res_index, session_id, data] = result;
     if (ciphertext.size() < GROUPS_ENCRYPT_OVERHEAD)
         throw std::runtime_error{"ciphertext is too small to be encrypted data"};
 
@@ -1033,9 +907,9 @@ DecryptGroupMessage decrypt_group_message(
     // generating the pubkey component if the user only passed in a 32 byte libsodium-style secret
     // key.
 
-    std::vector<unsigned char> plain;
+    std::vector<std::byte> plain;
 
-    auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    auto nonce = ciphertext.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
     ciphertext = ciphertext.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
     plain.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
 
@@ -1044,18 +918,13 @@ DecryptGroupMessage decrypt_group_message(
         const auto& decrypt_ed25519_privkey = decrypt_ed25519_privkey_list[index];
         if (decrypt_ed25519_privkey.size() != 32 && decrypt_ed25519_privkey.size() != 64)
             throw std::invalid_argument{"Invalid decrypt_ed25519_privkey: expected 32 or 64 bytes"};
-        decrypt_success = 0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                                       plain.data(),
-                                       nullptr,
-                                       nullptr,
-                                       ciphertext.data(),
-                                       ciphertext.size(),
-                                       nullptr,
-                                       0,
-                                       nonce.data(),
-                                       decrypt_ed25519_privkey.data());
+        decrypt_success = encrypt::xchacha20poly1305_decrypt(
+                plain,
+                ciphertext,
+                nonce,
+                decrypt_ed25519_privkey.first<crypto_aead_xchacha20poly1305_ietf_KEYBYTES>());
         if (decrypt_success) {
-            result.index = index;
+            res_index = index;
             break;
         }
     }
@@ -1066,15 +935,15 @@ DecryptGroupMessage decrypt_group_message(
     //
     // Removing any null padding bytes from the end
     //
-    if (auto it =
-                std::find_if(plain.rbegin(), plain.rend(), [](unsigned char c) { return c != 0; });
+    if (auto it = std::find_if(
+                plain.rbegin(), plain.rend(), [](std::byte b) { return b != std::byte{0}; });
         it != plain.rend())
         plain.resize(plain.size() - std::distance(plain.rbegin(), it));
 
     //
     // Now what we have less should be a bt_dict
     //
-    if (plain.empty() || plain.front() != 'd' || plain.back() != 'e')
+    if (plain.empty() || plain.front() != std::byte{'d'} || plain.back() != std::byte{'e'})
         throw std::runtime_error{"decrypted data is not a bencoded dict"};
 
     oxenc::bt_dict_consumer dict{to_string_view(plain)};
@@ -1093,17 +962,13 @@ DecryptGroupMessage decrypt_group_message(
         throw std::runtime_error{
                 "message author pubkey size (" + std::to_string(ed_pk.size()) + ") is invalid"};
 
-    std::array<unsigned char, 32> x_pk;
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(x_pk.data(), ed_pk.data()))
-        throw std::runtime_error{
-                "author ed25519 pubkey is invalid (unable to convert it to a session id)"};
+    auto x_pk = ed25519::pk_to_x25519(ed_pk.first<32>());
 
-    auto& [_, session_id, data] = result;
     session_id.reserve(66);
     session_id += "05";
     oxenc::to_hex(x_pk.begin(), x_pk.end(), std::back_inserter(session_id));
 
-    std::span<const unsigned char> raw_data;
+    std::span<const std::byte> raw_data;
     if (dict.skip_until("d")) {
         raw_data = to_span(dict.consume_string_view());
         if (raw_data.empty())
@@ -1133,14 +998,13 @@ DecryptGroupMessage decrypt_group_message(
 
     // The value we verify is the raw data *followed by* the group Ed25519 pubkey.  (See the comment
     // in encrypt_message).
-    std::vector<unsigned char> to_verify(raw_data.size() + group_ed25519_pubkey.size());
+    std::vector<std::byte> to_verify(raw_data.size() + group_ed25519_pubkey.size());
     std::memcpy(to_verify.data(), raw_data.data(), raw_data.size());
     std::memcpy(
             to_verify.data() + raw_data.size(),
             group_ed25519_pubkey.data(),
             group_ed25519_pubkey.size());
-    if (0 != crypto_sign_ed25519_verify_detached(
-                     ed_sig.data(), to_verify.data(), to_verify.size(), ed_pk.data()))
+    if (!ed25519::verify(ed_sig.first<64>(), ed_pk.first<32>(), to_verify))
         throw std::runtime_error{"message signature failed validation"};
 
     if (compressed) {
@@ -1154,36 +1018,32 @@ DecryptGroupMessage decrypt_group_message(
     return result;
 }
 
+// The old Argon2-based ONS encryption always used an all-zero salt and all-zero secretbox nonce.
+static constexpr std::array<std::byte, crypto_pwhash_SALTBYTES> ONS_ARGON2_SALT = {};
+static constexpr std::array<std::byte, crypto_secretbox_NONCEBYTES> ONS_SECRETBOX_NONCE = {};
+
 std::string decrypt_ons_response(
         std::string_view lowercase_name,
-        std::span<const unsigned char> ciphertext,
-        std::optional<std::span<const unsigned char, 24>> nonce) {
+        std::span<const std::byte> ciphertext,
+        std::optional<std::span<const std::byte, 24>> nonce) {
     // Handle old Argon2-based encryption used before HF16
     if (!nonce) {
         if (ciphertext.size() < crypto_secretbox_MACBYTES)
             throw std::invalid_argument{"Invalid ciphertext: expected to be greater than 16 bytes"};
 
-        uc32 key;
-        std::array<unsigned char, crypto_pwhash_SALTBYTES> salt = {0};
+        b32 key;
+        hash::argon2(
+                key,
+                {lowercase_name.data(), lowercase_name.size()},
+                ONS_ARGON2_SALT,
+                crypto_pwhash_OPSLIMIT_MODERATE,
+                crypto_pwhash_MEMLIMIT_MODERATE,
+                crypto_pwhash_ALG_ARGON2ID13);
 
-        if (0 != crypto_pwhash(
-                         key.data(),
-                         key.size(),
-                         lowercase_name.data(),
-                         lowercase_name.size(),
-                         salt.data(),
-                         crypto_pwhash_OPSLIMIT_MODERATE,
-                         crypto_pwhash_MEMLIMIT_MODERATE,
-                         crypto_pwhash_ALG_ARGON2ID13))
-            throw std::runtime_error{"Failed to generate key"};
-
-        std::vector<unsigned char> msg;
+        std::vector<std::byte> msg;
         msg.resize(ciphertext.size() - crypto_secretbox_MACBYTES);
-        std::array<unsigned char, crypto_secretbox_NONCEBYTES> nonce = {0};
 
-        if (0 !=
-            crypto_secretbox_open_easy(
-                    msg.data(), ciphertext.data(), ciphertext.size(), nonce.data(), key.data()))
+        if (!encrypt::secretbox_open_easy(msg, ciphertext, ONS_SECRETBOX_NONCE, key))
             throw std::runtime_error{"Failed to decrypt"};
 
         std::string session_id = oxenc::to_hex(msg.begin(), msg.end());
@@ -1191,149 +1051,84 @@ std::string decrypt_ons_response(
     }
 
     static_assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES == 24);
-    if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_ABYTES)
-        throw std::invalid_argument{"Invalid ciphertext: expected to be greater than 16 bytes"};
+    if (ciphertext.size() != 33 + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+        throw std::invalid_argument{"Invalid ciphertext: expected exactly 49 bytes"};
 
     // Hash the ONS name using BLAKE2b
     //
     // xchacha-based encryption
     // key = H(name, key=H(name))
-    uc32 key;
-    uc32 name_hash;
+    b32 name_hash;
     hash::blake2b(name_hash, lowercase_name);
-    hash::blake2b_key(key, name_hash, lowercase_name);
+    auto key = hash::blake2b_key<32>(name_hash, lowercase_name);
 
-    std::vector<unsigned char> buf;
-    unsigned long long buf_len = 0;
-    buf.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
-
-    if (0 != crypto_aead_xchacha20poly1305_ietf_decrypt(
-                     buf.data(),
-                     &buf_len,
-                     nullptr,
-                     ciphertext.data(),
-                     ciphertext.size(),
-                     nullptr,
-                     0,
-                     nonce->data(),
-                     key.data()))
+    std::array<std::byte, 33> buf;
+    if (!encrypt::xchacha20poly1305_decrypt(buf, ciphertext, *nonce, key))
         throw std::runtime_error{"Failed to decrypt"};
 
-    if (buf_len != 33)
-        throw std::runtime_error{"Invalid decrypted value: expected to be 33 bytes"};
-
-    std::string session_id = oxenc::to_hex(buf.begin(), buf.end());
-    return session_id;
+    return oxenc::to_hex(buf);
 }
 
-std::vector<unsigned char> decrypt_push_notification(
-        std::span<const unsigned char> payload, std::span<const unsigned char, 32> enc_key) {
+std::vector<std::byte> decrypt_push_notification(
+        std::span<const std::byte> payload, std::span<const std::byte, 32> enc_key) {
     if (payload.size() <
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{"Invalid payload: too short to contain valid encrypted data"};
 
-    std::vector<unsigned char> buf;
-    std::vector<unsigned char> nonce;
-    const size_t msg_size =
-            (payload.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES -
-             crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    unsigned long long buf_len = 0;
-    buf.resize(msg_size);
-    nonce.resize(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    std::memcpy(nonce.data(), payload.data(), crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    auto nonce = payload.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    auto ct = payload.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
 
-    if (0 != crypto_aead_xchacha20poly1305_ietf_decrypt(
-                     buf.data(),
-                     &buf_len,
-                     nullptr,
-                     payload.data() + crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-                     payload.size() - crypto_aead_xchacha20poly1305_ietf_NPUBBYTES,
-                     nullptr,
-                     0,
-                     nonce.data(),
-                     enc_key.data()))
+    std::vector<std::byte> buf(ct.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
+
+    if (!encrypt::xchacha20poly1305_decrypt(buf, ct, nonce, enc_key))
         throw std::runtime_error{"Failed to decrypt; perhaps the secret key is invalid?"};
 
     // Removing any null padding bytes from the end
-    if (auto it = std::find_if(buf.rbegin(), buf.rend(), [](unsigned char c) { return c != 0; });
+    if (auto it = std::find_if(
+                buf.rbegin(), buf.rend(), [](std::byte b) { return b != std::byte{0}; });
         it != buf.rend())
         buf.resize(buf.size() - std::distance(buf.rbegin(), it));
 
     return buf;
 }
 
-std::vector<unsigned char> encrypt_xchacha20(
-        std::span<const unsigned char> plaintext, std::span<const unsigned char, 32> key) {
+std::vector<std::byte> encrypt_xchacha20(
+        std::span<const std::byte> plaintext, std::span<const std::byte, 32> key) {
 
-    std::vector<unsigned char> ciphertext;
-    ciphertext.resize(
+    std::vector<std::byte> ciphertext(
             crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + plaintext.size() +
             crypto_aead_xchacha20poly1305_ietf_ABYTES);
 
-    // Generate random nonce, and stash it at the beginning of ciphertext:
-    randombytes_buf(ciphertext.data(), crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    auto nonce = std::span{ciphertext}.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    random::fill(nonce);
 
-    auto* c = reinterpret_cast<unsigned char*>(ciphertext.data()) +
-              crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
-    unsigned long long clen;
-
-    crypto_aead_xchacha20poly1305_ietf_encrypt(
-            c,
-            &clen,
-            plaintext.data(),
-            plaintext.size(),
-            nullptr,
-            0,        // additional data
-            nullptr,  // nsec (always unused)
-            reinterpret_cast<const unsigned char*>(ciphertext.data()),
-            key.data());
-    assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + clen <= ciphertext.size());
-    ciphertext.resize(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + clen);
+    encrypt::xchacha20poly1305_encrypt(
+            std::span{ciphertext}.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES),
+            plaintext,
+            nonce,
+            key);
     return ciphertext;
 }
 
-std::vector<unsigned char> decrypt_xchacha20(
-        std::span<const unsigned char> ciphertext, std::span<const unsigned char, 32> key) {
+std::vector<std::byte> decrypt_xchacha20(
+        std::span<const std::byte> ciphertext, std::span<const std::byte, 32> key) {
     if (ciphertext.size() <
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
 
     // Extract nonce from the beginning of the ciphertext:
-    auto nonce = ciphertext.subspan(0, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    auto nonce = ciphertext.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
     ciphertext = ciphertext.subspan(nonce.size());
 
-    std::vector<unsigned char> plaintext;
-    plaintext.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
-    auto* m = reinterpret_cast<unsigned char*>(plaintext.data());
-    unsigned long long mlen;
-    if (0 != crypto_aead_xchacha20poly1305_ietf_decrypt(
-                     m,
-                     &mlen,
-                     nullptr,  // nsec (always unused)
-                     ciphertext.data(),
-                     ciphertext.size(),
-                     nullptr,
-                     0,  // additional data
-                     nonce.data(),
-                     key.data()))
+    std::vector<std::byte> plaintext(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
+    if (!encrypt::xchacha20poly1305_decrypt(plaintext, ciphertext, nonce, key))
         throw std::runtime_error{"Could not decrypt (XChaCha20-Poly1305)"};
-    assert(mlen <= plaintext.size());
-    plaintext.resize(mlen);
     return plaintext;
 }
 
 }  // namespace session
 
-// Helpers: construct const unsigned char spans from raw C pointers.
-// Used in C API wrappers to avoid verbose std::span<const unsigned char, N>{ptr, N} casts.
-template <size_t N>
-static constexpr std::span<const unsigned char, N> cspan(const unsigned char* p) noexcept {
-    return std::span<const unsigned char, N>(p, N);
-}
-static std::span<const unsigned char> cspan(const unsigned char* p, size_t n) noexcept {
-    return {p, n};
-}
 
 extern "C" {
 
@@ -1348,9 +1143,9 @@ LIBSESSION_C_API bool session_encrypt_for_recipient_deterministic(
         size_t* ciphertext_len) {
     try {
         auto ciphertext = session::encrypt_for_recipient_deterministic(
-                cspan<64>(ed25519_privkey),
-                cspan<32>(recipient_pubkey),
-                cspan(plaintext_in, plaintext_len));
+                to_byte_span<64>(ed25519_privkey),
+                to_byte_span<32>(recipient_pubkey),
+                to_byte_span(plaintext_in, plaintext_len));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1371,10 +1166,10 @@ LIBSESSION_C_API bool session_encrypt_for_blinded_recipient(
         size_t* ciphertext_len) {
     try {
         auto ciphertext = session::encrypt_for_blinded_recipient(
-                cspan<64>(ed25519_privkey),
-                cspan<32>(community_pubkey),
-                cspan<33>(recipient_blinded_id),
-                cspan(plaintext_in, plaintext_len));
+                to_byte_span<64>(ed25519_privkey),
+                to_byte_span<32>(community_pubkey),
+                to_byte_span<33>(recipient_blinded_id),
+                to_byte_span(plaintext_in, plaintext_len));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1400,11 +1195,11 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
         size_t error_len) {
     session_encrypt_group_message result = {};
     try {
-        std::vector<unsigned char> result_cpp = encrypt_for_group(
+        std::vector<std::byte> result_cpp = encrypt_for_group(
                 {user_ed25519_privkey, user_ed25519_privkey_len},
-                cspan<32>(group_ed25519_pubkey),
-                cspan(group_enc_key, group_enc_key_len),
-                cspan(plaintext, plaintext_len),
+                to_byte_span<32>(group_ed25519_pubkey),
+                to_byte_span(group_enc_key, group_enc_key_len),
+                to_byte_span(plaintext, plaintext_len),
                 compress,
                 padding);
         result = {
@@ -1426,7 +1221,7 @@ LIBSESSION_C_API bool session_decrypt_incoming(
         size_t* plaintext_len) {
     try {
         auto result = session::decrypt_incoming_session_id(
-                cspan<64>(ed25519_privkey), cspan(ciphertext_in, ciphertext_len));
+                to_byte_span<64>(ed25519_privkey), to_byte_span(ciphertext_in, ciphertext_len));
         auto [plaintext, session_id] = result;
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
@@ -1449,9 +1244,9 @@ LIBSESSION_C_API bool session_decrypt_incoming_legacy_group(
         size_t* plaintext_len) {
     try {
         auto result = session::decrypt_incoming_session_id(
-                cspan<32>(x25519_pubkey),
-                cspan<32>(x25519_seckey),
-                cspan(ciphertext_in, ciphertext_len));
+                to_byte_span<32>(x25519_pubkey),
+                to_byte_span<32>(x25519_seckey),
+                to_byte_span(ciphertext_in, ciphertext_len));
         auto [plaintext, session_id] = result;
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
@@ -1476,11 +1271,11 @@ LIBSESSION_C_API bool session_decrypt_for_blinded_recipient(
         size_t* plaintext_len) {
     try {
         auto result = session::decrypt_from_blinded_recipient(
-                cspan<64>(ed25519_privkey),
-                cspan<32>(community_pubkey),
-                cspan<33>(sender_id),
-                cspan<33>(recipient_id),
-                cspan(ciphertext_in, ciphertext_len));
+                to_byte_span<64>(ed25519_privkey),
+                to_byte_span<32>(community_pubkey),
+                to_byte_span<33>(sender_id),
+                to_byte_span<33>(recipient_id),
+                to_byte_span(ciphertext_in, ciphertext_len));
         auto [plaintext, session_id] = result;
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
@@ -1503,26 +1298,25 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         char* error,
         size_t error_len) {
     session_decrypt_group_message_result result = {};
-    for (size_t index = 0; index < decrypt_ed25519_privkey_len; index++) {
-        std::span<const unsigned char> key = {
-                decrypt_ed25519_privkey_list[index].data, decrypt_ed25519_privkey_list[index].size};
-
-        DecryptGroupMessage result_cpp = {};
-        try {
-            result_cpp = decrypt_group_message(
-                    {&key, 1}, cspan<32>(group_ed25519_pubkey), cspan(ciphertext, ciphertext_len));
-            result = {
-                    .success = true,
-                    .index = index,
-                    .plaintext = session::span_u8_copy_or_throw(
-                            result.plaintext.data, result.plaintext.size),
-            };
-            assert(result_cpp.session_id.size() == sizeof(result.session_id));
-            std::memcpy(result.session_id, result_cpp.session_id.data(), sizeof(result.session_id));
-            break;
-        } catch (const std::exception& e) {
-            result.error_len_incl_null_terminator = copy_c_str(error, error_len, e.what());
-        }
+    try {
+        std::vector<std::span<const std::byte>> keys;
+        keys.reserve(decrypt_ed25519_privkey_len);
+        for (size_t i = 0; i < decrypt_ed25519_privkey_len; i++)
+            keys.push_back(to_byte_span(
+                    decrypt_ed25519_privkey_list[i].data, decrypt_ed25519_privkey_list[i].size));
+        auto [index, session_id, plaintext] = decrypt_group_message(
+                keys,
+                to_byte_span<32>(group_ed25519_pubkey),
+                to_byte_span(ciphertext, ciphertext_len));
+        result.success = true;
+        result.index = index;
+        result.plaintext = session::span_u8_copy_or_throw(plaintext.data(), plaintext.size());
+        assert(session_id.size() == sizeof(result.session_id));
+        std::memcpy(result.session_id, session_id.data(), sizeof(result.session_id));
+    } catch (const std::exception& e) {
+        auto msg = std::string_view{e.what()};
+        result.error_len_incl_null_terminator =
+                snprintf_clamped(error, error_len, "%.*s", (int)msg.size(), msg.data()) + 1;
     }
     return result;
 }
@@ -1534,13 +1328,13 @@ LIBSESSION_C_API bool session_decrypt_ons_response(
         const unsigned char* nonce_in,
         char* session_id_out) {
     try {
-        std::optional<std::span<const unsigned char, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>>
+        std::optional<std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>>
                 nonce;
         if (nonce_in)
-            nonce = cspan<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>(nonce_in);
+            nonce = to_byte_span<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>(nonce_in);
 
         auto session_id =
-                session::decrypt_ons_response(name_in, cspan(ciphertext_in, ciphertext_len), nonce);
+                session::decrypt_ons_response(name_in, to_byte_span(ciphertext_in, ciphertext_len), nonce);
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
         return true;
@@ -1557,7 +1351,7 @@ LIBSESSION_C_API bool session_decrypt_push_notification(
         size_t* plaintext_len) {
     try {
         auto plaintext = session::decrypt_push_notification(
-                cspan(payload_in, payload_len), cspan<32>(enc_key_in));
+                to_byte_span(payload_in, payload_len), to_byte_span<32>(enc_key_in));
 
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();
@@ -1576,7 +1370,7 @@ LIBSESSION_C_API bool session_encrypt_xchacha20(
         size_t* ciphertext_len) {
     try {
         auto ciphertext =
-                session::encrypt_xchacha20(cspan(plaintext_in, plaintext_len), cspan<32>(key_in));
+                session::encrypt_xchacha20(to_byte_span(plaintext_in, plaintext_len), to_byte_span<32>(key_in));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1595,7 +1389,7 @@ LIBSESSION_C_API bool session_decrypt_xchacha20(
         size_t* plaintext_len) {
     try {
         auto plaintext =
-                session::decrypt_xchacha20(cspan(ciphertext_in, ciphertext_len), cspan<32>(key_in));
+                session::decrypt_xchacha20(to_byte_span(ciphertext_in, ciphertext_len), to_byte_span<32>(key_in));
 
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();

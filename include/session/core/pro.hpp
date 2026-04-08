@@ -23,7 +23,7 @@ class Pro final : detail::CoreComponent {
     /// Outputs:
     /// - `bool` -- True if the proof was revoked, false otherwise.
     bool proof_is_revoked(
-            std::span<unsigned char, 32> gen_index_hash,
+            std::span<const std::byte, 32> gen_index_hash,
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts);
 
     /// API: core/Pro::pro_update_revocations

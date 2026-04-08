@@ -14,8 +14,8 @@
 using namespace session::config;
 
 UserProfile::UserProfile(
-        std::span<const unsigned char> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) {
+        const ed25519::PrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) {
     init(dumped, std::nullopt, std::nullopt);
     load_key(ed25519_secretkey);
 }
@@ -54,12 +54,12 @@ profile_pic UserProfile::get_profile_pic() const {
         pic.url = *url;
     if (auto* key = data[key_key].string(); key && key->size() == 32)
         pic.key.assign(
-                reinterpret_cast<const unsigned char*>(key->data()),
-                reinterpret_cast<const unsigned char*>(key->data()) + 32);
+                reinterpret_cast<const std::byte*>(key->data()),
+                reinterpret_cast<const std::byte*>(key->data()) + 32);
     return pic;
 }
 
-void UserProfile::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
+void UserProfile::set_profile_pic(std::string_view url, std::span<const std::byte> key) {
     auto current_url = data["p"].string_view_or("");
     auto current_key_str = data["q"].string_view_or("");
     std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
@@ -82,7 +82,7 @@ void UserProfile::set_profile_pic(profile_pic pic) {
 }
 
 void UserProfile::set_reupload_profile_pic(
-        std::string_view url, std::span<const unsigned char> key) {
+        std::string_view url, std::span<const std::byte> key) {
     auto current_url = data["P"].string_view_or("");
     auto current_key_str = data["Q"].string_view_or("");
     std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};
@@ -163,7 +163,7 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
     std::optional<ProConfig> curr = get_pro_config();
     if (!curr || *curr != pro) {
         auto root = data["s"];
-        root["r"] = std::span<const unsigned char>(
+        root["r"] = std::span<const std::byte>(
                 pro.rotating_privkey.data(), crypto_sign_ed25519_SEEDBYTES);
 
         auto proof_dict = root["p"];
@@ -271,9 +271,9 @@ LIBSESSION_C_API user_profile_pic user_profile_get_pic(const config_object* conf
 
 LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    std::span<const unsigned char> key;
+    std::span<const std::byte> key;
     if (!url.empty())
-        key = {pic.key, 32};
+        key = {reinterpret_cast<const std::byte*>(pic.key), 32};
 
     return wrap_exceptions(
             conf,
@@ -286,9 +286,9 @@ LIBSESSION_C_API int user_profile_set_pic(config_object* conf, user_profile_pic 
 
 LIBSESSION_C_API int user_profile_set_reupload_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    std::span<const unsigned char> key;
+    std::span<const std::byte> key;
     if (!url.empty())
-        key = {pic.key, 32};
+        key = {reinterpret_cast<const std::byte*>(pic.key), 32};
 
     return wrap_exceptions(
             conf,

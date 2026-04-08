@@ -64,10 +64,10 @@ template <typename ConfigT>
         size_t dumplen,
         char* error) {
     assert(ed25519_secretkey_bytes);
-    std::span<const unsigned char> ed25519_secretkey{ed25519_secretkey_bytes, 64};
-    std::optional<std::span<const unsigned char>> dump;
+    ed25519::PrivKeySpan ed25519_secretkey{ed25519_secretkey_bytes, 64};
+    std::optional<std::span<const std::byte>> dump;
     if (dumpstr && dumplen)
-        dump.emplace(dumpstr, dumplen);
+        dump.emplace(reinterpret_cast<const std::byte*>(dumpstr), dumplen);
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_secretkey, dump);
 }
 
@@ -82,13 +82,13 @@ template <typename ConfigT>
 
     assert(ed25519_pubkey_bytes);
 
-    std::span<const unsigned char> ed25519_pubkey{ed25519_pubkey_bytes, 32};
-    std::optional<std::span<const unsigned char>> ed25519_secretkey;
-    if (ed25519_secretkey_bytes)
-        ed25519_secretkey.emplace(ed25519_secretkey_bytes, 64);
-    std::optional<std::span<const unsigned char>> dump;
+    std::span<const std::byte, 32> ed25519_pubkey{
+            reinterpret_cast<const std::byte*>(ed25519_pubkey_bytes), 32};
+    ed25519::OptionalPrivKeySpan ed25519_secretkey{
+            ed25519_secretkey_bytes, ed25519_secretkey_bytes ? 64u : 0u};
+    std::optional<std::span<const std::byte>> dump;
     if (dump_bytes && dumplen)
-        dump.emplace(dump_bytes, dumplen);
+        dump.emplace(reinterpret_cast<const std::byte*>(dump_bytes), dumplen);
 
     return c_wrapper_init_generic<ConfigT>(conf, error, ed25519_pubkey, ed25519_secretkey, dump);
 }
@@ -149,7 +149,7 @@ std::string session_id_to_bytes(std::string_view session_id, std::string_view pr
 
 // Checks the session_id (throwing if invalid) then returns it as bytes, omitting the 05 (or
 // whatever) prefix, which is a pubkey (x25519 for 05 session_ids, ed25519 for other prefixes).
-std::array<unsigned char, 32> session_id_pk(
+std::array<std::byte, 32> session_id_pk(
         std::string_view session_id, std::string_view prefix = "05");
 
 // Validates a community pubkey; we accept it in hex, base32z, or base64 (padded or unpadded).
@@ -158,7 +158,7 @@ void check_encoded_pubkey(std::string_view pk);
 
 // Takes a 32-byte pubkey value encoded as hex, base32z, or base64 and returns the decoded 32 bytes.
 // Throws if invalid.
-std::vector<unsigned char> decode_pubkey(std::string_view pk);
+std::vector<std::byte> decode_pubkey(std::string_view pk);
 
 // Modifies a string to be (ascii) lowercase.
 void make_lc(std::string& s);
@@ -208,9 +208,9 @@ std::optional<std::string_view> maybe_sv(const session::config::dict& d, const c
 // string view is only valid as long as the dict stays unchanged.
 std::string_view sv_or_empty(const session::config::dict& d, const char* key);
 
-// Digs into a config `dict` to get out a std::vector<unsigned char>; nullopt if not there (or not
+// Digs into a config `dict` to get out a std::vector<std::byte>; nullopt if not there (or not
 // string)
-std::optional<std::vector<unsigned char>> maybe_vector(
+std::optional<std::vector<std::byte>> maybe_vector(
         const session::config::dict& d, const char* key);
 
 /// Sets a value to 1 if true, removes it if false.

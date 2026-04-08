@@ -19,28 +19,11 @@
 #include <string_view>
 #include <unordered_map>
 
+#include "session/crypto/ed25519.hpp"
 #include "utils.hpp"
 
 using namespace std::literals;
 using namespace session::config;
-
-static std::array<unsigned char, 64> sk_from_seed(std::span<const unsigned char> seed) {
-    std::array<unsigned char, 32> ignore;
-    std::array<unsigned char, 64> sk;
-    crypto_sign_ed25519_seed_keypair(ignore.data(), sk.data(), seed.data());
-    return sk;
-}
-
-static std::string session_id_from_ed(std::span<const unsigned char> ed_pk) {
-    std::string sid;
-    std::array<unsigned char, 32> xpk;
-    int rc = crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed_pk.data());
-    REQUIRE(rc == 0);
-    sid.reserve(66);
-    sid += "05";
-    oxenc::to_hex(xpk.begin(), xpk.end(), std::back_inserter(sid));
-    return sid;
-}
 
 // Hacky little class that implements `[n]` on a std::list.  This is inefficient (since it access
 // has to iterate n times through the list) but we only use it on small lists in this test code so
@@ -52,38 +35,26 @@ struct hacky_list : std::list<T> {
 };
 
 struct pseudo_client {
-    std::array<unsigned char, 64> secret_key;
-    const std::span<const unsigned char> public_key{secret_key.data() + 32, 32};
-    std::string session_id{session_id_from_ed(public_key)};
+    cleared_b64 secret_key;
+    const std::span<const std::byte, 32> public_key{secret_key.data() + 32, 32};
+    std::string session_id = oxenc::to_hex(ed25519::pk_to_session_id(public_key));
 
     groups::Info info;
     groups::Members members;
     groups::Keys keys;
 
     pseudo_client(
-            std::span<const unsigned char> seed,
+            std::span<const std::byte, 32> seed,
             bool admin,
-            const unsigned char* gpk,
-            std::optional<const unsigned char*> gsk,
-            std::optional<std::span<const unsigned char>> info_dump = std::nullopt,
-            std::optional<std::span<const unsigned char>> members_dump = std::nullopt,
-            std::optional<std::span<const unsigned char>> keys_dump = std::nullopt) :
-            secret_key{sk_from_seed(seed)},
-            info{std::span<const unsigned char>{gpk, 32},
-                 admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
-                       : std::nullopt,
-                 info_dump},
-            members{std::span<const unsigned char>{gpk, 32},
-                    admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
-                          : std::nullopt,
-                    members_dump},
-            keys{session::to_span(secret_key),
-                 std::span<const unsigned char>{gpk, 32},
-                 admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
-                       : std::nullopt,
-                 keys_dump,
-                 info,
-                 members} {
+            std::span<const std::byte, 32> gpk,
+            const ed25519::OptionalPrivKeySpan& gsk,
+            std::optional<std::span<const std::byte>> info_dump = std::nullopt,
+            std::optional<std::span<const std::byte>> members_dump = std::nullopt,
+            std::optional<std::span<const std::byte>> keys_dump = std::nullopt) :
+            secret_key{ed25519::keypair(seed).second},
+            info{gpk, gsk, info_dump},
+            members{gpk, gsk, members_dump},
+            keys{secret_key, gpk, gsk, keys_dump, info, members} {
         if (gsk)
             keys.rekey(info, members);
     }
@@ -91,25 +62,22 @@ struct pseudo_client {
 
 TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
 
-    const std::vector<unsigned char> group_seed =
-            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> admin1_seed =
-            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> admin2_seed =
-            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hexbytes;
-    const std::array member_seeds = {
-            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes,  // member1
-            "00011122435111155566677788811263446552465222efff0123456789abcdef"_hexbytes,  // member2
-            "00011129824754185548239498168169316979583253efff0123456789abcdef"_hexbytes,  // member3
-            "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff"_hexbytes,  // member4
-            "3333333333333333333333333333333333333333333333333333333333333333"_hexbytes,  // member3b
-            "4444444444444444444444444444444444444444444444444444444444444444"_hexbytes,  // member4b
+    constexpr auto group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hex_b;
+    constexpr auto admin1_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    constexpr auto admin2_seed =
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hex_b;
+    constexpr std::array member_seeds = {
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hex_b,  // member1
+            "00011122435111155566677788811263446552465222efff0123456789abcdef"_hex_b,  // member2
+            "00011129824754185548239498168169316979583253efff0123456789abcdef"_hex_b,  // member3
+            "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff"_hex_b,  // member4
+            "3333333333333333333333333333333333333333333333333333333333333333"_hex_b,  // member3b
+            "4444444444444444444444444444444444444444444444444444444444444444"_hex_b,  // member4b
     };
 
-    std::array<unsigned char, 32> group_pk;
-    std::array<unsigned char, 64> group_sk;
-
-    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+    auto [group_pk, group_sk] = ed25519::keypair(group_seed);
     REQUIRE(oxenc::to_hex(group_seed.begin(), group_seed.end()) ==
             oxenc::to_hex(group_sk.begin(), group_sk.begin() + 32));
 
@@ -120,11 +88,11 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     hacky_list<pseudo_client> members;
 
     // Initialize admin and member objects
-    admins.emplace_back(admin1_seed, true, group_pk.data(), group_sk.data());
-    admins.emplace_back(admin2_seed, true, group_pk.data(), group_sk.data());
+    admins.emplace_back(admin1_seed, true, group_pk, group_sk);
+    admins.emplace_back(admin2_seed, true, group_pk, group_sk);
 
     for (int i = 0; i < 4; ++i)
-        members.emplace_back(member_seeds[i], false, group_pk.data(), std::nullopt);
+        members.emplace_back(member_seeds[i], false, group_pk, std::nullopt);
 
     REQUIRE(admins[0].session_id ==
             "05f1e8b64bbf761edf8f7b47e3a1f369985644cce0a62adb8e21604474bdd49627");
@@ -144,8 +112,8 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     for (const auto& m : members)
         REQUIRE(m.members.size() == 0);
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> info_configs;
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> mem_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> info_configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> mem_configs;
 
     // add admin account, re-key, distribute
     auto& admin1 = admins[0];
@@ -296,7 +264,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
 
     CHECK(admin1.members.needs_push());
 
-    std::vector<unsigned char> old_key = session::to_vector(admin1.keys.group_enc_key());
+    std::vector<std::byte> old_key = session::to_vector(admin1.keys.group_enc_key());
     auto new_keys_config4 = admin1.keys.rekey(admin1.info, admin1.members);
     CHECK(not new_keys_config4.empty());
 
@@ -363,7 +331,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
 
     // Add two new members and send them supplemental keys
     for (int i = 0; i < 2; ++i) {
-        auto& m = members.emplace_back(member_seeds[4 + i], false, group_pk.data(), std::nullopt);
+        auto& m = members.emplace_back(member_seeds[4 + i], false, group_pk, std::nullopt);
 
         auto memb = admin1.members.get_or_construct(m.session_id);
         memb.set_invite_sent();
@@ -431,7 +399,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
             CHECK(m.keys.active_hashes() == std::unordered_set{{"keyhash5"s}});
     }
 
-    std::pair<std::string, std::vector<unsigned char>> decrypted1, decrypted2;
+    std::pair<std::string, std::vector<std::byte>> decrypted1, decrypted2;
     REQUIRE_NOTHROW(decrypted1 = members.back().keys.decrypt_message(compressed));
     CHECK(decrypted1.first == admin1.session_id);
     CHECK(session::to_string(decrypted1.second) == msg);
@@ -441,7 +409,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     CHECK(session::to_string(decrypted2.second) == msg);
 
     auto bad_compressed = compressed;
-    bad_compressed.back() ^= 0b100;
+    bad_compressed.back() ^= std::byte{0b100};
     CHECK_THROWS_WITH(
             members.back().keys.decrypt_message(bad_compressed),
             "unable to decrypt ciphertext with any current group keys; tried 4");
@@ -450,7 +418,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     auto& m1b = members.emplace_back(
             member_seeds[1],
             false,
-            group_pk.data(),
+            group_pk,
             std::nullopt,
             members[1].info.dump(),
             members[1].members.dump(),
@@ -469,7 +437,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     // get dropped as stale.
     info_configs.clear();
     mem_configs.clear();
-    std::vector<unsigned char> new_keys_config6 =
+    std::vector<std::byte> new_keys_config6 =
             session::to_vector(admin1.keys.rekey(admin1.info, admin1.members));
     auto [iseq6, ipush6, iobs6] = admin1.info.push();
     info_configs.emplace_back("ifakehash6", ipush6[0]);
@@ -499,7 +467,7 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
                                                  "keyhash6"s}});
     }
 
-    std::vector<unsigned char> new_keys_config7 =
+    std::vector<std::byte> new_keys_config7 =
             session::to_vector(admin1.keys.rekey(admin1.info, admin1.members));
 
     // Make sure we can encrypt & decrypt even if the rekey is still pending:
@@ -553,8 +521,8 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
     pseudo_client admin1b{
             admin1_seed,
             true,
-            group_pk.data(),
-            group_sk.data(),
+            group_pk,
+            group_sk,
             admin1.info.dump(),
             admin1.members.dump(),
             admin1.keys.dump()};
@@ -577,21 +545,21 @@ TEST_CASE("Group Keys - C++ API", "[config][groups][keys][cpp]") {
 }
 
 TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
-    struct pseudo_client {
-        std::array<unsigned char, 64> secret_key;
-        const std::span<const unsigned char> public_key{secret_key.data() + 32, 32};
-        std::string session_id{session_id_from_ed(public_key)};
+    struct pseudo_client_c {
+        b64 secret_key;
+        std::span<const std::byte, 32> public_key{secret_key.data() + 32, 32};
+        std::string session_id = oxenc::to_hex(ed25519::pk_to_session_id(public_key));
 
         config_group_keys* keys;
         config_object* info;
         config_object* members;
 
-        pseudo_client(
-                std::vector<unsigned char> seed,
+        pseudo_client_c(
+                std::span<const std::byte, 32> seed,
                 bool is_admin,
                 unsigned char* gpk,
                 std::optional<unsigned char*> gsk) :
-                secret_key{sk_from_seed(seed)} {
+                secret_key{ed25519::keypair(seed).second} {
             int rv = groups_members_init(&members, gpk, is_admin ? *gsk : NULL, NULL, 0, NULL);
             REQUIRE(rv == 0);
 
@@ -600,7 +568,7 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
 
             rv = groups_keys_init(
                     &keys,
-                    secret_key.data(),
+                    to_unsigned(secret_key.data()),
                     gpk,
                     is_admin ? *gsk : NULL,
                     info,
@@ -614,44 +582,41 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
                 REQUIRE(groups_keys_rekey(keys, info, members, nullptr, nullptr));
         }
 
-        ~pseudo_client() {
+        ~pseudo_client_c() {
             config_free(info);
             config_free(members);
         }
     };
 
-    const std::vector<unsigned char> group_seed =
-            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> admin1_seed =
-            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> admin2_seed =
-            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hexbytes;
-    const std::array member_seeds = {
-            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes,  // member1
-            "00011122435111155566677788811263446552465222efff0123456789abcdef"_hexbytes,  // member2
-            "00011129824754185548239498168169316979583253efff0123456789abcdef"_hexbytes,  // member3
-            "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff"_hexbytes   // member4
+    constexpr auto group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hex_b;
+    constexpr auto admin1_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    constexpr auto admin2_seed =
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hex_b;
+    constexpr std::array member_seeds = {
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hex_b,  // member1
+            "00011122435111155566677788811263446552465222efff0123456789abcdef"_hex_b,  // member2
+            "00011129824754185548239498168169316979583253efff0123456789abcdef"_hex_b,  // member3
+            "0000111122223333444455556666777788889999aaaabbbbccccddddeeeeffff"_hex_b   // member4
     };
 
-    std::array<unsigned char, 32> group_pk;
-    std::array<unsigned char, 64> group_sk;
+    auto [group_pk, group_sk] = ed25519::keypair(group_seed);
 
-    crypto_sign_ed25519_seed_keypair(
-            group_pk.data(),
-            group_sk.data(),
-            reinterpret_cast<const unsigned char*>(group_seed.data()));
     REQUIRE(oxenc::to_hex(group_seed.begin(), group_seed.end()) ==
             oxenc::to_hex(group_sk.begin(), group_sk.begin() + 32));
 
-    hacky_list<pseudo_client> admins;
-    hacky_list<pseudo_client> members;
+    hacky_list<pseudo_client_c> admins;
+    hacky_list<pseudo_client_c> members;
 
     // Initialize admin and member objects
-    admins.emplace_back(admin1_seed, true, group_pk.data(), group_sk.data());
-    admins.emplace_back(admin2_seed, true, group_pk.data(), group_sk.data());
+    auto* gpk = to_unsigned(group_pk.data());
+    auto* gsk = to_unsigned(group_sk.data());
+    admins.emplace_back(admin1_seed, true, gpk, gsk);
+    admins.emplace_back(admin2_seed, true, gpk, gsk);
 
     for (int i = 0; i < 4; ++i)
-        members.emplace_back(member_seeds[i], false, group_pk.data(), std::nullopt);
+        members.emplace_back(member_seeds[i], false, gpk, std::nullopt);
 
     REQUIRE(admins[0].session_id ==
             "05f1e8b64bbf761edf8f7b47e3a1f369985644cce0a62adb8e21604474bdd49627");
@@ -851,25 +816,22 @@ TEST_CASE("Group Keys - C API", "[config][groups][keys][c]") {
 
 TEST_CASE("Group Keys - swarm authentication", "[config][groups][keys][swarm]") {
 
-    const std::vector<unsigned char> group_seed =
-            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> admin_seed =
-            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> member_seed =
-            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hexbytes;
+    constexpr auto group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hex_b;
+    constexpr auto admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    constexpr auto member_seed =
+            "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hex_b;
 
-    std::array<unsigned char, 32> group_pk;
-    std::array<unsigned char, 64> group_sk;
-
-    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+    auto [group_pk, group_sk] = ed25519::keypair(group_seed);
     REQUIRE(oxenc::to_hex(group_seed.begin(), group_seed.end()) ==
             oxenc::to_hex(group_sk.begin(), group_sk.begin() + 32));
 
     CHECK(oxenc::to_hex(group_pk.begin(), group_pk.end()) ==
           "c50cb3ae956947a8de19135b5be2685ff348afc63fc34a837aca12bc5c1f5625");
 
-    pseudo_client admin{admin_seed, true, group_pk.data(), group_sk.data()};
-    pseudo_client member{member_seed, false, group_pk.data(), std::nullopt};
+    pseudo_client admin{admin_seed, true, group_pk, group_sk};
+    pseudo_client member{member_seed, false, group_pk, std::nullopt};
     session::config::UserGroups member_groups{member_seed, std::nullopt};
 
     CHECK(admin.session_id == "05f1e8b64bbf761edf8f7b47e3a1f369985644cce0a62adb8e21604474bdd49627");
@@ -893,7 +855,7 @@ TEST_CASE("Group Keys - swarm authentication", "[config][groups][keys][swarm]") 
 
     REQUIRE(push.size() == 1);
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> gr_conf;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> gr_conf;
     gr_conf.emplace_back("fakehash1", push[0]);
 
     member_gr2.merge(gr_conf);
@@ -919,16 +881,14 @@ TEST_CASE("Group Keys - swarm authentication", "[config][groups][keys][swarm]") 
     CHECK(oxenc::to_base64(subauth.subaccount_sig) == subauth_b64.subaccount_sig);
     CHECK(oxenc::to_base64(subauth.signature) == subauth_b64.signature);
 
-    CHECK(0 ==
-          crypto_sign_ed25519_verify_detached(
-                  reinterpret_cast<const unsigned char*>(subauth.signature.data()),
-                  to_sign.data(),
-                  to_sign.size(),
-                  reinterpret_cast<const unsigned char*>(subauth.subaccount.substr(4).data())));
+    CHECK(ed25519::verify(
+            to_span(subauth.signature).first<64>(),
+            to_span(subauth.subaccount.substr(4)).first<32>(),
+            to_sign));
 
     CHECK(member.keys.swarm_verify_subaccount(auth_data));
     CHECK(session::config::groups::Keys::swarm_verify_subaccount(
-            member.info.id, session::to_span(member.secret_key), auth_data));
+            member.info.id, member.secret_key, auth_data));
 
     // Try flipping a bit in each position of the auth data and make sure it fails to validate:
     for (size_t i = 0; i < auth_data.size(); i++) {
@@ -938,33 +898,30 @@ TEST_CASE("Group Keys - swarm authentication", "[config][groups][keys][swarm]") 
                                     // sign bit, so won't actually change anything if it flips.
                 continue;
             auto auth_data2 = auth_data;
-            auth_data2[i] ^= 1 << b;
+            auth_data2[i] ^= static_cast<std::byte>(1 << b);
             CHECK_FALSE(session::config::groups::Keys::swarm_verify_subaccount(
-                    member.info.id, session::to_span(member.secret_key), auth_data2));
+                    member.info.id, member.secret_key, auth_data2));
         }
     }
 }
 
 TEST_CASE("Group Keys promotion", "[config][groups][keys][promotion]") {
 
-    const std::vector<unsigned char> group_seed =
-            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> admin1_seed =
-            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    const std::vector<unsigned char> member1_seed =
-            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes;
+    constexpr auto group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hex_b;
+    constexpr auto admin1_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    constexpr auto member1_seed =
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hex_b;
 
-    std::array<unsigned char, 32> group_pk;
-    std::array<unsigned char, 64> group_sk;
-
-    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+    auto [group_pk, group_sk] = ed25519::keypair(group_seed);
     REQUIRE(oxenc::to_hex(group_seed.begin(), group_seed.end()) ==
             oxenc::to_hex(group_sk.begin(), group_sk.begin() + 32));
 
-    pseudo_client admin{admin1_seed, true, group_pk.data(), group_sk.data()};
-    pseudo_client member{member1_seed, false, group_pk.data(), std::nullopt};
+    pseudo_client admin{admin1_seed, true, group_pk, group_sk};
+    pseudo_client member{member1_seed, false, group_pk, std::nullopt};
 
-    std::vector<std::pair<std::string, std::span<const unsigned char>>> configs;
+    std::vector<std::pair<std::string, std::span<const std::byte>>> configs;
     {
         auto m = admin.members.get_or_construct(admin.session_id);
         m.admin = true;
@@ -1018,7 +975,7 @@ TEST_CASE("Group Keys promotion", "[config][groups][keys][promotion]") {
     REQUIRE(member.info.is_readonly());
     REQUIRE(member.members.is_readonly());
 
-    member.keys.load_admin_key(session::to_span(group_sk), member.info, member.members);
+    member.keys.load_admin_key(group_sk, member.info, member.members);
 
     CHECK(member.keys.admin());
     CHECK_FALSE(member.members.is_readonly());

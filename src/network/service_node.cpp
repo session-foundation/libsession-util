@@ -58,7 +58,7 @@ service_node service_node::from_json(nlohmann::json json) {
         throw std::invalid_argument{
                 "Invalid service node json: pubkey_ed25519 is not a valid, hex pubkey"};
 
-    std::vector<unsigned char> pubkey;
+    std::vector<std::byte> pubkey;
     pubkey.reserve(32);
     oxenc::from_hex(pk_ed.begin(), pk_ed.end(), std::back_inserter(pubkey));
 
@@ -209,10 +209,8 @@ std::pair<std::vector<service_node>, int> service_node::process_snode_cache_bin(
 
         try {
             // Pubkey
-            std::vector<unsigned char> pubkey;
-            pubkey.assign(
-                    reinterpret_cast<const unsigned char*>(current_ptr),
-                    reinterpret_cast<const unsigned char*>(current_ptr) + PK_SIZE);
+            std::vector<std::byte> pubkey;
+            pubkey.assign(current_ptr, current_ptr + PK_SIZE);
             note_ptr += PK_SIZE;
 
             // Swarm ID

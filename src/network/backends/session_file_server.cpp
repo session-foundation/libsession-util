@@ -175,7 +175,7 @@ Request to_request(
         const std::string& upload_id,
         const config::FileServer& config,
         UploadRequest upload_request) {
-    std::vector<unsigned char> all_data;
+    std::vector<std::byte> all_data;
 
     while (true) {
         if (upload_request.is_cancelled())
@@ -284,7 +284,7 @@ file_metadata parse_upload_response(const std::string& body, size_t upload_size)
     return metadata;
 }
 
-std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
+std::pair<file_metadata, std::vector<std::byte>> parse_download_response(
         std::string_view download_url,
         const std::vector<std::pair<std::string, std::string>>& headers,
         const std::string& body) {
@@ -307,7 +307,7 @@ std::pair<file_metadata, std::vector<unsigned char>> parse_download_response(
         }
     }
 
-    std::vector<unsigned char> data(body.begin(), body.end());
+    auto data = to_vector(body);
 
     if (metadata.size == 0)
         metadata.size = data.size();
@@ -354,9 +354,10 @@ Request get_client_version(
     }
 
     // Generate the auth signature
-    auto blinded_keys = blind_version_key_pair(to_span(seckey.view()));
+    auto sk = ed25519::PrivKeySpan::from(to_span(seckey.view()));
+    auto blinded_keys = blind_version_key_pair(sk);
     auto timestamp = epoch_seconds(clock_now_s());
-    auto signature = blind_version_sign(to_span(seckey.view()), platform, timestamp);
+    auto signature = blind_version_sign(sk, platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(DEFAULT_CONFIG.pubkey_hex);
     std::string blinded_pk_hex;
     blinded_pk_hex.reserve(66);
@@ -450,7 +451,7 @@ LIBSESSION_C_API session_request_params* session_file_server_get_client_version(
     try {
         auto req = file_server::get_client_version(
                 static_cast<Platform>(platform),
-                network::ed25519_seckey::from_bytes({ed25519_secret, 64}),
+                network::ed25519_seckey::from_bytes(to_byte_span<64>(ed25519_secret)),
                 std::chrono::milliseconds{request_timeout_ms},
                 (overall_timeout_ms > 0
                          ? std::optional{std::chrono::milliseconds{overall_timeout_ms}}

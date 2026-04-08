@@ -1,68 +1,63 @@
 #include <fmt/core.h>
-#include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/encrypt.hpp>
 #include <session/multi_encrypt.hpp>
 #include <session/util.hpp>
 
 #include "utils.hpp"
 
-using x_pair = std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 32>>;
+using namespace session;
 
-// Returns X25519 privkey, pubkey from an Ed25519 seed
-static x_pair to_x_keys(std::span<const unsigned char> ed_seed) {
-    std::array<unsigned char, 32> ed_pk;
-    std::array<unsigned char, 64> ed_sk;
-    crypto_sign_ed25519_seed_keypair(ed_pk.data(), ed_sk.data(), ed_seed.data());
-    x_pair ret;
-    auto& [x_priv, x_pub] = ret;
-    [[maybe_unused]] int rc = crypto_sign_ed25519_pk_to_curve25519(x_pub.data(), ed_pk.data());
-    assert(rc == 0);
-    crypto_sign_ed25519_sk_to_curve25519(x_priv.data(), ed_sk.data());
-    return ret;
+using x_pair = std::pair<b32, b32>;
+
+// Returns X25519 {privkey, pubkey} from an Ed25519 seed
+x_pair to_x_keys(std::span<const std::byte, 32> ed_seed) {
+    auto [ed_pk, ed_sk] = ed25519::keypair(ed_seed);
+    return {ed25519::sk_to_x25519(ed_sk), ed25519::pk_to_x25519(ed_pk)};
 }
 
 TEST_CASE("Multi-recipient encryption", "[encrypt][multi]") {
 
     const std::array seeds = {
-            "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef000000000000000000000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef111111111111111100000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef222222222222222200000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef333333333333333300000000000000000000000000000000"_hexbytes};
+            "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b,
+            "0123456789abcdef000000000000000000000000000000000000000000000000"_hex_b,
+            "0123456789abcdef111111111111111100000000000000000000000000000000"_hex_b,
+            "0123456789abcdef222222222222222200000000000000000000000000000000"_hex_b,
+            "0123456789abcdef333333333333333300000000000000000000000000000000"_hex_b};
 
     std::array<x_pair, seeds.size()> x_keys;
     for (size_t i = 0; i < seeds.size(); i++)
         x_keys[i] = to_x_keys(seeds[i]);
 
-    CHECK(oxenc::to_hex(session::to_span(x_keys[0].second)) ==
+    CHECK(oxenc::to_hex(x_keys[0].second) ==
           "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[1].second)) ==
+    CHECK(oxenc::to_hex(x_keys[1].second) ==
           "d673a8fb4800d2a252d2fc4e3342a88cdfa9412853934e8993d12d593be13371");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[2].second)) ==
+    CHECK(oxenc::to_hex(x_keys[2].second) ==
           "afd9716ea69ab8c7f475e1b250c86a6539e260804faecf2a803e9281a4160738");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[3].second)) ==
+    CHECK(oxenc::to_hex(x_keys[3].second) ==
           "03be14feabd59122349614b88bdc90db1d1af4c230e9a73c898beec833d51f11");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[4].second)) ==
+    CHECK(oxenc::to_hex(x_keys[4].second) ==
           "27b5c1ea87cef76284c752fa6ee1b9186b1a95e74e8f5b88f8b47e5191ce6f08");
 
-    auto nonce = "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hexbytes;
+    auto nonce = "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hex_b;
 
-    std::vector<std::span<const unsigned char>> recipients;
+    std::vector<std::span<const std::byte>> recipients;
     for (auto& [_, pubkey] : x_keys)
         recipients.emplace_back(pubkey.data(), pubkey.size());
 
     std::vector<std::string> msgs{{"hello", "cruel", "world"}};
-    std::vector<std::vector<unsigned char>> encrypted;
+    std::vector<std::vector<std::byte>> encrypted;
     session::encrypt_for_multiple(
             msgs[0],
-            session::to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+            to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
             nonce,
-            session::to_span(x_keys[0].first),
-            session::to_span(x_keys[0].second),
+            x_keys[0].first,
+            x_keys[0].second,
             "test suite",
-            [&](std::span<const unsigned char> enc) {
+            [&](std::span<const std::byte> enc) {
                 encrypted.emplace_back(session::to_vector(enc));
             });
 
@@ -72,39 +67,39 @@ TEST_CASE("Multi-recipient encryption", "[encrypt][multi]") {
     CHECK(to_hex(encrypted[2]) == "01c4fc2156327735f3fb5063b11ea95f6ebcc5b6cc");
 
     auto m1 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[1].first),
-            session::to_span(x_keys[1].second),
-            session::to_span(x_keys[0].second),
+            x_keys[1].first,
+            x_keys[1].second,
+            x_keys[0].second,
             "test suite");
     auto m2 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[2].first),
-            session::to_span(x_keys[2].second),
-            session::to_span(x_keys[0].second),
+            x_keys[2].first,
+            x_keys[2].second,
+            x_keys[0].second,
             "test suite");
     auto m3 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "test suite");
     auto m3b = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "not test suite");
     auto m4 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[4].first),
-            session::to_span(x_keys[4].second),
-            session::to_span(x_keys[0].second),
+            x_keys[4].first,
+            x_keys[4].second,
+            x_keys[0].second,
             "test suite");
 
     REQUIRE(m1);
@@ -119,13 +114,13 @@ TEST_CASE("Multi-recipient encryption", "[encrypt][multi]") {
 
     encrypted.clear();
     session::encrypt_for_multiple(
-            session::to_view_vector(msgs.begin(), msgs.end()),
-            session::to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+            to_view_vector(msgs.begin(), msgs.end()),
+            to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
             nonce,
-            session::to_span(x_keys[0].first),
-            session::to_span(x_keys[0].second),
+            x_keys[0].first,
+            x_keys[0].second,
             "test suite",
-            [&](std::span<const unsigned char> enc) {
+            [&](std::span<const std::byte> enc) {
                 encrypted.emplace_back(session::to_vector(enc));
             });
 
@@ -135,39 +130,39 @@ TEST_CASE("Multi-recipient encryption", "[encrypt][multi]") {
     CHECK(to_hex(encrypted[2]) == "1ecee2215d226817edfdb097f05037eb799309103a");
 
     m1 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[1].first),
-            session::to_span(x_keys[1].second),
-            session::to_span(x_keys[0].second),
+            x_keys[1].first,
+            x_keys[1].second,
+            x_keys[0].second,
             "test suite");
     m2 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[2].first),
-            session::to_span(x_keys[2].second),
-            session::to_span(x_keys[0].second),
+            x_keys[2].first,
+            x_keys[2].second,
+            x_keys[0].second,
             "test suite");
     m3 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "test suite");
     m3b = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "not test suite");
     m4 = session::decrypt_for_multiple(
-            session::to_view_vector(encrypted),
+            to_view_vector(encrypted),
             nonce,
-            session::to_span(x_keys[4].first),
-            session::to_span(x_keys[4].second),
-            session::to_span(x_keys[0].second),
+            x_keys[4].first,
+            x_keys[4].second,
+            x_keys[0].second,
             "test suite");
 
     REQUIRE(m1);
@@ -182,13 +177,13 @@ TEST_CASE("Multi-recipient encryption", "[encrypt][multi]") {
 
     // Mismatch messages & recipients size throws:
     CHECK_THROWS(session::encrypt_for_multiple(
-            session::to_view_vector(msgs.begin(), std::prev(msgs.end())),
-            session::to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+            to_view_vector(msgs.begin(), std::prev(msgs.end())),
+            to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
             nonce,
-            session::to_span(x_keys[0].first),
-            session::to_span(x_keys[0].second),
+            x_keys[0].first,
+            x_keys[0].second,
             "test suite",
-            [&](std::span<const unsigned char> enc) {
+            [&](std::span<const std::byte> enc) {
                 encrypted.emplace_back(session::to_vector(enc));
             }));
 }
@@ -196,39 +191,39 @@ TEST_CASE("Multi-recipient encryption", "[encrypt][multi]") {
 TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][simple]") {
 
     const std::array seeds = {
-            "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef000000000000000000000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef111111111111111100000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef222222222222222200000000000000000000000000000000"_hexbytes,
-            "0123456789abcdef333333333333333300000000000000000000000000000000"_hexbytes};
+            "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b,
+            "0123456789abcdef000000000000000000000000000000000000000000000000"_hex_b,
+            "0123456789abcdef111111111111111100000000000000000000000000000000"_hex_b,
+            "0123456789abcdef222222222222222200000000000000000000000000000000"_hex_b,
+            "0123456789abcdef333333333333333300000000000000000000000000000000"_hex_b};
 
     std::array<x_pair, seeds.size()> x_keys;
     for (size_t i = 0; i < seeds.size(); i++)
         x_keys[i] = to_x_keys(seeds[i]);
 
-    CHECK(oxenc::to_hex(session::to_span(x_keys[0].second)) ==
+    CHECK(oxenc::to_hex(x_keys[0].second) ==
           "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[1].second)) ==
+    CHECK(oxenc::to_hex(x_keys[1].second) ==
           "d673a8fb4800d2a252d2fc4e3342a88cdfa9412853934e8993d12d593be13371");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[2].second)) ==
+    CHECK(oxenc::to_hex(x_keys[2].second) ==
           "afd9716ea69ab8c7f475e1b250c86a6539e260804faecf2a803e9281a4160738");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[3].second)) ==
+    CHECK(oxenc::to_hex(x_keys[3].second) ==
           "03be14feabd59122349614b88bdc90db1d1af4c230e9a73c898beec833d51f11");
-    CHECK(oxenc::to_hex(session::to_span(x_keys[4].second)) ==
+    CHECK(oxenc::to_hex(x_keys[4].second) ==
           "27b5c1ea87cef76284c752fa6ee1b9186b1a95e74e8f5b88f8b47e5191ce6f08");
 
-    auto nonce = "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hexbytes;
+    auto nonce = "32ab4bb45d6df5cc14e1c330fb1a8b68ea3826a8c2213a49"_hex_b;
 
-    std::vector<std::span<const unsigned char>> recipients;
+    std::vector<std::span<const std::byte>> recipients;
     for (auto& [_, pubkey] : x_keys)
         recipients.emplace_back(pubkey.data(), pubkey.size());
 
     std::vector<std::string> msgs{{"hello", "cruel", "world"}};
-    std::vector<unsigned char> encrypted = session::encrypt_for_multiple_simple(
+    std::vector<std::byte> encrypted = encrypt_for_multiple_simple(
             msgs[0],
-            session::to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
-            session::to_span(x_keys[0].first),
-            session::to_span(x_keys[0].second),
+            to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+            x_keys[0].first,
+            x_keys[0].second,
             "test suite");
 
     REQUIRE(encrypted.size() ==
@@ -236,46 +231,46 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
                     /* 1:# 24:...nonce... */ 3 + 27 +
                     /* 1:e le */ 3 + 2 +
                     /* XX: then data with overhead */ 3 *
-                            (3 + 5 + crypto_aead_xchacha20poly1305_ietf_ABYTES));
+                            (3 + 5 + encrypt::XCHACHA20_ABYTES));
 
     // If we encrypt again the value should be different (because of the default randomized nonce):
-    CHECK(encrypted != session::encrypt_for_multiple_simple(
+    CHECK(encrypted != encrypt_for_multiple_simple(
                                msgs[0],
-                               session::to_view_vector(
+                               to_view_vector(
                                        std::next(recipients.begin()), std::prev(recipients.end())),
-                               session::to_span(x_keys[0].first),
-                               session::to_span(x_keys[0].second),
+                               x_keys[0].first,
+                               x_keys[0].second,
                                "test suite"));
 
-    auto m1 = session::decrypt_for_multiple_simple(
+    auto m1 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[1].first),
-            session::to_span(x_keys[1].second),
-            session::to_span(x_keys[0].second),
+            x_keys[1].first,
+            x_keys[1].second,
+            x_keys[0].second,
             "test suite");
-    auto m2 = session::decrypt_for_multiple_simple(
+    auto m2 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[2].first),
-            session::to_span(x_keys[2].second),
-            session::to_span(x_keys[0].second),
+            x_keys[2].first,
+            x_keys[2].second,
+            x_keys[0].second,
             "test suite");
-    auto m3 = session::decrypt_for_multiple_simple(
+    auto m3 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "test suite");
-    auto m3b = session::decrypt_for_multiple_simple(
+    auto m3b = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "not test suite");
-    auto m4 = session::decrypt_for_multiple_simple(
+    auto m4 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[4].first),
-            session::to_span(x_keys[4].second),
-            session::to_span(x_keys[0].second),
+            x_keys[4].first,
+            x_keys[4].second,
+            x_keys[0].second,
             "test suite");
 
     REQUIRE(m1);
@@ -288,11 +283,11 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
     CHECK(session::to_string(*m2) == "hello");
     CHECK(session::to_string(*m3) == "hello");
 
-    encrypted = session::encrypt_for_multiple_simple(
-            session::to_view_vector(msgs),
-            session::to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
-            session::to_span(x_keys[0].first),
-            session::to_span(x_keys[0].second),
+    encrypted = encrypt_for_multiple_simple(
+            to_view_vector(msgs),
+            to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+            x_keys[0].first,
+            x_keys[0].second,
             "test suite",
             nonce);
 
@@ -303,35 +298,35 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
                                           "bcb642c49c6da03f70cdaab2ed6666721318afd631"_hex,
                                           "1ecee2215d226817edfdb097f05037eb799309103a"_hex));
 
-    m1 = session::decrypt_for_multiple_simple(
+    m1 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[1].first),
-            session::to_span(x_keys[1].second),
-            session::to_span(x_keys[0].second),
+            x_keys[1].first,
+            x_keys[1].second,
+            x_keys[0].second,
             "test suite");
-    m2 = session::decrypt_for_multiple_simple(
+    m2 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[2].first),
-            session::to_span(x_keys[2].second),
-            session::to_span(x_keys[0].second),
+            x_keys[2].first,
+            x_keys[2].second,
+            x_keys[0].second,
             "test suite");
-    m3 = session::decrypt_for_multiple_simple(
+    m3 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "test suite");
-    m3b = session::decrypt_for_multiple_simple(
+    m3b = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[3].first),
-            session::to_span(x_keys[3].second),
-            session::to_span(x_keys[0].second),
+            x_keys[3].first,
+            x_keys[3].second,
+            x_keys[0].second,
             "not test suite");
-    m4 = session::decrypt_for_multiple_simple(
+    m4 = decrypt_for_multiple_simple(
             encrypted,
-            session::to_span(x_keys[4].first),
-            session::to_span(x_keys[4].second),
-            session::to_span(x_keys[0].second),
+            x_keys[4].first,
+            x_keys[4].second,
+            x_keys[0].second,
             "test suite");
 
     REQUIRE(m1);
@@ -344,10 +339,10 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
     CHECK(session::to_string(*m2) == "cruel");
     CHECK(session::to_string(*m3) == "world");
 
-    CHECK_THROWS(session::encrypt_for_multiple_simple(
-            session::to_view_vector(msgs.begin(), std::prev(msgs.end())),
-            session::to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
-            session::to_span(x_keys[0].first),
-            session::to_span(x_keys[0].second),
+    CHECK_THROWS(encrypt_for_multiple_simple(
+            to_view_vector(msgs.begin(), std::prev(msgs.end())),
+            to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+            x_keys[0].first,
+            x_keys[0].second,
             "test suite"));
 }

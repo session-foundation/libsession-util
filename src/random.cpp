@@ -22,8 +22,13 @@ void fill(std::span<char> buf) {
     fill(std::span{reinterpret_cast<std::byte*>(buf.data()), buf.size()});
 }
 
-std::vector<unsigned char> random(size_t size) {
-    std::vector<unsigned char> result;
+void fill_deterministic(std::span<std::byte> buf, std::span<const std::byte, 32> seed) {
+    static_assert(seed.extent == randombytes_SEEDBYTES);
+    randombytes_buf_deterministic(to_unsigned(buf.data()), buf.size(), to_unsigned(seed.data()));
+}
+
+std::vector<std::byte> random(size_t size) {
+    std::vector<std::byte> result;
     result.resize(size);
     fill(result);
     return result;
@@ -65,7 +70,7 @@ extern "C" {
 
 LIBSESSION_C_API unsigned char* session_random(size_t size) {
     auto* ret = static_cast<unsigned char*>(malloc(size));
-    session::random::fill(std::span{ret, size});
+    session::random::fill(std::span{reinterpret_cast<std::byte*>(ret), size});
     return ret;
 }
 

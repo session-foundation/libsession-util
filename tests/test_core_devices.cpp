@@ -364,8 +364,9 @@ TEST_CASE("Devices - build_account_pubkey_message", "[core][devices]") {
         auto x25519_pub = c->globals.session_id().template subspan<1>();  // skip 0x05 prefix
         bool sig_valid = false;
         dict.require_signature(
-                "~", [&](std::span<const unsigned char> body, std::span<const unsigned char> sig) {
-                    sig_valid = xed25519::verify(sig, x25519_pub, body);
+                "~", [&](std::span<const std::byte> body, std::span<const std::byte> sig) {
+                    sig_valid =
+                            sig.size() == 64 && xed25519::verify(sig.first<64>(), x25519_pub, body);
                 });
         CHECK(sig_valid);
     }

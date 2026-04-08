@@ -88,7 +88,7 @@ class Keys : public ConfigSig {
     Ed25519Secret user_ed25519_sk;
 
     struct key_info {
-        std::array<unsigned char, 32> key;
+        std::array<std::byte, 32> key;
         std::chrono::system_clock::time_point timestamp;  // millisecond precision
         int64_t generation;
 
@@ -108,8 +108,8 @@ class Keys : public ConfigSig {
     /// Hashes of messages we have successfully parsed; used for deciding what needs to be renewed.
     std::map<int64_t, std::unordered_set<std::string>> active_msgs_;
 
-    sodium_cleared<std::array<unsigned char, 32>> pending_key_;
-    sodium_vector<unsigned char> pending_key_config_;
+    cleared_b32 pending_key_;
+    sodium_vector<std::byte> pending_key_config_;
     int64_t pending_gen_ = -1;
 
     bool needs_dump_ = false;
@@ -120,21 +120,20 @@ class Keys : public ConfigSig {
     void set_verifier(ConfigMessage::verify_callable v) override { verifier_ = std::move(v); }
     void set_signer(ConfigMessage::sign_callable s) override { signer_ = std::move(s); }
 
-    std::vector<unsigned char> sign(std::span<const unsigned char> data) const;
+    std::vector<std::byte> sign(std::span<const std::byte> data) const;
 
     // Checks for and drops expired keys.
     void remove_expired();
 
     // Loads existing state from a previous dump of keys data
-    void load_dump(std::span<const unsigned char> dump);
+    void load_dump(std::span<const std::byte> dump);
 
     // Inserts a key into the correct place in `keys_`.
     void insert_key(std::string_view message_hash, key_info&& key);
 
     // Returned the blinding factor for a given session X25519 pubkey.  This depends on the group's
     // seed and thus is only obtainable by an admin account.
-    std::array<unsigned char, 32> subaccount_blind_factor(
-            const std::array<unsigned char, 32>& session_xpk) const;
+    b32 subaccount_blind_factor(std::span<const std::byte, 32> session_xpk) const;
 
   public:
     /// The multiple of members keys we include in the message; we add junk entries to the key list
@@ -192,10 +191,10 @@ class Keys : public ConfigSig {
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     ///   that was previously dumped from an instance of this class by calling `dump()`.
     /// - `info` and `members` -- will be loaded with the group keys, if present in the dump.
-    Keys(std::span<const unsigned char> user_ed25519_secretkey,
-         std::span<const unsigned char> group_ed25519_pubkey,
-         std::optional<std::span<const unsigned char>> group_ed25519_secretkey,
-         std::optional<std::span<const unsigned char>> dumped,
+    Keys(const ed25519::PrivKeySpan& user_ed25519_secretkey,
+         std::span<const std::byte, 32> group_ed25519_pubkey,
+         const ed25519::OptionalPrivKeySpan& group_ed25519_secretkey,
+         std::optional<std::span<const std::byte>> dumped,
          Info& info,
          Members& members);
 
@@ -232,8 +231,8 @@ class Keys : public ConfigSig {
     /// Inputs: none.
     ///
     /// Outputs:
-    /// - `std::vector<std::span<const unsigned char>>` - vector of encryption keys.
-    std::vector<std::span<const unsigned char>> group_keys() const;
+    /// - `std::vector<std::span<const std::byte>>` - vector of encryption keys.
+    std::vector<std::span<const std::byte>> group_keys() const;
 
     /// API: groups/Keys::size
     ///
@@ -258,8 +257,8 @@ class Keys : public ConfigSig {
     /// Inputs: none.
     ///
     /// Outputs:
-    /// - `std::span<const unsigned char>` of the most current group encryption key.
-    std::span<const unsigned char> group_enc_key() const;
+    /// - `std::span<const std::byte>` of the most current group encryption key.
+    std::span<const std::byte> group_enc_key() const;
 
     /// API: groups/Keys::is_admin
     ///
@@ -292,7 +291,7 @@ class Keys : public ConfigSig {
     ///
     /// Outputs: nothing.  After a successful call, `admin()` will return true.  Throws if the given
     /// secret key does not match the group's pubkey.
-    void load_admin_key(std::span<const unsigned char> secret, Info& info, Members& members);
+    void load_admin_key(const ed25519::PrivKeySpan& secret, Info& info, Members& members);
 
     /// API: groups/Keys::rekey
     ///
@@ -325,12 +324,12 @@ class Keys : public ConfigSig {
     ///   config will be dirtied after the rekey and will require a push.
     ///
     /// Outputs:
-    /// - `std::span<const unsigned char>` containing the data that needs to be pushed to the config
+    /// - `std::span<const std::byte>` containing the data that needs to be pushed to the config
     /// keys namespace
     ///   for the group.  (This can be re-obtained from `pending_config()` if needed until it has
     ///   been confirmed or superceded).  This data must be consumed or copied from the returned
     ///   string_view immediately: it will not be valid past other calls on the Keys config object.
-    std::span<const unsigned char> rekey(Info& info, Members& members);
+    std::span<const std::byte> rekey(Info& info, Members& members);
 
     /// API: groups/Keys::key_supplement
     ///
@@ -352,11 +351,11 @@ class Keys : public ConfigSig {
     ///   Session IDs are specified in hex.
     ///
     /// Outputs:
-    /// - `std::vector<unsigned char>` containing the message that should be pushed to the swarm
+    /// - `std::vector<std::byte>` containing the message that should be pushed to the swarm
     /// containing encrypted
     ///   keys for the given user(s).
-    std::vector<unsigned char> key_supplement(const std::vector<std::string>& sids) const;
-    std::vector<unsigned char> key_supplement(std::string sid) const {
+    std::vector<std::byte> key_supplement(const std::vector<std::string>& sids) const;
+    std::vector<std::byte> key_supplement(std::string sid) const {
         return key_supplement(std::vector{{std::move(sid)}});
     }
 
@@ -386,7 +385,7 @@ class Keys : public ConfigSig {
     ///   delete messages without having the full admin group keys.
     ///
     /// Outputs:
-    /// - `std::vector<unsigned char>` -- contains a subaccount swarm signing value; this can be
+    /// - `std::vector<std::byte>` -- contains a subaccount swarm signing value; this can be
     /// passed (by the user)
     ///   into `swarm_subaccount_sign` to sign a value suitable for swarm authentication.
     ///   (Internally this packs the flags, blinding factor, and group admin signature together and
@@ -398,7 +397,7 @@ class Keys : public ConfigSig {
     ///
     ///   The signing value produced will be the same (for a given `session_id`/`write`/`del`
     ///   values) when constructed by any admin of the group.
-    std::vector<unsigned char> swarm_make_subaccount(
+    std::vector<std::byte> swarm_make_subaccount(
             std::string_view session_id, bool write = true, bool del = false) const;
 
     /// API: groups/Keys::swarm_verify_subaccount
@@ -432,12 +431,12 @@ class Keys : public ConfigSig {
     ///   not validate or does not meet the requirements.
     static bool swarm_verify_subaccount(
             std::string group_id,
-            std::span<const unsigned char> session_ed25519_secretkey,
-            std::span<const unsigned char> signing_value,
+            const ed25519::PrivKeySpan& session_ed25519_secretkey,
+            std::span<const std::byte> signing_value,
             bool write = false,
             bool del = false);
     bool swarm_verify_subaccount(
-            std::span<const unsigned char> signing_value,
+            std::span<const std::byte> signing_value,
             bool write = false,
             bool del = false) const;
 
@@ -487,8 +486,8 @@ class Keys : public ConfigSig {
     /// - struct containing three binary values enabling swarm authentication (see description
     /// above).
     swarm_auth swarm_subaccount_sign(
-            std::span<const unsigned char> msg,
-            std::span<const unsigned char> signing_value,
+            std::span<const std::byte> msg,
+            std::span<const std::byte> signing_value,
             bool binary = false) const;
 
     /// API: groups/Keys::swarm_subaccount_token
@@ -510,23 +509,23 @@ class Keys : public ConfigSig {
     ///
     /// Outputs:
     /// - 36 byte token that can be used for swarm token revocation.
-    std::vector<unsigned char> swarm_subaccount_token(
+    std::vector<std::byte> swarm_subaccount_token(
             std::string_view session_id, bool write = true, bool del = false) const;
 
     /// API: groups/Keys::pending_config
     ///
     /// If a rekey has been performed but not yet confirmed then this will contain the config
     /// message to be pushed to the swarm.  If there is no push current pending then this returns
-    /// nullopt.  The value should be used immediately (i.e. the std::span<const unsigned char> may
+    /// nullopt.  The value should be used immediately (i.e. the std::span<const std::byte> may
     /// not remain valid if other calls to the config object are made).
     ///
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::optional<std::span<const unsigned char>>` -- returns a populated config message that
+    /// - `std::optional<std::span<const std::byte>>` -- returns a populated config message that
     /// should be pushed,
     ///   if not yet confirmed, otherwise when no pending update is present this returns nullopt.
-    std::optional<std::span<const unsigned char>> pending_config() const;
+    std::optional<std::span<const std::byte>> pending_config() const;
 
     /// API: groups/Keys::pending_key
     ///
@@ -540,11 +539,11 @@ class Keys : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::optional<std::span<const unsigned char>>` the encryption key generated by the last
+    /// - `std::optional<std::span<const std::byte>>` the encryption key generated by the last
     /// `rekey()` call.
     ///   This is set to a new key when `rekey()` is called, and is cleared when any config message
     ///   is successfully loaded by `load_key`.
-    std::optional<std::span<const unsigned char>> pending_key() const;
+    std::optional<std::span<const std::byte>> pending_key() const;
 
     /// API: groups/Keys::load_key
     ///
@@ -579,7 +578,7 @@ class Keys : public ConfigSig {
     ///   it could mean we decrypted one for us, but already had it.
     bool load_key_message(
             std::string_view hash,
-            std::span<const unsigned char> data,
+            std::span<const std::byte> data,
             int64_t timestamp_ms,
             Info& info,
             Members& members);
@@ -648,7 +647,7 @@ class Keys : public ConfigSig {
     /// Outputs:
     /// - opaque binary data containing the group keys and other Keys config data that can be passed
     ///   to the `Keys` constructor to reinitialize a Keys object with the current state.
-    std::vector<unsigned char> dump();
+    std::vector<std::byte> dump();
 
     /// API: groups/Keys::make_dump
     ///
@@ -659,8 +658,8 @@ class Keys : public ConfigSig {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::vector<unsigned char>` -- Returns binary data of the state dump
-    std::vector<unsigned char> make_dump() const;
+    /// - `std::vector<std::byte>` -- Returns binary data of the state dump
+    std::vector<std::byte> make_dump() const;
 
     /// API: groups/Keys::encrypt_message
     ///
@@ -687,8 +686,8 @@ class Keys : public ConfigSig {
     ///
     /// Outputs:
     /// - `ciphertext` -- the encrypted, etc. value to send to the swarm
-    std::vector<unsigned char> encrypt_message(
-            std::span<const unsigned char> plaintext,
+    std::vector<std::byte> encrypt_message(
+            std::span<const std::byte> plaintext,
             bool compress = true,
             size_t padding = 256) const;
 
@@ -707,7 +706,7 @@ class Keys : public ConfigSig {
     ///   by `encrypt_message()`.
     ///
     /// Outputs:
-    /// - `std::pair<std::string, std::vector<unsigned char>>` -- the session ID (in hex) and the
+    /// - `std::pair<std::string, std::vector<std::byte>>` -- the session ID (in hex) and the
     /// plaintext binary
     ///   data that was encrypted.
     ///
@@ -715,8 +714,8 @@ class Keys : public ConfigSig {
     /// some diagnostic info on what part failed.  Typically a production session client would catch
     /// (and possibly log) but otherwise ignore such exceptions and just not process the message if
     /// it throws.
-    std::pair<std::string, std::vector<unsigned char>> decrypt_message(
-            std::span<const unsigned char> ciphertext) const;
+    std::pair<std::string, std::vector<std::byte>> decrypt_message(
+            std::span<const std::byte> ciphertext) const;
 };
 
 }  // namespace session::config::groups

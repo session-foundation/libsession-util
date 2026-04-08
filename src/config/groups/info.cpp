@@ -16,9 +16,9 @@ using namespace std::literals;
 namespace session::config::groups {
 
 Info::Info(
-        std::span<const unsigned char> ed25519_pubkey,
-        std::optional<std::span<const unsigned char>> ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped) :
+        std::span<const std::byte, 32> ed25519_pubkey,
+        const ed25519::OptionalPrivKeySpan& ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped) :
         id{"03" + oxenc::to_hex(ed25519_pubkey.begin(), ed25519_pubkey.end())} {
     init(dumped, ed25519_pubkey, ed25519_secretkey);
 }
@@ -61,12 +61,12 @@ profile_pic Info::get_profile_pic() const {
         pic.url = *url;
     if (auto* key = data["q"].string(); key && key->size() == 32)
         pic.key.assign(
-                reinterpret_cast<const unsigned char*>(key->data()),
-                reinterpret_cast<const unsigned char*>(key->data()) + 32);
+                reinterpret_cast<const std::byte*>(key->data()),
+                reinterpret_cast<const std::byte*>(key->data()) + 32);
     return pic;
 }
 
-void Info::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
+void Info::set_profile_pic(std::string_view url, std::span<const std::byte> key) {
     set_pair_if(!url.empty() && key.size() == 32, data["p"], url, data["q"], key);
 }
 
@@ -256,9 +256,9 @@ LIBSESSION_C_API user_profile_pic groups_info_get_pic(const config_object* conf)
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_C_API int groups_info_set_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    std::span<const unsigned char> key;
+    std::span<const std::byte> key;
     if (!url.empty())
-        key = {pic.key, 32};
+        key = {reinterpret_cast<const std::byte*>(pic.key), 32};
 
     return wrap_exceptions(
             conf,

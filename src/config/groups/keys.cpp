@@ -16,13 +16,18 @@
 #include <stdexcept>
 #include <unordered_set>
 
+#include <oxen/log.hpp>
+
 #include "../internal.hpp"
 #include "session/clock.hpp"
+#include "session/crypto/ed25519.hpp"
+#include "session/encrypt.hpp"
 #include "session/config/groups/info.hpp"
 #include "session/config/groups/keys.h"
 #include "session/config/groups/members.hpp"
 #include "session/hash.hpp"
 #include "session/multi_encrypt.hpp"
+#include "session/random.hpp"
 #include "session/session_encrypt.hpp"
 #include "session/xed25519.hpp"
 
@@ -35,22 +40,15 @@ static auto sys_time_from_ms(int64_t milliseconds_since_epoch) {
 }
 
 Keys::Keys(
-        std::span<const unsigned char> user_ed25519_secretkey,
-        std::span<const unsigned char> group_ed25519_pubkey,
-        std::optional<std::span<const unsigned char>> group_ed25519_secretkey,
-        std::optional<std::span<const unsigned char>> dumped,
+        const ed25519::PrivKeySpan& user_ed25519_secretkey,
+        std::span<const std::byte, 32> group_ed25519_pubkey,
+        const ed25519::OptionalPrivKeySpan& group_ed25519_secretkey,
+        std::optional<std::span<const std::byte>> dumped,
         Info& info,
         Members& members) {
 
     if (sodium_init() == -1)
         throw std::runtime_error{"libsodium initialization failed!"};
-
-    if (user_ed25519_secretkey.size() != 64)
-        throw std::invalid_argument{"Invalid Keys construction: invalid user ed25519 secret key"};
-    if (group_ed25519_pubkey.size() != 32)
-        throw std::invalid_argument{"Invalid Keys construction: invalid group ed25519 public key"};
-    if (group_ed25519_secretkey && group_ed25519_secretkey->size() != 64)
-        throw std::invalid_argument{"Invalid Keys construction: invalid group ed25519 secret key"};
 
     init_sig_keys(group_ed25519_pubkey, group_ed25519_secretkey);
 
@@ -68,14 +66,14 @@ bool Keys::needs_dump() const {
     return needs_dump_;
 }
 
-std::vector<unsigned char> Keys::dump() {
+std::vector<std::byte> Keys::dump() {
     auto dumped = make_dump();
 
     needs_dump_ = false;
     return dumped;
 }
 
-std::vector<unsigned char> Keys::make_dump() const {
+std::vector<std::byte> Keys::make_dump() const {
     oxenc::bt_dict_producer d;
     {
         auto active = d.append_list("A");
@@ -109,7 +107,7 @@ std::vector<unsigned char> Keys::make_dump() const {
     return to_vector(d.view());
 }
 
-void Keys::load_dump(std::span<const unsigned char> dump) {
+void Keys::load_dump(std::span<const std::byte> dump) {
     oxenc::bt_dict_consumer d{dump};
 
     if (d.skip_until("A")) {
@@ -183,8 +181,8 @@ size_t Keys::size() const {
     return keys_.size() + !pending_key_config_.empty();
 }
 
-std::vector<std::span<const unsigned char>> Keys::group_keys() const {
-    std::vector<std::span<const unsigned char>> ret;
+std::vector<std::span<const std::byte>> Keys::group_keys() const {
+    std::vector<std::span<const std::byte>> ret;
     ret.reserve(size());
 
     if (!pending_key_config_.empty())
@@ -196,7 +194,7 @@ std::vector<std::span<const unsigned char>> Keys::group_keys() const {
     return ret;
 }
 
-std::span<const unsigned char> Keys::group_enc_key() const {
+std::span<const std::byte> Keys::group_enc_key() const {
     if (!pending_key_config_.empty())
         return {pending_key_.data(), 32};
     if (keys_.empty())
@@ -206,50 +204,30 @@ std::span<const unsigned char> Keys::group_enc_key() const {
     return {key.data(), key.size()};
 }
 
-void Keys::load_admin_key(std::span<const unsigned char> seed, Info& info, Members& members) {
+void Keys::load_admin_key(const ed25519::PrivKeySpan& secret, Info& info, Members& members) {
     if (admin())
         return;
 
-    if (seed.size() == 64)
-        seed = seed.subspan(0, seed.size() - 32);
-    else if (seed.size() != 32)
-        throw std::invalid_argument{
-                "Failed to load admin key: invalid secret key (expected 32 or 64 bytes)"};
-
-    std::array<unsigned char, 32> pk;
-    sodium_cleared<std::array<unsigned char, 64>> sk;
-    crypto_sign_ed25519_seed_keypair(pk.data(), sk.data(), seed.data());
-
-    if (_sign_pk.has_value() && *_sign_pk != pk)
+    if (_sign_pk && !std::ranges::equal(*_sign_pk, secret.pubkey()))
         throw std::runtime_error{
                 "Failed to load admin key: given secret key does not match group pubkey"};
 
-    auto seckey = to_span(sk);
-    set_sig_keys(seckey);
-    info.set_sig_keys(seckey);
-    members.set_sig_keys(seckey);
+    set_sig_keys(secret);
+    info.set_sig_keys(secret);
+    members.set_sig_keys(secret);
 }
 
 namespace {
 
-    std::array<unsigned char, 32> compute_xpk(const unsigned char* ed25519_pk) {
-        std::array<unsigned char, 32> xpk;
-        if (0 != crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed25519_pk))
-            throw std::runtime_error{
-                    "An error occured while attempting to convert Ed25519 pubkey to X25519; "
-                    "is the pubkey valid?"};
-        return xpk;
-    }
-
     constexpr auto seed_hash_key = "SessionGroupKeySeed"sv;
-    const std::span<const unsigned char> enc_key_hash_key = to_span("SessionGroupKeyGen");
+    const std::span<const std::byte> enc_key_hash_key = to_span("SessionGroupKeyGen");
     constexpr auto enc_key_admin_hash_key = "SessionGroupKeyAdminKey"sv;
     constexpr auto enc_key_member_hash_key = "SessionGroupKeyMemberKey"sv;
-    constexpr auto junk_seed_hash_key = "SessionGroupJunkMembers"_uc;
+    constexpr auto junk_seed_hash_key = "SessionGroupJunkMembers"_bytes;
 
 }  // namespace
 
-std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
+std::span<const std::byte> Keys::rekey(Info& info, Members& members) {
     if (!admin())
         throw std::logic_error{
                 "Unable to issue a new group encryption key without the main group keys"};
@@ -257,10 +235,10 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
     // For members we calculate the outer encryption key as H(aB || A || B).  But because we only
     // have `B` (the session id) as an x25519 pubkey, we do this in x25519 space, which means we
     // have to use the x25519 conversion of a/A rather than the group's ed25519 pubkey.
-    auto group_xpk = compute_xpk(_sign_pk->data());
+    auto group_xpk = ed25519::pk_to_x25519(*_sign_pk);
 
-    sodium_cleared<std::array<unsigned char, 32>> group_xsk;
-    crypto_sign_ed25519_sk_to_curve25519(group_xsk.data(), _sign_sk.data());
+    auto group_xsk = ed25519::sk_to_x25519(
+            std::span<const std::byte, 64>{_sign_sk.data(), 64});
 
     // We need quasi-randomness: full secure random would be great, except that different admins
     // encrypting for the same update would always create different keys, but we want it
@@ -288,51 +266,34 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
     // member.  For admins we encrypt using a 32-byte blake2b keyed hash of the group secret key
     // seed, just like H2, but with key "SessionGroupKeyAdminKey".
 
-    std::array<unsigned char, 32> h2 = seed_hash(seed_hash_key);
+    auto h2 = seed_hash(seed_hash_key);
 
-    std::array<unsigned char, 56> h1;
-
-    crypto_generichash_blake2b_state st;
-
-    crypto_generichash_blake2b_init(
-            &st, enc_key_hash_key.data(), enc_key_hash_key.size(), h1.size());
+    hash::blake2b_hasher<encrypt::XCHACHA20_KEYBYTES + encrypt::XCHACHA20_NONCEBYTES> hasher{
+            enc_key_hash_key, std::nullopt};
     for (const auto& m : members)
-        hash::update_all(st, m.session_id);
+        hasher.update(m.session_id);
 
     auto gen = keys_.empty() ? 0 : keys_.back().generation + 1;
     auto gen_str = std::to_string(gen);
-    hash::update_all(st, gen_str, h2);
+    hasher.update(gen_str, h2);
 
-    crypto_generichash_blake2b_final(&st, h1.data(), h1.size());
+    auto h1 = hasher.finalize();
 
-    std::span<const unsigned char> enc_key{h1.data(), 32};
-    std::span<const unsigned char> nonce{h1.data() + 32, 24};
+    std::span<const std::byte, encrypt::XCHACHA20_KEYBYTES> enc_key =
+            std::span{h1}.first<encrypt::XCHACHA20_KEYBYTES>();
+    std::span<const std::byte, encrypt::XCHACHA20_NONCEBYTES> nonce =
+            std::span{h1}.last<encrypt::XCHACHA20_NONCEBYTES>();
 
     oxenc::bt_dict_producer d{};
 
     d.append("#", to_string_view(nonce));
 
-    static_assert(crypto_aead_xchacha20poly1305_ietf_KEYBYTES == 32);
-    static_assert(crypto_aead_xchacha20poly1305_ietf_ABYTES == 16);
-    std::array<
-            unsigned char,
-            crypto_aead_xchacha20poly1305_ietf_KEYBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES>
-            encrypted;
+    std::array<std::byte, encrypt::XCHACHA20_KEYBYTES + encrypt::XCHACHA20_ABYTES> encrypted;
     std::string_view enc_sv = to_string_view(encrypted);
 
     // Shared key for admins
     auto member_k = seed_hash(enc_key_admin_hash_key);
-    static_assert(member_k.size() == crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
-    crypto_aead_xchacha20poly1305_ietf_encrypt(
-            encrypted.data(),
-            nullptr,
-            enc_key.data(),
-            enc_key.size(),
-            nullptr,
-            0,
-            nullptr,
-            nonce.data(),
-            member_k.data());
+    encrypt::xchacha20poly1305_encrypt(encrypted, enc_key, nonce, member_k);
 
     d.append("G", gen);
     d.append("K", enc_sv);
@@ -340,8 +301,8 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
     {
         auto member_keys = d.append_list("k");
         int member_count = 0;
-        std::vector<std::array<unsigned char, 32>> member_xpk_raw;
-        std::vector<std::span<const unsigned char>> member_xpks;
+        std::vector<b32> member_xpk_raw;
+        std::vector<std::span<const std::byte>> member_xpks;
         member_xpk_raw.reserve(members.size());
         member_xpks.reserve(members.size());
         for (const auto& m : members) {
@@ -356,7 +317,7 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
                 to_span(group_xsk),
                 to_span(group_xpk),
                 enc_key_member_hash_key,
-                [&](std::span<const unsigned char> enc_sv) {
+                [&](std::span<const std::byte> enc_sv) {
                     member_keys.append(enc_sv);
                     member_count++;
                 },
@@ -366,13 +327,13 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
         // Pad it out with junk entries to the next MESSAGE_KEY_MULTIPLE
         if (member_count % MESSAGE_KEY_MULTIPLE) {
             int n_junk = MESSAGE_KEY_MULTIPLE - (member_count % MESSAGE_KEY_MULTIPLE);
-            std::vector<unsigned char> junk_data;
+            std::vector<std::byte> junk_data;
             junk_data.resize(encrypted.size() * n_junk);
 
             auto rng_seed =
-                    hash::blake2b_key<randombytes_SEEDBYTES>(junk_seed_hash_key, h1, _sign_sk);
+                    hash::blake2b_key<32>(junk_seed_hash_key, h1, _sign_sk);
 
-            randombytes_buf_deterministic(junk_data.data(), junk_data.size(), rng_seed.data());
+            random::fill_deterministic(junk_data, rng_seed);
             std::string_view junk_view = to_string_view(junk_data);
             while (!junk_view.empty()) {
                 member_keys.append(junk_view.substr(0, encrypted.size()));
@@ -384,7 +345,7 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
     // Finally we sign the message at put it as the ~ key (which is 0x7e, and thus comes later than
     // any other printable ascii key).
     d.append_signature(
-            "~", [this](std::span<const unsigned char> to_sign) { return sign(to_sign); });
+            "~", [this](std::span<const std::byte> to_sign) { return sign(to_sign); });
 
     // Load this key/config/gen into our pending variables
     pending_gen_ = gen;
@@ -402,17 +363,17 @@ std::span<const unsigned char> Keys::rekey(Info& info, Members& members) {
 
     needs_dump_ = true;
 
-    return std::span<const unsigned char>{pending_key_config_.data(), pending_key_config_.size()};
+    return std::span<const std::byte>{pending_key_config_.data(), pending_key_config_.size()};
 }
 
-std::vector<unsigned char> Keys::sign(std::span<const unsigned char> data) const {
+std::vector<std::byte> Keys::sign(std::span<const std::byte> data) const {
     auto sig = signer_(data);
     if (sig.size() != 64)
         throw std::logic_error{"Invalid signature: signing function did not return 64 bytes"};
     return sig;
 }
 
-std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& sids) const {
+std::vector<std::byte> Keys::key_supplement(const std::vector<std::string>& sids) const {
     if (!admin())
         throw std::logic_error{
                 "Unable to issue supplemental group encryption keys without the main group keys"};
@@ -424,10 +385,9 @@ std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& 
     // For members we calculate the outer encryption key as H(aB || A || B).  But because we only
     // have `B` (the session id) as an x25519 pubkey, we do this in x25519 space, which means we
     // have to use the x25519 conversion of a/A rather than the group's ed25519 pubkey.
-    auto group_xpk = compute_xpk(_sign_pk->data());
-
-    sodium_cleared<std::array<unsigned char, 32>> group_xsk;
-    crypto_sign_ed25519_sk_to_curve25519(group_xsk.data(), _sign_sk.data());
+    auto group_xpk = ed25519::pk_to_x25519(*_sign_pk);
+    auto group_xsk = ed25519::sk_to_x25519(
+            std::span<const std::byte, 64>{_sign_sk.data(), 64});
 
     // We need quasi-randomness here for the nonce: full secure random would be great, except that
     // different admins encrypting for the same update would always create different keys, but we
@@ -457,22 +417,15 @@ std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& 
         supp_keys = std::move(supp).str();
     }
 
-    std::array<unsigned char, 24> h1;
-
-    crypto_generichash_blake2b_state st;
-
-    crypto_generichash_blake2b_init(
-            &st, enc_key_hash_key.data(), enc_key_hash_key.size(), h1.size());
-
+    hash::blake2b_hasher<encrypt::XCHACHA20_NONCEBYTES> nonce_hasher{
+            enc_key_hash_key, std::nullopt};
     for (const auto& sid : sids)
-        hash::update_all(st, sid);
+        nonce_hasher.update(sid);
 
-    std::array<unsigned char, 32> h2 = seed_hash(seed_hash_key);
-    hash::update_all(st, supp_keys, h2);
+    auto h2 = seed_hash(seed_hash_key);
+    nonce_hasher.update(supp_keys, h2);
 
-    crypto_generichash_blake2b_final(&st, h1.data(), h1.size());
-
-    std::span<const unsigned char> nonce{h1.data(), h1.size()};
+    auto nonce = nonce_hasher.finalize();
 
     oxenc::bt_dict_producer d{};
 
@@ -480,13 +433,13 @@ std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& 
 
     {
         auto list = d.append_list("+");
-        std::vector<unsigned char> encrypted;
+        std::vector<std::byte> encrypted;
         encrypted.resize(supp_keys.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
 
         size_t member_count = 0;
 
-        std::vector<std::array<unsigned char, 32>> member_xpk_raw;
-        std::vector<std::span<const unsigned char>> member_xpks;
+        std::vector<b32> member_xpk_raw;
+        std::vector<std::span<const std::byte>> member_xpks;
         member_xpk_raw.reserve(sids.size());
         member_xpks.reserve(sids.size());
         for (const auto& sid : sids) {
@@ -501,7 +454,7 @@ std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& 
                 to_span(group_xsk),
                 to_span(group_xpk),
                 enc_key_member_hash_key,
-                [&](std::span<const unsigned char> encrypted) {
+                [&](std::span<const std::byte> encrypted) {
                     list.append(encrypted);
                     member_count++;
                 },
@@ -518,46 +471,44 @@ std::vector<unsigned char> Keys::key_supplement(const std::vector<std::string>& 
     // Finally we sign the message at put it as the ~ key (which is 0x7e, and thus comes later than
     // any other printable ascii key).
     d.append_signature(
-            "~", [this](std::span<const unsigned char> to_sign) { return sign(to_sign); });
+            "~", [this](std::span<const std::byte> to_sign) { return sign(to_sign); });
 
     return to_vector(d.view());
 }
 
 // Blinding factor for subaccounts: H(sessionid || groupid) mod L, where H is 64-byte blake2b, using
 // a hash key derived from the group's seed.
-std::array<unsigned char, 32> Keys::subaccount_blind_factor(
-        const std::array<unsigned char, 32>& session_xpk) const {
+b32 Keys::subaccount_blind_factor(
+        std::span<const std::byte, 32> session_xpk) const {
 
     auto mask = seed_hash("SessionGroupSubaccountMask");
-    static_assert(mask.size() == crypto_generichash_blake2b_KEYBYTES);
 
     auto h = hash::blake2b_key<64>(
             mask,
-            std::array<unsigned char, 1>{'\x05'},
+            std::byte{0x05},
             session_xpk,
-            std::array<unsigned char, 1>{'\x03'},
+            std::byte{0x03},
             *_sign_pk);
 
-    std::array<unsigned char, 32> out;
-    crypto_core_ed25519_scalar_reduce(out.data(), h.data());
-    return out;
+    return ed25519::scalar_reduce(h);
 }
 
 namespace {
 
     // These constants are defined and explains in more detail in oxen-storage-server
-    constexpr unsigned char SUBACC_FLAG_READ = 0b0001;
-    constexpr unsigned char SUBACC_FLAG_WRITE = 0b0010;
-    constexpr unsigned char SUBACC_FLAG_DEL = 0b0100;
-    constexpr unsigned char SUBACC_FLAG_ANY_PREFIX = 0b1000;
+    constexpr std::byte SUBACC_FLAG_READ{0b0001};
+    constexpr std::byte SUBACC_FLAG_WRITE{0b0010};
+    constexpr std::byte SUBACC_FLAG_DEL{0b0100};
+    constexpr std::byte SUBACC_FLAG_ANY_PREFIX{0b1000};
 
-    constexpr unsigned char subacc_flags(bool write, bool del) {
-        return SUBACC_FLAG_READ | (write ? SUBACC_FLAG_WRITE : 0) | (del ? SUBACC_FLAG_DEL : 0);
+    constexpr std::byte subacc_flags(bool write, bool del) {
+        return SUBACC_FLAG_READ | (write ? SUBACC_FLAG_WRITE : std::byte{0}) |
+               (del ? SUBACC_FLAG_DEL : std::byte{0});
     }
 
 }  // namespace
 
-std::vector<unsigned char> Keys::swarm_make_subaccount(
+std::vector<std::byte> Keys::swarm_make_subaccount(
         std::string_view session_id, bool write, bool del) const {
     if (!admin())
         throw std::logic_error{"Cannot make subaccount signature: admin keys required"};
@@ -589,30 +540,30 @@ std::vector<unsigned char> Keys::swarm_make_subaccount(
     auto T = xed25519::pubkey(X);
 
     // kT is the user's Ed25519 blinded pubkey:
-    std::array<unsigned char, 32> kT;
+    auto kT = ed25519::scalarmult_noclamp(k, T);
 
-    if (0 != crypto_scalarmult_ed25519_noclamp(kT.data(), k.data(), T.data()))
-        throw std::runtime_error{"scalarmult failed: perhaps an invalid session id?"};
-
-    std::vector<unsigned char> out;
+    std::vector<std::byte> out;
     out.resize(4 + 32 + 64);
-    out[0] = 0x03;                      // network prefix
+    out[0] = std::byte{0x03};           // network prefix
     out[1] = subacc_flags(write, del);  // permission flags
-    out[2] = 0;                         // reserved 1
-    out[3] = 0;                         // reserved 2
+    out[2] = std::byte{0};              // reserved 1
+    out[3] = std::byte{0};              // reserved 2
     // The next 32 bytes are k (NOT kT; the user can go make kT themselves):
     std::memcpy(&out[4], k.data(), k.size());
 
     // And then finally, we append a group signature of: p || f || 0 || 0 || kT
-    std::array<unsigned char, 36> to_sign;
+    std::array<std::byte, 36> to_sign;
     std::memcpy(&to_sign[0], out.data(), 4);  // first 4 bytes are the same as out
     std::memcpy(&to_sign[4], kT.data(), 32);  // but then we have kT instead of k
-    crypto_sign_ed25519_detached(&out[36], nullptr, to_sign.data(), to_sign.size(), c.data());
+    ed25519::sign(
+            std::span<std::byte, 64>{out.data() + 36, 64},
+            ed25519::PrivKeySpan{std::span<const std::byte, 64>{c.data(), 64}},
+            to_sign);
 
     return out;
 }
 
-std::vector<unsigned char> Keys::swarm_subaccount_token(
+std::vector<std::byte> Keys::swarm_subaccount_token(
         std::string_view session_id, bool write, bool del) const {
     if (!admin())
         throw std::logic_error{"Cannot make subaccount signature: admin keys required"};
@@ -625,20 +576,21 @@ std::vector<unsigned char> Keys::swarm_subaccount_token(
     // T = |S|
     auto T = xed25519::pubkey(X);
 
-    std::vector<unsigned char> out;
+    auto kT = ed25519::scalarmult_noclamp(k, T);
+
+    std::vector<std::byte> out;
     out.resize(4 + 32);
-    out[0] = 0x03;                      // network prefix
+    out[0] = std::byte{0x03};           // network prefix
     out[1] = subacc_flags(write, del);  // permission flags
-    out[2] = 0;                         // reserved 1
-    out[3] = 0;                         // reserved 2
-    if (0 != crypto_scalarmult_ed25519_noclamp(&out[4], k.data(), T.data()))
-        throw std::runtime_error{"scalarmult failed: perhaps an invalid session id?"};
+    out[2] = std::byte{0};              // reserved 1
+    out[3] = std::byte{0};              // reserved 2
+    std::memcpy(&out[4], kT.data(), 32);
     return out;
 }
 
 Keys::swarm_auth Keys::swarm_subaccount_sign(
-        std::span<const unsigned char> msg,
-        std::span<const unsigned char> sign_val,
+        std::span<const std::byte> msg,
+        std::span<const std::byte> sign_val,
         bool binary) const {
     if (sign_val.size() != 100)
         throw std::logic_error{"Invalid signing value: size is wrong"};
@@ -651,7 +603,7 @@ Keys::swarm_auth Keys::swarm_subaccount_sign(
 
     // (see above for variable/crypto notation)
 
-    std::span<const unsigned char> k = sign_val.subspan(4, 32);
+    auto k = sign_val.subspan<4, 32>();
 
     // our token is the first 4 bytes of `sign_val` (flags, etc.), followed by kT which we have to
     // compute:
@@ -659,30 +611,27 @@ Keys::swarm_auth Keys::swarm_subaccount_sign(
     std::memcpy(token.data(), sign_val.data(), 4);
 
     // T = |S|, i.e. we have to clear the sign bit from our pubkey
-    std::array<unsigned char, 32> T;
-    crypto_sign_ed25519_sk_to_pk(T.data(), user_ed25519_sk.data());
-    bool neg = T[31] & 0x80;
-    T[31] &= 0x7f;
-    if (0 != crypto_scalarmult_ed25519_noclamp(to_unsigned(token.data() + 4), k.data(), T.data()))
-        throw std::runtime_error{"scalarmult failed: perhaps an invalid session id or seed?"};
+    ed25519::PrivKeySpan user_sk{std::span<const std::byte, 64>{user_ed25519_sk.data(), 64}};
+    b32 T;
+    std::ranges::copy(user_sk.pubkey(), T.begin());
+    bool neg = (T[31] & std::byte{0x80}) != std::byte{0};
+    T[31] &= std::byte{0x7f};
 
-    // token is now set: flags || kT
-    std::span<const unsigned char> kT{to_unsigned(token.data() + 4), 32};
+    auto kT = ed25519::scalarmult_noclamp(k, T);
+    std::memcpy(token.data() + 4, kT.data(), 32);
 
     // sub_sig is just the admin's signature, sitting at the end of sign_val (after 4f || k):
     sub_sig = to_string_view(sign_val.subspan(36));
 
     // Our signing private scalar is kt, where t = ±s according to whether we had to negate S to
     // make T
-    std::array<unsigned char, 32> s, s_neg;
-    crypto_sign_ed25519_sk_to_curve25519(s.data(), user_ed25519_sk.data());
-    crypto_core_ed25519_scalar_negate(s_neg.data(), s.data());
+    auto s = ed25519::sk_to_x25519(user_sk);
+    auto s_neg = ed25519::scalar_negate(s);
     xed25519::constant_time_conditional_assign(s, s_neg, neg);
 
     auto& t = s;
 
-    std::array<unsigned char, 32> kt;
-    crypto_core_ed25519_scalar_mul(kt.data(), k.data(), t.data());
+    auto kt = ed25519::scalar_mul(k, t);
 
     // We now have kt, kT, our privkey/public.  (Note that kt is a scalar, not a seed).
 
@@ -706,37 +655,28 @@ Keys::swarm_auth Keys::swarm_subaccount_sign(
     //
     // (using the standard Ed25519 SHA-512 here for H)
 
-    constexpr std::array<unsigned char, 14> seed_hash_key = {
-            'S', 'u', 'b', 'a', 'c', 'c', 'o', 'u', 'n', 't', 'S', 'e', 'e', 'd'};
-    constexpr std::array<unsigned char, 13> r_hash_key = {
-            'S', 'u', 'b', 'a', 'c', 'c', 'o', 'u', 'n', 't', 'S', 'i', 'g'};
-    std::array<unsigned char, 32> hseed;
-    hash::blake2b_key(
-            hseed, seed_hash_key, std::span<const unsigned char>{user_ed25519_sk.data(), 32});
+    constexpr auto subacc_seed_key = "SubaccountSeed"_bytes;
+    constexpr auto subacc_sig_key = "SubaccountSig"_bytes;
+    b32 hseed;
+    hash::blake2b_key(hseed, subacc_seed_key, user_sk.seed());
 
-    std::array<unsigned char, 64> tmp;
-    hash::blake2b_key(tmp, r_hash_key, hseed, kT, msg);
+    b64 tmp;
+    hash::blake2b_key(tmp, subacc_sig_key, hseed, kT, msg);
 
-    std::array<unsigned char, 32> r;
-    crypto_core_ed25519_scalar_reduce(r.data(), tmp.data());
+    auto r = ed25519::scalar_reduce(tmp);
 
     sig.resize(64);
-    unsigned char* R = to_unsigned(sig.data());
-    unsigned char* S = to_unsigned(sig.data() + 32);
+    auto R = std::span<std::byte, 32>{to_bytes(sig.data()), 32};
+    auto S = std::span<std::byte, 32>{to_bytes(sig.data()) + 32, 32};
     // R = rB
-    crypto_scalarmult_ed25519_base_noclamp(R, r.data());
+    ed25519::scalarmult_base_noclamp(R, r);
 
     // Compute S = r + H(R || A || M) a mod L:  (with A = kT, a = kt)
-    crypto_hash_sha512_state shast;
-    crypto_hash_sha512_init(&shast);
-    crypto_hash_sha512_update(&shast, R, 32);
-    crypto_hash_sha512_update(&shast, kT.data(), kT.size());  // A = pubkey, that is, kT
-    crypto_hash_sha512_update(&shast, msg.data(), msg.size());
-    std::array<unsigned char, 64> hram;
-    crypto_hash_sha512_final(&shast, hram.data());      // S = H(R||A||M)
-    crypto_core_ed25519_scalar_reduce(S, hram.data());  // S %= L
-    crypto_core_ed25519_scalar_mul(S, S, kt.data());    // S *= a
-    crypto_core_ed25519_scalar_add(S, S, r.data());     // S += r
+    b64 hram;
+    hash::sha512(hram, R, kT, msg);
+    ed25519::scalar_reduce(S, hram);          // S = H(R||A||M) % L
+    ed25519::scalar_mul(S, S, kt);            // S *= a
+    ed25519::scalar_add(S, S, r);             // S += r
 
     // sig is now set to the desired R || S, with S = r + H(R || A || M)a (all mod L)
 
@@ -750,12 +690,12 @@ Keys::swarm_auth Keys::swarm_subaccount_sign(
 }
 
 bool Keys::swarm_verify_subaccount(
-        std::span<const unsigned char> sign_val, bool write, bool del) const {
+        std::span<const std::byte> sign_val, bool write, bool del) const {
     if (!_sign_pk)
         return false;
     return swarm_verify_subaccount(
             "03" + oxenc::to_hex(_sign_pk->begin(), _sign_pk->end()),
-            std::span<const unsigned char>{user_ed25519_sk.data(), user_ed25519_sk.size()},
+            ed25519::PrivKeySpan::from(user_ed25519_sk),
             sign_val,
             write,
             del);
@@ -763,8 +703,8 @@ bool Keys::swarm_verify_subaccount(
 
 bool Keys::swarm_verify_subaccount(
         std::string group_id,
-        std::span<const unsigned char> user_ed_sk,
-        std::span<const unsigned char> sign_val,
+        const ed25519::PrivKeySpan& session_ed25519_secretkey,
+        std::span<const std::byte> sign_val,
         bool write,
         bool del) {
     auto group_pk = session_id_pk(group_id, "03");
@@ -772,46 +712,44 @@ bool Keys::swarm_verify_subaccount(
     if (sign_val.size() != 100)
         return false;
 
-    std::span<const unsigned char> prefix = sign_val.subspan(0, 4);
-    if (prefix[0] != 0x03 && !(prefix[1] & SUBACC_FLAG_ANY_PREFIX))
+    auto prefix = sign_val.subspan<0, 4>();
+    if (prefix[0] != std::byte{0x03} &&
+        (prefix[1] & SUBACC_FLAG_ANY_PREFIX) == std::byte{0})
         return false;  // require either 03 prefix match, or the "any prefix" flag
 
-    if (!(prefix[1] & SUBACC_FLAG_READ))
+    if ((prefix[1] & SUBACC_FLAG_READ) == std::byte{0})
         return false;  // missing the read flag
 
-    if (write && !(prefix[1] & SUBACC_FLAG_WRITE))
+    if (write && (prefix[1] & SUBACC_FLAG_WRITE) == std::byte{0})
         return false;  // we require write, but it isn't set
-                       //
-    if (del && !(prefix[1] & SUBACC_FLAG_DEL))
+
+    if (del && (prefix[1] & SUBACC_FLAG_DEL) == std::byte{0})
         return false;  // we require delete, but it isn't set
 
-    std::span<const unsigned char> k = sign_val.subspan(4, 32);
-    std::span<const unsigned char> sig = sign_val.subspan(36);
+    auto k = sign_val.subspan<4, 32>();
+    auto sig = sign_val.subspan<36, 64>();
 
     // T = |S|, i.e. we have to clear the sign bit from our pubkey
-    std::array<unsigned char, 32> T;
-    crypto_sign_ed25519_sk_to_pk(T.data(), user_ed_sk.data());
-    T[31] &= 0x7f;
+    b32 T;
+    std::ranges::copy(session_ed25519_secretkey.pubkey(), T.begin());
+    T[31] &= std::byte{0x7f};
 
     // Compute kT, then reconstruct the `flags || kT` value the admin should have provided a
     // signature for
-    std::array<unsigned char, 32> kT;
-    if (0 != crypto_scalarmult_ed25519_noclamp(kT.data(), k.data(), T.data()))
-        throw std::runtime_error{"scalarmult failed: perhaps an invalid session id or seed?"};
+    auto kT = ed25519::scalarmult_noclamp(k, T);
 
-    std::array<unsigned char, 36> to_verify;
+    std::array<std::byte, 36> to_verify;
     std::memcpy(&to_verify[0], sign_val.data(), 4);  // prefix, flags, 2x future use bytes
     std::memcpy(&to_verify[4], kT.data(), 32);
 
     // Verify it!
-    return 0 == crypto_sign_ed25519_verify_detached(
-                        sig.data(), to_verify.data(), to_verify.size(), group_pk.data());
+    return ed25519::verify(sig, group_pk, to_verify);
 }
 
-std::optional<std::span<const unsigned char>> Keys::pending_config() const {
+std::optional<std::span<const std::byte>> Keys::pending_config() const {
     if (pending_key_config_.empty())
         return std::nullopt;
-    return std::span<const unsigned char>{pending_key_config_.data(), pending_key_config_.size()};
+    return std::span<const std::byte>{pending_key_config_.data(), pending_key_config_.size()};
 }
 
 void Keys::insert_key(std::string_view msg_hash, key_info&& new_key) {
@@ -856,39 +794,17 @@ void Keys::insert_key(std::string_view msg_hash, key_info&& new_key) {
 // Returns true (after writing to `out`) if decryption succeeds, false if it fails.
 namespace {
     bool try_decrypting(
-            unsigned char* out,
-            std::span<const unsigned char> encrypted,
-            std::span<const unsigned char> nonce,
-            std::span<const unsigned char> key) {
-        assert(encrypted.size() >= crypto_aead_xchacha20poly1305_ietf_ABYTES);
-        assert(nonce.size() == crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-        assert(key.size() == crypto_aead_xchacha20poly1305_ietf_KEYBYTES);
-
-        return 0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                            out,
-                            nullptr,
-                            nullptr,
-                            encrypted.data(),
-                            encrypted.size(),
-                            nullptr,
-                            0,
-                            nonce.data(),
-                            key.data());
-    }
-    bool try_decrypting(
-            unsigned char* out,
-            std::span<const unsigned char> encrypted,
-            std::span<const unsigned char> nonce,
-
-            const std::array<unsigned char, 32>& key) {
-        return try_decrypting(
-                out, encrypted, nonce, std::span<const unsigned char>{key.data(), key.size()});
+            std::span<std::byte> out,
+            std::span<const std::byte> encrypted,
+            std::span<const std::byte, encrypt::XCHACHA20_NONCEBYTES> nonce,
+            std::span<const std::byte, encrypt::XCHACHA20_KEYBYTES> key) {
+        return encrypt::xchacha20poly1305_decrypt(out, encrypted, nonce, key);
     }
 }  // namespace
 
 bool Keys::load_key_message(
         std::string_view hash,
-        std::span<const unsigned char> data,
+        std::span<const std::byte> data,
         int64_t timestamp_ms,
         Info& info,
         Members& members) {
@@ -898,22 +814,26 @@ bool Keys::load_key_message(
     if (!_sign_pk || !verifier_)
         throw std::logic_error{"Group pubkey is not set; unable to load config message"};
 
-    auto group_xpk = compute_xpk(_sign_pk->data());
+    auto group_xpk = ed25519::pk_to_x25519(*_sign_pk);
 
     if (!d.skip_until("#"))
         throw config_value_error{"Key message has no nonce"};
-    auto nonce = to_span(d.consume_string_view());
+    auto nonce_dyn = d.consume_span<std::byte>();
+    if (nonce_dyn.size() != encrypt::XCHACHA20_NONCEBYTES)
+        throw config_value_error{"Key message has invalid nonce size"};
+    auto nonce = nonce_dyn.first<encrypt::XCHACHA20_NONCEBYTES>();
 
     sodium_vector<key_info> new_keys;
     std::optional<int64_t> max_gen;  // If set then associate the message with this generation
                                      // value, even if we didn't find a key for us.
 
-    sodium_cleared<std::array<unsigned char, 32>> member_dec_key;
-    sodium_cleared<std::array<unsigned char, 32>> member_xsk;
-    std::array<unsigned char, 32> member_xpk;
+    sodium_cleared<b32> member_dec_key;
+    sodium_cleared<b32> member_xsk;
+    b32 member_xpk;
     if (!admin()) {
-        crypto_sign_ed25519_sk_to_curve25519(member_xsk.data(), user_ed25519_sk.data());
-        member_xpk = compute_xpk(user_ed25519_sk.data() + 32);
+        ed25519::PrivKeySpan user_sk{std::span<const std::byte, 64>{user_ed25519_sk.data(), 64}};
+        member_xsk = ed25519::sk_to_x25519(user_sk);
+        member_xpk = ed25519::pk_to_x25519(user_sk.pubkey());
     }
 
     if (d.skip_until("+")) {
@@ -922,7 +842,7 @@ bool Keys::load_key_message(
 
         int member_key_pos = -1;
 
-        auto next_ciphertext = [&]() -> std::optional<std::span<const unsigned char>> {
+        auto next_ciphertext = [&]() -> std::optional<std::span<const std::byte>> {
             while (!supp.is_finished()) {
                 member_key_pos++;
                 auto encrypted = to_span(supp.consume_string_view());
@@ -1013,7 +933,7 @@ bool Keys::load_key_message(
         if (admin()) {
             auto k = seed_hash(enc_key_admin_hash_key);
 
-            if (!try_decrypting(new_key.key.data(), admin_key, nonce, k))
+            if (!try_decrypting(new_key.key, admin_key, nonce, k))
                 throw config_value_error{"Failed to decrypt admin key from key message"};
 
             found_key = true;
@@ -1027,7 +947,7 @@ bool Keys::load_key_message(
         auto key_list = d.consume_list_consumer();
 
         int member_key_pos = -1;
-        auto next_ciphertext = [&]() -> std::optional<std::span<const unsigned char>> {
+        auto next_ciphertext = [&]() -> std::optional<std::span<const std::byte>> {
             while (!key_list.is_finished()) {
                 member_key_pos++;
                 auto member_key = to_span(key_list.consume_string_view());
@@ -1164,25 +1084,25 @@ bool Keys::needs_rekey() const {
     return last_it->generation == second_it->generation;
 }
 
-std::optional<std::span<const unsigned char>> Keys::pending_key() const {
+std::optional<std::span<const std::byte>> Keys::pending_key() const {
     if (!pending_key_config_.empty())
-        return std::span<const unsigned char>{pending_key_.data(), pending_key_.size()};
+        return std::span<const std::byte>{pending_key_.data(), pending_key_.size()};
     return std::nullopt;
 }
 
 static constexpr size_t ENCRYPT_OVERHEAD =
         crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES;
 
-std::vector<unsigned char> Keys::encrypt_message(
-        std::span<const unsigned char> plaintext, bool compress, size_t padding) const {
+std::vector<std::byte> Keys::encrypt_message(
+        std::span<const std::byte> plaintext, bool compress, size_t padding) const {
     assert(_sign_pk);
-    std::vector<unsigned char> ciphertext = encrypt_for_group(
-            user_ed25519_sk, *_sign_pk, group_enc_key(), plaintext, compress, padding);
+    std::vector<std::byte> ciphertext = encrypt_for_group(
+            ed25519::PrivKeySpan::from(user_ed25519_sk), *_sign_pk, group_enc_key(), plaintext, compress, padding);
     return ciphertext;
 }
 
-std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
-        std::span<const unsigned char> ciphertext) const {
+std::pair<std::string, std::vector<std::byte>> Keys::decrypt_message(
+        std::span<const std::byte> ciphertext) const {
     assert(_sign_pk);
 
     //
@@ -1192,7 +1112,7 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     bool decrypt_success = false;
     if (auto pending = pending_key(); pending) {
         try {
-            std::span<std::span<const unsigned char>> key_list = {&(*pending), 1};
+            std::span<std::span<const std::byte>> key_list = {&(*pending), 1};
             decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
             decrypt_success = true;
         } catch (const std::exception&) {
@@ -1202,8 +1122,8 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     if (!decrypt_success) {
         for (auto& k : keys_) {
             try {
-                std::span<const unsigned char> key = {k.key.data(), k.key.size()};
-                std::span<std::span<const unsigned char>> key_list = {&key, 1};
+                std::span<const std::byte> key = {k.key.data(), k.key.size()};
+                std::span<std::span<const std::byte>> key_list = {&key, 1};
                 decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
                 decrypt_success = true;
                 break;
@@ -1217,7 +1137,7 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
                 "unable to decrypt ciphertext with any current group keys; tried {}",
                 keys_.size() + (pending_key() ? 1 : 0))};
 
-    std::pair<std::string, std::vector<unsigned char>> result;
+    std::pair<std::string, std::vector<std::byte>> result;
     result.first = std::move(decrypt.session_id);
     result.second = std::move(decrypt.plaintext);
     return result;
@@ -1287,14 +1207,12 @@ LIBSESSION_C_API int groups_keys_init(
 
     assert(user_ed25519_secretkey && group_ed25519_pubkey && cinfo && cmembers);
 
-    std::span<const unsigned char> user_sk{user_ed25519_secretkey, 64};
-    std::span<const unsigned char> group_pk{group_ed25519_pubkey, 32};
-    std::optional<std::span<const unsigned char>> group_sk;
-    if (group_ed25519_secretkey)
-        group_sk.emplace(group_ed25519_secretkey, 64);
-    std::optional<std::span<const unsigned char>> dumped;
+    ed25519::PrivKeySpan user_sk{user_ed25519_secretkey, 64};
+    auto group_pk = to_byte_span<32>(group_ed25519_pubkey);
+    ed25519::OptionalPrivKeySpan group_sk{group_ed25519_secretkey, group_ed25519_secretkey ? 64u : 0u};
+    std::optional<std::span<const std::byte>> dumped;
     if (dump && dumplen)
-        dumped.emplace(dump, dumplen);
+        dumped.emplace(to_byte_span(dump, dumplen));
 
     auto& info = *unbox<groups::Info>(cinfo);
     auto& members = *unbox<groups::Members>(cmembers);
@@ -1334,7 +1252,7 @@ LIBSESSION_C_API const unsigned char* groups_keys_get_key(const config_group_key
     auto keys = unbox(conf).group_keys();
     if (N >= keys.size())
         return nullptr;
-    return keys[N].data();
+    return to_unsigned(keys[N].data());
 }
 
 LIBSESSION_C_API size_t groups_keys_get_keys(
@@ -1346,7 +1264,7 @@ LIBSESSION_C_API size_t groups_keys_get_keys(
         for (size_t index = clamped_offset; index < keys.size() && result < dest_size; index++) {
             const auto& src_key = keys[index];
             span_u8* dest_key = dest + result++;
-            dest_key->data = const_cast<unsigned char*>(src_key.data());
+            dest_key->data = const_cast<unsigned char*>(to_unsigned(src_key.data()));
             dest_key->size = src_key.size();
         }
     }
@@ -1357,7 +1275,7 @@ LIBSESSION_C_API const span_u8 groups_keys_group_enc_key(const config_group_keys
     span_u8 result = {};
     try {
         auto key = unbox(conf).group_enc_key();
-        result.data = const_cast<unsigned char*>(key.data());
+        result.data = const_cast<unsigned char*>(to_unsigned(key.data()));
         result.size = key.size();
         assert(result.size == 32);
     } catch (const std::exception& e) {
@@ -1378,7 +1296,7 @@ LIBSESSION_C_API bool groups_keys_load_admin_key(
             conf,
             [&] {
                 unbox(conf).load_admin_key(
-                        std::span<const unsigned char>{secret, 32},
+                        ed25519::PrivKeySpan{secret, 32},
                         *unbox<groups::Info>(info),
                         *unbox<groups::Members>(members));
                 return true;
@@ -1394,14 +1312,14 @@ LIBSESSION_C_API bool groups_keys_rekey(
         size_t* outlen) {
     assert(info && members);
     auto& keys = unbox(conf);
-    std::span<const unsigned char> to_push;
+    std::span<const std::byte> to_push;
 
     return wrap_exceptions(
             conf,
             [&] {
                 to_push = keys.rekey(*unbox<groups::Info>(info), *unbox<groups::Members>(members));
                 if (out && outlen) {
-                    *out = to_push.data();
+                    *out = to_unsigned(to_push.data());
                     *outlen = to_push.size();
                 }
                 return true;
@@ -1413,7 +1331,7 @@ LIBSESSION_C_API bool groups_keys_pending_config(
         const config_group_keys* conf, const unsigned char** out, size_t* outlen) {
     assert(out && outlen);
     if (auto pending = unbox(conf).pending_config()) {
-        *out = pending->data();
+        *out = to_unsigned(pending->data());
         *outlen = pending->size();
         return true;
     }
@@ -1434,7 +1352,7 @@ LIBSESSION_C_API bool groups_keys_load_message(
             [&] {
                 unbox(conf).load_key_message(
                         msg_hash,
-                        std::span<const unsigned char>{data, datalen},
+                        to_byte_span(data, datalen),
                         timestamp_ms,
                         *unbox<groups::Info>(info),
                         *unbox<groups::Members>(members));
@@ -1472,10 +1390,10 @@ LIBSESSION_C_API void groups_keys_encrypt_message(
         size_t* ciphertext_len) {
     assert(plaintext_in && ciphertext_out && ciphertext_len);
 
-    std::vector<unsigned char> ciphertext;
+    std::vector<std::byte> ciphertext;
     try {
         ciphertext = unbox(conf).encrypt_message(
-                std::span<const unsigned char>{plaintext_in, plaintext_len});
+                to_byte_span(plaintext_in, plaintext_len));
         *ciphertext_out = static_cast<unsigned char*>(std::malloc(ciphertext.size()));
         std::memcpy(*ciphertext_out, ciphertext.data(), ciphertext.size());
         *ciphertext_len = ciphertext.size();
@@ -1498,7 +1416,7 @@ LIBSESSION_C_API bool groups_keys_decrypt_message(
             conf,
             [&] {
                 auto [sid, plaintext] = unbox(conf).decrypt_message(
-                        std::span<const unsigned char>{ciphertext_in, ciphertext_len});
+                        to_byte_span(ciphertext_in, ciphertext_len));
                 std::memcpy(session_id, sid.c_str(), sid.size() + 1);
                 *plaintext_out = static_cast<unsigned char*>(std::malloc(plaintext.size()));
                 std::memcpy(*plaintext_out, plaintext.data(), plaintext.size());
@@ -1568,8 +1486,8 @@ LIBSESSION_C_API bool groups_keys_swarm_verify_subaccount_flags(
     try {
         return groups::Keys::swarm_verify_subaccount(
                 group_id,
-                std::span<const unsigned char>{session_ed25519_secretkey, 64},
-                std::span<const unsigned char>{signing_value, 100},
+                ed25519::PrivKeySpan{session_ed25519_secretkey, 64},
+                to_byte_span(signing_value, 100),
                 write,
                 del);
     } catch (...) {
@@ -1584,8 +1502,8 @@ LIBSESSION_C_API bool groups_keys_swarm_verify_subaccount(
     try {
         return groups::Keys::swarm_verify_subaccount(
                 group_id,
-                std::span<const unsigned char>{session_ed25519_secretkey, 64},
-                std::span<const unsigned char>{signing_value, 100});
+                ed25519::PrivKeySpan{session_ed25519_secretkey, 64},
+                to_byte_span(signing_value, 100));
     } catch (...) {
         return false;
     }
@@ -1605,8 +1523,8 @@ LIBSESSION_C_API bool groups_keys_swarm_subaccount_sign(
             conf,
             [&] {
                 auto auth = unbox(conf).swarm_subaccount_sign(
-                        std::span<const unsigned char>{msg, msg_len},
-                        std::span<const unsigned char>{signing_value, 100});
+                        to_byte_span(msg, msg_len),
+                        to_byte_span(signing_value, 100));
                 assert(auth.subaccount.size() == 48);
                 assert(auth.subaccount_sig.size() == 88);
                 assert(auth.signature.size() == 88);
@@ -1635,8 +1553,8 @@ LIBSESSION_C_API bool groups_keys_swarm_subaccount_sign_binary(
             conf,
             [&] {
                 auto auth = unbox(conf).swarm_subaccount_sign(
-                        std::span<const unsigned char>{msg, msg_len},
-                        std::span<const unsigned char>{signing_value, 100},
+                        to_byte_span(msg, msg_len),
+                        to_byte_span(signing_value, 100),
                         true);
                 assert(auth.subaccount.size() == 36);
                 assert(auth.subaccount_sig.size() == 64);

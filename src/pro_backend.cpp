@@ -136,7 +136,7 @@ bool json_require_fixed_bytes_from_hex(
         const nlohmann::json& j,
         std::string_view key,
         std::vector<std::string>& errors,
-        std::span<unsigned char> dest) {
+        std::span<std::byte> dest) {
     auto hex = json_require<std::string_view>(j, key, errors);
     if (hex.starts_with("0X") || hex.starts_with("0x"))
         hex = hex.substr(2);
@@ -188,31 +188,11 @@ std::string AddProPaymentRequest::to_json() const {
 
 MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         std::uint8_t version,
-        std::span<const unsigned char> master_privkey,
-        std::span<const unsigned char> rotating_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
+        const ed25519::PrivKeySpan& rotating_privkey,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const unsigned char> payment_tx_payment_id,
-        std::span<const unsigned char> payment_tx_order_id) {
-    cleared_uc64 master_from_seed;
-    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
-        uc32 master_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
-        master_privkey = master_from_seed;
-    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
-    }
-
-    cleared_uc64 rotating_from_seed;
-    if (rotating_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
-        uc32 rotating_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                rotating_pubkey.data(), rotating_from_seed.data(), rotating_privkey.data());
-        rotating_privkey = rotating_from_seed;
-    } else if (rotating_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
-    }
-
+        std::span<const std::byte> payment_tx_payment_id,
+        std::span<const std::byte> payment_tx_order_id) {
     if (payment_tx_provider == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE) {
         if (payment_tx_order_id.empty())
             throw std::invalid_argument{
@@ -230,59 +210,26 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
     auto hash_to_sign = hash::blake2b_pers<32>(
             ADD_PRO_PAYMENT_PERS,
             version,
-            master_privkey.subspan(
-                    crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
-            rotating_privkey.subspan(
-                    crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
-            static_cast<unsigned char>(payment_tx_provider),
+            master_privkey.pubkey(),
+            rotating_privkey.pubkey(),
+            static_cast<uint8_t>(payment_tx_provider),
             payment_tx_payment_id,
             payment_tx_order_id);
 
-    // Sign the hash with both keys
     MasterRotatingSignatures result = {};
-    crypto_sign_ed25519_detached(
-            result.master_sig.data(),
-            nullptr,
-            hash_to_sign.data(),
-            hash_to_sign.size(),
-            master_privkey.data());
-    crypto_sign_ed25519_detached(
-            result.rotating_sig.data(),
-            nullptr,
-            hash_to_sign.data(),
-            hash_to_sign.size(),
-            rotating_privkey.data());
+    result.master_sig = ed25519::sign(master_privkey, hash_to_sign);
+    result.rotating_sig = ed25519::sign(rotating_privkey, hash_to_sign);
     return result;
 }
 
 std::string AddProPaymentRequest::build_to_json(
         std::uint8_t version,
-        std::span<const unsigned char> master_privkey,
-        std::span<const unsigned char> rotating_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
+        const ed25519::PrivKeySpan& rotating_privkey,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const unsigned char> payment_tx_payment_id,
-        std::span<const unsigned char> payment_tx_order_id) {
-    cleared_uc64 master_from_seed;
-    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
-        uc32 master_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
-        master_privkey = master_from_seed;
-    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
-    }
-
-    cleared_uc64 rotating_from_seed;
-    if (rotating_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
-        uc32 rotating_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                rotating_pubkey.data(), rotating_from_seed.data(), rotating_privkey.data());
-        rotating_privkey = rotating_from_seed;
-    } else if (rotating_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
-    }
-
-    MasterRotatingSignatures sigs = AddProPaymentRequest::build_sigs(
+        std::span<const std::byte> payment_tx_payment_id,
+        std::span<const std::byte> payment_tx_order_id) {
+    auto sigs = AddProPaymentRequest::build_sigs(
             version,
             master_privkey,
             rotating_privkey,
@@ -292,25 +239,15 @@ std::string AddProPaymentRequest::build_to_json(
 
     AddProPaymentRequest request = {};
     request.version = version;
-    std::memcpy(
-            request.master_pkey.data(),
-            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
-    std::memcpy(
-            request.rotating_pkey.data(),
-            rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
+    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
+    std::ranges::copy(rotating_privkey.pubkey(), request.rotating_pkey.begin());
     request.payment_tx.provider = payment_tx_provider;
-    request.payment_tx.payment_id = std::string(
-            reinterpret_cast<const char*>(payment_tx_payment_id.data()),
-            payment_tx_payment_id.size());
-    request.payment_tx.order_id = std::string(
-            reinterpret_cast<const char*>(payment_tx_order_id.data()), payment_tx_order_id.size());
+    request.payment_tx.payment_id = to_string_view(payment_tx_payment_id);
+    request.payment_tx.order_id = to_string_view(payment_tx_order_id);
     request.master_sig = sigs.master_sig;
     request.rotating_sig = sigs.rotating_sig;
 
-    std::string result = request.to_json();
-    return result;
+    return request.to_json();
 }
 
 AddProPaymentOrGenerateProProofResponse AddProPaymentOrGenerateProProofResponse::parse(
@@ -361,29 +298,9 @@ std::string GenerateProProofRequest::to_json() const {
 
 MasterRotatingSignatures GenerateProProofRequest::build_sigs(
         std::uint8_t request_version,
-        std::span<const unsigned char> master_privkey,
-        std::span<const unsigned char> rotating_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
+        const ed25519::PrivKeySpan& rotating_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
-
-    cleared_uc64 master_from_seed;
-    if (master_privkey.size() == 32) {
-        uc32 master_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
-        master_privkey = master_from_seed;
-    } else if (master_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
-    }
-
-    cleared_uc64 rotating_from_seed;
-    if (rotating_privkey.size() == 32) {
-        uc32 rotating_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                rotating_pubkey.data(), rotating_from_seed.data(), rotating_privkey.data());
-        rotating_privkey = rotating_from_seed;
-    } else if (rotating_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
-    }
 
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
@@ -392,72 +309,33 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     auto hash_to_sign = hash::blake2b_pers<32>(
             GENERATE_PROOF_PERS,
             version,
-            master_privkey.last<32>(),
-            rotating_privkey.last<32>(),
+            master_privkey.pubkey(),
+            rotating_privkey.pubkey(),
             unix_ts_ms);
 
-    // Sign the hash with both keys
     MasterRotatingSignatures result = {};
-    crypto_sign_ed25519_detached(
-            result.master_sig.data(),
-            nullptr,
-            hash_to_sign.data(),
-            hash_to_sign.size(),
-            master_privkey.data());
-    crypto_sign_ed25519_detached(
-            result.rotating_sig.data(),
-            nullptr,
-            hash_to_sign.data(),
-            hash_to_sign.size(),
-            rotating_privkey.data());
+    result.master_sig = ed25519::sign(master_privkey, hash_to_sign);
+    result.rotating_sig = ed25519::sign(rotating_privkey, hash_to_sign);
     return result;
 }
 
 std::string GenerateProProofRequest::build_to_json(
         std::uint8_t request_version,
-        std::span<const unsigned char> master_privkey,
-        std::span<const unsigned char> rotating_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
+        const ed25519::PrivKeySpan& rotating_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
-    // Rederive keys from 32 byte seed if given
-    cleared_uc64 master_from_seed;
-    if (master_privkey.size() == 32) {
-        uc32 master_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
-        master_privkey = master_from_seed;
-    } else if (master_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
-    }
-
-    cleared_uc64 rotating_from_seed;
-    if (rotating_privkey.size() == 32) {
-        uc32 rotating_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                rotating_pubkey.data(), rotating_from_seed.data(), rotating_privkey.data());
-        rotating_privkey = rotating_from_seed;
-    } else if (rotating_privkey.size() != 64) {
-        throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
-    }
-
-    MasterRotatingSignatures sigs = GenerateProProofRequest::build_sigs(
+    auto sigs = GenerateProProofRequest::build_sigs(
             request_version, master_privkey, rotating_privkey, unix_ts);
 
     GenerateProProofRequest request = {};
     request.version = request_version;
-    std::memcpy(
-            request.master_pkey.data(),
-            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
-    std::memcpy(
-            request.rotating_pkey.data(),
-            rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
+    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
+    std::ranges::copy(rotating_privkey.pubkey(), request.rotating_pkey.begin());
     request.unix_ts = unix_ts;
     request.master_sig = sigs.master_sig;
     request.rotating_sig = sigs.rotating_sig;
 
-    std::string result = request.to_json();
-    return result;
+    return request.to_json();
 }
 
 std::string GetProRevocationsRequest::to_json() const {
@@ -531,64 +409,33 @@ std::string GetProDetailsRequest::to_json() const {
     return result;
 }
 
-uc64 GetProDetailsRequest::build_sig(
+b64 GetProDetailsRequest::build_sig(
         uint8_t version,
-        std::span<const unsigned char> master_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         uint32_t count) {
-    cleared_uc64 master_from_seed;
-    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
-        uc32 master_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
-        master_privkey = master_from_seed;
-    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
-    }
-
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
     auto hash_to_sign = hash::blake2b_pers<32>(
-            GET_PRO_DETAILS_PERS, version, master_privkey.last<32>(), unix_ts_ms, count);
+            GET_PRO_DETAILS_PERS, version, master_privkey.pubkey(), unix_ts_ms, count);
 
-    // Sign the hash
-    uc64 result = {};
-    crypto_sign_ed25519_detached(
-            result.data(),
-            nullptr,
-            hash_to_sign.data(),
-            hash_to_sign.size(),
-            master_privkey.data());
-    return result;
+    return ed25519::sign(master_privkey, hash_to_sign);
 }
 
 std::string GetProDetailsRequest::build_to_json(
         uint8_t version,
-        std::span<const unsigned char> master_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         uint32_t count) {
-    cleared_uc64 master_from_seed;
-    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
-        uc32 master_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
-        master_privkey = master_from_seed;
-    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
-    }
-
     GetProDetailsRequest request = {};
     request.version = version;
-    memcpy(request.master_pkey.data(),
-           master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-           crypto_sign_ed25519_PUBLICKEYBYTES);
+    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
     request.master_sig = GetProDetailsRequest::build_sig(version, master_privkey, unix_ts, count);
     request.unix_ts = unix_ts;
     request.count = count;
 
-    std::string result = request.to_json();
-    return result;
+    return request.to_json();
 }
 
 GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
@@ -756,24 +603,14 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
     return result;
 }
 
-uc64 SetPaymentRefundRequestedRequest::build_sig(
+b64 SetPaymentRefundRequestedRequest::build_sig(
         uint8_t version,
-        std::span<const unsigned char> master_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const unsigned char> payment_tx_payment_id,
-        std::span<const unsigned char> payment_tx_order_id) {
-    cleared_uc64 master_from_seed;
-    if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
-        uc32 master_pubkey;
-        crypto_sign_ed25519_seed_keypair(
-                master_pubkey.data(), master_from_seed.data(), master_privkey.data());
-        master_privkey = master_from_seed;
-    } else if (master_privkey.size() != crypto_sign_ed25519_SECRETKEYBYTES) {
-        throw std::invalid_argument{"Invalid master_privkey: expected 32 or 64 bytes"};
-    }
-
+        std::span<const std::byte> payment_tx_payment_id,
+        std::span<const std::byte> payment_tx_order_id) {
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5962925d7f18f83a3ff5774885495e5dd55ecb0a/server.py#L634
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
@@ -781,34 +618,25 @@ uc64 SetPaymentRefundRequestedRequest::build_sig(
     auto hash_to_sign = hash::blake2b_pers<32>(
             SET_PAYMENT_REFUND_REQUESTED_PERS,
             version,
-            master_privkey.subspan(
-                    crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES),
+            master_privkey.pubkey(),
             unix_ts_ms,
             refund_requested_unix_ts_ms,
-            static_cast<unsigned char>(payment_tx_provider),
+            static_cast<uint8_t>(payment_tx_provider),
             payment_tx_payment_id,
             payment_tx_order_id);
 
-    // Sign the hash
-    uc64 result = {};
-    crypto_sign_ed25519_detached(
-            result.data(),
-            nullptr,
-            hash_to_sign.data(),
-            hash_to_sign.size(),
-            master_privkey.data());
-    return result;
+    return ed25519::sign(master_privkey, hash_to_sign);
 }
 
 std::string SetPaymentRefundRequestedRequest::build_to_json(
         uint8_t version,
-        std::span<const unsigned char> master_privkey,
+        const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
         std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const unsigned char> payment_tx_payment_id,
-        std::span<const unsigned char> payment_tx_order_id) {
-    uc64 sig = SetPaymentRefundRequestedRequest::build_sig(
+        std::span<const std::byte> payment_tx_payment_id,
+        std::span<const std::byte> payment_tx_order_id) {
+    auto sig = SetPaymentRefundRequestedRequest::build_sig(
             version,
             master_privkey,
             unix_ts,
@@ -819,22 +647,15 @@ std::string SetPaymentRefundRequestedRequest::build_to_json(
 
     SetPaymentRefundRequestedRequest request = {};
     request.version = version;
-    std::memcpy(
-            request.master_pkey.data(),
-            master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
-            crypto_sign_ed25519_PUBLICKEYBYTES);
+    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
     request.payment_tx.provider = payment_tx_provider;
-    request.payment_tx.payment_id = std::string(
-            reinterpret_cast<const char*>(payment_tx_payment_id.data()),
-            payment_tx_payment_id.size());
-    request.payment_tx.order_id = std::string(
-            reinterpret_cast<const char*>(payment_tx_order_id.data()), payment_tx_order_id.size());
+    request.payment_tx.payment_id = to_string_view(payment_tx_payment_id);
+    request.payment_tx.order_id = to_string_view(payment_tx_order_id);
     request.master_sig = sig;
     request.unix_ts = unix_ts;
     request.refund_requested_unix_ts = refund_requested_unix_ts;
 
-    std::string result = request.to_json();
-    return result;
+    return request.to_json();
 }
 
 std::string SetPaymentRefundRequestedRequest::to_json() const {
@@ -888,6 +709,7 @@ SetPaymentRefundRequestedResponse SetPaymentRefundRequestedResponse::parse(std::
 }
 }  // namespace session::pro_backend
 
+using namespace session;
 using namespace session::pro_backend;
 
 /// Define a string8 from a c-string literal. The string should not be modified as it'll live in the
@@ -910,16 +732,13 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) {
 
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
-    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::span<const unsigned char> payment_tx_payment_id_span(
-            payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(
-            payment_tx_order_id, payment_tx_order_id_len);
-
     session_pro_backend_master_rotating_signatures result = {};
     try {
+        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
+        ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
+        auto payment_tx_payment_id_span = to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
+        auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
+
         auto sigs = AddProPaymentRequest::build_sigs(
                 request_version,
                 master_span,
@@ -950,15 +769,12 @@ session_pro_backend_add_pro_payment_request_build_to_json(
         size_t payment_tx_order_id_len) {
     session_pro_backend_to_json result = {};
 
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
-    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::span<const unsigned char> payment_tx_payment_id_span(
-            payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(
-            payment_tx_order_id, payment_tx_order_id_len);
-
     try {
+        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
+        ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
+        auto payment_tx_payment_id_span = to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
+        auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
+
         std::string json = AddProPaymentRequest::build_to_json(
                 request_version,
                 master_span,
@@ -984,13 +800,11 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) {
 
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
-    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::chrono::milliseconds ts{unix_ts_ms};
-
     session_pro_backend_master_rotating_signatures result = {};
     try {
+        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
+        ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
+        std::chrono::milliseconds ts{unix_ts_ms};
         auto sigs = GenerateProProofRequest::build_sigs(
                 request_version,
                 master_span,
@@ -1013,13 +827,11 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
         const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
         uint64_t unix_ts_ms) {
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span(master_privkey, master_privkey_len);
-    std::span<const unsigned char> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::chrono::milliseconds ts{unix_ts_ms};
-
     session_pro_backend_to_json result = {};
     try {
+        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
+        ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
+        std::chrono::milliseconds ts{unix_ts_ms};
         auto json = GenerateProProofRequest::build_to_json(
                 request_version,
                 master_span,
@@ -1040,12 +852,10 @@ session_pro_backend_get_pro_details_request_build_sig(
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint32_t count) {
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
-    std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
-
     session_pro_backend_signature result = {};
     try {
+        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
+        std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
         auto sig = GetProDetailsRequest::build_sig(request_version, master_span, ts, count);
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
@@ -1062,12 +872,10 @@ session_pro_backend_get_pro_details_request_build_to_json(
         size_t master_privkey_len,
         uint64_t unix_ts_ms,
         uint32_t count) {
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
-    std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
-
     session_pro_backend_to_json result = {};
     try {
+        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
+        std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
         auto json = GetProDetailsRequest::build_to_json(request_version, master_span, ts, count);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
@@ -1431,15 +1239,12 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         size_t payment_tx_payment_id_len,
         const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) {
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
+    ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
     std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
             std::chrono::milliseconds(refund_requested_unix_ts_ms)};
-    std::span<const unsigned char> payment_tx_payment_id_span(
-            payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(
-            payment_tx_order_id, payment_tx_order_id_len);
+    auto payment_tx_payment_id_span = to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
+    auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_signature result = {};
     try {
@@ -1472,15 +1277,12 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
         const unsigned char* payment_tx_order_id,
         size_t payment_tx_order_id_len) {
 
-    // Convert C inputs to C++ types
-    std::span<const unsigned char> master_span{master_privkey, master_privkey_len};
+    ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
     std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
     std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
             std::chrono::milliseconds(refund_requested_unix_ts_ms)};
-    std::span<const unsigned char> payment_tx_payment_id_span(
-            payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const unsigned char> payment_tx_order_id_span(
-            payment_tx_order_id, payment_tx_order_id_len);
+    auto payment_tx_payment_id_span = to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
+    auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_to_json result = {};
     try {

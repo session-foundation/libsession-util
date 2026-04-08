@@ -3,7 +3,7 @@
 #include <memory>
 #include <session/clock.hpp>
 #include <session/config/namespaces.hpp>
-#include <session/ed25519.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/mnemonics.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
@@ -239,7 +239,7 @@ class Core {
         std::array<std::byte, 33> recipient;
         std::vector<std::byte> content;
         sys_ms sent_timestamp;
-        std::optional<cleared_uc64> pro_privkey;
+        std::optional<cleared_b64> pro_privkey;
         std::chrono::milliseconds ttl;
         bool force_v2;
     };
@@ -256,7 +256,7 @@ class Core {
             std::span<const std::byte, 33> recipient,
             std::span<const std::byte> content,
             sys_ms sent_timestamp,
-            const OptionalEd25519PrivKeySpan& pro_privkey,
+            const ed25519::OptionalPrivKeySpan& pro_privkey,
             std::chrono::milliseconds ttl,
             bool force_v2);
 
@@ -342,7 +342,7 @@ class Core {
     ///              pfs_keys_fetched callback will fire when it completes.
     /// - nak     -- a recent fetch returned no keys; re-fetching is suppressed for
     ///              PFS_KEY_NAK_DURATION (1h).
-    PfsKeyStatus prefetch_pfs_keys(std::span<const unsigned char, 33> session_id);
+    PfsKeyStatus prefetch_pfs_keys(std::span<const std::byte, 33> session_id);
 
     /// Sets the polling interval used when a network object is attached.  The default is 20s.
     /// Takes effect by replacing the active ticker (if any); safe to call at any time.

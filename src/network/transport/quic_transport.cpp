@@ -4,7 +4,7 @@
 #include <oxen/log/format.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
 
-#include "session/ed25519.hpp"
+#include "session/crypto/ed25519.hpp"
 #include "session/network/session_network_types.hpp"
 
 using namespace oxen;
@@ -112,8 +112,7 @@ void QuicTransport::verify_connectivity(
         // Only try to establish a connection if we are the first to ask for one
         if (_pending_requests.count(pubkey_hex) == 0 &&
             _pending_verification_callbacks.at(pubkey_hex).size() == 1)
-            _establish_connection(
-                    {node.remote_pubkey, node.host(), node.omq_port}, request_id, category);
+            _establish_connection(node.to_quic_address(), request_id, category);
     });
 }
 
@@ -235,7 +234,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
                             cat,
                             "[Request {}]: Resolving service_node to RemoteAddress.",
                             request_id);
-                    remote.emplace(arg.remote_pubkey, arg.host(), arg.omq_port);
+                    remote = arg.to_quic_address();
                 }
             },
             request.destination);
@@ -295,7 +294,7 @@ void QuicTransport::_establish_connection(
         if (!_endpoint)
             throw std::runtime_error{"Network is invalid"};
 
-        auto conn_key_pair = ed25519::ed25519_key_pair();
+        auto conn_key_pair = ed25519::keypair();
         auto creds = quic::GNUTLSCreds::make_from_ed_seckey(to_string_view(conn_key_pair.second));
 
         // If we are starting a connection attempt then transition to the "connecting" state
