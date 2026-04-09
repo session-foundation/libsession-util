@@ -91,6 +91,10 @@ cleared_b32 sk_to_x25519(std::span<const std::byte, 32> seed) {
     return xsk;
 }
 
+std::pair<cleared_b32, b32> x25519_keypair(const PrivKeySpan& sk) {
+    return {sk_to_x25519(sk), pk_to_x25519(sk.pubkey())};
+}
+
 void scalarmult_base(std::span<std::byte, 32> out, std::span<const std::byte, 32> scalar) {
     if (0 != crypto_scalarmult_ed25519_base(to_unsigned(out.data()), to_unsigned(scalar.data())))
         throw std::runtime_error{"crypto_scalarmult_ed25519_base failed"};

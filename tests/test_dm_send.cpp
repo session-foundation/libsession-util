@@ -22,7 +22,7 @@ std::array<std::byte, 33> sid_bytes(Core& c) {
 }
 
 // Minimal valid SessionProtos::Content protobuf: field 15 (sigTimestamp) = 1.
-constexpr auto MINIMAL_CONTENT = "7801"_hex_u;
+constexpr auto MINIMAL_CONTENT = "7801"_hex_b;
 
 // A valid session ID for tests that don't need actual decryption on the other side.
 constexpr auto DUMMY_SID =
@@ -75,7 +75,7 @@ TEST_CASE("send_dm: v2 PFS round-trip", "[core][send_dm]") {
     // Feed the captured payload into recipient to verify decryption.
     REQUIRE(!captured_payload.empty());
     SwarmMessage sm;
-    sm.data = to_span<const unsigned char>(captured_payload);
+    sm.data = captured_payload;
     sm.hash = "send_test_hash";
     sm.timestamp = clock_now_ms();
     sm.expiry = clock_now_ms() + 24h;
@@ -123,7 +123,7 @@ TEST_CASE("send_dm: v1 fallback on NAK", "[core][send_dm]") {
 
     REQUIRE(!captured_payload.empty());
     SwarmMessage sm;
-    sm.data = to_span<const unsigned char>(captured_payload);
+    sm.data = captured_payload;
     sm.hash = "v1_hash";
     sm.timestamp = clock_now_ms();
     sm.expiry = clock_now_ms() + 24h;
@@ -171,7 +171,7 @@ TEST_CASE("send_dm: v2 non-PFS with force_v2", "[core][send_dm]") {
 
     REQUIRE(!captured_payload.empty());
     SwarmMessage sm;
-    sm.data = to_span<const unsigned char>(captured_payload);
+    sm.data = captured_payload;
     sm.hash = "nopfs_hash";
     sm.timestamp = clock_now_ms();
     sm.expiry = clock_now_ms() + 24h;

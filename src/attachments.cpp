@@ -725,7 +725,7 @@ Encryptor::Encryptor(std::span<const std::byte> seed, Domain domain) {
 
     const auto& pers = domain_pers(domain);
     crypto_generichash_blake2b_init_salt_personal(
-            &b2b_st(hash_st_data), uc(seed.data()), 32, nonce_key.size(), nullptr, pers.data());
+            &b2b_st(hash_st_data), uc(seed.data()), 32, nonce_key.size(), nullptr, uc(pers.data()));
 }
 
 void Encryptor::update_key(std::span<const std::byte> data) {
@@ -760,12 +760,11 @@ cleared_b32 Encryptor::start_encryption(
 
     // Write 'S' prefix + header into out_buf; initialize secretstream
     out_buf[0] = std::byte{'S'};
-    auto* header = uc(out_buf.data()) + 1;
     ss_st(ss_st_data) = secretstream_xchacha20poly1305_init_push_with_nonce(
-            std::span<unsigned char, ENCRYPT_HEADER>{header, ENCRYPT_HEADER},
-            std::span<const unsigned char, ENCRYPT_KEY_SIZE>{
-                    uc(nonce_key.data()) + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE},
-            std::span<const unsigned char, ENCRYPT_HEADER>{uc(nonce_key.data()), ENCRYPT_HEADER});
+            std::span<std::byte, ENCRYPT_HEADER>{out_buf.data() + 1, ENCRYPT_HEADER},
+            std::span<const std::byte, ENCRYPT_KEY_SIZE>{
+                    nonce_key.data() + ENCRYPT_HEADER, ENCRYPT_KEY_SIZE},
+            std::span<const std::byte, ENCRYPT_HEADER>{nonce_key.data(), ENCRYPT_HEADER});
     out_size = 1 + ENCRYPT_HEADER;
 
     plaintext_buf.reserve(ENCRYPT_CHUNK_SIZE);

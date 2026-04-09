@@ -1155,17 +1155,15 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
                     group_keys, group_pk, payload, pro_backend_pubkey_cpp.data);
             result.success = true;
         } catch (const std::exception& e) {
-            std::string error_cpp = e.what();
-            result.error_len_incl_null_terminator = snprintf_clamped(
-                    error, error_len, "%.*s",
-                    static_cast<int>(error_cpp.size()), error_cpp.data()) + 1;
+            result.error_len_incl_null_terminator =
+                    format_c_str(error, error_len, "{}", e.what());
         }
     } else if (keys->group_ed25519_pubkey.size) {
-        result.error_len_incl_null_terminator =
-                snprintf_clamped(
-                        error, error_len,
-                        "Invalid group_ed25519_pubkey: must be exactly 32 bytes, was: %zu",
-                        keys->group_ed25519_pubkey.size) + 1;
+        result.error_len_incl_null_terminator = format_c_str(
+                error,
+                error_len,
+                "Invalid group_ed25519_pubkey: must be exactly 32 bytes, was: {}",
+                keys->group_ed25519_pubkey.size);
         return result;
     } else {
         // DM path: decrypt with Ed25519 private key(s)
@@ -1178,16 +1176,14 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
                 result.success = true;
                 break;
             } catch (const std::exception& e) {
-                std::string error_cpp = e.what();
-                result.error_len_incl_null_terminator = snprintf_clamped(
-                        error, error_len, "%.*s",
-                        static_cast<int>(error_cpp.size()), error_cpp.data()) + 1;
+                result.error_len_incl_null_terminator =
+                        format_c_str(error, error_len, "{}", e.what());
             }
         }
 
         if (keys->decrypt_keys_len == 0) {
             result.error_len_incl_null_terminator =
-                    snprintf_clamped(error, error_len, "No ed25519 private keys were provided") + 1;
+                    format_c_str(error, error_len, "No ed25519 private keys were provided");
         }
     }
 

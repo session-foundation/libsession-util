@@ -20,7 +20,7 @@ namespace {
 
 // Fixed sender seed, shared across all test cases.
 constexpr auto SENDER_SEED =
-        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"_hex_u;
+        "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"_hex_b;
 
 struct SenderKeys {
     b32 ed_pk;
@@ -241,10 +241,10 @@ TEST_CASE("_handle_direct_messages: v2 non-PFS fallback receive", "[core][dm]") 
     TempCore recipient{cbs};
     // Do NOT call active_account_keys() — sender has no PFS keys for this recipient.
 
-    std::array<unsigned char, 33> recip_session_id;
+    b33 recip_session_id;
     std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
 
-    constexpr auto content = "cafebabe"_hex_u;
+    constexpr auto content = "cafebabe"_hex_b;
     auto ct = encrypt_for_recipient_v2_nopfs(sender.ed_sk, recip_session_id, content, std::nullopt);
 
     OwnedMessage om{std::span{ct}, "hash_nopfs", from_epoch_ms(3333), from_epoch_ms(7777)};
@@ -288,18 +288,17 @@ TEST_CASE(
     TempCore recipient{cbs};
     recipient->devices.active_account_keys();
 
-    std::array<unsigned char, 33> recip_session_id;
+    b33 recip_session_id;
     std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
     auto seed_access = recipient->globals.account_seed();
     auto x25519_sec = seed_access.x25519_key();
-    std::span<const unsigned char, 32> x25519_pub{recip_session_id.data() + 1, 32};
+    std::span<const std::byte, 32> x25519_pub{recip_session_id.data() + 1, 32};
 
     // The target ki is the first 2 bytes of the recipient's active ML-KEM public key.
     auto [x25519_bytes, mlkem_bytes] = TestHelper::active_account_pubkeys(*recipient);
-    std::array<unsigned char, 2> target_ki{
-            static_cast<unsigned char>(mlkem_bytes[0]), static_cast<unsigned char>(mlkem_bytes[1])};
+    std::array<std::byte, 2> target_ki{mlkem_bytes[0], mlkem_bytes[1]};
 
-    constexpr auto content = "deadc0de"_hex_u;
+    constexpr auto content = "deadc0de"_hex_b;
     auto ct = encrypt_for_recipient_v2_nopfs(sender.ed_sk, recip_session_id, content, std::nullopt);
 
     // Recover the current plaintext ki so we can XOR it out and XOR the target in.
@@ -343,20 +342,20 @@ TEST_CASE(
 
     TempCore recipient{cbs};
 
-    std::array<unsigned char, 33> recip_session_id;
+    b33 recip_session_id;
     std::ranges::copy(recipient->globals.session_id(), recip_session_id.begin());
 
     // Generate the first account key and record (prefix → pubkeys) as we rotate.
     recipient->devices.active_account_keys();
 
-    using Prefix = std::array<unsigned char, 2>;
+    using Prefix = std::array<std::byte, 2>;
     using PubkeyPair = std::pair<std::array<std::byte, 32>, std::array<std::byte, 1184>>;
     std::map<Prefix, PubkeyPair> seen;
 
     // Record the current active key; returns the earlier key's pubkeys if its prefix collides.
     auto record_active = [&]() -> std::optional<PubkeyPair> {
         auto [x, m] = TestHelper::active_account_pubkeys(*recipient);
-        Prefix pfx{static_cast<unsigned char>(m[0]), static_cast<unsigned char>(m[1])};
+        Prefix pfx{m[0], m[1]};
         if (auto it = seen.find(pfx); it != seen.end())
             return it->second;
         seen.emplace(pfx, PubkeyPair{x, m});
@@ -379,12 +378,12 @@ TEST_CASE(
     // Encrypt with the earlier (now-rotated) key that shares the active key's ki prefix.
     // active_account_keys(ki) returns [active_key (wrong), rotated_target (right)], so Core
     // tries the wrong key first (DecryptV2Error), then succeeds with the right one.
-    constexpr auto content = "feedface"_hex_u;
+    constexpr auto content = "feedface"_hex_b;
     auto ct = encrypt_for_recipient_v2(
             sender.ed_sk,
             recip_session_id,
-            as_uc(target_pubkeys.first),
-            as_uc(target_pubkeys.second),
+            target_pubkeys.first,
+            target_pubkeys.second,
             content,
             std::nullopt);
 

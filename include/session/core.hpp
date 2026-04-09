@@ -375,7 +375,7 @@ class Core {
             std::span<const std::byte, 33> recipient_session_id,
             std::span<const std::byte> content,
             sys_ms sent_timestamp,
-            const OptionalEd25519PrivKeySpan& pro_privkey = std::nullopt,
+            const ed25519::OptionalPrivKeySpan& pro_privkey = std::nullopt,
             std::chrono::milliseconds ttl = 14 * 24h,
             bool force_v2 = false);
 

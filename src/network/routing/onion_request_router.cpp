@@ -582,12 +582,10 @@ void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const 
 
             // Accumulate all encrypted output into a buffer (onion requests require the
             // full payload upfront).
-            std::vector<unsigned char> all_data;
+            std::vector<std::byte> all_data;
             all_data.reserve(enc_size);
-            for (auto chunk = enc.next(); !chunk.empty(); chunk = enc.next()) {
-                auto* p = reinterpret_cast<const unsigned char*>(chunk.data());
-                all_data.insert(all_data.end(), p, p + chunk.size());
-            }
+            for (auto chunk = enc.next(); !chunk.empty(); chunk = enc.next())
+                all_data.insert(all_data.end(), chunk.begin(), chunk.end());
 
             // Build the one-shot Request via to_request (needs an UploadRequest with next_data)
             UploadRequest legacy_req;
@@ -595,10 +593,10 @@ void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const 
             legacy_req.overall_timeout = request.overall_timeout;
             legacy_req.stall_timeout = request.stall_timeout;
             legacy_req.ttl = request.ttl;
-            auto data_ptr = std::make_shared<std::vector<unsigned char>>(std::move(all_data));
+            auto data_ptr = std::make_shared<std::vector<std::byte>>(std::move(all_data));
             bool consumed = false;
             legacy_req.next_data = [data_ptr,
-                                    consumed]() mutable -> std::vector<unsigned char> {
+                                    consumed]() mutable -> std::vector<std::byte> {
                 if (consumed)
                     return {};
                 consumed = true;

@@ -233,6 +233,10 @@ inline cleared_b32 sk_to_x25519(const T& sk) {
     return sk_to_x25519(sk.seed());
 }
 
+/// Derives the X25519 {secret, public} key pair from an Ed25519 private key.
+/// Equivalent to `{sk_to_x25519(sk), pk_to_x25519(sk.pubkey())}` but as a single call.
+std::pair<cleared_b32, b32> x25519_keypair(const PrivKeySpan& sk);
+
 /// Returns the private Ed25519 scalar `a` from a seed or PrivKeySpan (using cleared memory).
 ///
 /// Ed25519 and X25519 share the same private scalar: the Ed25519-to-X25519 conversion is

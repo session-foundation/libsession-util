@@ -50,12 +50,11 @@ TEST_CASE("Live: file upload via QUIC", "[live][file]") {
     req.overall_timeout = LIVE_TIMEOUT;
 
     bool consumed = false;
-    req.next_data = [&]() -> std::vector<unsigned char> {
+    req.next_data = [&]() -> std::vector<std::byte> {
         if (consumed)
             return {};
         consumed = true;
-        return {reinterpret_cast<const unsigned char*>(encrypted.data()),
-                reinterpret_cast<const unsigned char*>(encrypted.data() + encrypted.size())};
+        return {encrypted.begin(), encrypted.end()};
     };
     req.ttl = 1min;
     req.on_complete = [&](auto result, bool) { promise.set_value(std::move(result)); };
@@ -148,12 +147,11 @@ TEST_CASE("Live: file upload and download round-trip via QUIC", "[live][file]") 
     upload_req.overall_timeout = LIVE_TIMEOUT;
 
     bool consumed = false;
-    upload_req.next_data = [&]() -> std::vector<unsigned char> {
+    upload_req.next_data = [&]() -> std::vector<std::byte> {
         if (consumed)
             return {};
         consumed = true;
-        return {reinterpret_cast<const unsigned char*>(encrypted.data()),
-                reinterpret_cast<const unsigned char*>(encrypted.data() + encrypted.size())};
+        return {encrypted.begin(), encrypted.end()};
     };
     upload_req.ttl = 1min;
     upload_req.on_complete = [&](auto result, bool) {

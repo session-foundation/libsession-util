@@ -1314,9 +1314,7 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         assert(session_id.size() == sizeof(result.session_id));
         std::memcpy(result.session_id, session_id.data(), sizeof(result.session_id));
     } catch (const std::exception& e) {
-        auto msg = std::string_view{e.what()};
-        result.error_len_incl_null_terminator =
-                snprintf_clamped(error, error_len, "%.*s", (int)msg.size(), msg.data()) + 1;
+        result.error_len_incl_null_terminator = format_c_str(error, error_len, "{}", e.what());
     }
     return result;
 }

@@ -16,7 +16,7 @@
 #include <oxen/quic/gnutls_crypto.hpp>
 
 #include "session/clock.hpp"
-#include "session/ed25519.hpp"
+#include "session/crypto/ed25519.hpp"
 
 using namespace oxen;
 using namespace std::literals;
@@ -56,9 +56,9 @@ QuicFileClient::QuicFileClient(
                      : std::nullopt));
 
     // Set up TLS credentials
-    auto key_pair = ed25519::ed25519_key_pair();
-    _creds = quic::GNUTLSCreds::make_from_ed_seckey(std::string_view{
-            reinterpret_cast<const char*>(key_pair.second.data()), key_pair.second.size()});
+    auto [pk, sk] = ed25519::keypair();
+    _creds = quic::GNUTLSCreds::make_from_ed_seckey(
+            std::string_view{reinterpret_cast<const char*>(sk.data()), sk.size()});
 
     // Enable 0RTT if callbacks are provided
     if (_ticket_store && _ticket_extract) {

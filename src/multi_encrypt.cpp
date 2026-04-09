@@ -66,13 +66,7 @@ namespace detail {
         return encrypt::xchacha20poly1305_decrypt(out, ciphertext, nonce, key);
     }
 
-    std::pair<cleared_b32, b32> x_keys(const ed25519::PrivKeySpan& sk) {
-        return {ed25519::sk_to_x25519(sk), ed25519::pk_to_x25519(sk.pubkey())};
-    }
-
 }  // namespace detail
-
-namespace {
 
 std::optional<std::vector<std::byte>> decrypt_for_multiple(
         const std::vector<std::span<const std::byte>>& ciphertexts,
@@ -153,7 +147,7 @@ std::vector<std::byte> encrypt_for_multiple_simple(
         std::optional<std::span<const std::byte, 24>> nonce,
         int pad) {
 
-    auto [x_privkey, x_pubkey] = x_keys(ed25519_secret_key);
+    auto [x_privkey, x_pubkey] = ed25519::x25519_keypair(ed25519_secret_key);
 
     return encrypt_for_multiple_simple(
             messages, recipients, x_privkey, x_pubkey, domain, nonce, pad);
@@ -194,7 +188,7 @@ std::optional<std::vector<std::byte>> decrypt_for_multiple_simple(
         std::span<const std::byte, 32> sender_pubkey,
         std::string_view domain) {
 
-    auto [x_privkey, x_pubkey] = x_keys(ed25519_secret_key);
+    auto [x_privkey, x_pubkey] = ed25519::x25519_keypair(ed25519_secret_key);
 
     return decrypt_for_multiple_simple(encoded, x_privkey, x_pubkey, sender_pubkey, domain);
 }
@@ -274,7 +268,7 @@ LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple_ed25519(
 
     try {
         auto [priv, pub] =
-                session::detail::x_keys(to_byte_span<64>(ed25519_secret_key));
+                session::ed25519::x25519_keypair(to_byte_span<64>(ed25519_secret_key));
         return session_encrypt_for_multiple_simple(
                 out_len,
                 messages,
