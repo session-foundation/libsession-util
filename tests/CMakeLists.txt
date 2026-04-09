@@ -23,6 +23,7 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_curve25519.cpp
     test_ed25519.cpp
     test_encrypt.cpp
+    test_formattable.cpp
     test_group_keys.cpp
     test_group_info.cpp
     test_group_members.cpp
