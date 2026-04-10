@@ -19,7 +19,8 @@ void seed_keypair(
         std::span<std::byte, 32> pk,
         std::span<std::byte, 32> sk,
         std::span<const std::byte, 32> seed) {
-    crypto_box_seed_keypair(to_unsigned(pk.data()), to_unsigned(sk.data()), to_unsigned(seed.data()));
+    crypto_box_seed_keypair(
+            to_unsigned(pk.data()), to_unsigned(sk.data()), to_unsigned(seed.data()));
 }
 
 std::pair<b32, cleared_b32> seed_keypair(std::span<const std::byte, 32> seed) {
@@ -42,8 +43,9 @@ bool scalarmult(
         std::span<std::byte, 32> out,
         std::span<const std::byte, 32> scalar,
         std::span<const std::byte, 32> point) {
-    return 0 == crypto_scalarmult_curve25519(
-                        to_unsigned(out.data()), to_unsigned(scalar.data()), to_unsigned(point.data()));
+    return 0 ==
+           crypto_scalarmult_curve25519(
+                   to_unsigned(out.data()), to_unsigned(scalar.data()), to_unsigned(point.data()));
 }
 
 b32 scalarmult(std::span<const std::byte, 32> scalar, std::span<const std::byte, 32> point) {

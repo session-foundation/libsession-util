@@ -5,8 +5,8 @@
 #include <chrono>
 #include <nlohmann/json.hpp>
 #include <oxen/quic/gnutls_crypto.hpp>
-#include <session/crypto/x25519.hpp>
 #include <session/crypto/ed25519.hpp>
+#include <session/crypto/x25519.hpp>
 #include <session/network/key_types.hpp>
 #include <session/network/request_queue.hpp>
 #include <session/network/routing/onion_request_router.hpp>

@@ -149,7 +149,6 @@ class CallTracker {
 
 }  // namespace session
 
-
 template <typename Container>
 inline std::string to_hex(const Container& bytes) {
     std::string hex;

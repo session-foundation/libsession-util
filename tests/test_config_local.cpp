@@ -7,8 +7,8 @@
 #include <session/config/local.hpp>
 #include <session/config/notify.hpp>
 #include <session/config/theme.hpp>
-#include <session/util.hpp>
 #include <session/crypto/ed25519.hpp>
+#include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"

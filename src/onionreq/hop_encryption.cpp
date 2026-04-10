@@ -30,7 +30,8 @@ namespace {
     std::array<unsigned char, crypto_scalarmult_BYTES> calculate_shared_secret(
             const network::x25519_seckey& seckey, const network::x25519_pubkey& pubkey) {
         std::array<unsigned char, crypto_scalarmult_BYTES> secret;
-        if (crypto_scalarmult(secret.data(), to_unsigned(seckey.data()), to_unsigned(pubkey.data())) != 0)
+        if (crypto_scalarmult(
+                    secret.data(), to_unsigned(seckey.data()), to_unsigned(pubkey.data())) != 0)
             throw std::runtime_error("Shared key derivation failed (crypto_scalarmult)");
         return secret;
     }
@@ -144,7 +145,7 @@ std::vector<std::byte> HopEncryption::decrypt_aesgcm(
 
     if (!response_long_enough(EncryptType::aes_gcm, ciphertext.size()))
         throw std::invalid_argument{
-            fmt::format("Ciphertext data is too short: {}", ciphertext.size())};
+                fmt::format("Ciphertext data is too short: {}", ciphertext.size())};
 
     auto key = derive_symmetric_key(private_key_, pubKey);
 

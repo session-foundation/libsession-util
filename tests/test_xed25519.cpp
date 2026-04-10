@@ -23,14 +23,11 @@ constexpr auto pub1 = seed1.last<32>();
 constexpr auto pub2 = seed2.last<32>();
 
 // Expected X25519 pubkeys derived from the Ed25519 pubkeys
-constexpr auto xpub1 =
-        "fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
-constexpr auto xpub2 =
-        "05c9a9bf178fa644d44bebf628716dc7f2df3d0842e97881962c723699152073"_hex_b;
+constexpr auto xpub1 = "fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+constexpr auto xpub2 = "05c9a9bf178fa644d44bebf628716dc7f2df3d0842e97881962c723699152073"_hex_b;
 
 // The "absolute" (positive) version of pub2's Ed25519 pubkey
-constexpr auto pub2_abs =
-        "3570b69a47dc094544c1c5089c40414bbda1ffdde8aab2617fe937ee74a5ee01"_hex_b;
+constexpr auto pub2_abs = "3570b69a47dc094544c1c5089c40414bbda1ffdde8aab2617fe937ee74a5ee01"_hex_b;
 
 TEST_CASE("XEd25519 pubkey conversion", "[xed25519][pubkey]") {
     auto xpk1 = ed25519::pk_to_x25519(pub1);
@@ -108,10 +105,14 @@ TEST_CASE("XEd25519 signing (C wrapper)", "[xed25519][sign][c]") {
 
     b64 xed_sig1, xed_sig2;
     REQUIRE(session_xed25519_sign(
-            to_unsigned(xed_sig1.data()), to_unsigned(xsk1.data()), to_unsigned(msg.data()),
+            to_unsigned(xed_sig1.data()),
+            to_unsigned(xsk1.data()),
+            to_unsigned(msg.data()),
             msg.size()));
     REQUIRE(session_xed25519_sign(
-            to_unsigned(xed_sig2.data()), to_unsigned(xsk2.data()), to_unsigned(msg.data()),
+            to_unsigned(xed_sig2.data()),
+            to_unsigned(xsk2.data()),
+            to_unsigned(msg.data()),
             msg.size()));
 
     REQUIRE(ed25519::verify(xed_sig1, pub1, msg));
@@ -148,16 +149,24 @@ TEST_CASE("XEd25519 verification (C wrapper)", "[xed25519][verify][c]") {
 
     b64 xed_sig1, xed_sig2;
     REQUIRE(session_xed25519_sign(
-            to_unsigned(xed_sig1.data()), to_unsigned(xsk1.data()), to_unsigned(msg.data()),
+            to_unsigned(xed_sig1.data()),
+            to_unsigned(xsk1.data()),
+            to_unsigned(msg.data()),
             msg.size()));
     REQUIRE(session_xed25519_sign(
-            to_unsigned(xed_sig2.data()), to_unsigned(xsk2.data()), to_unsigned(msg.data()),
+            to_unsigned(xed_sig2.data()),
+            to_unsigned(xsk2.data()),
+            to_unsigned(msg.data()),
             msg.size()));
 
     REQUIRE(session_xed25519_verify(
-            to_unsigned(xed_sig1.data()), to_unsigned(xpub1.data()), to_unsigned(msg.data()),
+            to_unsigned(xed_sig1.data()),
+            to_unsigned(xpub1.data()),
+            to_unsigned(msg.data()),
             msg.size()));
     REQUIRE(session_xed25519_verify(
-            to_unsigned(xed_sig2.data()), to_unsigned(xpub2.data()), to_unsigned(msg.data()),
+            to_unsigned(xed_sig2.data()),
+            to_unsigned(xpub2.data()),
+            to_unsigned(msg.data()),
             msg.size()));
 }

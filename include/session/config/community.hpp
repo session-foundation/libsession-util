@@ -199,9 +199,7 @@ struct community {
     /// Outputs:
     /// - `std::string` -- Returns the Full URL
     static std::string full_url(
-            std::string_view base_url,
-            std::string_view room,
-            std::span<const std::byte> pubkey);
+            std::string_view base_url, std::string_view room, std::span<const std::byte> pubkey);
 
     /// API: community/community::canonical_url
     ///

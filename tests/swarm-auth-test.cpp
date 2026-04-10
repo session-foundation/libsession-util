@@ -60,8 +60,7 @@ struct pseudo_client {
             std::optional<const unsigned char*> gsk) :
             secret_key{sk_from_seed(seed)},
             info{std::span<const std::byte>{gpk, 32},
-                 admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64})
-                       : std::nullopt,
+                 admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64}) : std::nullopt,
                  std::nullopt},
             members{std::span<const std::byte>{gpk, 32},
                     admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64})
@@ -69,8 +68,7 @@ struct pseudo_client {
                     std::nullopt},
             keys{to_usv(secret_key),
                  std::span<const std::byte>{gpk, 32},
-                 admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64})
-                       : std::nullopt,
+                 admin ? std::make_optional<std::span<const std::byte>>({*gsk, 64}) : std::nullopt,
                  std::nullopt,
                  info,
                  members} {}

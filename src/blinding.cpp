@@ -1,14 +1,14 @@
 #include "session/blinding.hpp"
-#include "session/blinding.h"
 
 #include <fmt/format.h>
 #include <oxenc/hex.h>
-#include <oxen/log/format.hpp>
-#include <session/format.hpp>
 
 #include <cassert>
+#include <oxen/log/format.hpp>
+#include <session/format.hpp>
 #include <stdexcept>
 
+#include "session/blinding.h"
 #include "session/crypto/ed25519.hpp"
 #include "session/export.h"
 #include "session/hash.hpp"
@@ -56,7 +56,8 @@ namespace {
         if (session_id.size() != 32)
             throw std::invalid_argument{"Invalid session id"};
 
-        ed25519::scalarmult_noclamp(out.last<32>(), blind_factor, xed25519::pubkey(session_id.first<32>()));
+        ed25519::scalarmult_noclamp(
+                out.last<32>(), blind_factor, xed25519::pubkey(session_id.first<32>()));
         out[0] = prefix;
     }
 
@@ -71,7 +72,8 @@ namespace {
             std::span<const std::byte> session_id,
             std::span<const std::byte, 32> server_pk,
             std::span<std::byte, 33> out) {
-        blind_id_impl(session_id, server_pk, blind25_factor(session_id, server_pk), out, std::byte{0x25});
+        blind_id_impl(
+                session_id, server_pk, blind25_factor(session_id, server_pk), out, std::byte{0x25});
     }
 
     // Parses server_pk from either 32 raw bytes or 64 hex digits.
@@ -103,17 +105,16 @@ namespace {
         b64 hram;
         hash::sha512(hram, sig_R, A, message);
 
-        ed25519::scalar_reduce(sig_S, hram);     // S = H(R||A||M)
-        ed25519::scalar_mul(sig_S, sig_S, a);    // S = H(R||A||M) a
-        ed25519::scalar_add(sig_S, sig_S, r);    // S = r + H(R||A||M) a
+        ed25519::scalar_reduce(sig_S, hram);   // S = H(R||A||M)
+        ed25519::scalar_mul(sig_S, sig_S, a);  // S = H(R||A||M) a
+        ed25519::scalar_add(sig_S, sig_S, r);  // S = r + H(R||A||M) a
 
         return result;
     }
 
 }  // namespace
 
-b33 blind15_id(
-        std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk) {
+b33 blind15_id(std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk) {
     if (session_id.size() == 33) {
         if (session_id[0] != std::byte{0x05})
             throw std::invalid_argument{"blind15_id: session_id must start with 0x05"};
@@ -149,8 +150,7 @@ std::array<std::string, 2> blind15_id(std::string_view session_id, std::string_v
     return result;
 }
 
-b33 blind25_id(
-        std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk) {
+b33 blind25_id(std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk) {
     if (session_id.size() == 33) {
         if (session_id[0] != std::byte{0x05})
             throw std::invalid_argument{"blind25_id: session_id must start with 0x05"};
@@ -190,8 +190,7 @@ b33 blinded15_id_from_ed(
 
     b33 result;
     auto k = blind15_factor(server_pk);
-    ed25519::scalarmult_noclamp(
-            std::span<std::byte, 32>{result.data() + 1, 32}, k, ed_pubkey);
+    ed25519::scalarmult_noclamp(std::span<std::byte, 32>{result.data() + 1, 32}, k, ed_pubkey);
     result[0] = std::byte{0x15};
     return result;
 }
@@ -216,16 +215,13 @@ b33 blinded25_id_from_ed(
     std::ranges::copy(ed_pubkey, pos_ed_pubkey.begin());
     pos_ed_pubkey[31] &= std::byte{0x7f};
 
-    ed25519::scalarmult_noclamp(
-            std::span<std::byte, 32>{result.data() + 1, 32}, k, pos_ed_pubkey);
+    ed25519::scalarmult_noclamp(std::span<std::byte, 32>{result.data() + 1, 32}, k, pos_ed_pubkey);
     result[0] = std::byte{0x25};
     return result;
 }
 
 std::pair<b32, cleared_b32> blind15_key_pair(
-        const ed25519::PrivKeySpan& ed25519_sk,
-        std::span<const std::byte, 32> server_pk,
-        b32* k) {
+        const ed25519::PrivKeySpan& ed25519_sk, std::span<const std::byte, 32> server_pk, b32* k) {
     std::pair<b32, cleared_b32> result;
     auto& [A, a] = result;
 
@@ -420,8 +416,8 @@ LIBSESSION_C_API bool session_blind15_key_pair(
         unsigned char* blinded_pk_out,
         unsigned char* blinded_sk_out) {
     try {
-        auto [b_pk, b_sk] = session::blind15_key_pair(
-                {ed25519_seckey, 64}, to_byte_span<32>(server_pk));
+        auto [b_pk, b_sk] =
+                session::blind15_key_pair({ed25519_seckey, 64}, to_byte_span<32>(server_pk));
         std::memcpy(blinded_pk_out, b_pk.data(), b_pk.size());
         std::memcpy(blinded_sk_out, b_sk.data(), b_sk.size());
         return true;
@@ -436,8 +432,8 @@ LIBSESSION_C_API bool session_blind25_key_pair(
         unsigned char* blinded_pk_out,
         unsigned char* blinded_sk_out) {
     try {
-        auto [b_pk, b_sk] = session::blind25_key_pair(
-                {ed25519_seckey, 64}, to_byte_span<32>(server_pk));
+        auto [b_pk, b_sk] =
+                session::blind25_key_pair({ed25519_seckey, 64}, to_byte_span<32>(server_pk));
         std::memcpy(blinded_pk_out, b_pk.data(), b_pk.size());
         std::memcpy(blinded_sk_out, b_sk.data(), b_sk.size());
         return true;

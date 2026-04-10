@@ -2,9 +2,9 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <session/blinding.hpp>
-#include <session/crypto/x25519.hpp>
 #include <session/crypto/ed25519.hpp>
 #include <session/crypto/mlkem768.hpp>
+#include <session/crypto/x25519.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/util.hpp>
 
@@ -17,7 +17,8 @@ TEST_CASE("Session protocol encryption", "[session-protocol][encrypt]") {
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
     auto [ed_pk, ed_sk] = ed25519::keypair(seed);
     auto curve_pk = ed25519::pk_to_x25519(ed_pk);
-    REQUIRE(oxenc::to_hex(ed_pk) == "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(ed_pk) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
     REQUIRE(oxenc::to_hex(curve_pk) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
     auto sid = "05" + oxenc::to_hex(curve_pk);
@@ -86,7 +87,8 @@ TEST_CASE("Session protocol deterministic encryption", "[session-protocol][encry
     const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hex_b;
     auto [ed_pk, ed_sk] = ed25519::keypair(seed);
     auto curve_pk = ed25519::pk_to_x25519(ed_pk);
-    REQUIRE(oxenc::to_hex(ed_pk) == "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(ed_pk) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
     REQUIRE(oxenc::to_hex(curve_pk) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
     auto sid = "05" + oxenc::to_hex(curve_pk);
@@ -145,7 +147,8 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
             "1d7e7f92b1ed3643855c98ecac02fc7274033a3467653f047d6e433540c03f17"_hex_b;
     auto [ed_pk, ed_sk] = ed25519::keypair(seed);
     auto curve_pk = ed25519::pk_to_x25519(ed_pk);
-    REQUIRE(oxenc::to_hex(ed_pk) == "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
+    REQUIRE(oxenc::to_hex(ed_pk) ==
+            "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7");
     REQUIRE(oxenc::to_hex(curve_pk) ==
             "d2ad010eeb72d72e561d9de7bd7b6989af77dcabffa03a5111a6c859ae5c3a72");
     auto sid = "05" + oxenc::to_hex(curve_pk);
@@ -201,7 +204,10 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                 "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
                 "culpa qui officia deserunt mollit anim id est laborum."sv;
         auto enc = encrypt_for_blinded_recipient(
-                ed25519::extract_seed(ed_sk), server_pk, blind15_pk2_prefixed, to_span(lorem_ipsum));
+                ed25519::extract_seed(ed_sk),
+                server_pk,
+                blind15_pk2_prefixed,
+                to_span(lorem_ipsum));
         CHECK_FALSE(std::ranges::search(enc, "dolore magna"_bytes));
 
         auto [msg, sender] = decrypt_from_blinded_recipient(
@@ -231,7 +237,10 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                 "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
                 "culpa qui officia deserunt mollit anim id est laborum."sv;
         auto enc = encrypt_for_blinded_recipient(
-                ed25519::extract_seed(ed_sk), server_pk, blind15_pk2_prefixed, to_span(lorem_ipsum));
+                ed25519::extract_seed(ed_sk),
+                server_pk,
+                blind15_pk2_prefixed,
+                to_span(lorem_ipsum));
         CHECK_FALSE(std::ranges::search(enc, "dolore magna"_bytes));
 
         auto [msg, sender] = decrypt_from_blinded_recipient(
@@ -291,7 +300,10 @@ TEST_CASE("Session blinding protocol encryption", "[session-blinding-protocol][e
                 "fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in "
                 "culpa qui officia deserunt mollit anim id est laborum."sv;
         auto enc = encrypt_for_blinded_recipient(
-                ed25519::extract_seed(ed_sk), server_pk, blind25_pk2_prefixed, to_span(lorem_ipsum));
+                ed25519::extract_seed(ed_sk),
+                server_pk,
+                blind25_pk2_prefixed,
+                to_span(lorem_ipsum));
         CHECK_FALSE(std::ranges::search(enc, "dolore magna"_bytes));
 
         auto [msg, sender] = decrypt_from_blinded_recipient(

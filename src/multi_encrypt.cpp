@@ -2,11 +2,11 @@
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <session/multi_encrypt.h>
-#include <session/crypto/x25519.hpp>
-#include <session/random.hpp>
 
+#include <session/crypto/x25519.hpp>
 #include <session/encrypt.hpp>
 #include <session/multi_encrypt.hpp>
+#include <session/random.hpp>
 #include <stdexcept>
 
 #include "session/hash.hpp"
@@ -261,8 +261,7 @@ LIBSESSION_C_API unsigned char* session_encrypt_for_multiple_simple_ed25519(
         int pad) {
 
     try {
-        auto [priv, pub] =
-                session::ed25519::x25519_keypair(to_byte_span<64>(ed25519_secret_key));
+        auto [priv, pub] = session::ed25519::x25519_keypair(to_byte_span<64>(ed25519_secret_key));
         return session_encrypt_for_multiple_simple(
                 out_len,
                 messages,

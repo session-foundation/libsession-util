@@ -3,24 +3,23 @@
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/hex.h>
 
-#include <session/crypto/x25519.hpp>
-#include <session/crypto/ed25519.hpp>
-#include <session/encrypt.hpp>
-#include <session/crypto/mlkem768.hpp>
-
 #include <chrono>
 #include <cmath>
 #include <concepts>
 #include <iterator>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
-#include <session/format.hpp>
 #include <oxen/quic/format.hpp>
 #include <ranges>
 #include <session/config/encrypt.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
 #include <session/core/link_sas.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/crypto/mlkem768.hpp>
+#include <session/crypto/x25519.hpp>
+#include <session/encrypt.hpp>
+#include <session/format.hpp>
 #include <session/hash.hpp>
 #include <session/random.hpp>
 #include <session/sqlite.hpp>
@@ -767,10 +766,10 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
                 return std::span<std::byte, 2>{enc_key_raw.data() + pos_map[i] * (2 + 32), 2};
             });
 
-    auto enc_key = indices | std::views::transform([&](int i) {
-                       return std::span<std::byte, 32>{
-                               enc_key_raw.data() + pos_map[i] * (2 + 32) + 2, 32};
-                   });
+    auto enc_key =
+            indices | std::views::transform([&](int i) {
+                return std::span<std::byte, 32>{enc_key_raw.data() + pos_map[i] * (2 + 32) + 2, 32};
+            });
 
     cleared_vector<std::byte> ml_ss_raw(mlkem768::SHAREDSECRETBYTES * devices.size());
 
@@ -779,7 +778,8 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     // (because this is never transmitted, and so not shuffled or padded).
     auto ml_ss = std::views::iota(size_t{0}, devices.size()) | std::views::transform([&](size_t i) {
                      return std::span<std::byte, mlkem768::SHAREDSECRETBYTES>{
-                             ml_ss_raw.data() + i * mlkem768::SHAREDSECRETBYTES, mlkem768::SHAREDSECRETBYTES};
+                             ml_ss_raw.data() + i * mlkem768::SHAREDSECRETBYTES,
+                             mlkem768::SHAREDSECRETBYTES};
                  });
 
     cleared_b32 rnd;
@@ -877,10 +877,9 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     o.append("C", ciphertext_raw);
     o.append("K", enc_key_raw);
     o.append("d", enc_devices);
-    o.append_signature(
-            "~", [seed = core.globals.account_seed()](std::span<const std::byte> body) {
-                return ed25519::sign(seed.ed25519_secret(), body);
-            });
+    o.append_signature("~", [seed = core.globals.account_seed()](std::span<const std::byte> body) {
+        return ed25519::sign(seed.ed25519_secret(), body);
+    });
 
     assert(o.view().size() == out.size());  // Ensure we calculated exactly the right size above
 
@@ -1088,10 +1087,10 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
             indices | std::views::transform([&](int i) {
                 return std::span<const std::byte, 2>{enc_key_raw.data() + i * (2 + 32), 2};
             });
-    auto enc_key = indices | std::views::transform([&](int i) {
-                       return std::span<const std::byte, 32>{
-                               enc_key_raw.data() + i * (2 + 32) + 2, 32};
-                   });
+    auto enc_key =
+            indices | std::views::transform([&](int i) {
+                return std::span<const std::byte, 32>{enc_key_raw.data() + i * (2 + 32) + 2, 32};
+            });
 
     auto active_keys = active_device_keys();
 
@@ -1407,9 +1406,7 @@ void Devices::parse_account_pubkeys(std::span<const SwarmMessage> messages, bool
             auto X = in.require_span<unsigned char, 32>("X");
             in.require_signature(
                     "~",
-                    [&x25519_pub](
-                            std::span<const std::byte> body,
-                            std::span<const std::byte> sig) {
+                    [&x25519_pub](std::span<const std::byte> body, std::span<const std::byte> sig) {
                         if (sig.size() != 64 ||
                             !xed25519::verify(sig.first<64>(), x25519_pub, body))
                             throw std::runtime_error{
@@ -1525,10 +1522,9 @@ std::vector<std::byte> Devices::build_account_pubkey_message() {
     oxenc::bt_dict_producer o{reinterpret_cast<char*>(out.data()), out.size()};
     o.append("M", k.mlkem768_pub);
     o.append("X", k.x25519_pub);
-    o.append_signature(
-            "~", [seed = core.globals.account_seed()](std::span<const std::byte> body) {
-                return xed25519::sign(seed.x25519_key(), body);
-            });
+    o.append_signature("~", [seed = core.globals.account_seed()](std::span<const std::byte> body) {
+        return xed25519::sign(seed.x25519_key(), body);
+    });
 
     assert(o.view().size() == out.size());  // Ensure we calculated exactly the right size above
     return out;

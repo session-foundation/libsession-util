@@ -1,5 +1,4 @@
 #include "session/logging.hpp"
-#include "session/logging.h"
 
 #include <spdlog/common.h>
 
@@ -9,6 +8,7 @@
 
 #include "oxen/log/level.hpp"
 #include "session/export.h"
+#include "session/logging.h"
 
 namespace session {
 

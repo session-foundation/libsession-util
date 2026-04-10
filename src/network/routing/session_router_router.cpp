@@ -61,8 +61,7 @@ namespace {
                         log::trace(
                                 cat, "[Request {}]: Using pre-resolved RemoteAddress.", request_id);
                         result.emplace(
-                                as_span(arg.view_remote_key()).template first<32>(),
-                                arg.port());
+                                as_span(arg.view_remote_key()).template first<32>(), arg.port());
                     } else if constexpr (std::is_same_v<T, service_node>) {
                         log::trace(
                                 cat,
@@ -248,17 +247,16 @@ void SessionRouter::upload_file(FileUploadRequest request, std::span<const std::
 
         if (!_ready) {
             log::debug(cat, "Router not ready, queueing upload_file.");
-            _pending_operations.emplace_back(
-                    [weak_self,
-                     this,
-                     enc = std::move(enc),
-                     request = std::move(request),
-                     target = std::move(target)]() mutable {
-                        auto self = weak_self.lock();
-                        if (!self)
-                            return;
-                        _start_file_upload(std::move(enc), std::move(request), std::move(target));
-                    });
+            _pending_operations.emplace_back([weak_self,
+                                              this,
+                                              enc = std::move(enc),
+                                              request = std::move(request),
+                                              target = std::move(target)]() mutable {
+                auto self = weak_self.lock();
+                if (!self)
+                    return;
+                _start_file_upload(std::move(enc), std::move(request), std::move(target));
+            });
             return;
         }
 
@@ -302,8 +300,7 @@ void SessionRouter::_start_file_upload(
                     if (!pubkey)
                         return nullptr;
 
-                    return &_get_file_client(
-                            *pubkey, "::1", info.local_port, info.suggested_mtu);
+                    return &_get_file_client(*pubkey, "::1", info.local_port, info.suggested_mtu);
                 });
 
         _loop->call([weak_self = weak_from_this(), this, upload_id] {
@@ -1290,7 +1287,8 @@ void SessionRouter::_send_via_tunnel(
     // auto test_key =
     // oxenc::from_base64("1n+DAM9hKyJhtXSPR5L/HdemIKPiHs8dZsPn2kEQuMs="); auto test_key
     // = oxenc::from_base32z("55fxd8stjrt9g6rsbftx7eesy47pj4751xjghinr3k9ffxh4ieyo");
-    auto router_target = oxen::quic::RemoteAddress{as_span<unsigned char>(test_key), "::1", tunnel.local_port};
+    auto router_target =
+            oxen::quic::RemoteAddress{as_span<unsigned char>(test_key), "::1", tunnel.local_port};
 
     // Construct the actual request to send
     std::optional<std::chrono::milliseconds> remaining_overall_timeout =

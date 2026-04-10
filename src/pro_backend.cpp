@@ -736,7 +736,8 @@ session_pro_backend_add_pro_payment_request_build_sigs(
     try {
         ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
         ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
-        auto payment_tx_payment_id_span = to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
+        auto payment_tx_payment_id_span =
+                to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
         auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
 
         auto sigs = AddProPaymentRequest::build_sigs(
@@ -772,7 +773,8 @@ session_pro_backend_add_pro_payment_request_build_to_json(
     try {
         ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
         ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
-        auto payment_tx_payment_id_span = to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
+        auto payment_tx_payment_id_span =
+                to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
         auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
 
         std::string json = AddProPaymentRequest::build_to_json(
@@ -1248,8 +1250,7 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
                 std::chrono::milliseconds(refund_requested_unix_ts_ms)};
         auto payment_tx_payment_id_span =
                 to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
-        auto payment_tx_order_id_span =
-                to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
+        auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
         auto sig = SetPaymentRefundRequestedRequest::build_sig(
                 request_version,
                 master_span,
@@ -1288,8 +1289,7 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
                 std::chrono::milliseconds(refund_requested_unix_ts_ms)};
         auto payment_tx_payment_id_span =
                 to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
-        auto payment_tx_order_id_span =
-                to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
+        auto payment_tx_order_id_span = to_byte_span(payment_tx_order_id, payment_tx_order_id_len);
         auto json = SetPaymentRefundRequestedRequest::build_to_json(
                 request_version,
                 master_span,

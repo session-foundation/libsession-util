@@ -1,6 +1,5 @@
 #include "session/session_encrypt.hpp"
 
-#include <oxen/log.hpp>
 #include <oxenc/base64.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
@@ -11,6 +10,7 @@
 #include <array>
 #include <cassert>
 #include <cstring>
+#include <oxen/log.hpp>
 #include <sstream>
 #include <stdexcept>
 #include <vector>
@@ -18,11 +18,11 @@
 #include "internal-util.hpp"
 #include "session/blinding.hpp"
 #include "session/clock.hpp"
-#include "session/crypto/x25519.hpp"
 #include "session/crypto/ed25519.hpp"
+#include "session/crypto/mlkem768.hpp"
+#include "session/crypto/x25519.hpp"
 #include "session/encrypt.hpp"
 #include "session/hash.hpp"
-#include "session/crypto/mlkem768.hpp"
 #include "session/random.hpp"
 #include "session/sodium_array.hpp"
 #include "session/types.hpp"
@@ -204,7 +204,8 @@ std::vector<std::byte> encrypt_for_recipient_deterministic(
 
     // A sealed box is a regular box (using the ephermal keys and nonce), but with the ephemeral
     // pubkey prepended:
-    static_assert(encryption::BOX_SEALBYTES == encryption::BOX_PUBLICKEYBYTES + encryption::BOX_MACBYTES);
+    static_assert(
+            encryption::BOX_SEALBYTES == encryption::BOX_PUBLICKEYBYTES + encryption::BOX_MACBYTES);
 
     std::vector<std::byte> result;
     result.resize(encryption::BOX_SEALBYTES + signed_msg.size());
@@ -325,8 +326,7 @@ std::vector<std::byte> encrypt_for_recipient_v2(
 
     // Step 3: ki = M[0:2] ⊕ kiss  (encrypted key indicator; lets recipient quickly identify key)
     std::array<std::byte, 2> ki{
-            recipient_account_mlkem768[0] ^ kiss[0],
-            recipient_account_mlkem768[1] ^ kiss[1]};
+            recipient_account_mlkem768[0] ^ kiss[0], recipient_account_mlkem768[1] ^ kiss[1]};
 
     // Step 4: ML-KEM-768 encapsulate: ssₘ, mlkem_ct = Encapsulate(M)
     std::array<std::byte, mlkem768::CIPHERTEXTBYTES> mlkem_ct;
@@ -374,10 +374,7 @@ static DecryptV2Result v2_aead_decrypt_and_parse(
     size_t enc_size = ciphertext.size() - V2_HEADER_SIZE;
     std::vector<std::byte> plain(enc_size - V2_AEAD_OVERHEAD);
     if (!encryption::xchacha20poly1305_decrypt(
-                plain,
-                ciphertext.subspan(V2_HEADER_SIZE, enc_size),
-                nonce,
-                key))
+                plain, ciphertext.subspan(V2_HEADER_SIZE, enc_size), nonce, key))
         throw DecryptV2Error{"v2 message decryption failed"};
 
     // Strip zero padding from end (the plaintext was padded to a multiple of 256 bytes)
@@ -632,8 +629,7 @@ std::vector<std::byte> encrypt_for_blinded_recipient(
     // Layout: version(1) || ciphertext(buf+ABYTES) || nonce(NPUBBYTES)
     std::vector<std::byte> ciphertext;
     ciphertext.resize(
-            1 + buf.size() + encryption::XCHACHA20_ABYTES +
-            encryption::XCHACHA20_NONCEBYTES);
+            1 + buf.size() + encryption::XCHACHA20_ABYTES + encryption::XCHACHA20_NONCEBYTES);
 
     // Prepend with a version byte, so that the recipient can reliably detect if a future version is
     // no longer encrypting things the way it expects.
@@ -815,15 +811,13 @@ std::pair<std::vector<std::byte>, std::string> decrypt_from_blinded_recipient(
         std::span<const std::byte, 33> recipient_id,
         std::span<const std::byte> ciphertext) {
     auto ed_pk = ed25519_privkey.pubkey();
-    if (ciphertext.size() < encryption::XCHACHA20_NONCEBYTES + 1 +
-                                    encryption::XCHACHA20_ABYTES)
+    if (ciphertext.size() < encryption::XCHACHA20_NONCEBYTES + 1 + encryption::XCHACHA20_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
 
     cleared_b32 dec_key;
-    auto blinded_id = recipient_id[0] == std::byte{0x25}
-                            ? blinded25_id_from_ed(ed_pk, server_pk)
-                            : blinded15_id_from_ed(ed_pk, server_pk);
+    auto blinded_id = recipient_id[0] == std::byte{0x25} ? blinded25_id_from_ed(ed_pk, server_pk)
+                                                         : blinded15_id_from_ed(ed_pk, server_pk);
 
     if (to_string_view(sender_id) == to_string_view(blinded_id))
         dec_key = blinded_shared_secret(ed25519_privkey, sender_id, recipient_id, server_pk, true);
@@ -862,10 +856,9 @@ std::pair<std::vector<std::byte>, std::string> decrypt_from_blinded_recipient(
     auto sender_x_pk = ed25519::pk_to_x25519(sender_ed_pk);
 
     // Verify that the inner sender_ed_pk (A) yields the same outer kA we got with the message
-    auto extracted_sender =
-            recipient_id[0] == std::byte{0x25}
-                    ? blinded25_id_from_ed(sender_ed_pk, server_pk)
-                    : blinded15_id_from_ed(sender_ed_pk, server_pk);
+    auto extracted_sender = recipient_id[0] == std::byte{0x25}
+                                  ? blinded25_id_from_ed(sender_ed_pk, server_pk)
+                                  : blinded15_id_from_ed(sender_ed_pk, server_pk);
 
     bool matched = to_string_view(sender_id) == to_string_view(extracted_sender);
     if (!matched && extracted_sender[0] == std::byte{0x15}) {
@@ -1051,8 +1044,7 @@ std::string decrypt_ons_response(
 
 std::vector<std::byte> decrypt_push_notification(
         std::span<const std::byte> payload, std::span<const std::byte, 32> enc_key) {
-    if (payload.size() <
-        encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES)
+    if (payload.size() < encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES)
         throw std::invalid_argument{"Invalid payload: too short to contain valid encrypted data"};
 
     auto nonce = payload.first<encryption::XCHACHA20_NONCEBYTES>();
@@ -1076,24 +1068,19 @@ std::vector<std::byte> encrypt_xchacha20(
         std::span<const std::byte> plaintext, std::span<const std::byte, 32> key) {
 
     std::vector<std::byte> ciphertext(
-            encryption::XCHACHA20_NONCEBYTES + plaintext.size() +
-            encryption::XCHACHA20_ABYTES);
+            encryption::XCHACHA20_NONCEBYTES + plaintext.size() + encryption::XCHACHA20_ABYTES);
 
     auto nonce = std::span{ciphertext}.first<encryption::XCHACHA20_NONCEBYTES>();
     random::fill(nonce);
 
     encryption::xchacha20poly1305_encrypt(
-            std::span{ciphertext}.subspan(encryption::XCHACHA20_NONCEBYTES),
-            plaintext,
-            nonce,
-            key);
+            std::span{ciphertext}.subspan(encryption::XCHACHA20_NONCEBYTES), plaintext, nonce, key);
     return ciphertext;
 }
 
 std::vector<std::byte> decrypt_xchacha20(
         std::span<const std::byte> ciphertext, std::span<const std::byte, 32> key) {
-    if (ciphertext.size() <
-        encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES)
+    if (ciphertext.size() < encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
 
@@ -1108,7 +1095,6 @@ std::vector<std::byte> decrypt_xchacha20(
 }
 
 }  // namespace session
-
 
 extern "C" {
 
@@ -1310,13 +1296,12 @@ LIBSESSION_C_API bool session_decrypt_ons_response(
         const unsigned char* nonce_in,
         char* session_id_out) {
     try {
-        std::optional<std::span<const std::byte, encryption::XCHACHA20_NONCEBYTES>>
-                nonce;
+        std::optional<std::span<const std::byte, encryption::XCHACHA20_NONCEBYTES>> nonce;
         if (nonce_in)
             nonce = to_byte_span<encryption::XCHACHA20_NONCEBYTES>(nonce_in);
 
-        auto session_id =
-                session::decrypt_ons_response(name_in, to_byte_span(ciphertext_in, ciphertext_len), nonce);
+        auto session_id = session::decrypt_ons_response(
+                name_in, to_byte_span(ciphertext_in, ciphertext_len), nonce);
 
         std::memcpy(session_id_out, session_id.c_str(), session_id.size() + 1);
         return true;
@@ -1351,8 +1336,8 @@ LIBSESSION_C_API bool session_encrypt_xchacha20(
         unsigned char** ciphertext_out,
         size_t* ciphertext_len) {
     try {
-        auto ciphertext =
-                session::encrypt_xchacha20(to_byte_span(plaintext_in, plaintext_len), to_byte_span<32>(key_in));
+        auto ciphertext = session::encrypt_xchacha20(
+                to_byte_span(plaintext_in, plaintext_len), to_byte_span<32>(key_in));
 
         *ciphertext_out = static_cast<unsigned char*>(malloc(ciphertext.size()));
         *ciphertext_len = ciphertext.size();
@@ -1370,8 +1355,8 @@ LIBSESSION_C_API bool session_decrypt_xchacha20(
         unsigned char** plaintext_out,
         size_t* plaintext_len) {
     try {
-        auto plaintext =
-                session::decrypt_xchacha20(to_byte_span(ciphertext_in, ciphertext_len), to_byte_span<32>(key_in));
+        auto plaintext = session::decrypt_xchacha20(
+                to_byte_span(ciphertext_in, ciphertext_len), to_byte_span<32>(key_in));
 
         *plaintext_out = static_cast<unsigned char*>(malloc(plaintext.size()));
         *plaintext_len = plaintext.size();

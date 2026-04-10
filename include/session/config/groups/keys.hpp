@@ -436,9 +436,7 @@ class Keys : public ConfigSig {
             bool write = false,
             bool del = false);
     bool swarm_verify_subaccount(
-            std::span<const std::byte> signing_value,
-            bool write = false,
-            bool del = false) const;
+            std::span<const std::byte> signing_value, bool write = false, bool del = false) const;
 
     /// API: groups/Keys::swarm_auth
     ///
@@ -687,9 +685,7 @@ class Keys : public ConfigSig {
     /// Outputs:
     /// - `ciphertext` -- the encrypted, etc. value to send to the swarm
     std::vector<std::byte> encrypt_message(
-            std::span<const std::byte> plaintext,
-            bool compress = true,
-            size_t padding = 256) const;
+            std::span<const std::byte> plaintext, bool compress = true, size_t padding = 256) const;
 
     /// API: groups/Keys::decrypt_message
     ///

@@ -95,8 +95,10 @@ TEST_CASE("Ed25519 pro key pair generation seed", "[ed25519][keypair]") {
     constexpr auto seed1 = "e5481635020d6f7b327e94e6d63e33a431fccabc4d2775845c43a8486a9f2884"_hex_b;
     constexpr auto seed2 = "743d646706b6b04b97b752036dd6cf5f2adc4b339fcfdfb4b496f0764bb93a84"_hex_b;
 
-    auto [pk1, sk1] = session::ed25519::derive_subkey(seed1, session::pro_backend::pro_subkey_domain);
-    auto [pk2, sk2] = session::ed25519::derive_subkey(seed2, session::pro_backend::pro_subkey_domain);
+    auto [pk1, sk1] =
+            session::ed25519::derive_subkey(seed1, session::pro_backend::pro_subkey_domain);
+    auto [pk2, sk2] =
+            session::ed25519::derive_subkey(seed2, session::pro_backend::pro_subkey_domain);
 
     CHECK(sk1.size() == 64);
     CHECK(sk1 != sk2);
@@ -117,8 +119,7 @@ TEST_CASE("Ed25519", "[ed25519][signature]") {
 
     constexpr auto ed_seed =
             "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
-    constexpr auto ed_pk =
-            "8862834829a87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"_hex_b;
+    constexpr auto ed_pk = "8862834829a87e0afadfed763fa8785e893dbde7f2c001ff1071aa55005c347f"_hex_b;
     constexpr auto ed_invalid = "010203040506070809"_hex_u;
 
     auto sig1 = session::ed25519::sign(ed_seed, to_span("hello"));

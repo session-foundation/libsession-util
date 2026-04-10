@@ -8,10 +8,10 @@
 #include <string_view>
 #include <type_traits>
 
+#include "../internal-util.hpp"
 #include "session/clock.hpp"
 #include "session/config/base.h"
 #include "session/config/base.hpp"
-#include "../internal-util.hpp"
 #include "session/config/error.h"
 #include "session/types.hpp"
 
@@ -211,8 +211,7 @@ std::string_view sv_or_empty(const session::config::dict& d, const char* key);
 
 // Digs into a config `dict` to get out a std::vector<std::byte>; nullopt if not there (or not
 // string)
-std::optional<std::vector<std::byte>> maybe_vector(
-        const session::config::dict& d, const char* key);
+std::optional<std::vector<std::byte>> maybe_vector(const session::config::dict& d, const char* key);
 
 /// Sets a value to 1 if true, removes it if false.
 void set_flag(ConfigBase::DictFieldProxy&& field, bool val);

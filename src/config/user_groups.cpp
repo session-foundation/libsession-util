@@ -315,9 +315,7 @@ std::optional<community_info> UserGroups::get_community(std::string_view partial
 }
 
 community_info UserGroups::get_or_construct_community(
-        std::string_view base_url,
-        std::string_view room,
-        std::span<const std::byte> pubkey) const {
+        std::string_view base_url, std::string_view room, std::span<const std::byte> pubkey) const {
     community_info result{base_url, room, pubkey.first<32>()};
 
     if (auto* info_dict = community_field(result).dict())

@@ -1,5 +1,4 @@
 #include "session/config/contacts.hpp"
-#include "session/config/contacts.h"
 
 #include <fmt/format.h>
 #include <fmt/ranges.h>

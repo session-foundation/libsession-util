@@ -1,5 +1,4 @@
 #include "session/onionreq/response_parser.hpp"
-#include "session/onionreq/response_parser.h"
 
 #include <oxenc/base64.h>
 #include <oxenc/endian.h>
@@ -12,6 +11,7 @@
 #include "session/onionreq/builder.h"
 #include "session/onionreq/builder.hpp"
 #include "session/onionreq/hop_encryption.hpp"
+#include "session/onionreq/response_parser.h"
 #include "session/util.hpp"
 
 using namespace session;

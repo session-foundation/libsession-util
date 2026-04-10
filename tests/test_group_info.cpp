@@ -5,8 +5,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <session/config/groups/info.hpp>
-#include <session/util.hpp>
 #include <session/crypto/ed25519.hpp>
+#include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
@@ -27,8 +27,8 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
     std::vector<std::vector<std::byte>> enc_keys;
-    enc_keys.push_back(to_vector(
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hex_b));
+    enc_keys.push_back(
+            to_vector("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"_hex_b));
 
     groups::Info ginfo1{ed_pk, ed_sk, std::nullopt};
 
@@ -39,10 +39,11 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
 
     enc_keys.insert(
             enc_keys.begin(),
-            to_vector(
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b));
-    enc_keys.push_back(to_vector("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hex_b));
-    enc_keys.push_back(to_vector("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hex_b));
+            to_vector("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b));
+    enc_keys.push_back(
+            to_vector("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hex_b));
+    enc_keys.push_back(
+            to_vector("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hex_b));
     groups::Info ginfo2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
@@ -108,8 +109,9 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
 
     CHECK(ginfo1.get_name() == "Better name!");
     CHECK(ginfo1.get_profile_pic().url == "http://example.com/12345");
-    CHECK(std::ranges::equal(ginfo1.get_profile_pic().key,
-          "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
+    CHECK(std::ranges::equal(
+            ginfo1.get_profile_pic().key,
+            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
     CHECK(ginfo1.get_expiry_timer() == 1h);
     CHECK(ginfo1.get_created() == create_time);
     CHECK(ginfo1.get_delete_before() == create_time + 50 * 86400);
@@ -123,8 +125,9 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     CHECK(ginfo2.merge(merge_configs) == std::unordered_set{{"fakehash3"s}});
     CHECK(ginfo2.get_name() == "Better name!");
     CHECK(ginfo2.get_profile_pic().url == "http://example.com/12345");
-    CHECK(std::ranges::equal(ginfo2.get_profile_pic().key,
-          "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
+    CHECK(std::ranges::equal(
+            ginfo2.get_profile_pic().key,
+            "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
     CHECK(ginfo2.get_expiry_timer() == 1h);
     CHECK(ginfo2.get_created() == create_time);
     CHECK(ginfo2.get_delete_before() == create_time + 50 * 86400);
@@ -215,8 +218,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
 
     // Deliberately use the wrong signing key so that what we produce encrypts successfully but
     // doesn't verify
-    const auto seed_bad1 =
-            "0023456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
+    const auto seed_bad1 = "0023456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hex_b;
     auto [ed_pk_bad1, ed_sk_bad1] = ed25519::keypair(seed_bad1);
 
     groups::Info ginfo_bad1{ed_pk, ed_sk, std::nullopt};
@@ -358,5 +360,6 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     auto pic = ginfo.get_profile_pic();
     CHECK_FALSE(pic.empty());
     CHECK(pic.url == "http://example.com/12345");
-    CHECK(std::ranges::equal(pic.key, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
+    CHECK(std::ranges::equal(
+            pic.key, "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
 }

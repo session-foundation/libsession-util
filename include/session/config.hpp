@@ -125,8 +125,7 @@ class ConfigMessage {
             std::span<const std::byte> data, std::span<const std::byte> signature)>;
 
     /// Signing function: this is passed the data to be signed and returns the 64-byte signature.
-    using sign_callable =
-            std::function<std::vector<std::byte>(std::span<const std::byte> data)>;
+    using sign_callable = std::function<std::vector<std::byte>(std::span<const std::byte> data)>;
 
     ConfigMessage();
     ConfigMessage(const ConfigMessage&) = default;
@@ -230,9 +229,7 @@ class ConfigMessage {
     /// verified signature when it was parsed.  Returns nullopt otherwise (e.g. not loaded from
     /// verification at all; loaded without a verification function; or had no signature and a
     /// signature wasn't required).
-    const std::optional<b64>& verified_signature() {
-        return verified_signature_;
-    }
+    const std::optional<b64>& verified_signature() { return verified_signature_; }
 
     /// Constructs a new MutableConfigMessage from this config message with an incremented seqno.
     /// The new config message's diff will reflect changes made after this construction.
@@ -249,8 +246,7 @@ class ConfigMessage {
     virtual std::vector<std::byte> serialize(bool enable_signing = true);
 
   protected:
-    std::vector<std::byte> serialize_impl(
-            const oxenc::bt_dict& diff, bool enable_signing = true);
+    std::vector<std::byte> serialize_impl(const oxenc::bt_dict& diff, bool enable_signing = true);
 };
 
 // Constructor tag

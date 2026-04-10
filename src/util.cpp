@@ -1,12 +1,12 @@
 #include <assert.h>
 #include <fmt/format.h>
-#include <session/format.hpp>
 #include <session/util.h>
 #include <simdutf.h>
 #include <zstd.h>
 
 #include <charconv>
 #include <memory>
+#include <session/format.hpp>
 #include <session/util.hpp>
 #include <system_error>
 

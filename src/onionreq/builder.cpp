@@ -407,7 +407,8 @@ LIBSESSION_C_API bool onion_request_builder_build(
 
     try {
         auto& unboxed_builder = unbox(builder);
-        auto payload = unboxed_builder.build(session::to_vector(std::span{payload_in, payload_in_len}));
+        auto payload =
+                unboxed_builder.build(session::to_vector(std::span{payload_in, payload_in_len}));
 
         if (unboxed_builder.final_hop_x25519_keypair) {
             auto key_pair = unboxed_builder.final_hop_x25519_keypair.value();

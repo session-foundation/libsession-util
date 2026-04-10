@@ -595,8 +595,7 @@ void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const 
             legacy_req.ttl = request.ttl;
             auto data_ptr = std::make_shared<std::vector<std::byte>>(std::move(all_data));
             bool consumed = false;
-            legacy_req.next_data = [data_ptr,
-                                    consumed]() mutable -> std::vector<std::byte> {
+            legacy_req.next_data = [data_ptr, consumed]() mutable -> std::vector<std::byte> {
                 if (consumed)
                     return {};
                 consumed = true;
@@ -614,8 +613,7 @@ void OnionRequestRouter::upload_file(FileUploadRequest request, std::span<const 
                         if (!request.on_complete)
                             return;
                         if (auto* meta = std::get_if<file_metadata>(&result))
-                            request.on_complete(
-                                    std::make_pair(std::move(*meta), key), timeout);
+                            request.on_complete(std::make_pair(std::move(*meta), key), timeout);
                         else
                             request.on_complete(std::get<int16_t>(result), timeout);
                     });
@@ -954,10 +952,7 @@ void OnionRequestRouter::_dispatch_upload(
 
         const auto upload_size = req.body->size();
         log::debug(
-                cat,
-                "[Upload {}]: Accumulated {} bytes, sending request.",
-                upload_id,
-                upload_size);
+                cat, "[Upload {}]: Accumulated {} bytes, sending request.", upload_id, upload_size);
 
         _send_request_internal(
                 std::move(req),
@@ -989,8 +984,7 @@ void OnionRequestRouter::_dispatch_upload(
                         if (!body)
                             throw std::runtime_error{"No response body."};
 
-                        auto metadata =
-                                file_server::parse_upload_response(*body, upload_size);
+                        auto metadata = file_server::parse_upload_response(*body, upload_size);
                         log::info(
                                 cat,
                                 "[Upload {}]: Successfully uploaded {} bytes as file ID: {}",
@@ -1003,18 +997,10 @@ void OnionRequestRouter::_dispatch_upload(
                         log::error(cat, "[Upload {}]: Cancelled", upload_id);
                         on_result(ERROR_REQUEST_CANCELLED, false);
                     } catch (const status_code_exception& e) {
-                        log::error(
-                                cat,
-                                "[Upload {}]: Failure with error: {}",
-                                upload_id,
-                                e.what());
+                        log::error(cat, "[Upload {}]: Failure with error: {}", upload_id, e.what());
                         on_result(e.status_code, false);
                     } catch (const std::exception& e) {
-                        log::error(
-                                cat,
-                                "[Upload {}]: Failure with error: {}",
-                                upload_id,
-                                e.what());
+                        log::error(cat, "[Upload {}]: Failure with error: {}", upload_id, e.what());
                         on_result(ERROR_UNKNOWN, false);
                     }
                 });

@@ -1,5 +1,4 @@
 #include "session/xed25519.hpp"
-#include "session/xed25519.h"
 
 #include <sodium/crypto_core_ed25519.h>
 #include <sodium/crypto_scalarmult_ed25519.h>
@@ -14,6 +13,7 @@
 #include "session/export.h"
 #include "session/hash.hpp"
 #include "session/util.hpp"
+#include "session/xed25519.h"
 
 namespace session::xed25519 {
 

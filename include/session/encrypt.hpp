@@ -42,8 +42,15 @@ inline void xchacha20poly1305_encrypt(
         std::span<const std::byte, XCHACHA20_NONCEBYTES> nonce,
         std::span<const std::byte, XCHACHA20_KEYBYTES> key) {
     crypto_aead_xchacha20poly1305_ietf_encrypt(
-            ucdata(out), nullptr, ucdata(msg), msg.size(), nullptr, 0, nullptr,
-            ucdata(nonce), ucdata(key));
+            ucdata(out),
+            nullptr,
+            ucdata(msg),
+            msg.size(),
+            nullptr,
+            0,
+            nullptr,
+            ucdata(nonce),
+            ucdata(key));
 }
 
 /// Decrypts `ciphertext` with `key` and `nonce`, writing plaintext (ciphertext.size() - ABYTES
@@ -54,9 +61,15 @@ inline bool xchacha20poly1305_decrypt(
         std::span<const std::byte, XCHACHA20_NONCEBYTES> nonce,
         std::span<const std::byte, XCHACHA20_KEYBYTES> key) {
     return 0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
-                        ucdata(out), nullptr, nullptr,
-                        ucdata(ciphertext), ciphertext.size(), nullptr, 0,
-                        ucdata(nonce), ucdata(key));
+                        ucdata(out),
+                        nullptr,
+                        nullptr,
+                        ucdata(ciphertext),
+                        ciphertext.size(),
+                        nullptr,
+                        0,
+                        ucdata(nonce),
+                        ucdata(key));
 }
 
 // ─── XChaCha20 stream ────────────────────────────────────────────────────────

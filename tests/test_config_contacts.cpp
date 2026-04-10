@@ -7,8 +7,8 @@
 #include <chrono>
 #include <random>
 #include <session/config/contacts.hpp>
-#include <session/util.hpp>
 #include <session/crypto/ed25519.hpp>
+#include <session/util.hpp>
 #include <string_view>
 #include <thread>
 
@@ -643,8 +643,7 @@ TEST_CASE("huger contacts with multipart messages", "[config][multipart][contact
         CHECK(dump.size() < total_dumps + 500 /* ~ various other dump overhead */);
 
         if (dump_load_in_between) {
-            auto c2b =
-                    std::make_unique<session::config::Contacts>(seed, c2->dump());
+            auto c2b = std::make_unique<session::config::Contacts>(seed, c2->dump());
             CHECK_FALSE(c2b->needs_dump());
             c2 = std::move(c2b);
             CHECK_FALSE(c2->needs_dump());

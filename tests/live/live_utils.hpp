@@ -10,14 +10,13 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <session/clock.hpp>
-#include <session/crypto/ed25519.hpp>
 #include <session/config/namespaces.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/network/network_opt.hpp>
 #include <session/network/session_network.hpp>
 #include <session/network/session_network_types.hpp>
-#include <session/crypto/ed25519.hpp>
 #include <session/util.hpp>
 
 #include "../dns_utils.hpp"

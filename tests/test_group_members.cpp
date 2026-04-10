@@ -45,8 +45,10 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     enc_keys.insert(
             enc_keys.begin(),
             to_vector("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"_hex_b));
-    enc_keys.push_back(to_vector("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hex_b));
-    enc_keys.push_back(to_vector("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hex_b));
+    enc_keys.push_back(
+            to_vector("cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"_hex_b));
+    enc_keys.push_back(
+            to_vector("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"_hex_b));
     groups::Members gmem2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
@@ -216,7 +218,8 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                                      ? ""
                                      : "{} {}"_format(i < 10 ? "Admin" : "Member", i)));
             if (i < 20)
-                CHECK(std::ranges::equal(m.profile_picture.key,
+                CHECK(std::ranges::equal(
+                        m.profile_picture.key,
                         "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
             else
                 CHECK(m.profile_picture.key.empty());
@@ -302,7 +305,8 @@ TEST_CASE("Group Members", "[config][groups][members]") {
                                      ? ""
                                      : "{} {}"_format(i < 10 ? "Admin" : "Member", i)));
             if (i < 20)
-                CHECK(std::ranges::equal(m.profile_picture.key,
+                CHECK(std::ranges::equal(
+                        m.profile_picture.key,
                         "abcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcdabcd"_hex_b));
             else
                 CHECK(m.profile_picture.key.empty());

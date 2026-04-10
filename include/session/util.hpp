@@ -92,9 +92,7 @@ template <std::size_t N, typename InChar>
 inline std::array<std::byte, N> to_array(std::span<const InChar> sp) {
     std::array<std::byte, N> result{};
     std::copy_n(
-            reinterpret_cast<const std::byte*>(sp.data()),
-            std::min(N, sp.size()),
-            result.begin());
+            reinterpret_cast<const std::byte*>(sp.data()), std::min(N, sp.size()), result.begin());
     return result;
 }
 
@@ -239,8 +237,7 @@ std::vector<std::span<const std::byte>> to_view_vector(It begin, It end) {
     vec.reserve(std::distance(begin, end));
     for (; begin != end; ++begin) {
         if constexpr (std::is_same_v<std::remove_cv_t<decltype(*begin)>, char*>)  // C strings
-            vec.emplace_back(reinterpret_cast<const std::byte*>(*begin),
-                             std::strlen(*begin));
+            vec.emplace_back(reinterpret_cast<const std::byte*>(*begin), std::strlen(*begin));
         else {
             static_assert(
                     sizeof(*begin->data()) == 1,
@@ -381,9 +378,7 @@ static_assert(std::is_same_v<
 /// ZSTD-compresses a value.  `prefix` can be prepended on the returned value, if needed.  Throws on
 /// serious error.
 std::vector<std::byte> zstd_compress(
-        std::span<const std::byte> data,
-        int level = 1,
-        std::span<const std::byte> prefix = {});
+        std::span<const std::byte> data, int level = 1, std::span<const std::byte> prefix = {});
 
 /// ZSTD-decompresses a value.  Returns nullopt if decompression fails.  If max_size is non-zero
 /// then this returns nullopt if the decompressed size would exceed that limit.

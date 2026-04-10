@@ -43,8 +43,7 @@ OnionReqParser::OnionReqParser(
     payload_ = enc.decrypt(enc_type, to_vector<std::byte>(ciphertext), remote_pk);
 }
 
-std::vector<std::byte> OnionReqParser::encrypt_reply(
-        std::span<const std::byte> reply) const {
+std::vector<std::byte> OnionReqParser::encrypt_reply(std::span<const std::byte> reply) const {
     return enc.encrypt(enc_type, to_vector<std::byte>(reply), remote_pk);
 }
 

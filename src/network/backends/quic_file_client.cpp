@@ -51,9 +51,8 @@ QuicFileClient::QuicFileClient(
     _ep = quic::Endpoint::endpoint(
             *_loop,
             quic::Address{},
-            (_max_udp_payload
-                     ? std::make_optional<quic::opt::max_udp_payload>(*_max_udp_payload)
-                     : std::nullopt));
+            (_max_udp_payload ? std::make_optional<quic::opt::max_udp_payload>(*_max_udp_payload)
+                              : std::nullopt));
 
     // Set up TLS credentials
     auto [pk, sk] = ed25519::keypair();
@@ -552,16 +551,15 @@ void streaming_file_upload(
     // Runs on the loop thread where get_stats() is a direct member access (no queuing).
     std::shared_ptr<quic::Ticker> progress_timer;
     if (request.progress_interval > 0ms) {
-        progress_timer = loop->call_every(
-                request.progress_interval,
-                [state, &request, upload_size] {
+        progress_timer =
+                loop->call_every(request.progress_interval, [state, &request, upload_size] {
                     if (state->done || !state->stream)
                         return;
 
                     auto now = std::chrono::steady_clock::now();
                     auto [acked, unacked, unsent] = state->stream->get_stats();
-                    auto file_acked =
-                            std::max<int64_t>(0, static_cast<int64_t>(acked) - state->preamble_size);
+                    auto file_acked = std::max<int64_t>(
+                            0, static_cast<int64_t>(acked) - state->preamble_size);
 
                     if (file_acked > state->last_acked) {
                         state->last_acked = file_acked;

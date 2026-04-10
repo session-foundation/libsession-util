@@ -1,7 +1,7 @@
 #pragma once
 
-#include <oxen/quic/address.hpp>
 #include <cstddef>
+#include <oxen/quic/address.hpp>
 #include <span>
 #include <string>
 #include <string_view>
@@ -93,8 +93,7 @@ class Builder {
     std::optional<std::vector<std::pair<std::string, std::string>>> headers_ = std::nullopt;
     std::optional<std::vector<std::pair<std::string, std::string>>> query_params_ = std::nullopt;
 
-    std::vector<std::byte> _generate_payload(
-            std::optional<std::vector<std::byte>> body) const;
+    std::vector<std::byte> _generate_payload(std::optional<std::vector<std::byte>> body) const;
 };
 
 }  // namespace session::onionreq

@@ -1,9 +1,9 @@
 #include "session/hash.hpp"
-#include "session/hash.h"
 
 #include <sodium/crypto_generichash_blake2b.h>
 
 #include "session/export.h"
+#include "session/hash.h"
 #include "session/util.hpp"
 
 namespace {

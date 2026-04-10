@@ -100,8 +100,8 @@ struct base_group_info {
 /// Struct containing legacy group info (aka "groups").
 struct legacy_group_info : base_group_info {
     std::string session_id;                      // The legacy group "session id" (33 bytes).
-    std::vector<std::byte> enc_pubkey;       // bytes (32 or empty)
-    std::vector<std::byte> enc_seckey;       // bytes (32 or empty)
+    std::vector<std::byte> enc_pubkey;           // bytes (32 or empty)
+    std::vector<std::byte> enc_seckey;           // bytes (32 or empty)
     std::chrono::seconds disappearing_timer{0};  // 0 == disabled.
 
     /// Constructs a new legacy group info from an id (which must look like a session_id).  Throws

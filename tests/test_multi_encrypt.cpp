@@ -230,48 +230,27 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
             /* de */ 2 +
                     /* 1:# 24:...nonce... */ 3 + 27 +
                     /* 1:e le */ 3 + 2 +
-                    /* XX: then data with overhead */ 3 *
-                            (3 + 5 + encryption::XCHACHA20_ABYTES));
+                    /* XX: then data with overhead */ 3 * (3 + 5 + encryption::XCHACHA20_ABYTES));
 
     // If we encrypt again the value should be different (because of the default randomized nonce):
-    CHECK(encrypted != encrypt_for_multiple_simple(
-                               msgs[0],
-                               to_view_vector(
-                                       std::next(recipients.begin()), std::prev(recipients.end())),
-                               x_keys[0].first,
-                               x_keys[0].second,
-                               "test suite"));
+    CHECK(encrypted !=
+          encrypt_for_multiple_simple(
+                  msgs[0],
+                  to_view_vector(std::next(recipients.begin()), std::prev(recipients.end())),
+                  x_keys[0].first,
+                  x_keys[0].second,
+                  "test suite"));
 
     auto m1 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[1].first,
-            x_keys[1].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[1].first, x_keys[1].second, x_keys[0].second, "test suite");
     auto m2 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[2].first,
-            x_keys[2].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[2].first, x_keys[2].second, x_keys[0].second, "test suite");
     auto m3 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[3].first,
-            x_keys[3].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[3].first, x_keys[3].second, x_keys[0].second, "test suite");
     auto m3b = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[3].first,
-            x_keys[3].second,
-            x_keys[0].second,
-            "not test suite");
+            encrypted, x_keys[3].first, x_keys[3].second, x_keys[0].second, "not test suite");
     auto m4 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[4].first,
-            x_keys[4].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[4].first, x_keys[4].second, x_keys[0].second, "test suite");
 
     REQUIRE(m1);
     REQUIRE(m2);
@@ -299,35 +278,15 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
                                           "1ecee2215d226817edfdb097f05037eb799309103a"_hex));
 
     m1 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[1].first,
-            x_keys[1].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[1].first, x_keys[1].second, x_keys[0].second, "test suite");
     m2 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[2].first,
-            x_keys[2].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[2].first, x_keys[2].second, x_keys[0].second, "test suite");
     m3 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[3].first,
-            x_keys[3].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[3].first, x_keys[3].second, x_keys[0].second, "test suite");
     m3b = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[3].first,
-            x_keys[3].second,
-            x_keys[0].second,
-            "not test suite");
+            encrypted, x_keys[3].first, x_keys[3].second, x_keys[0].second, "not test suite");
     m4 = decrypt_for_multiple_simple(
-            encrypted,
-            x_keys[4].first,
-            x_keys[4].second,
-            x_keys[0].second,
-            "test suite");
+            encrypted, x_keys[4].first, x_keys[4].second, x_keys[0].second, "test suite");
 
     REQUIRE(m1);
     REQUIRE(m2);

@@ -62,7 +62,6 @@ session::b32 proof_hash_internal(
             session::BUILD_PROOF_PERS, version, gen_index_hash, rotating_pubkey, expiry_unix_ts_ms);
 }
 
-
 struct array_uc32_from_ptr_result {
     bool success;
     session::b32 data;
@@ -321,7 +320,8 @@ std::vector<std::byte> encode_for_community(
     content_w_sig.set_prosigforcommunitymessageonly(
             reinterpret_cast<const char*>(pro_sig.data()), pro_sig.size());
     std::vector<std::byte> reserialized(content_w_sig.ByteSizeLong());
-    [[maybe_unused]] bool ok = content_w_sig.SerializeToArray(reserialized.data(), reserialized.size());
+    [[maybe_unused]] bool ok =
+            content_w_sig.SerializeToArray(reserialized.data(), reserialized.size());
     assert(ok);
     return pad_message(reserialized);
 }
@@ -333,8 +333,7 @@ std::vector<std::byte> encode_for_community_inbox(
         std::span<const std::byte, 33> recipient_pubkey,
         std::span<const std::byte, 32> community_pubkey,
         const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey) {
-    std::vector<std::byte> content =
-            encode_for_community(plaintext, pro_rotating_ed25519_privkey);
+    std::vector<std::byte> content = encode_for_community(plaintext, pro_rotating_ed25519_privkey);
     return encrypt_for_blinded_recipient(
             ed25519_privkey, community_pubkey, recipient_pubkey, content);
 }
@@ -587,8 +586,7 @@ DecodedEnvelope decode_dm_envelope(
         throw std::runtime_error{"Parse websocket wrapped envelope failed, missing request body"};
 
     SessionProtos::Envelope envelope = {};
-    if (!envelope.ParseFromArray(
-                ws_msg.request().body().data(), ws_msg.request().body().size()))
+    if (!envelope.ParseFromArray(ws_msg.request().body().data(), ws_msg.request().body().size()))
         throw std::runtime_error{"Parse envelope from plaintext failed"};
 
     parse_envelope_fields(result, envelope);
@@ -908,10 +906,7 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
             to_byte_span(proof->gen_index_hash.data),
             to_byte_span(proof->rotating_pubkey.data),
             proof->expiry_unix_ts_ms);
-    return ed25519::verify(
-            to_byte_span(proof->sig.data),
-            to_byte_span<32>(verify_pubkey),
-            hash);
+    return ed25519::verify(to_byte_span(proof->sig.data), to_byte_span<32>(verify_pubkey), hash);
 }
 
 LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(
@@ -1018,8 +1013,8 @@ session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
     return c_encode_impl(error, error_len, [&] {
         return encode_dm_v1(
                 std::span{static_cast<const std::byte*>(plaintext), plaintext_len},
-                ed25519::PrivKeySpan{static_cast<const unsigned char*>(ed25519_privkey),
-                                     ed25519_privkey_len},
+                ed25519::PrivKeySpan{
+                        static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
                 from_epoch_ms(sent_timestamp_ms),
                 to_byte_span(recipient_pubkey->data),
                 ed25519::OptionalPrivKeySpan{
@@ -1044,8 +1039,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
     return c_encode_impl(error, error_len, [&] {
         return encode_for_community_inbox(
                 std::span{static_cast<const std::byte*>(plaintext), plaintext_len},
-                ed25519::PrivKeySpan{static_cast<const unsigned char*>(ed25519_privkey),
-                                     ed25519_privkey_len},
+                ed25519::PrivKeySpan{
+                        static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
                 std::chrono::milliseconds(sent_timestamp_ms),
                 to_byte_span(recipient_pubkey->data),
                 to_byte_span(community_pubkey->data),
@@ -1088,8 +1083,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_group(
     return c_encode_impl(error, error_len, [&] {
         return encode_for_group(
                 std::span{static_cast<const std::byte*>(plaintext), plaintext_len},
-                ed25519::PrivKeySpan{static_cast<const unsigned char*>(ed25519_privkey),
-                                     ed25519_privkey_len},
+                ed25519::PrivKeySpan{
+                        static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
                 std::chrono::milliseconds(sent_timestamp_ms),
                 to_byte_span(group_ed25519_pubkey->data),
                 to_byte_span(group_enc_key->data),
@@ -1153,8 +1148,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
                     group_keys, group_pk, payload, pro_backend_pubkey_cpp.data);
             result.success = true;
         } catch (const std::exception& e) {
-            result.error_len_incl_null_terminator =
-                    format_c_str(error, error_len, "{}", e.what());
+            result.error_len_incl_null_terminator = format_c_str(error, error_len, "{}", e.what());
         }
     } else if (keys->group_ed25519_pubkey.size) {
         result.error_len_incl_null_terminator = format_c_str(
@@ -1169,8 +1163,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
             try {
                 ed25519::PrivKeySpan privkey{
                         keys->decrypt_keys[index].data, keys->decrypt_keys[index].size};
-                result_cpp = decode_dm_envelope(
-                        privkey, payload, pro_backend_pubkey_cpp.data);
+                result_cpp = decode_dm_envelope(privkey, payload, pro_backend_pubkey_cpp.data);
                 result.success = true;
                 break;
             } catch (const std::exception& e) {

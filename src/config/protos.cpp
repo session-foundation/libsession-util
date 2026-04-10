@@ -1,9 +1,9 @@
 #include "session/config/protos.hpp"
 
-#include <oxen/log.hpp>
 #include <oxenc/hex.h>
 
 #include <array>
+#include <oxen/log.hpp>
 #include <stdexcept>
 #include <vector>
 

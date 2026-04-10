@@ -3,8 +3,8 @@
 #include <oxenc/hex.h>
 
 #include <charconv>
-#include <session/format.hpp>
 #include <optional>
+#include <session/format.hpp>
 #include <session/types.hpp>
 #include <stdexcept>
 #include <string_view>
@@ -203,7 +203,9 @@ LIBSESSION_C_API bool community_parse_partial_url(
 LIBSESSION_C_API void community_make_full_url(
         const char* base_url, const char* room, const unsigned char* pubkey, char* full_url) {
     auto full = session::config::community::full_url(
-            base_url, room, std::span<const std::byte>{reinterpret_cast<const std::byte*>(pubkey), 32});
+            base_url,
+            room,
+            std::span<const std::byte>{reinterpret_cast<const std::byte*>(pubkey), 32});
     assert(full.size() <= COMMUNITY_FULL_URL_MAX_LENGTH);
     std::memcpy(full_url, full.data(), full.size() + 1);
 }

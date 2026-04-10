@@ -1,5 +1,4 @@
 #include "session/random.hpp"
-#include "session/random.h"
 
 #include <fmt/ranges.h>
 #include <sodium/randombytes.h>
@@ -8,6 +7,7 @@
 #include <atomic>
 
 #include "session/export.h"
+#include "session/random.h"
 #include "session/util.hpp"
 
 namespace session::random {

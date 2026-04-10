@@ -110,8 +110,7 @@ secretstream_xchacha20poly1305_init_push_with_nonce(
     crypto_secretstream_xchacha20poly1305_state st;
 
     std::memcpy(header.data(), nonce.data(), ENCRYPT_HEADER);
-    crypto_core_hchacha20(
-            st.k, to_unsigned(header.data()), to_unsigned(key.data()), nullptr);
+    crypto_core_hchacha20(st.k, to_unsigned(header.data()), to_unsigned(key.data()), nullptr);
     static_assert(sizeof(st) == 52);
     std::memset(st.nonce, 0, 4 /*crypto_secretstream_xchacha20poly1305_COUNTERBYTES*/);
     st.nonce[0] = 1;

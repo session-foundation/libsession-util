@@ -492,10 +492,11 @@ TEST_CASE("User Groups -- (non-legacy) groups", "[config][groups][new]") {
     c2b.secretkey =
             session::to_vector(ed_sk);  // This one does match the group ID, so should propagate
     c2b.auth_data =                     // should get ignored, since we have a valid secret key set:
-                                        to_vector(
-            "01020304050000000000000000000000000000000000000000000000000000000000000000000000000000"
-            "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
-            "0000000000000000000000000000"_hex_b);
+            to_vector(
+                    "0102030405000000000000000000000000000000000000000000000000000000"
+                    "0000000000000000000000000000000000000000000000000000000000000000"
+                    "0000000000000000000000000000000000000000000000000000000000000000"
+                    "00000000"_hex_b);
     g2.set(c2b);
 
     std::tie(seqno, to_push, obs) = g2.push();
@@ -708,9 +709,7 @@ TEST_CASE("User Groups members C API", "[config][groups][c]") {
 
     REQUIRE(to_push->n_configs == 1);
     std::vector<std::pair<std::string, std::span<const std::byte>>> to_merge;
-    to_merge.emplace_back(
-            "fakehash1",
-            to_byte_span(to_push->config[0], to_push->config_lens[0]));
+    to_merge.emplace_back("fakehash1", to_byte_span(to_push->config[0], to_push->config_lens[0]));
     CHECK(c2.merge(to_merge) == std::unordered_set<std::string>{{"fakehash1"}});
 
     auto grp = c2.get_legacy_group(definitely_real_id);

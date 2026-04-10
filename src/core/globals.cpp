@@ -1,13 +1,12 @@
 #include <oxenc/hex.h>
 #include <sodium/utils.h>
 
-#include <session/crypto/ed25519.hpp>
-#include <session/random.hpp>
-
 #include <concepts>
 #include <oxen/log.hpp>
 #include <session/core/globals.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/format.hpp>
+#include <session/random.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
 

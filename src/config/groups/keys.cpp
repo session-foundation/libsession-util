@@ -6,20 +6,18 @@
 
 #include <chrono>
 #include <iterator>
+#include <oxen/log.hpp>
 #include <stdexcept>
 #include <unordered_set>
 
 #include "../../internal-util.hpp"
-
-#include <oxen/log.hpp>
-
 #include "../internal.hpp"
 #include "session/clock.hpp"
-#include "session/crypto/ed25519.hpp"
-#include "session/encrypt.hpp"
 #include "session/config/groups/info.hpp"
 #include "session/config/groups/keys.h"
 #include "session/config/groups/members.hpp"
+#include "session/crypto/ed25519.hpp"
+#include "session/encrypt.hpp"
 #include "session/hash.hpp"
 #include "session/multi_encrypt.hpp"
 #include "session/random.hpp"
@@ -232,8 +230,7 @@ std::span<const std::byte> Keys::rekey(Info& info, Members& members) {
     // have to use the x25519 conversion of a/A rather than the group's ed25519 pubkey.
     auto group_xpk = ed25519::pk_to_x25519(*_sign_pk);
 
-    auto group_xsk = ed25519::sk_to_x25519(
-            std::span<const std::byte, 64>{_sign_sk.data(), 64});
+    auto group_xsk = ed25519::sk_to_x25519(std::span<const std::byte, 64>{_sign_sk.data(), 64});
 
     // We need quasi-randomness: full secure random would be great, except that different admins
     // encrypting for the same update would always create different keys, but we want it
@@ -324,8 +321,7 @@ std::span<const std::byte> Keys::rekey(Info& info, Members& members) {
             std::vector<std::byte> junk_data;
             junk_data.resize(encrypted.size() * n_junk);
 
-            auto rng_seed =
-                    hash::blake2b_key<32>(junk_seed_hash_key, h1, _sign_sk);
+            auto rng_seed = hash::blake2b_key<32>(junk_seed_hash_key, h1, _sign_sk);
 
             random::fill_deterministic(junk_data, rng_seed);
             std::string_view junk_view = to_string_view(junk_data);
@@ -338,8 +334,7 @@ std::span<const std::byte> Keys::rekey(Info& info, Members& members) {
 
     // Finally we sign the message at put it as the ~ key (which is 0x7e, and thus comes later than
     // any other printable ascii key).
-    d.append_signature(
-            "~", [this](std::span<const std::byte> to_sign) { return sign(to_sign); });
+    d.append_signature("~", [this](std::span<const std::byte> to_sign) { return sign(to_sign); });
 
     // Load this key/config/gen into our pending variables
     pending_gen_ = gen;
@@ -380,8 +375,7 @@ std::vector<std::byte> Keys::key_supplement(const std::vector<std::string>& sids
     // have `B` (the session id) as an x25519 pubkey, we do this in x25519 space, which means we
     // have to use the x25519 conversion of a/A rather than the group's ed25519 pubkey.
     auto group_xpk = ed25519::pk_to_x25519(*_sign_pk);
-    auto group_xsk = ed25519::sk_to_x25519(
-            std::span<const std::byte, 64>{_sign_sk.data(), 64});
+    auto group_xsk = ed25519::sk_to_x25519(std::span<const std::byte, 64>{_sign_sk.data(), 64});
 
     // We need quasi-randomness here for the nonce: full secure random would be great, except that
     // different admins encrypting for the same update would always create different keys, but we
@@ -464,25 +458,18 @@ std::vector<std::byte> Keys::key_supplement(const std::vector<std::string>& sids
 
     // Finally we sign the message at put it as the ~ key (which is 0x7e, and thus comes later than
     // any other printable ascii key).
-    d.append_signature(
-            "~", [this](std::span<const std::byte> to_sign) { return sign(to_sign); });
+    d.append_signature("~", [this](std::span<const std::byte> to_sign) { return sign(to_sign); });
 
     return to_vector(d.view());
 }
 
 // Blinding factor for subaccounts: H(sessionid || groupid) mod L, where H is 64-byte blake2b, using
 // a hash key derived from the group's seed.
-b32 Keys::subaccount_blind_factor(
-        std::span<const std::byte, 32> session_xpk) const {
+b32 Keys::subaccount_blind_factor(std::span<const std::byte, 32> session_xpk) const {
 
     auto mask = seed_hash("SessionGroupSubaccountMask");
 
-    auto h = hash::blake2b_key<64>(
-            mask,
-            std::byte{0x05},
-            session_xpk,
-            std::byte{0x03},
-            *_sign_pk);
+    auto h = hash::blake2b_key<64>(mask, std::byte{0x05}, session_xpk, std::byte{0x03}, *_sign_pk);
 
     return ed25519::scalar_reduce(h);
 }
@@ -583,9 +570,7 @@ std::vector<std::byte> Keys::swarm_subaccount_token(
 }
 
 Keys::swarm_auth Keys::swarm_subaccount_sign(
-        std::span<const std::byte> msg,
-        std::span<const std::byte> sign_val,
-        bool binary) const {
+        std::span<const std::byte> msg, std::span<const std::byte> sign_val, bool binary) const {
     if (sign_val.size() != 100)
         throw std::logic_error{"Invalid signing value: size is wrong"};
 
@@ -668,9 +653,9 @@ Keys::swarm_auth Keys::swarm_subaccount_sign(
     // Compute S = r + H(R || A || M) a mod L:  (with A = kT, a = kt)
     b64 hram;
     hash::sha512(hram, R, kT, msg);
-    ed25519::scalar_reduce(S, hram);          // S = H(R||A||M) % L
-    ed25519::scalar_mul(S, S, kt);            // S *= a
-    ed25519::scalar_add(S, S, r);             // S += r
+    ed25519::scalar_reduce(S, hram);  // S = H(R||A||M) % L
+    ed25519::scalar_mul(S, S, kt);    // S *= a
+    ed25519::scalar_add(S, S, r);     // S += r
 
     // sig is now set to the desired R || S, with S = r + H(R || A || M)a (all mod L)
 
@@ -707,8 +692,7 @@ bool Keys::swarm_verify_subaccount(
         return false;
 
     auto prefix = sign_val.subspan<0, 4>();
-    if (prefix[0] != std::byte{0x03} &&
-        (prefix[1] & SUBACC_FLAG_ANY_PREFIX) == std::byte{0})
+    if (prefix[0] != std::byte{0x03} && (prefix[1] & SUBACC_FLAG_ANY_PREFIX) == std::byte{0})
         return false;  // require either 03 prefix match, or the "any prefix" flag
 
     if ((prefix[1] & SUBACC_FLAG_READ) == std::byte{0})
@@ -1090,7 +1074,12 @@ std::vector<std::byte> Keys::encrypt_message(
         std::span<const std::byte> plaintext, bool compress, size_t padding) const {
     assert(_sign_pk);
     std::vector<std::byte> ciphertext = encrypt_for_group(
-            ed25519::PrivKeySpan::from(user_ed25519_sk), *_sign_pk, group_enc_key(), plaintext, compress, padding);
+            ed25519::PrivKeySpan::from(user_ed25519_sk),
+            *_sign_pk,
+            group_enc_key(),
+            plaintext,
+            compress,
+            padding);
     return ciphertext;
 }
 
@@ -1183,7 +1172,8 @@ LIBSESSION_C_API int groups_keys_init(
 
     ed25519::PrivKeySpan user_sk{user_ed25519_secretkey, 64};
     auto group_pk = to_byte_span<32>(group_ed25519_pubkey);
-    ed25519::OptionalPrivKeySpan group_sk{group_ed25519_secretkey, group_ed25519_secretkey ? 64u : 0u};
+    ed25519::OptionalPrivKeySpan group_sk{
+            group_ed25519_secretkey, group_ed25519_secretkey ? 64u : 0u};
     std::optional<std::span<const std::byte>> dumped;
     if (dump && dumplen)
         dumped.emplace(to_byte_span(dump, dumplen));
@@ -1366,8 +1356,7 @@ LIBSESSION_C_API void groups_keys_encrypt_message(
 
     std::vector<std::byte> ciphertext;
     try {
-        ciphertext = unbox(conf).encrypt_message(
-                to_byte_span(plaintext_in, plaintext_len));
+        ciphertext = unbox(conf).encrypt_message(to_byte_span(plaintext_in, plaintext_len));
         *ciphertext_out = static_cast<unsigned char*>(std::malloc(ciphertext.size()));
         std::memcpy(*ciphertext_out, ciphertext.data(), ciphertext.size());
         *ciphertext_len = ciphertext.size();
@@ -1389,8 +1378,8 @@ LIBSESSION_C_API bool groups_keys_decrypt_message(
     return wrap_exceptions(
             conf,
             [&] {
-                auto [sid, plaintext] = unbox(conf).decrypt_message(
-                        to_byte_span(ciphertext_in, ciphertext_len));
+                auto [sid, plaintext] =
+                        unbox(conf).decrypt_message(to_byte_span(ciphertext_in, ciphertext_len));
                 std::memcpy(session_id, sid.c_str(), sid.size() + 1);
                 *plaintext_out = static_cast<unsigned char*>(std::malloc(plaintext.size()));
                 std::memcpy(*plaintext_out, plaintext.data(), plaintext.size());
@@ -1497,8 +1486,7 @@ LIBSESSION_C_API bool groups_keys_swarm_subaccount_sign(
             conf,
             [&] {
                 auto auth = unbox(conf).swarm_subaccount_sign(
-                        to_byte_span(msg, msg_len),
-                        to_byte_span(signing_value, 100));
+                        to_byte_span(msg, msg_len), to_byte_span(signing_value, 100));
                 assert(auth.subaccount.size() == 48);
                 assert(auth.subaccount_sig.size() == 88);
                 assert(auth.signature.size() == 88);
@@ -1527,9 +1515,7 @@ LIBSESSION_C_API bool groups_keys_swarm_subaccount_sign_binary(
             conf,
             [&] {
                 auto auth = unbox(conf).swarm_subaccount_sign(
-                        to_byte_span(msg, msg_len),
-                        to_byte_span(signing_value, 100),
-                        true);
+                        to_byte_span(msg, msg_len), to_byte_span(signing_value, 100), true);
                 assert(auth.subaccount.size() == 36);
                 assert(auth.subaccount_sig.size() == 64);
                 assert(auth.signature.size() == 64);

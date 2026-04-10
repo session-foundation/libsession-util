@@ -365,7 +365,11 @@ TEST_CASE("Conversations (C API)", "[config][conversations][c]") {
     CHECK(conf->last_error == "Invalid community URL: room token contains invalid characters"sv);
 
     CHECK(convo_info_volatile_get_or_construct_community(
-            conf, &og, "http://Example.ORG:5678", "SudokuRoom", to_unsigned(community_pubkey.data())));
+            conf,
+            &og,
+            "http://Example.ORG:5678",
+            "SudokuRoom",
+            to_unsigned(community_pubkey.data())));
     CHECK(conf->last_error == nullptr);
     CHECK(og.base_url == "http://example.org:5678"sv);  // Note: lower-case
     CHECK(og.room == "sudokuroom"sv);                   // Note: lower-case

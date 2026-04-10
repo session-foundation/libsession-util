@@ -150,8 +150,10 @@ TEST_CASE("blake2b_hasher", "[hash][blake2b]") {
 
     // Pers + multi-update consistency.
     b32 pers_multi;
-    blake2b_hasher<32>{nullkey, pers}.update("Test"_bytes).update("Message"_bytes).finalize(
-            pers_multi);
+    blake2b_hasher<32>{nullkey, pers}
+            .update("Test"_bytes)
+            .update("Message"_bytes)
+            .finalize(pers_multi);
     CHECK(pers_out == pers_multi);
 
     // Different pers → different output.

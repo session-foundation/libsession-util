@@ -482,8 +482,7 @@ class Contacts : public ConfigBase {
   protected:
     // Drills into the nested dicts to access community details
     DictFieldProxy blinded_contact_field(
-            const blinded_contact_info& bc,
-            std::span<const std::byte>* get_pubkey = nullptr) const;
+            const blinded_contact_info& bc, std::span<const std::byte>* get_pubkey = nullptr) const;
 
   public:
     /// API: contacts/Contacts::blinded

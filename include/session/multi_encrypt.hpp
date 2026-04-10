@@ -98,8 +98,8 @@ extern const size_t encrypt_multiple_message_overhead;
 ///   used to generate individual keys for domain separation, and so should ideally have a different
 ///   value in different contexts (i.e. group keys uses one value, kicked messages use another,
 ///   etc.).  *Can* be empty, but should be set to something.
-/// - `call` -- this is invoked for each different encrypted value with a std::span<const std::byte>;
-///   the caller must copy as needed as the span doesn't remain valid past the call.
+/// - `call` -- this is invoked for each different encrypted value with a std::span<const
+///   std::byte>; the caller must copy as needed as the span doesn't remain valid past the call.
 /// - `ignore_invalid_recipient` -- if given and true then any recipients that appear to have
 ///   invalid public keys (i.e. the shared key multiplication fails) will be silently ignored (the
 ///   callback will not be called).  If not given (or false) then such a failure for any recipient
@@ -188,12 +188,14 @@ void encrypt_for_multiple(std::string_view message, Args&&... args) {
 template <
         typename NextCiphertext,
         typename = std::enable_if_t<
-                std::is_invocable_r_v<
-                        std::optional<std::span<const std::byte>>,
-                        NextCiphertext> ||
+                std::is_invocable_r_v<std::optional<std::span<const std::byte>>, NextCiphertext> ||
                 std::is_invocable_r_v<std::optional<std::vector<std::byte>>, NextCiphertext> ||
-                std::is_invocable_r_v<std::optional<std::span<const unsigned char>>, NextCiphertext> ||  // legacy
-                std::is_invocable_r_v<std::optional<std::vector<unsigned char>>, NextCiphertext> ||  // legacy
+                std::is_invocable_r_v<
+                        std::optional<std::span<const unsigned char>>,
+                        NextCiphertext> ||  // legacy
+                std::is_invocable_r_v<
+                        std::optional<std::vector<unsigned char>>,
+                        NextCiphertext> ||  // legacy
                 std::is_invocable_r_v<std::optional<std::string_view>, NextCiphertext> ||
                 std::is_invocable_r_v<std::optional<std::string>, NextCiphertext>>>
 std::optional<std::vector<std::byte>> decrypt_for_multiple(

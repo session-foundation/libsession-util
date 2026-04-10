@@ -1,5 +1,6 @@
 #include <session/config/pro.h>
 #include <session/pro_backend.h>
+
 #include <session/config/pro.hpp>
 #include <session/crypto/ed25519.hpp>
 #include <session/sodium_array.hpp>
@@ -52,9 +53,7 @@ bool ProConfig::load(const dict& root) {
     // Derive the rotating public key from the seed and populate the proof's pubkey and the outer
     // private key
     ed25519::seed_keypair(
-            proof.rotating_pubkey,
-            rotating_privkey,
-            std::span{*maybe_rotating_seed}.first<32>());
+            proof.rotating_pubkey, rotating_privkey, std::span{*maybe_rotating_seed}.first<32>());
     return true;
 }
 

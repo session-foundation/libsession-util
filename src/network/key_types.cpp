@@ -3,6 +3,7 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
+
 #include <cstring>
 #include <session/crypto/ed25519.hpp>
 #include <session/crypto/x25519.hpp>
@@ -25,9 +26,8 @@ namespace detail {
 
     void load_from_bytes(void* buffer, size_t length, std::string_view bytes) {
         if (bytes.size() != length)
-            throw std::runtime_error{
-                    "Key data is invalid: expected {} bytes, received {}"_format(
-                            length, bytes.size())};
+            throw std::runtime_error{"Key data is invalid: expected {} bytes, received {}"_format(
+                    length, bytes.size())};
         std::memmove(buffer, bytes.data(), length);
     }
 

@@ -239,7 +239,8 @@ struct blake2b_hasher {
 template <Blake2BOutputContainer Out, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0)
 void blake2b_key(Out& out, const Key& key, const T&... args) {
-    blake2b_hasher<detail::container_extent_v<Out>>{key, std::nullopt}.update(args...).finalize(out);
+    blake2b_hasher<detail::container_extent_v<Out>>{key, std::nullopt}.update(args...).finalize(
+            out);
 }
 template <size_t N, Blake2BKey Key, HashInput... T>
     requires(sizeof...(T) > 0 && N >= 1 && N <= 64)
@@ -532,7 +533,7 @@ namespace session { inline namespace literals {
     template <BytesLiteral Lit>
         requires(Lit.size == 16)
     consteval auto operator""_b2b_pers() {
-        return operator""_bytes<Lit>();
+        return operator""_bytes < Lit>();
     }
 
-} }  // namespace session::literals
+}}  // namespace session::literals

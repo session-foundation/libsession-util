@@ -88,19 +88,14 @@ std::unordered_set<std::string> ConfigBase::merge(
 
         for (auto& [h, c] : configs) {
             try {
-                auto unwrapped = protos::unwrap_config(
-                        _keys.front(),
-                        c,
-                        storage_namespace());
+                auto unwrapped = protos::unwrap_config(_keys.front(), c, storage_namespace());
 
                 // There was a release of one of the clients which resulted in double-wrapped
                 // config messages so we now need to try to double-unwrap in order to better
                 // support multi-device for users running those old versions
                 try {
-                    auto unwrapped2 = protos::unwrap_config(
-                            _keys.front(),
-                            unwrapped,
-                            storage_namespace());
+                    auto unwrapped2 =
+                            protos::unwrap_config(_keys.front(), unwrapped, storage_namespace());
                     log::warning(
                             cat,
                             "Found double wraped message in namespace {}",
@@ -217,8 +212,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const std::byte
                 if (actual_hash != final_hash)
                     throw std::runtime_error{
                             "recombined message hash ({}) does not match part hash ({})"_format(
-                                    actual_hash,
-                                    final_hash)};
+                                    actual_hash, final_hash)};
             }
 
             log::debug(
@@ -788,8 +782,7 @@ ConfigBase::push() {
         encrypt_inplace(msg, key(), encryption_domain());
 
         if (accepts_protobuf() && !_keys.empty()) {
-            auto pbwrapped = protos::wrap_config(
-                    _keys.front(), msg, s, storage_namespace());
+            auto pbwrapped = protos::wrap_config(_keys.front(), msg, s, storage_namespace());
             // If protobuf wrapping would push us *over* the max message size then we just skip the
             // protobuf wrapping because older clients (that need protobuf) also don't support
             // multipart anyway, so we can't produce a message they will accept no matter what.
@@ -868,8 +861,7 @@ void ConfigSig::init_sig_keys(
         std::optional<std::span<const std::byte, 32>> ed25519_pubkey,
         const ed25519::OptionalPrivKeySpan& ed25519_secretkey) {
     if (ed25519_secretkey) {
-        if (ed25519_pubkey &&
-            !std::ranges::equal(*ed25519_pubkey, ed25519_secretkey->pubkey()))
+        if (ed25519_pubkey && !std::ranges::equal(*ed25519_pubkey, ed25519_secretkey->pubkey()))
             throw std::invalid_argument{"Invalid signing keys: secret key and pubkey do not match"};
         set_sig_keys(*ed25519_secretkey);
     } else if (ed25519_pubkey) {
@@ -1099,11 +1091,11 @@ cleared_b32 ConfigSig::seed_hash(std::string_view key) const {
 
 namespace {
 
-void set_error(config_object* conf, std::string e) {
-    auto& error = unbox(conf).error;
-    error = std::move(e);
-    conf->last_error = error.c_str();
-}
+    void set_error(config_object* conf, std::string e) {
+        auto& error = unbox(conf).error;
+        error = std::move(e);
+        conf->last_error = error.c_str();
+    }
 
 }  // namespace
 
@@ -1134,8 +1126,7 @@ LIBSESSION_EXPORT config_string_list* config_merge(
         std::vector<std::pair<std::string, std::span<const std::byte>>> confs;
         confs.reserve(count);
         for (size_t i = 0; i < count; i++)
-            confs.emplace_back(
-                    msg_hashes[i], to_byte_span(configs[i], lengths[i]));
+            confs.emplace_back(msg_hashes[i], to_byte_span(configs[i], lengths[i]));
 
         return make_string_list(config.merge(confs));
     });

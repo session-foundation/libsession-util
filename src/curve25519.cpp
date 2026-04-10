@@ -1,8 +1,7 @@
-#include "session/crypto/ed25519.hpp"
-#include "session/crypto/x25519.hpp"
-
 #include <cstring>
 
+#include "session/crypto/ed25519.hpp"
+#include "session/crypto/x25519.hpp"
 #include "session/export.h"
 #include "session/util.hpp"
 

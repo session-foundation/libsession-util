@@ -1,7 +1,7 @@
 #pragma once
 
-#include <session/clock.hpp>
 #include <cstddef>
+#include <session/clock.hpp>
 #include <span>
 #include <string>
 

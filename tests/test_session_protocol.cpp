@@ -315,8 +315,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Check non-encryptable messages produce only plaintext") {
         SECTION("Community inbox") {
-            auto [blind15_pk, blind15_sk] =
-                    session::blind15_key_pair(keys.ed_sk1, to_byte_span<32>(keys.ed_pk1.data()), /*blind factor*/ nullptr);
+            auto [blind15_pk, blind15_sk] = session::blind15_key_pair(
+                    keys.ed_sk1, to_byte_span<32>(keys.ed_pk1.data()), /*blind factor*/ nullptr);
             cbytes33 blind15_recipient = {};
             blind15_recipient.data[0] = 0x15;
             std::memcpy(blind15_recipient.data + 1, blind15_pk.data(), blind15_pk.size());
@@ -525,9 +525,14 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             cbytes33 group_v2_session_pk = {};
             cbytes32 group_v2_session_sk = {};
             group_v2_session_pk.data[0] = 0x03;
-            std::memcpy(group_v2_session_pk.data + 1, to_unsigned(group_v2_pk.data()), group_v2_pk.size());
             std::memcpy(
-                    group_v2_session_sk.data, to_unsigned(group_v2_sk.data()), sizeof(group_v2_session_sk.data));
+                    group_v2_session_pk.data + 1,
+                    to_unsigned(group_v2_pk.data()),
+                    group_v2_pk.size());
+            std::memcpy(
+                    group_v2_session_sk.data,
+                    to_unsigned(group_v2_sk.data()),
+                    sizeof(group_v2_session_sk.data));
 
             encrypt_result = session_protocol_encode_for_group(
                     protobuf_content.plaintext.data(),

@@ -20,11 +20,10 @@ namespace session::ed25519 {
 /// Concept for types that implicitly convert to a 32- or 64-byte byte/unsigned-char span.
 /// Used by PrivKeySpan and OptionalPrivKeySpan to accept Ed25519 seeds and full keys.
 template <typename T>
-concept Ed25519KeySpannable =
-        std::convertible_to<const T&, std::span<const std::byte, 64>> ||
-        std::convertible_to<const T&, std::span<const std::byte, 32>> ||
-        std::convertible_to<const T&, std::span<const unsigned char, 64>> ||
-        std::convertible_to<const T&, std::span<const unsigned char, 32>>;
+concept Ed25519KeySpannable = std::convertible_to<const T&, std::span<const std::byte, 64>> ||
+                              std::convertible_to<const T&, std::span<const std::byte, 32>> ||
+                              std::convertible_to<const T&, std::span<const unsigned char, 64>> ||
+                              std::convertible_to<const T&, std::span<const unsigned char, 32>>;
 
 struct PrivKeySpan {
     template <Ed25519KeySpannable T>
@@ -50,12 +49,8 @@ struct PrivKeySpan {
             PrivKeySpan{reinterpret_cast<const std::byte*>(data), size} {}
 
     // Named factory for dynamic-span input (runtime size check, throws if not 32 or 64).
-    static PrivKeySpan from(std::span<const std::byte> key) {
-        return {key.data(), key.size()};
-    }
-    static PrivKeySpan from(std::span<const unsigned char> key) {
-        return {key.data(), key.size()};
-    }
+    static PrivKeySpan from(std::span<const std::byte> key) { return {key.data(), key.size()}; }
+    static PrivKeySpan from(std::span<const unsigned char> key) { return {key.data(), key.size()}; }
 
     PrivKeySpan(const PrivKeySpan&) = delete;
     PrivKeySpan& operator=(const PrivKeySpan&) = delete;
@@ -159,7 +154,10 @@ inline std::span<const std::byte, 32> extract_seed(
 /// - The 64-byte ed25519 signature
 ///
 /// Write-to-output form.
-void sign(std::span<std::byte, 64> sig, const PrivKeySpan& ed25519_privkey, std::span<const std::byte> msg);
+void sign(
+        std::span<std::byte, 64> sig,
+        const PrivKeySpan& ed25519_privkey,
+        std::span<const std::byte> msg);
 /// Return-value form.
 b64 sign(const PrivKeySpan& ed25519_privkey, std::span<const std::byte> msg);
 
@@ -262,8 +260,7 @@ void scalarmult_noclamp(
         std::span<const std::byte, 32> scalar,
         std::span<const std::byte, 32> point);
 /// Return-value form.
-b32 scalarmult_noclamp(
-        std::span<const std::byte, 32> scalar, std::span<const std::byte, 32> point);
+b32 scalarmult_noclamp(std::span<const std::byte, 32> scalar, std::span<const std::byte, 32> point);
 
 /// Reduces a 64-byte scalar modulo the Ed25519 group order to 32 bytes.
 /// Write-to-output form: result written into `out`.

@@ -30,5 +30,4 @@ struct Disappearing {
     std::chrono::seconds timer = 0s;
 };
 
-
 }  // namespace session

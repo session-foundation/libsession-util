@@ -133,8 +133,7 @@ class ProProof {
     ///
     /// Outputs:
     /// - `bool` - True if the message was signed by the embedded `rotating_pubkey` false otherwise.
-    bool verify_message(
-            std::span<const std::byte, 64> sig, std::span<const std::byte> msg) const;
+    bool verify_message(std::span<const std::byte, 64> sig, std::span<const std::byte> msg) const;
 
     /// API: pro/Proof::is_active
     ///
@@ -285,7 +284,6 @@ struct DecodedCommunityMessage {
     // the embedded pro data/proof was valid, invalid or whether or not the proof has expired.
     std::optional<DecodedPro> pro;
 };
-
 
 /// API: session_protocol/pro_features_for_utf8
 ///

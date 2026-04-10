@@ -6,8 +6,8 @@
 
 #include <charconv>
 #include <chrono>
-#include <session/format.hpp>
 #include <iterator>
+#include <session/format.hpp>
 #include <stdexcept>
 #include <variant>
 
@@ -240,9 +240,7 @@ std::optional<convo::community> ConvoInfoVolatile::get_community(
 }
 
 convo::community ConvoInfoVolatile::get_or_construct_community(
-        std::string_view base_url,
-        std::string_view room,
-        std::span<const std::byte> pubkey) const {
+        std::string_view base_url, std::string_view room, std::span<const std::byte> pubkey) const {
     convo::community result{base_url, community::canonical_room(room), pubkey.first<32>()};
 
     if (auto* info_dict = community_field(result).dict())

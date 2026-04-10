@@ -15,7 +15,7 @@ typedef struct convo_info_volatile_1to1 {
     bool unread;        // true if the conversation is explicitly marked unread
 
     bool has_pro_gen_index_hash;     // Flag indicating if hash is set
-    cbytes32 pro_gen_index_hash;      // Hash of the generation index set by the Session Pro Backend
+    cbytes32 pro_gen_index_hash;     // Hash of the generation index set by the Session Pro Backend
     uint64_t pro_expiry_unix_ts_ms;  // Unix epoch timestamp to which this contacts entitlement to
                                      // Session Pro features is valid to
 } convo_info_volatile_1to1;
@@ -52,7 +52,7 @@ typedef struct convo_info_volatile_blinded_1to1 {
     bool unread;        // true if the conversation is explicitly marked unread
 
     bool has_pro_gen_index_hash;     // Flag indicating if hash is set
-    cbytes32 pro_gen_index_hash;      // Hash of the generation index set by the Session Pro Backend
+    cbytes32 pro_gen_index_hash;     // Hash of the generation index set by the Session Pro Backend
     uint64_t pro_expiry_unix_ts_ms;  // Unix epoch timestamp to which this contacts entitlement to
                                      // Session Pro features is valid to
 } convo_info_volatile_blinded_1to1;

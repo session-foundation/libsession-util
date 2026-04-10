@@ -1,11 +1,10 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 
-#include <session/crypto/ed25519.hpp>
-
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_exception.hpp>
 #include <session/config.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/hash.hpp>
 #include <session/util.hpp>
 
@@ -335,11 +334,8 @@ TEST_CASE("config message signature", "[config][signing]") {
         auto sig = ed25519::sign(sk, data);
         return std::vector<std::byte>{sig.begin(), sig.end()};
     };
-    auto verifier = [&sk](
-                            std::span<const std::byte> data,
-                            std::span<const std::byte> signature) {
-        return signature.size() == 64 &&
-               ed25519::verify(signature.first<64>(), sk.pubkey(), data);
+    auto verifier = [&sk](std::span<const std::byte> data, std::span<const std::byte> signature) {
+        return signature.size() == 64 && ed25519::verify(signature.first<64>(), sk.pubkey(), data);
     };
 
     m.signer = signer;

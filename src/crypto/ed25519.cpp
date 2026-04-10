@@ -117,8 +117,8 @@ b32 scalarmult_base(std::span<const std::byte, 32> scalar) {
 }
 
 void scalarmult_base_noclamp(std::span<std::byte, 32> out, std::span<const std::byte, 32> scalar) {
-    if (0 != crypto_scalarmult_ed25519_base_noclamp(
-                     to_unsigned(out.data()), to_unsigned(scalar.data())))
+    if (0 !=
+        crypto_scalarmult_ed25519_base_noclamp(to_unsigned(out.data()), to_unsigned(scalar.data())))
         throw std::runtime_error{"crypto_scalarmult_ed25519_base_noclamp failed"};
 }
 
@@ -132,8 +132,9 @@ void scalarmult_noclamp(
         std::span<std::byte, 32> out,
         std::span<const std::byte, 32> scalar,
         std::span<const std::byte, 32> point) {
-    if (0 != crypto_scalarmult_ed25519_noclamp(
-                     to_unsigned(out.data()), to_unsigned(scalar.data()), to_unsigned(point.data())))
+    if (0 !=
+        crypto_scalarmult_ed25519_noclamp(
+                to_unsigned(out.data()), to_unsigned(scalar.data()), to_unsigned(point.data())))
         throw std::runtime_error{"crypto_scalarmult_ed25519_noclamp failed"};
 }
 
@@ -300,8 +301,7 @@ LIBSESSION_C_API bool session_ed25519_pro_privkey_for_ed25519_seed(
         const unsigned char* ed25519_seed, unsigned char* ed25519_sk_out) {
     try {
         auto [pub, sk] = session::ed25519::derive_subkey(
-                to_byte_span<32>(ed25519_seed),
-                session::pro_backend::pro_subkey_domain);
+                to_byte_span<32>(ed25519_seed), session::pro_backend::pro_subkey_domain);
         std::memcpy(ed25519_sk_out, sk.data(), sk.size());
         return true;
     } catch (...) {

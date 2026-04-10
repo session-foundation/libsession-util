@@ -75,12 +75,17 @@ int do_upload(
     req.on_progress = [&](int64_t acked, int64_t total) {
         auto now = clock::now();
         auto since_last = std::chrono::duration<double>(now - last_progress).count();
-        auto recent_speed =
-                since_last > 0 ? human_size{static_cast<int64_t>((acked - last_progress_bytes) /
-                                                                  since_last)}
-                               : human_size{0};
+        auto recent_speed = since_last > 0 ? human_size{static_cast<int64_t>(
+                                                     (acked - last_progress_bytes) / since_last)}
+                                           : human_size{0};
         auto pct = total > 0 ? 100.0 * acked / total : 0.0;
-        fmt::print(stderr, "[{}/{}] {:.1f}% {}/s\n", human_size{acked}, human_size{total}, pct, recent_speed);
+        fmt::print(
+                stderr,
+                "[{}/{}] {:.1f}% {}/s\n",
+                human_size{acked},
+                human_size{total},
+                pct,
+                recent_speed);
         last_progress = now;
         last_progress_bytes = acked;
     };
@@ -259,7 +264,7 @@ int run(const CliArgs& args, bool is_upload) {
     auto netid = args.testnet ? net::opt::netid::testnet() : net::opt::netid::mainnet();
     auto router = args.srouter ? net::opt::router::session_router() : net::opt::router::direct();
     auto cache_dir = std::filesystem::temp_directory_path() /
-                      (args.testnet ? "quic_files_cache_testnet" : "quic_files_cache");
+                     (args.testnet ? "quic_files_cache_testnet" : "quic_files_cache");
     std::filesystem::create_directories(cache_dir);
 
     std::vector<std::any> net_opts;
@@ -392,8 +397,7 @@ int main(int argc, char* argv[]) {
     // For direct mode, default the server pubkey and address from the known file server configs.
     if (!args.srouter) {
         if (args.server_pubkey_hex.empty()) {
-            auto& pk = args.testnet ? fs::QUIC_FS_ED_PUBKEY_TESTNET
-                                    : fs::QUIC_FS_ED_PUBKEY_MAINNET;
+            auto& pk = args.testnet ? fs::QUIC_FS_ED_PUBKEY_TESTNET : fs::QUIC_FS_ED_PUBKEY_MAINNET;
             args.server_pubkey_hex = oxenc::to_hex(pk.begin(), pk.end());
         }
         if (args.server_address == "::1") {

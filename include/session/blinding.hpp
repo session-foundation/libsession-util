@@ -65,8 +65,7 @@ b32 blind15_factor(std::span<const std::byte, 32> server_pk);
 /// Returns the blinding factor for 25 blinding.  Typically this isn't used directly, but is
 /// exposed for debugging/testing.  Takes session id and server pk in bytes, not hex.  session
 /// id can be 05-prefixed (33 bytes) or unprefixed (32 bytes).
-b32 blind25_factor(
-        std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk);
+b32 blind25_factor(std::span<const std::byte> session_id, std::span<const std::byte, 32> server_pk);
 
 /// Computes the two possible 15-blinded ids from a session id and server pubkey.  Values accepted
 /// and returned are hex-encoded.
@@ -140,8 +139,8 @@ std::pair<b32, cleared_b32> blind15_key_pair(
 ///
 /// Can optionally also return the blinding factor, k', by providing a pointer to a b32; if
 /// non-nullptr then k' will be written to it, where k' = ±k.  Here, `k'` can be negative to cancel
-/// out a negative in the true pubkey, which the remote client will always assume is not present when
-/// it does a Session ID -> Ed25519 conversion for blinding purposes.
+/// out a negative in the true pubkey, which the remote client will always assume is not present
+/// when it does a Session ID -> Ed25519 conversion for blinding purposes.
 ///
 /// It is recommended to pass the full 64-byte libsodium-style secret key for `ed25519_sk` (i.e.
 /// seed + appended pubkey) as with just the 32-byte seed the public key has to be recomputed.

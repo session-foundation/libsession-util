@@ -67,9 +67,7 @@ void encrypt_inplace(
 /// - `key_base` -- Fixed key that all clients, must be 32 bytes.
 /// - `domain` -- short string for the keyed hash
 void encrypt_prealloced(
-        std::span<std::byte> message,
-        std::span<const std::byte> key_base,
-        std::string_view domain);
+        std::span<std::byte> message, std::span<const std::byte> key_base, std::string_view domain);
 
 /// API: encrypt/ENCRYPT_DATA_OVERHEAD
 ///

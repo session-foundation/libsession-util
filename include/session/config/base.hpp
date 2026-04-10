@@ -175,12 +175,11 @@ class ConfigBase : public ConfigSig {
     std::unordered_set<std::string> _old_hashes;
 
     struct PartialMessage {
-        int index;                        // 0-based index of this part
-        std::string message_id;           // storage server message hash of this part
+        int index;                    // 0-based index of this part
+        std::string message_id;       // storage server message hash of this part
         std::vector<std::byte> data;  // Data chunk
 
-        PartialMessage(
-                int index, std::string_view message_id, std::span<const std::byte> data) :
+        PartialMessage(int index, std::string_view message_id, std::span<const std::byte> data) :
                 index{index}, message_id{message_id}, data{data.begin(), data.end()} {}
     };
     struct PartialMessages {

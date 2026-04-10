@@ -167,9 +167,9 @@ struct DecryptV2Error : std::runtime_error {
 
 /// Result of decrypt_incoming_v2.
 struct DecryptV2Result {
-    std::vector<std::byte> content;               ///< Decrypted message content.
-    b33 sender_session_id;                        ///< 05-prefixed Session ID of the sender.
-    std::optional<b64> pro_signature;             ///< Pro sig, if present.
+    std::vector<std::byte> content;    ///< Decrypted message content.
+    b33 sender_session_id;             ///< 05-prefixed Session ID of the sender.
+    std::optional<b64> pro_signature;  ///< Pro sig, if present.
 };
 
 /// API: crypto/decrypt_incoming_v2_prefix

@@ -52,7 +52,8 @@ TEST_CASE("Pro", "[config][pro]") {
 
         // Write the signature into the proof
         ed25519::sign(pro_cpp.proof.sig, signing_sk, hash_to_sign_cpp);
-        ed25519::sign(to_byte_span(pro.proof.sig.data), signing_sk, to_byte_span(hash_to_sign.data));
+        ed25519::sign(
+                to_byte_span(pro.proof.sig.data), signing_sk, to_byte_span(hash_to_sign.data));
     }
 
     // Verify expiry

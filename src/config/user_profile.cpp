@@ -81,8 +81,7 @@ void UserProfile::set_profile_pic(profile_pic pic) {
     set_profile_pic(pic.url, pic.key);
 }
 
-void UserProfile::set_reupload_profile_pic(
-        std::string_view url, std::span<const std::byte> key) {
+void UserProfile::set_reupload_profile_pic(std::string_view url, std::span<const std::byte> key) {
     auto current_url = data["P"].string_view_or("");
     auto current_key_str = data["Q"].string_view_or("");
     std::string_view new_key_str{reinterpret_cast<const char*>(key.data()), key.size()};

@@ -6,16 +6,16 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
-#include <session/crypto/ed25519.hpp>
 
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
-#include <session/format.hpp>
 #include <oxen/quic/loop.hpp>
 #include <session/clock.hpp>
 #include <session/core.hpp>
 #include <session/core/schema/schema_registry.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/format.hpp>
 #include <session/network/session_network.hpp>
 #include <session/network/session_network_types.hpp>
 #include <session/pro_backend.hpp>
@@ -147,12 +147,8 @@ void Core::_poll() {
     net->get_swarm(
             globals.pubkey_x25519(),
             false,
-            [this,
-             net,
-             namespaces,
-             ed25519_hex,
-             now_ms,
-             ns_sig = std::move(ns_sig)](auto, auto swarm) {
+            [this, net, namespaces, ed25519_hex, now_ms, ns_sig = std::move(ns_sig)](
+                    auto, auto swarm) {
                 if (swarm.empty())
                     return;
 
@@ -490,8 +486,7 @@ void Core::_handle_pfs_response(std::span<const std::byte, 33> sid, std::string 
                 in.require_signature(
                         "~",
                         [&x25519_pub](
-                                std::span<const std::byte> b,
-                                std::span<const std::byte> sig) {
+                                std::span<const std::byte> b, std::span<const std::byte> sig) {
                             if (sig.size() != 64 ||
                                 !xed25519::verify(sig.first<64>(), x25519_pub, b))
                                 throw std::runtime_error{"signature verification failed"};

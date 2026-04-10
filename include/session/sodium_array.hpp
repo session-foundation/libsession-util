@@ -11,7 +11,6 @@ void sodium_buffer_deallocate(void* p);
 // Calls sodium_memzero to zero a buffer
 void sodium_zero_buffer(void* ptr, size_t size);
 
-
 // Wrapper around a type that uses `sodium_memzero` to zero the container on destruction; may only
 // be used with trivially destructible types.
 template <typename T, typename = std::enable_if_t<std::is_trivially_destructible_v<T>>>
@@ -37,7 +36,6 @@ template <size_t N>
 using cleared_bytes = cleared_array<std::byte, N>;
 using cleared_b32 = cleared_bytes<32>;
 using cleared_b64 = cleared_bytes<64>;
-
 
 // sodium Allocator wrapper; this allocates/frees via libsodium, which is designed for dealing with
 // sensitive data.  It is as a result slower and has more overhead than a standard allocator and
@@ -72,9 +70,7 @@ template <typename T>
 struct clearing_allocator {
     using value_type = T;
 
-    [[nodiscard]] static T* allocate(std::size_t n) {
-        return std::allocator<T>{}.allocate(n);
-    }
+    [[nodiscard]] static T* allocate(std::size_t n) { return std::allocator<T>{}.allocate(n); }
 
     static void deallocate(T* p, std::size_t n) {
         sodium_zero_buffer(p, n * sizeof(T));
@@ -82,7 +78,9 @@ struct clearing_allocator {
     }
 
     template <typename T2>
-    bool operator==(const clearing_allocator<T2>&) const noexcept { return true; }
+    bool operator==(const clearing_allocator<T2>&) const noexcept {
+        return true;
+    }
 };
 
 /// Vector that zeros its buffer on deallocation (including when resizing).  Lighter weight

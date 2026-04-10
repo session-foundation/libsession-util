@@ -113,9 +113,7 @@ void QuicTransport::verify_connectivity(
         if (_pending_requests.count(pubkey_hex) == 0 &&
             _pending_verification_callbacks.at(pubkey_hex).size() == 1)
             _establish_connection(
-                    {node.remote_pubkey.view(), node.host(), node.omq_port},
-                    request_id,
-                    category);
+                    {node.remote_pubkey.view(), node.host(), node.omq_port}, request_id, category);
     });
 }
 

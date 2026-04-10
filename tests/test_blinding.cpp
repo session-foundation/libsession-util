@@ -18,10 +18,8 @@ constexpr auto seed2 =
         "8659efdcbe0949e0f81141e6d397e8be75f45d09262f209d5950e97989eb43c7"
         "3570b69a47dc094544c1c5089c40414bbda1ffdde8aab2617fe937ee74a5ee81"_hex_b;
 
-constexpr auto sid1 =
-        "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
-constexpr auto sid2 =
-        "0505c9a9bf178fa644d44bebf628716dc7f2df3d0842e97881962c723699152073"_hex_b;
+constexpr auto sid1 = "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+constexpr auto sid2 = "0505c9a9bf178fa644d44bebf628716dc7f2df3d0842e97881962c723699152073"_hex_b;
 constexpr auto xpub1 = sid1.last<32>();
 constexpr auto xpub2 = sid2.last<32>();
 const std::string session_id1 = oxenc::to_hex(sid1);
@@ -229,8 +227,7 @@ TEST_CASE("Version 07xxx-blinded signing", "[blinding07][sign]") {
     uint64_t timestamp = 1234567890;
     std::vector<std::byte> full_message = to_vector("{}{}{}"_format(timestamp, method, path));
 
-    auto req_sig_no_body =
-            blind_version_sign_request(seed1, timestamp, method, path, std::nullopt);
+    auto req_sig_no_body = blind_version_sign_request(seed1, timestamp, method, path, std::nullopt);
     CHECK(ed25519::verify(req_sig_no_body, pk, full_message));
 
     full_message.insert(full_message.end(), body.begin(), body.end());
