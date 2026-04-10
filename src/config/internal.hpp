@@ -11,6 +11,7 @@
 #include "session/clock.hpp"
 #include "session/config/base.h"
 #include "session/config/base.hpp"
+#include "../internal-util.hpp"
 #include "session/config/error.h"
 #include "session/types.hpp"
 
@@ -261,6 +262,47 @@ void load_unknowns(
         oxenc::bt_dict_consumer& in,
         std::string_view previous,
         std::string_view until);
+template <typename T = ConfigBase, std::enable_if_t<std::is_base_of_v<ConfigBase, T>, int> = 0>
+inline internals<T>& unbox(config_object* conf) {
+    return *static_cast<internals<T>*>(conf->internals);
+}
+template <typename T = ConfigBase, std::enable_if_t<std::is_base_of_v<ConfigBase, T>, int> = 0>
+inline const internals<T>& unbox(const config_object* conf) {
+    return *static_cast<const internals<T>*>(conf->internals);
+}
+
+// Wraps a lambda and, if an exception is thrown, sets an error message in the config_object's
+// error buffer and updates the last_error pointer.
+template <std::invocable Call>
+decltype(auto) wrap_exceptions(config_object* conf, Call&& f) {
+    using Ret = std::invoke_result_t<Call>;
+
+    try {
+        conf->last_error = nullptr;
+        return std::invoke(std::forward<Call>(f));
+    } catch (const std::exception& e) {
+        session::copy_c_str(conf->_error_buf, e.what());
+        conf->last_error = conf->_error_buf;
+    }
+    if constexpr (std::is_pointer_v<Ret>)
+        return static_cast<Ret>(nullptr);
+    else
+        static_assert(std::is_void_v<Ret>, "Don't know how to return an error value!");
+}
+
+// Same as above but accepts callbacks with value returns on errors
+template <std::invocable Call, typename Ret>
+Ret wrap_exceptions(config_object* conf, Call&& f, Ret error_return) {
+    try {
+        conf->last_error = nullptr;
+        return std::invoke(std::forward<Call>(f));
+    } catch (const std::exception& e) {
+        session::copy_c_str(conf->_error_buf, e.what());
+        conf->last_error = conf->_error_buf;
+    }
+    return error_return;
+}
+
 }  // namespace session::config
 
 namespace fmt {

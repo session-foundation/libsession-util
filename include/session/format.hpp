@@ -1,6 +1,7 @@
 #pragma once
 
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
@@ -39,6 +40,11 @@ inline namespace literals {
 }  // namespace session
 
 namespace fmt {
+
+// Disable fmt's generic range formatter for byte spans so that our byte_spannable formatter takes
+// precedence (avoids ambiguity when fmt/ranges.h is also included).
+template <session::byte_spannable T>
+struct range_format_kind<T, char, void> : std::integral_constant<range_format, range_format::disabled> {};
 
 /// Generic formatter for any byte_spannable type (std::span, std::array, std::vector of std::byte).
 ///

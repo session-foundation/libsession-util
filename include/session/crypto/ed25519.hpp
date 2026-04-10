@@ -45,17 +45,7 @@ struct PrivKeySpan {
 
     // Constructor for runtime-known sizes (e.g. at C API boundaries).
     // Throws std::invalid_argument if size is not 32 or 64.
-    PrivKeySpan(const std::byte* data, size_t size) {
-        if (size == 64)
-            data_ = data;
-        else if (size == 32) {
-            expand_seed(std::span<const std::byte, 32>{data, 32});
-            data_ = storage_->data();
-        } else
-            throw std::invalid_argument{
-                    "Ed25519 private key must be 32 or 64 bytes (got " +
-                    std::to_string(size) + ")"};
-    }
+    PrivKeySpan(const std::byte* data, size_t size);
     PrivKeySpan(const unsigned char* data, size_t size) :
             PrivKeySpan{reinterpret_cast<const std::byte*>(data), size} {}
 
@@ -218,10 +208,15 @@ void pk_to_session_id(std::span<std::byte, 33> out, std::span<const std::byte, 3
 /// Return-value form.
 b33 pk_to_session_id(std::span<const std::byte, 32> pk);
 
-/// Converts an Ed25519 secret key to an X25519 secret key (using cleared memory).
-/// Overload taking the 32-byte seed directly (the libsodium implementation only reads the
-/// first 32 bytes anyway, so this is both correct and avoids expanding a seed unnecessarily).
-cleared_b32 sk_to_x25519(std::span<const std::byte, 32> seed);
+/// Converts an Ed25519 secret key to an X25519 secret key.
+/// Write-to-output form.
+void sk_to_x25519(std::span<std::byte, 32> out, std::span<const std::byte, 32> seed);
+/// Return-value form (using cleared memory).
+inline cleared_b32 sk_to_x25519(std::span<const std::byte, 32> seed) {
+    cleared_b32 xsk;
+    sk_to_x25519(xsk, seed);
+    return xsk;
+}
 /// Overload for a full 64-byte Ed25519 secret key (seed || pubkey); only the seed (first 32
 /// bytes) is used.
 inline cleared_b32 sk_to_x25519(std::span<const std::byte, 64> full_key) {
@@ -242,10 +237,10 @@ std::pair<cleared_b32, b32> x25519_keypair(const PrivKeySpan& sk);
 /// Ed25519 and X25519 share the same private scalar: the Ed25519-to-X25519 conversion is
 /// defined by using that same scalar on X25519's base point instead of Ed25519's.  Use this
 /// alias wherever the goal is to obtain the private scalar `a` rather than an X25519 key.
-template <typename T>
-    requires requires(T&& t) { sk_to_x25519(std::forward<T>(t)); }
-inline cleared_b32 sk_to_private(T&& arg) {
-    return sk_to_x25519(std::forward<T>(arg));
+template <typename... Args>
+    requires requires(Args&&... args) { sk_to_x25519(std::forward<Args>(args)...); }
+inline decltype(auto) sk_to_private(Args&&... args) {
+    return sk_to_x25519(std::forward<Args>(args)...);
 }
 
 /// Computes the Ed25519 group element from a scalar (clamped).

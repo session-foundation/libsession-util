@@ -60,7 +60,7 @@
 /// password.
 ///
 /// (Note that the above makes a secure copy when opening the database.  If you cannot avoid making
-/// a copy yourself, remember to copy into at least a `session::cleared_uc32` or use similar secure
+/// a copy yourself, remember to copy into at least a `session::cleared_b32` or use similar secure
 /// clearing after use to ensure the key bytes does not remain in unused process memory).
 ///
 /// If you want password protection instead of secure raw key protection then replace

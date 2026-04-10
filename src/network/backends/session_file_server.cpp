@@ -6,6 +6,7 @@
 
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <session/format.hpp>
 
 #include "../session_network_internal.hpp"
 #include "session/blinding.hpp"
@@ -120,10 +121,8 @@ std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     return info;
 }
 
-const std::string QUIC_FS_SESH_ADDRESS_MAINNET =
-        oxenc::to_base32z(QUIC_FS_ED_PUBKEY_MAINNET) + ".sesh";
-const std::string QUIC_FS_SESH_ADDRESS_TESTNET =
-        oxenc::to_base32z(QUIC_FS_ED_PUBKEY_TESTNET) + ".sesh";
+const std::string QUIC_FS_SESH_ADDRESS_MAINNET = "{:a}.sesh"_format(QUIC_FS_ED_PUBKEY_MAINNET);
+const std::string QUIC_FS_SESH_ADDRESS_TESTNET = "{:a}.sesh"_format(QUIC_FS_ED_PUBKEY_TESTNET);
 
 std::optional<SRouterTarget> default_quic_target(
         const config::FileServer& http_config, opt::netid::Target netid) {
@@ -359,18 +358,12 @@ Request get_client_version(
     auto timestamp = epoch_seconds(clock_now_s());
     auto signature = blind_version_sign(sk, platform, timestamp);
     auto pubkey = x25519_pubkey::from_hex(DEFAULT_CONFIG.pubkey_hex);
-    std::string blinded_pk_hex;
-    blinded_pk_hex.reserve(66);
-    blinded_pk_hex += "07";
-    oxenc::to_hex(
-            blinded_keys.first.begin(),
-            blinded_keys.first.end(),
-            std::back_inserter(blinded_pk_hex));
+    auto blinded_pk_hex = "07{:x}"_format(blinded_keys.first);
 
     auto headers = std::vector<std::pair<std::string, std::string>>{};
     headers.emplace_back(HEADER_PUBKEY, blinded_pk_hex);
     headers.emplace_back(HEADER_TIMESTAMP, "{}"_format(timestamp));
-    headers.emplace_back(HEADER_SIGNATURE, oxenc::to_base64(signature.begin(), signature.end()));
+    headers.emplace_back(HEADER_SIGNATURE, oxenc::to_base64(signature));
 
     return Request{
             random::unique_id("GCV"),

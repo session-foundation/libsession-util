@@ -30,8 +30,8 @@ void check_session_id(std::string_view session_id, std::string_view prefix) {
     if (!(session_id.size() == 64 + prefix.size() && oxenc::is_hex(session_id) &&
           session_id.substr(0, prefix.size()) == prefix))
         throw std::invalid_argument{
-                "Invalid session ID: expected 66 hex digits starting with " + std::string{prefix} +
-                "; got " + std::string{session_id}};
+                "Invalid session ID: expected 66 hex digits starting with {}; got {}"_format(
+                        prefix, session_id)};
 }
 
 SessionIDPrefix get_session_id_prefix(std::string_view id) {

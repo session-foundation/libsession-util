@@ -57,7 +57,7 @@ enum class ConfigState : int {
 };
 
 using Ed25519PubKey = b32;
-using Ed25519Secret = sodium_array<std::byte>;
+using Ed25519Secret = sodium_vector<std::byte>;
 
 // Helper base class for holding a config signing keypair
 class ConfigSig {
@@ -1372,7 +1372,7 @@ class ConfigBase : public ConfigSig {
     ///   push) if the first key (i.e. the key used for encryption) is changed as a result of this
     ///   call.  Ignored if the config is not modifiable.
     void add_key(
-            std::span<const std::byte> key,
+            std::span<const std::byte, 32> key,
             bool high_priority = true,
             bool dirty_config = false);
 
@@ -1406,7 +1406,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if found and removed
-    bool remove_key(std::span<const std::byte> key, size_t from = 0, bool dirty_config = false);
+    bool remove_key(std::span<const std::byte, 32> key, size_t from = 0, bool dirty_config = false);
 
     /// API: base/ConfigBase::replace_keys
     ///
@@ -1420,7 +1420,7 @@ class ConfigBase : public ConfigSig {
     ///   requiring a repush) if the old and new first key are not the same.  Ignored if the config
     ///   is not modifiable.
     void replace_keys(
-            const std::vector<std::span<const std::byte>>& new_keys, bool dirty_config = false);
+            const std::vector<std::span<const std::byte, 32>>& new_keys, bool dirty_config = false);
 
     /// API: base/ConfigBase::get_keys
     ///
@@ -1435,7 +1435,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `std::vector<std::span<const std::byte>>` -- Returns vector of encryption keys
-    std::vector<std::span<const std::byte>> get_keys() const;
+    std::vector<std::span<const std::byte, 32>> get_keys() const;
 
     /// API: base/ConfigBase::key_count
     ///
@@ -1456,7 +1456,7 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `bool` -- Returns true if it does exist
-    bool has_key(std::span<const std::byte> key) const;
+    bool has_key(std::span<const std::byte, 32> key) const;
 
     /// API: base/ConfigBase::key
     ///
@@ -1469,9 +1469,9 @@ class ConfigBase : public ConfigSig {
     ///
     /// Outputs:
     /// - `std::span<const std::byte>` -- binary data of the key
-    std::span<const std::byte> key(size_t i = 0) const {
+    std::span<const std::byte, 32> key(size_t i = 0) const {
         assert(i < _keys.size());
-        return {_keys[i].data(), _keys[i].size()};
+        return _keys[i];
     }
 };
 
@@ -1507,58 +1507,6 @@ struct internals final {
     ConfigT& operator*() { return *operator->(); }
     const ConfigT& operator*() const { return *operator->(); }
 };
-
-template <typename T = ConfigBase, std::enable_if_t<std::is_base_of_v<ConfigBase, T>, int> = 0>
-inline internals<T>& unbox(config_object* conf) {
-    return *static_cast<internals<T>*>(conf->internals);
-}
-template <typename T = ConfigBase, std::enable_if_t<std::is_base_of_v<ConfigBase, T>, int> = 0>
-inline const internals<T>& unbox(const config_object* conf) {
-    return *static_cast<const internals<T>*>(conf->internals);
-}
-
-template <size_t N>
-void copy_c_str(char (&dest)[N], std::string_view src) {
-    if (src.size() >= N)
-        src.remove_suffix(src.size() - N - 1);
-    std::memcpy(dest, src.data(), src.size());
-    dest[src.size()] = 0;
-}
-
-// Wraps a labmda and, if an exception is thrown, sets an error message in the internals.error
-// string and updates the last_error pointer in the outer (C) config_object struct to point at it.
-//
-// No return value: accepts void and pointer returns; pointer returns will become nullptr on error
-template <std::invocable Call>
-decltype(auto) wrap_exceptions(config_object* conf, Call&& f) {
-    using Ret = std::invoke_result_t<Call>;
-
-    try {
-        conf->last_error = nullptr;
-        return std::invoke(std::forward<Call>(f));
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    if constexpr (std::is_pointer_v<Ret>)
-        return static_cast<Ret>(nullptr);
-    else
-        static_assert(std::is_void_v<Ret>, "Don't know how to return an error value!");
-}
-
-// Same as above but accepts callbacks with value returns on errors: returns `f()` on success,
-// `error_return` on exception
-template <std::invocable Call, typename Ret>
-Ret wrap_exceptions(config_object* conf, Call&& f, Ret error_return) {
-    try {
-        conf->last_error = nullptr;
-        return std::invoke(std::forward<Call>(f));
-    } catch (const std::exception& e) {
-        copy_c_str(conf->_error_buf, e.what());
-        conf->last_error = conf->_error_buf;
-    }
-    return error_return;
-}
 
 // Internal helper: attempts zstd compression of `msg` in-place (with a 'z' prefix byte); leaves
 // `msg` unchanged if compression does not reduce the size.  `level` of 0 disables compression.

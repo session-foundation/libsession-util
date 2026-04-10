@@ -5,15 +5,15 @@
 #include <span>
 #include <vector>
 
-#include "session/formattable.hpp"
+#include "session/format.hpp"
 #include "utils.hpp"
 
-TEST_CASE("byte span formatting - default hex", "[formattable]") {
+TEST_CASE("byte span formatting - default hex", "[format]") {
     CHECK(fmt::format("{}", "abcd0123"_hex_b) == "abcd0123");
     CHECK(fmt::format("{:x}", "abcd0123"_hex_b) == "abcd0123");
 }
 
-TEST_CASE("byte span formatting - various types", "[formattable]") {
+TEST_CASE("byte span formatting - various types", "[format]") {
     auto arr = "deadbeef"_hex_b;
 
     SECTION("std::span with static extent") {
@@ -37,7 +37,7 @@ TEST_CASE("byte span formatting - various types", "[formattable]") {
     }
 }
 
-TEST_CASE("byte span formatting - empty span", "[formattable]") {
+TEST_CASE("byte span formatting - empty span", "[format]") {
     std::span<const std::byte> empty;
     CHECK(fmt::format("{}", empty) == "");
     CHECK(fmt::format("{:x}", empty) == "");
@@ -47,7 +47,7 @@ TEST_CASE("byte span formatting - empty span", "[formattable]") {
     CHECK(fmt::format("{:r}", empty) == "");
 }
 
-TEST_CASE("byte span formatting - stripped hex", "[formattable]") {
+TEST_CASE("byte span formatting - stripped hex", "[format]") {
     SECTION("all zeros") {
         CHECK(fmt::format("{:z}", "00000000"_hex_b) == "0");
     }
@@ -69,7 +69,7 @@ TEST_CASE("byte span formatting - stripped hex", "[formattable]") {
     }
 }
 
-TEST_CASE("byte span formatting - base32z", "[formattable]") {
+TEST_CASE("byte span formatting - base32z", "[format]") {
     auto val = "0001020304"_hex_b;
     auto hex_result = fmt::format("{:x}", val);
     auto b32z_result = fmt::format("{:a}", val);
@@ -78,16 +78,16 @@ TEST_CASE("byte span formatting - base32z", "[formattable]") {
     CHECK(b32z_result != hex_result);
 }
 
-TEST_CASE("byte span formatting - base64", "[formattable]") {
+TEST_CASE("byte span formatting - base64", "[format]") {
     CHECK(fmt::format("{:b}", "00010203"_hex_b) == "AAECAw==");
     CHECK(fmt::format("{:B}", "00010203"_hex_b) == "AAECAw");
 }
 
-TEST_CASE("byte span formatting - raw", "[formattable]") {
+TEST_CASE("byte span formatting - raw", "[format]") {
     CHECK(fmt::format("{:r}", "6869"_hex_b) == "hi");
 }
 
-TEST_CASE("byte span formatting - ellipsis", "[formattable]") {
+TEST_CASE("byte span formatting - ellipsis", "[format]") {
     // 8 bytes = 16 hex chars: "0123456789abcdef"
     auto val = "0123456789abcdef"_hex_b;
     CHECK(fmt::format("{}", val) == "0123456789abcdef");
@@ -114,7 +114,7 @@ TEST_CASE("byte span formatting - ellipsis", "[formattable]") {
     }
 }
 
-TEST_CASE("byte span formatting - 32 byte key ellipsis", "[formattable]") {
+TEST_CASE("byte span formatting - 32 byte key ellipsis", "[format]") {
     auto key = "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20"_hex_b;
     auto full = fmt::format("{}", key);
     CHECK(full.size() == 64);
@@ -126,7 +126,7 @@ TEST_CASE("byte span formatting - 32 byte key ellipsis", "[formattable]") {
     CHECK(ellipsized.size() == 7 + 3 + 4);
 }
 
-TEST_CASE("byte span formatting - format errors", "[formattable]") {
+TEST_CASE("byte span formatting - format errors", "[format]") {
     auto val = "01"_hex_b;
 
     // Use fmt::runtime() to bypass compile-time format string checking
@@ -138,7 +138,7 @@ TEST_CASE("byte span formatting - format errors", "[formattable]") {
     CHECK_THROWS_AS(fmt::format(fmt::runtime("{:1.0}"), val), fmt::format_error);
 }
 
-TEST_CASE("byte span formatting - _format UDL", "[formattable]") {
+TEST_CASE("byte span formatting - _format UDL", "[format]") {
     using namespace session::literals;
     auto val = "deadbeef"_hex_b;
     CHECK("key: {}"_format(val) == "key: deadbeef");

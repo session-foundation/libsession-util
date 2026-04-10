@@ -40,7 +40,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     // This is just for testing: normally you don't load keys manually but just make a groups::Keys
     // object that loads the keys into the Members object for you.
     for (const auto& k : enc_keys)
-        gmem1.add_key(k, false);
+        gmem1.add_key(std::span{k}.first<32>(), false);
 
     enc_keys.insert(
             enc_keys.begin(),
@@ -50,7 +50,7 @@ TEST_CASE("Group Members", "[config][groups][members]") {
     groups::Members gmem2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
-        gmem2.add_key(k, false);
+        gmem2.add_key(std::span{k}.first<32>(), false);
 
     std::vector<std::string> sids;
     while (sids.size() < 256) {

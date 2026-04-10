@@ -19,7 +19,7 @@ Info::Info(
         std::span<const std::byte, 32> ed25519_pubkey,
         const ed25519::OptionalPrivKeySpan& ed25519_secretkey,
         std::optional<std::span<const std::byte>> dumped) :
-        id{"03" + oxenc::to_hex(ed25519_pubkey.begin(), ed25519_pubkey.end())} {
+        id{"03{:x}"_format(ed25519_pubkey)} {
     init(dumped, ed25519_pubkey, ed25519_secretkey);
 }
 

@@ -30,17 +30,5 @@ struct Disappearing {
     std::chrono::seconds timer = 0s;
 };
 
-/// A Session ID: an x25519 pubkey, with a 05 identifying prefix.  On the wire we send just the
-/// 32-byte pubkey value (i.e. not hex, without the prefix).
-struct SessionID {
-    /// The fixed session netid, 0x05
-    static constexpr std::byte netid{0x05};
-
-    /// The raw x25519 pubkey, as bytes
-    b32 pubkey;
-
-    /// Returns the full pubkey in hex, including the netid prefix.
-    std::string hex() const;
-};
 
 }  // namespace session

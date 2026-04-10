@@ -1,8 +1,7 @@
 #include <session/config/pro.h>
 #include <session/pro_backend.h>
-#include <sodium/crypto_sign_ed25519.h>
-
 #include <session/config/pro.hpp>
+#include <session/crypto/ed25519.hpp>
 #include <session/sodium_array.hpp>
 
 #include "internal.hpp"
@@ -21,7 +20,7 @@ bool ProConfig::load(const dict& root) {
         return false;
 
     std::optional<std::vector<std::byte>> maybe_rotating_seed = maybe_vector(root, "r");
-    if (!maybe_rotating_seed || maybe_rotating_seed->size() != crypto_sign_ed25519_SEEDBYTES)
+    if (!maybe_rotating_seed || maybe_rotating_seed->size() != 32)
         return false;
 
     // NOTE: Load into the proof object
@@ -52,10 +51,10 @@ bool ProConfig::load(const dict& root) {
 
     // Derive the rotating public key from the seed and populate the proof's pubkey and the outer
     // private key
-    crypto_sign_ed25519_seed_keypair(
-            to_unsigned(proof.rotating_pubkey.data()),
-            to_unsigned(rotating_privkey.data()),
-            to_unsigned(maybe_rotating_seed->data()));
+    ed25519::seed_keypair(
+            proof.rotating_pubkey,
+            rotating_privkey,
+            std::span{*maybe_rotating_seed}.first<32>());
     return true;
 }
 

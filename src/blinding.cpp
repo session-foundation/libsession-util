@@ -4,7 +4,7 @@
 #include <fmt/format.h>
 #include <oxenc/hex.h>
 #include <oxen/log/format.hpp>
-#include <sodium/crypto_sign_ed25519.h>
+#include <session/format.hpp>
 
 #include <cassert>
 #include <stdexcept>
@@ -143,9 +143,9 @@ std::array<std::string, 2> blind15_id(std::string_view session_id, std::string_v
     b33 blinded;
     blind15_id_impl(raw_sid, raw_server_pk, blinded);
     std::array<std::string, 2> result;
-    result[0] = oxenc::to_hex(blinded.begin(), blinded.end());
+    result[0] = oxenc::to_hex(blinded);
     blinded.back() ^= std::byte{0x80};
-    result[1] = oxenc::to_hex(blinded.begin(), blinded.end());
+    result[1] = oxenc::to_hex(blinded);
     return result;
 }
 
@@ -178,7 +178,7 @@ std::string blind25_id(std::string_view session_id, std::string_view server_pk) 
 
     b33 blinded;
     blind25_id_impl(raw_sid, raw_server_pk, blinded);
-    return oxenc::to_hex(blinded.begin(), blinded.end());
+    return oxenc::to_hex(blinded);
 }
 
 b33 blinded15_id_from_ed(
@@ -235,11 +235,8 @@ std::pair<b32, cleared_b32> blind15_key_pair(
         k = &k_tmp;
     *k = blind15_factor(server_pk);
 
-    /// Generate a scalar for the private key
-    if (0 != crypto_sign_ed25519_sk_to_curve25519(
-                     to_unsigned(a.data()), to_unsigned(ed25519_sk.data())))
-        throw std::runtime_error{
-                "blind15_key_pair: Invalid ed25519_sk; conversion to curve25519 seckey failed"};
+    // Calculate the private scalar `a`
+    ed25519::sk_to_private(a, ed25519_sk.seed());
 
     // Turn a, A into their blinded versions
     ed25519::scalar_mul(a, *k, a);

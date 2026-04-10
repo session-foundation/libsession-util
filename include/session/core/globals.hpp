@@ -43,6 +43,7 @@ class Globals final : detail::CoreComponent {
     network::ed25519_pubkey _pubkey_ed25519;
     network::x25519_pubkey _pubkey_x25519;
     std::array<std::byte, 33> _session_id;  // AKA pubkey_x25519 with a 0x05 byte prefix
+    std::string _session_id_hex;            // hex encoding of _session_id, computed once in init()
 
     void init() override;
 
@@ -108,6 +109,7 @@ class Globals final : detail::CoreComponent {
     }
     // These are computed from the account_seed during construction:
     std::span<const std::byte, 33> session_id() { return _session_id; }
+    const std::string& session_id_hex() const { return _session_id_hex; }
     const network::ed25519_pubkey& pubkey_ed25519() const { return _pubkey_ed25519; }
     const network::x25519_pubkey& pubkey_x25519() const { return _pubkey_x25519; }
 

@@ -11,6 +11,7 @@
 #include <nlohmann/json.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <session/format.hpp>
 #include <oxen/quic/loop.hpp>
 #include <session/clock.hpp>
 #include <session/core.hpp>
@@ -126,7 +127,6 @@ void Core::_poll() {
             config::Namespace::AccountPubkeys};
 
     auto now_ms = epoch_ms(clock_now_ms());
-    auto session_id_hex = oxenc::to_hex(globals.session_id());
     auto ed25519_hex = globals.pubkey_ed25519().hex();
 
     // Build per-namespace signatures for namespaces that require authentication; index-aligned with
@@ -140,7 +140,7 @@ void Core::_poll() {
                 continue;
             std::string to_sign = "retrieve{}{}"_format(ns_val, now_ms);
             auto sig = ed25519::sign(seed.ed25519_secret(), to_span(to_sign));
-            ns_sig[i] = oxenc::to_base64(sig);
+            ns_sig[i] = "{:b}"_format(sig);
         }
     }
 
@@ -150,7 +150,6 @@ void Core::_poll() {
             [this,
              net,
              namespaces,
-             session_id_hex,
              ed25519_hex,
              now_ms,
              ns_sig = std::move(ns_sig)](auto, auto swarm) {
@@ -167,7 +166,7 @@ void Core::_poll() {
                         auto ns = namespaces[i];
                         auto ns_val = static_cast<int16_t>(ns);
                         nlohmann::json params = {
-                                {"pubkey", session_id_hex},
+                                {"pubkey", globals.session_id_hex()},
                                 {"namespace", ns_val},
                         };
 
@@ -310,8 +309,6 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
     auto status = PfsKeyStatus::fetching;
     {
         auto conn = db.conn();
-        auto sid_hex = oxenc::to_hex(session_id.begin(), session_id.end());
-
         if (auto row = conn.prepared_maybe_get<std::optional<int64_t>, std::optional<int64_t>>(
                     "SELECT fetched_at, nak_at FROM pfs_key_cache WHERE session_id = ?", sid)) {
             auto [fetched_at, nak_at] = *row;
@@ -322,14 +319,14 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
                             cat,
                             "prefetch_pfs_keys: cached key for {} is still fresh ({} old), "
                             "skipping",
-                            sid_hex,
+                            session_id,
                             age);
                     return PfsKeyStatus::fresh;
                 }
                 log::debug(
                         cat,
                         "prefetch_pfs_keys: cached key for {} is stale ({} old), re-fetching",
-                        sid_hex,
+                        session_id,
                         age);
                 status = PfsKeyStatus::stale;
             } else if (nak_at) {
@@ -338,18 +335,18 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
                     log::debug(
                             cat,
                             "prefetch_pfs_keys: recent NAK for {} ({} old), skipping",
-                            sid_hex,
+                            session_id,
                             age);
                     return PfsKeyStatus::nak;
                 }
                 log::debug(
                         cat,
                         "prefetch_pfs_keys: expired NAK for {} ({} old), re-fetching",
-                        sid_hex,
+                        session_id,
                         age);
             }
         } else {
-            log::debug(cat, "prefetch_pfs_keys: no cached key for {}, fetching", sid_hex);
+            log::debug(cat, "prefetch_pfs_keys: no cached key for {}, fetching", session_id);
         }
     }
 
@@ -357,12 +354,11 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
     network::x25519_pubkey x25519_pub;
     std::ranges::copy(session_id.subspan<1>(), x25519_pub.begin());
 
-    auto session_id_hex = oxenc::to_hex(session_id.begin(), session_id.end());
     auto now_ms = epoch_ms(clock_now_ms());
 
     // AccountPubkeys (-21) allows unauthenticated retrieve: no signature needed.
     nlohmann::json params = {
-            {"pubkey", session_id_hex},
+            {"pubkey", oxenc::to_hex(session_id)},
             {"namespace", static_cast<int16_t>(config::Namespace::AccountPubkeys)},
     };
 
@@ -392,7 +388,7 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
                         log::warning(
                                 cat,
                                 "Failed to fetch PFS keys for {}: {}",
-                                oxenc::to_hex(sid),
+                                sid,
                                 timeout ? "timed out"
                                 : body  ? *body
                                         : "request failed");
@@ -547,7 +543,6 @@ void Core::_send_to_swarm(
         throw std::logic_error{"_send_to_swarm: no send_to_swarm callback and no network object"};
 
     // Build signed store request.
-    auto session_id_hex = oxenc::to_hex(globals.session_id());
     auto ed25519_hex = globals.pubkey_ed25519().hex();
     auto ns_val = static_cast<int16_t>(ns);
     auto now_ms = epoch_ms(clock_now_ms());
@@ -561,13 +556,13 @@ void Core::_send_to_swarm(
     }
 
     nlohmann::json params = {
-            {"pubkey", session_id_hex},
+            {"pubkey", globals.session_id_hex()},
             {"pubkey_ed25519", ed25519_hex},
             {"namespace", ns_val},
-            {"data", oxenc::to_base64(payload)},
+            {"data", "{:b}"_format(payload)},
             {"timestamp", now_ms},
             {"sig_timestamp", now_ms},
-            {"signature", oxenc::to_base64(sig)},
+            {"signature", "{:b}"_format(sig)},
             {"ttl", ttl.count()},
     };
 

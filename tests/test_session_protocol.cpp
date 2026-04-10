@@ -547,7 +547,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         }
 
         // Decrypt envelope
-        span_u8 key = {to_unsigned(group_v2_sk.data()), group_v2_sk.size()};
+        span_u8 key = {to_unsigned(group_v2_sk.data()), 32};
         session_protocol_decode_envelope_keys decrypt_keys = {};
         decrypt_keys.group_ed25519_pubkey = {to_unsigned(group_v2_pk.data()), group_v2_pk.size()};
         decrypt_keys.decrypt_keys = &key;

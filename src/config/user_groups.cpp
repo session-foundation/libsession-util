@@ -3,7 +3,6 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <sodium/crypto_sign.h>
 
 #include <charconv>
 #include <iterator>
@@ -230,14 +229,11 @@ void group_info::load(const dict& info_dict) {
         name.clear();
 
     if (auto seed = maybe_vector(info_dict, "K"); seed && seed->size() == 32) {
-        b33 pk;
-        pk[0] = std::byte{0x03};
-        secretkey.resize(64);
-        crypto_sign_seed_keypair(
-                to_unsigned(pk.data() + 1), to_unsigned(secretkey.data()),
-                to_unsigned(seed->data()));
-        if (id != oxenc::to_hex(pk.begin(), pk.end()))
+        auto [pk, sk] = ed25519::keypair(std::span{*seed}.first<32>());
+        if (id != "03{:x}"_format(pk))
             secretkey.clear();
+        else
+            secretkey.assign(sk.begin(), sk.end());
     }
     if (auto sig = maybe_vector(info_dict, "s"); sig && sig->size() == 100)
         auth_data = std::move(*sig);
@@ -384,17 +380,10 @@ group_info UserGroups::get_or_construct_group(std::string_view pubkey_hex) const
 }
 
 group_info UserGroups::create_group() const {
-    b32 pk;
-    std::vector<std::byte> sk;
-    sk.resize(64);
-    crypto_sign_keypair(to_unsigned(pk.data()), to_unsigned(sk.data()));
-    std::string pk_hex;
-    pk_hex.reserve(66);
-    pk_hex += "03";
-    oxenc::to_hex(pk.begin(), pk.end(), std::back_inserter(pk_hex));
+    auto [pk, sk] = ed25519::keypair();
 
-    group_info gr{std::move(pk_hex)};
-    gr.secretkey = std::move(sk);
+    group_info gr{"03{:x}"_format(pk)};
+    gr.secretkey.assign(sk.begin(), sk.end());
     return gr;
 }
 

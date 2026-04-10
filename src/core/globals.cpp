@@ -1,11 +1,13 @@
 #include <oxenc/hex.h>
-#include <sodium/crypto_sign_ed25519.h>
-#include <sodium/randombytes.h>
 #include <sodium/utils.h>
+
+#include <session/crypto/ed25519.hpp>
+#include <session/random.hpp>
 
 #include <concepts>
 #include <oxen/log.hpp>
 #include <session/core/globals.hpp>
+#include <session/format.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
 
@@ -130,37 +132,30 @@ void Globals::init() {
             // FIXME: we should allow full 32-byte seeds here, but for now this is compatible with
             // the 16-byte/128-bit seed that Session accounts use which is 16 random bytes followed
             // by 16 0s:
-            randombytes_buf(seed.data(), 16);
+            random::fill(std::span{seed}.first<16>());
             std::memset(seed.data() + 16, 0, 16);
         }
     }
 
+    // Layout: [ed25519_sk(64) | x25519_sk(32)] = 96 bytes
     auto rw = _account_seed.resize(96);
 
-    auto* rw_uc = reinterpret_cast<unsigned char*>(rw.buf.data());
-    crypto_sign_ed25519_seed_keypair(
-            to_unsigned(_pubkey_ed25519.data()),
-            rw_uc,
-            reinterpret_cast<const unsigned char*>(seed_to_use->data()));
-    crypto_sign_ed25519_sk_to_curve25519(rw_uc + 64, rw_uc);
+    ed25519::seed_keypair(_pubkey_ed25519, rw.buf.first<64>(), *seed_to_use);
+    ed25519::sk_to_x25519(rw.buf.last<32>(), *seed_to_use);
 
     _predefined_seed.reset();  // Clear now that it has been consumed
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(
-                     to_unsigned(_pubkey_x25519.data()),
-                     to_unsigned(_pubkey_ed25519.data())))
-        // This *should* be impossible when starting from a seed because that would mean the seed
-        // generation produced an invalid Ed pubkey!
-        log::critical(cat, "Failed to convert seed-extracted Ed25519 pubkey to X25519 session ID!");
+    ed25519::pk_to_x25519(_pubkey_x25519, _pubkey_ed25519);
 
     _session_id[0] = std::byte{0x05};
     std::copy(_pubkey_x25519.begin(), _pubkey_x25519.end(), _session_id.data() + 1);
+    _session_id_hex = oxenc::to_hex(_session_id);
 
     if (!have_seed) {
         log::info(cat, "Generated new Session account seed");
         set("_seed", rw.buf.first(32));
     }
 
-    log::info(cat, "Initialized with Session ID: {}", oxenc::to_hex(_session_id));
+    log::info(cat, "Initialized with Session ID: {}", _session_id_hex);
 }
 
 mnemonics::secure_mnemonic Globals::seed_mnemonic(const mnemonics::Mnemonics& lang, bool force_24) {

@@ -3,7 +3,10 @@
 
 #include <algorithm>
 #include <cstring>
+#include <session/format.hpp>
 #include <string_view>
+
+using namespace session::literals;
 
 namespace session {
 

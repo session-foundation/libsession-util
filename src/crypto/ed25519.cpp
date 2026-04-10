@@ -5,6 +5,7 @@
 #include <sodium/crypto_sign.h>
 #include <sodium/crypto_sign_ed25519.h>
 
+#include <session/format.hpp>
 #include <stdexcept>
 
 #include "session/export.h"
@@ -14,6 +15,17 @@
 #include "session/util.hpp"
 
 namespace session::ed25519 {
+
+PrivKeySpan::PrivKeySpan(const std::byte* data, size_t size) {
+    if (size == 64)
+        data_ = data;
+    else if (size == 32) {
+        expand_seed(std::span<const std::byte, 32>{data, 32});
+        data_ = storage_->data();
+    } else
+        throw std::invalid_argument{
+                "Ed25519 private key must be 32 or 64 bytes (got {})"_format(size)};
+}
 
 void PrivKeySpan::expand_seed(std::span<const std::byte, 32> seed) {
     auto& buf = storage_.emplace();
@@ -85,10 +97,8 @@ b33 pk_to_session_id(std::span<const std::byte, 32> pk) {
     return sid;
 }
 
-cleared_b32 sk_to_x25519(std::span<const std::byte, 32> seed) {
-    cleared_b32 xsk;
-    crypto_sign_ed25519_sk_to_curve25519(to_unsigned(xsk.data()), to_unsigned(seed.data()));
-    return xsk;
+void sk_to_x25519(std::span<std::byte, 32> out, std::span<const std::byte, 32> seed) {
+    crypto_sign_ed25519_sk_to_curve25519(to_unsigned(out.data()), to_unsigned(seed.data()));
 }
 
 std::pair<cleared_b32, b32> x25519_keypair(const PrivKeySpan& sk) {

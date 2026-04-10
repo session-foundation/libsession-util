@@ -109,22 +109,16 @@ namespace detail {
         };
         (update(make_hashable(args)), ...);
     }
-}  // namespace detail
+    template <HashInput... T>
+        requires(sizeof...(T) > 0)
+    void update_all(crypto_generichash_blake2b_state& st, const T&... args) {
+        auto update_hash = [&st](std::span<const unsigned char> arg) {
+            crypto_generichash_blake2b_update(&st, arg.data(), arg.size());
+        };
+        (update_hash(make_hashable(args)), ...);
+    }
 
-/// API: hash/update_all
-///
-/// Wrapper about crypto_generichash_blake2b_update that takes any number of contiguous byte
-/// containers *or* integer values and updates the hash state with them, in argument order.  Integer
-/// values are always written as raw bytes in little-endian encoding (i.e. they will be byte-swapped
-/// if necessary).
-template <HashInput... T>
-    requires(sizeof...(T) > 0)
-void update_all(crypto_generichash_blake2b_state& st, const T&... args) {
-    auto update_hash = [&st](std::span<const unsigned char> arg) {
-        crypto_generichash_blake2b_update(&st, arg.data(), arg.size());
-    };
-    (update_hash(detail::make_hashable(args)), ...);
-}
+}  // namespace detail
 
 /// Concept for a fixed-size, writable byte container — the basic requirement for any hash output.
 template <typename T>
@@ -214,7 +208,7 @@ struct blake2b_hasher {
     template <HashInput... T>
         requires(sizeof...(T) > 0)
     blake2b_hasher& update(const T&... args) {
-        update_all(st, args...);
+        detail::update_all(st, args...);
         return *this;
     }
 
@@ -487,6 +481,11 @@ void hmac_sha256(Out& out, const Key& key, const T&... args) {
 
 // ─── Argon2id (password hashing / KDF) ───────────────────────────────────────
 
+inline constexpr size_t ARGON2_SALTBYTES = crypto_pwhash_SALTBYTES;
+inline constexpr unsigned long long ARGON2_OPSLIMIT_MODERATE = crypto_pwhash_OPSLIMIT_MODERATE;
+inline constexpr size_t ARGON2_MEMLIMIT_MODERATE = crypto_pwhash_MEMLIMIT_MODERATE;
+inline constexpr int ARGON2ID13 = crypto_pwhash_ALG_ARGON2ID13;
+
 /// Derives a key from a password using Argon2id (libsodium crypto_pwhash).
 /// Throws std::runtime_error if the derivation fails (e.g. out of memory).
 ///
@@ -503,7 +502,7 @@ template <HashOutputContainer Out>
 void argon2(
         Out& out,
         std::span<const char> password,
-        std::span<const std::byte, crypto_pwhash_SALTBYTES> salt,
+        std::span<const std::byte, ARGON2_SALTBYTES> salt,
         unsigned long long opslimit,
         size_t memlimit,
         int alg) {

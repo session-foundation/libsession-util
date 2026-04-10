@@ -232,7 +232,7 @@ class Keys : public ConfigSig {
     ///
     /// Outputs:
     /// - `std::vector<std::span<const std::byte>>` - vector of encryption keys.
-    std::vector<std::span<const std::byte>> group_keys() const;
+    std::vector<std::span<const std::byte, 32>> group_keys() const;
 
     /// API: groups/Keys::size
     ///
@@ -268,7 +268,7 @@ class Keys : public ConfigSig {
     ///
     /// Outputs:
     /// - `true` if this object knows the group's master key
-    bool admin() const { return _sign_sk && _sign_pk; }
+    bool admin() const { return !_sign_sk.empty() && _sign_pk; }
 
     /// API: groups/Keys::load_admin_key
     ///
@@ -543,7 +543,7 @@ class Keys : public ConfigSig {
     /// `rekey()` call.
     ///   This is set to a new key when `rekey()` is called, and is cleared when any config message
     ///   is successfully loaded by `load_key`.
-    std::optional<std::span<const std::byte>> pending_key() const;
+    std::optional<std::span<const std::byte, 32>> pending_key() const;
 
     /// API: groups/Keys::load_key
     ///

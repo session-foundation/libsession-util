@@ -6,8 +6,6 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/hex.h>
 #include <session/session_encrypt.h>
-#include <sodium/crypto_pwhash.h>
-#include <sodium/crypto_secretbox.h>
 #include <zstd.h>
 
 #include <array>
@@ -86,8 +84,8 @@ constexpr auto V2_XWING_LABEL =  //
 constexpr auto V2_SS_DOMAIN = "SessionV2MessageSS"_bytes;
 
 // Shared v2 wire-format layout constants (used in both encrypt and decrypt)
-static constexpr size_t V2_AEAD_OVERHEAD = crypto_aead_xchacha20poly1305_ietf_ABYTES;
-static constexpr size_t V2_NONCE_SIZE = crypto_aead_xchacha20poly1305_ietf_NPUBBYTES;
+static constexpr size_t V2_AEAD_OVERHEAD = encryption::XCHACHA20_ABYTES;
+static constexpr size_t V2_NONCE_SIZE = encryption::XCHACHA20_NONCEBYTES;
 static constexpr size_t V2_HEADER_SIZE = 2 + 2 + 32 + mlkem768::CIPHERTEXTBYTES;
 static constexpr size_t V2_OUTER_OVERHEAD = V2_HEADER_SIZE + V2_AEAD_OVERHEAD;
 static constexpr size_t V2_MIN_FINAL_SIZE = ((V2_OUTER_OVERHEAD + 256 + 255) / 256) * 256;
@@ -109,9 +107,9 @@ static void v2_derive_xwing_key_nonce(
         std::span<const std::byte, 32> ssx,
         std::span<const std::byte, 32> E,
         std::span<const std::byte, 32> X) {
-    auto ss = hash::sha3_256<32>(key_buf, ssx, E, X, V2_XWING_LABEL);
+    cleared_b32 ss;
+    hash::sha3_256(ss, key_buf, ssx, E, X, V2_XWING_LABEL);
     hash::shake256(V2_SS_DOMAIN, ss)(key_buf, nonce_out);
-    sodium_memzero(ss.data(), ss.size());
 }
 
 // Computes the 2-byte Key Indicator Shared Secret (KISS):
@@ -173,8 +171,8 @@ std::vector<std::byte> encrypt_for_recipient(
                                               // proper 0x05 prefix when present.
 
     std::vector<std::byte> result;
-    result.resize(signed_msg.size() + crypto_box_SEALBYTES);
-    encrypt::box_seal(result, signed_msg, recipient_pubkey.first<32>());
+    result.resize(signed_msg.size() + encryption::BOX_SEALBYTES);
+    encryption::box_seal(result, signed_msg, recipient_pubkey.first<32>());
 
     return result;
 }
@@ -201,18 +199,18 @@ std::vector<std::byte> encrypt_for_recipient_deterministic(
     // The nonce for a sealed box is not passed but is implicitly defined as the (unkeyed) blake2b
     // hash of:
     //     EPH_PUBKEY || RECIPIENT_PUBKEY
-    std::array<std::byte, crypto_box_NONCEBYTES> nonce;
+    std::array<std::byte, encryption::BOX_NONCEBYTES> nonce;
     hash::blake2b(nonce, eph_pk, recipient_pubkey);
 
     // A sealed box is a regular box (using the ephermal keys and nonce), but with the ephemeral
     // pubkey prepended:
-    static_assert(crypto_box_SEALBYTES == crypto_box_PUBLICKEYBYTES + crypto_box_MACBYTES);
+    static_assert(encryption::BOX_SEALBYTES == encryption::BOX_PUBLICKEYBYTES + encryption::BOX_MACBYTES);
 
     std::vector<std::byte> result;
-    result.resize(crypto_box_SEALBYTES + signed_msg.size());
+    result.resize(encryption::BOX_SEALBYTES + signed_msg.size());
     std::ranges::copy(eph_pk, result.begin());
-    encrypt::box_easy(
-            std::span{result}.subspan(crypto_box_PUBLICKEYBYTES),
+    encryption::box_easy(
+            std::span{result}.subspan(encryption::BOX_PUBLICKEYBYTES),
             signed_msg,
             nonce,
             recipient_pubkey.first<32>(),
@@ -291,7 +289,7 @@ static std::vector<std::byte> v2_encrypt_inner(
     }
 
     // In-place AEAD encrypt (libsodium explicitly supports c == m)
-    encrypt::xchacha20poly1305_encrypt(
+    encryption::xchacha20poly1305_encrypt(
             std::span{result}.subspan(V2_HEADER_SIZE),
             std::span{result}.subspan(V2_HEADER_SIZE, padded_inner_size),
             enc_nonce,
@@ -375,7 +373,7 @@ static DecryptV2Result v2_aead_decrypt_and_parse(
 
     size_t enc_size = ciphertext.size() - V2_HEADER_SIZE;
     std::vector<std::byte> plain(enc_size - V2_AEAD_OVERHEAD);
-    if (!encrypt::xchacha20poly1305_decrypt(
+    if (!encryption::xchacha20poly1305_decrypt(
                 plain,
                 ciphertext.subspan(V2_HEADER_SIZE, enc_size),
                 nonce,
@@ -634,18 +632,18 @@ std::vector<std::byte> encrypt_for_blinded_recipient(
     // Layout: version(1) || ciphertext(buf+ABYTES) || nonce(NPUBBYTES)
     std::vector<std::byte> ciphertext;
     ciphertext.resize(
-            1 + buf.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES +
-            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+            1 + buf.size() + encryption::XCHACHA20_ABYTES +
+            encryption::XCHACHA20_NONCEBYTES);
 
     // Prepend with a version byte, so that the recipient can reliably detect if a future version is
     // no longer encrypting things the way it expects.
     ciphertext[0] = std::byte{BLINDED_ENCRYPT_VERSION};
 
-    auto nonce = std::span{ciphertext}.last<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    auto nonce = std::span{ciphertext}.last<encryption::XCHACHA20_NONCEBYTES>();
     random::fill(nonce);
 
-    encrypt::xchacha20poly1305_encrypt(
-            std::span{ciphertext}.subspan(1, buf.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES),
+    encryption::xchacha20poly1305_encrypt(
+            std::span{ciphertext}.subspan(1, buf.size() + encryption::XCHACHA20_ABYTES),
             buf,
             nonce,
             enc_key);
@@ -654,7 +652,7 @@ std::vector<std::byte> encrypt_for_blinded_recipient(
 }
 
 static constexpr size_t GROUPS_ENCRYPT_OVERHEAD =
-        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES;
+        encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES;
 
 std::vector<std::byte> encrypt_for_group(
         const ed25519::PrivKeySpan& user_ed25519_privkey,
@@ -728,14 +726,14 @@ std::vector<std::byte> encrypt_for_group(
 
     std::vector<std::byte> ciphertext;
     ciphertext.resize(GROUPS_ENCRYPT_OVERHEAD + encoded.size());
-    auto nonce = std::span{ciphertext}.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    auto nonce = std::span{ciphertext}.first<encryption::XCHACHA20_NONCEBYTES>();
     random::fill(nonce);
 
-    encrypt::xchacha20poly1305_encrypt(
-            std::span{ciphertext}.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES),
+    encryption::xchacha20poly1305_encrypt(
+            std::span{ciphertext}.subspan(encryption::XCHACHA20_NONCEBYTES),
             to_span(encoded),
             nonce,
-            group_enc_key.first<crypto_aead_xchacha20poly1305_ietf_KEYBYTES>());
+            group_enc_key.first<encryption::XCHACHA20_KEYBYTES>());
 
     return ciphertext;
 }
@@ -749,10 +747,7 @@ std::pair<std::vector<std::byte>, std::string> decrypt_incoming_session_id(
 
     // Everything is good, so just drop A and Y off the message and prepend the '05' prefix to
     // the sender session ID
-    std::string sender_session_id;
-    sender_session_id.reserve(66);
-    sender_session_id += "05";
-    oxenc::to_hex(sender_x_pk.begin(), sender_x_pk.end(), std::back_inserter(sender_session_id));
+    auto sender_session_id = "05{:x}"_format(sender_x_pk);
 
     return {buf, sender_session_id};
 }
@@ -768,10 +763,7 @@ std::pair<std::vector<std::byte>, std::string> decrypt_incoming_session_id(
 
     // Everything is good, so just drop A and Y off the message and prepend the '05' prefix to
     // the sender session ID
-    std::string sender_session_id;
-    sender_session_id.reserve(66);
-    sender_session_id += "05";
-    oxenc::to_hex(sender_x_pk.begin(), sender_x_pk.end(), std::back_inserter(sender_session_id));
+    auto sender_session_id = "05{:x}"_format(sender_x_pk);
 
     return {buf, sender_session_id};
 }
@@ -788,16 +780,16 @@ std::pair<std::vector<std::byte>, b32> decrypt_incoming(
         std::span<const std::byte, 32> x25519_seckey,
         std::span<const std::byte> ciphertext) {
 
-    if (ciphertext.size() < crypto_box_SEALBYTES + 32 + 64)
+    if (ciphertext.size() < encryption::BOX_SEALBYTES + 32 + 64)
         throw std::runtime_error{"Invalid incoming message: ciphertext is too small"};
-    const size_t outer_size = ciphertext.size() - crypto_box_SEALBYTES;
+    const size_t outer_size = ciphertext.size() - encryption::BOX_SEALBYTES;
     const size_t msg_size = outer_size - 32 - 64;
 
     std::pair<std::vector<std::byte>, b32> result;
     auto& [buf, sender_ed_pk] = result;
 
     buf.resize(outer_size);
-    if (!encrypt::box_seal_open(buf, ciphertext, x25519_pubkey, x25519_seckey))
+    if (!encryption::box_seal_open(buf, ciphertext, x25519_pubkey, x25519_seckey))
         throw std::runtime_error{"Decryption failed"};
 
     auto tail = std::span{buf}.subspan(msg_size);  // A(32) || SIG(64)
@@ -823,8 +815,8 @@ std::pair<std::vector<std::byte>, std::string> decrypt_from_blinded_recipient(
         std::span<const std::byte, 33> recipient_id,
         std::span<const std::byte> ciphertext) {
     auto ed_pk = ed25519_privkey.pubkey();
-    if (ciphertext.size() < crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + 1 +
-                                    crypto_aead_xchacha20poly1305_ietf_ABYTES)
+    if (ciphertext.size() < encryption::XCHACHA20_NONCEBYTES + 1 +
+                                    encryption::XCHACHA20_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
 
@@ -844,20 +836,20 @@ std::pair<std::vector<std::byte>, std::string> decrypt_from_blinded_recipient(
     // v, ct, nc = data[0], data[1:-24], data[-24:]
     if (ciphertext[0] != std::byte{BLINDED_ENCRYPT_VERSION})
         throw std::invalid_argument{
-                "Invalid ciphertext: version is not " + std::to_string(BLINDED_ENCRYPT_VERSION)};
+                fmt::format("Invalid ciphertext: version is not {}", BLINDED_ENCRYPT_VERSION)};
 
     const size_t msg_size =
-            (ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES - 1 -
-             crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+            (ciphertext.size() - encryption::XCHACHA20_ABYTES - 1 -
+             encryption::XCHACHA20_NONCEBYTES);
 
     if (msg_size < 32)
         throw std::invalid_argument{"Invalid ciphertext: innerBytes too short"};
     buf.resize(msg_size);
 
-    auto nonce = ciphertext.last<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
-    if (!encrypt::xchacha20poly1305_decrypt(
+    auto nonce = ciphertext.last<encryption::XCHACHA20_NONCEBYTES>();
+    if (!encryption::xchacha20poly1305_decrypt(
                 buf,
-                ciphertext.subspan(1, msg_size + crypto_aead_xchacha20poly1305_ietf_ABYTES),
+                ciphertext.subspan(1, msg_size + encryption::XCHACHA20_ABYTES),
                 nonce,
                 dec_key))
         throw std::invalid_argument{"Decryption failed"};
@@ -887,15 +879,13 @@ std::pair<std::vector<std::byte>, std::string> decrypt_from_blinded_recipient(
     // Everything is good, so just drop the sender_ed_pk off the message and prepend the '05' prefix
     // to the sender session ID
     buf.resize(buf.size() - 32);
-    sender_session_id.reserve(66);
-    sender_session_id += "05";
-    oxenc::to_hex(sender_x_pk.begin(), sender_x_pk.end(), std::back_inserter(sender_session_id));
+    sender_session_id = "05{:x}"_format(sender_x_pk);
 
     return result;
 }
 
 DecryptGroupMessage decrypt_group_message(
-        std::span<std::span<const std::byte>> decrypt_ed25519_privkey_list,
+        std::span<std::span<const std::byte, 32>> group_enc_keys,
         std::span<const std::byte, 32> group_ed25519_pubkey,
         std::span<const std::byte> ciphertext) {
     DecryptGroupMessage result = {};
@@ -903,26 +893,20 @@ DecryptGroupMessage decrypt_group_message(
     if (ciphertext.size() < GROUPS_ENCRYPT_OVERHEAD)
         throw std::runtime_error{"ciphertext is too small to be encrypted data"};
 
-    // Note we only use the secret key of the decrypt_ed25519_privkey so we don't care about
-    // generating the pubkey component if the user only passed in a 32 byte libsodium-style secret
-    // key.
+    // Each group encryption key is a 32-byte symmetric XChaCha20-Poly1305 key.  Multiple keys
+    // are tried because the group key rotates and recently-received messages may still be
+    // encrypted with a pre-rotation key.
 
     std::vector<std::byte> plain;
 
-    auto nonce = ciphertext.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
-    ciphertext = ciphertext.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
-    plain.resize(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
+    auto nonce = ciphertext.first<encryption::XCHACHA20_NONCEBYTES>();
+    ciphertext = ciphertext.subspan(encryption::XCHACHA20_NONCEBYTES);
+    plain.resize(ciphertext.size() - encryption::XCHACHA20_ABYTES);
 
     bool decrypt_success = false;
-    for (size_t index = 0; index < decrypt_ed25519_privkey_list.size(); index++) {
-        const auto& decrypt_ed25519_privkey = decrypt_ed25519_privkey_list[index];
-        if (decrypt_ed25519_privkey.size() != 32 && decrypt_ed25519_privkey.size() != 64)
-            throw std::invalid_argument{"Invalid decrypt_ed25519_privkey: expected 32 or 64 bytes"};
-        decrypt_success = encrypt::xchacha20poly1305_decrypt(
-                plain,
-                ciphertext,
-                nonce,
-                decrypt_ed25519_privkey.first<crypto_aead_xchacha20poly1305_ietf_KEYBYTES>());
+    for (size_t index = 0; index < group_enc_keys.size(); index++) {
+        decrypt_success = encryption::xchacha20poly1305_decrypt(
+                plain, ciphertext, nonce, group_enc_keys[index]);
         if (decrypt_success) {
             res_index = index;
             break;
@@ -952,21 +936,18 @@ DecryptGroupMessage decrypt_group_message(
         throw std::runtime_error{"group message version tag (\"\") is missing"};
     if (auto v = dict.consume_integer<int>(); v != 1)
         throw std::runtime_error{
-                "group message version tag (" + std::to_string(v) +
-                ") is not compatible (we support v1)"};
+                fmt::format("group message version tag ({}) is not compatible (we support v1)", v)};
 
     if (!dict.skip_until("a"))
         throw std::runtime_error{"missing message author pubkey"};
     auto ed_pk = to_span(dict.consume_string_view());
     if (ed_pk.size() != 32)
         throw std::runtime_error{
-                "message author pubkey size (" + std::to_string(ed_pk.size()) + ") is invalid"};
+                fmt::format("message author pubkey size ({}) is invalid", ed_pk.size())};
 
     auto x_pk = ed25519::pk_to_x25519(ed_pk.first<32>());
 
-    session_id.reserve(66);
-    session_id += "05";
-    oxenc::to_hex(x_pk.begin(), x_pk.end(), std::back_inserter(session_id));
+    session_id = "05{:x}"_format(x_pk);
 
     std::span<const std::byte> raw_data;
     if (dict.skip_until("d")) {
@@ -980,7 +961,7 @@ DecryptGroupMessage decrypt_group_message(
     auto ed_sig = to_span(dict.consume_string_view());
     if (ed_sig.size() != 64)
         throw std::runtime_error{
-                "message signature size (" + std::to_string(ed_sig.size()) + ") is invalid"};
+                fmt::format("message signature size ({}) is invalid", ed_sig.size())};
 
     bool compressed = false;
     if (dict.skip_until("z")) {
@@ -1019,8 +1000,8 @@ DecryptGroupMessage decrypt_group_message(
 }
 
 // The old Argon2-based ONS encryption always used an all-zero salt and all-zero secretbox nonce.
-static constexpr std::array<std::byte, crypto_pwhash_SALTBYTES> ONS_ARGON2_SALT = {};
-static constexpr std::array<std::byte, crypto_secretbox_NONCEBYTES> ONS_SECRETBOX_NONCE = {};
+static constexpr std::array<std::byte, hash::ARGON2_SALTBYTES> ONS_ARGON2_SALT = {};
+static constexpr std::array<std::byte, encryption::SECRETBOX_NONCEBYTES> ONS_SECRETBOX_NONCE = {};
 
 std::string decrypt_ons_response(
         std::string_view lowercase_name,
@@ -1028,7 +1009,7 @@ std::string decrypt_ons_response(
         std::optional<std::span<const std::byte, 24>> nonce) {
     // Handle old Argon2-based encryption used before HF16
     if (!nonce) {
-        if (ciphertext.size() < crypto_secretbox_MACBYTES)
+        if (ciphertext.size() < encryption::SECRETBOX_MACBYTES)
             throw std::invalid_argument{"Invalid ciphertext: expected to be greater than 16 bytes"};
 
         b32 key;
@@ -1036,22 +1017,21 @@ std::string decrypt_ons_response(
                 key,
                 {lowercase_name.data(), lowercase_name.size()},
                 ONS_ARGON2_SALT,
-                crypto_pwhash_OPSLIMIT_MODERATE,
-                crypto_pwhash_MEMLIMIT_MODERATE,
-                crypto_pwhash_ALG_ARGON2ID13);
+                hash::ARGON2_OPSLIMIT_MODERATE,
+                hash::ARGON2_MEMLIMIT_MODERATE,
+                hash::ARGON2ID13);
 
         std::vector<std::byte> msg;
-        msg.resize(ciphertext.size() - crypto_secretbox_MACBYTES);
+        msg.resize(ciphertext.size() - encryption::SECRETBOX_MACBYTES);
 
-        if (!encrypt::secretbox_open_easy(msg, ciphertext, ONS_SECRETBOX_NONCE, key))
+        if (!encryption::secretbox_open_easy(msg, ciphertext, ONS_SECRETBOX_NONCE, key))
             throw std::runtime_error{"Failed to decrypt"};
 
-        std::string session_id = oxenc::to_hex(msg.begin(), msg.end());
-        return session_id;
+        return oxenc::to_hex(msg);
     }
 
-    static_assert(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES == 24);
-    if (ciphertext.size() != 33 + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+    static_assert(encryption::XCHACHA20_NONCEBYTES == 24);
+    if (ciphertext.size() != 33 + encryption::XCHACHA20_ABYTES)
         throw std::invalid_argument{"Invalid ciphertext: expected exactly 49 bytes"};
 
     // Hash the ONS name using BLAKE2b
@@ -1063,7 +1043,7 @@ std::string decrypt_ons_response(
     auto key = hash::blake2b_key<32>(name_hash, lowercase_name);
 
     std::array<std::byte, 33> buf;
-    if (!encrypt::xchacha20poly1305_decrypt(buf, ciphertext, *nonce, key))
+    if (!encryption::xchacha20poly1305_decrypt(buf, ciphertext, *nonce, key))
         throw std::runtime_error{"Failed to decrypt"};
 
     return oxenc::to_hex(buf);
@@ -1072,15 +1052,15 @@ std::string decrypt_ons_response(
 std::vector<std::byte> decrypt_push_notification(
         std::span<const std::byte> payload, std::span<const std::byte, 32> enc_key) {
     if (payload.size() <
-        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+        encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES)
         throw std::invalid_argument{"Invalid payload: too short to contain valid encrypted data"};
 
-    auto nonce = payload.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
-    auto ct = payload.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES);
+    auto nonce = payload.first<encryption::XCHACHA20_NONCEBYTES>();
+    auto ct = payload.subspan(encryption::XCHACHA20_NONCEBYTES);
 
-    std::vector<std::byte> buf(ct.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
+    std::vector<std::byte> buf(ct.size() - encryption::XCHACHA20_ABYTES);
 
-    if (!encrypt::xchacha20poly1305_decrypt(buf, ct, nonce, enc_key))
+    if (!encryption::xchacha20poly1305_decrypt(buf, ct, nonce, enc_key))
         throw std::runtime_error{"Failed to decrypt; perhaps the secret key is invalid?"};
 
     // Removing any null padding bytes from the end
@@ -1096,14 +1076,14 @@ std::vector<std::byte> encrypt_xchacha20(
         std::span<const std::byte> plaintext, std::span<const std::byte, 32> key) {
 
     std::vector<std::byte> ciphertext(
-            crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + plaintext.size() +
-            crypto_aead_xchacha20poly1305_ietf_ABYTES);
+            encryption::XCHACHA20_NONCEBYTES + plaintext.size() +
+            encryption::XCHACHA20_ABYTES);
 
-    auto nonce = std::span{ciphertext}.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    auto nonce = std::span{ciphertext}.first<encryption::XCHACHA20_NONCEBYTES>();
     random::fill(nonce);
 
-    encrypt::xchacha20poly1305_encrypt(
-            std::span{ciphertext}.subspan(crypto_aead_xchacha20poly1305_ietf_NPUBBYTES),
+    encryption::xchacha20poly1305_encrypt(
+            std::span{ciphertext}.subspan(encryption::XCHACHA20_NONCEBYTES),
             plaintext,
             nonce,
             key);
@@ -1113,16 +1093,16 @@ std::vector<std::byte> encrypt_xchacha20(
 std::vector<std::byte> decrypt_xchacha20(
         std::span<const std::byte> ciphertext, std::span<const std::byte, 32> key) {
     if (ciphertext.size() <
-        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+        encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES)
         throw std::invalid_argument{
                 "Invalid ciphertext: too short to contain valid encrypted data"};
 
     // Extract nonce from the beginning of the ciphertext:
-    auto nonce = ciphertext.first<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>();
+    auto nonce = ciphertext.first<encryption::XCHACHA20_NONCEBYTES>();
     ciphertext = ciphertext.subspan(nonce.size());
 
-    std::vector<std::byte> plaintext(ciphertext.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
-    if (!encrypt::xchacha20poly1305_decrypt(plaintext, ciphertext, nonce, key))
+    std::vector<std::byte> plaintext(ciphertext.size() - encryption::XCHACHA20_ABYTES);
+    if (!encryption::xchacha20poly1305_decrypt(plaintext, ciphertext, nonce, key))
         throw std::runtime_error{"Could not decrypt (XChaCha20-Poly1305)"};
     return plaintext;
 }
@@ -1299,11 +1279,15 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         size_t error_len) {
     session_decrypt_group_message_result result = {};
     try {
-        std::vector<std::span<const std::byte>> keys;
+        std::vector<std::span<const std::byte, 32>> keys;
         keys.reserve(decrypt_ed25519_privkey_len);
-        for (size_t i = 0; i < decrypt_ed25519_privkey_len; i++)
-            keys.push_back(to_byte_span(
-                    decrypt_ed25519_privkey_list[i].data, decrypt_ed25519_privkey_list[i].size));
+        for (size_t i = 0; i < decrypt_ed25519_privkey_len; i++) {
+            if (decrypt_ed25519_privkey_list[i].size != 32)
+                throw std::invalid_argument{fmt::format(
+                        "Invalid group encryption key: expected 32 bytes, got {}",
+                        decrypt_ed25519_privkey_list[i].size)};
+            keys.push_back(to_byte_span<32>(decrypt_ed25519_privkey_list[i].data));
+        }
         auto [index, session_id, plaintext] = decrypt_group_message(
                 keys,
                 to_byte_span<32>(group_ed25519_pubkey),
@@ -1326,10 +1310,10 @@ LIBSESSION_C_API bool session_decrypt_ons_response(
         const unsigned char* nonce_in,
         char* session_id_out) {
     try {
-        std::optional<std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>>
+        std::optional<std::span<const std::byte, encryption::XCHACHA20_NONCEBYTES>>
                 nonce;
         if (nonce_in)
-            nonce = to_byte_span<crypto_aead_xchacha20poly1305_ietf_NPUBBYTES>(nonce_in);
+            nonce = to_byte_span<encryption::XCHACHA20_NONCEBYTES>(nonce_in);
 
         auto session_id =
                 session::decrypt_ons_response(name_in, to_byte_span(ciphertext_in, ciphertext_len), nonce);

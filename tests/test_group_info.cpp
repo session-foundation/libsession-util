@@ -35,7 +35,7 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     // This is just for testing: normally you don't load keys manually but just make a groups::Keys
     // object that loads the keys into the Members object for you.
     for (const auto& k : enc_keys)
-        ginfo1.add_key(k, false);
+        ginfo1.add_key(std::span{k}.first<32>(), false);
 
     enc_keys.insert(
             enc_keys.begin(),
@@ -46,7 +46,7 @@ TEST_CASE("Group Info settings", "[config][groups][info]") {
     groups::Info ginfo2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys)  // Just for testing, as above.
-        ginfo2.add_key(k, false);
+        ginfo2.add_key(std::span{k}.first<32>(), false);
 
     ginfo1.set_name("GROUP Name");
     CHECK(ginfo1.is_dirty());
@@ -165,7 +165,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     groups::Info ginfo{ed_pk, std::nullopt, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo.add_key(k, false);
+        ginfo.add_key(std::span{k}.first<32>(), false);
 
     REQUIRE_THROWS_WITH(
             ginfo.set_name("Super Group!"), "Unable to make changes to a read-only config object");
@@ -177,7 +177,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     groups::Info ginfo_rw{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo_rw.add_key(k, false);
+        ginfo_rw.add_key(std::span{k}.first<32>(), false);
 
     ginfo_rw.set_name("Super Group!!");
     CHECK(ginfo_rw.is_dirty());
@@ -200,7 +200,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     groups::Info ginfo_rw2{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo_rw2.add_key(k, false);
+        ginfo_rw2.add_key(std::span{k}.first<32>(), false);
 
     CHECK(ginfo_rw2.merge(merge_configs) == std::unordered_set{{"fakehash1"s}});
     CHECK_FALSE(ginfo.needs_push());
@@ -222,7 +222,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     groups::Info ginfo_bad1{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo_bad1.add_key(k, false);
+        ginfo_bad1.add_key(std::span{k}.first<32>(), false);
 
     ginfo_bad1.merge(merge_configs);
     ginfo_bad1.set_sig_keys(ed_sk_bad1);
@@ -305,7 +305,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     groups::Info ginfo2{ed_pk, std::nullopt, dump};
 
     for (const auto& k : enc_keys1)  // Just for testing, as above.
-        ginfo2.add_key(k, false);
+        ginfo2.add_key(std::span{k}.first<32>(), false);
 
     CHECK(!ginfo.needs_dump());
     CHECK(!ginfo2.needs_dump());
@@ -323,7 +323,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     groups::Info ginfo_rw3{ed_pk, ed_sk, std::nullopt};
 
     for (const auto& k : enc_keys2)  // Just for testing, as above.
-        ginfo_rw3.add_key(k, false);
+        ginfo_rw3.add_key(std::span{k}.first<32>(), false);
 
     CHECK(ginfo_rw3.merge(merge_configs) == std::unordered_set{{"fakehash23"s}});
     CHECK(ginfo_rw3.get_name() == "Super Group 2");
@@ -352,7 +352,7 @@ TEST_CASE("Verify-only Group Info", "[config][groups][verify-only]") {
     // If we don't have the new "bbb" key loaded yet, this will fail:
     CHECK(ginfo.merge(merge_configs) == std::unordered_set<std::string>{});
 
-    ginfo.add_key(enc_keys2.front());
+    ginfo.add_key(std::span{enc_keys2.front()}.first<32>());
     CHECK(ginfo.merge(merge_configs) == std::unordered_set{{"fakehash7"s}});
 
     auto pic = ginfo.get_profile_pic();

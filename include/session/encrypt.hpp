@@ -14,13 +14,23 @@
 
 #include "util.hpp"
 
-namespace session::encrypt {
+namespace session::encryption {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 inline constexpr size_t XCHACHA20_KEYBYTES = 32;
 inline constexpr size_t XCHACHA20_NONCEBYTES = 24;
 inline constexpr size_t XCHACHA20_ABYTES = 16;  // authentication tag size
+
+inline constexpr size_t BOX_PUBLICKEYBYTES = 32;
+inline constexpr size_t BOX_SECRETKEYBYTES = 32;
+inline constexpr size_t BOX_MACBYTES = 16;
+inline constexpr size_t BOX_NONCEBYTES = 24;
+inline constexpr size_t BOX_SEALBYTES = BOX_PUBLICKEYBYTES + BOX_MACBYTES;  // 48
+
+inline constexpr size_t SECRETBOX_KEYBYTES = 32;
+inline constexpr size_t SECRETBOX_NONCEBYTES = 24;
+inline constexpr size_t SECRETBOX_MACBYTES = 16;
 
 // ─── XChaCha20-Poly1305 AEAD ─────────────────────────────────────────────────
 
@@ -29,8 +39,8 @@ inline constexpr size_t XCHACHA20_ABYTES = 16;  // authentication tag size
 inline void xchacha20poly1305_encrypt(
         std::span<std::byte> out,
         std::span<const std::byte> msg,
-        std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce,
-        std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> key) {
+        std::span<const std::byte, XCHACHA20_NONCEBYTES> nonce,
+        std::span<const std::byte, XCHACHA20_KEYBYTES> key) {
     crypto_aead_xchacha20poly1305_ietf_encrypt(
             ucdata(out), nullptr, ucdata(msg), msg.size(), nullptr, 0, nullptr,
             ucdata(nonce), ucdata(key));
@@ -41,8 +51,8 @@ inline void xchacha20poly1305_encrypt(
 inline bool xchacha20poly1305_decrypt(
         std::span<std::byte> out,
         std::span<const std::byte> ciphertext,
-        std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce,
-        std::span<const std::byte, crypto_aead_xchacha20poly1305_ietf_KEYBYTES> key) {
+        std::span<const std::byte, XCHACHA20_NONCEBYTES> nonce,
+        std::span<const std::byte, XCHACHA20_KEYBYTES> key) {
     return 0 == crypto_aead_xchacha20poly1305_ietf_decrypt(
                         ucdata(out), nullptr, nullptr,
                         ucdata(ciphertext), ciphertext.size(), nullptr, 0,
@@ -56,8 +66,8 @@ inline bool xchacha20poly1305_decrypt(
 inline void xchacha20_xor(
         std::span<std::byte> out,
         std::span<const std::byte> in,
-        std::span<const std::byte, crypto_stream_xchacha20_NONCEBYTES> nonce,
-        std::span<const std::byte, crypto_stream_xchacha20_KEYBYTES> key) {
+        std::span<const std::byte, XCHACHA20_NONCEBYTES> nonce,
+        std::span<const std::byte, XCHACHA20_KEYBYTES> key) {
     crypto_stream_xchacha20_xor(ucdata(out), ucdata(in), in.size(), ucdata(nonce), ucdata(key));
 }
 
@@ -118,13 +128,13 @@ inline std::optional<size_t> secretstream_pull(
 // ─── Box (X25519 + XSalsa20-Poly1305) ────────────────────────────────────────
 
 /// Encrypts `msg` for `recipient_pk` from `sender_sk`, writing ciphertext into `out`.
-/// `out` must be `msg.size() + crypto_box_MACBYTES` bytes.
+/// `out` must be `msg.size() + BOX_MACBYTES` bytes.
 inline void box_easy(
         std::span<std::byte> out,
         std::span<const std::byte> msg,
-        std::span<const std::byte, crypto_box_NONCEBYTES> nonce,
-        std::span<const std::byte, crypto_box_PUBLICKEYBYTES> recipient_pk,
-        std::span<const std::byte, crypto_box_SECRETKEYBYTES> sender_sk) {
+        std::span<const std::byte, BOX_NONCEBYTES> nonce,
+        std::span<const std::byte, BOX_PUBLICKEYBYTES> recipient_pk,
+        std::span<const std::byte, BOX_SECRETKEYBYTES> sender_sk) {
     if (0 != crypto_box_easy(
                      ucdata(out),
                      ucdata(msg),
@@ -136,22 +146,22 @@ inline void box_easy(
 }
 
 /// Seals `msg` for `pk` (anonymous sender), writing ciphertext into `out`.
-/// `out` must be `msg.size() + crypto_box_SEALBYTES` bytes.
+/// `out` must be `msg.size() + BOX_SEALBYTES` bytes.
 inline void box_seal(
         std::span<std::byte> out,
         std::span<const std::byte> msg,
-        std::span<const std::byte, crypto_box_PUBLICKEYBYTES> pk) {
+        std::span<const std::byte, BOX_PUBLICKEYBYTES> pk) {
     if (0 != crypto_box_seal(ucdata(out), ucdata(msg), msg.size(), ucdata(pk)))
         throw std::runtime_error{"crypto_box_seal failed (invalid public key?)"};
 }
 
-/// Decrypts a sealed box.  `out` must be `ciphertext.size() - crypto_box_SEALBYTES` bytes.
+/// Decrypts a sealed box.  `out` must be `ciphertext.size() - BOX_SEALBYTES` bytes.
 /// Returns false if authentication fails.
 inline bool box_seal_open(
         std::span<std::byte> out,
         std::span<const std::byte> ciphertext,
-        std::span<const std::byte, crypto_box_PUBLICKEYBYTES> pk,
-        std::span<const std::byte, crypto_box_SECRETKEYBYTES> sk) {
+        std::span<const std::byte, BOX_PUBLICKEYBYTES> pk,
+        std::span<const std::byte, BOX_SECRETKEYBYTES> sk) {
     return 0 == crypto_box_seal_open(
                         ucdata(out), ucdata(ciphertext), ciphertext.size(), ucdata(pk), ucdata(sk));
 }
@@ -163,11 +173,11 @@ inline bool box_seal_open(
 inline bool secretbox_open_easy(
         std::span<std::byte> out,
         std::span<const std::byte> ciphertext,
-        std::span<const std::byte, crypto_secretbox_NONCEBYTES> nonce,
-        std::span<const std::byte, crypto_secretbox_KEYBYTES> key) {
+        std::span<const std::byte, SECRETBOX_NONCEBYTES> nonce,
+        std::span<const std::byte, SECRETBOX_KEYBYTES> key) {
     return 0 ==
            crypto_secretbox_open_easy(
                    ucdata(out), ucdata(ciphertext), ciphertext.size(), ucdata(nonce), ucdata(key));
 }
 
-}  // namespace session::encrypt
+}  // namespace session::encryption

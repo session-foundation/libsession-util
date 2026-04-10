@@ -5,6 +5,7 @@
 #include <oxenc/endian.h>
 #include <sodium/core.h>
 
+#include <session/format.hpp>
 #include <stdexcept>
 
 #include "session/export.h"
@@ -181,7 +182,8 @@ LIBSESSION_C_API bool onion_request_decrypt(
                 break;
 
             default:
-                throw std::runtime_error{"Invalid decryption type " + std::to_string(enc_type_)};
+                throw std::runtime_error{
+                        "Invalid decryption type {}"_format(static_cast<int>(enc_type_))};
         }
 
         session::onionreq::HopEncryption d{

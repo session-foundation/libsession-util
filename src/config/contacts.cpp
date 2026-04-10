@@ -333,7 +333,7 @@ blinded_contact_info::blinded_contact_info(
     if (prefix != session::SessionIDPrefix::community_blinded &&
         prefix != session::SessionIDPrefix::community_blinded_legacy)
         throw std::invalid_argument{
-                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{blinded_id}};
+                "Invalid blinded ID: Expected '15' or '25' prefix; got {}"_format(blinded_id)};
 }
 
 void blinded_contact_info::load(const dict& info_dict) {
@@ -520,7 +520,7 @@ bool Contacts::erase_blinded(std::string_view base_url_, std::string_view blinde
     if (prefix != session::SessionIDPrefix::community_blinded &&
         prefix != session::SessionIDPrefix::community_blinded_legacy)
         throw std::invalid_argument{
-                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{blinded_id}};
+                "Invalid blinded ID: Expected '15' or '25' prefix; got {}"_format(blinded_id)};
 
     auto base_url = community::canonical_url(base_url_);
     auto pk = std::string(blinded_id.substr(2));

@@ -3,6 +3,7 @@
 #include <oxenc/hex.h>
 
 #include <charconv>
+#include <session/format.hpp>
 #include <optional>
 #include <session/types.hpp>
 #include <stdexcept>
@@ -10,8 +11,6 @@
 #include <type_traits>
 
 #include "internal.hpp"
-#include "oxenc/base32z.h"
-#include "oxenc/base64.h"
 #include "session/config/community.h"
 #include "session/export.h"
 #include "session/util.hpp"
@@ -54,18 +53,15 @@ void community::set_pubkey(std::string_view pubkey) {
 }
 
 std::string community::pubkey_hex() const {
-    const auto& pk = pubkey();
-    return oxenc::to_hex(pk.begin(), pk.end());
+    return "{:x}"_format(pubkey());
 }
 
 std::string community::pubkey_b32z() const {
-    const auto& pk = pubkey();
-    return oxenc::to_base32z(pk.begin(), pk.end());
+    return "{:a}"_format(pubkey());
 }
 
 std::string community::pubkey_b64() const {
-    const auto& pk = pubkey();
-    return oxenc::to_base64(pk.begin(), pk.end());
+    return "{:b}"_format(pubkey());
 }
 
 void community::set_room(std::string_view room) {
@@ -79,12 +75,7 @@ std::string community::full_url() const {
 
 std::string community::full_url(
         std::string_view base_url, std::string_view room, std::span<const std::byte> pubkey) {
-    std::string url{base_url};
-    url += '/';
-    url += room;
-    url += qs_pubkey;
-    url += oxenc::to_hex(pubkey);
-    return url;
+    return "{}/{}?public_key={:x}"_format(base_url, room, pubkey);
 }
 
 void community::canonicalize_url(std::string& url) {
@@ -110,10 +101,8 @@ std::string community::canonical_url(std::string_view url) {
     std::string result;
     result += proto;
     result += host;
-    if (port) {
-        result += ':';
-        result += std::to_string(*port);
-    }
+    if (port)
+        fmt::format_to(std::back_inserter(result), ":{}", *port);
     // We don't (currently) allow a /path in a community URL
     if (path)
         throw std::invalid_argument{"Invalid community URL: found unexpected trailing value"};

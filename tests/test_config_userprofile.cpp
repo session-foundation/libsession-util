@@ -10,6 +10,7 @@
 #include <session/util.hpp>
 #include <string_view>
 
+#include "../src/config/internal.hpp"
 #include "utils.hpp"
 
 using namespace session;

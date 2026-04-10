@@ -63,7 +63,7 @@ EncryptType parse_enc_type(std::string_view enc_type) {
         return EncryptType::xchacha20;
     if (enc_type == "aes-gcm" || enc_type == "gcm")
         return EncryptType::aes_gcm;
-    throw std::runtime_error{"Invalid encryption type " + std::string{enc_type}};
+    throw std::runtime_error{"Invalid encryption type {}"_format(enc_type)};
 }
 
 Builder Builder::make(

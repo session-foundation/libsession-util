@@ -231,7 +231,7 @@ TEST_CASE("Multi-recipient encryption, simpler interface", "[encrypt][multi][sim
                     /* 1:# 24:...nonce... */ 3 + 27 +
                     /* 1:e le */ 3 + 2 +
                     /* XX: then data with overhead */ 3 *
-                            (3 + 5 + encrypt::XCHACHA20_ABYTES));
+                            (3 + 5 + encryption::XCHACHA20_ABYTES));
 
     // If we encrypt again the value should be different (because of the default randomized nonce):
     CHECK(encrypted != encrypt_for_multiple_simple(

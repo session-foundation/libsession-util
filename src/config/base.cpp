@@ -217,8 +217,8 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const std::byte
                 if (actual_hash != final_hash)
                     throw std::runtime_error{
                             "recombined message hash ({}) does not match part hash ({})"_format(
-                                    oxenc::to_hex(actual_hash.begin(), actual_hash.end()),
-                                    oxenc::to_hex(final_hash.begin(), final_hash.end()))};
+                                    actual_hash,
+                                    final_hash)};
             }
 
             log::debug(
@@ -227,7 +227,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const std::byte
                     msg_id,
                     index,
                     parts.size,
-                    oxenc::to_hex(final_hash.begin(), final_hash.end()),
+                    final_hash,
                     final_size);
 
             parts.finish(MULTIPART_MAX_REMEMBER);
@@ -250,14 +250,14 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const std::byte
                     log::debug(
                             cat,
                             "multipart message {} inflated to {}B plaintext from {}B compressed",
-                            oxenc::to_hex(final_hash.begin(), final_hash.end()),
+                            final_hash,
                             decompressed->size(),
                             recombined.size());
                     recombined = std::move(*decompressed);
                 } else
                     throw std::runtime_error{
                             "Invalid recombined data (hash {}): decompression failed"_format(
-                                    oxenc::to_hex(final_hash.begin(), final_hash.end()), msg_id)};
+                                    final_hash, msg_id)};
             }
 
             if (recombined.empty())
@@ -276,7 +276,7 @@ ConfigBase::_handle_multipart(std::string_view msg_id, std::span<const std::byte
                     msg_id,
                     index,
                     parts.size,
-                    oxenc::to_hex(final_hash.begin(), final_hash.end()));
+                    final_hash);
             return {true, std::nullopt};
         }
 
@@ -752,7 +752,7 @@ ConfigBase::push() {
                 cat,
                 "splitting large config message ({}B, hash {}) into {} parts",
                 msg.size(),
-                oxenc::to_hex(final_hash.begin(), final_hash.end()),
+                final_hash,
                 num_parts);
 
         std::span<const std::byte> remaining{msg};
@@ -950,10 +950,7 @@ int ConfigBase::key_count() const {
     return _keys.size();
 }
 
-bool ConfigBase::has_key(std::span<const std::byte> key) const {
-    if (key.size() != 32)
-        throw std::invalid_argument{"invalid key given to has_key(): not 32-bytes"};
-
+bool ConfigBase::has_key(std::span<const std::byte, 32> key) const {
     auto* keyptr = key.data();
     for (const auto& key : _keys)
         if (sodium_memcmp(keyptr, key.data(), KEY_SIZE) == 0)
@@ -961,21 +958,18 @@ bool ConfigBase::has_key(std::span<const std::byte> key) const {
     return false;
 }
 
-std::vector<std::span<const std::byte>> ConfigBase::get_keys() const {
-    std::vector<std::span<const std::byte>> ret;
+std::vector<std::span<const std::byte, 32>> ConfigBase::get_keys() const {
+    std::vector<std::span<const std::byte, 32>> ret;
     ret.reserve(_keys.size());
     for (const auto& key : _keys)
-        ret.emplace_back(key.data(), key.size());
+        ret.emplace_back(key);
     return ret;
 }
 
 void ConfigBase::add_key(
-        std::span<const std::byte> key, bool high_priority, bool dirty_config) {
+        std::span<const std::byte, 32> key, bool high_priority, bool dirty_config) {
     static_assert(
             sizeof(Key) == KEY_SIZE, "std::array appears to have some overhead which seems bad");
-
-    if (key.size() != KEY_SIZE)
-        throw std::invalid_argument{"add_key failed: key size must be 32 bytes"};
 
     if (!_keys.empty() && sodium_memcmp(_keys.front().data(), key.data(), KEY_SIZE) == 0)
         return;
@@ -1009,17 +1003,13 @@ int ConfigBase::clear_keys(bool dirty_config) {
 }
 
 void ConfigBase::replace_keys(
-        const std::vector<std::span<const std::byte>>& new_keys, bool dirty_config) {
+        const std::vector<std::span<const std::byte, 32>>& new_keys, bool dirty_config) {
     if (new_keys.empty()) {
         if (_keys.empty())
             return;
         clear_keys(dirty_config);
         return;
     }
-
-    for (auto& k : new_keys)
-        if (k.size() != KEY_SIZE)
-            throw std::invalid_argument{"replace_keys failed: keys must be 32 bytes"};
 
     dirty_config = dirty_config && !is_readonly() &&
                    (_keys.empty() ||
@@ -1034,7 +1024,7 @@ void ConfigBase::replace_keys(
         dirty();
 }
 
-bool ConfigBase::remove_key(std::span<const std::byte> key, size_t from, bool dirty_config) {
+bool ConfigBase::remove_key(std::span<const std::byte, 32> key, size_t from, bool dirty_config) {
     auto starting_size = _keys.size();
     if (from >= starting_size)
         return false;
@@ -1063,8 +1053,7 @@ void ConfigBase::load_key(const ed25519::PrivKeySpan& ed25519_secretkey) {
 
 void ConfigSig::set_sig_keys(const ed25519::PrivKeySpan& secret) {
     clear_sig_keys();
-    _sign_sk.reset(64);
-    std::memcpy(_sign_sk.data(), secret.data(), 64);
+    _sign_sk.assign(secret.begin(), secret.end());
     ed25519::sk_to_pk(_sign_pk.emplace(), secret);
 
     set_verifier([this](std::span<const std::byte> data, std::span<const std::byte> sig) {
@@ -1087,7 +1076,7 @@ void ConfigSig::set_sig_pubkey(std::span<const std::byte, 32> pubkey) {
 
 void ConfigSig::clear_sig_keys() {
     _sign_pk.reset();
-    _sign_sk.reset();
+    _sign_sk.clear();
     set_signer(nullptr);
     set_verifier(nullptr);
 }
@@ -1101,7 +1090,7 @@ void ConfigBase::set_signer(ConfigMessage::sign_callable s) {
 }
 
 cleared_b32 ConfigSig::seed_hash(std::string_view key) const {
-    if (!_sign_sk)
+    if (_sign_sk.empty())
         throw std::runtime_error{"Cannot make a seed hash without a signing secret key"};
     cleared_b32 result;
     hash::blake2b_key(result, key, std::span{_sign_sk.data(), 32});

@@ -532,7 +532,7 @@ struct DecryptGroupMessage {
 /// (and possibly log) but otherwise ignore such exceptions and just not process the message if
 /// it throws.
 DecryptGroupMessage decrypt_group_message(
-        std::span<std::span<const std::byte>> decrypt_ed25519_privkey_list,
+        std::span<std::span<const std::byte, 32>> group_enc_keys,
         std::span<const std::byte, 32> group_ed25519_pubkey,
         std::span<const std::byte> ciphertext);
 

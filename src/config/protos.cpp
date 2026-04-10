@@ -1,8 +1,5 @@
 #include "session/config/protos.hpp"
 
-#include <sodium/crypto_scalarmult.h>
-#include <sodium/crypto_sign_ed25519.h>
-
 #include <oxen/log.hpp>
 #include <oxenc/hex.h>
 

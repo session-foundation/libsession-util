@@ -2,10 +2,8 @@
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <session/multi_encrypt.h>
-#include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_scalarmult_curve25519.h>
-#include <sodium/crypto_sign_ed25519.h>
-#include <sodium/randombytes.h>
+#include <session/crypto/x25519.hpp>
+#include <session/random.hpp>
 
 #include <session/encrypt.hpp>
 #include <session/multi_encrypt.hpp>
@@ -16,7 +14,7 @@
 
 namespace session {
 
-const size_t encrypt_multiple_message_overhead = crypto_aead_xchacha20poly1305_ietf_ABYTES;
+const size_t encrypt_multiple_message_overhead = encryption::XCHACHA20_ABYTES;
 
 namespace detail {
 
@@ -28,11 +26,7 @@ namespace detail {
             bool encrypting,
             std::string_view domain) {
 
-        b32 buf;
-        if (0 != crypto_scalarmult_curve25519(to_unsigned(buf.data()), to_unsigned(a.data()), to_unsigned(B.data())))
-            throw std::invalid_argument{"Unable to compute shared encrypted key: invalid pubkey?"};
-
-        static_assert(crypto_aead_xchacha20poly1305_ietf_KEYBYTES == 32);
+        auto buf = x25519::scalarmult(a, B);
 
         // If we're encrypting then a/A == sender, B = recipient
         // If we're decrypting then a/A = recipient, B = sender
@@ -49,8 +43,8 @@ namespace detail {
             std::span<const std::byte, 32> key,
             std::span<const std::byte, 24> nonce) {
 
-        out.resize(msg.size() + encrypt::XCHACHA20_ABYTES);
-        encrypt::xchacha20poly1305_encrypt(out, msg, nonce, key);
+        out.resize(msg.size() + encryption::XCHACHA20_ABYTES);
+        encryption::xchacha20poly1305_encrypt(out, msg, nonce, key);
     }
 
     bool decrypt_multi_impl(
@@ -59,11 +53,11 @@ namespace detail {
             std::span<const std::byte, 32> key,
             std::span<const std::byte, 24> nonce) {
 
-        if (ciphertext.size() < encrypt::XCHACHA20_ABYTES)
+        if (ciphertext.size() < encryption::XCHACHA20_ABYTES)
             return false;
 
-        out.resize(ciphertext.size() - encrypt::XCHACHA20_ABYTES);
-        return encrypt::xchacha20poly1305_decrypt(out, ciphertext, nonce, key);
+        out.resize(ciphertext.size() - encryption::XCHACHA20_ABYTES);
+        return encryption::xchacha20poly1305_decrypt(out, ciphertext, nonce, key);
     }
 
 }  // namespace detail
@@ -101,10 +95,10 @@ std::vector<std::byte> encrypt_for_multiple_simple(
 
     oxenc::bt_dict_producer d;
 
-    std::array<unsigned char, 24> random_nonce;
+    std::array<std::byte, 24> random_nonce;
     if (!nonce) {
-        randombytes_buf(random_nonce.data(), random_nonce.size());
-        nonce.emplace(to_byte_span<24>(random_nonce.data()));
+        random::fill(random_nonce);
+        nonce.emplace(random_nonce);
     } else if (nonce->size() != 24) {
         throw std::invalid_argument{"Invalid nonce: nonce must be 24 bytes"};
     }
@@ -130,7 +124,7 @@ std::vector<std::byte> encrypt_for_multiple_simple(
             std::vector<std::byte> junk;
             junk.resize(pad_size);
             for (; msg_count % pad != 0; msg_count++) {
-                randombytes_buf(junk.data(), pad_size);
+                random::fill(junk);
                 enc_list.append(to_string(junk));
             }
         }

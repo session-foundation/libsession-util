@@ -527,7 +527,7 @@ DecodedEnvelope decode_dm_envelope(
 ///
 /// Throws on parse or decryption failure.
 DecodedEnvelope decode_group_envelope(
-        std::span<std::span<const std::byte>> group_keys,
+        std::span<std::span<const std::byte, 32>> group_keys,
         std::span<const std::byte, 32> group_ed25519_pubkey,
         std::span<const std::byte> envelope_payload,
         std::span<const std::byte, 32> pro_backend_pubkey);

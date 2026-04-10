@@ -113,8 +113,8 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
 namespace session {
 
 static_assert(sizeof(std::declval<ProProof>().gen_index_hash) == 32);
-static_assert(sizeof(std::declval<ProProof>().rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
-static_assert(sizeof(std::declval<ProProof>().sig) == crypto_sign_ed25519_BYTES);
+static_assert(sizeof(std::declval<ProProof>().rotating_pubkey) == 32);
+static_assert(sizeof(std::declval<ProProof>().sig) == 64);
 
 bool ProProof::verify_signature(std::span<const std::byte, 32> verify_pubkey) const {
     return ed25519::verify(sig, verify_pubkey, hash());
@@ -166,8 +166,7 @@ void ProProfileBitset::unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
 }
 
 bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const {
-    bool result = data & (1ULL << static_cast<uint64_t>(features));
-    return result;
+    return data & (1ULL << static_cast<uint64_t>(features));
 }
 
 void ProMessageBitset::set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
@@ -179,8 +178,7 @@ void ProMessageBitset::unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
 }
 
 bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const {
-    bool result = data & (1ULL << static_cast<uint64_t>(features));
-    return result;
+    return data & (1ULL << static_cast<uint64_t>(features));
 }
 
 };  // namespace session
@@ -615,7 +613,7 @@ DecodedEnvelope decode_dm_envelope(
 }
 
 DecodedEnvelope decode_group_envelope(
-        std::span<std::span<const std::byte>> group_keys,
+        std::span<std::span<const std::byte, 32>> group_keys,
         std::span<const std::byte, 32> group_ed25519_pubkey,
         std::span<const std::byte> envelope_payload,
         std::span<const std::byte, 32> pro_backend_pubkey) {
@@ -744,7 +742,7 @@ DecodedCommunityMessage decode_for_community(
 
     // If there was a pro signature in one of the payloads, verify and copy it to our result struct
     if (pro_sig) {
-        if (pro_sig->size() != crypto_sign_ed25519_BYTES)
+        if (pro_sig->size() != 64)
             throw std::runtime_error(
                     "Decoding community message failed, pro signature has wrong size");
 
@@ -845,10 +843,8 @@ DecodedCommunityMessage decode_for_community(
 using namespace session;
 
 static_assert((sizeof((session_protocol_pro_proof*)0)->gen_index_hash) == 32);
-static_assert(
-        (sizeof((session_protocol_pro_proof*)0)->rotating_pubkey) ==
-        crypto_sign_ed25519_PUBLICKEYBYTES);
-static_assert((sizeof((session_protocol_pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
+static_assert(sizeof(std::declval<session_protocol_pro_proof>().rotating_pubkey) == 32);
+static_assert(sizeof(std::declval<session_protocol_pro_proof>().sig) == 64);
 
 static_assert(
         SESSION_PROTOCOL_PRO_PROFILE_FEATURES_COUNT <=
@@ -858,8 +854,7 @@ static_assert(
 
 LIBSESSION_C_API bool session_protocol_pro_profile_bitset_is_set(
         session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    bool result = value.data & (1ULL << features);
-    return result;
+    return value.data & (1ULL << features);
 }
 
 LIBSESSION_C_API void session_protocol_pro_profile_bitset_set(
@@ -876,8 +871,7 @@ LIBSESSION_C_API void session_protocol_pro_profile_bitset_unset(
 
 LIBSESSION_C_API bool session_protocol_pro_message_bitset_is_set(
         session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    bool result = value.data & (1ULL << features);
-    return result;
+    return value.data & (1ULL << features);
 }
 
 LIBSESSION_C_API void session_protocol_pro_message_bitset_set(
@@ -1144,11 +1138,15 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
         // Groups v2 path: decrypt with group symmetric keys
         auto group_pk = to_byte_span<32>(keys->group_ed25519_pubkey.data);
 
-        std::vector<std::span<const std::byte>> group_keys;
+        std::vector<std::span<const std::byte, 32>> group_keys;
         group_keys.reserve(keys->decrypt_keys_len);
-        for (size_t i = 0; i < keys->decrypt_keys_len; i++)
-            group_keys.emplace_back(
-                    to_byte_span(keys->decrypt_keys[i].data, keys->decrypt_keys[i].size));
+        for (size_t i = 0; i < keys->decrypt_keys_len; i++) {
+            if (keys->decrypt_keys[i].size != 32)
+                throw std::invalid_argument{fmt::format(
+                        "Invalid group encryption key: expected 32 bytes, got {}",
+                        keys->decrypt_keys[i].size)};
+            group_keys.emplace_back(to_byte_span<32>(keys->decrypt_keys[i].data));
+        }
 
         try {
             result_cpp = decode_group_envelope(

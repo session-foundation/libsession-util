@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <fmt/format.h>
+#include <session/format.hpp>
 #include <session/util.h>
 #include <simdutf.h>
 #include <zstd.h>
@@ -142,7 +143,7 @@ std::vector<std::byte> zstd_compress(
             data.size(),
             level);
     if (ZSTD_isError(size))
-        throw std::runtime_error{"Compression failed: " + std::string{ZSTD_getErrorName(size)}};
+        throw std::runtime_error{"Compression failed: {}"_format(ZSTD_getErrorName(size))};
 
     compressed.resize(prefix.size() + size);
     return compressed;

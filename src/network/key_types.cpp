@@ -3,9 +3,10 @@
 #include <oxenc/base32z.h>
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
-#include <sodium.h>
-
 #include <cstring>
+#include <session/crypto/ed25519.hpp>
+#include <session/crypto/x25519.hpp>
+#include <session/format.hpp>
 #include <type_traits>
 
 namespace session::network {
@@ -17,16 +18,16 @@ namespace detail {
             throw std::runtime_error{"Hex key data is invalid: data is not hex"};
         if (hex.size() != 2 * length)
             throw std::runtime_error{
-                    "Hex key data is invalid: expected " + std::to_string(length) +
-                    " hex digits, received " + std::to_string(hex.size())};
+                    "Hex key data is invalid: expected {} hex digits, received {}"_format(
+                            length, hex.size())};
         oxenc::from_hex(hex.begin(), hex.end(), reinterpret_cast<unsigned char*>(buffer));
     }
 
     void load_from_bytes(void* buffer, size_t length, std::string_view bytes) {
         if (bytes.size() != length)
             throw std::runtime_error{
-                    "Key data is invalid: expected " + std::to_string(length) +
-                    " bytes, received " + std::to_string(bytes.size())};
+                    "Key data is invalid: expected {} bytes, received {}"_format(
+                            length, bytes.size())};
         std::memmove(buffer, bytes.data(), length);
     }
 
@@ -40,17 +41,17 @@ std::string ed25519_pubkey::snode_address() const {
 
 legacy_pubkey legacy_seckey::pubkey() const {
     legacy_pubkey pk;
-    crypto_scalarmult_ed25519_base_noclamp(to_unsigned(pk.data()), to_unsigned(data()));
+    ed25519::scalarmult_base_noclamp(pk, *this);
     return pk;
 };
 ed25519_pubkey ed25519_seckey::pubkey() const {
     ed25519_pubkey pk;
-    crypto_sign_ed25519_sk_to_pk(to_unsigned(pk.data()), to_unsigned(data()));
+    ed25519::sk_to_pk(pk, ed25519::PrivKeySpan::from(*this));
     return pk;
 };
 x25519_pubkey x25519_seckey::pubkey() const {
     x25519_pubkey pk;
-    crypto_scalarmult_curve25519_base(to_unsigned(pk.data()), to_unsigned(data()));
+    x25519::scalarmult_base(pk, *this);
     return pk;
 };
 
@@ -82,12 +83,7 @@ x25519_pubkey parse_x25519_pubkey(std::string_view pubkey_in) {
     return parse_pubkey<x25519_pubkey>(pubkey_in);
 }
 x25519_pubkey compute_x25519_pubkey(std::span<const std::byte, 32> ed25519_pk) {
-    b32 xpk;
-    if (0 != crypto_sign_ed25519_pk_to_curve25519(to_unsigned(xpk.data()), to_unsigned(ed25519_pk.data())))
-        throw std::runtime_error{
-                "An error occured while attempting to convert Ed25519 pubkey to X25519; "
-                "is the pubkey valid?"};
-    return x25519_pubkey::from_bytes(xpk);
+    return x25519_pubkey::from_bytes(ed25519::pk_to_x25519(ed25519_pk));
 }
 
 }  // namespace session::network

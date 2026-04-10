@@ -88,7 +88,6 @@ add_libsession_util_library(config
     config/pro.cpp
     config/user_groups.cpp
     config/user_profile.cpp
-    fields.cpp
 )
 
 

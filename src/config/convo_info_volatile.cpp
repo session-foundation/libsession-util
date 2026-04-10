@@ -6,6 +6,7 @@
 
 #include <charconv>
 #include <chrono>
+#include <session/format.hpp>
 #include <iterator>
 #include <stdexcept>
 #include <variant>
@@ -312,7 +313,7 @@ std::optional<convo::blinded_one_to_one> ConvoInfoVolatile::get_blinded_1to1(
     if (prefix != session::SessionIDPrefix::community_blinded &&
         prefix != session::SessionIDPrefix::community_blinded_legacy)
         throw std::invalid_argument{
-                "Invalid blinded ID: Expected '15' or '25' prefix; got " + std::string{pubkey_hex}};
+                "Invalid blinded ID: Expected '15' or '25' prefix; got {}"_format(pubkey_hex)};
 
     std::string pubkey = session_id_to_bytes(pubkey_hex, to_string(prefix));
 

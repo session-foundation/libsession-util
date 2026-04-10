@@ -1,4 +1,3 @@
-#include <fmt/ranges.h>
 #include <oxenc/bt_producer.h>
 #include <oxenc/bt_serialize.h>
 #include <oxenc/bt_value_producer.h>
@@ -15,6 +14,7 @@
 #include <iterator>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <session/format.hpp>
 #include <oxen/quic/format.hpp>
 #include <ranges>
 #include <session/config/encrypt.hpp>
@@ -43,16 +43,16 @@ static constexpr auto dev_key = "device_unique_id"sv;
 
 void Devices::init() {
     if (core.globals.get_blob_to(dev_key, self_id))
-        log::info(cat, "Loaded existing unique device id: {}", oxenc::to_hex(self_id));
+        log::info(cat, "Loaded existing unique device id: {}", self_id);
     else {
         random::fill(self_id);
         core.globals.set(dev_key, self_id);
-        log::info(cat, "Generated new unique device id: {}", oxenc::to_hex(self_id));
+        log::info(cat, "Generated new unique device id: {}", self_id);
     }
 }
 
 std::string Devices::device_id() const {
-    return oxenc::to_hex(self_id.begin(), self_id.end());
+    return oxenc::to_hex(self_id);
 }
 
 template <typename T>
@@ -87,31 +87,13 @@ static Keys keys_from_seed(std::span<const std::byte, 32> seed) {
 
 namespace {
 
-// Lightweight formattable wrapper for logging a brief "aabb…xxyy" hex summary of a key.  The
-// hex computation is deferred to when the formatter is invoked, so it is skipped entirely if
-// the log level is disabled.
-struct key_summary {
-    std::span<const std::byte> key;
-
-    template <std::ranges::contiguous_range T>
-        requires oxenc::basic_char<std::ranges::range_value_t<T>>
-    key_summary(const T& k) : key{std::as_bytes(std::span{k})} {}
-};
-
-std::string format_as(const key_summary& ks) {
-    return "{}…{}"_format(
-            oxenc::to_hex(ks.key.begin(), ks.key.begin() + 2),
-            oxenc::to_hex(ks.key.end() - 2, ks.key.end()));
-}
-
 }  // namespace
 
 // format_as for XWingKeys-derived types (DeviceKeys, AccountKeys), defined in session::core so
 // that fmtlib's ADL-based lookup can find it when logging these types.
 template <std::derived_from<Devices::XWingKeys> Keys>
 std::string format_as(const Keys& k) {
-    return "X25519[{}], MLKEM768[{}]"_format(
-            key_summary{k.x25519_pub}, key_summary{k.mlkem768_pub});
+    return "X25519[{:9.4}], MLKEM768[{:9.4}]"_format(k.x25519_pub, k.mlkem768_pub);
 }
 
 Devices::DeviceKeys Devices::rotate_device_keys() {
@@ -811,7 +793,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     for (; i < padded_count; i++)
         random::fill(ciphertext[i]);
 
-    std::array<std::byte, crypto_aead_xchacha20poly1305_ietf_NPUBBYTES> nonce;
+    std::array<std::byte, encryption::XCHACHA20_NONCEBYTES> nonce;
     hash::blake2b_key_pers(nonce, A, PERS_DEV_NONCE, ciphertext_raw);
 
     cleared_b32 key_base;
@@ -831,8 +813,8 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
 
     auto plaintext_devices = encode_group_payload(devices, acc_keys);
     std::vector<std::byte> enc_devices;
-    enc_devices.resize(plaintext_devices.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
-    encrypt::xchacha20poly1305_encrypt(enc_devices, to_span(plaintext_devices), nonce, key_base);
+    enc_devices.resize(plaintext_devices.size() + encryption::XCHACHA20_ABYTES);
+    encryption::xchacha20poly1305_encrypt(enc_devices, to_span(plaintext_devices), nonce, key_base);
 
     cleared_b32 ki;
     cleared_b32 aB;
@@ -864,7 +846,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
         hash::blake2b_pers(ki, PERS_KEY_KEY, aB, A, B, ml_ss[i], info.pk_mlkem768);
 
         static_assert(decltype(ekey)::extent == key_base.size());
-        encrypt::xchacha20_xor(ekey, key_base, nonce, ki);
+        encryption::xchacha20_xor(ekey, key_base, nonce, ki);
 
         // Hash a bunch of stuff together as a checksum to let decryption skip most not-for-me
         // values.
@@ -1089,7 +1071,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
         throw std::runtime_error{
                 "Invalid encrypted device data: ciphertext ({}) vs enc key ({}) size mismatch"_format(
                         count, k_count)};
-    if (enc_devices.size() <= crypto_aead_xchacha20poly1305_ietf_ABYTES)
+    if (enc_devices.size() <= encryption::XCHACHA20_ABYTES)
         throw std::runtime_error{
                 "Invalid encrypted device data: encrypted data is too short ({}B)"_format(
                         enc_devices.size())};
@@ -1118,7 +1100,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
     cleared_b32 ml_ss, aB, ki, key_base;
 
     std::vector<std::byte> plaintext_devices;
-    plaintext_devices.resize(enc_devices.size() - crypto_aead_xchacha20poly1305_ietf_ABYTES);
+    plaintext_devices.resize(enc_devices.size() - encryption::XCHACHA20_ABYTES);
 
     // Trial decrypt until we find one that works, except that we can skip most of the heavy
     // operations for most keys not intended for us.  Note that we have to attempt each received key
@@ -1162,10 +1144,10 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
 
             // and then use it to recover the key_base:
             static_assert(decltype(ekey)::extent == key_base.size());
-            encrypt::xchacha20_xor(key_base, ekey, knonce, ki);
+            encryption::xchacha20_xor(key_base, ekey, knonce, ki);
 
             // Now we can decrypt the encrypted payload:
-            if (encrypt::xchacha20poly1305_decrypt(
+            if (encryption::xchacha20poly1305_decrypt(
                         plaintext_devices, enc_devices, devices_nonce, key_base)) {
                 found = true;
                 break;

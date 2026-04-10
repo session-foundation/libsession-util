@@ -3,18 +3,13 @@
 #include <oxenc/base64.h>
 #include <oxenc/hex.h>
 #include <sodium/core.h>
-#include <sodium/crypto_aead_xchacha20poly1305.h>
-#include <sodium/crypto_core_ed25519.h>
-#include <sodium/crypto_scalarmult_curve25519.h>
-#include <sodium/crypto_scalarmult_ed25519.h>
-#include <sodium/crypto_sign_ed25519.h>
-#include <sodium/randombytes.h>
-#include <sodium/utils.h>
 
 #include <chrono>
 #include <iterator>
 #include <stdexcept>
 #include <unordered_set>
+
+#include "../../internal-util.hpp"
 
 #include <oxen/log.hpp>
 
@@ -52,7 +47,7 @@ Keys::Keys(
 
     init_sig_keys(group_ed25519_pubkey, group_ed25519_secretkey);
 
-    user_ed25519_sk.load(user_ed25519_secretkey.data(), 64);
+    user_ed25519_sk.assign(user_ed25519_secretkey.begin(), user_ed25519_secretkey.end());
 
     if (dumped) {
         load_dump(*dumped);
@@ -137,8 +132,8 @@ void Keys::load_dump(std::span<const std::byte> dump) {
             auto key_bytes = kd.consume_string_view();
             if (key_bytes.size() != key.key.size())
                 throw config_value_error{
-                        "Invalid Keys dump: found key with invalid size (" +
-                        std::to_string(key_bytes.size()) + ")"};
+                        "Invalid Keys dump: found key with invalid size ({})"_format(
+                                key_bytes.size())};
             std::memcpy(key.key.data(), key_bytes.data(), key.key.size());
 
             if (!kd.skip_until("t"))
@@ -171,8 +166,8 @@ void Keys::load_dump(std::span<const std::byte> dump) {
         auto pk = pending.consume_string_view();
         if (pk.size() != pending_key_.size())
             throw config_value_error{
-                    "Invalid Keys dump: found pending key (k) with invalid size (" +
-                    std::to_string(pk.size()) + ")"};
+                    "Invalid Keys dump: found pending key (k) with invalid size ({})"_format(
+                            pk.size())};
         std::memcpy(pending_key_.data(), pk.data(), pending_key_.size());
     }
 }
@@ -181,15 +176,15 @@ size_t Keys::size() const {
     return keys_.size() + !pending_key_config_.empty();
 }
 
-std::vector<std::span<const std::byte>> Keys::group_keys() const {
-    std::vector<std::span<const std::byte>> ret;
+std::vector<std::span<const std::byte, 32>> Keys::group_keys() const {
+    std::vector<std::span<const std::byte, 32>> ret;
     ret.reserve(size());
 
     if (!pending_key_config_.empty())
-        ret.emplace_back(pending_key_.data(), 32);
+        ret.emplace_back(pending_key_);
 
     for (auto it = keys_.rbegin(); it != keys_.rend(); ++it)
-        ret.emplace_back(it->key.data(), 32);
+        ret.emplace_back(it->key);
 
     return ret;
 }
@@ -268,32 +263,31 @@ std::span<const std::byte> Keys::rekey(Info& info, Members& members) {
 
     auto h2 = seed_hash(seed_hash_key);
 
-    hash::blake2b_hasher<encrypt::XCHACHA20_KEYBYTES + encrypt::XCHACHA20_NONCEBYTES> hasher{
+    hash::blake2b_hasher<encryption::XCHACHA20_KEYBYTES + encryption::XCHACHA20_NONCEBYTES> hasher{
             enc_key_hash_key, std::nullopt};
     for (const auto& m : members)
         hasher.update(m.session_id);
 
     auto gen = keys_.empty() ? 0 : keys_.back().generation + 1;
-    auto gen_str = std::to_string(gen);
-    hasher.update(gen_str, h2);
+    hasher.update("{}"_format(gen), h2);
 
     auto h1 = hasher.finalize();
 
-    std::span<const std::byte, encrypt::XCHACHA20_KEYBYTES> enc_key =
-            std::span{h1}.first<encrypt::XCHACHA20_KEYBYTES>();
-    std::span<const std::byte, encrypt::XCHACHA20_NONCEBYTES> nonce =
-            std::span{h1}.last<encrypt::XCHACHA20_NONCEBYTES>();
+    std::span<const std::byte, encryption::XCHACHA20_KEYBYTES> enc_key =
+            std::span{h1}.first<encryption::XCHACHA20_KEYBYTES>();
+    std::span<const std::byte, encryption::XCHACHA20_NONCEBYTES> nonce =
+            std::span{h1}.last<encryption::XCHACHA20_NONCEBYTES>();
 
     oxenc::bt_dict_producer d{};
 
     d.append("#", to_string_view(nonce));
 
-    std::array<std::byte, encrypt::XCHACHA20_KEYBYTES + encrypt::XCHACHA20_ABYTES> encrypted;
+    std::array<std::byte, encryption::XCHACHA20_KEYBYTES + encryption::XCHACHA20_ABYTES> encrypted;
     std::string_view enc_sv = to_string_view(encrypted);
 
     // Shared key for admins
     auto member_k = seed_hash(enc_key_admin_hash_key);
-    encrypt::xchacha20poly1305_encrypt(encrypted, enc_key, nonce, member_k);
+    encryption::xchacha20poly1305_encrypt(encrypted, enc_key, nonce, member_k);
 
     d.append("G", gen);
     d.append("K", enc_sv);
@@ -417,7 +411,7 @@ std::vector<std::byte> Keys::key_supplement(const std::vector<std::string>& sids
         supp_keys = std::move(supp).str();
     }
 
-    hash::blake2b_hasher<encrypt::XCHACHA20_NONCEBYTES> nonce_hasher{
+    hash::blake2b_hasher<encryption::XCHACHA20_NONCEBYTES> nonce_hasher{
             enc_key_hash_key, std::nullopt};
     for (const auto& sid : sids)
         nonce_hasher.update(sid);
@@ -434,7 +428,7 @@ std::vector<std::byte> Keys::key_supplement(const std::vector<std::string>& sids
     {
         auto list = d.append_list("+");
         std::vector<std::byte> encrypted;
-        encrypted.resize(supp_keys.size() + crypto_aead_xchacha20poly1305_ietf_ABYTES);
+        encrypted.resize(supp_keys.size() + encryption::XCHACHA20_ABYTES);
 
         size_t member_count = 0;
 
@@ -694,7 +688,7 @@ bool Keys::swarm_verify_subaccount(
     if (!_sign_pk)
         return false;
     return swarm_verify_subaccount(
-            "03" + oxenc::to_hex(_sign_pk->begin(), _sign_pk->end()),
+            "03{:x}"_format(*_sign_pk),
             ed25519::PrivKeySpan::from(user_ed25519_sk),
             sign_val,
             write,
@@ -783,10 +777,10 @@ void Keys::insert_key(std::string_view msg_hash, key_info&& new_key) {
 // Attempts xchacha20 decryption.
 //
 // Preconditions:
-// - `ciphertext` must be at least 16 [crypto_aead_xchacha20poly1305_ietf_ABYTES]
+// - `ciphertext` must be at least 16 [encryption::XCHACHA20_ABYTES]
 // - `out` must have enough space (ciphertext.size() - 16
-// [crypto_aead_xchacha20poly1305_ietf_ABYTES])
-// - `nonce` must be 24 bytes [crypto_aead_xchacha20poly1305_ietf_NPUBBYTES]
+// [encryption::XCHACHA20_ABYTES])
+// - `nonce` must be 24 bytes [encryption::XCHACHA20_NONCEBYTES]
 // - `key` must be 32 bytes [crypto_aead_xchacha20poly1305_ietf_KEYBYTES]
 //
 // The latter two are asserted in a debug build, but not otherwise checked.
@@ -796,9 +790,9 @@ namespace {
     bool try_decrypting(
             std::span<std::byte> out,
             std::span<const std::byte> encrypted,
-            std::span<const std::byte, encrypt::XCHACHA20_NONCEBYTES> nonce,
-            std::span<const std::byte, encrypt::XCHACHA20_KEYBYTES> key) {
-        return encrypt::xchacha20poly1305_decrypt(out, encrypted, nonce, key);
+            std::span<const std::byte, encryption::XCHACHA20_NONCEBYTES> nonce,
+            std::span<const std::byte, encryption::XCHACHA20_KEYBYTES> key) {
+        return encryption::xchacha20poly1305_decrypt(out, encrypted, nonce, key);
     }
 }  // namespace
 
@@ -819,9 +813,9 @@ bool Keys::load_key_message(
     if (!d.skip_until("#"))
         throw config_value_error{"Key message has no nonce"};
     auto nonce_dyn = d.consume_span<std::byte>();
-    if (nonce_dyn.size() != encrypt::XCHACHA20_NONCEBYTES)
+    if (nonce_dyn.size() != encryption::XCHACHA20_NONCEBYTES)
         throw config_value_error{"Key message has invalid nonce size"};
-    auto nonce = nonce_dyn.first<encrypt::XCHACHA20_NONCEBYTES>();
+    auto nonce = nonce_dyn.first<encryption::XCHACHA20_NONCEBYTES>();
 
     sodium_vector<key_info> new_keys;
     std::optional<int64_t> max_gen;  // If set then associate the message with this generation
@@ -855,11 +849,10 @@ bool Keys::load_key_message(
                 // e               + 1
                 //                 ---
                 //                  52
-                if (encrypted.size() < 52 + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+                if (encrypted.size() < 52 + encryption::XCHACHA20_ABYTES)
                     throw config_value_error{
-                            "Supplemental key message has invalid key info size at "
-                            "index " +
-                            std::to_string(member_key_pos)};
+                            "Supplemental key message has invalid key info size at index {}"_format(
+                                    member_key_pos)};
 
                 if (!new_keys.empty() || admin())
                     continue;  // Keep parsing, to ensure validity of the whole message
@@ -927,7 +920,7 @@ bool Keys::load_key_message(
                     "Non-supplemental key message is missing required admin key (K)"};
 
         auto admin_key = to_span(d.consume_string_view());
-        if (admin_key.size() != 32 + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+        if (admin_key.size() != 32 + encryption::XCHACHA20_ABYTES)
             throw config_value_error{"Key message has invalid admin key length"};
 
         if (admin()) {
@@ -951,10 +944,10 @@ bool Keys::load_key_message(
             while (!key_list.is_finished()) {
                 member_key_pos++;
                 auto member_key = to_span(key_list.consume_string_view());
-                if (member_key.size() != 32 + crypto_aead_xchacha20poly1305_ietf_ABYTES)
+                if (member_key.size() != 32 + encryption::XCHACHA20_ABYTES)
                     throw config_value_error{
-                            "Key message has invalid member key length at index " +
-                            std::to_string(member_key_pos)};
+                            "Key message has invalid member key length at index {}"_format(
+                                    member_key_pos)};
 
                 if (found_key)
                     continue;
@@ -1084,14 +1077,14 @@ bool Keys::needs_rekey() const {
     return last_it->generation == second_it->generation;
 }
 
-std::optional<std::span<const std::byte>> Keys::pending_key() const {
+std::optional<std::span<const std::byte, 32>> Keys::pending_key() const {
     if (!pending_key_config_.empty())
-        return std::span<const std::byte>{pending_key_.data(), pending_key_.size()};
+        return std::span<const std::byte, 32>{pending_key_};
     return std::nullopt;
 }
 
 static constexpr size_t ENCRYPT_OVERHEAD =
-        crypto_aead_xchacha20poly1305_ietf_NPUBBYTES + crypto_aead_xchacha20poly1305_ietf_ABYTES;
+        encryption::XCHACHA20_NONCEBYTES + encryption::XCHACHA20_ABYTES;
 
 std::vector<std::byte> Keys::encrypt_message(
         std::span<const std::byte> plaintext, bool compress, size_t padding) const {
@@ -1108,34 +1101,15 @@ std::pair<std::string, std::vector<std::byte>> Keys::decrypt_message(
     //
     // Decrypt, using all the possible keys, starting with a pending one (if we have one)
     //
-    DecryptGroupMessage decrypt = {};
-    bool decrypt_success = false;
-    if (auto pending = pending_key(); pending) {
-        try {
-            std::span<std::span<const std::byte>> key_list = {&(*pending), 1};
-            decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
-            decrypt_success = true;
-        } catch (const std::exception&) {
-        }
-    }
+    // Build the list of candidate keys: pending key (if any) first, then all active keys.
+    std::vector<std::span<const std::byte, 32>> key_list;
+    key_list.reserve(keys_.size() + 1);
+    if (auto pending = pending_key())
+        key_list.push_back(*pending);
+    for (auto& k : keys_)
+        key_list.emplace_back(k.key);
 
-    if (!decrypt_success) {
-        for (auto& k : keys_) {
-            try {
-                std::span<const std::byte> key = {k.key.data(), k.key.size()};
-                std::span<std::span<const std::byte>> key_list = {&key, 1};
-                decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
-                decrypt_success = true;
-                break;
-            } catch (const std::exception&) {
-            }
-        }
-    }
-
-    if (!decrypt_success)  // none of the keys worked
-        throw std::runtime_error{fmt::format(
-                "unable to decrypt ciphertext with any current group keys; tried {}",
-                keys_.size() + (pending_key() ? 1 : 0))};
+    auto decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);
 
     std::pair<std::string, std::vector<std::byte>> result;
     result.first = std::move(decrypt.session_id);
