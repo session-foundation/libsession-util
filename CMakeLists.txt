@@ -84,6 +84,7 @@ option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 # Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
 option(ENABLE_NETWORKING "Build with networking functionality" ON)
 option(ENABLE_NETWORKING_SROUTER "Build with session-router networking support (requires ENABLE_NETWORKING)" ON)
+option(ENABLE_NETTLE "Build with Nettle crypto library (independent of onionreq, e.g. for AES-CBC)" ${ENABLE_NETWORKING})
 
 if(USE_LTO)
   include(CheckIPOSupported)
@@ -120,9 +121,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 add_subdirectory(external)
 
-if(ENABLE_NETWORKING)
+if(ENABLE_NETWORKING OR ENABLE_NETTLE)
     if(NOT TARGET nettle::nettle)
-        if(BUILD_STATIC_DEPS)
+        if(BUILD_STATIC_DEPS AND TARGET nettle_external)
             message(FATAL_ERROR "Internal error: nettle::nettle target (expected via libquic BUILD_STATIC_DEPS) not found")
         else()
             find_package(PkgConfig REQUIRED)
