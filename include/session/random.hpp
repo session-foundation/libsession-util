@@ -3,6 +3,10 @@
 #include <sodium/randombytes.h>
 
 #include <algorithm>
+#include <concepts>
+#include <cstdint>
+#include <limits>
+#include <random>
 
 #include "util.hpp"
 
@@ -75,13 +79,12 @@ std::string unique_id(std::string_view prefix);
 ///
 /// Outputs:
 /// - A random integer in the specified range
-template <typename T>
+template <std::integral T>
 T get_uniform_distribution(T min, T max) {
     if (min > max)
         return min;
 
-    const uint64_t range = static_cast<uint64_t>(max) - static_cast<uint64_t>(min) + 1;
-    return static_cast<T>(static_cast<uint64_t>(min) + (csrng() % range));
+    return std::uniform_int_distribution<T>{min, max}(csrng);
 }
 
 }  // namespace session::random
