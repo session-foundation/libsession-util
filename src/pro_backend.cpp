@@ -171,7 +171,9 @@ std::string AddProPaymentRequest::to_json() const {
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
+            assert(false && "Unimplemented");
+        } break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
             j["payment_tx"]["google_order_id"] = payment_tx.order_id;
@@ -588,9 +590,9 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
             } break;
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
                 item.rangeproof_order_id =
-                          json_require<std::string>(obj, "rangeproof_order_id", result.errors);
+                        json_require<std::string>(obj, "rangeproof_order_id", result.errors);
                 assert(item.rangeproof_order_id.size() <
-                        sizeof(((session_pro_backend_pro_payment_item*)0)->rangeproof_order_id));
+                       sizeof(((session_pro_backend_pro_payment_item*)0)->rangeproof_order_id));
             } break;
         }
 
@@ -668,7 +670,9 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
+        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
+            assert(false && "Unimplemented");
+        } break;
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
             j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
             j["payment_tx"]["google_order_id"] = payment_tx.order_id;
@@ -1213,7 +1217,6 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
                         src.rangeproof_order_id.data());
 
             } break;
-
         }
     }
 
