@@ -262,6 +262,24 @@ static std::vector<std::byte> slurp_file(const std::filesystem::path& filename) 
     return contents;
 }
 
+static void write_file(const std::filesystem::path& filename, std::span<const std::byte> contents) {
+    std::ofstream out;
+    out.exceptions(std::ios::failbit | std::ios::badbit);
+    out.open(filename, std::ios::binary | std::ios::trunc);
+    out.write(reinterpret_cast<const char*>(contents.data()), contents.size());
+}
+
+static void corrupt_last_byte(std::vector<std::byte>& data) {
+    REQUIRE(!data.empty());
+    data.back() ^= std::byte{0x01};
+}
+
+static void corrupt_first_full_chunk(std::vector<std::byte>& data) {
+    constexpr size_t first_chunk_offset = 1 + attachment::ENCRYPT_HEADER;
+    REQUIRE(data.size() > first_chunk_offset + attachment::ENCRYPTED_CHUNK_TOTAL);
+    data[first_chunk_offset] ^= std::byte{0x01};
+}
+
 TEST_CASE(
         "Attachment encryption: plaintext buffer to encrypted file",
         "[attachments][files][encrypt]") {
@@ -361,4 +379,85 @@ TEST_CASE(
     auto contents = slurp_file(out_dec.path);
     CHECK(contents.size() == data.size());
     CHECK(!!(contents == data));
+}
+
+TEST_CASE(
+        "Attachment streaming decryption rejects corrupted data", "[attachments][files][decrypt]") {
+
+    auto seed = "a123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+    auto data = make_data(1000);
+
+    auto [enc, key] = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT);
+    corrupt_last_byte(enc);
+
+    SECTION("encrypted buffer to plaintext file") {
+        temp_data_file out;
+
+        CHECK_THROWS_MATCHES(
+                attachment::decrypt(enc, key, out.path), std::runtime_error, bad_data_message);
+        CHECK_FALSE(std::filesystem::exists(out.path));
+    }
+
+    SECTION("encrypted file to plaintext buffer") {
+        temp_data_file encrypted_file;
+        write_file(encrypted_file.path, enc);
+
+        CHECK_THROWS_MATCHES(
+                attachment::decrypt(encrypted_file.path, key),
+                std::runtime_error,
+                bad_data_message);
+    }
+
+    SECTION("encrypted file to plaintext file") {
+        temp_data_file encrypted_file;
+        temp_data_file out;
+        write_file(encrypted_file.path, enc);
+
+        CHECK_THROWS_MATCHES(
+                attachment::decrypt(encrypted_file.path, key, out.path),
+                std::runtime_error,
+                bad_data_message);
+        CHECK_FALSE(std::filesystem::exists(out.path));
+    }
+}
+
+TEST_CASE(
+        "Attachment streaming decryption rejects corrupted full chunks",
+        "[attachments][files][decrypt]") {
+
+    auto seed = "b123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
+    auto data = make_data(attachment::ENCRYPT_CHUNK_SIZE * 2);
+
+    auto [enc, key] = attachment::encrypt(seed, data, attachment::Domain::ATTACHMENT);
+    corrupt_first_full_chunk(enc);
+
+    SECTION("encrypted buffer to plaintext file") {
+        temp_data_file out;
+
+        CHECK_THROWS_MATCHES(
+                attachment::decrypt(enc, key, out.path), std::runtime_error, bad_data_message);
+        CHECK_FALSE(std::filesystem::exists(out.path));
+    }
+
+    SECTION("encrypted file to plaintext buffer") {
+        temp_data_file encrypted_file;
+        write_file(encrypted_file.path, enc);
+
+        CHECK_THROWS_MATCHES(
+                attachment::decrypt(encrypted_file.path, key),
+                std::runtime_error,
+                bad_data_message);
+    }
+
+    SECTION("encrypted file to plaintext file") {
+        temp_data_file encrypted_file;
+        temp_data_file out;
+        write_file(encrypted_file.path, enc);
+
+        CHECK_THROWS_MATCHES(
+                attachment::decrypt(encrypted_file.path, key, out.path),
+                std::runtime_error,
+                bad_data_message);
+        CHECK_FALSE(std::filesystem::exists(out.path));
+    }
 }

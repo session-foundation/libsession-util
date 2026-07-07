@@ -91,6 +91,12 @@ std::optional<size_t> decrypted_max_size(size_t encrypted_size) {
     return sz;
 }
 
+class decryption_failure : public std::runtime_error {
+  public:
+    decryption_failure() :
+            std::runtime_error{"Attachment decryption failed: invalid key or corrupted data"} {}
+};
+
 // We have to roll our own custom version of crypto_secretstream_xchacha20poly1305_init_push here
 // because libsodium offers no way to provide the randomness it uses (it hard codes a call to
 // randombytes_buf), and so this repeats its internal implementation but using our hashed data for
@@ -703,7 +709,7 @@ void Decryptor::process_chunk(std::span<const std::byte> chunk, bool is_final) {
     output(out);
 }
 
-bool Decryptor::update(std::span<const std::byte> enc_data) {
+[[nodiscard]] bool Decryptor::update(std::span<const std::byte> enc_data) {
     if (failed)
         return false;
     if (finished)
@@ -758,7 +764,7 @@ bool Decryptor::update(std::span<const std::byte> enc_data) {
     return true;
 }
 
-bool Decryptor::finalize() {
+[[nodiscard]] bool Decryptor::finalize() {
     if (failed)
         return false;
 
@@ -791,8 +797,8 @@ void decrypt(
                         out.write(reinterpret_cast<const char*>(data.data()), data.size());
                     }};
 
-        d.update(encrypted);
-        d.finalize();
+        if (!d.update(encrypted) || !d.finalize())
+            throw decryption_failure{};
     } catch (const std::exception& e) {
         std::error_code ec;
         std::filesystem::remove(filename, ec);
@@ -832,12 +838,15 @@ size_t decrypt(
                 }};
 
     std::array<std::byte, 4096> chunk;
-    while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size()))
-        d.update(chunk);
-    if (in.gcount() > 0)
-        d.update(std::span{chunk}.first(in.gcount()));
+    while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size())) {
+        if (!d.update(chunk))
+            throw decryption_failure{};
+    }
+    if (in.gcount() > 0 && !d.update(std::span{chunk}.first(in.gcount())))
+        throw decryption_failure{};
 
-    d.finalize();
+    if (!d.finalize())
+        throw decryption_failure{};
 
     return decrypted - out.begin();
 }
@@ -881,11 +890,14 @@ void decrypt(
                     }};
 
         std::array<std::byte, 4096> chunk;
-        while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size()))
-            d.update(chunk);
-        if (in.gcount() > 0)
-            d.update(std::span{chunk}.first(in.gcount()));
-        d.finalize();
+        while (in.read(reinterpret_cast<char*>(chunk.data()), chunk.size())) {
+            if (!d.update(chunk))
+                throw decryption_failure{};
+        }
+        if (in.gcount() > 0 && !d.update(std::span{chunk}.first(in.gcount())))
+            throw decryption_failure{};
+        if (!d.finalize())
+            throw decryption_failure{};
     } catch (const std::exception& e) {
         std::error_code ec;
         std::filesystem::remove(file_out, ec);

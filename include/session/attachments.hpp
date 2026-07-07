@@ -307,14 +307,14 @@ class Decryptor {
     /// previous failure).
     ///
     /// Throws std::logic_error if called after a successful finalize().
-    bool update(std::span<const std::byte> enc_data);
+    [[nodiscard]] bool update(std::span<const std::byte> enc_data);
 
     /// Called to signal the end of the encrypted data stream.  If all data was processed
     /// successfully and the stream ended properly, this returns true; returns false if the stream
     /// data did not indicate finality (or if a previous update returned failure).
     ///
     /// Throws std::logic_error if called after a successful finalize().
-    bool finalize();
+    [[nodiscard]] bool finalize();
 };
 
 /// API: crypto/attachment::decrypt
