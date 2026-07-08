@@ -107,6 +107,7 @@ target_link_libraries(crypto
     session::secure_buffer
     PRIVATE
     sessiondep::libsodium
+    sessiondep::simdutf
     mlkem_native::mlkem768
     nlohmann_json::nlohmann_json
     libsession::protos
@@ -131,6 +132,7 @@ target_link_libraries(
     PRIVATE
     config
     sessiondep::libsodium
+    nlohmann_json::nlohmann_json
     session::SQLite
     mlkem_native::mlkem768
     quic
@@ -192,6 +194,10 @@ if(ENABLE_NETWORKING)
     if (BUILD_STATIC_DEPS)
         target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
     endif()
+
+    # core's public headers expose network::Network and it constructs network::Request, so it
+    # depends on the network target (defined after core above).
+    target_link_libraries(core PUBLIC network)
 endif()
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
