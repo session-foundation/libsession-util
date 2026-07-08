@@ -112,6 +112,17 @@ if(IPO_ENABLED AND NOT DEFINED CMAKE_INTERPROCEDURAL_OPTIMIZATION)
   set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 endif()
 
+# USE_LTO is the single LTO knob.  Two submodule-provided options default ON independently of it:
+# SESSIONDEPS_LTO (session-deps, several copies sharing one cache variable) controls LTO for static
+# dependency builds, and WITH_LTO (session-router's enable_lto.cmake) controls LTO for session-router's
+# own targets.  Leaving either ON in a non-LTO build breaks the link: LTO'd static archives can't be
+# consumed by a non-LTO link -- clang in particular emits pure bitcode archives that a plain bfd link
+# reports as "file format not recognized", or silently drops the members (undefined references).  Force
+# both to follow USE_LTO, seeding these shared cache variables before any submodule evaluates its own
+# option() so there is exactly one LTO switch.
+set(SESSIONDEPS_LTO ${USE_LTO} CACHE BOOL "Use LTO for static dependency builds, where supported" FORCE)
+set(WITH_LTO ${USE_LTO} CACHE BOOL "enable lto on compile time" FORCE)
+
 if(STATIC_LIBSTD)
     add_link_options(-static-libstdc++)
     if(NOT CMAKE_CXX_COMPILER_ID MATCHES Clang)
@@ -126,6 +137,14 @@ include(AddStaticBundleLib)
 
 # Always build PIC
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+# For a static-deps build we build everything from source; don't let oxen-logging pick up system
+# fmt/spdlog via find_package.  Beyond the usual reasons to prefer our own versions, a system
+# fmt/spdlog is built against libstdc++ and cannot be linked into a libc++ build (undefined
+# std::__1 symbols), so force the bundled submodules which build with our toolchain.
+if(BUILD_STATIC_DEPS)
+    set(OXEN_LOGGING_FORCE_SUBMODULES ON CACHE INTERNAL "")
+endif()
 
 
 add_subdirectory(external)
