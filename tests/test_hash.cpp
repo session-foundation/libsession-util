@@ -10,6 +10,9 @@
 using namespace session::literals;
 
 TEST_CASE("Hash generation", "[hash][hash]") {
+    // Intentionally exercising the deprecated hash::hash() to verify it still works.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     auto hash1 = session::hash::hash(32, session::to_span("TestMessage"), std::nullopt);
     auto hash2 = session::hash::hash(32, session::to_span("TestMessage"), std::nullopt);
     auto hash3 =
@@ -27,6 +30,7 @@ TEST_CASE("Hash generation", "[hash][hash]") {
             session::to_span("KeyThatIsTooLongKeyThatIsTooLongKeyThatIsTooLongKeyThatIsTooLongKeyTh"
                              "atIsTooLon"
                              "g")));
+#pragma GCC diagnostic pop
 
     CHECK(hash1.size() == 32);
     CHECK(hash2.size() == 32);

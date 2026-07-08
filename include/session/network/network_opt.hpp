@@ -403,12 +403,6 @@ namespace opt {
         explicit quic_max_udp_payload(size_t s) : size{s} {}
     };
 
-    /// Deprecated: use quic_max_udp_payload{1200} instead.
-    struct [[deprecated("use quic_max_udp_payload{1200} instead")]] quic_disable_mtu_discovery
-            : quic_max_udp_payload {
-        quic_disable_mtu_discovery() : quic_max_udp_payload{1200} {}
-    };
-
     // MARK: Onion Request Router Options
 
     /// Can be used to override the default (3) number of times a path can receive an error before

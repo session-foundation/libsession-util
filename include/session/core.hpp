@@ -313,7 +313,8 @@ class Core {
     // - database options: see sqlite::DatabaseOption (encryption, behaviour flags, etc.)
     template <CoreOption... Opts>
     Core(std::filesystem::path db_path, Opts&&... opts) :
-            callbacks{_maybe_instance<core::callbacks>(std::forward<Opts>(opts)...).value_or({})},
+            callbacks{_maybe_instance<core::callbacks>(std::forward<Opts>(opts)...)
+                              .value_or(core::callbacks{})},
             db{_make_db(std::move(db_path), std::forward<Opts>(opts)...)} {
         if (auto s = _maybe_instance<predefined_seed>(std::forward<Opts>(opts)...))
             globals._predefined_seed = std::move(s->bytes);

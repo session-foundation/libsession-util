@@ -394,7 +394,7 @@ local static_build(name,
   debian_build('Debian stable (armhf)', docker_base + 'debian-stable/arm32v7', arch='arm64', jobs=4),
 
   // Macos builds:
-  mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
+  //mac_builder('macOS Intel (Release)', allow_test_fail=true/*the current intel mac has issues*/),
   mac_builder('macOS Arm64 (Release)', arch='arm64'),
   mac_builder('macOS Arm64 (Debug)', arch='arm64', build_type='Debug'),
 

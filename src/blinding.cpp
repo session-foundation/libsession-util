@@ -494,7 +494,7 @@ LIBSESSION_C_API bool session_blind25_sign(
 
 LIBSESSION_C_API bool session_blind_version_sign_request(
         const unsigned char* ed25519_seckey,
-        size_t timestamp,
+        uint64_t timestamp,
         const char* method,
         const char* path,
         const unsigned char* body,
@@ -520,7 +520,7 @@ LIBSESSION_C_API bool session_blind_version_sign_request(
 LIBSESSION_C_API bool session_blind_version_sign(
         const unsigned char* ed25519_seckey,
         CLIENT_PLATFORM platform,
-        size_t timestamp,
+        uint64_t timestamp,
         unsigned char* blinded_sig_out) {
     try {
         auto sig = session::blind_version_sign(

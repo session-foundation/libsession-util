@@ -581,7 +581,7 @@ void Network::upload_file(FileUploadRequest request, std::span<const std::byte> 
                 if (auto* status_code = std::get_if<int16_t>(&result)) {
                     if (*status_code == ERROR_TOO_EARLY) {
                         log::info(cat, "File upload received 425, triggering clock resync.");
-                        _resync_clock(std::nullopt, std::nullopt);
+                        _resync_clock(std::nullopt, nullptr);
 
                         if (user_callback)
                             user_callback(*status_code, timeout);

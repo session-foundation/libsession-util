@@ -59,7 +59,7 @@ Config::Config(const std::vector<std::any>& opts) {
         // Quic transport options
         HANDLE_TYPE(opt::quic_handshake_timeout);
         HANDLE_TYPE(opt::quic_keep_alive);
-        HANDLE_TYPE(opt::quic_disable_mtu_discovery);
+        HANDLE_TYPE(opt::quic_max_udp_payload);
 
         // Onion request router options
         HANDLE_TYPE(opt::onionreq_path_strike_threshold);
@@ -316,13 +316,6 @@ void Config::handle_config_opt(opt::quic_max_udp_payload qmup) {
     quic_max_udp_payload = qmup.size;
     log::debug(cat, "Network config max QUIC UDP payload set to {} bytes", qmup.size);
 }
-
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-void Config::handle_config_opt(opt::quic_disable_mtu_discovery qdmd) {
-    handle_config_opt(static_cast<opt::quic_max_udp_payload&>(qdmd));
-}
-#pragma GCC diagnostic pop
 
 // MARK: Onion Request Router Options
 

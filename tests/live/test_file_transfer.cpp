@@ -59,7 +59,11 @@ TEST_CASE("Live: file upload via QUIC", "[live][file]") {
     req.ttl = 1min;
     req.on_complete = [&](auto result, bool) { promise.set_value(std::move(result)); };
 
+    // Intentionally exercising the deprecated upload() path to verify it still works.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     net->upload(std::move(req));
+#pragma GCC diagnostic pop
 
     REQUIRE(future.wait_for(LIVE_TIMEOUT) == std::future_status::ready);
     auto result = future.get();
@@ -158,7 +162,11 @@ TEST_CASE("Live: file upload and download round-trip via QUIC", "[live][file]") 
         upload_promise.set_value(std::move(result));
     };
 
+    // Intentionally exercising the deprecated upload() path to verify it still works.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
     net->upload(std::move(upload_req));
+#pragma GCC diagnostic pop
 
     REQUIRE(upload_future.wait_for(LIVE_TIMEOUT) == std::future_status::ready);
     auto upload_result = upload_future.get();

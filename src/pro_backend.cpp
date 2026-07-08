@@ -1211,11 +1211,8 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
                         1;
             } break;
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
-                dest.rangeproof_order_id_count = snprintf_clamped(
-                        dest.rangeproof_order_id,
-                        sizeof(dest.rangeproof_order_id),
-                        src.rangeproof_order_id.data());
-
+                dest.rangeproof_order_id_count =
+                        session::copy_c_str(dest.rangeproof_order_id, src.rangeproof_order_id) - 1;
             } break;
         }
     }

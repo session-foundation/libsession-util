@@ -132,7 +132,6 @@ struct Config {
     void handle_config_opt(opt::quic_handshake_timeout qht);
     void handle_config_opt(opt::quic_keep_alive qka);
     void handle_config_opt(opt::quic_max_udp_payload qmup);
-    void handle_config_opt(opt::quic_disable_mtu_discovery qdmd);
 
     // Onion request router options
     void handle_config_opt(opt::onionreq_path_strike_threshold pst);
