@@ -55,7 +55,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
     auto& sent = mock_net->sent_requests[0];
 
     CHECK(sent.request.endpoint == "batch");
-    auto batch_json = nlohmann::json::parse(*sent.request.body);
+    auto batch_json = parse_json(*sent.request.body);
     auto& reqs = batch_json["requests"];
     REQUIRE(reqs.size() == 3);
     // Subrequest 0: Default (ns 0) — requires auth.
@@ -98,7 +98,7 @@ TEST_CASE("Core automatic polling", "[core][poll]") {
     TestHelper::poll(*core);
 
     REQUIRE(mock_net->sent_requests.size() == 1);
-    auto batch_json2 = nlohmann::json::parse(*mock_net->sent_requests[0].request.body);
+    auto batch_json2 = parse_json(*mock_net->sent_requests[0].request.body);
     CHECK(batch_json2["requests"][1]["params"]["last_hash"] == "hash1");
 }
 
@@ -120,7 +120,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(
+        auto p = parse_json(
                 *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         // No prior hash for any node — must not send last_hash.
         CHECK_FALSE(p.contains("last_hash"));
@@ -136,7 +136,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(
+        auto p = parse_json(
                 *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         CHECK(p["last_hash"] == "xyz");
     }
@@ -147,7 +147,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(
+        auto p = parse_json(
                 *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         // B has no recorded hash — must not send last_hash so we get everything.
         CHECK_FALSE(p.contains("last_hash"));
@@ -165,7 +165,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = nlohmann::json::parse(
+        auto p = parse_json(
                 *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         CHECK(p["last_hash"] == "xyz");
     }

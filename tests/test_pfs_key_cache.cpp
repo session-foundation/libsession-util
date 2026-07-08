@@ -59,7 +59,7 @@ TEST_CASE("prefetch_pfs_keys fetches and caches remote account pubkeys", "[core]
 
         REQUIRE(mock_net->sent_requests.size() == 1);
         CHECK(mock_net->sent_requests[0].request.endpoint == "retrieve");
-        auto req = nlohmann::json::parse(*mock_net->sent_requests[0].request.body);
+        auto req = parse_json(*mock_net->sent_requests[0].request.body);
         CHECK(req["pubkey"] == oxenc::to_hex(sid));
         CHECK(req["namespace"] == static_cast<int16_t>(config::Namespace::AccountPubkeys));
 

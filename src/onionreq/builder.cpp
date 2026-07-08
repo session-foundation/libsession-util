@@ -135,7 +135,8 @@ std::vector<std::byte> Builder::_generate_payload(
         nlohmann::json params_json;
 
         if (body && !body->empty())
-            params_json = nlohmann::json::parse(*body);
+            // Parse as a char view: libc++'s std::char_traits has no std::byte specialization.
+            params_json = nlohmann::json::parse(to_string_view(*body));
         else
             params_json = nlohmann::json::object();
 

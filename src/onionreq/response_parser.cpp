@@ -93,7 +93,8 @@ DecryptedResponse ResponseParser::_decrypt_v3_response(const std::string& respon
             base64_iv_and_ciphertext.end(),
             std::back_inserter(iv_and_ciphertext));
     auto result = decrypt(iv_and_ciphertext);
-    auto result_json = nlohmann::json::parse(result);
+    // Parse as a char view: libc++'s std::char_traits has no std::byte specialization.
+    auto result_json = nlohmann::json::parse(to_string_view(result));
     int16_t status_code;
     std::vector<std::pair<std::string, std::string>> headers;
     std::string body;

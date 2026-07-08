@@ -6,6 +6,8 @@
 #include <nlohmann/json.hpp>
 #include <stdexcept>
 
+#include "session/util.hpp"
+
 namespace session::onionreq {
 
 OnionReqParser::OnionReqParser(
@@ -29,7 +31,9 @@ OnionReqParser::OnionReqParser(
         throw std::invalid_argument{"encrypted onion request data segment too small"};
     auto ciphertext = req.subspan(0, size);
     req = req.subspan(size);
-    auto metadata = nlohmann::json::parse(req);
+    // Parse as a char view: nlohmann instantiates char_traits<value_type>, and libc++ only
+    // specializes std::char_traits for the standard character types (not std::byte).
+    auto metadata = nlohmann::json::parse(to_string_view(req));
 
     if (auto encit = metadata.find("enc_type"); encit != metadata.end())
         enc_type = parse_enc_type(encit->get<std::string_view>());

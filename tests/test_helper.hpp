@@ -3,6 +3,7 @@
 #include <fmt/format.h>
 
 #include <filesystem>
+#include <nlohmann/json.hpp>
 #include <session/core.hpp>
 #include <session/core/devices.hpp>
 #include <session/network/key_types.hpp>
@@ -10,8 +11,16 @@
 #include <session/random.hpp>
 #include <session/sodium_array.hpp>
 #include <session/sqlite.hpp>
+#include <session/util.hpp>
+#include <span>
 
 namespace session {
+
+// nlohmann can't parse a std::byte range directly: libc++'s std::char_traits has no std::byte
+// specialization.  Parse request/response bodies via a char view instead.
+inline nlohmann::json parse_json(std::span<const std::byte> body) {
+    return nlohmann::json::parse(to_string_view(body));
+}
 
 /// A minimal in-process mock of network::Network for unit tests.
 /// Tests can set `current_node` to control which node get_swarm returns, and inspect
