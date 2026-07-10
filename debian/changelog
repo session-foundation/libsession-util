@@ -1,3 +1,874 @@
+libsession-util (1.6.4-1~ubuntu2204) jammy; urgency=medium
+
+  [ Morgan Pretty ]
+  * [WIP] Started working on libQuic functions
+  * Test to ensure libQuic is linked when running unit tests
+  * Fixed an incorrect function definition
+  * Added changes from bindle-static-deps PR
+  * [WIP] Latest tweaks, still have linker errors...
+  * Added a call to test_onionreq.cpp to ensure it calls some libQuic methods
+  * Tweaks to libQuic to get iOS build linking correctly
+  * Started working on quic-based onion request functions
+  * Fixed up a bunch of libQuic onion routing issues
+  * Fixed support for non-JSON response body
+  * Updated the error handling to better handle 421 errors (auto retry)
+  * Fixed file uploads and requests with query params
+  * Fixed a couple of bugs and added some unit tests
+  * Updated to the latest libquic commit
+  * Ran formatter and fixed test build (not sure we want the change though)
+  * Added an if statement around the check custom target
+  * Ran the formatter
+  * Added a couple of basic standard network request unit tests
+  * Drop old "lokinet-ci-" docker image prefix
+  * Added gnutls-bin to the default deps
+  * More tweaks to the default deps trying to fix CI builds
+  * Fix warnings and ran formatter
+  * Tweaked the onionreq builder to fix more warnings
+  * Changes to resolve warnings in CI builds
+  * Additional CI error fixes and attempting to suppress Catch2 warnings
+  * Reworked network to be instance-based
+  * Added a function to replace the secret key used for the network
+  * Fixed up lambda variable capture, ip formatting
+  * Updated to the latest stable libQuic commit
+  * Ran the formatter and fixed a weird namespace mistake
+  * Removed backported starts_with and ends_with
+  * Implemented the snode pool cache logic, PR comments
+  * Resolved remaining PR comments and minor tweaks
+  * Used 'RemoteAddress' instead of a custom service_node
+  * Ran the formatter and fixed some CI build errors
+  * Fixed more CI warnings
+  * More tweaks to resolve CI errors (warnings)
+  * Further tweaks for CI errors
+  * Additional tweaks for CI warnings
+  * Missed the 'snode destination' onion request call in the previous commit
+  * Pointing at the latest dev libQuic
+  * Reverted to a previous `dev` commit
+  * Added a function to retrieve the current old hashes without pushing
+  * Tweaked 'with_path' behaviour, added ability to reset/create endpoint
+  * Fixed the get_endpoint and paths changed callback memory
+  * Ran the formatter
+  * Fixed a build error
+  * Fixed more issues found by the CI
+  * Ran the linter, bubble up path building errors
+  * Bubble up snode pool errors
+  * Tweaks to try and fix the CI test failures
+  * Renamed the C API for the logger functions, fixed build errors
+  * Fixed an issue where the network status wouldn't get updated in some cases
+  * PR comments and logger testing
+  * Added a function to manually trigger a log for debugging purposes
+  * Build fix
+  * Fixed an issue when merging the current config into itself
+  * Ran formatter, catch exceptions thrown when loading cache, disable 'open_for_reading' exceptions
+  * Combined the snode_pool and build_paths loopers
+  * Combined the path building and snode pool logic
+  * Updated the unit tests for Apple builds (file path differs)
+  * Silly autocomplete mistake
+  * Testing debian test failure 1
+  * Testing debian test failure 2
+  * Testing debian test failure 3
+  * Testing debian test failure 4
+  * Testing debian test failure 5
+  * Testing debian test failure 6
+  * Testing debian test failure 7
+  * Testing debian test failure 8
+  * Ensured network status changes run in the network looper
+  * Testing debian test failure 9
+  * Testing debian test failure 10
+  * Testing debian test failure 11
+  * Testing debian test failure 12 (Try std::moving `info` everywhere)
+  * Reverted the previous change, added check to fix logging test
+  * Added a preprocessor macro to identify the release build for tests
+  * Another tweak to logging test
+  * Made a number of changes based on iOS crash logs
+  * Removed a couple of debug logs
+  * Made a few changes to fix some race conditions in network recovery
+  * Wrapped a few throwing functions in try/catches in the C API
+  * Fixing CI errors
+  * Updated the C API config error handling logic
+  * Updated get_connection_info vars to be shared_ptrs to prevent bg crash
+  * Updated to the latest libQuic
+  * Added separate paths for uploading/downloading files, fixed a few bugs
+  * Fixed bugs which recovering connections and error handling
+  * Fixed the broken tests
+  * Looking to fix CI errors
+  * A couple more bug fixes and added auth for versioning API call
+  * Added a bunch of trace logs to help better debug network issues
+  * Added back the 'ENABLE_ONIONREQ' flag
+  * Fixed an issue where bad nodes might not get dropped in some cases
+  * Removed the path "recovery" logic (just rebuild instead)
+  * Reverted the removal of the path "recovery" logic
+  * Wrapped a few more functions in the exception wrapper
+  * Added custom handling for a HTML 400 error
+  * Optimisations to the path building logic
+  * Fixed an issue in the C++ to C conversion of a service node
+  * Added a version check for the final path node and a couple other fixes
+  * Added functions for generating a blinded id for version check auth
+  * Added missing headers
+  * Added missing headers
+  * Added new sodium_array header changes
+  * Addressed PR comments
+  * Added a missing import
+  * Updated the docs to be correct, and explicit about a unix timestamp
+  * Fixed a bug with the version check API auth generation
+  * Additional invite/promotion state and missing C functions
+  * Renamed a couple of functions, updated docs, fixed 'promotion_x' funcs
+  * Small docs change
+  * Ran the formatter -_-
+  * Added 'set_{x}_truncated' functions so clients have non-throwing versions
+  * Ran the formatter
+  * Added a utf8_truncate function and use it when truncating user content
+  * Added some tests for the new utf8 truncation logic
+  * Added missing headers
+  * Added new sodium_array header changes
+  * Addressed PR comments
+  * Added a missing import
+  * Updated the docs to be correct, and explicit about a unix timestamp
+  * Fixed a few issues resulting from merges
+  * Fixed merge bug, removed extra timeout threshold, needs_dump fix
+  * Fixed a few bugs
+  * Removed some duplicate code
+  * Removed the 'paths_and_pool_loop' and refactored the path build logic
+  * PR feedback tweaks round 1
+  * Attempt to fix a couple of CI build issues
+  * Fixed another CI error
+  * Added a bunch of network unit tests, fixed some warnings
+  * Fixed one of the broken tests
+  * Drop 'not found' nodes immediately, additional PR feedback tweaks
+  * Split the resume_queues function and fixed broken tests
+  * Updated libquic submodule
+  * Fixed a bug and the broken tests
+  * Fixed a couple of bugs
+  * Fixed a build error
+  * Fixed a few bugs found when testing
+  * Updated decrypt_ons_response to support decrypting legacy ONS values
+  * Updated logic to keep dropped paths around until their requests finish
+  * Fixed a bug with the C API ONS lookup function
+  * Ran formatter, fixed array size issue
+  * Fixed issue breaking tests when testnet is busted, fixed some CI warnings
+  * Exposes functions to clear the oxen::log sinks
+  * Updated the docs for legacy group decrypt function to reduce misuse
+  * Reverted 64-byte legacy group secret key decryption (only need 32 bytes)
+  * Fixed an incorrect size for the curve25519 secret key
+  * Updated libQuic and cleaned up 'wrap_exceptions' usage
+  * Added a function to compute a message hash
+  * Added code to calculate swarms locally instead of fetching
+  * Added a timeout mechanism which takes the path build time into account
+  * Improvements to attachment upload/download behaviours
+  * Expose response headers in network request functions
+  * Tweaks to try to fix CI errors
+  * Another tweak for CI errors
+  * Further tweaks to make CI happy
+  * More CI platform specific tweaks
+  * Another tweak for CI test build issues
+  * Fixed a cache refresh bug, logging tweaks, CI build tweaks
+  * Fixed a bug with onion_path pending requests func and logging tweaks
+  * Reverted change causing test crashes on CI, tweak for 32-bit CI error
+  * Fixed up the iOS build script
+  * Fixed a C API bug with the INVITE_NOT_SENT member status
+  * Added a function to retrieve the current snode cache size
+  * Consolidated the group member status read funcs into an enum
+  * Fixed a couple of typos
+  * Fixed some inconsistently naming, added C API group_member_status
+  * Fixed another silly typo
+  * Added a missing C func
+  * Added a couple missing function definitions to a C header
+  * Split set_invited func, renamed some constants, renamed some functions
+  * Update include/session/config/groups/members.hpp
+  * Initial version of the `local_pending_send` flag
+  * Addressed code feedback
+  * Fixed a couple of build issues
+  * Further tweaks for CI errors
+  * Added the C header changes I had missed
+  * Yet another change I missed bringing across
+  * Function change for CI error
+  * Fixed some broken tests, fixed a bug with erasing a member
+  * Added C API for new `set_invite_not_sent` function
+  * Fixed an incorrect variable
+  * Added a bugfix to prevent removing the current hash incorrectly and removed an assert
+  * Applied some old PR feedback changes
+  * Added a missing default value to the new Builder constructor
+  * Fixed a couple of issues with the `random_base32` function
+  * CI build error fixes #1
+  * Updated the Ci instructions to use the local mirror on all pipelines
+  * Added the local mirror to the specific platform scripts
+  * Fixed the logging tests on macOS ARM64
+  * Removed an unneeded _old_hashes.erase
+  * Updated the clang format version
+  * Changed the byte limit for the groups description to 600
+  * Updated the 'drone-format-verify.sh' to also use clang-format-17
+  * Reduced the GroupKeys padding from 75 members to 45 to fit in a PN
+  * Seems like the logging differences might be specific to the clang version
+  * Added missing import and disable network logging tests
+  * Tweaks to the iOS build script for more control over packaging process
+  * Mistake in ios.sh
+  * Added a couple of unit tests to validate the merge bug fixes
+  * Updated the test to ensure obsolete merges still don't impact the current state
+  * Explicitly set the log level for the test logging categories
+  * Fixed broken tests, fix typo, added log_level_raiser/log_level_lowerer
+  * Bumped version number and ran formatter
+  * Updated to the latest stable libQuic, Retyped the networking code
+  * Fixed an issue where snode requests would fail due to compiler optimisations
+  * Removed the {b/c/u}span custom types and made them explicit spans
+  * Updated to the latest libQuic
+  * Fixed broken logging test
+  * Debug macOS release logging issue on CI
+  * Updated logs for Apple Release builds (as they are different for some reason)
+  * Retyped code to use vector & span instead of ustring & ustring_view
+  * Fixed some CI errors due to missing imports
+  * Moved the vector include into types.hpp
+  * Shifted imports around again
+  * Disable -Werror for buggy GCC stringop warnings
+  * Got fed up and included vector everywhere we include array
+  * Another include
+  * Fixed a couple more CI issues
+  * Fixed a couple more basic_string_view uses
+  * Fixed an error due to static analysis of a test
+  * Updated includes to fix build error due to new version of fmt
+  * Updated to the latest libQuic
+  * Updates to support the latest oxen-encoding changes
+  * Updated formatter to clang-19
+  * Added a header causing Desktop build issues
+  * Removed the <=> operator from service_node
+  * Updated to the latest libQuic, ran the formatter
+  * Replaced oxenc::variant usages with stl <variant>
+  * Fix the logging tests
+  * Ran the formatter...
+  * Updated to the latest libQuic
+  * Updated version number to `1.3.0`
+  * Fixed a couple of incorrect 'LIBSESSION_WARN_UNUSED' usages
+  * Updated the network tests to talk to a local callback
+  * Updates for the de-network changes in libQuic
+  * Updates for the latest de-network branch changes
+  * Fixed an infinite loop when refreshing the snode cache
+  * Updated the version number to 1.3.1
+  * Changed the 'static macOS' build to 'arm64'
+  * Disabled MTU discovery & C API tweaks
+  * Ran the formatter...
+  * Renaming 'network' to 'session_network' because xcode can't debug
+  * Added general xchacha20 encrypt/decrypt functions, doc tweaks
+  * Added a unit test
+  * Updated to the latest libQuic
+  * Ran the formatter
+  * Ran the formatter
+  * Extended durations of eventually/always tests, fixed crashing test
+  * Fixed C API size calculation
+  * Updated to the latest libQuic
+  * PR comments
+  * Removed some unneeded `mutable` usage in lambdas
+  * Refactored the 'EVENTUALLY' and 'ALWAYS' logic for networking tests
+  * Ran the formatter...
+  * Bumped version to 1.4.0
+  * Renamed current_hashes on GroupKeys to active_hashes for consistency
+  * Formatter
+  * Added the ability to locally store arbitrary String -> uint16 values
+  * Ran the formatter
+  * Made the local settings booleans, added explicit enums for enum settings
+  * Fixed incorrect C++ enum definition
+  * Updated the code to ignore nodes which fail to parse
+  * Added invalid ip/port handling to the json parsing
+  * ran formatter
+  * Moved the new local settings into a new Local config
+  * Added a case to Namespace for the local config (as an identifier)
+  * Replaced notify_sound enum with int64_t, added 'ios' to function names
+  * Updated version number
+  * Increased window for the multipart expiration test
+  * WIP lokinet integration
+  * More testing
+  * Rename the current session_network (to simplify refactoring)
+  * Started breaking the session_network logic to be more configurable
+  * Updated the seed node IP addresses
+  * Increased version number to 1.5.1
+  * Fixed a network test that was still talking to testnet
+  * Changed Debian 11 to Debian 12
+  * Further progress on refactoring, added first pass on QuicTransport
+  * Initial work for the OnionRequestRouter, fixed some build errors
+  * Increased the port numbers used by the network tests
+  * Stopped reusing port numbers in case that's causing a test failure
+  * Added 'profile_seqno' to contact_info & member to version profile info
+  * Changed 'profile_seqno' to 'profile_updated'
+  * Ran the formatter, fixed a network test that was still talking to testnet
+  * Ran the formatter again
+  * Added blinded contact records to Contacts and ConvoInfoVolatile
+  * Comment fixes from PR feedback
+  * Updated `blinded_contact_info` to not inherit from `community`
+  * Added unit tests for blinded contacts, bug fixes and cleanup
+  * Fixed a test failure caused by odd syntax
+  * Bumped version number
+  * Tweaked the snode pool logic to exclude based on /24 subnet
+  * Removed the `legacy_blinding` flag from blinded contacts
+  * Code review cleanup
+  * Made `blinded_contact_info` implementation details private, handle invalid case
+  * Missed a `legacy_blinding` flag
+  * Added some logic for edge-case handling
+  * Further progress on refactored network
+  * Removed 'legacy_blinding' flag from convo info volatile functions
+  * Fixed some bugs
+  * Fixed up a few issues
+  * Fixed a couple of deadlocks
+  * Bumped version number to avoid confusion
+  * Added missing `profile_updated` and `priority` values
+  * Fixed general snode cache refresh, started on C interface
+  * Progressing the C interface somewhat
+  * Ran the formatter
+  * Added an option to use the legacy endpoint to refresh the cache
+  * Fixed a couple of bugs
+  * Started working on trying to add custom conflict resolution handling
+  * Setup conflict resolution, added another version tracking value
+  * Also handle changes to the `blinded_msgreqs` setting
+  * Added error handling and bug fixes
+  * Added initial LokinetRouter wrapper
+  * Fixed a couple of bugs and cleaned up some duplicate code
+  * Fixed a few issues with the 421 retry mechanism
+  * Added a number of remaining pieces of functionality from the old code
+  * Reverted previous changes, added new re-upload fields to UserProfile
+  * Started fixing recovery from network loss
+  * Fixed a couple of bugs and fixed unit tests
+  * Fixed some non-deterministic logic in tests
+  * Added suspend/resume funcs, fixed crash during destruction
+  * Catch libQuic exception, handle missing opt, ran formatter
+  * Removed an incorrect lock which was causing a deadlock
+  * Resolved some TODOs
+  * Fixed a deadlock in the SnodePool
+  * Fixed a number of edge cases and bugs
+  * Fixed a couple of bugs in the SnodePool
+  * Bumped version number
+  * Fixed the `profile_updated` timestamp to correctly be in seconds
+  * Added function to retrieve the current connection status
+  * Updated to the latest lokinet
+  * Removed the old network code
+  * Removed old header includes
+  * Started looking at cleaning up the unit tests
+  * Fixed a few issues with the LokinetRouter
+  * Attempt to fix `is_dict_value` build errors
+  * Fixed an issue where the lokinet payload is in a different format
+  * Updated to latest Lokinet, added network info hook, removed '_v2'
+  * Changed an incorrect variable type
+  * Started working on unit tests
+  * Updated lokinet, bug fixing, unit test fixing
+  * Cleanup network unit tests, fixed a few bugs which came up
+  * Added proxied requests to the LokinetRouter, fixed tests
+  * Ran formatter, try to fix CI builds
+  * Tweaks to tests to prevent unneeded calls
+  * Fixing errors found by CI
+  * Improved the robustness of a flaky test
+  * Updated to the latest lokinet
+  * Disabled the "profile_updated" timestamp updating logic
+  * Use #if 0 instead of commenting out in tests
+  * Swap Lokinet to session-path-refactor branch for testing
+  * Update to latest Lokinet
+  * Updated to the latest lokinet
+  * Re-enabled the profile_updated timestamp updating
+  * Bumped version number, Fixed testnet min snode cache issue
+  * Fixed a bug where profile_updated would update when no data changed
+  * PR suggestions
+  * Added syncing for Session Pro profile values
+  * Comment tweak
+  * Updated some url variable names
+  * Fixed a couple of bugs with the pro config syncing
+  * Addressed PR comments
+  * Additional PR feedback
+  * Fixed failing tests
+  * Added syncing for a 'pro_access_expiry_ts' value
+  * Set the profile_updated timestamp when updating the pro proof
+  * Increased the version number for tagging a release
+  * Fixed a crash which could occur during network destruction
+  * Addressed some PR comments, updated to Session Router, bug fixes
+  * More PR connects, IPv6 changes, non-JSON response handling, crash fix
+  * Updated to the latest Session Router to fix a build issue
+  * Updated code to use multiple quic streams, simplified some logic
+  * Remove 250ms timeout tick from RequestQueue
+  * Added code to persist snode strikes to disk
+  * Cleaned up logging as per PR feedback
+  * Fixed a crash which could occur after resetting the QUIC endpoint
+  * Fixed an issue where using an explicit IPv6 address broke onion requests
+  * Added code to load the snode strikes map from disk
+  * Updated the error handling to follow the new rules
+  * Updated snode pool refresh to include nodes found in X responses
+  * Updated clock resyncing logic
+  * Reworked file I/O, added edge node cache and path/edge rotation
+  * Fixed edge node caching
+  * PR comments and feedback, steaming file interface
+  * Adding missing exception
+  * Fixed a number of quick PR comments
+  * Added the ability to specify the TTL when uploading a file
+  * Minor tweaks from testing
+  * Removed "callbacks" transport, added `desired_path_index` param
+  * Added a function to expose whether the network offset has been set
+  * Added code to both parse and generate file server download urls
+  * Updated upload/download requests to remove shared_ptr, cleanup C API
+  * Added test for download url parsing/generation and fixed a couple bugs
+  * Added download url parsing/generation for open group servers as well
+  * Fixed a build error
+  * Tweaks to download url generation
+  * Added more distinct errors
+  * Cleanup weak_self and this usage
+  * Removed unneeded std::move calls for disk writing
+  * Removed redundant "safety" reservation
+  * Addressed a bunch of PR comments
+  * Fixed a potential collision issue with the random request ids
+  * Joining upload threads during destruction, added missing OR clear cache
+  * Updated `session_file_metadata` to also have a 64 char id
+  * Cleaned up url parsing, added 'extend' file server request
+  * Removed snode pool legacy endpoint refresh logic
+  * Added static node list fallback logic after failing to bootstrap from all seed nodes
+  * Updated to the latest session router
+  * Fixed build issues and log tweaks
+  * Ran linter
+  * Fixed a couple of issues with shutting down the network
+  * Fixed a couple of bugs with file uploads
+  * Fixed a crash due to an invalidated iterator
+  * Added missing import
+  * Fix CI build errors
+  * Bumped version number v1.5.9 -> v1.5.10
+  * Removed the `max_streams` setting, added available_stream_ids pool
+  * Fixed a crash when incorrectly erasing a joinable thread
+  * Fixed some misleading errors
+  * Code review tweaks
+  * Fixed a crash which could occur when the network is destroyed
+  * Increased some version numbers
+  * Updated to the latest Session Router
+  * Debugging logging test failures
+  * Tweak logging test to be less specific
+  * Updated the iOS build script to resolve warnings and strip unused code
+  * Update utils/ios.sh
+  * Fixed an issue where failing to get a stream would fail a request
+  * Cleanup from code review
+  * Additional cleanup from code review
+  * Minor tweak
+  * Fixed a few bugs with the networking code found when testing
+  * Bumped version number
+  * PR feedback
+  * Fixed a couple of crashes with the new networking release
+  * Fixed single path mode
+
+  [ Jason Rhinelander ]
+  * Fix link dependency recursion for interface libraries
+  * Bump to latest libquic with xcode/ios build updates
+  * Bump to c++20
+  * Find and link to nettle
+  * Bump libquic
+  * Disable shared libs for llvm build
+  * Bump nlohmann-json to latest
+  * Move some apple jobs to om2g CI
+  * Add some linux builds; fix bionic
+  * drone job name lipstick
+  * bullseye backports
+  * Add ngtcp2 CI dep
+  * make oxen repo default
+  * fix libngtcp2-dev package name and depend on crypto package
+  * Add test image deps
+  * more dep fixing
+  * libquic bump
+  * Remove bionic; disable win-x86
+  * libquic bump
+  * use CHECK(thing) and CHECK_FALSE(thing) instead of == true/false
+  * libquic bump
+  * Switch to libquic `stable` branch && bump required system lib version
+  * Fix oxen::logging dependencies
+  * Remove duplicate Windows build
+  * Use oxen-encoding via libquic
+  * oxenc 1.1.0 compatibility
+  * remove comment for removed argument
+  * Replace callback logger; de-header oxen-logging and spdlog
+  * Mildly simplify hash() implementation
+  * logging: add level controls; add tests
+  * C network API doc tweaks & typedef
+  * Remove unneeded specific values
+  * Re-join disk writing thread during destruction
+  * `#include` cleanups
+  * Minor API doc wording tweaks
+  * Replace crappy config logger with oxen-logging
+  * Change unmerged_index() to optional<size_t>
+  * Fix flakey oxen-logging source dir stripping
+  * Add fix for test case premature timeout
+  * Use libquic's (relatively new) string_view-accepting opt::alpns
+  * More input validity checks
+  * Drop `oxen::` prefix from various things
+  * Remove custom comparison for Address compare
+  * Unbreak compilation
+  * Add missing test file
+  * Split out sodium utils into a dedicated header
+  * Add file helpers; push more std::filesystem::path
+  * Set badbits but not failbit after opening
+  * Bump to latest libquic & oxen-logging
+  * Add hack to hide broken log path with xcode 15
+  * Fix Loop variable initialization
+  * Delete C++ object in network_free
+  * Avoid reuse of cleared_uc64 data
+  * Fix C free functions
+  * allow protobuf to come from the system lib
+  * Avoid reuse of cleared_uc64 data
+  * Fix dirty() not setting _needs_dump when already dirty
+  * Compilation error/warning fixes
+  * Make windows-x86 static "allow fail"
+  * extra_data: use dict producer/consumer
+  * Add two-step ConfigBase init via default-ctor+init()
+  * Fix compatibility with newer oxenc; add oxen-logging
+  * Add support for large, multi-part config messages
+  * Add implicit group pubkey to group signature
+  * Add logging options and initialization to test suite
+  * Add detailed debug logging to ConfigBase::_merge
+  * Deprioritize current config when no current hash
+  * Move logging into its own binary to avoid log level/sink interference
+  * Fix missing headers
+  * Add missing static-deps include directory
+  * Bump libquic to silence gcc stringop warnings
+  * Fix inconsistency with == and inequalities
+  * Add test case trace logger from libquic
+  * Speed up huge contacts test with fake session ids
+  * More useful test error on network timeout
+  * formatting
+  * multiparts: use ordered map for internal storage
+  * Fix test suite when not root
+  * Lokinet WIP
+  * Add lokinet submodule properly
+  * Drop duplicate submodules
+  * Add dummy test lokinet file
+  * Update lokinet to latest WIP with updated embedded build flags
+  * Build tweaks
+  * Allow macOS Intel test failures
+  * Fix another privileged port use
+  * Make profile timestamp type safe std::chrono::sys_seconds
+  * Add `int_or_0`/`string_or_empty` to match ts_or_epoch
+  * Drone: drop unneeded backports from Debian 12 build
+  * blinded_contact_info: type-safe timestamp
+  * fixes for doc generation
+  * Add sys_seconds support to dict proxy
+  * gcc-15 warning workaround
+  * Bump libquic to latest dev
+  * fix testLogging for latest oxen-logging
+  * Add new attachment encrypt/decrypt functions
+  * Add various buffer<->file encryption/decryption; C API
+  * Fix attachment file API bugs
+  * Fix bug in set erasing causing config dirtying
+  * Use non-deterministic keys for 1-to-1 messages
+  * fix fiddle_rlimit_nofile
+  * Rewrite date formatting using STL or HH date
+  * parse_http_date: return more coarse sys_seconds
+  * Fix libc++ internal (from autocompletion, maybe?)
+  * Optimize random base32 generator
+  * Replace DiskManager with dedicated quic::Loop
+  * fix base32 random generator
+  * TOREWRITE: require loop, don't check
+  * Fix resetting of clock resync internals
+  * Various code cleanups
+  * get_service_nodes: use modern API
+  * Bump session-router to fix embedded-only build linking error
+  * Clean up fiddle_rlimit_nofile (now set_rlimit_nofile)
+  * Bump session-router for another linking fix
+  * Update to new STF repo URL + pubkey
+  * Fix clang-19 LTO linking
+  * Bump session-router for more build fixes
+  * C++ modernization/optimizations
+  * fix clang LTO
+  * Minor cleanups
+  * formatting
+  * fix conflicting oxen::logging targets
+  * Optimize fork_versions
+  * another session-router build fix bump
+  * Allow disabling session-router but keeping quic + related fixes
+  * yet another session-router build fix bump
+  * Link to libevent properly
+  * session-router bump for android build fix
+  * Dry out Upload/DownloadRequest with a base class of common members
+  * Add and use chrono helpers
+  * Simplify upload/download types
+  * Minor response parsing cleanups
+  * Add missing header
+  * Drop compute_message_hash
+  * fix macos static build not using LOCAL_MIRROR
+  * version bump
+  * Update apt repo signing key to deb.session.foundation.gpg
+  * Use builds.session.codes for build uploads
+
+  [ Audric Ackermann ]
+  * fix build
+  * fix: dirty fix TO BE REMOVED to make needs_dump true when need to dump
+  * feat: allow config wrappers to be extended
+  * chore: remove unused hacky_list on swarm-auth-test.cpp
+  * fix: make FULL_URL_MAX_LENGTH a constexpr and not such static const
+  * feat: add is_destroyed flag to UserGroupsConfig
+  * fix: merge kicked & destroyed group status into removed_status
+  * chore: fix comment for blind_version_key_pair returning a seed
+  * chore: replace oxen-io urls with session-foundation
+  * fix: member::status() can be marked as const
+  * use single letter for keys dump()
+  * add pending_state get/set and fix unit tests
+  * set_pending_send marks config as needing dump on change
+  * chore: fixed some typo
+  * chore: run ./utils/format.sh
+  * feat: allow to mark a member invite state as not sent
+  * fix: build on sid with clang-17
+  * feat: forgive timestamps provided as ms/μs
+  * chore: rename to_seconds to to_epoch_seconds
+  * fix: use correct type from chrono duration count()
+  * fix: zstd cmake_minimum_required is 2.8, but not supported anymore
+  * chore: make cppcheck happy in ed25519 sign
+  * fix: add get_pro_features body
+  * feat: add rangeproof provider basic support
+  * fix: parse rangeproof_order_id for rangeproof provider
+  * chore: address PR review
+  * fix: nil provider fallthrough to break reorder
+
+  [ yougotwill ]
+  * feat: moved community url max length and qs_pubkey to cpp header
+  * fix: missing missing input statements in docstrings
+  * feat: refactor folder structure for mkdocs
+  * feat: added README
+  * feat: use mkdocs to build api sites in dist folder
+  * feat: restructured make commands to build, serve, and dev within the dist folder
+  * feat: update mkdocs configuration and add KaTeX support for math rendering
+  * feat: moved and updated README
+  * feat: added requirements.txt
+  * feat: add config merge logic doc to api websites
+  * feat: added back search bar
+  * feat: disable mdx files from being committed
+  * fix: remove arguments from api comments in group info
+  * fix: build-all command
+  * feat: auto generate table of contents
+  * feat: updated drone api task
+  * feat: adjusted content and right sidebar widths
+  * feat: added copyright
+  * fix: using virtual environment for installing deps
+  * fix: remove pip upgrade step
+  * fix: use python3 alias
+  * feat: install system wide python venv package
+  * fix: make sure to make the venv inside the correct directory
+  * fix: source venv activiate using dot which is POSIX-compliant
+  * feat: move venv ignore into docs api folder
+  * fix: dev-c make command
+  * fix: revert triggering api docs in drone unless we are pushing to dev
+  * docs: update README to include documentation writing guidelines
+  * fix: update comment for clarity in config message example test
+
+  [ Ryan Miller ]
+  * Add blind version signing for a generic request
+  * Change body hash to body
+  * Create headers for blind version signing
+  * chore: update pro urls
+  * chore: sort protocol strings
+
+  [ Thomas Winget ]
+  * blind_version_sign_request C API and CPP test
+  * more correct string reserve, also lint
+  * use string_view instead of ustring_view where reasonable
+  * size_t -> uint64_t in C API in a couple places (timestamp)
+
+  [ doylet ]
+  * Add Session Pro master key derivation
+  * Only give 64b skey from session pro keygen
+  * Apply _hex_u changes to rest of ed25519 tests
+  * Use cleared_u32 and 64 from sodium_array header
+  * Linting fix
+  * Add basic pro proof verification functions
+  * Reformat the string split in test_config_userprofile
+  * Add pro proof and rotating key pair to user profile
+  * Add c wrappers for Session Pro and proofs
+  * Update protobufs for Pro and pro proofs
+  * Typedef array u8x32, add it to types.hpp anad use it in new code
+  * Add Pro message to Content and decrypt it
+  * Update Session protobuf files to session-ios at 084e58f
+  * Revise the PRO protobuf structures
+  * Port encrypt for namespace into libsession
+  * Update decrypt function to return the envelope and the metadata
+  * Add documentation for new session protocol functions
+  * Add c bindings for new encryption functions
+  * Revise docs for session protocol c header
+  * Fix incorrect detection of higher char limits and non-optional pro sigs
+  * Note that closed groups handles both legacy/non-legacy keys
+  * Avoid required files in pro messages, handle non-encrypted contents in envelope
+  * Regen the protobufs w/ non required fields for pro structures
+  * Allow envelope decrypt to handle encrypted v2 group envelopes
+  * Do not enforce library types in C interface
+  * Pro version field should use a key that sorts to the top
+  * Fix C session protocol using std::span and missing comments
+  * Fixup some comments, add missing x25519 pubkey from C decrypted envelope
+  * Linting
+  * Fix pro tests breaking due to version change to @
+  * Move group msg encryption primitive into session encrypt, avoids circular dependency
+  * Move group encryption into session encrypt
+  * Update nomenclamenture, Closed/OpenGroup to Group/Community respectively
+  * Add some missing typedefs on C structs
+  * Document the free-eing requirement on the C interface for session protocol/encrypt
+  * We cannot enforce the presence of a pro signature
+  * Don't use assert in test key-gen which breaks in release mode
+  * Add error logging to C apis
+  * Add TODO on the purpose of PUBKEY in pro_backend
+  * Add note that character limit is UTF16 code units for now
+  * Remove outdated comment, these encrypt dests just receive plaintext
+  * Remove the CPP session protocol tests, keep C API
+  * Fix groups message not encrypting correctly
+  * Remove envelope type, it is inferred from the namespace
+  * Encapsulate the freeing of session protocol encrypt/decrypt funcs
+  * Prohibit the creation of legacy groups messages, no longer supported
+  * Fix linting
+  * Remove the need for ProStatus::Nil by using std::optional
+  * Add docs to pro config
+  * Add helper functions for getting PRO_STATUS from proof standalone from decryption
+  * Re-add missing wrapping of 1o1 messages
+  * Mitigate snprintf error prone return value
+  * Address some outdated doc comments
+  * Use bytes32/64/33 in session protocol, add wrapper encrypt for {1o1,group,comms} functions
+  * Remove destinations that don't encrypt
+  * Remove namespace from encrypt for destination
+  * Linting
+  * Add missing memory header for zstd
+  * Move ProProof into session_protocol.hpp
+  * Add pro proof and rotating key pair to user profile
+  * Add Pro message to Content and decrypt it
+  * Port encrypt for namespace into libsession
+  * Linting
+  * Move group msg encryption primitive into session encrypt, avoids circular dependency
+  * Add docs to pro config
+  * Polish C++ pro backend APIs and add C variants
+  * Document the new c helper functions
+  * Document the dev flow for pro backend
+  * Test pro backend against local dev server
+  * Add revocation tests, guard CURL tests behind CMake option
+  * Update readme with new instructions for pro backend dev mode tests
+  * Add more notes on role/usage of protocol.hpp
+  * Add payment provider to the pro payments items
+  * Add Session Pro payment provider metadata, e.g. links to support pages
+  * Fix formatting
+  * Make parsing a static function
+  * Remove duplicated recipient pubkey field
+  * Add UTF8/UTF16 codepoint count via new simdutf submodule
+  * Add type annotations in the C interface
+  * Update pro_features_for_utf* naming scheme, add read-only note on error string
+  * Update pro backend layer with changes to API
+  * Update pro payments to pro status endpoint
+  * Update pro backend to use millisecond timestamps
+  * Update pro backend status API to handle new grace ts response
+  * Fix broken tests due to mismatched timestamp magnitude
+  * Fix broken tests after rebase
+  * Formatting
+  * Use non-SSH url for simdutf
+  * Remove null-checks for args marked NON-NULL
+  * Use format macro to dump proof expiry
+  * Add community message parsing to handle pro signature from content or envelope
+  * Add encode/decode for community messages
+  * Rename encrypt/decrypt_for to encode/decode_for for consistency
+  * Rename encrypt->encode and implement 1o1 padding/unpadding
+  * Simplify encrypt_for_destination because we do not need to support legacy groups
+  * Correctly prefix pro structures in session protocol
+  * Encode/decode protocol messages now take the pro key and sign the message for you
+  * Merge community encoding to single function, support inbox messages
+  * Allow configurable session pro backend URL in unit tests
+  * Formatting
+  * Implement C wrappers for encode_for_community/inbox
+  * Add missing stdint include for uint64_t in blinding.h
+  * Clarify padding requirement in interface
+  * Fix outdated reference to pro data instead of pro config
+  * Update outdated doc comments for session encrypt
+  * Correctly handle envelope source from ios/android and parse timestamps
+  * Verify the timestamp is decoded in unit tests
+  * Update payment provider metadata table with new required fields
+  * Switch to forward declared typedefs, remove illegal number separator literal
+  * Ensure simdutf is included in the static library bundler
+  * Make pro rotating ed25519 span in high-level interface optional
+  * Disambiguate a group ed25519 privkey from the pubkey arg by labelling it 'enc'
+  * Groups v2 key is not ed25519, it's a xchacha20-poly1305 aead construction key
+  * Update envelop decode keys reference to ed25519 privkeys
+  * Add get bulk group enc keys in the C api
+  * Remove extraneous group prefix on bulk get keys api
+  * Update outdated doc name for group_keys_get_keys
+  * Fix GroupsV2 decoded deriving incorrect x25519 key bytes
+  * Update pro backend to accomodate new API changes from the server
+  * Update documentation for the pro backend
+  * Outdated reference to AddProPayment in docs
+  * Revise the hardcoded platform strings w/ latest additions
+  * Use fwd declared typedefs which are better and match all other pro code
+  * Parse the new error_report value from the user pro status endpoint
+  * s/terms_and_conditions/terms_of_service
+  * Add missing initialisings for the nil payment platform URLs
+  * Fix ProConfig proofs not deserialising version correctly
+  * Fix inconsistent utf8/16 pro_features_for arguments
+  * Use west-const and fix mismatched utf16 parameter for pro_features_for_utf16
+  * Add one-shot functions to directly generate JSON from request params for the pro backend
+  * Update ed25519 session pro key naming convention to privkey
+  * Add missing string_view from config/encrypt.hpp
+  * Add missing dllexport via LIBSESSION_EXPORT to protocol API; fix incorrect EXPORT in impl
+  * Identify when message exceeds max limits in pro_features_for_utf8/16
+  * Add constant for the max number of pinned convos for non-pro users
+  * Move C helper functions that throw into C++ land
+  * Change get_pro_status history to accept a count
+  * Add missing order ID to the payment tx for the pro backend
+  * Unpad the decoded community message on behalf of the caller
+  * Add the custom status codes for AddProPayment responses
+  * Formatting
+  * Remove Session Pro from the user config
+  * Add new parse-error status code to pro backend responses
+  * Merge EXTRA_PRO_FEATURES into PRO_FEATURES to simplify interface
+  * Document protobufs sigTimestamp and pro proof fields
+  * Fix 10k character flag check in pro_features_for_utf
+  * Update Session Pro naming scheme for some apis
+  * Fix pro backend tests which now require DEV. prefix on faux payments for tests
+  * Avoid char16_t in the C interface, requires C11
+  * Add mission symbol export for user_profile_remove_pro_config
+  * Formatting
+  * Add set payment refund requested endpoint support
+  * Zero initialise arena memory in pro backend
+  * Update Session Pro personalisation keys to avoid hash collisions
+  * Fix macOS CI build complaining about missing template arg for sys_time in userprofile tests
+  * Split the bitset into separate profile/message bitsets
+  * Update nomenclamenture from features to bitset
+  * Move inline header bitset functions into implementation
+  * Remove leftover _features nomenclamenture
+  * Explicit bitshift with ULL suffix to force U64, reuse bitset extracting code
+  * Typedef c structs/enums for pro message/profile bitsets, remove default initialiser
+  * Add build variants and additional non-pro strings to hardcoded strings
+  * Distinguish between app donation link and plain donation link
+  * Add more hardcoded strings
+  * Fix tests
+  * Remove the unix_ts_ms arg from decoding, use the sent timestamp internally
+  * Ensure that the bitset is cleared when setting into a config set
+  * Separate pro backend dev tests from the main test block
+  * Static assert some sizes for sanity checking the pro backend tests
+  * Replace unique-ptr scope exit with scope_exit primitive
+  * Explicitly initialise json array to try and narrow down CI sigsegv
+  * Explicitly invoke to_hex with size to force non-strlen overload
+  * Bump patch version, 1.5.7 -> 1.5.8
+  * Make C strings in header extern and move into CPP file
+  * Dummy pro signature should be generated from throwaway keys
+  * Sync the ProConfig to swarms rather than extra data
+  * Remove if `s` in pro config check, remove unusual const& on lvalue
+  * Inline pro.proof accessor in set_pro_config
+  * Optimise Session Pro wireformat by storing just the seed
+  * Update pro config tests to store seed in 'r'
+
+  [ SessionHero01 ]
+  * Add utf16_len_for_codepoints
+  * Add C API
+  * Update C header
+  * Address PR feedback
+  * PR feedback
+  * Add comments and test
+  * Fix compile issue for Android
+  * Update protobuf
+  * Update to latest version
+  * Added pro sig
+  * Add back missing protos
+  * Update convo prune logic
+  * Update gpg
+  * Fix tests
+  * Remove unused include
+  * Formatting
+  * More formatting
+  * sys_time template
+  * Update clang and llvm version
+  * Update to use virtual load method, and pro_base
+  * Simplify is_stale
+  * Update clang and llvm version
+
+  [ Doyle ]
+  * Update include/session/session_protocol.hpp
+
+  [ Samy ]
+  * fix: remove modulo bias from random helper
+  * fix: reject corrupted attachment stream decrypts
+
+ -- Jason Rhinelander <jason@session.foundation>  Fri, 10 Jul 2026 17:16:45 -0300
+
 libsession-util (1.2.0~pre20240724-1~ubuntu2204) jammy; urgency=medium
 
   * allow protobuf to come from the system lib
