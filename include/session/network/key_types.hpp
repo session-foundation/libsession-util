@@ -9,11 +9,12 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 #include "../types.hpp"
 #include "../util.hpp"
 
-namespace session::onionreq {
+namespace session::network {
 
 using namespace std::literals;
 
@@ -54,7 +55,12 @@ struct alignas(size_t) key_base : std::array<unsigned char, KeyLength> {
         detail::load_from_bytes(d.data(), d.size(), bytes);
         return d;
     }
-    static Derived from_bytes(ustring_view bytes) { return from_bytes(from_unsigned_sv(bytes)); }
+    static Derived from_bytes(std::vector<unsigned char> bytes) {
+        return from_bytes(to_string(bytes));
+    }
+    static Derived from_bytes(std::span<const unsigned char> bytes) {
+        return from_bytes(to_string(bytes));
+    }
 };
 
 template <typename Derived, size_t KeyLength>
@@ -92,13 +98,14 @@ using x25519_keypair = std::pair<x25519_pubkey, x25519_seckey>;
 legacy_pubkey parse_legacy_pubkey(std::string_view pubkey_in);
 ed25519_pubkey parse_ed25519_pubkey(std::string_view pubkey_in);
 x25519_pubkey parse_x25519_pubkey(std::string_view pubkey_in);
+x25519_pubkey compute_x25519_pubkey(std::span<const unsigned char> ed25519_pk);
 
-}  // namespace session::onionreq
+}  // namespace session::network
 
 namespace std {
 template <typename Derived, size_t N>
-struct hash<session::onionreq::pubkey_base<Derived, N>> {
-    size_t operator()(const session::onionreq::pubkey_base<Derived, N>& pk) const {
+struct hash<session::network::pubkey_base<Derived, N>> {
+    size_t operator()(const session::network::pubkey_base<Derived, N>& pk) const {
         // pubkeys are already random enough to use the first bytes directly as a good (and fast)
         // hash value
         static_assert(alignof(decltype(pk)) >= alignof(size_t));
@@ -107,13 +114,11 @@ struct hash<session::onionreq::pubkey_base<Derived, N>> {
 };
 
 template <>
-struct hash<session::onionreq::legacy_pubkey> : hash<session::onionreq::legacy_pubkey::PubKeyBase> {
-};
+struct hash<session::network::legacy_pubkey> : hash<session::network::legacy_pubkey::PubKeyBase> {};
 template <>
-struct hash<session::onionreq::x25519_pubkey> : hash<session::onionreq::x25519_pubkey::PubKeyBase> {
-};
+struct hash<session::network::x25519_pubkey> : hash<session::network::x25519_pubkey::PubKeyBase> {};
 template <>
-struct hash<session::onionreq::ed25519_pubkey>
-        : hash<session::onionreq::ed25519_pubkey::PubKeyBase> {};
+struct hash<session::network::ed25519_pubkey> : hash<session::network::ed25519_pubkey::PubKeyBase> {
+};
 
 }  // namespace std

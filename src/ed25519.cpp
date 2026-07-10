@@ -1,20 +1,43 @@
 #include "session/ed25519.hpp"
 
+#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <stdexcept>
 
 #include "session/export.h"
-#include "session/util.hpp"
-
-namespace session::ed25519 {
+#include "session/sodium_array.hpp"
 
 template <size_t N>
-using cleared_array = sodium_cleared<std::array<unsigned char, N>>;
-
 using uc32 = std::array<unsigned char, 32>;
-using cleared_uc64 = cleared_array<64>;
+using uc64 = std::array<unsigned char, 64>;
+
+namespace {
+uc64 derived_ed25519_privkey(std::span<const unsigned char> ed25519_seed, std::string_view key) {
+    if (ed25519_seed.size() != 32 && ed25519_seed.size() != 64)
+        throw std::invalid_argument{
+                "Invalid ed25519_seed: expected 32 bytes or libsodium style 64 bytes seed"};
+
+    // Construct seed for derived key
+    //   new_seed = Blake2b32(ed25519_seed, key=<key>)
+    //   b/B      = Ed25519FromSeed(new_seed)
+    session::cleared_uc32 s2 = {};
+    int hash_result = crypto_generichash_blake2b(
+            s2.data(),
+            s2.size(),
+            ed25519_seed.data(),
+            ed25519_seed.size(),
+            reinterpret_cast<const unsigned char*>(key.data()),
+            key.size());
+    assert(hash_result == 0);  // This function can't return 0 unless misused
+
+    auto [pubkey, privkey] = session::ed25519::ed25519_key_pair(s2);
+    return privkey;
+}
+}  // namespace
+
+namespace session::ed25519 {
 
 std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_key_pair() {
     std::array<unsigned char, 32> ed_pk;
@@ -25,7 +48,7 @@ std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_
 }
 
 std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_key_pair(
-        ustring_view ed25519_seed) {
+        std::span<const unsigned char> ed25519_seed) {
     if (ed25519_seed.size() != 32) {
         throw std::invalid_argument{"Invalid ed25519_seed: expected 32 bytes"};
     }
@@ -38,7 +61,7 @@ std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_
     return {ed_pk, ed_sk};
 }
 
-std::array<unsigned char, 32> seed_for_ed_privkey(ustring_view ed25519_privkey) {
+std::array<unsigned char, 32> seed_for_ed_privkey(std::span<const unsigned char> ed25519_privkey) {
     std::array<unsigned char, 32> seed;
 
     if (ed25519_privkey.size() == 32 || ed25519_privkey.size() == 64)
@@ -51,7 +74,8 @@ std::array<unsigned char, 32> seed_for_ed_privkey(ustring_view ed25519_privkey) 
     return seed;
 }
 
-ustring sign(ustring_view ed25519_privkey, ustring_view msg) {
+std::vector<unsigned char> sign(
+        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> msg) {
     cleared_uc64 ed_sk_from_seed;
     if (ed25519_privkey.size() == 32) {
         uc32 ignore_pk;
@@ -62,15 +86,20 @@ ustring sign(ustring_view ed25519_privkey, ustring_view msg) {
         throw std::invalid_argument{"Invalid ed25519_privkey: expected 32 or 64 bytes"};
     }
 
-    std::array<unsigned char, 64> sig;
+    std::vector<unsigned char> sig;
+    sig.resize(64);
+
     if (0 != crypto_sign_ed25519_detached(
                      sig.data(), nullptr, msg.data(), msg.size(), ed25519_privkey.data()))
         throw std::runtime_error{"Failed to sign; perhaps the secret key is invalid?"};
 
-    return {sig.data(), sig.size()};
+    return sig;
 }
 
-bool verify(ustring_view sig, ustring_view pubkey, ustring_view msg) {
+bool verify(
+        std::span<const unsigned char> sig,
+        std::span<const unsigned char> pubkey,
+        std::span<const unsigned char> msg) {
     if (sig.size() != 64)
         throw std::invalid_argument{"Invalid sig: expected 64 bytes"};
     if (pubkey.size() != 32)
@@ -80,6 +109,11 @@ bool verify(ustring_view sig, ustring_view pubkey, ustring_view msg) {
             crypto_sign_ed25519_verify_detached(sig.data(), msg.data(), msg.size(), pubkey.data()));
 }
 
+std::array<unsigned char, 64> ed25519_pro_privkey_for_ed25519_seed(
+        std::span<const unsigned char> ed25519_seed) {
+    auto result = derived_ed25519_privkey(ed25519_seed, "SessionProRandom");
+    return result;
+}
 }  // namespace session::ed25519
 
 using namespace session;
@@ -102,7 +136,8 @@ LIBSESSION_C_API bool session_ed25519_key_pair_seed(
         unsigned char* ed25519_pk_out,
         unsigned char* ed25519_sk_out) {
     try {
-        auto result = session::ed25519::ed25519_key_pair(ustring_view{ed25519_seed, 32});
+        auto result = session::ed25519::ed25519_key_pair(
+                std::span<const unsigned char>{ed25519_seed, 32});
         auto [ed_pk, ed_sk] = result;
         std::memcpy(ed25519_pk_out, ed_pk.data(), ed_pk.size());
         std::memcpy(ed25519_sk_out, ed_sk.data(), ed_sk.size());
@@ -115,7 +150,8 @@ LIBSESSION_C_API bool session_ed25519_key_pair_seed(
 LIBSESSION_C_API bool session_seed_for_ed_privkey(
         const unsigned char* ed25519_privkey, unsigned char* ed25519_seed_out) {
     try {
-        auto result = session::ed25519::seed_for_ed_privkey(ustring_view{ed25519_privkey, 64});
+        auto result = session::ed25519::seed_for_ed_privkey(
+                std::span<const unsigned char>{ed25519_privkey, 64});
         std::memcpy(ed25519_seed_out, result.data(), result.size());
         return true;
     } catch (...) {
@@ -130,7 +166,8 @@ LIBSESSION_C_API bool session_ed25519_sign(
         unsigned char* ed25519_sig_out) {
     try {
         auto result = session::ed25519::sign(
-                ustring_view{ed25519_privkey, 64}, ustring_view{msg, msg_len});
+                std::span<const unsigned char>{ed25519_privkey, 64},
+                std::span<const unsigned char>{msg, msg_len});
         std::memcpy(ed25519_sig_out, result.data(), result.size());
         return true;
     } catch (...) {
@@ -144,5 +181,19 @@ LIBSESSION_C_API bool session_ed25519_verify(
         const unsigned char* msg,
         size_t msg_len) {
     return session::ed25519::verify(
-            ustring_view{sig, 64}, ustring_view{pubkey, 32}, ustring_view{msg, msg_len});
+            std::span<const unsigned char>{sig, 64},
+            std::span<const unsigned char>{pubkey, 32},
+            std::span<const unsigned char>{msg, msg_len});
+}
+
+LIBSESSION_C_API bool session_ed25519_pro_privkey_for_ed25519_seed(
+        const unsigned char* ed25519_seed, unsigned char* ed25519_sk_out) {
+    try {
+        auto seed = std::span<const unsigned char>(ed25519_seed, 32);
+        uc64 sk = session::ed25519::ed25519_pro_privkey_for_ed25519_seed(seed);
+        std::memcpy(ed25519_sk_out, sk.data(), sk.size());
+        return true;
+    } catch (...) {
+        return false;
+    }
 }

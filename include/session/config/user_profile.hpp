@@ -1,12 +1,12 @@
 #pragma once
 
 #include <chrono>
-#include <memory>
 #include <optional>
 #include <session/config.hpp>
 
 #include "base.hpp"
 #include "namespaces.hpp"
+#include "pro.hpp"
 #include "profile_pic.hpp"
 
 namespace session::config {
@@ -24,10 +24,20 @@ using namespace std::literals;
 /// M - set to 1 if blinded message request retrieval is enabled, 0 if retrieval is *disabled*, and
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
-
-class UserProfile final : public ConfigBase {
-
+/// f - session pro features bitset
+/// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
+///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
+/// E - user pro access expiry unix timestamp (in milliseconds). Note: This can be different from
+///     the pro proof expiry which can be sooner.
+/// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
+/// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
+///     when `T > t`).
+/// T - The unix timestamp (seconds) that the user last re-uploaded their profile information
+///    (automatically updates when calling `set_reupload_profile_pic`).
+class UserProfile : public ConfigBase {
   public:
+    friend class UserProfileTester;
+
     // No default constructor
     UserProfile() = delete;
 
@@ -47,7 +57,9 @@ class UserProfile final : public ConfigBase {
     ///
     /// Outputs:
     /// - `UserProfile` - Constructor
-    UserProfile(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped);
+    UserProfile(
+            std::span<const unsigned char> ed25519_secretkey,
+            std::optional<std::span<const unsigned char>> dumped);
 
     /// API: user_profile/UserProfile::storage_namespace
     ///
@@ -99,7 +111,8 @@ class UserProfile final : public ConfigBase {
     /// API: user_profile/UserProfile::get_profile_pic
     ///
     /// Gets the user's current profile pic URL and decryption key.  The returned object will
-    /// evaluate as false if the URL and/or key are not set.
+    /// evaluate as false if the URL and/or key are not set.  The returned value will be the latest
+    /// profile pic between when the user last set their profile and when it was last re-uploaded.
     ///
     /// Inputs: None
     ///
@@ -109,12 +122,12 @@ class UserProfile final : public ConfigBase {
 
     /// API: user_profile/UserProfile::set_profile_pic
     ///
-    /// Sets the user's current profile pic to a new URL and decryption key.  Clears both if either
-    /// one is empty.
+    /// Sets the user's current profile pic to a new URL and decryption key.  Clears both as well as
+    /// the reupload values if either one is empty.
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, ustring_view key);
+    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -124,8 +137,27 @@ class UserProfile final : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, ustring_view key);
+    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     void set_profile_pic(profile_pic pic);
+
+    /// API: user_profile/UserProfile::set_reupload_profile_pic
+    ///
+    /// Sets the user's profile pic to a new URL and decryption key after reuploading.
+    ///
+    /// Declaration:
+    /// ```cpp
+    /// void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    /// void set_reupload_profile_pic(profile_pic pic);
+    /// ```
+    ///
+    /// Inputs:
+    /// - First function:
+    ///    - `url` -- URL pointing to the profile pic
+    ///    - `key` -- Decryption key
+    /// - Second function:
+    ///    - `pic` -- Profile pic object
+    void set_reupload_profile_pic(std::string_view url, std::span<const unsigned char> key);
+    void set_reupload_profile_pic(profile_pic pic);
 
     /// API: user_profile/UserProfile::get_nts_priority
     ///
@@ -135,7 +167,7 @@ class UserProfile final : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `int` - Returns a numeric representing prioritity
+    /// - `int` -- Returns a numeric representing prioritity
     int get_nts_priority() const;
 
     /// API: user_profile/UserProfile::set_nts_priority
@@ -155,7 +187,7 @@ class UserProfile final : public ConfigBase {
     /// Inputs: None
     ///
     /// Outputs:
-    /// - `std::optional<std::chrono::seconds>` - Returns the timestamp representing the message
+    /// - `std::optional<std::chrono::seconds>` -- Returns the timestamp representing the message
     /// expiry timer if the timer is set
     std::optional<std::chrono::seconds> get_nts_expiry() const;
 
@@ -197,7 +229,105 @@ class UserProfile final : public ConfigBase {
     ///   default).
     void set_blinded_msgreqs(std::optional<bool> enabled);
 
+    /// API: user_profile/UserProfile::get_profile_updated
+    ///
+    /// Returns the timestamp that the user last updated their profile information; or `0` if it's
+    /// never been updated.  This value will return the latest timestamp between when the user last
+    /// set their profile and when it was last re-uploaded.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::chrono::sys_seconds` - timestamp that the user last updated their profile
+    /// information.  Will be `0` if it's never been updated.
+    std::chrono::sys_seconds get_profile_updated() const;
+
     bool accepts_protobuf() const override { return true; }
+
+    /// API: user_profile/UserProfile::get_pro_config
+    ///
+    /// Get the Session Pro data if any, for the current user profile. This may be missing if the
+    /// user does not have any entitlement to Session Pro config.
+    ///
+    /// Inputs: None
+    std::optional<ProConfig> get_pro_config() const;
+
+    /// API: user_profile/UserProfile::set_pro_config
+    ///
+    /// Attach the Session Pro components to the user profile including the proof entitling the user
+    /// to use Session Pro features as well as the Ed25519 key pair known as the Rotating Session
+    /// Pro key authorised to use the proof.
+    ///
+    /// Inputs:
+    /// - `pro` -- The Session Pro components to assign to the current user profile. This will
+    ///   overwrite any existing Session Pro config if it exists. No verification of `pro` is done.
+    void set_pro_config(const ProConfig& pro);
+
+    /// API: user_profile/UserProfile::remove_pro_config
+    ///
+    /// Remove the Session Pro components from the user profile.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `bool` - Flag indicating whether the config had Session Pro config removed or not.
+    bool remove_pro_config();
+
+    /// API: user_profile/UserProfile::get_pro_features
+    ///
+    /// Retrieves the bitset indicating which pro features the user currently has enabled.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - Bitset with individual bits set on it corresponding to
+    /// SESSION_PROTOCOL_PRO_PROFILE_FEATURES_BITSET. It is possible to receive bits set that don't
+    /// have a corresponding enum value if you are receiving a bitset from a newer client with newer
+    /// features enabled. These flags should be ignored by clients that do not recognise them.
+    ProProfileBitset get_profile_bitset() const;
+
+    /// API: user_profile/UserProfile::set_pro_badge
+    ///
+    /// Updates the bitset to specify whether the user wants their profile to show the pro badge.
+    ///
+    /// Inputs:
+    /// - `enabled` -- Flag which specifies whether the user wants the pro badge to appear on their
+    /// profile or not.
+    void set_pro_badge(bool enabled);
+
+    /// API: user_profile/UserProfile::set_animated_avatar
+    ///
+    /// Updates the bitset to specify whether the user has an animated profile picture, should be
+    /// set when uploading a profile picture. Note: This doesn't prevent a users profile picture
+    /// from animating, it's just a way to more easily synchronise the state between devices when
+    /// sending messages so we don't need the device to have successfully download the current
+    /// display picture in order to be able to determine this.
+    ///
+    /// Inputs:
+    /// - `enabled` -- Flag which specifies whether the users display picture is animated or not.
+    void set_animated_avatar(bool enabled);
+
+    /// API: user_profile/UserProfile::get_pro_access_expiry
+    ///
+    /// Retrieves the Session Pro access expiry unix timestamp if it has been set, this should
+    /// generally be the expiry value returned from /get_pro_details.
+    ///
+    /// Inputs:  None
+    ///
+    /// Outputs:
+    /// - `std::optional<sys_ms>` - The unix timestamp in
+    /// milliseconds that the users pro access will expire, or nullopt if unset.
+    std::optional<sys_ms> get_pro_access_expiry() const;
+
+    /// API: user_profile/UserProfile::set_pro_access_expiry
+    ///
+    /// Updates the Session Pro access expiry unix timestamp.
+    ///
+    /// Inputs:
+    /// - `access_expiry_ts_ms` -- The timestamp that the users Session Pro access will expire, or
+    /// nullopt to remove the value.
+    void set_pro_access_expiry(
+            std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms);
 };
 
 }  // namespace session::config

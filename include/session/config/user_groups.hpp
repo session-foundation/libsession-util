@@ -50,6 +50,7 @@ namespace session::config {
 ///         non-empty.
 ///     n - the room name, from a the group invitation; this is intended to be removed once the
 ///         invitation has been accepted, as the name contained in the group info supercedes this).
+///     r - removed_status, tracks why we were removed from the group.
 ///     @, !, +, i, j -- see common values, above.
 ///
 /// o - dict of communities (AKA open groups); within this dict (which deliberately has the same
@@ -87,8 +88,8 @@ struct base_group_info {
     notify_mode notifications = notify_mode::defaulted;  // When the user wants notifications
     int64_t mute_until = 0;  // unix timestamp (seconds) until which notifications are disabled
 
-    std::string name;  // human-readable; always set for a legacy closed group, only used before
-                       // joining a new closed group (after joining the group info provide the name)
+    std::string name;  // human-readable; always set for a legacy group, only used before
+                       // joining a new group (after joining the group info provide the name)
 
     bool invited = false;  // True if this is currently in the invite-but-not-accepted state.
 
@@ -96,11 +97,11 @@ struct base_group_info {
     void load(const dict& info_dict);
 };
 
-/// Struct containing legacy group info (aka "closed groups").
+/// Struct containing legacy group info (aka "groups").
 struct legacy_group_info : base_group_info {
     std::string session_id;                      // The legacy group "session id" (33 bytes).
-    ustring enc_pubkey;                          // bytes (32 or empty)
-    ustring enc_seckey;                          // bytes (32 or empty)
+    std::vector<unsigned char> enc_pubkey;       // bytes (32 or empty)
+    std::vector<unsigned char> enc_seckey;       // bytes (32 or empty)
     std::chrono::seconds disappearing_timer{0};  // 0 == disabled.
 
     /// Constructs a new legacy group info from an id (which must look like a session_id).  Throws
@@ -182,13 +183,15 @@ struct legacy_group_info : base_group_info {
     void load(const dict& info_dict);
 };
 
-/// Struct containing new group info (aka "closed groups v2").
+constexpr int NOT_REMOVED = 0, KICKED_FROM_GROUP = 1, GROUP_DESTROYED = 2;
+
+/// Struct containing new group info (aka "groups v2").
 struct group_info : base_group_info {
     std::string id;  // The group pubkey (66 hex digits); this is an ed25519 key, prefixed with "03"
                      // (to distinguish it from a 05 x25519 pubkey session id).
 
     /// Group secret key (64 bytes); this is only possessed by admins.
-    ustring secretkey;
+    std::vector<unsigned char> secretkey;
 
     /// Group authentication signing value (100 bytes); this is used by non-admins to authenticate
     /// (using the swarm key generation functions in config::groups::Keys).  This value will be
@@ -196,7 +199,13 @@ struct group_info : base_group_info {
     /// is an admin), and so does not need to be explicitly cleared when being promoted to admin.
     ///
     /// Producing and using this value is done with the groups::Keys `swarm` methods.
-    ustring auth_data;
+    std::vector<unsigned char> auth_data;
+
+    /// Tracks why we were removed from the group. Values are:
+    /// - NOT_REMOVED: that we haven't been removed,
+    /// - KICKED_FROM_GROUP: we have been kicked from the group,
+    /// - GROUP_DESTROYED: the group was permanently destroyed so everyone got removed.
+    int removed_status = NOT_REMOVED;
 
     /// Constructs a new group info from an hex id (03 + pubkey).  Throws if id is invalid.
     explicit group_info(std::string gid);
@@ -205,13 +214,23 @@ struct group_info : base_group_info {
     group_info(const struct ugroups_group_info& c);  // From c struct
     void into(struct ugroups_group_info& c) const;   // Into c struct
 
-    /// Shortcut for clearing both secretkey and auth_data, which indicates that we were kicked from
-    /// the group.
-    void setKicked();
+    /// Marks the group as kicked and clears auth_data & secret_key
+    void mark_kicked();
+
+    /// Marks the group as reinvited (i.e. revert a `mark_kicked` call)
+    /// Note: this only works when the group was not permanently deleted.
+    void mark_invited();
 
     /// Returns true if we don't have room access, i.e. we were kicked and both secretkey and
     /// auth_data are empty.
     bool kicked() const;
+
+    /// Mark the group as permanently destroyed and clears auth_data & secret_key. This cannot be
+    /// unset once set.
+    void mark_destroyed();
+
+    /// Returns true if the group was destroyed by one of the admin.
+    bool is_destroyed() const;
 
   private:
     friend class UserGroups;
@@ -235,7 +254,7 @@ struct community_info : base_group_info, community {
     void load(const dict& info_dict);
 
     friend class UserGroups;
-    friend class comm_iterator_helper;
+    friend struct comm_iterator_helper;
 };
 
 using any_group_info = std::variant<group_info, community_info, legacy_group_info>;
@@ -262,7 +281,9 @@ class UserGroups : public ConfigBase {
     ///
     /// Outputs:
     /// - `UserGroups` - Constructor
-    UserGroups(ustring_view ed25519_secretkey, std::optional<ustring_view> dumped);
+    UserGroups(
+            std::span<const unsigned char> ed25519_secretkey,
+            std::optional<std::span<const unsigned char>> dumped);
 
     /// API: user_groups/UserGroups::storage_namespace
     ///
@@ -323,7 +344,7 @@ class UserGroups : public ConfigBase {
 
     /// API: user_groups/UserGroups::get_group
     ///
-    /// Looks up and returns a group (aka new closed group) by group ID (hex, looks like a Session
+    /// Looks up and returns a group (aka new group) by group ID (hex, looks like a Session
     /// ID but starting with 03).  Returns nullopt if the group was not found, otherwise returns a
     /// filled out `group_info`.
     ///
@@ -347,7 +368,8 @@ class UserGroups : public ConfigBase {
     ///         std::string_view room,
     ///         std::string_view pubkey_encoded) const;
     /// community_info get_or_construct_community(
-    ///         std::string_view base_url, std::string_view room, ustring_view pubkey) const;
+    ///         std::string_view base_url, std::string_view room, std::span<const unsigned char>
+    ///         pubkey) const;
     /// ```
     ///
     /// Inputs:
@@ -370,7 +392,9 @@ class UserGroups : public ConfigBase {
             std::string_view room,
             std::string_view pubkey_encoded) const;
     community_info get_or_construct_community(
-            std::string_view base_url, std::string_view room, ustring_view pubkey) const;
+            std::string_view base_url,
+            std::string_view room,
+            std::span<const unsigned char> pubkey) const;
 
     /// API: user_groups/UserGroups::get_or_construct_community(string_view)
     ///
@@ -446,7 +470,7 @@ class UserGroups : public ConfigBase {
   protected:
     // Drills into the nested dicts to access open group details
     DictFieldProxy community_field(
-            const community_info& og, ustring_view* get_pubkey = nullptr) const;
+            const community_info& og, std::span<const unsigned char>* get_pubkey = nullptr) const;
 
     void set_base(const base_group_info& bg, DictFieldProxy& info) const;
 
