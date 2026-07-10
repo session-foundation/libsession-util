@@ -38,7 +38,7 @@ namespace {
     // This deviates from Signal's XEd25519 specified derivation of r in that we use a personalized
     // Black2b hash (for better performance and cryptographic properties), rather than a
     // custom-prefixed SHA-512 hash.
-    bytes<32> xed25519_compute_r(const bytes<32>& a, ustring_view msg) {
+    bytes<32> xed25519_compute_r(const bytes<32>& a, std::span<const unsigned char> msg) {
         bytes<64> random;
         randombytes_buf(random.data(), random.size());
 
@@ -62,7 +62,10 @@ namespace {
 
     // Assigns S = H(R || A || M) mod L
     void ed25519_hram(
-            unsigned char* S, const unsigned char* R, const bytes<32>& A, ustring_view msg) {
+            unsigned char* S,
+            const unsigned char* R,
+            const bytes<32>& A,
+            std::span<const unsigned char> msg) {
         bytes<64> hram;
         crypto_hash_sha512_state st;
         crypto_hash_sha512_init(&st);
@@ -74,13 +77,10 @@ namespace {
         crypto_core_ed25519_scalar_reduce(S, hram.data());
     }
 
-    ustring_view as_unsigned_sv(std::string_view x) {
-        return {reinterpret_cast<const unsigned char*>(x.data()), x.size()};
-    }
-
 }  // namespace
 
-bytes<64> sign(ustring_view curve25519_privkey, ustring_view msg) {
+bytes<64> sign(
+        std::span<const unsigned char> curve25519_privkey, std::span<const unsigned char> msg) {
 
     assert(curve25519_privkey.size() == 32);
 
@@ -117,11 +117,14 @@ bytes<64> sign(ustring_view curve25519_privkey, ustring_view msg) {
 }
 
 std::string sign(std::string_view curve25519_privkey, std::string_view msg) {
-    auto sig = sign(as_unsigned_sv(curve25519_privkey), as_unsigned_sv(msg));
+    auto sig = sign(to_span(curve25519_privkey), to_span(msg));
     return std::string{reinterpret_cast<const char*>(sig.data()), sig.size()};
 }
 
-bool verify(ustring_view signature, ustring_view curve25519_pubkey, ustring_view msg) {
+bool verify(
+        std::span<const unsigned char> signature,
+        std::span<const unsigned char> curve25519_pubkey,
+        std::span<const unsigned char> msg) {
     assert(signature.size() == crypto_sign_ed25519_BYTES);
     assert(curve25519_pubkey.size() == 32);
     auto ed_pubkey = pubkey(curve25519_pubkey);
@@ -130,11 +133,10 @@ bool verify(ustring_view signature, ustring_view curve25519_pubkey, ustring_view
 }
 
 bool verify(std::string_view signature, std::string_view curve25519_pubkey, std::string_view msg) {
-    return verify(
-            as_unsigned_sv(signature), as_unsigned_sv(curve25519_pubkey), as_unsigned_sv(msg));
+    return verify(to_span(signature), to_span(curve25519_pubkey), to_span(msg));
 }
 
-std::array<unsigned char, 32> pubkey(ustring_view curve25519_pubkey) {
+std::array<unsigned char, 32> pubkey(std::span<const unsigned char> curve25519_pubkey) {
     fe25519 u, y;
     crypto_internal_fe25519_frombytes(u, curve25519_pubkey.data());
     fe25519_montx_to_edy(y, u);
@@ -146,13 +148,11 @@ std::array<unsigned char, 32> pubkey(ustring_view curve25519_pubkey) {
 }
 
 std::string pubkey(std::string_view curve25519_pubkey) {
-    auto ed_pk = pubkey(as_unsigned_sv(curve25519_pubkey));
+    auto ed_pk = pubkey(to_span(curve25519_pubkey));
     return std::string{reinterpret_cast<const char*>(ed_pk.data()), ed_pk.size()};
 }
 
 }  // namespace session::xed25519
-
-using session::xed25519::ustring_view;
 
 extern "C" {
 

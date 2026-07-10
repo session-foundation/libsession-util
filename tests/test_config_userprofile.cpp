@@ -5,21 +5,49 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <cstring>
+#include <session/config/base.hpp>
 #include <session/config/user_profile.hpp>
+#include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
 
 using namespace std::literals;
-using namespace oxenc::literals;
 
-void log_msg(config_log_level lvl, const char* msg, void*) {
-    INFO((lvl == LOG_LEVEL_ERROR     ? "ERROR"
-          : lvl == LOG_LEVEL_WARNING ? "Warning"
-          : lvl == LOG_LEVEL_INFO    ? "Info"
-                                     : "debug")
-         << ": " << msg);
-}
+namespace {
+struct UserProfileTester {
+    static std::chrono::sys_seconds get_profile_updated_value(config_object* conf) {
+        return std::chrono::sys_seconds{std::chrono::seconds{
+                session::config::unbox<session::config::UserProfile>(conf)->data["t"].integer_or(
+                        0)}};
+    }
+
+    static void set_profile_updated(config_object* conf, std::chrono::sys_seconds value) {
+        session::config::unbox<session::config::UserProfile>(conf)->data["t"] =
+                static_cast<int>(value.time_since_epoch().count());
+    }
+
+    static void set_profile_updated(
+            session::config::UserProfile& profile, std::chrono::sys_seconds value) {
+        profile.data["t"] = static_cast<int>(value.time_since_epoch().count());
+    }
+
+    static std::chrono::sys_seconds get_reupload_profile_updated_value(config_object* conf) {
+        return std::chrono::sys_seconds{std::chrono::seconds{
+                session::config::unbox<session::config::UserProfile>(conf)->data["T"].integer_or(
+                        0)}};
+    }
+
+    static void set_reupload_profile_updated(config_object* conf, std::chrono::sys_seconds value) {
+        session::config::unbox<session::config::UserProfile>(conf)->data["T"] =
+                static_cast<int>(value.time_since_epoch().count());
+    }
+
+    static uint64_t get_raw_profile_updated_value(config_object* conf) {
+        return session::config::unbox<session::config::UserProfile>(conf)->data["t"].integer_or(0);
+    }
+};
+}  // namespace
 
 TEST_CASE("UserProfile", "[config][user_profile]") {
 
@@ -38,30 +66,26 @@ TEST_CASE("UserProfile", "[config][user_profile]") {
     CHECK(oxenc::to_hex(seed.begin(), seed.end()) ==
           oxenc::to_hex(ed_sk.begin(), ed_sk.begin() + 32));
 
-    session::config::UserProfile profile{ustring_view{seed}, std::nullopt};
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
 
     CHECK_THROWS(
             profile.set_name("123456789012345678901234567890123456789012345678901234567890123456789"
-                             "01"
-                             "23456789012345678901234567890A"));
+                             "0123456789012345678901234567890A"));
     CHECK_NOTHROW(
             profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
-                                       "01"
-                                       "234567890123456789012345678901234567890A"));
+                                       "01234567890123456789012345678901234567890A"));
     CHECK(profile.get_name() ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "901234567890");
     CHECK_NOTHROW(
             profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
-                                       "01"
-                                       "234567890123456789012345678901234567🎂"));
+                                       "01234567890123456789012345678901234567🎂"));
     CHECK(profile.get_name() ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "901234567");
     CHECK_NOTHROW(
             profile.set_name_truncated("12345678901234567890123456789012345678901234567890123456789"
-                                       "01"
-                                       "2345678901234567890123456789012345🎂🎂"));
+                                       "012345678901234567890123456789012345🎂🎂"));
     CHECK(profile.get_name() ==
           "1234567890123456789012345678901234567890123456789012345678901234567890123456789012345678"
           "9012345🎂");
@@ -89,8 +113,6 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     rc = user_profile_init(&conf, ed_sk.data(), NULL, 0, err);
     REQUIRE(rc == 0);
 
-    config_set_logger(conf, log_msg, NULL);
-
     // We don't need to push anything, since this is an empty config
     CHECK_FALSE(config_needs_push(conf));
     // And we haven't changed anything so don't need to dump to db
@@ -105,14 +127,15 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     config_push_data* to_push = config_push(conf);
     REQUIRE(to_push);
     CHECK(to_push->seqno == 0);
-    CHECK(to_push->config_len == 256 + 176);  // 176 = protobuf overhead
+    REQUIRE(to_push->n_configs == 1);
+    CHECK(to_push->config_lens[0] == 256 + 176);  // 176 = protobuf overhead
     const char* enc_domain = "UserProfile";
     REQUIRE(config_encryption_domain(conf) == std::string_view{enc_domain});
 
     // There's nothing particularly profound about this value (it is multiple layers of nested
     // protobuf with some encryption and padding halfway through); this test is just here to ensure
     // that our pushed messages are deterministic:
-    CHECK(oxenc::to_hex(to_push->config, to_push->config + to_push->config_len) ==
+    CHECK(oxenc::to_hex(to_push->config[0], to_push->config[0] + to_push->config_lens[0]) ==
           "080112ab030a0012001aa20308062801429b0326ec9746282053eb119228e6c36012966e7d2642163169ba39"
           "98af44ca65f967768dd78ee80fffab6f809f6cef49c73a36c82a89622ff0de2ceee06b8c638e2c876fa9047f"
           "449dbe24b1fc89281a264fe90abdeffcdd44f797bd4572a6c5ae8d88bf372c3c717943ebd570222206fabf0e"
@@ -139,6 +162,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     memcpy(p.key, "secret78901234567890123456789012", 32);
     CHECK(0 == user_profile_set_pic(conf, p));
     user_profile_set_nts_priority(conf, 9);
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
 
     // Retrieve them just to make sure they set properly:
     name = user_profile_get_name(conf);
@@ -146,10 +170,11 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(name == "Kallie"sv);
 
     pic = user_profile_get_pic(conf);
-    REQUIRE(pic.url);
-    REQUIRE(pic.key);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
     CHECK(pic.url == "http://example.org/omg-pic-123.bmp"sv);
-    CHECK(ustring_view{pic.key, 32} == "secret78901234567890123456789012"_bytes);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "secret78901234567890123456789012"_bytes);
 
     CHECK(user_profile_get_nts_priority(conf) == 9);
 
@@ -167,7 +192,7 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // The data to be actually pushed, expanded like this to make it somewhat human-readable:
     // clang-format off
-    auto exp_push1_decrypted =
+    auto exp_push1_decrypted = session::to_vector(
         "d"
           "1:#" "i1e"
           "1:&" "d"
@@ -175,17 +200,19 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
             "1:n" "6:Kallie"
             "1:p" "34:http://example.org/omg-pic-123.bmp"
             "1:q" "32:secret78901234567890123456789012"
+            "1:t" "i123e"
           "e"
           "1:<" "l"
-            "l" "i0e" "32:"_bytes + exp_hash0 + "de" "e"
+            "l" "i0e" "32:" + session::to_string(exp_hash0) + "de" "e"
           "e"
           "1:=" "d"
             "1:+" "0:"
             "1:n" "0:"
             "1:p" "0:"
             "1:q" "0:"
+            "1:t" "0:"
           "e"
-        "e"_bytes;
+        "e");
     // clang-format on
     auto exp_push1_encrypted =
             "9693a69686da3055f1ecdfb239c3bf8e746951a36d888c2fb7c02e856a5c2091b24e39a7e1af828f"
@@ -219,15 +246,19 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(printable(dump1, dump1len) == printable(
         "d"
           "1:!" "i2e"
-          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
-          "1:(" "0:"
+          "1:${}:{}"
+          "1:(" "le"
           "1:)" "le"
-        "e"));
+          "1:*" "de"
+          "1:+" "de"
+        "e"_format(exp_push1_decrypted.size(), session::to_string(exp_push1_decrypted))));
     // clang-format on
     free(dump1);  // done with the dump; don't leak!
 
+    const char* tmphash;  // test suite cheat: &(tmphash = "asdf") to fake a length-1 array.
+
     // So now imagine we got back confirmation from the swarm that the push has been stored:
-    config_confirm_pushed(conf, seqno, "fakehash1");
+    config_confirm_pushed(conf, seqno, &(tmphash = "fakehash1"), 1);
 
     CHECK_FALSE(config_needs_push(conf));
     CHECK(config_needs_dump(conf));  // The confirmation changes state, so this makes us need a dump
@@ -238,10 +269,12 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(printable(dump1, dump1len) == printable(
         "d"
           "1:!" "i0e"
-          "1:$" + std::to_string(exp_push1_decrypted.size()) + ":" + std::string{to_sv(exp_push1_decrypted)} + ""
-          "1:(" "9:fakehash1"
+          "1:${}:{}"
+          "1:(" "l" "9:fakehash1" "e"
           "1:)" "le"
-        "e"));
+          "1:*" "de"
+          "1:+" "de"
+        "e"_format(exp_push1_decrypted.size(), session::to_string(exp_push1_decrypted))));
     // clang-format on
     free(dump1);
 
@@ -253,7 +286,6 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     // Start with an empty config, as above:
     config_object* conf2;
     REQUIRE(user_profile_init(&conf2, ed_sk.data(), NULL, 0, err) == 0);
-    config_set_logger(conf2, log_msg, NULL);
     CHECK_FALSE(config_needs_dump(conf2));
 
     // Now imagine we just pulled down the encrypted string from the swarm; we merge it into conf2:
@@ -285,6 +317,8 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Change the name on both clients:
     user_profile_set_name(conf, "Nibbler");
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
+
     user_profile_set_name(conf2, "Raz");
 
     // And, on conf2, we're also going to change some other things:
@@ -302,17 +336,19 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(user_profile_get_blinded_msgreqs(conf2) == -1);
     user_profile_set_blinded_msgreqs(conf2, 1);
     CHECK(user_profile_get_blinded_msgreqs(conf2) == 1);
+    UserProfileTester::set_profile_updated(conf2, std::chrono::sys_seconds{124s});
 
     // Both have changes, so push need a push
     CHECK(config_needs_push(conf));
     CHECK(config_needs_push(conf2));
     to_push = config_push(conf);
+
     CHECK(to_push->seqno == 2);  // incremented, since we made a field change
-    config_confirm_pushed(conf2, to_push->seqno, "fakehash2");
+    config_confirm_pushed(conf2, to_push->seqno, &(tmphash = "fakehash2"), 1);
 
     config_push_data* to_push2 = config_push(conf2);
     CHECK(to_push2->seqno == 2);  // incremented, since we made a field change
-    config_confirm_pushed(conf2, to_push2->seqno, "fakehash3");
+    config_confirm_pushed(conf2, to_push2->seqno, &(tmphash = "fakehash3"), 1);
 
     config_dump(conf, &dump1, &dump1len);
     config_dump(conf2, &dump2, &dump2len);
@@ -322,8 +358,10 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Since we set different things, we're going to get back different serialized data to be
     // pushed:
-    CHECK(printable(to_push->config, to_push->config_len) !=
-          printable(to_push2->config, to_push2->config_len));
+    REQUIRE(to_push->n_configs == 1);
+    REQUIRE(to_push2->n_configs == 1);
+    CHECK(printable(to_push->config[0], to_push->config_lens[0]) !=
+          printable(to_push2->config[0], to_push2->config_lens[0]));
 
     // Now imagine that each client pushed its `seqno=2` config to the swarm, but then each client
     // also fetches new messages and pulls down the other client's `seqno=2` value.
@@ -331,16 +369,16 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     // Feed the new config into each other.  (This array could hold multiple configs if we pulled
     // down more than one).
     merge_hash[0] = "fakehash2";
-    merge_data[0] = to_push->config;
-    merge_size[0] = to_push->config_len;
+    merge_data[0] = to_push->config[0];
+    merge_size[0] = to_push->config_lens[0];
     accepted = config_merge(conf2, merge_hash, merge_data, merge_size, 1);
     free(to_push);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "fakehash2"sv);
     free(accepted);
     merge_hash[0] = "fakehash3";
-    merge_data[0] = to_push2->config;
-    merge_size[0] = to_push2->config_len;
+    merge_data[0] = to_push2->config[0];
+    merge_size[0] = to_push2->config_lens[0];
     accepted = config_merge(conf, merge_hash, merge_data, merge_size, 1);
     REQUIRE(accepted->len == 1);
     CHECK(accepted->value[0] == "fakehash3"sv);
@@ -366,16 +404,32 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
 
     // Since only one of them set a profile pic there should be no conflict there:
     pic = user_profile_get_pic(conf);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.url);
+#else
+    REQUIRE(pic.url != nullptr);
+#endif
     CHECK(pic.url == "http://new.example.com/pic"sv);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.key);
-    CHECK(to_hex(ustring_view{pic.key, 32}) ==
+#else
+    REQUIRE(pic.key != nullptr);
+#endif
+    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
     pic = user_profile_get_pic(conf2);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.url);
+#else
+    REQUIRE(pic.url != nullptr);
+#endif
     CHECK(pic.url == "http://new.example.com/pic"sv);
+#if defined(__APPLE__) || defined(__clang__) || defined(__llvm__)
     REQUIRE(pic.key);
-    CHECK(to_hex(ustring_view{pic.key, 32}) ==
+#else
+    REQUIRE(pic.key != nullptr);
+#endif
+    CHECK(oxenc::to_hex(std::span<const unsigned char>{pic.key, 32}) ==
           "7177657274007975696f31323334353637383930313233343536373839303132");
 
     CHECK(user_profile_get_nts_priority(conf) == 9);
@@ -385,8 +439,8 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(user_profile_get_blinded_msgreqs(conf) == 1);
     CHECK(user_profile_get_blinded_msgreqs(conf2) == 1);
 
-    config_confirm_pushed(conf, to_push->seqno, "fakehash4");
-    config_confirm_pushed(conf2, to_push2->seqno, "fakehash4");
+    config_confirm_pushed(conf, to_push->seqno, &(tmphash = "fakehash4"), 1);
+    config_confirm_pushed(conf2, to_push2->seqno, &(tmphash = "fakehash4"), 1);
 
     config_dump(conf, &dump1, &dump1len);
     config_dump(conf2, &dump2, &dump2len);
@@ -398,4 +452,204 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK_FALSE(config_needs_dump(conf2));
     CHECK_FALSE(config_needs_push(conf));
     CHECK_FALSE(config_needs_push(conf2));
+
+    // Check the current pic
+    pic = user_profile_get_pic(conf);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
+    CHECK(pic.url == "http://new.example.com/pic"sv);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "qwert\0yuio1234567890123456789012"_bytes);
+
+    // Reupload the "current" pic and confirm it gets returned
+    strcpy(p.url, "testUrl");
+    memcpy(p.key, "secret78901234567890123456789000", 32);
+    CHECK(0 == user_profile_set_reupload_pic(conf, p));
+
+    pic = user_profile_get_pic(conf);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
+    CHECK(pic.url == "testUrl"sv);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "secret78901234567890123456789000"_bytes);
+
+    // Upload a "new" pic and it now gets returned
+    strcpy(p.url, "testNewUrl");
+    memcpy(p.key, "secret78901234567890123456789111", 32);
+    CHECK(0 == user_profile_set_pic(conf, p));
+    pic = user_profile_get_pic(conf);
+    REQUIRE(pic.url != ""s);
+    REQUIRE(pic.key != session::to_vector("").data());
+    CHECK(pic.url == "testNewUrl"sv);
+    CHECK(session::to_vector(std::span<const unsigned char>{pic.key, 32}) ==
+          "secret78901234567890123456789111"_bytes);
+
+    // Ensure the timestamp for the last modified pic gets updated correctly when the name gets set
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    CHECK(0 == user_profile_set_pic(conf, p));
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
+    user_profile_set_name(conf, "test1");
+    CHECK(UserProfileTester::get_profile_updated_value(conf).time_since_epoch().count() != 123);
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{124s});
+    CHECK(0 == user_profile_set_reupload_pic(conf, p));
+    user_profile_set_name(conf, "test2");
+    CHECK(UserProfileTester::get_reupload_profile_updated_value(conf).time_since_epoch().count() !=
+          124);
+
+    // Ensure the timestamp for the last modified pic gets updated correctly when the blinded msgreq
+    // is set
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    strcpy(p.url, "http://example.org/omg-pic-124.bmp");  // NB: length must be < sizeof(p.url)!
+    CHECK(0 == user_profile_set_pic(conf, p));
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{123s});
+    user_profile_set_blinded_msgreqs(conf, 0);
+    CHECK(UserProfileTester::get_profile_updated_value(conf).time_since_epoch().count() != 123);
+    UserProfileTester::set_profile_updated(conf, std::chrono::sys_seconds{0s});
+
+    UserProfileTester::set_reupload_profile_updated(conf, std::chrono::sys_seconds{124s});
+    CHECK(0 == user_profile_set_reupload_pic(conf, p));
+    user_profile_set_blinded_msgreqs(conf, 1);
+    CHECK(UserProfileTester::get_reupload_profile_updated_value(conf).time_since_epoch().count() !=
+          124);
+
+    // Ensure the timestamp is stored in seconds seconds (was incorrectly stored as microseconds)
+    auto time_before_call = std::chrono::system_clock::now();
+    strcpy(p.url, "http://example.org/omg-pic-125.bmp");  // NB: length must be < sizeof(p.url)!
+    CHECK(0 == user_profile_set_pic(conf, p));
+    auto time_after_call = std::chrono::system_clock::now();
+    auto before_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(time_before_call.time_since_epoch())
+                    .count();
+    auto after_seconds =
+            std::chrono::duration_cast<std::chrono::seconds>(time_before_call.time_since_epoch())
+                    .count();
+
+    auto raw_value = UserProfileTester::get_raw_profile_updated_value(conf);
+    INFO("Checking if raw_value " << raw_value << " is within the range [" << before_seconds << ", "
+                                  << after_seconds << "]");
+    CHECK((raw_value >= before_seconds && raw_value <= after_seconds));
+}
+
+TEST_CASE("user profile timestamp update bug", "[config][user_profile]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+
+    // Initially the code would update `profile_updated` even if the data hadn't changed, this test
+    // verifies that no longer happens
+    std::vector<unsigned char> key = "qwerty78901234567890123456789012"_bytes;
+    std::string url = "http://example.com/huge.bmp";
+    profile.set_name("Nibbler");
+    profile.set_blinded_msgreqs(true);
+    profile.set_profile_pic(url, key);
+    auto seconds_before_call = profile.get_profile_updated();
+    std::this_thread::sleep_for(2s);
+    profile.set_name("Nibbler");
+    profile.set_blinded_msgreqs(true);
+    profile.set_profile_pic(url, key);
+    auto seconds_after_call = profile.get_profile_updated();
+    CHECK(profile.get_profile_updated() == seconds_before_call);
+
+    // Also make sure it does change
+    profile.set_name("Nibbler1");
+    CHECK(profile.get_profile_updated() != seconds_before_call);
+}
+
+TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
+
+    const auto seed = "0123456789abcdef0123456789abcdef00000000000000000000000000000000"_hexbytes;
+
+    session::config::UserProfile profile{std::span<const unsigned char>{seed}, std::nullopt};
+
+    // Ensure the bitset is being updated correctly
+    CHECK(profile.get_profile_bitset().data == 0);
+
+    profile.set_pro_badge(true);
+    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+
+    profile.set_pro_badge(false);
+    CHECK(profile.get_profile_bitset().data == 0);
+
+    profile.set_animated_avatar(true);
+    CHECK(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+
+    profile.set_animated_avatar(false);
+    CHECK(profile.get_profile_bitset().data == 0);
+
+    profile.set_pro_badge(true);
+    profile.set_animated_avatar(true);
+    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+
+    profile.set_animated_avatar(false);
+    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK_FALSE(profile.get_profile_bitset().is_set(
+            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+
+    {
+        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        CHECK(profile2.get_profile_bitset().is_set(
+                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK_FALSE(profile2.get_profile_bitset().is_set(
+                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    }
+
+    // Ensure the pro config is being stored correctly
+    std::array<uint8_t, crypto_sign_ed25519_PUBLICKEYBYTES> rotating_pk, signing_pk;
+    session::cleared_uc64 rotating_sk, signing_sk;
+    {
+        crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
+        crypto_sign_ed25519_keypair(signing_pk.data(), signing_sk.data());
+    }
+
+    session::config::ProConfig pro_cpp = {};
+    pro_pro_config pro = {};
+    {
+        // CPP
+        pro_cpp.rotating_privkey = rotating_sk;
+        pro_cpp.proof.version = 2;
+        pro_cpp.proof.rotating_pubkey = rotating_pk;
+        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
+        constexpr auto gen_index_hash =
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
+        static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
+        std::memcpy(
+                pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
+
+        // C
+        std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
+        pro.proof.version = pro_cpp.proof.version;
+        std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
+        pro.proof.expiry_unix_ts_ms = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
+        std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
+    }
+
+    UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{123s});
+    CHECK(profile.get_profile_updated().time_since_epoch().count() == 123);
+    CHECK_FALSE(profile.get_pro_config().has_value());
+    profile.set_pro_config(pro_cpp);
+    CHECK(profile.get_pro_config() == pro_cpp);
+    CHECK(profile.get_profile_updated().time_since_epoch().count() != 123);
+
+    {
+        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        CHECK(profile.get_pro_config() == pro_cpp);
+    }
+
+    profile.remove_pro_config();
+    CHECK_FALSE(profile.get_pro_config().has_value());
+
+    auto access_expiry_ms =
+            std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{500}};
+    profile.set_pro_access_expiry(access_expiry_ms);
+    CHECK(profile.get_pro_access_expiry() == access_expiry_ms);
 }
