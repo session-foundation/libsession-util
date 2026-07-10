@@ -1,4 +1,5 @@
 option(SUBMODULE_CHECK "Enables checking that vendored library submodules are up to date" ON)
+
 if(SUBMODULE_CHECK)
   find_package(Git)
   if(GIT_FOUND)
@@ -26,10 +27,10 @@ if(SUBMODULE_CHECK)
     message(STATUS "Checking submodules")
     check_submodule(ios-cmake)
     check_submodule(libsodium-internal)
-    check_submodule(oxen-encoding)
-    check_submodule(nlohmann-json)
     check_submodule(zstd)
     check_submodule(protobuf)
+    check_submodule(session-router)
+    check_submodule(date)
   endif()
 endif()
 
@@ -37,25 +38,30 @@ if(NOT BUILD_STATIC_DEPS AND NOT FORCE_ALL_SUBMODULES)
   find_package(PkgConfig REQUIRED)
 endif()
 
-macro(system_or_submodule BIGNAME smallname pkgconf subdir)
-  option(FORCE_${BIGNAME}_SUBMODULE "force using ${smallname} submodule" OFF)
-  if(NOT BUILD_STATIC_DEPS AND NOT FORCE_${BIGNAME}_SUBMODULE AND NOT FORCE_ALL_SUBMODULES)
-    pkg_check_modules(${BIGNAME} ${pkgconf} IMPORTED_TARGET GLOBAL)
-  endif()
-  if(${BIGNAME}_FOUND)
-    add_library(${smallname} INTERFACE IMPORTED GLOBAL)
-    if(NOT TARGET PkgConfig::${BIGNAME} AND CMAKE_VERSION VERSION_LESS "3.21")
-      # Work around cmake bug 22180 (PkgConfig::THING not set if no flags needed)
-    else()
-      target_link_libraries(${smallname} INTERFACE PkgConfig::${BIGNAME})
+macro(libsession_system_or_submodule BIGNAME smallname target pkgconf subdir)
+  if(NOT TARGET ${target})
+    option(FORCE_${BIGNAME}_SUBMODULE "force using ${smallname} submodule" OFF)
+    if(NOT BUILD_STATIC_DEPS AND NOT FORCE_${BIGNAME}_SUBMODULE AND NOT FORCE_ALL_SUBMODULES)
+      pkg_check_modules(${BIGNAME} ${pkgconf} IMPORTED_TARGET GLOBAL)
     endif()
-    message(STATUS "Found system ${smallname} ${${BIGNAME}_VERSION}")
-  else()
-    message(STATUS "using ${smallname} submodule")
-    add_subdirectory(${subdir})
-  endif()
-  if(TARGET ${smallname} AND NOT TARGET ${smallname}::${smallname})
-    add_library(${smallname}::${smallname} ALIAS ${smallname})
+    if(${BIGNAME}_FOUND)
+      add_library(${smallname} INTERFACE IMPORTED GLOBAL)
+      if(NOT TARGET PkgConfig::${BIGNAME} AND CMAKE_VERSION VERSION_LESS "3.21")
+        # Work around cmake bug 22180 (PkgConfig::THING not set if no flags needed)
+      else()
+        target_link_libraries(${smallname} INTERFACE PkgConfig::${BIGNAME})
+      endif()
+      message(STATUS "Found system ${smallname} ${${BIGNAME}_VERSION}")
+    else()
+      message(STATUS "using ${smallname} submodule ${subdir}")
+      add_subdirectory(${subdir})
+    endif()
+    if(NOT TARGET ${target})
+      add_library(${target} ALIAS ${smallname})
+    endif()
+    if(BUILD_STATIC_DEPS AND STATIC_BUNDLE)
+      libsession_static_bundle(${smallname}::${smallname})
+    endif()
   endif()
 endmacro()
 
@@ -65,11 +71,6 @@ set(cross_host "")
 set(cross_rc "")
 if(CMAKE_CROSSCOMPILING)
     if(APPLE_TARGET_TRIPLE)
-        if(PLATFORM MATCHES "OS64" OR PLATFORM MATCHES "SIMULATORARM64")
-            set(APPLE_TARGET_TRIPLE aarch64-apple-ios)
-        elseif(PLATFORM MATCHES "SIMULATOR64")
-            set(APPLE_TARGET_TRIPLE x86_64-apple-ios)
-        endif()
         set(cross_host "--host=${APPLE_TARGET_TRIPLE}")
     elseif(ANDROID)
         if(CMAKE_ANDROID_ARCH_ABI MATCHES x86_64)
@@ -102,8 +103,26 @@ if(CMAKE_CROSSCOMPILING)
     endif()
 endif()
 
+if(ENABLE_NETWORKING)
+  set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
+  libsession_system_or_submodule(OXENQUIC quic oxen::quic liboxenquic>=1.8 session-router/external/oxen-libquic)
+endif()
 
-system_or_submodule(OXENC oxenc liboxenc>=1.0.10 oxen-encoding)
+libsession_system_or_submodule(OXENC oxenc oxenc::oxenc liboxenc>=1.5.0 session-router/external/oxen-libquic/external/oxen-encoding)
+
+libsession_system_or_submodule(OXENLOGGING oxenlogging oxen::logging liboxen-logging>=1.2.0 session-router/external/oxen-libquic/external/oxen-logging)
+if(OXENLOGGING_FOUND)
+    if(NOT TARGET oxen::logging)
+        # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
+        # but this script will give us them:
+        include(session-router/external/oxen-libquic/external/oxen-logging/cmake/load_fmt_spdlog.cmake)
+
+        add_library(oxen-logging-fmt-spdlog INTERFACE)
+        target_link_libraries(oxen-logging-fmt-spdlog INTERFACE oxenlogging::oxenlogging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
+        add_library(oxen::logging ALIAS oxen-logging-fmt-spdlog)
+    endif()
+endif()
+
 
 
 if(CMAKE_C_COMPILER_LAUNCHER)
@@ -124,12 +143,12 @@ if(APPLE)
     endforeach()
 endif()
 
-
-function(libsodium_internal_subdir)
+function(add_static_subdirectory dir)
     set(BUILD_SHARED_LIBS OFF)
-    add_subdirectory(libsodium-internal)
+    add_subdirectory(${dir} ${ARGN})
 endfunction()
-libsodium_internal_subdir()
+
+add_static_subdirectory(libsodium-internal)
 libsession_static_bundle(libsodium::sodium-internal)
 
 
@@ -143,7 +162,7 @@ set(protobuf_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(protobuf_ABSL_PROVIDER "module" CACHE STRING "" FORCE)
 set(protobuf_BUILD_PROTOC_BINARIES OFF CACHE BOOL "")
 set(protobuf_BUILD_PROTOBUF_BINARIES ON CACHE BOOL "" FORCE)
-system_or_submodule(PROTOBUF_LITE protobuf_lite protobuf-lite>=3.21 protobuf)
+libsession_system_or_submodule(PROTOBUF_LITE protobuf_lite protobuf::libprotobuf-lite protobuf-lite>=3.21 protobuf)
 if(TARGET PkgConfig::PROTOBUF_LITE AND NOT TARGET protobuf::libprotobuf-lite)
     add_library(protobuf::libprotobuf-lite ALIAS PkgConfig::PROTOBUF_LITE)
 endif()
@@ -172,4 +191,38 @@ libsession_static_bundle(libzstd_static)
 
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
-system_or_submodule(NLOHMANN nlohmann_json nlohmann_json>=3.7.0 nlohmann-json)
+libsession_system_or_submodule(NLOHMANN nlohmann_json nlohmann_json::nlohmann_json nlohmann_json>=3.7.0 session-router/external/nlohmann)
+
+if(ENABLE_NETWORKING AND ENABLE_NETWORKING_SROUTER)
+    set(SROUTER_FULL OFF CACHE BOOL "")
+    set(SROUTER_DAEMON OFF CACHE BOOL "")
+    set(SROUTER_NATIVE_BUILD OFF CACHE BOOL "")
+    set(SROUTER_JEMALLOC OFF CACHE BOOL "")
+
+    add_library(sodium INTERFACE)
+    target_link_libraries(sodium INTERFACE libsodium::sodium-internal)
+    add_static_subdirectory(session-router EXCLUDE_FROM_ALL)
+    libsession_static_bundle(session-router::libsessionrouter)
+endif()
+
+set(JSON_BuildTests OFF CACHE INTERNAL "")
+set(JSON_Install ON CACHE INTERNAL "") # Required to export targets that we use
+
+function(simdutf_subdir)
+    set(SIMDUTF_TESTS OFF CACHE BOOL "")
+    set(SIMDUTF_TOOLS OFF CACHE BOOL "")
+    set(BUILD_SHARED_LIBS OFF)
+    add_subdirectory(simdutf)
+endfunction()
+simdutf_subdir()
+libsession_static_bundle(simdutf)
+
+# We need Howard Hinnant's header-only date library for now because the STL implementation of
+# std::chrono::parse() is spotty or broken on:
+# - Apple.  libc++ date parsing is only available when on XCode 16.3+ *and* targetting macOS 15+.
+# - gcc before 13.
+# - clang+libc++ before llvm-19.  (Real 19, not Apple's idiotic PR renumbering).
+#
+# On the plus side, this is header-only so we don't actually compile anything extra if we don't
+# actually use it.
+add_subdirectory(date)

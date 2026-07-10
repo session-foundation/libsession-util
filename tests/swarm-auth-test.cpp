@@ -17,25 +17,23 @@
 #include <session/config/groups/keys.hpp>
 #include <session/config/groups/members.hpp>
 #include <session/config/user_groups.hpp>
+#include <session/util.hpp>
 #include <string_view>
 
 #include "utils.hpp"
-
-using namespace std::literals;
-using namespace oxenc::literals;
 
 static constexpr int64_t created_ts = 1680064059;
 
 using namespace session::config;
 
-static std::array<unsigned char, 64> sk_from_seed(ustring_view seed) {
+static std::array<unsigned char, 64> sk_from_seed(std::span<const unsigned char> seed) {
     std::array<unsigned char, 32> ignore;
     std::array<unsigned char, 64> sk;
     crypto_sign_ed25519_seed_keypair(ignore.data(), sk.data(), seed.data());
     return sk;
 }
 
-static std::string session_id_from_ed(ustring_view ed_pk) {
+static std::string session_id_from_ed(std::span<const unsigned char> ed_pk) {
     std::string sid;
     std::array<unsigned char, 32> xpk;
     int rc = crypto_sign_ed25519_pk_to_curve25519(xpk.data(), ed_pk.data());
@@ -46,18 +44,9 @@ static std::string session_id_from_ed(ustring_view ed_pk) {
     return sid;
 }
 
-// Hacky little class that implements `[n]` on a std::list.  This is inefficient (since it access
-// has to iterate n times through the list) but we only use it on small lists in this test code so
-// convenience wins over efficiency.  (Why not just use a vector?  Because vectors requires `T` to
-// be moveable, so we'd either have to use std::unique_ptr for members, which is also annoying).
-template <typename T>
-struct hacky_list : std::list<T> {
-    T& operator[](size_t n) { return *std::next(std::begin(*this), n); }
-};
-
 struct pseudo_client {
     std::array<unsigned char, 64> secret_key;
-    const ustring_view public_key{secret_key.data() + 32, 32};
+    const std::span<const unsigned char> public_key{secret_key.data() + 32, 32};
     std::string session_id{session_id_from_ed(public_key)};
 
     groups::Info info;
@@ -65,20 +54,23 @@ struct pseudo_client {
     groups::Keys keys;
 
     pseudo_client(
-            ustring_view seed,
+            std::span<const unsigned char> seed,
             bool admin,
             const unsigned char* gpk,
             std::optional<const unsigned char*> gsk) :
             secret_key{sk_from_seed(seed)},
-            info{ustring_view{gpk, 32},
-                 admin ? std::make_optional<ustring_view>({*gsk, 64}) : std::nullopt,
+            info{std::span<const unsigned char>{gpk, 32},
+                 admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
+                       : std::nullopt,
                  std::nullopt},
-            members{ustring_view{gpk, 32},
-                    admin ? std::make_optional<ustring_view>({*gsk, 64}) : std::nullopt,
+            members{std::span<const unsigned char>{gpk, 32},
+                    admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
+                          : std::nullopt,
                     std::nullopt},
             keys{to_usv(secret_key),
-                 ustring_view{gpk, 32},
-                 admin ? std::make_optional<ustring_view>({*gsk, 64}) : std::nullopt,
+                 std::span<const unsigned char>{gpk, 32},
+                 admin ? std::make_optional<std::span<const unsigned char>>({*gsk, 64})
+                       : std::nullopt,
                  std::nullopt,
                  info,
                  members} {}
@@ -86,11 +78,11 @@ struct pseudo_client {
 
 int main() {
 
-    const ustring group_seed =
+    const std::vector<unsigned char> group_seed =
             "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
-    const ustring admin_seed =
+    const std::vector<unsigned char> admin_seed =
             "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
-    const ustring member_seed =
+    const std::vector<unsigned char> member_seed =
             "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"_hexbytes;
 
     std::array<unsigned char, 32> group_pk;
@@ -112,7 +104,7 @@ int main() {
     session::config::UserGroups member_gr2{member_seed, std::nullopt};
     auto [seqno, push, obs] = member_groups.push();
 
-    std::vector<std::pair<std::string, ustring_view>> gr_conf;
+    std::vector<std::pair<std::string, std::span<const unsigned char>>> gr_conf;
     gr_conf.emplace_back("fakehash1", push);
 
     member_gr2.merge(gr_conf);
@@ -123,9 +115,10 @@ int main() {
 
     auto msg = to_usv("hello world");
     std::array<unsigned char, 64> store_sig;
-    ustring store_to_sign;
-    store_to_sign += to_usv("store999");
-    store_to_sign += to_usv(std::to_string(now));
+    std::vector<unsigned char> store_to_sign;
+    auto store_vec = session::str_to_vec("store999{}"_format(now));
+    store_to_sign.insert(store_to_sign.end(), store_vec.begin(), store_vec.end());
+
     crypto_sign_ed25519_detached(
             store_sig.data(), nullptr, store_to_sign.data(), store_to_sign.size(), group_sk.data());
 
@@ -141,9 +134,9 @@ int main() {
 
     std::cout << "STORE:\n\n" << store.dump() << "\n\n";
 
-    ustring retrieve_to_sign;
-    retrieve_to_sign += to_usv("retrieve999");
-    retrieve_to_sign += to_usv(std::to_string(now));
+    std::vector<unsigned char> retrieve_to_sign;
+    auto retrieve_vec = session::str_to_vec("retrieve999{}"_format(now));
+    retrieve_to_sign.insert(retrieve_to_sign.end(), retrieve_vec.begin(), retrieve_vec.end());
     auto subauth = member.keys.swarm_subaccount_sign(retrieve_to_sign, auth_data);
 
     nlohmann::json retrieve{

@@ -17,11 +17,12 @@ using namespace std::literals;
 namespace session::config::groups {
 
 Info::Info(
-        ustring_view ed25519_pubkey,
-        std::optional<ustring_view> ed25519_secretkey,
-        std::optional<ustring_view> dumped) :
-        ConfigBase{dumped, ed25519_pubkey, ed25519_secretkey},
-        id{"03" + oxenc::to_hex(ed25519_pubkey.begin(), ed25519_pubkey.end())} {}
+        std::span<const unsigned char> ed25519_pubkey,
+        std::optional<std::span<const unsigned char>> ed25519_secretkey,
+        std::optional<std::span<const unsigned char>> dumped) :
+        id{"03" + oxenc::to_hex(ed25519_pubkey.begin(), ed25519_pubkey.end())} {
+    init(dumped, ed25519_pubkey, ed25519_secretkey);
+}
 
 std::optional<std::string_view> Info::get_name() const {
     if (auto* s = data["n"].string(); s && !s->empty())
@@ -60,11 +61,13 @@ profile_pic Info::get_profile_pic() const {
     if (auto* url = data["p"].string(); url && !url->empty())
         pic.url = *url;
     if (auto* key = data["q"].string(); key && key->size() == 32)
-        pic.key = {reinterpret_cast<const unsigned char*>(key->data()), 32};
+        pic.key.assign(
+                reinterpret_cast<const unsigned char*>(key->data()),
+                reinterpret_cast<const unsigned char*>(key->data()) + 32);
     return pic;
 }
 
-void Info::set_profile_pic(std::string_view url, ustring_view key) {
+void Info::set_profile_pic(std::string_view url, std::span<const unsigned char> key) {
     set_pair_if(!url.empty() && key.size() == 32, data["p"], url, data["q"], key);
 }
 
@@ -83,32 +86,32 @@ void Info::set_expiry_timer(std::chrono::seconds expiration_timer) {
 }
 
 void Info::set_created(int64_t timestamp) {
-    set_positive_int(data["c"], timestamp);
+    set_positive_int(data["c"], to_epoch_seconds(timestamp));
 }
 
 std::optional<int64_t> Info::get_created() const {
     if (auto* ts = data["c"].integer())
-        return *ts;
+        return to_epoch_seconds(*ts);
     return std::nullopt;
 }
 
 void Info::set_delete_before(int64_t timestamp) {
-    set_positive_int(data["d"], timestamp);
+    set_positive_int(data["d"], to_epoch_seconds(timestamp));
 }
 
 std::optional<int64_t> Info::get_delete_before() const {
     if (auto* ts = data["d"].integer())
-        return *ts;
+        return to_epoch_seconds(*ts);
     return std::nullopt;
 }
 
 void Info::set_delete_attach_before(int64_t timestamp) {
-    set_positive_int(data["D"], timestamp);
+    set_positive_int(data["D"], to_epoch_seconds(timestamp));
 }
 
 std::optional<int64_t> Info::get_delete_attach_before() const {
     if (auto* ts = data["D"].integer())
-        return *ts;
+        return to_epoch_seconds(*ts);
     return std::nullopt;
 }
 
@@ -171,12 +174,13 @@ LIBSESSION_C_API const char* groups_info_get_name(const config_object* conf) {
 /// Outputs:
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_C_API int groups_info_set_name(config_object* conf, const char* name) {
-    try {
-        unbox<groups::Info>(conf)->set_name(name);
-    } catch (const std::exception& e) {
-        return set_error(conf, SESSION_ERR_BAD_VALUE, e);
-    }
-    return 0;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<groups::Info>(conf)->set_name(name);
+                return 0;
+            },
+            static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
 /// API: groups_info/groups_info_get_description
@@ -209,12 +213,13 @@ LIBSESSION_C_API const char* groups_info_get_description(const config_object* co
 /// Outputs:
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_C_API int groups_info_set_description(config_object* conf, const char* description) {
-    try {
-        unbox<groups::Info>(conf)->set_description(description);
-    } catch (const std::exception& e) {
-        return set_error(conf, SESSION_ERR_BAD_VALUE, e);
-    }
-    return 0;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<groups::Info>(conf)->set_description(description);
+                return 0;
+            },
+            static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
 /// API: groups_info/groups_info_get_pic
@@ -252,17 +257,17 @@ LIBSESSION_C_API user_profile_pic groups_info_get_pic(const config_object* conf)
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_C_API int groups_info_set_pic(config_object* conf, user_profile_pic pic) {
     std::string_view url{pic.url};
-    ustring_view key;
+    std::span<const unsigned char> key;
     if (!url.empty())
         key = {pic.key, 32};
 
-    try {
-        unbox<groups::Info>(conf)->set_profile_pic(url, key);
-    } catch (const std::exception& e) {
-        return set_error(conf, SESSION_ERR_BAD_VALUE, e);
-    }
-
-    return 0;
+    return wrap_exceptions(
+            conf,
+            [&] {
+                unbox<groups::Info>(conf)->set_profile_pic(url, key);
+                return 0;
+            },
+            static_cast<int>(SESSION_ERR_BAD_VALUE));
 }
 
 /// API: groups_info/groups_info_get_expiry_timer

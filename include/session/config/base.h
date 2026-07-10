@@ -42,44 +42,6 @@ typedef struct config_object {
 /// - `conf` -- [in] Pointer to config_object object
 LIBSESSION_EXPORT void config_free(config_object* conf);
 
-typedef enum config_log_level {
-    LOG_LEVEL_DEBUG = 0,
-    LOG_LEVEL_INFO,
-    LOG_LEVEL_WARNING,
-    LOG_LEVEL_ERROR
-} config_log_level;
-
-/// API: base/config_set_logger
-///
-/// Sets a logging function; takes the log function pointer and a context pointer (which can be NULL
-/// if not needed).  The given function pointer will be invoked with one of the above values, a
-/// null-terminated c string containing the log message, and the void* context object given when
-/// setting the logger (this is for caller-specific state data and won't be touched).
-///
-/// The logging function must have signature:
-///
-/// void log(config_log_level lvl, const char* msg, void* ctx);
-///
-/// Can be called with callback set to NULL to clear an existing logger.
-///
-/// The config object itself has no log level: the caller should filter by level as needed.
-///
-/// Declaration:
-/// ```cpp
-/// VOID config_set_logger(
-///     [in, out]   config_object*                                  conf,
-///     [in]        void(*)(config_log_level, const char*, void*)   callback,
-///     [in]        void*                                           ctx
-/// );
-/// ```
-///
-/// Inputs:
-/// - `conf` -- [in] Pointer to config_object object
-/// - `callback` -- [in] Callback function
-/// - `ctx` --- [in, optional] Pointer to an optional context. Set to NULL if unused
-LIBSESSION_EXPORT void config_set_logger(
-        config_object* conf, void (*callback)(config_log_level, const char*, void*), void* ctx);
-
 /// API: base/config_storage_namespace
 ///
 /// Returns the numeric namespace in which config messages of this type should be stored.
@@ -133,8 +95,8 @@ typedef struct config_string_list {
 
 LIBSESSION_EXPORT config_string_list* config_merge(
         config_object* conf,
-        const char** msg_hashes,
-        const unsigned char** configs,
+        const char* const* msg_hashes,
+        const unsigned char* const* configs,
         const size_t* lengths,
         size_t count) LIBSESSION_WARN_UNUSED;
 
@@ -161,10 +123,12 @@ LIBSESSION_EXPORT bool config_needs_push(const config_object* conf);
 typedef struct config_push_data {
     // The config seqno (to be provided later in `config_confirm_pushed`).
     seqno_t seqno;
-    // The config message to push (binary data, not null-terminated).
-    unsigned char* config;
-    // The length of `config`
-    size_t config_len;
+    // Array of config message(s) to push (each is binary data, not null-terminated).
+    unsigned char** config;
+    // Array of lengths of the messages in `config`
+    size_t* config_lens;
+    // Length of config and config_len arrays.
+    size_t n_configs;
     // Array of obsolete message hashes to delete; each element is a null-terminated C string
     char** obsolete;
     // length of `obsolete`
@@ -199,24 +163,28 @@ LIBSESSION_EXPORT config_push_data* config_push(config_object* conf);
 /// API: base/config_confirm_pushed
 ///
 /// Reports that data obtained from `config_push` has been successfully stored on the server with
-/// message hash `msg_hash`.  The seqno value is the one returned by the config_push call that
-/// yielded the config data.
+/// message hash(es) `msg_hashes` containing `hashes_len` hashes.  The seqno value is the one
+/// returned by the config_push call that yielded the config data.  The order of hashes in the
+/// msg_hashes array is unimportant.
 ///
 /// Declaration:
 /// ```cpp
 /// VOID config_confirm_pushed(
 ///     [in, out]   config_object*      conf,
-///     [out]       seqno_t             seqno,
-///     [out]       const char*         msg_hash
+///     [in]        seqno_t             seqno,
+///     [in]        const char* const*  msg_hashes
+///     [in]        size_t              hashes_len
 /// );
 /// ```
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
-/// - `seqno` -- [out] Value returned by config_push call
-/// - `msg_hash` -- [out] Value returned by config_push call
+/// - `seqno` -- [in] Value returned by config_push call
+/// - `msg_hashes` -- [in] array of message hashes (null terminated C strings) returned by the
+///   storage server when stored.
+/// - `hashes_len` -- [in] length of the `msg_hashes` array
 LIBSESSION_EXPORT void config_confirm_pushed(
-        config_object* conf, seqno_t seqno, const char* msg_hash);
+        config_object* conf, seqno_t seqno, const char* const* msg_hashes, size_t hashes_len);
 
 /// API: base/config_dump
 ///
@@ -242,7 +210,10 @@ LIBSESSION_EXPORT void config_confirm_pushed(
 /// - `conf` -- [in] Pointer to config_object object
 /// - `out` -- [out] Pointer to the output location
 /// - `outlen` -- [out] Length of output
-LIBSESSION_EXPORT void config_dump(config_object* conf, unsigned char** out, size_t* outlen);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_dump(config_object* conf, unsigned char** out, size_t* outlen);
 
 /// API: base/config_needs_dump
 ///
@@ -264,17 +235,19 @@ LIBSESSION_EXPORT void config_dump(config_object* conf, unsigned char** out, siz
 /// - `bool` -- True if config has changed since last call to `dump()`
 LIBSESSION_EXPORT bool config_needs_dump(const config_object* conf);
 
-/// API: base/config_current_hashes
+/// API: base/config_curr_hashes
 ///
-/// Obtains the current active hashes.  Note that this will be empty if the current hash is unknown
-/// or not yet determined (for example, because the current state is dirty or because the most
-/// recent push is still pending and we don't know the hash yet).
+/// Obtains the hashes of the current config state.  Note that this will be empty if the current
+/// hash is unknown or not yet determined (for example, because the current state is dirty or
+/// because the most recent push is still pending and we don't know the hash yet).
+///
+/// See also config_active_hashes(), which you often want to use instead of this.
 ///
 /// The returned pointer belongs to the caller and must be freed via `free()` when done with it.
 ///
 /// Declaration:
 /// ```cpp
-/// CONFIG_STRING_LIST* config_current_hashes(
+/// CONFIG_STRING_LIST* config_curr_hashes(
 ///     [in]    const config_object*          conf
 /// );
 ///
@@ -285,8 +258,58 @@ LIBSESSION_EXPORT bool config_needs_dump(const config_object* conf);
 ///
 /// Outputs:
 /// - `config_string_list*` -- pointer to the list of hashes; the pointer belongs to the caller
-LIBSESSION_EXPORT config_string_list* config_current_hashes(const config_object* conf)
+LIBSESSION_EXPORT config_string_list* config_curr_hashes(const config_object* conf)
         LIBSESSION_WARN_UNUSED;
+
+/// API: base/config_active_hashes
+///
+/// Obtains the hashes of currently active config messages.  This includes both the hashes of the
+/// current config (as returned by config_curr_hashes), but also any partially-arrived multipart
+/// config messages for which we are still waiting for remaining parts to complete the config.
+///
+/// The returned array of hashes have no particular ordering (and may differ from one call to the
+/// next even without any change to the values considered as a set).
+///
+/// The returned pointer belongs to the caller and must be freed via `free()` when done with it.
+///
+/// Declaration:
+/// ```cpp
+/// CONFIG_STRING_LIST* config_active_hashes(
+///     [in]    const config_object*          conf
+/// );
+///
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to config_object object
+///
+/// Outputs:
+/// - `config_string_list*` -- pointer to the list of hashes; the pointer belongs to the caller
+LIBSESSION_EXPORT config_string_list* config_active_hashes(const config_object* conf)
+        LIBSESSION_WARN_UNUSED;
+
+/// API: base/config_old_hashes
+///
+/// Obtains the known old hashes.  Note that this will be empty if there are no old hashes or
+/// the config is in a dirty state (in which case these should be retrieved via the `push`
+/// function). Calling this function, or the `push` function, will clear the stored old_hashes.
+///
+/// The returned pointer belongs to the caller and must be freed via `free()` when done with it.
+///
+/// Declaration:
+/// ```cpp
+/// CONFIG_STRING_LIST* config_old_hashes(
+///     [in]    const config_object*          conf
+/// );
+///
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to config_object object
+///
+/// Outputs:
+/// - `config_string_list*` -- pointer to the list of hashes; the pointer belongs to the caller
+LIBSESSION_EXPORT config_string_list* config_old_hashes(config_object* conf) LIBSESSION_WARN_UNUSED;
 
 /// API: base/config_get_keys
 ///
@@ -322,7 +345,7 @@ LIBSESSION_EXPORT unsigned char* config_get_keys(const config_object* conf, size
 ///
 /// Declaration:
 /// ```cpp
-/// VOID config_add_key(
+/// BOOL config_add_key(
 ///     [in, out]       config_object*          conf,
 ///     [in]            const unsigned char*    key
 /// );
@@ -332,7 +355,10 @@ LIBSESSION_EXPORT unsigned char* config_get_keys(const config_object* conf, size
 /// Inputs:
 /// - `conf` -- [in, out] Pointer to config_object object
 /// - `key` -- [in] Pointer to the binary key object, must be 32 bytes
-LIBSESSION_EXPORT void config_add_key(config_object* conf, const unsigned char* key);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_add_key(config_object* conf, const unsigned char* key);
 
 /// API: base/config_add_key_low_prio
 ///
@@ -341,7 +367,7 @@ LIBSESSION_EXPORT void config_add_key(config_object* conf, const unsigned char* 
 ///
 /// Declaration:
 /// ```cpp
-/// VOID config_add_key_low_prio(
+/// BOOL config_add_key_low_prio(
 ///     [in, out]       config_object*          conf,
 ///     [in]            const unsigned char*    key
 /// );
@@ -351,7 +377,10 @@ LIBSESSION_EXPORT void config_add_key(config_object* conf, const unsigned char* 
 /// Inputs:
 /// - `conf` -- [in, out] Pointer to config_object object
 /// - `key` -- [in] Pointer to the binary key object, must be 32 bytes
-LIBSESSION_EXPORT void config_add_key_low_prio(config_object* conf, const unsigned char* key);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_add_key_low_prio(config_object* conf, const unsigned char* key);
 
 /// API: base/config_clear_keys
 ///
@@ -497,7 +526,10 @@ LIBSESSION_EXPORT const char* config_encryption_domain(const config_object* conf
 /// Inputs:
 /// - `secret` -- pointer to a 64-byte sodium-style Ed25519 "secret key" buffer (technically the
 ///   seed+precomputed pubkey concatenated together) that sets both the secret key and public key.
-LIBSESSION_EXPORT void config_set_sig_keys(config_object* conf, const unsigned char* secret);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_set_sig_keys(config_object* conf, const unsigned char* secret);
 
 /// API: base/config_set_sig_pubkey
 ///
@@ -507,7 +539,10 @@ LIBSESSION_EXPORT void config_set_sig_keys(config_object* conf, const unsigned c
 ///
 /// Inputs:
 /// - `pubkey` -- pointer to the 32-byte Ed25519 pubkey that must have signed incoming messages.
-LIBSESSION_EXPORT void config_set_sig_pubkey(config_object* conf, const unsigned char* pubkey);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool config_set_sig_pubkey(config_object* conf, const unsigned char* pubkey);
 
 /// API: base/config_get_sig_pubkey
 ///
