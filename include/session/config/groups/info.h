@@ -6,7 +6,6 @@ extern "C" {
 
 #include "../base.h"
 #include "../profile_pic.h"
-#include "../util.h"
 
 LIBSESSION_EXPORT extern const size_t GROUP_INFO_NAME_MAX_LENGTH;
 LIBSESSION_EXPORT extern const size_t GROUP_INFO_DESCRIPTION_MAX_LENGTH;
@@ -212,7 +211,7 @@ LIBSESSION_EXPORT int64_t groups_info_get_attach_delete_before(const config_obje
 /// - `ts` -- [in] the unix timestamp, or 0 to clear a current value.
 LIBSESSION_EXPORT void groups_info_set_attach_delete_before(config_object* conf, int64_t ts);
 
-/// API: groups_info/groups_info_is_destroyed(const config_object* conf);
+/// API: groups_info/groups_info_is_destroyed
 ///
 /// Returns true if this group has been marked destroyed by an admin, which indicates to a receiving
 /// client that they should destroy it locally.
@@ -224,7 +223,7 @@ LIBSESSION_EXPORT void groups_info_set_attach_delete_before(config_object* conf,
 /// - `true` if the group has been nuked, `false` otherwise.
 LIBSESSION_EXPORT bool groups_info_is_destroyed(const config_object* conf);
 
-/// API: groups_info/groups_info_destroy_group(const config_object* conf);
+/// API: groups_info/groups_info_destroy_group
 ///
 /// Nukes a group from orbit.  This is permanent (i.e. there is no removing this setting once set).
 ///

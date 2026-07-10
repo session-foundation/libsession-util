@@ -5,6 +5,7 @@ extern "C" {
 #endif
 
 #include "base.h"
+#include "pro.h"
 #include "profile_pic.h"
 
 /// API: user_profile/user_profile_init
@@ -92,7 +93,8 @@ LIBSESSION_EXPORT int user_profile_set_name(config_object* conf, const char* nam
 ///
 /// Obtains the current profile pic.  The pointers in the returned struct will be NULL if a profile
 /// pic is not currently set, and otherwise should be copied right away (they will not be valid
-/// beyond other API calls on this config object).
+/// beyond other API calls on this config object).  The returned value will be the latest profile
+/// pic between when the user last set their profile and when it was last re-uploaded.
 ///
 /// Declaration:
 /// ```cpp
@@ -110,7 +112,7 @@ LIBSESSION_EXPORT user_profile_pic user_profile_get_pic(const config_object* con
 
 /// API: user_profile/user_profile_set_pic
 ///
-/// Sets a user profile
+/// Sets a user profile pic
 ///
 /// Declaration:
 /// ```cpp
@@ -127,6 +129,26 @@ LIBSESSION_EXPORT user_profile_pic user_profile_get_pic(const config_object* con
 /// Outputs:
 /// - `int` -- Returns 0 on success, non-zero on error
 LIBSESSION_EXPORT int user_profile_set_pic(config_object* conf, user_profile_pic pic);
+
+/// API: user_profile/user_profile_set_reupload_pic
+///
+/// Sets a user profile pic when reuploading
+///
+/// Declaration:
+/// ```cpp
+/// INT user_profile_set_reupload_pic(
+///     [in]    config_object*      conf,
+///     [in]    user_profile_pic    pic
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `pic` -- [in] Pointer to the pic
+///
+/// Outputs:
+/// - `int` -- Returns 0 on success, non-zero on error
+LIBSESSION_EXPORT int user_profile_set_reupload_pic(config_object* conf, user_profile_pic pic);
 
 /// API: user_profile/user_profile_get_nts_priority
 ///
@@ -244,6 +266,138 @@ LIBSESSION_EXPORT int user_profile_get_blinded_msgreqs(const config_object* conf
 /// Outputs:
 /// - `void` -- Returns Nothing
 LIBSESSION_EXPORT void user_profile_set_blinded_msgreqs(config_object* conf, int enabled);
+
+/// API: user_profile/user_profile_get_profile_updated
+///
+/// Returns the timestamp that the user last updated their profile information; or `0` if it's
+/// never been updated.  This value will return the latest timestamp between when the user last
+/// set their profile and when it was last re-uploaded.
+///
+/// Inputs: None
+///
+/// Outputs:
+/// - `int64_t` - timestamp (unix seconds) that the user last updated their public profile
+/// information.  Will be `0` if it's never been updated.
+LIBSESSION_EXPORT int64_t user_profile_get_profile_updated(config_object* conf);
+
+/// API: user_profile/user_profile_get_pro_config
+///
+/// Get the Pro data for the user profile if it exists which includes the users rotating private key
+/// and their last authorised proof.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL user_profile_get_pro_config(
+///     [in]    const config_object* conf
+///     [out]   pro_pro*             pro
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `pro` -- [out] Pointer to the pro object where the retrieved details are written
+///
+/// Outputs:
+/// - `bool` -- True if the user profile had Pro data associated with it. Otherwise false and the
+///   pro structure will remain untouched.
+LIBSESSION_EXPORT bool user_profile_get_pro_config(const config_object* conf, pro_pro_config* pro);
+
+/// API: user_profile/user_profile_set_pro_config
+///
+/// Update the pro data associated with the user profile.
+///
+/// Declaration:
+/// ```cpp
+/// VOID user_profile_set_pro_config(
+///     [in]    config_object* conf,
+///     [in]    pro_pro*       pro
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `pro` -- [in] Pointer to the Pro data to write to the user profile
+///
+/// Outputs:
+/// - `void` -- Returns nothing
+LIBSESSION_EXPORT void user_profile_set_pro_config(config_object* conf, const pro_pro_config* pro);
+
+/// API: user_profile/user_profile_remove_pro_config
+///
+/// Remove the Session Pro components from the user profile.
+///
+/// Declaration:
+/// ```cpp
+/// BOOL user_profile_remove_pro_config(
+///     [in]    config_object* conf
+/// );
+/// ```
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `bool` - A flag indicating whether the config had Session Pro components which were removed.
+LIBSESSION_EXPORT bool user_profile_remove_pro_config(config_object* conf);
+
+/// API: user_profile/user_profile_get_pro_features
+///
+/// Retrieves the bitset indicating which pro features the user currently has enabled.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `session_protocol_pro_profile_bitset` - bitset indicating which profile features are enabled.
+LIBSESSION_EXPORT session_protocol_pro_profile_bitset
+user_profile_get_pro_features(const config_object* conf);
+
+/// API: user_profile/user_profile_set_pro_badge
+///
+/// Updates the bitset to specify whether the user wants their profile to show the pro badge.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `enabled` -- Flag which specifies whether the user wants the pro badge to appear on their
+/// profile or not.
+LIBSESSION_EXPORT void user_profile_set_pro_badge(config_object* conf, bool enabled);
+
+/// API: user_profile/user_profile_set_animated_avatar
+///
+/// Updates the bitset to specify whether the user has an animated profile picture, should be
+/// set when uploading a profile picture. Note: This doesn't prevent a users profile picture
+/// from animating, it's just a way to more easily synchronise the state between devices when
+/// sending messages so we don't need the device to have successfully download the current
+/// display picture in order to be able to determine this.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `enabled` -- Flag which specifies whether the users display picture is animated or not.
+LIBSESSION_EXPORT void user_profile_set_animated_avatar(config_object* conf, bool enabled);
+
+/// API: user_profile/user_profile_get_pro_access_expiry_ms
+///
+/// Retrieves the Session Pro access expiry unix timestamp if it has been set, this should generally
+/// be the expiry value returned from /get_pro_details.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `uint64_t` - The unix timestamp in milliseconds that the users pro access will expire, or 0 if
+/// unset.
+LIBSESSION_EXPORT uint64_t user_profile_get_pro_access_expiry_ms(const config_object* conf);
+
+/// API: user_profile/user_profile_set_pro_access_expiry_ms
+///
+/// Updates the Session Pro access expiry unix timestamp.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `access_expiry_ts_ms` -- The timestamp that the users Session Pro access will expire, or 0 to
+/// remove the value.
+LIBSESSION_EXPORT void user_profile_set_pro_access_expiry_ms(
+        config_object* conf, uint64_t access_expiry_ts_ms);
 
 #ifdef __cplusplus
 }  // extern "C"
