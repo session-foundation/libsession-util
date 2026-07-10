@@ -7,6 +7,8 @@ Build-Depends:
     g++,
     pkg-config,
     liboxenc-dev (>= 1.0.7),
+    liboxen-logging-dev (>= 1.2.0),
+    liboxen-quic-dev (>= 1.8.0),
     nlohmann-json3-dev,
     nettle-dev,
     libprotobuf-dev
@@ -17,7 +19,10 @@ Homepage: https://github.com/oxen-io/libsession-util
 Package: libsession-util-dev
 Section: libdevel
 Architecture: any
-Depends: libsession-util@LIB_VERSION@ (= ${binary:Version}), ${misc:Depends}, liboxenc-dev (>= 1.0.7)
+Depends: libsession-util@LIB_VERSION@ (= ${binary:Version}), ${misc:Depends},
+    liboxenc-dev (>= 1.5.0),
+    liboxen-logging-dev (>= 1.2.0),
+    liboxen-quic-dev (>= 1.8.0)
 Description: Utility library for the Session messenger (headers)
  This C++17 library contains various utility functions used by different
  front-end versions of the Session messenger.
