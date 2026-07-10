@@ -1,6 +1,6 @@
 local distro = 'noble';
 local distro_name = 'Ubuntu ' + distro;
-local distro_docker = 'registry.oxen.rocks/ubuntu-' + distro + '-builder';
+local distro_docker = 'registry.session.codes/ubuntu-' + distro + '-builder';
 
 local apt_get_quiet = 'apt-get -o=Dpkg::Use-Pty=0 -q';
 
