@@ -1,11 +1,25 @@
 #pragma once
 
+#include <oxen/quic/address.hpp>
 #include <string>
 #include <string_view>
+#include <variant>
 
-#include "key_types.hpp"
+#include "session/network/session_network_types.hpp"
+
+namespace session::network {
+struct service_node;
+struct request_info;
+struct Request;
+}  // namespace session::network
 
 namespace session::onionreq {
+
+namespace detail {
+
+    session::network::x25519_pubkey pubkey_for_destination(
+            network::network_destination destination);
+}
 
 enum class EncryptType {
     aes_gcm,
@@ -27,56 +41,58 @@ inline constexpr std::string_view to_string(EncryptType type) {
 // Builder class for preparing onion request payloads.
 class Builder {
   public:
+    Builder(const network::network_destination& destination,
+            const std::string& endpoint,
+            const std::vector<network::service_node>& nodes,
+            const EncryptType enc_type_ = EncryptType::xchacha20);
+
+    static Builder make(
+            const network::network_destination& destination,
+            const std::string& endpoint,
+            const std::vector<network::service_node>& nodes,
+            const EncryptType enc_type_ = EncryptType::xchacha20);
+
     EncryptType enc_type;
-    std::optional<x25519_pubkey> destination_x25519_public_key = std::nullopt;
-    std::optional<x25519_keypair> final_hop_x25519_keypair = std::nullopt;
+    bool is_v4_request;
+    std::optional<network::x25519_keypair> final_hop_x25519_keypair = std::nullopt;
 
     Builder(EncryptType enc_type_ = EncryptType::xchacha20) : enc_type{enc_type_} {}
 
     void set_enc_type(EncryptType enc_type_) { enc_type = enc_type_; }
+    std::optional<network::x25519_pubkey> get_destination_x25519_public_key() const {
+        return destination_x25519_public_key_;
+    };
 
-    void set_snode_destination(ed25519_pubkey ed25519_public_key, x25519_pubkey x25519_public_key) {
-        destination_x25519_public_key.reset();
-        ed25519_public_key_.reset();
-        destination_x25519_public_key.emplace(x25519_public_key);
-        ed25519_public_key_.emplace(ed25519_public_key);
+    void set_destination(network::network_destination destination);
+    void add_hop(std::span<const unsigned char> remote_key);
+    void add_hop(std::pair<network::ed25519_pubkey, network::x25519_pubkey> keys) {
+        hops_.push_back(keys);
     }
 
-    void set_server_destination(
-            std::string host,
-            std::string target,
-            std::string protocol,
-            std::optional<uint16_t> port,
-            x25519_pubkey x25519_public_key) {
-        destination_x25519_public_key.reset();
-
-        host_.emplace(host);
-        target_.emplace(target);
-        protocol_.emplace(protocol);
-
-        if (port)
-            port_.emplace(*port);
-
-        destination_x25519_public_key.emplace(x25519_public_key);
-    }
-
-    void add_hop(std::pair<ed25519_pubkey, x25519_pubkey> keys) { hops_.push_back(keys); }
-
-    ustring build(ustring payload);
+    std::vector<unsigned char> build(std::vector<unsigned char> payload);
+    std::vector<unsigned char> generate_onion_blob(
+            const std::optional<std::vector<unsigned char>>& plaintext_body);
 
   private:
-    std::vector<std::pair<ed25519_pubkey, x25519_pubkey>> hops_ = {};
+    std::vector<std::pair<network::ed25519_pubkey, network::x25519_pubkey>> hops_ = {};
+    std::string endpoint_;
+    std::optional<network::x25519_pubkey> destination_x25519_public_key_ = std::nullopt;
 
     // Snode request values
 
-    std::optional<ed25519_pubkey> ed25519_public_key_ = std::nullopt;
+    std::optional<network::ed25519_pubkey> ed25519_public_key_ = std::nullopt;
 
     // Proxied request values
 
     std::optional<std::string> host_ = std::nullopt;
-    std::optional<std::string> target_ = std::nullopt;
     std::optional<std::string> protocol_ = std::nullopt;
+    std::optional<std::string> method_ = std::nullopt;
     std::optional<uint16_t> port_ = std::nullopt;
+    std::optional<std::vector<std::pair<std::string, std::string>>> headers_ = std::nullopt;
+    std::optional<std::vector<std::pair<std::string, std::string>>> query_params_ = std::nullopt;
+
+    std::vector<unsigned char> _generate_payload(
+            std::optional<std::vector<unsigned char>> body) const;
 };
 
 }  // namespace session::onionreq

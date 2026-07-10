@@ -28,12 +28,12 @@ typedef struct ugroups_legacy_group_info {
                                    // terminator).
 
     int64_t disappearing_timer;  // Seconds. 0 == disabled.
-    int priority;  // pinned message priority; 0 = unpinned, negative = hidden, positive = pinned
-                   // (with higher meaning pinned higher).
-    int64_t joined_at;                // unix timestamp when joined (or re-joined)
+    int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
+                        // pinned (with higher meaning pinned higher).
+    int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
-                         // setting until the timestamp)
+    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
+                                      // `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
@@ -58,15 +58,17 @@ typedef struct ugroups_group_info {
                                    // signing value that can be used to produce signature values to
                                    // access the swarm.
 
-    int priority;  // pinned message priority; 0 = unpinned, negative = hidden, positive = pinned
-                   // (with higher meaning pinned higher).
-    int64_t joined_at;                // unix timestamp when joined (or re-joined)
+    int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
+                        // pinned (with higher meaning pinned higher).
+    int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
-                         // setting until the timestamp)
+    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
+                                      // `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
+    int removed_status;  // Tracks why we were removed from the group. Values are 0:NOT_REMOVED,
+                         // 1:KICKED_FROM_GROUP or 2:GROUP_DESTROYED
 } ugroups_group_info;
 
 typedef struct ugroups_community_info {
@@ -77,12 +79,12 @@ typedef struct ugroups_community_info {
                          // info (that one is always forced lower-cased).
     unsigned char pubkey[32];  // 32 bytes (not terminated, can contain nulls)
 
-    int priority;  // pinned message priority; 0 = unpinned, negative = hidden, positive = pinned
-                   // (with higher meaning pinned higher).
-    int64_t joined_at;                // unix timestamp when joined (or re-joined)
+    int priority;       // pinned conversation priority; 0 = unpinned, negative = hidden, positive =
+                        // pinned (with higher meaning pinned higher).
+    int64_t joined_at;  // unix timestamp (seconds) when joined (or re-joined)
     CONVO_NOTIFY_MODE notifications;  // When the user wants notifications
-    int64_t mute_until;  // Mute notifications until this timestamp (overrides `notifications`
-                         // setting until the timestamp)
+    int64_t mute_until;               // Mute notifications until this timestamp (seconds, overrides
+                                      // `notifications` setting until the timestamp)
 
     bool invited;  // True if this is in the invite-but-not-accepted state.
 
@@ -325,7 +327,10 @@ LIBSESSION_EXPORT void user_groups_set_community(
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a group info object
-LIBSESSION_EXPORT void user_groups_set_group(config_object* conf, const ugroups_group_info* group);
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_group(config_object* conf, const ugroups_group_info* group);
 
 /// API: user_groups/user_groups_set_legacy_group
 ///
@@ -345,7 +350,10 @@ LIBSESSION_EXPORT void user_groups_set_group(config_object* conf, const ugroups_
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a legacy group info object
-LIBSESSION_EXPORT void user_groups_set_legacy_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_legacy_group(
         config_object* conf, const ugroups_legacy_group_info* group);
 
 /// API: user_groups/user_groups_set_free_legacy_group
@@ -365,7 +373,10 @@ LIBSESSION_EXPORT void user_groups_set_legacy_group(
 /// Inputs:
 /// - `conf` -- [in] Pointer to config_object object
 /// - `group` -- [in] Pointer to a legacy group info object
-LIBSESSION_EXPORT void user_groups_set_free_legacy_group(
+///
+/// Output:
+/// - `bool` -- Returns true if the call succeeds, false if an error occurs.
+LIBSESSION_EXPORT bool user_groups_set_free_legacy_group(
         config_object* conf, ugroups_legacy_group_info* group);
 
 /// API: user_groups/user_groups_erase_community
@@ -437,6 +448,15 @@ LIBSESSION_EXPORT bool user_groups_erase_group(config_object* conf, const char* 
 /// - `bool` -- Returns True if conversation was found and removed
 LIBSESSION_EXPORT bool user_groups_erase_legacy_group(config_object* conf, const char* group_id);
 
+/// API: user_groups/ugroups_group_set_invited
+///
+/// Call when we have been invited to a group to reset the 'kicked' state.
+///
+/// Inputs:
+/// - `group` -- [in] pointer to the group info which we should set to kicked
+///
+LIBSESSION_EXPORT void ugroups_group_set_invited(ugroups_group_info* group);
+
 /// API: user_groups/ugroups_group_set_kicked
 ///
 /// Call when we have been kicked from a group; this clears group's secret key and auth key from the
@@ -455,6 +475,25 @@ LIBSESSION_EXPORT void ugroups_group_set_kicked(ugroups_group_info* group);
 /// - `group` -- [in] pointer to the group info to query
 ///
 LIBSESSION_EXPORT bool ugroups_group_is_kicked(const ugroups_group_info* group);
+
+/// API: user_groups/ugroups_group_set_destroyed
+///
+/// Mark the group as permanently destroyed and clears auth_data & secret_key. This cannot be
+/// unset once set.
+///
+/// Inputs:
+/// - `group` -- [in] pointer to the group info which we should set to kicked
+///
+LIBSESSION_EXPORT void ugroups_group_set_destroyed(ugroups_group_info* group);
+
+/// API: user_groups/ugroups_group_is_destroyed
+///
+/// Returns true if the group was destroyed by one of the admin.
+///
+/// Inputs:
+/// - `group` -- [in] pointer to the group info to query
+///
+LIBSESSION_EXPORT bool ugroups_group_is_destroyed(const ugroups_group_info* group);
 
 typedef struct ugroups_legacy_members_iterator ugroups_legacy_members_iterator;
 

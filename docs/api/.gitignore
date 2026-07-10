@@ -1,2 +1,5 @@
 api/*
 api
+dist
+*.mdx
+.venv

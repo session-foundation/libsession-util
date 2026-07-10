@@ -46,6 +46,14 @@ elif [ -n "$archive" ]; then
     exit 1
 fi
 
+# Use CMAKE_BUILD_TYPE from extra args if provided, otherwise default to Release
+build_type="Release"
+for arg in "$@"; do
+    if [[ "$arg" == -DCMAKE_BUILD_TYPE=* ]]; then
+        build_type="${arg#-DCMAKE_BUILD_TYPE=}"
+        break
+    fi
+done
 
 set -e
 set -x
@@ -59,7 +67,7 @@ cmake -G 'Unix Makefiles' \
     -DSTATIC_BUNDLE=ON \
     -DBUILD_SHARED_LIBS=OFF \
     -DWITH_TESTS=OFF \
-    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_BUILD_TYPE=$build_type \
     "$@" \
     "$projdir"
 
@@ -72,8 +80,6 @@ fi
 mkdir -p "$pkg"/{lib,include}
 cp -v libsession-util.a "$pkg"/lib
 cp -rv "$projdir"/include/session "$pkg"/include
-mkdir -p "$pkg"/include/oxenc
-cp -v "$projdir"/external/oxen-encoding/oxenc/*.h external/oxen-encoding/oxenc/version.h "$pkg"/include/oxenc/
 
 if [ -z "$zip" ]; then
     tar cvJf "$archive" "$pkg"

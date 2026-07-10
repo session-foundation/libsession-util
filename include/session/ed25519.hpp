@@ -1,8 +1,8 @@
 #pragma once
 
 #include <array>
-
-#include "types.hpp"
+#include <span>
+#include <vector>
 
 namespace session::ed25519 {
 
@@ -11,7 +11,7 @@ std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_
 
 /// Given an Ed25519 seed this returns the associated Ed25519 key pair
 std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_key_pair(
-        ustring_view ed25519_seed);
+        std::span<const unsigned char> ed25519_seed);
 
 /// API: ed25519/seed_for_ed_privkey
 ///
@@ -25,7 +25,7 @@ std::pair<std::array<unsigned char, 32>, std::array<unsigned char, 64>> ed25519_
 ///
 /// Outputs:
 /// - The ed25519 seed
-std::array<unsigned char, 32> seed_for_ed_privkey(ustring_view ed25519_privkey);
+std::array<unsigned char, 32> seed_for_ed_privkey(std::span<const unsigned char> ed25519_privkey);
 
 /// API: ed25519/sign
 ///
@@ -37,7 +37,8 @@ std::array<unsigned char, 32> seed_for_ed_privkey(ustring_view ed25519_privkey);
 ///
 /// Outputs:
 /// - The ed25519 signature
-ustring sign(ustring_view ed25519_privkey, ustring_view msg);
+std::vector<unsigned char> sign(
+        std::span<const unsigned char> ed25519_privkey, std::span<const unsigned char> msg);
 
 /// API: ed25519/verify
 ///
@@ -50,6 +51,23 @@ ustring sign(ustring_view ed25519_privkey, ustring_view msg);
 ///
 /// Outputs:
 /// - A flag indicating whether the signature is valid
-bool verify(ustring_view sig, ustring_view pubkey, ustring_view msg);
+bool verify(
+        std::span<const unsigned char> sig,
+        std::span<const unsigned char> pubkey,
+        std::span<const unsigned char> msg);
+
+/// API: ed25519/ed25519_pro_privkey_for_ed25519_seed
+///
+/// Generate the deterministic Master Session Pro key for signing requests to interact with the
+/// Session Pro features of the protocol.
+///
+/// Inputs:
+/// - `ed25519_seed` -- the seed to the long-term key for the Session account to derive the
+///   deterministic key from.
+///
+/// Outputs:
+/// - The libsodium-style Master Session Pro Ed25519 secret key, 64 bytes.
+std::array<unsigned char, 64> ed25519_pro_privkey_for_ed25519_seed(
+        std::span<const unsigned char> ed25519_seed);
 
 }  // namespace session::ed25519

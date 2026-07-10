@@ -16,7 +16,8 @@ extern "C" {
 /// - `size` -- [in] number of bytes to be generated.
 ///
 /// Outputs:
-/// - `unsigned char*` -- pointer to random bytes of `size` bytes.
+/// - `unsigned char*` -- pointer to random bytes of `size` bytes.  The caller is responsible for
+/// freeing the data when done!
 LIBSESSION_EXPORT unsigned char* session_random(size_t size);
 
 #ifdef __cplusplus

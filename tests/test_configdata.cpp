@@ -6,14 +6,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_exception.hpp>
 #include <session/config.hpp>
+#include <session/util.hpp>
 
 #include "session/bt_merge.hpp"
 #include "session/version.h"
 #include "utils.hpp"
 
 using namespace session;
-using namespace std::literals;
-using namespace oxenc::literals;
+using namespace fmt::literals;
 using config::ConfigMessage;
 using config::MutableConfigMessage;
 using oxenc::bt_dict;
@@ -53,7 +53,7 @@ TEST_CASE("config data dict encoding", "[config][data][dict]") {
     d["D"] = config::dict{{"x", 1}, {"y", 2}};
     d["d"] = config::dict{{"e", config::dict{{"f", config::dict{{"g", ""}}}}}};
 
-    static_assert(oxenc::detail::is_bt_input_dict_container<config::dict>);
+    static_assert(oxenc::bt_input_dict_container<config::dict>);
 
     CHECK(oxenc::bt_serialize(d) ==
           "d1:B1:x1:Dd1:xi1e1:yi2ee1:ai23e1:cli-3ei4e1:11:2e1:dd1:ed1:fd1:g0:eeee");
@@ -100,24 +100,15 @@ TEST_CASE("config pruning", "[config][prune]") {
 
 // shortcut to access a nested dict
 auto& d(config::dict_value& v) {
-    return var::get<config::dict>(v);
+    return std::get<config::dict>(v);
 }
 // or set
 auto& s(config::dict_value& v) {
-    return var::get<config::set>(v);
+    return std::get<config::set>(v);
 }
 
-template <typename T, size_t N>
-ustring_view view(const std::array<T, N>& data) {
-    return ustring_view{data.data(), data.size()};
-}
-template <typename T, size_t N>
-std::string view_hex(const std::array<T, N>& data) {
-    return oxenc::to_hex(data.begin(), data.end());
-}
-
-ustring blake2b(ustring_view data) {
-    ustring result;
+std::vector<unsigned char> blake2b(std::span<const unsigned char> data) {
+    std::vector<unsigned char> result;
     result.resize(32);
     crypto_generichash_blake2b(result.data(), 32, data.data(), data.size(), nullptr, 0);
     return result;
@@ -202,13 +193,13 @@ TEST_CASE("config message serialization", "[config][serialization]") {
         "e"));
     // clang-format on
 
-    const auto hash0 = "d65738bba88b0f3455cef20fe09a7b4b10f25f9db82be24a6ce1bd06da197526"_hex;
-    CHECK(view_hex(m.hash()) == oxenc::to_hex(hash0));
+    const std::string hash0{"d65738bba88b0f3455cef20fe09a7b4b10f25f9db82be24a6ce1bd06da197526"_hex};
+    CHECK(to_hex(m.hash()) == oxenc::to_hex(hash0));
 
     auto m1 = m.increment();
     m1.data().erase("foo");
-    const auto hash1 = "5b30b4abf4cba71db25dbc0d977cc25df1d0a8a87cad7f561cdec2b8caf65f5e"_hex;
-    CHECK(view_hex(m1.hash()) == oxenc::to_hex(hash1));
+    const std::string hash1{"5b30b4abf4cba71db25dbc0d977cc25df1d0a8a87cad7f561cdec2b8caf65f5e"_hex};
+    CHECK(to_hex(m1.hash()) == oxenc::to_hex(hash1));
 
     auto m2 = m1.increment();
 
@@ -220,8 +211,8 @@ TEST_CASE("config message serialization", "[config][serialization]") {
     s(d(m2.data()["bar"])[""]).erase("b");
     s(d(m2.data()["bar"])[""]).insert(42);  // already present
 
-    const auto hash2 = "027552203cf669070d3ecbeecfa65c65497d59aa4da490e0f68f8131ce081320"_hex;
-    CHECK(view_hex(m2.hash()) == oxenc::to_hex(hash2));
+    const std::string hash2{"027552203cf669070d3ecbeecfa65c65497d59aa4da490e0f68f8131ce081320"_hex};
+    CHECK(to_hex(m2.hash()) == oxenc::to_hex(hash2));
 
     // clang-format off
     CHECK(printable(m2.serialize()) == printable(
@@ -239,7 +230,7 @@ TEST_CASE("config message serialization", "[config][serialization]") {
           "1:<" "l"
             "l"
               "i10e"
-              "32:" + hash0 +
+              "32:{hash0}"
               "d"
                 "3:bar" "d"
                   "0:" "lli42e1:a1:belee"
@@ -251,7 +242,7 @@ TEST_CASE("config message serialization", "[config][serialization]") {
             "e"
             "l"
               "i11e"
-              "32:" + hash1 +
+              "32:{hash1}"
               "d"
                 "3:foo" "1:-"
               "e"
@@ -265,17 +256,20 @@ TEST_CASE("config message serialization", "[config][serialization]") {
             "e"
             "3:foo" "0:"
           "e"
-        "e"));
+        "e",
+        "hash0"_a=hash0, "hash1"_a=hash1));
+    // clang-format on
 
     auto m5 = m2.increment().increment().increment();
-    const auto hash3 = "b83871ea06587f9254cdf2b2af8daff19bd7fb550fb90d5f8f9f546464c08bc5"_hex;
-    const auto hash4 = "c30e2cfa7ec93c64a1ab6420c9bccfb63da8e4c2940ed6509ffb64f3f0131860"_hex;
-    const auto hash5 = "3234eb7da8cf4b79b9eec2a144247279d10f6f118184f82429a42c5996bea60c"_hex;
+    const std::string hash3{"b83871ea06587f9254cdf2b2af8daff19bd7fb550fb90d5f8f9f546464c08bc5"_hex},
+            hash4{"c30e2cfa7ec93c64a1ab6420c9bccfb63da8e4c2940ed6509ffb64f3f0131860"_hex},
+            hash5{"3234eb7da8cf4b79b9eec2a144247279d10f6f118184f82429a42c5996bea60c"_hex};
 
-    CHECK(view_hex(m2.increment().hash()) == oxenc::to_hex(hash3));
-    CHECK(view_hex(m2.increment().increment().hash()) == oxenc::to_hex(hash4));
-    CHECK(view_hex(m5.hash()) == oxenc::to_hex(hash5));
+    CHECK(to_hex(m2.increment().hash()) == oxenc::to_hex(hash3));
+    CHECK(to_hex(m2.increment().increment().hash()) == oxenc::to_hex(hash4));
+    CHECK(to_hex(m5.hash()) == oxenc::to_hex(hash5));
 
+    // clang-format off
     CHECK(printable(m5.serialize()) == printable(
         "d"
           "1:#" "i15e"
@@ -291,14 +285,14 @@ TEST_CASE("config message serialization", "[config][serialization]") {
           "1:<" "l"
             "l"
               "i11e"
-              "32:" + hash1 +
+              "32:{hash1}"
               "d"
                 "3:foo" "1:-"
               "e"
             "e"
             "l"
               "i12e"
-              "32:" + hash2 +
+              "32:{hash2}"
               "d"
                 "3:bar" "d"
                   "0:" "l" "li99e1:ce" "l1:be" "e"
@@ -310,18 +304,19 @@ TEST_CASE("config message serialization", "[config][serialization]") {
             "e"
             "l"
               "i13e"
-              "32:" + hash3 +
+              "32:{hash3}"
               "de"
             "e"
             "l"
               "i14e"
-              "32:" + hash4 +
+              "32:{hash4}"
               "de"
             "e"
           "e"
           "1:=" "d"
           "e"
-        "e"));
+        "e",
+        "hash1"_a=hash1, "hash2"_a=hash2, "hash3"_a=hash3, "hash4"_a=hash4));
 
     // clang-format on
 }
@@ -337,14 +332,16 @@ TEST_CASE("config message signature", "[config][signing]") {
             "4384261cdd338f5820ca9cbbe3fc72ac8944ee60d3b795b797fbbf5597b09f17"sv;
     std::array<unsigned char, 64> secretkey;
     oxenc::from_hex(skey_hex.begin(), skey_hex.end(), secretkey.begin());
-    auto signer = [&secretkey](ustring_view data) {
-        ustring result;
+    auto signer = [&secretkey](std::span<const unsigned char> data) {
+        std::vector<unsigned char> result;
         result.resize(64);
         crypto_sign_ed25519_detached(
                 result.data(), nullptr, data.data(), data.size(), secretkey.data());
         return result;
     };
-    auto verifier = [&secretkey](ustring_view data, ustring_view signature) {
+    auto verifier = [&secretkey](
+                            std::span<const unsigned char> data,
+                            std::span<const unsigned char> signature) {
         return 0 == crypto_sign_verify_detached(
                             signature.data(), data.data(), data.size(), secretkey.data() + 32);
     };
@@ -381,15 +378,17 @@ TEST_CASE("config message signature", "[config][signing]") {
     auto expected_sig =
             "77267f4de7701ae348eba0ef73175281512ba3f1051cfed22dc3e31b9c699330"
             "2938863e09bc8b33638161071bd8dc397d5c1d3f674120d08fbb9c64dde2e907"_hexbytes;
-    ustring sig(64, '\0');
+    std::vector<unsigned char> sig(64, '\0');
     // Sign it ourselves, and check what we get:
     crypto_sign_ed25519_detached(
             sig.data(), nullptr, m_signing_value.data(), m_signing_value.size(), secretkey.data());
     CHECK(to_hex(sig) == to_hex(expected_sig));
+    auto key_bytes = "1:~64:"_bytes;
+    auto end_bytes = "e"_bytes;
     auto m_expected = m_signing_value;
-    m_expected += "1:~64:"_bytes;
-    m_expected += expected_sig;
-    m_expected += 'e';
+    m_expected.insert(m_expected.end(), key_bytes.begin(), key_bytes.end());
+    m_expected.insert(m_expected.end(), expected_sig.begin(), expected_sig.end());
+    m_expected.insert(m_expected.end(), end_bytes.begin(), end_bytes.end());
     CHECK(printable(m.serialize()) == printable(m_expected));
 
     ConfigMessage msg{m_expected, verifier, signer};
@@ -415,7 +414,7 @@ TEST_CASE("config message signature", "[config][signing]") {
     ConfigMessage m2{{m_broken, m_expected}, verifier, signer};
     CHECK_FALSE(m2.merged());
     CHECK(m2.seqno() == 10);
-    CHECK(view_hex(m2.hash()) == view_hex(m.hash()));
+    CHECK(to_hex(m2.hash()) == to_hex(m.hash()));
 
     CHECK_THROWS_MATCHES(
             ConfigMessage(
@@ -427,7 +426,8 @@ TEST_CASE("config message signature", "[config][signing]") {
             config::config_error,
             Message("Config signature failed verification"));
 
-    auto m_unsigned = m_signing_value + "e"_bytes;
+    auto m_unsigned = m_signing_value;
+    m_unsigned.insert(m_unsigned.end(), end_bytes.begin(), end_bytes.end());
     CHECK_THROWS_MATCHES(
             ConfigMessage(m_unsigned, verifier),
             config::missing_signature,
@@ -449,7 +449,7 @@ const auto h119 = "43094f68c1faa37eff79e1c2f3973ffd5f9d6423b00ccda306fc6e7dac5f0
 const auto h120 = "e3a237f91014d31e4d30569c4a8bfcd72157804f99b8732c611c48bf126432b5"_hexbytes;
 const auto h121 = "1a7f602055124deaf21175ef3f32983dee7c9de570e5d9c9a0bbc2db71dcb97f"_hexbytes;
 const auto h122 = "46560604fe352101bb869435260d7100ccfe007be5f741c7e96303f02f394e8a"_hexbytes;
-const auto m123_expected =
+const auto m123_expected = to_vector(
         // clang-format off
         "d"
           "1:#" "i123e"
@@ -477,22 +477,22 @@ const auto m123_expected =
             "7:string2" "7:goodbye"
          "e"
          "1:<" "l"
-           "l" "i119e" "32:"_bytes+h119+ "de" "e"
-           "l" "i120e" "32:"_bytes+h120+ "de" "e"
-           "l" "i121e" "32:"_bytes+h121+ "de" "e"
-           "l" "i122e" "32:"_bytes+h122+ "de" "e"
+           "l" "i119e" "32:"+to_string(h119)+ "de" "e"
+           "l" "i120e" "32:"+to_string(h120)+ "de" "e"
+           "l" "i121e" "32:"+to_string(h121)+ "de" "e"
+           "l" "i122e" "32:"+to_string(h122)+ "de" "e"
          "e"
          "1:=" "d"
            "4:int0" "1:-"
            "4:int1" "0:"
            "4:int2" "0:"
          "e"
-       "e"_bytes;
+       "e");
 // clang-format on
 const auto h123 = "d9398c597b058ac7e28e3febb76ed68eb8c5b6c369610562ab5f2b596775d73c"_hexbytes;
 
 TEST_CASE("config message example 1", "[config][example]") {
-    /// This is the "Ordinary update" example described in docs/config-merge-logic.md
+    /// This is the "Ordinary update" example described in docs/api/docs/config-merge-logic.md
     MutableConfigMessage m118{118, 5};
     CHECK(m118.seqno() == 118);
     CHECK(m118.lag == 5);
@@ -556,24 +556,24 @@ TEST_CASE("config message example 1", "[config][example]") {
 
     CHECK(printable(m118.serialize()) == printable(m118_expected));
 
-    CHECK(view_hex(m118.hash()) == to_hex(blake2b(m118_expected)));
+    CHECK(to_hex(m118.hash()) == to_hex(blake2b(m118_expected)));
 
     // Increment 5 times so that our diffs will be empty.
     auto m123 = m118.increment();
     CHECK(m123.seqno() == 119);
-    CHECK(view_hex(m123.hash()) == to_hex(h119));
+    CHECK(to_hex(m123.hash()) == to_hex(h119));
 
     m123 = m123.increment();
     CHECK(m123.seqno() == 120);
-    CHECK(view_hex(m123.hash()) == to_hex(h120));
+    CHECK(to_hex(m123.hash()) == to_hex(h120));
 
     m123 = m123.increment();
     CHECK(m123.seqno() == 121);
-    CHECK(view_hex(m123.hash()) == to_hex(h121));
+    CHECK(to_hex(m123.hash()) == to_hex(h121));
 
     m123 = m123.increment();
     CHECK(m123.seqno() == 122);
-    CHECK(view_hex(m123.hash()) == to_hex(h122));
+    CHECK(to_hex(m123.hash()) == to_hex(h122));
 
     m123 = m123.increment();
 
@@ -589,7 +589,7 @@ TEST_CASE("config message deserialization", "[config][deserialization]") {
     ConfigMessage m{m123_expected};
 
     CHECK(m.seqno() == 123);
-    CHECK(view_hex(m.hash()) == to_hex(h123));
+    CHECK(to_hex(m.hash()) == to_hex(h123));
     CHECK(m.diff() == oxenc::bt_dict{
         {"int0"s, "-"s},
         {"int1"s, ""s},
@@ -607,7 +607,7 @@ TEST_CASE("config message deserialization", "[config][deserialization]") {
     // increment()
     MutableConfigMessage mut{m123_expected};
     CHECK(mut.seqno() == 124);
-    CHECK(view_hex(mut.hash()) == "3ea36410cf7086ce816eb193b0c94e88632abfb75771d82f8ddb3a909124c580");
+    CHECK(to_hex(mut.hash()) == "3ea36410cf7086ce816eb193b0c94e88632abfb75771d82f8ddb3a909124c580");
     CHECK(mut.diff() == oxenc::bt_dict{});
     CHECK_FALSE(mut.merged());
     CHECK_FALSE(mut.verified_signature());
@@ -640,12 +640,12 @@ TEST_CASE("config message deserialization", "[config][deserialization]") {
             "7:string2" "7:goodbye"
           "e"
           "1:<" "l"
-            "l" "i120e" "32:"_bytes+h120+ "de" "e"
-            "l" "i121e" "32:"_bytes+h121+ "de" "e"
-            "l" "i122e" "32:"_bytes+h122+ "de" "e"
+            "l" "i120e" "32:"+to_string(h120)+ "de" "e"
+            "l" "i121e" "32:"+to_string(h121)+ "de" "e"
+            "l" "i122e" "32:"+to_string(h122)+ "de" "e"
             "l"
               "i123e"
-              "32:"_bytes+h123+
+              "32:"+to_string(h123)+
               "d"
                 "4:int0" "1:-"
                 "4:int1" "0:"
@@ -654,7 +654,7 @@ TEST_CASE("config message deserialization", "[config][deserialization]") {
             "e"
           "e"
           "1:=" "de"
-        "e"_bytes));
+        "e"));
     // clang-format on
 }
 
@@ -723,7 +723,7 @@ const auto h124 = "8b73f316178765b9b3b37168e865c84bb5a78610cbb59b84d0fa4d3b4b3c1
 
 TEST_CASE("config message example 2", "[config][example]") {
     /// This is the "Large, but still ordinary, update" example described in
-    /// docs/config-merge-logic.md
+    /// docs/api/docs/config-merge-logic.md
     MutableConfigMessage m{m123_expected};
     REQUIRE(m.seqno() == 124);
 
@@ -755,12 +755,12 @@ TEST_CASE("config message example 2", "[config][example]") {
             "7:string3" "3:omg"
           "e"
           "1:<" "l"
-            "l" "i120e" "32:"_bytes+h120+ "de" "e"
-            "l" "i121e" "32:"_bytes+h121+ "de" "e"
-            "l" "i122e" "32:"_bytes+h122+ "de" "e"
+            "l" "i120e" "32:"+to_string(h120)+ "de" "e"
+            "l" "i121e" "32:"+to_string(h121)+ "de" "e"
+            "l" "i122e" "32:"+to_string(h122)+ "de" "e"
             "l"
               "i123e"
-              "32:"_bytes+blake2b(m123_expected)+
+              "32:"+to_string(blake2b(m123_expected))+
               "d"
                 "4:int0" "1:-"
                 "4:int1" "0:"
@@ -800,17 +800,17 @@ TEST_CASE("config message example 2", "[config][example]") {
             "7:string2" "0:"
             "7:string3" "0:"
           "e"
-        "e"_bytes));
+        "e"));
     // clang-format on
 
-    CHECK(view_hex(m.hash()) == to_hex(h124));
+    CHECK(to_hex(m.hash()) == to_hex(h124));
 }
 
 const auto h125a = "80f229c3667de6d0fa6f96b53118e097fbda82db3ca1aea221a3db91ea9c45fb"_hexbytes;
 const auto h125b = "ab12f0efe9a9ed00db6b17b44ae0ff36b9f49094077fb114f415522f2a0e98de"_hexbytes;
 
 // clang-format off
-const auto m126_expected =
+const auto m126_expected = to_vector(
     "d"
       "1:#" "i126e"
       "1:&" "d"
@@ -834,10 +834,10 @@ const auto m126_expected =
         "7:string3" "3:omg"
       "e"
       "1:<" "l"
-        "l" "i122e" "32:"_bytes+h122+ "de" "e"
+        "l" "i122e" "32:"+to_string(h122)+ "de" "e"
         "l"
           "i123e"
-          "32:"_bytes+h123+
+          "32:"+to_string(h123)+
           "d"
             "4:int0" "1:-"
             "4:int1" "0:"
@@ -846,7 +846,7 @@ const auto m126_expected =
         "e"
         "l"
           "i124e"
-          "32:"_bytes+h124+
+          "32:"+to_string(h124)+
           "d"
             "5:dictA" "d"
               "7:goodbye" "l" "l" "i123e" "i456e" "e" "le" "e"
@@ -882,7 +882,7 @@ const auto m126_expected =
         "e"
         "l"
           "i125e"
-          "32:"_bytes+h125a+
+          "32:"+to_string(h125a)+
           "d"
             "5:dictB" "d"
               "3:foo" "1:-"
@@ -891,22 +891,23 @@ const auto m126_expected =
         "e"
         "l"
           "i125e"
-          "32:"_bytes+h125b+
+          "32:"+to_string(h125b)+
           "d" "4:int1" "0:" "e"
         "e"
       "e"
       "1:=" "de"
-    "e"_bytes;
+    "e");
 // clang-format on
 
 TEST_CASE("config message example 3 - simple conflict", "[config][example][conflict]") {
-    /// This is the "Simple conflict resolution" example described in docs/config-merge-logic.md
+    /// This is the "Simple conflict resolution" example described in docs/api/
+    /// docs/config-merge-logic.md
     MutableConfigMessage m124{m123_expected};
     REQUIRE(m124.seqno() == 124);
 
     updates_124(m124);
 
-    REQUIRE(view_hex(m124.hash()) == to_hex(h124));
+    REQUIRE(to_hex(m124.hash()) == to_hex(h124));
 
     auto m125_a = m124.increment();
     REQUIRE(m125_a.seqno() == 125);
@@ -916,8 +917,8 @@ TEST_CASE("config message example 3 - simple conflict", "[config][example][confl
     REQUIRE(m125_b.seqno() == 125);
     m125_b.data()["int1"] = 5;
 
-    REQUIRE(view_hex(m125_a.hash()) == to_hex(h125a));
-    REQUIRE(view_hex(m125_b.hash()) == to_hex(h125b));
+    REQUIRE(to_hex(m125_a.hash()) == to_hex(h125a));
+    REQUIRE(to_hex(m125_b.hash()) == to_hex(h125b));
     REQUIRE(m125_a.hash() < m125_b.hash());
 
     ConfigMessage m{{m125_a.serialize(), m125_b.serialize()}};
@@ -959,7 +960,7 @@ TEST_CASE("config message example 3 - simple conflict", "[config][example][confl
 
 TEST_CASE("config message example 4 - complex conflict resolution", "[config][example][conflict]") {
     /// This is the "Complex conflict resolution" example described in
-    /// docs/config-merge-logic.md
+    /// docs/api/docs/config-merge-logic.md
 
     ConfigMessage m123{m123_expected};
 
@@ -971,7 +972,7 @@ TEST_CASE("config message example 4 - complex conflict resolution", "[config][ex
     auto m124b = m123.increment();
     updates_124(m124b);
 
-    REQUIRE(view_hex(m124b.hash()) == to_hex(h124));
+    REQUIRE(to_hex(m124b.hash()) == to_hex(h124));
 
     auto m125a = m124b.increment();
     d(m125a.data()["dictB"]).erase("foo");
@@ -1047,7 +1048,7 @@ TEST_CASE("config message example 4 - complex conflict resolution", "[config][ex
           "1:<" "l"
             "l"
               "i123e"
-              "32:"_bytes+h123+
+              "32:"+to_string(h123)+
               "d"
                 "4:int0" "1:-"
                 "4:int1" "0:"
@@ -1056,7 +1057,7 @@ TEST_CASE("config message example 4 - complex conflict resolution", "[config][ex
             "e"
             "l"
               "i124e"
-              "32:"_bytes+ustring{view(m124a.hash())}+
+              "32:"+to_string(m124a.hash())+
               "d"
                 "5:dictB" "d"
                   "6:answer" "0:"
@@ -1066,7 +1067,7 @@ TEST_CASE("config message example 4 - complex conflict resolution", "[config][ex
             "e"
             "l"
               "i124e"
-              "32:"_bytes+h124+
+              "32:"+to_string(h124)+
               "d"
                 "5:dictA" "d"
                   "7:goodbye" "l" "l" "i123e" "i456e" "e" "le" "e"
@@ -1102,7 +1103,7 @@ TEST_CASE("config message example 4 - complex conflict resolution", "[config][ex
             "e"
             "l"
               "i125e"
-              "32:"_bytes+h125a+
+              "32:"+to_string(h125a)+
               "d"
                 "5:dictB" "d"
                   "3:foo" "1:-"
@@ -1111,18 +1112,18 @@ TEST_CASE("config message example 4 - complex conflict resolution", "[config][ex
             "e"
             "l"
               "i125e"
-              "32:"_bytes+h125b+
+              "32:"+to_string(h125b)+
               "d" "4:int1" "0:" "e"
             "e"
-            "l" "i126e" "32:"_bytes+ustring{view(m126a.hash())}+ "de" "e"
-            "l" "i126e" "32:"_bytes+ustring{view(m126b.hash())}+ "de" "e"
+            "l" "i126e" "32:"+to_string(m126a.hash())+ "de" "e"
+            "l" "i126e" "32:"+to_string(m126b.hash())+ "de" "e"
           "e"
           "1:=" "d"
             "5:dictA" "d"
               "7:goodbye" "l" "li789ee" "le" "e"
             "e"
           "e"
-        "e"_bytes));
+        "e"));
     // clang-format on
 
     ConfigMessage m_alt1{{m127.serialize(), m125a.serialize(), m126b.serialize()}};
