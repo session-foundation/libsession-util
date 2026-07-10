@@ -4,6 +4,7 @@
 extern "C" {
 #endif
 
+#include "../../types.h"
 #include "../base.h"
 #include "../util.h"
 
@@ -108,7 +109,7 @@ LIBSESSION_EXPORT size_t groups_keys_size(const config_group_keys* conf);
 /// API: groups/groups_keys_get_key
 ///
 /// Accesses the Nth encryption key, ordered from most-to-least recent starting from index 0.
-/// Calling this with 0 thus returns the most-current key (which is also the current _en_cryption
+/// Calling this with 0 thus returns the most-current key (which is also the current encryption
 /// key).
 ///
 /// This function is not particularly efficient and is not typically needed except for diagnostics:
@@ -131,6 +132,38 @@ LIBSESSION_EXPORT size_t groups_keys_size(const config_group_keys* conf);
 /// Outputs:
 /// - `const unsigned char*` -- pointer to the 32-byte key, or nullptr if there
 LIBSESSION_EXPORT const unsigned char* groups_keys_get_key(const config_group_keys* conf, size_t N);
+
+/// API: groups/groups_keys_get_keys
+///
+/// Retrieve multiple keys for the group consisting of [offset, offset + dest_size). This function
+/// clamps the `offset` and `dest_size` such that no out-of-bounds reads are executed. See
+/// `groups_keys_get_key` for more information on semantics provided by this function.
+///
+/// The returned pointer points at a 32-byte binary value containing the key; it should be copied or
+/// used at once as it may not remain valid past other calls to the keys object.  It should *not* be
+/// freed or modified.
+///
+/// Inputs:
+/// - `conf` -- the groups config object
+/// - `offset` -- the offset to retrieve keys for, ordered from most-to-least recent starting from
+///   offset 0 (e.g. offset=0; dest_size=1, returns the most-current key)
+/// - `dest` -- the buffer to write the loaded keys into
+/// - `dest_size` -- the maximum number of keys that can be written into the buffer
+///
+/// Outputs:
+/// - `size_t` the number of keys that were written to the buffer. This can be less than the
+/// `dest_size` if the user requested a range of keys that is smaller than the given buffer.
+LIBSESSION_EXPORT size_t
+groups_keys_get_keys(const config_group_keys* conf, size_t offset, span_u8* dest, size_t dest_size);
+
+/// API: groups/groups_keys_group_enc_key
+///
+/// Accesses the current encryption key: that is, the most current group decryption key. Returns the
+/// 32 byte private key, or, an empty span if there are no encryption keys at all.
+///
+/// Inputs:
+/// - `conf` -- the groups config object
+LIBSESSION_EXPORT const span_u8 groups_keys_group_enc_key(const config_group_keys* conf);
 
 /// API: groups/groups_keys_is_admin
 ///
@@ -246,7 +279,7 @@ LIBSESSION_EXPORT bool groups_keys_load_message(
         config_object* info,
         config_object* members) LIBSESSION_WARN_UNUSED;
 
-/// API: groups/groups_keys_current_hashes
+/// API: groups/groups_keys_active_hashes
 ///
 /// Returns the hashes of currently active keys messages, that is, messages that have a decryption
 /// key that new devices or clients might require; these are the messages that should have their
@@ -258,7 +291,7 @@ LIBSESSION_EXPORT bool groups_keys_load_message(
 /// Outputs:
 /// - `config_string_list*` -- pointer to an array of message hashes.  The returned pointer belongs
 ///   to the caller and must be free()d when done.
-LIBSESSION_EXPORT config_string_list* groups_keys_current_hashes(const config_group_keys* conf);
+LIBSESSION_EXPORT config_string_list* groups_keys_active_hashes(const config_group_keys* conf);
 
 /// API: groups/groups_keys_needs_rekey
 ///
@@ -328,12 +361,12 @@ LIBSESSION_EXPORT void groups_keys_dump(
 ///   not leak the message memory (but only if the function returns true).
 /// - `message_len` -- pointer to a `size_t` that will be set to the length of the `message` buffer.
 ///
-/// Oututs:
+/// Outputs:
 /// - `true` and sets `*message` and `*message_len` on success; returns `false` and does not set
 ///   them on failure.
 LIBSESSION_EXPORT bool groups_keys_key_supplement(
         config_group_keys* conf,
-        const char** sids,
+        const char* const* sids,
         size_t sids_len,
         unsigned char** message,
         size_t* message_len);
@@ -345,7 +378,7 @@ LIBSESSION_EXPORT bool groups_keys_key_supplement(
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 ///
-/// Oututs:
+/// Outputs:
 /// - `int` -- latest keys generation number
 LIBSESSION_EXPORT int groups_keys_current_generation(config_group_keys* conf);
 

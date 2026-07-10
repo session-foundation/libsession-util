@@ -1,7 +1,8 @@
 
 add_library(common INTERFACE)
 target_link_libraries(common INTERFACE
-    oxenc::oxenc)
+    oxenc::oxenc
+    oxen::logging)
 
 target_include_directories(common INTERFACE ../include)
 if(WARNINGS_AS_ERRORS)
@@ -34,18 +35,15 @@ macro(add_libsession_util_library name)
 endmacro()
 
 
-if(NOT BUILD_STATIC_DEPS)
-    find_package(PkgConfig REQUIRED)
 
-    if(NOT TARGET nettle)
-        pkg_check_modules(NETTLE nettle IMPORTED_TARGET REQUIRED)
-        add_library(nettle INTERFACE IMPORTED)
-        target_link_libraries(nettle INTERFACE PkgConfig::NETTLE)
-    endif()
-endif()
-
+add_libsession_util_library(util
+    file.cpp
+    logging.cpp
+    util.cpp
+)
 
 add_libsession_util_library(crypto
+    attachments.cpp
     blinding.cpp
     curve25519.cpp
     ed25519.cpp
@@ -53,8 +51,11 @@ add_libsession_util_library(crypto
     multi_encrypt.cpp
     random.cpp
     session_encrypt.cpp
-    util.cpp
+    session_protocol.cpp
+    sodium_array.cpp
     xed25519.cpp
+    pro_backend.cpp
+    types.cpp
 )
 
 add_libsession_util_library(config
@@ -70,7 +71,9 @@ add_libsession_util_library(config
     config/groups/keys.cpp
     config/groups/members.cpp
     config/internal.cpp
+    config/local.cpp
     config/protos.cpp
+    config/pro.cpp
     config/user_groups.cpp
     config/user_profile.cpp
     fields.cpp
@@ -78,43 +81,84 @@ add_libsession_util_library(config
 
 
 
-target_link_libraries(crypto
+target_link_libraries(util
     PUBLIC
     common
+    oxen::logging
+    libzstd::static
+    simdutf
+)
+
+target_link_libraries(crypto
+    PUBLIC
+    util
     PRIVATE
     libsodium::sodium-internal
+    nlohmann_json::nlohmann_json
+    libsession::protos
 )
 
 target_link_libraries(config
     PUBLIC
     crypto
-    common
     libsession::protos
     PRIVATE
     libsodium::sodium-internal
-    libzstd::static
 )
 
-if(ENABLE_ONIONREQ)
-    add_libsession_util_library(onionreq
+if(ENABLE_NETWORKING)
+    # libevent
+    if(NOT TARGET libevent::core)
+        add_library(libevent_core INTERFACE)
+        pkg_check_modules(LIBEVENT_core libevent_core>=2.1 IMPORTED_TARGET REQUIRED)
+        target_link_libraries(libevent_core INTERFACE PkgConfig::LIBEVENT_core)
+        add_library(libevent::core ALIAS libevent_core)
+    endif()
+
+    add_libsession_util_library(network
         onionreq/builder.cpp
         onionreq/hop_encryption.cpp
-        onionreq/key_types.cpp
         onionreq/parser.cpp
         onionreq/response_parser.cpp
+        network/key_types.cpp
+        network/network_config.cpp
+        network/request_queue.cpp
+        network/service_node.cpp
+        network/session_network_internal.cpp
+        network/session_network_types.cpp
+        network/session_network.cpp
+        network/snode_pool.cpp
+        network/swarm.cpp
+        network/backends/session_file_server.cpp
+        network/backends/session_open_group_server.cpp
+        network/transport/quic_transport.cpp
+        network/routing/direct_router.cpp
+        network/routing/onion_request_router.cpp
     )
 
-    target_link_libraries(onionreq
+    target_link_libraries(network
         PUBLIC
         crypto
-        common
+        quic
         PRIVATE
         nlohmann_json::nlohmann_json
         libsodium::sodium-internal
-        nettle
+        nettle::nettle
+        date::date
+        libevent::core
     )
-endif()
 
+    if(ENABLE_NETWORKING_SROUTER)
+        target_sources(network
+            PRIVATE
+            network/routing/session_router_router.cpp)
+        target_link_libraries(network PUBLIC session-router::libsessionrouter)
+    endif()
+
+    if (BUILD_STATIC_DEPS)
+        target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
+    endif()
+endif()
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
     # GCC 11 has an overzealous (and false) stringop-overread warning, but only when LTO is off.
@@ -122,6 +166,14 @@ if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
     target_compile_options(config PUBLIC -Wno-error=stringop-overread)
 endif()
 
+# GCC's stringop overflow and overread warnings are very buggy, producing false positives for all
+# sorts of valid things, so make sure we don't have -Werror for them.  We cap this check for now at
+# 15 (where these still occur in the latest gcc snapshot) with the vain hope that maybe they'll get
+# fixed for gcc 16.
+if(WARNINGS_AS_ERRORS AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+        CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 12.0.0 AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 16.0.0)
+    target_compile_options(crypto PUBLIC -Wno-error=stringop-overflow -Wno-error=stringop-overread)
+endif()
 
 if(LIBSESSION_UTIL_VERSIONTAG)
     set(PROJECT_VERSION_TAG "${LIBSESSION_UTIL_VERSIONTAG}")

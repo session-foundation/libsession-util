@@ -26,13 +26,13 @@ using namespace std::literals;
 /// p - group profile url
 /// q - group profile decryption key (binary)
 
-class Info final : public ConfigBase {
+class Info : public ConfigBase {
 
   public:
     /// Limits for the name & description strings, in bytes.  If longer, we truncate to these
     /// lengths:
     static constexpr size_t NAME_MAX_LENGTH = 100;  // same as base_group_info::NAME_MAX_LENGTH
-    static constexpr size_t DESCRIPTION_MAX_LENGTH = 2000;
+    static constexpr size_t DESCRIPTION_MAX_LENGTH = 600;
 
     // No default constructor
     Info() = delete;
@@ -55,9 +55,9 @@ class Info final : public ConfigBase {
     ///   push config changes.
     /// - `dumped` -- either `std::nullopt` to construct a new, empty object; or binary state data
     ///   that was previously dumped from an instance of this class by calling `dump()`.
-    Info(ustring_view ed25519_pubkey,
-         std::optional<ustring_view> ed25519_secretkey,
-         std::optional<ustring_view> dumped);
+    Info(std::span<const unsigned char> ed25519_pubkey,
+         std::optional<std::span<const unsigned char>> ed25519_secretkey,
+         std::optional<std::span<const unsigned char>> dumped);
 
     /// API: groups/Info::storage_namespace
     ///
@@ -124,7 +124,7 @@ class Info final : public ConfigBase {
     ///
     /// Returns the group description, or std::nullopt if there is no group description set.
     ///
-    /// If given a description longer than `Info::DESCRIPTION_MAX_LENGTH` (2000) bytes it will be
+    /// If given a description longer than `Info::DESCRIPTION_MAX_LENGTH` bytes it will be
     /// truncated.
     ///
     /// Inputs: None
@@ -174,7 +174,7 @@ class Info final : public ConfigBase {
     ///
     /// Declaration:
     /// ```cpp
-    /// void set_profile_pic(std::string_view url, ustring_view key);
+    /// void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     /// void set_profile_pic(profile_pic pic);
     /// ```
     ///
@@ -184,7 +184,7 @@ class Info final : public ConfigBase {
     ///    - `key` -- Decryption key
     /// - Second function:
     ///    - `pic` -- Profile pic object
-    void set_profile_pic(std::string_view url, ustring_view key);
+    void set_profile_pic(std::string_view url, std::span<const unsigned char> key);
     void set_profile_pic(profile_pic pic);
 
     /// API: groups/Info::set_expiry_timer
@@ -236,11 +236,11 @@ class Info final : public ConfigBase {
     /// API: groups/Info::set_delete_before
     ///
     /// Sets a "delete before" unix timestamp: this instructs clients to delete all messages from
-    /// the closed group history with a timestamp earlier than this value.  Returns nullopt if no
+    /// the group history with a timestamp earlier than this value.  Returns nullopt if no
     /// delete-before timestamp is set.
     ///
-    /// The given value is not checked for sanity (e.g. if you pass milliseconds it will be
-    /// interpreted as deleting everything for the next 50000+ years).  Be careful!
+    /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
+    /// interpreted as such)
     ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete messages.  Pass 0
@@ -250,7 +250,7 @@ class Info final : public ConfigBase {
     /// API: groups/Info::get_delete_before
     ///
     /// Returns the delete-before unix timestamp (seconds) for the group; clients should delete all
-    /// messages from the closed group with timestamps earlier than this value, if set.
+    /// messages from the group with timestamps earlier than this value, if set.
     ///
     /// Returns std::nullopt if no delete-before timestamp is set.
     ///
@@ -267,8 +267,8 @@ class Info final : public ConfigBase {
     /// that) from any messages older than the given timestamp.  Returns nullopt if no
     /// delete-attachments-before timestamp is set.
     ///
-    /// The given value is not checked for sanity (e.g. if you pass milliseconds it will be
-    /// interpreted as deleting all attachments for the next 50000+ years).  Be careful!
+    /// The given value is checked for sanity (e.g. if you pass milliseconds it will be
+    /// interpreted as such)
     ///
     /// Inputs:
     /// - `timestamp` -- the new unix timestamp before which clients should delete attachments. Pass
@@ -279,7 +279,7 @@ class Info final : public ConfigBase {
     /// API: groups/Info::get_delete_attach_before
     ///
     /// Returns the delete-attachments-before unix timestamp (seconds) for the group; clients should
-    /// delete all messages from the closed group with timestamps earlier than this value, if set.
+    /// delete all messages from the group with timestamps earlier than this value, if set.
     ///
     /// Returns std::nullopt if no delete-attachments-before timestamp is set.
     ///

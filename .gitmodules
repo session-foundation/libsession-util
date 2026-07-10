@@ -1,9 +1,6 @@
-[submodule "external/oxen-encoding"]
-	path = external/oxen-encoding
-	url = https://github.com/oxen-io/oxen-encoding.git
 [submodule "external/libsodium-internal"]
     path = external/libsodium-internal
-    url = https://github.com/jagerman/libsodium-internal.git
+    url = https://github.com/session-foundation/libsodium-internal.git
 [submodule "tests/Catch2"]
 	path = tests/Catch2
 	url = https://github.com/catchorg/Catch2
@@ -13,9 +10,15 @@
 [submodule "external/zstd"]
 	path = external/zstd
 	url = https://github.com/facebook/zstd.git
-[submodule "external/nlohmann-json"]
-	path = external/nlohmann-json
-	url = https://github.com/nlohmann/json.git
 [submodule "external/protobuf"]
 	path = external/protobuf
 	url = https://github.com/protocolbuffers/protobuf.git
+[submodule "external/session-router"]
+	path = external/session-router
+	url = https://github.com/session-foundation/session-router.git
+[submodule "external/simdutf"]
+	path = external/simdutf
+	url = https://github.com/simdutf/simdutf.git
+[submodule "external/date"]
+	path = external/date
+	url = https://github.com/HowardHinnant/date.git

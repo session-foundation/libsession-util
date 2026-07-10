@@ -23,7 +23,8 @@ community::community(std::string_view base_url_, std::string_view room_) {
     set_room(std::move(room_));
 }
 
-community::community(std::string_view base_url, std::string_view room, ustring_view pubkey_) :
+community::community(
+        std::string_view base_url, std::string_view room, std::span<const unsigned char> pubkey_) :
         community{base_url, room} {
     set_pubkey(pubkey_);
 }
@@ -45,10 +46,10 @@ void community::set_base_url(std::string_view new_url) {
     base_url_ = canonical_url(new_url);
 }
 
-void community::set_pubkey(ustring_view pubkey) {
+void community::set_pubkey(std::span<const unsigned char> pubkey) {
     if (pubkey.size() != 32)
         throw std::invalid_argument{"Invalid pubkey: expected a 32-byte pubkey"};
-    pubkey_ = pubkey;
+    pubkey_.assign(pubkey.begin(), pubkey.end());
 }
 void community::set_pubkey(std::string_view pubkey) {
     pubkey_ = decode_pubkey(pubkey);
@@ -79,74 +80,13 @@ std::string community::full_url() const {
 }
 
 std::string community::full_url(
-        std::string_view base_url, std::string_view room, ustring_view pubkey) {
+        std::string_view base_url, std::string_view room, std::span<const unsigned char> pubkey) {
     std::string url{base_url};
     url += '/';
     url += room;
     url += qs_pubkey;
     url += oxenc::to_hex(pubkey);
     return url;
-}
-
-// returns protocol, host, port.  Port can be empty; throws on unparseable values.  protocol and
-// host get normalized to lower-case.  Port will be 0 if not present in the URL, or if set to
-// the default for the protocol. The URL must not include a path (though a single optional `/`
-// after the domain is accepted and ignored).
-std::tuple<std::string, std::string, uint16_t> parse_url(std::string_view url) {
-    std::tuple<std::string, std::string, uint16_t> result{};
-    auto& [proto, host, port] = result;
-    if (auto pos = url.find("://"); pos != std::string::npos) {
-        auto proto_name = url.substr(0, pos);
-        url.remove_prefix(proto_name.size() + 3);
-        if (string_iequal(proto_name, "http"))
-            proto = "http://";
-        else if (string_iequal(proto_name, "https"))
-            proto = "https://";
-    }
-    if (proto.empty())
-        throw std::invalid_argument{"Invalid community URL: invalid/missing protocol://"};
-
-    bool next_allow_dot = false;
-    bool has_dot = false;
-    while (!url.empty()) {
-        auto c = url.front();
-        if ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == '-') {
-            host += c;
-            next_allow_dot = true;
-        } else if (c >= 'A' && c <= 'Z') {
-            host += c + ('a' - 'A');
-            next_allow_dot = true;
-        } else if (next_allow_dot && c == '.') {
-            host += '.';
-            has_dot = true;
-            next_allow_dot = false;
-        } else {
-            break;
-        }
-        url.remove_prefix(1);
-    }
-    if (host.size() < 4 || !has_dot || host.back() == '.')
-        throw std::invalid_argument{"Invalid community URL: invalid hostname"};
-
-    if (!url.empty() && url.front() == ':') {
-        url.remove_prefix(1);
-        if (auto [p, ec] = std::from_chars(url.data(), url.data() + url.size(), port);
-            ec == std::errc{})
-            url.remove_prefix(p - url.data());
-        else
-            throw std::invalid_argument{"Invalid community URL: invalid port"};
-        if ((port == 80 && proto == "http://") || (port == 443 && proto == "https://"))
-            port = 0;
-    }
-
-    if (!url.empty() && url.front() == '/')
-        url.remove_prefix(1);
-
-    // We don't (currently) allow a /path in a community URL
-    if (!url.empty())
-        throw std::invalid_argument{"Invalid community URL: found unexpected trailing value"};
-
-    return result;
 }
 
 void community::canonicalize_url(std::string& url) {
@@ -168,14 +108,17 @@ void community::canonicalize_room(std::string& room) {
 }
 
 std::string community::canonical_url(std::string_view url) {
-    const auto& [proto, host, port] = parse_url(url);
+    const auto& [proto, host, port, path] = parse_url(url);
     std::string result;
     result += proto;
     result += host;
-    if (port != 0) {
+    if (port) {
         result += ':';
-        result += std::to_string(port);
+        result += std::to_string(*port);
     }
+    // We don't (currently) allow a /path in a community URL
+    if (path)
+        throw std::invalid_argument{"Invalid community URL: found unexpected trailing value"};
     if (result.size() > BASE_URL_MAX_LENGTH)
         throw std::invalid_argument{"Invalid community URL: base URL is too long"};
     return result;
@@ -187,9 +130,9 @@ std::string community::canonical_room(std::string_view room) {
     return r;
 }
 
-std::tuple<std::string, std::string, std::optional<ustring>> community::parse_partial_url(
-        std::string_view url) {
-    std::tuple<std::string, std::string, std::optional<ustring>> result;
+std::tuple<std::string, std::string, std::optional<std::vector<unsigned char>>>
+community::parse_partial_url(std::string_view url) {
+    std::tuple<std::string, std::string, std::optional<std::vector<unsigned char>>> result;
     auto& [base_url, room_token, maybe_pubkey] = result;
 
     // Consume the URL from back to front; first the public key:
@@ -213,7 +156,8 @@ std::tuple<std::string, std::string, std::optional<ustring>> community::parse_pa
     return result;
 }
 
-std::tuple<std::string, std::string, ustring> community::parse_full_url(std::string_view full_url) {
+std::tuple<std::string, std::string, std::vector<unsigned char>> community::parse_full_url(
+        std::string_view full_url) {
     auto [base, rm, maybe_pk] = parse_partial_url(full_url);
     if (!maybe_pk)
         throw std::invalid_argument{"Invalid community URL: no valid server pubkey"};
@@ -271,9 +215,8 @@ LIBSESSION_C_API bool community_parse_partial_url(
 
 LIBSESSION_C_API void community_make_full_url(
         const char* base_url, const char* room, const unsigned char* pubkey, char* full_url) {
-    auto full =
-            session::config::community::full_url(base_url, room, session::ustring_view{pubkey, 32});
+    auto full = session::config::community::full_url(
+            base_url, room, std::span<const unsigned char>{pubkey, 32});
     assert(full.size() <= COMMUNITY_FULL_URL_MAX_LENGTH);
-    size_t pos = 0;
     std::memcpy(full_url, full.data(), full.size() + 1);
 }

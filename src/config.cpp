@@ -4,7 +4,6 @@
 #include <oxenc/bt_serialize.h>
 #include <oxenc/bt_value_producer.h>
 #include <oxenc/endian.h>
-#include <oxenc/variant.h>
 #include <sodium/crypto_aead_xchacha20poly1305.h>
 #include <sodium/crypto_generichash_blake2b.h>
 
@@ -51,7 +50,7 @@ namespace {
         return {s.empty(), false};
     }
     std::pair<bool, bool> prune_(dict_value& v) {
-        return var::visit([](auto& x) { return prune_(x); }, unwrap(v));
+        return std::visit([](auto& x) { return prune_(x); }, unwrap(v));
     }
 
     // diff helper functions
@@ -79,9 +78,9 @@ namespace {
 
         oxenc::bt_list additions, removals;
         for (auto& a : added)
-            var::visit([&additions](auto& x) { additions.emplace_back(std::move(x)); }, a);
+            std::visit([&additions](auto& x) { additions.emplace_back(std::move(x)); }, a);
         for (auto& r : removed)
-            var::visit([&removals](auto& x) { removals.emplace_back(std::move(x)); }, r);
+            std::visit([&removals](auto& x) { removals.emplace_back(std::move(x)); }, r);
 
         return oxenc::bt_list{{std::move(additions)}, {std::move(removals)}};
     }
@@ -92,7 +91,6 @@ namespace {
 
         auto oldit = old.begin(), newit = new_.begin();
         while (oldit != old.end() || newit != new_.end()) {
-            bool is_new = false;
             if (oldit == old.end() || (newit != new_.end() && newit->first < oldit->first)) {
                 // newit is a new item; fall through to handle below
 
@@ -117,19 +115,18 @@ namespace {
                 if (o.index() != n.index()) {
                     // The fundamental type (scalar, dict, set) changed, so we'll treat this as a
                     // new value (which implicitly deletes a value of a wrong type when merging).
-                    is_new = true;
                     ++oldit;
                     // fall through to handler below
 
                 } else {
                     const auto& key = newit->first;
                     if (auto* ov = std::get_if<scalar>(&o)) {
-                        if (*ov != var::get<scalar>(n))
+                        if (*ov != std::get<scalar>(n))
                             df[key] = ""sv;
                     } else if (auto* dv = std::get_if<dict>(&o)) {
-                        if (auto subdiff = diff_impl(*dv, var::get<dict>(n)))
+                        if (auto subdiff = diff_impl(*dv, std::get<dict>(n)))
                             df[key] = std::move(*subdiff);
-                    } else if (auto subdiff = diff_impl(var::get<set>(o), var::get<set>(n))) {
+                    } else if (auto subdiff = diff_impl(std::get<set>(o), std::get<set>(n))) {
                         df[key] = std::move(*subdiff);
                     }
                     ++oldit;
@@ -165,9 +162,9 @@ namespace {
     // Gets a string_view if the type is a string or string_view, nullopt otherwise.
     constexpr std::optional<std::string_view> get_bt_str(const oxenc::bt_value& v) {
         if (std::holds_alternative<std::string>(v))
-            return var::get<std::string>(v);
+            return std::get<std::string>(v);
         if (std::holds_alternative<std::string_view>(v))
-            return var::get<std::string_view>(v);
+            return std::get<std::string_view>(v);
         return std::nullopt;
     }
 
@@ -248,7 +245,7 @@ namespace {
     void serialize_data(oxenc::bt_list_producer&& out, const set& s);
     void serialize_data(oxenc::bt_dict_producer&& out, const dict& d) {
         for (const auto& pair : d) {
-            var::visit(
+            std::visit(
                     [&](const auto& v) {
                         auto& k = pair.first;
                         using T = std::remove_cv_t<std::remove_reference_t<decltype(v)>>;
@@ -257,7 +254,7 @@ namespace {
                         else if constexpr (std::is_same_v<T, set>)
                             serialize_data(out.append_list(k), v);
                         else
-                            var::visit(
+                            std::visit(
                                     [&](const auto& scalar) { out.append(pair.first, scalar); }, v);
                     },
                     unwrap(pair.second));
@@ -265,7 +262,7 @@ namespace {
     }
     void serialize_data(oxenc::bt_list_producer&& out, const set& s) {
         for (auto& val : s)
-            var::visit([&](const auto& scalar) { out.append(scalar); }, val);
+            std::visit([&](const auto& scalar) { out.append(scalar); }, val);
     }
 
     void parse_data(set& s, oxenc::bt_list_consumer in);
@@ -282,10 +279,10 @@ namespace {
                 d.emplace_hint(d.end(), std::move(key), in.consume_integer<int64_t>());
             else if (in.is_dict()) {
                 auto it = d.emplace_hint(d.end(), std::move(key), dict{});
-                parse_data(var::get<dict>(it->second), in.consume_dict_consumer());
+                parse_data(std::get<dict>(it->second), in.consume_dict_consumer());
             } else if (in.is_list()) {
                 auto it = d.emplace_hint(d.end(), std::move(key), set{});
-                parse_data(var::get<set>(it->second), in.consume_list_consumer());
+                parse_data(std::get<set>(it->second), in.consume_list_consumer());
             } else {
                 throw oxenc::bt_deserialize_invalid{"Data contains invalid bencoded value type"};
             }
@@ -348,7 +345,7 @@ namespace {
         return std::string_view{reinterpret_cast<const char*>(hash.data()), hash.size()};
     }
 
-    hash_t& hash_msg(hash_t& into, ustring_view serialized) {
+    hash_t& hash_msg(hash_t& into, std::span<const unsigned char> serialized) {
         crypto_generichash_blake2b(
                 into.data(), into.size(), serialized.data(), serialized.size(), nullptr, 0);
         return into;
@@ -388,7 +385,7 @@ namespace {
                 if (*scalar_diff == "-")
                     data.erase(k);
                 else if (*scalar_diff == "")
-                    data[k] = var::get<scalar>(source_val);
+                    data[k] = std::get<scalar>(source_val);
                 else
                     throw config_error{
                             "Invalid diff value to apply at key " + k + ": expected '' or '-'"};
@@ -399,23 +396,23 @@ namespace {
                     // with an empty dict.
                     subdict = dict{};
 
-                apply_diff(var::get<dict>(subdict), *dict_diff, var::get<dict>(source_val));
+                apply_diff(std::get<dict>(subdict), *dict_diff, std::get<dict>(source_val));
             } else if (set_diff) {
                 auto& elem = data[k];
                 if (!std::holds_alternative<set>(elem))
                     // If not a list (or new) replace with a new empty list
                     elem = set{};
 
-                auto& subset = var::get<set>(elem);
+                auto& subset = std::get<set>(elem);
 
-                for (const auto& added : var::get<oxenc::bt_list>(*set_diff->begin())) {
+                for (const auto& added : std::get<oxenc::bt_list>(*set_diff->begin())) {
                     if (auto s = get_bt_scalar(added))
                         subset.insert(std::move(*s));
                     else
                         throw config_error{"Invalid set diff added value: expected int or scalar"};
                 }
                 for (const auto& removed :
-                     var::get<oxenc::bt_list>(*std::next(set_diff->begin()))) {
+                     std::get<oxenc::bt_list>(*std::next(set_diff->begin()))) {
                     if (auto s = get_bt_scalar(removed))
                         subset.erase(*s);
                     else
@@ -431,23 +428,22 @@ namespace {
 
 void verify_config_sig(
         oxenc::bt_dict_consumer dict,
-        ustring_view config_msg,
         const ConfigMessage::verify_callable& verifier,
         std::optional<std::array<unsigned char, 64>>* verified_signature,
         bool trust_signature) {
-    ustring_view to_verify, sig;
     if (dict.skip_until("~")) {
-        dict.consume_signature([&](ustring_view to_verify, ustring_view sig) {
-            if (sig.size() != 64)
-                throw signature_error{"Config signature is invalid (not 64B)"};
-            if (verifier && !verifier(to_verify, sig))
-                throw signature_error{"Config signature failed verification"};
-            if (verified_signature && (verifier || trust_signature)) {
-                if (!*verified_signature)
-                    verified_signature->emplace();
-                std::memcpy((*verified_signature)->data(), sig.data(), 64);
-            }
-        });
+        dict.consume_signature(
+                [&](std::span<const unsigned char> to_verify, std::span<const unsigned char> sig) {
+                    if (sig.size() != 64)
+                        throw signature_error{"Config signature is invalid (not 64B)"};
+                    if (verifier && !verifier(to_verify, sig))
+                        throw signature_error{"Config signature failed verification"};
+                    if (verified_signature && (verifier || trust_signature)) {
+                        if (!*verified_signature)
+                            verified_signature->emplace();
+                        std::memcpy((*verified_signature)->data(), sig.data(), 64);
+                    }
+                });
     } else if (verifier) {
         throw missing_signature{"Config signature is missing"};
     }
@@ -527,14 +523,14 @@ ConfigMessage::ConfigMessage() {
 }
 
 ConfigMessage::ConfigMessage(
-        ustring_view serialized,
+        std::span<const unsigned char> serialized,
         verify_callable verifier_,
         sign_callable signer_,
         int lag,
         bool trust_signature) :
         verifier{std::move(verifier_)}, signer{std::move(signer_)}, lag{lag} {
 
-    oxenc::bt_dict_consumer dict{from_unsigned_sv(serialized)};
+    oxenc::bt_dict_consumer dict{serialized};
 
     try {
         hash_msg(seqno_hash_.second, serialized);
@@ -558,14 +554,14 @@ ConfigMessage::ConfigMessage(
 
         load_unknowns(unknown_, dict, "=", "~");
 
-        verify_config_sig(dict, serialized, verifier, &verified_signature_, trust_signature);
+        verify_config_sig(dict, verifier, &verified_signature_, trust_signature);
     } catch (const oxenc::bt_deserialize_invalid& err) {
         throw config_parse_error{"Failed to parse config file: "s + err.what()};
     }
 }
 
 ConfigMessage::ConfigMessage(
-        const std::vector<ustring_view>& serialized_confs,
+        const std::vector<std::span<const unsigned char>>& serialized_confs,
         verify_callable verifier_,
         sign_callable signer_,
         int lag,
@@ -592,12 +588,12 @@ ConfigMessage::ConfigMessage(
 
     // prune out redundant messages (i.e. messages already included in another message's diff, and
     // duplicates)
-    for (int i = 0; i < configs.size(); i++) {
+    for (size_t i = 0; i < configs.size(); i++) {
         auto& [conf, redundant] = configs[i];
         if (conf.seqno() > max_seqno)
             max_seqno = conf.seqno();
 
-        for (int j = 0; !redundant && j < configs.size(); j++) {
+        for (size_t j = 0; !redundant && j < configs.size(); j++) {
             if (i == j)
                 continue;
             const auto& conf2 = configs[j].first;
@@ -619,7 +615,7 @@ ConfigMessage::ConfigMessage(
 
     if (curr_confs == 1) {
         // We have just one non-redundant config left after all that, so we become it directly as-is
-        for (int i = 0; i < configs.size(); i++) {
+        for (size_t i = 0; i < configs.size(); i++) {
             if (!configs[i].second) {
                 *this = std::move(configs[i].first);
                 unmerged_ = i;
@@ -647,7 +643,7 @@ ConfigMessage::ConfigMessage(
         return;
     }
 
-    unmerged_ = -1;
+    unmerged_ = std::nullopt;
 
     // Clear any redundant messages. (we do it *here* rather than above because, in the
     // single-good-config case, above, we need the index of the good config for `unmerged_`).
@@ -683,6 +679,7 @@ ConfigMessage::ConfigMessage(
     for (const auto& [seqno_hash, ptrs] : replay) {
         const auto& [data, diff] = ptrs;
         apply_diff(data_, *diff, *data);
+
         lagged_diffs_.emplace_hint(lagged_diffs_.end(), seqno_hash, *diff);
     }
 
@@ -694,7 +691,7 @@ ConfigMessage::ConfigMessage(
 }
 
 MutableConfigMessage::MutableConfigMessage(
-        const std::vector<ustring_view>& serialized_confs,
+        const std::vector<std::span<const unsigned char>>& serialized_confs,
         verify_callable verifier,
         sign_callable signer,
         int lag,
@@ -710,7 +707,10 @@ MutableConfigMessage::MutableConfigMessage(
 }
 
 MutableConfigMessage::MutableConfigMessage(
-        ustring_view config, verify_callable verifier, sign_callable signer, int lag) :
+        std::span<const unsigned char> config,
+        verify_callable verifier,
+        sign_callable signer,
+        int lag) :
         MutableConfigMessage{
                 std::vector{{config}},
                 std::move(verifier),
@@ -729,13 +729,14 @@ const oxenc::bt_dict& MutableConfigMessage::diff() {
     return diff_;
 }
 
-ustring ConfigMessage::serialize(bool enable_signing) {
+std::vector<unsigned char> ConfigMessage::serialize(bool enable_signing) {
     return serialize_impl(
             diff(),  // implicitly prunes (if actually a mutable instance)
             enable_signing);
 }
 
-ustring ConfigMessage::serialize_impl(const oxenc::bt_dict& curr_diff, bool enable_signing) {
+std::vector<unsigned char> ConfigMessage::serialize_impl(
+        const oxenc::bt_dict& curr_diff, bool enable_signing) {
     oxenc::bt_dict_producer outer{};
 
     outer.append("#", seqno());
@@ -775,7 +776,7 @@ ustring ConfigMessage::serialize_impl(const oxenc::bt_dict& curr_diff, bool enab
                         reinterpret_cast<const char*>(verified_signature_->data()),
                         verified_signature_->size()});
     } else if (signer && enable_signing) {
-        outer.append_signature("~", [this](ustring_view to_sign) {
+        outer.append_signature("~", [this](std::span<const unsigned char> to_sign) {
             auto sig = signer(to_sign);
             if (sig.size() != 64)
                 throw std::logic_error{
@@ -783,13 +784,13 @@ ustring ConfigMessage::serialize_impl(const oxenc::bt_dict& curr_diff, bool enab
             return sig;
         });
     }
-    return ustring{to_unsigned_sv(outer.view())};
+    return to_vector(outer.view());
 }
 
 const hash_t& MutableConfigMessage::hash() {
     return hash(serialize());
 }
-const hash_t& MutableConfigMessage::hash(ustring_view serialized) {
+const hash_t& MutableConfigMessage::hash(std::span<const unsigned char> serialized) {
     return hash_msg(seqno_hash_.second, serialized);
 }
 

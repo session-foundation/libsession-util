@@ -7,8 +7,8 @@ import re
 import fileinput
 from enum import Enum, auto
 import json
-import requests
 import argparse
+import requests
 
 parser = argparse.ArgumentParser()
 parser.add_argument(
@@ -249,7 +249,7 @@ while True:
                 except Exception as e:
                     error("failed to parse json example input as json")
 
-            result = requests.post(args.rpc + "/json_rpc", json={"jsonrpc": "2.0", "id": "0", "method": rpc_name, "params": params}).json()
+            result = requests.post(args.rpc + "/json_rpc", json={"jsonrpc": "2.0", "id": "0", "method": rpc_name, "params": params}, timeout=30).json()
             if 'error' in result:
                 error(f"JSON fetched example returned an error: {result['error']}")
             elif 'result' not in result:
@@ -375,18 +375,23 @@ if not args.no_sort:
     for v in endpoints.values():
         v.sort(key=lambda x: x[0])
 
-os.makedirs(args.out, exist_ok=True)
+output_path = os.path.dirname(os.path.realpath(__file__)) +  f'/{args.out}'
+os.makedirs(output_path, exist_ok=True)
 
-static_path = os.path.dirname(os.path.realpath(__file__)) + '/static'
+# copy the mkdocs.yml file to the root of the output directory
+shutil.copyfile('mkdocs.yml', f"{output_path}/mkdocs.yml")
+print(f"Copied mkdocs.yml => {output_path}/mkdocs.yml")
 
-for f in ('index.md', 'sidebar.md'):
-    shutil.copy(f"{static_path}/{f}", f"{args.out}/{f}")
-    print(f"Copied static/{f} => {args.out}/{f}")
+STATIC_FOLDER = 'docs'
+static_path = os.path.dirname(os.path.realpath(__file__)) + f'/{STATIC_FOLDER}'
+
+# copy the static folder over to the output directory
+shutil.copytree(static_path, f"{output_path}/{STATIC_FOLDER}")
 
 preamble_prefix = static_path + '/preamble-'
 
 for cat, eps in endpoints.items():
-    out = f"{args.out}/{cat}.md"
+    out = f"{output_path}/{STATIC_FOLDER}/{cat}.md"
     with open(out, "w") as f:
         preamble = f"{preamble_prefix}{cat}.md"
         if os.path.isfile(preamble):
@@ -396,7 +401,7 @@ for cat, eps in endpoints.items():
             f.write("\n\n")
         else:
             print(f"Warning: {preamble} doesn't exist, writing generic preamble for {cat}", file=sys.stderr)
-            f.write(f"# {cat} endpoints\n\n")
+            f.write(f"# {cat.replace('_', ' ').title()}\n\n")
 
         for _, md in eps:
             f.write(md)
