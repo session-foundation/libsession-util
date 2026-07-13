@@ -10,6 +10,7 @@ Build-Depends:
     liboxen-logging-dev (>= 1.2.0),
     liboxen-quic-dev (>= 1.8.0),
     nlohmann-json3-dev,
+    libunbound-dev,
     nettle-dev,
     libprotobuf-dev
 Standards-Version: 4.4.1
