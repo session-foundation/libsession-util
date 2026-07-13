@@ -1,3 +1,11 @@
+libsession-util (1.6.4-2~deb14) forky; urgency=medium
+
+  * CI: use registry.session.codes builder image (drop dead lokinet-ci- prefix)
+  * Update build dependencies
+  * Add libunbound-dev temporary build-dep
+
+ -- Jason Rhinelander <jason@session.foundation>  Mon, 13 Jul 2026 13:19:20 -0300
+
 libsession-util (1.6.4-1~deb14) forky; urgency=medium
 
   * Forky deb
