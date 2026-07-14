@@ -1,3 +1,9 @@
+libsession-util (1.6.4-3~deb14) forky; urgency=medium
+
+  * remove oxenc submodule hack
+
+ -- Jason Rhinelander <jason@session.foundation>  Tue, 14 Jul 2026 15:43:28 -0300
+
 libsession-util (1.6.4-2~deb14) forky; urgency=medium
 
   * CI: use registry.session.codes builder image (drop dead lokinet-ci- prefix)
