@@ -4,8 +4,9 @@
 #include <filesystem>
 #include <limits>
 #include <oxen/log.hpp>
+#include <type_traits>
 
-#include "session/network/network_opt.hpp"
+#include "network_opt.hpp"
 #include "session/types.hpp"
 
 namespace session::network::config {
@@ -66,22 +67,15 @@ struct Config {
     bool quic_disable_mtu_discovery = false;
 
     template <typename... Opt>
-        requires(
-                sizeof...(Opt) > 0 &&
-                std::conjunction_v<std::is_base_of<opt::base, std::decay_t<Opt>>...>)
+        requires(sizeof...(Opt) > 0 && (opt::is_option<std::decay_t<Opt>> && ...))
     Config(Opt&&... opts) {
         // parse all options
         ((void)handle_config_opt(std::forward<Opt>(opts)), ...);
         _init();
     }
-    explicit Config(const std::vector<std::any>& opts);
+    explicit Config(const std::vector<opt::any>& opts);
 
     Config() = default;
-    Config(const Config&) = default;
-    Config(Config&&) = default;
-    Config& operator=(const Config&) = default;
-    Config& operator=(Config&&) = default;
-    ~Config() = default;
 
   private:
     void _init();
@@ -133,9 +127,14 @@ struct Config {
     void handle_config_opt(opt::onionreq_edge_node_cache_duration encd);
 
     template <typename Opt>
-    void handle_config_opt(std::optional<Opt> option) {
-        if (option)
-            handle_config_opt(std::move(*option));
+    void handle_config_opt(std::optional<Opt>&& o) {
+        if (o)
+            handle_config_opt(*std::move(o));
+    }
+    template <typename Opt>
+    void handle_config_opt(const std::optional<Opt>& o) {
+        if (o)
+            handle_config_opt(*o);
     }
 };
 
