@@ -2,7 +2,6 @@
 
 #include <oxenc/base64.h>
 
-#include <any>
 #include <chrono>
 #include <future>
 #include <oxen/log.hpp>
@@ -1242,7 +1241,7 @@ LIBSESSION_C_API bool session_network_init(
     try {
         // Build the configuration options (ordered this way for the debug logs to make the most
         // sense)
-        std::vector<std::any> cpp_opts;
+        std::vector<opt::any> cpp_opts;
 
         // Network ID
         switch (config->netid) {
