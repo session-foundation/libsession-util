@@ -1,3 +1,10 @@
+libsession-util (1.6.6-1~deb11) bullseye; urgency=medium
+
+  * Network config runtime option cleanup
+  * v1.6.6
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 15 Jul 2026 17:47:01 -0300
+
 libsession-util (1.6.5-1~deb11+1) bullseye; urgency=medium
 
   * Drop no-op OXEN_LOGGING_* configure flags
