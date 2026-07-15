@@ -8,6 +8,7 @@
 #include <fstream>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <ranges>
 
 #include "session/file.hpp"
 #include "session/hash.hpp"
