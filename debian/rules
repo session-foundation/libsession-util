@@ -12,6 +12,4 @@ export PYBUILD_NAME = session-util
 	dh $@ --buildsystem=cmake --parallel
 
 override_dh_auto_configure:
-	dh_auto_configure -- -DBUILD_SHARED_LIBS=ON -DWITH_TESTS=OFF \
-		-DOXEN_LOGGING_FORCE_SUBMODULES=ON \
-		-DOXEN_LOGGING_FMT_HEADER_ONLY=ON -DOXEN_LOGGING_SPDLOG_HEADER_ONLY=ON
+	dh_auto_configure -- -DBUILD_SHARED_LIBS=ON -DWITH_TESTS=OFF
