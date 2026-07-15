@@ -1,5 +1,11 @@
 libsession-util (1.6.6-1~deb13) trixie; urgency=medium
 
+  * Add missing header
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 15 Jul 2026 18:59:05 -0300
+
+libsession-util (1.6.6-1~deb13) trixie; urgency=medium
+
   * Network config runtime option cleanup
   * v1.6.6
 
