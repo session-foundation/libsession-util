@@ -1,0 +1,30 @@
+From: Jason Rhinelander <jason@imaginary.ca>
+Date: Wed, 15 Jul 2026 18:21:49 -0300
+Subject: Include session/router.hpp for complete tunnel_info
+
+Older libstdc++ (Debian bullseye g++-10, Ubuntu jammy g++-11) requires
+session::router::tunnel_info to be a complete type for the std::unordered_map
+member in SessionRouter; include its definition instead of relying on the
+forward declaration. Newer toolchains (bookworm/noble+) accept the forward
+declaration, so this is only needed on those two distros.
+
+Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+---
+ include/session/network/routing/session_router_router.hpp | 4 ++++
+ 1 file changed, 4 insertions(+)
+
+diff --git a/include/session/network/routing/session_router_router.hpp b/include/session/network/routing/session_router_router.hpp
+index 64e5c4e..6e34370 100644
+--- a/include/session/network/routing/session_router_router.hpp
++++ b/include/session/network/routing/session_router_router.hpp
+@@ -9,6 +9,10 @@
+ #include <unordered_map>
+ #include <vector>
+ 
++// Older libstdc++ (bullseye/jammy) needs tunnel_info complete for the std::unordered_map
++// member below, so pull in its full definition rather than only forward-declaring it.
++#include <session/router.hpp>
++
+ #include "session/network/backends/session_file_server.hpp"
+ #include "session/network/request_queue.hpp"
+ #include "session/network/routing/network_router.hpp"
