@@ -1,5 +1,12 @@
 libsession-util (1.6.6-1~deb11) bullseye; urgency=medium
 
+  * Include session/router.hpp for complete tunnel_info
+  * Add missing header
+
+ -- Jason Rhinelander <jason@session.foundation>  Wed, 15 Jul 2026 18:59:10 -0300
+
+libsession-util (1.6.6-1~deb11) bullseye; urgency=medium
+
   * Network config runtime option cleanup
   * v1.6.6
 
