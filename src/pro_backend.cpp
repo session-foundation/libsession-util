@@ -7,6 +7,7 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <chrono>
+#include <concepts>
 #include <nlohmann/json.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
@@ -81,24 +82,24 @@ const T json_require(
         errors.push_back(fmt::format("Key '{}' is missing", key));
     } else {
         bool success = false;
-        std::string_view type = {};
-        if constexpr (session::is_one_of<T, double, float>) {
+        std::string_view type;
+        if constexpr (std::floating_point<T>) {
             type = "a float";
             success = it->is_number_float();
-        } else if constexpr (session::is_one_of<T, uint64_t, uint32_t, uint16_t, uint8_t>) {
+        } else if constexpr (std::same_as<T, bool>) {
+            type = "a boolean";
+            success = it->is_boolean();
+        } else if constexpr (std::integral<T>) {
             type = "a number";
             success = it->is_number();
         } else if constexpr (session::is_one_of<T, std::string, std::string_view>) {
             type = "a string";
             success = it->is_string();
-        } else if constexpr (session::is_one_of<T, nlohmann::json::array_t>) {
+        } else if constexpr (std::same_as<T, nlohmann::json::array_t>) {
             type = "an array";
             success = it->is_array();
-        } else if constexpr (session::is_one_of<T, bool>) {
-            type = "a boolean";
-            success = it->is_boolean();
         } else {
-            static_assert(session::is_one_of<T, nlohmann::json::object_t>);
+            static_assert(std::same_as<T, nlohmann::json::object_t>);
             type = "an object";
             success = it->is_object();
         }
@@ -514,7 +515,7 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
         return result;
 
     // Parse payload
-    result.ticket = json_require<uint32_t>(result_obj, "ticket", result.errors);
+    result.ticket = json_require<int64_t>(result_obj, "ticket", result.errors);
 
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
