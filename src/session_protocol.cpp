@@ -75,7 +75,6 @@ session::array_uc32 proof_hash_internal(
         std::span<const std::uint8_t> rotating_pubkey,
         std::uint64_t expiry_unix_ts_ms) {
 
-    constexpr std::string_view PRO_BACKEND_BLAKE2B_PERSONALISATION = "SeshProBackend__";
     // This must match the hashing routine at
     // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
     session::array_uc32 result = {};
