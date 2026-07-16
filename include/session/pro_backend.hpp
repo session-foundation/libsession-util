@@ -312,10 +312,10 @@ struct GetProRevocationsRequest {
     /// Request version. The latest accepted version is 0
     std::uint8_t version;
 
-    /// 4-byte monotonic integer for the caller's revocation list iteration. Set to 0 if unknown;
+    /// 64-bit monotonic integer for the caller's revocation list iteration. Set to 0 if unknown;
     /// otherwise, use the latest known `ticket` from a prior `GetProRevocationResponse` to allow
     /// the Session Pro Backend to omit the revocation list if it has not changed.
-    std::uint32_t ticket;
+    std::int64_t ticket;
 
     /// API: pro/GenerateProProofRequest::to_json
     ///
@@ -335,9 +335,9 @@ struct ProRevocationItem {
 };
 
 struct GetProRevocationsResponse : public ResponseHeader {
-    /// 4-byte monotonic integer for the latest revocation list iteration.
+    /// 64-bit monotonic integer for the latest revocation list iteration.
     /// Update the caller's ticket to this value for subsequent requests.
-    std::uint32_t ticket;
+    std::int64_t ticket;
 
     /// List of revoked Session Pro proofs
     std::vector<ProRevocationItem> items;

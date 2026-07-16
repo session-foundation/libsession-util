@@ -187,7 +187,7 @@ typedef struct session_pro_backend_get_pro_revocations_request
         session_pro_backend_get_pro_revocations_request;
 struct session_pro_backend_get_pro_revocations_request {
     uint8_t version;
-    uint32_t ticket;
+    int64_t ticket;
 };
 
 typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
@@ -200,7 +200,7 @@ typedef struct session_pro_backend_get_pro_revocations_response
         session_pro_backend_get_pro_revocations_response;
 struct session_pro_backend_get_pro_revocations_response {
     session_pro_backend_response_header header;
-    uint32_t ticket;
+    int64_t ticket;
     /// Array of items, with items_count elements
     session_pro_backend_pro_revocation_item* items;
     size_t items_count;
