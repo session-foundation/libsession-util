@@ -91,7 +91,7 @@ namespace detail {
             return std::span{reinterpret_cast<const unsigned char*>(&val), sizeof(val)};
         else {
             std::array<unsigned char, sizeof(val)> swapped;
-            oxenc::write_big_as_host(swapped.data(), val);
+            oxenc::write_host_as_little(val, swapped.data());
             return swapped;
         }
     }
