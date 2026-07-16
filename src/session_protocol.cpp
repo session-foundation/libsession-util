@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
 #include <simdutf.h>
@@ -86,6 +87,7 @@ session::array_uc32 proof_hash_internal(
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(&state, gen_index_hash.data(), gen_index_hash.size());
     crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
+    oxenc::host_to_little_inplace(expiry_unix_ts_ms);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<uint8_t*>(&expiry_unix_ts_ms), sizeof(expiry_unix_ts_ms));
     crypto_generichash_blake2b_final(&state, result.data(), result.size());

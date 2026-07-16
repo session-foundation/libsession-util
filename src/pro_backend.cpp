@@ -1,4 +1,5 @@
 #include <fmt/core.h>
+#include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/export.h>
 #include <session/pro_backend.h>
@@ -415,6 +416,7 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
             &state, master_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(
             &state, rotating_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
+    oxenc::host_to_little_inplace(unix_ts_ms);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
@@ -583,6 +585,8 @@ array_uc64 GetProDetailsRequest::build_sig(
             &state,
             master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
             crypto_sign_ed25519_PUBLICKEYBYTES);
+    oxenc::host_to_little_inplace(unix_ts_ms);
+    oxenc::host_to_little_inplace(count);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<unsigned char*>(&unix_ts_ms), sizeof(unix_ts_ms));
     crypto_generichash_blake2b_update(
@@ -828,6 +832,8 @@ array_uc64 SetPaymentRefundRequestedRequest::build_sig(
     // Timestamps
     uint64_t unix_ts_ms = epoch_ms(unix_ts);
     uint64_t refund_requested_unix_ts_ms = epoch_ms(refund_requested_unix_ts);
+    oxenc::host_to_little_inplace(unix_ts_ms);
+    oxenc::host_to_little_inplace(refund_requested_unix_ts_ms);
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<const uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms));
     crypto_generichash_blake2b_update(
