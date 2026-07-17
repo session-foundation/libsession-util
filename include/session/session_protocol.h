@@ -90,7 +90,7 @@ struct session_protocol_pro_signed_message {
 typedef struct session_protocol_pro_proof session_protocol_pro_proof;
 struct session_protocol_pro_proof {
     uint8_t version;
-    bytes32 gen_index_hash;
+    bytes32 revocation_tag;
     bytes32 rotating_pubkey;
     int64_t expiry_ts;
     bytes64 sig;

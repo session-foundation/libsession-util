@@ -75,8 +75,8 @@ class ProProof {
     /// Version of the proof set by the Session Pro Backend
     std::uint8_t version;
 
-    /// Hash of the generation index set by the Session Pro Backend
-    array_uc32 gen_index_hash;
+    /// Opaque revocation tag identifying this proof (from the Session Pro backend)
+    array_uc32 revocation_tag;
 
     /// The public key that the Session client registers their Session Pro entitlement under.
     /// Session clients must sign messages with this key along side the sending of this proof for
@@ -168,7 +168,7 @@ class ProProof {
     array_uc32 hash() const;
 
     bool operator==(const ProProof& other) const {
-        return version == other.version && gen_index_hash == other.gen_index_hash &&
+        return version == other.version && revocation_tag == other.revocation_tag &&
                rotating_pubkey == other.rotating_pubkey && expiry_unix_ts == other.expiry_unix_ts &&
                sig == other.sig;
     }

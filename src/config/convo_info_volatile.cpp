@@ -31,12 +31,12 @@ namespace convo {
     }
     one_to_one::one_to_one(const convo_info_volatile_1to1& c) :
             pro_base(c.last_read, c.unread), session_id{c.session_id, 66} {
-        if (c.has_pro_gen_index_hash) {
-            pro_gen_index_hash.emplace();
+        if (c.has_pro_revocation_tag) {
+            pro_revocation_tag.emplace();
             std::memcpy(
-                    pro_gen_index_hash->data(),
-                    c.pro_gen_index_hash.data,
-                    pro_gen_index_hash->size());
+                    pro_revocation_tag->data(),
+                    c.pro_revocation_tag.data,
+                    pro_revocation_tag->size());
             pro_expiry_unix_ts = as_sys_seconds(c.pro_expiry_ts);
         }
     }
@@ -46,16 +46,16 @@ namespace convo {
         c.last_read = last_read;
         c.unread = unread;
 
-        if (pro_gen_index_hash) {
-            c.has_pro_gen_index_hash = true;
+        if (pro_revocation_tag) {
+            c.has_pro_revocation_tag = true;
             std::memcpy(
-                    c.pro_gen_index_hash.data,
-                    pro_gen_index_hash->data(),
-                    pro_gen_index_hash->size());
+                    c.pro_revocation_tag.data,
+                    pro_revocation_tag->data(),
+                    pro_revocation_tag->size());
 
             c.pro_expiry_ts = epoch_seconds(pro_expiry_unix_ts);
         } else {
-            c.has_pro_gen_index_hash = false;
+            c.has_pro_revocation_tag = false;
             c.pro_expiry_ts = 0;
         }
     }
@@ -126,12 +126,12 @@ namespace convo {
             pro_base(c.last_read, c.unread),
             blinded_session_id{c.blinded_session_id, 66},
             legacy_blinding{c.legacy_blinding} {
-        if (c.has_pro_gen_index_hash) {
-            pro_gen_index_hash.emplace();
+        if (c.has_pro_revocation_tag) {
+            pro_revocation_tag.emplace();
             std::memcpy(
-                    pro_gen_index_hash->data(),
-                    c.pro_gen_index_hash.data,
-                    pro_gen_index_hash->size());
+                    pro_revocation_tag->data(),
+                    c.pro_revocation_tag.data,
+                    pro_revocation_tag->size());
             pro_expiry_unix_ts = as_sys_seconds(c.pro_expiry_ts);
         }
     }
@@ -142,15 +142,15 @@ namespace convo {
         c.unread = unread;
         c.legacy_blinding = legacy_blinding;
 
-        if (pro_gen_index_hash) {
-            c.has_pro_gen_index_hash = true;
+        if (pro_revocation_tag) {
+            c.has_pro_revocation_tag = true;
             std::memcpy(
-                    c.pro_gen_index_hash.data,
-                    pro_gen_index_hash->data(),
-                    pro_gen_index_hash->size());
+                    c.pro_revocation_tag.data,
+                    pro_revocation_tag->data(),
+                    pro_revocation_tag->size());
             c.pro_expiry_ts = epoch_seconds(pro_expiry_unix_ts);
         } else {
-            c.has_pro_gen_index_hash = false;
+            c.has_pro_revocation_tag = false;
             c.pro_expiry_ts = 0;
         }
     }
@@ -159,15 +159,15 @@ namespace convo {
         base::load(info_dict);
 
         auto pro_expiry = int_or_0(info_dict, "e");
-        std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
+        std::optional<std::vector<unsigned char>> maybe_pro_revocation_tag =
                 maybe_vector(info_dict, "g");
-        if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
+        if (pro_expiry > 0 && maybe_pro_revocation_tag && maybe_pro_revocation_tag->size() == 32) {
             pro_expiry_unix_ts = as_sys_seconds(pro_expiry);
-            pro_gen_index_hash.emplace();
+            pro_revocation_tag.emplace();
             std::memcpy(
-                    pro_gen_index_hash->data(),
-                    maybe_pro_gen_index_hash->data(),
-                    pro_gen_index_hash->size());
+                    pro_revocation_tag->data(),
+                    maybe_pro_revocation_tag->data(),
+                    pro_revocation_tag->size());
         }
     }
 
@@ -335,9 +335,9 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     set_base(c, info);
 
     auto pro_expiry = epoch_seconds(c.pro_expiry_unix_ts);
-    if (pro_expiry > 0 && c.pro_gen_index_hash) {
+    if (pro_expiry > 0 && c.pro_revocation_tag) {
         set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_gen_index_hash;
+        info["g"] = *c.pro_revocation_tag;
     }
 }
 
@@ -362,7 +362,7 @@ static bool is_stale(const C& c, std::chrono::system_clock::time_point cutoff) {
     if (c.unread)
         return false;
     if constexpr (std::derived_from<C, convo::pro_base>)
-        if (c.pro_gen_index_hash.has_value() && c.pro_expiry_unix_ts >= cutoff)
+        if (c.pro_revocation_tag.has_value() && c.pro_expiry_unix_ts >= cutoff)
             return false;
     return sys_ms{std::chrono::milliseconds{c.last_read}} < cutoff;
 }
@@ -441,9 +441,9 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
     set_nonzero_int(info["y"], c.legacy_blinding);
 
     auto pro_expiry = epoch_seconds(c.pro_expiry_unix_ts);
-    if (pro_expiry > 0 && c.pro_gen_index_hash) {
+    if (pro_expiry > 0 && c.pro_revocation_tag) {
         set_nonzero_int(info["e"], pro_expiry);
-        info["g"] = *c.pro_gen_index_hash;
+        info["g"] = *c.pro_revocation_tag;
     }
 }
 

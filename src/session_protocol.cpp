@@ -71,7 +71,7 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
 namespace {
 session::array_uc32 proof_hash_internal(
         std::uint8_t version,
-        std::span<const std::uint8_t> gen_index_hash,
+        std::span<const std::uint8_t> revocation_tag,
         std::span<const std::uint8_t> rotating_pubkey,
         std::int64_t expiry_ts) {
 
@@ -84,7 +84,7 @@ session::array_uc32 proof_hash_internal(
             {SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION,
              sizeof(SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION) - 1});
     crypto_generichash_blake2b_update(&state, &version, sizeof(version));
-    crypto_generichash_blake2b_update(&state, gen_index_hash.data(), gen_index_hash.size());
+    crypto_generichash_blake2b_update(&state, revocation_tag.data(), revocation_tag.size());
     crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
     oxenc::host_to_little_inplace(expiry_ts);
     crypto_generichash_blake2b_update(
@@ -159,9 +159,9 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
     result.status = static_cast<SESSION_PROTOCOL_PRO_STATUS>(cpp.status);
     result.proof.version = cpp.proof.version;
     std::memcpy(
-            result.proof.gen_index_hash.data,
-            cpp.proof.gen_index_hash.data(),
-            cpp.proof.gen_index_hash.max_size());
+            result.proof.revocation_tag.data,
+            cpp.proof.revocation_tag.data(),
+            cpp.proof.revocation_tag.max_size());
     std::memcpy(
             result.proof.rotating_pubkey.data,
             cpp.proof.rotating_pubkey.data(),
@@ -176,7 +176,7 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
 
 namespace session {
 
-static_assert(sizeof(((ProProof*)0)->gen_index_hash) == 32);
+static_assert(sizeof(((ProProof*)0)->revocation_tag) == 32);
 static_assert(sizeof(((ProProof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
 static_assert(sizeof(((ProProof*)0)->sig) == crypto_sign_ed25519_BYTES);
 
@@ -227,7 +227,7 @@ ProStatus ProProof::status(
 
 array_uc32 ProProof::hash() const {
     array_uc32 result = proof_hash_internal(
-            version, gen_index_hash, rotating_pubkey, epoch_seconds(expiry_unix_ts));
+            version, revocation_tag, rotating_pubkey, epoch_seconds(expiry_unix_ts));
     return result;
 }
 
@@ -894,7 +894,7 @@ DecodedEnvelope decode_envelope(
             // clang-format off
             size_t proof_errors = 0;
             proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
-            proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
+            proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.revocation_tag.max_size();
             proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
             proof_errors += !proto_proof.has_expiryunixts();
             proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
@@ -909,7 +909,7 @@ DecodedEnvelope decode_envelope(
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
             std::memcpy(
-                    proof.gen_index_hash.data(),
+                    proof.revocation_tag.data(),
                     proto_proof.genindexhash().data(),
                     proto_proof.genindexhash().size());
             std::memcpy(
@@ -1056,7 +1056,7 @@ DecodedCommunityMessage decode_for_community(
         // clang-format off
         size_t proof_errors = 0;
         proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
-        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
+        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.revocation_tag.max_size();
         proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
         proof_errors += !proto_proof.has_expiryunixts();
         proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
@@ -1069,7 +1069,7 @@ DecodedCommunityMessage decode_for_community(
         pro.msg_bitset.data = pro_msg.msgbitset();
         pro.profile_bitset.data = pro_msg.profilebitset();
         std::memcpy(
-                proof.gen_index_hash.data(),
+                proof.revocation_tag.data(),
                 proto_proof.genindexhash().data(),
                 proto_proof.genindexhash().size());
         std::memcpy(
@@ -1139,7 +1139,7 @@ void make_blake2b32_hasher(
 
 using namespace session;
 
-static_assert((sizeof((session_protocol_pro_proof*)0)->gen_index_hash) == 32);
+static_assert((sizeof((session_protocol_pro_proof*)0)->revocation_tag) == 32);
 static_assert(
         (sizeof((session_protocol_pro_proof*)0)->rotating_pubkey) ==
         crypto_sign_ed25519_PUBLICKEYBYTES);
@@ -1191,7 +1191,7 @@ LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_pr
     bytes32 result = {};
     session::array_uc32 hash = proof_hash_internal(
             proof->version,
-            proof->gen_index_hash.data,
+            proof->revocation_tag.data,
             proof->rotating_pubkey.data,
             proof->expiry_ts);
     std::memcpy(result.data, hash.data(), hash.size());
@@ -1207,7 +1207,7 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
     auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
     session::array_uc32 hash = proof_hash_internal(
             proof->version,
-            proof->gen_index_hash.data,
+            proof->revocation_tag.data,
             proof->rotating_pubkey.data,
             proof->expiry_ts);
     bool result = proof_verify_signature_internal(hash, proof->sig.data, verify_pubkey_span);

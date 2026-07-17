@@ -357,7 +357,7 @@ AddProPaymentOrGenerateProProofResponse AddProPaymentOrGenerateProProofResponse:
     result.proof.expiry_unix_ts = std::chrono::sys_seconds(
             std::chrono::seconds(expiry_ts));
     json_require_fixed_bytes_from_hex(
-            result_obj, "gen_index_hash", result.errors, result.proof.gen_index_hash);
+            result_obj, "revocation_tag", result.errors, result.proof.revocation_tag);
     json_require_fixed_bytes_from_hex(
             result_obj, "rotating_pkey", result.errors, result.proof.rotating_pubkey);
     json_require_fixed_bytes_from_hex(result_obj, "sig", result.errors, result.proof.sig);
@@ -534,7 +534,7 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
         ProRevocationItem item = {};
         item.expiry_unix_ts = as_sys_seconds(expiry_unix_ts);
         json_require_fixed_bytes_from_hex(
-                obj, "gen_index_hash", result.errors, item.gen_index_hash);
+                obj, "revocation_tag", result.errors, item.revocation_tag);
 
         // Handle parsing result
         if (result.errors.size())
@@ -1339,9 +1339,9 @@ session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
     result.proof.version = cpp.proof.version;
     result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_unix_ts);
     std::memcpy(
-            result.proof.gen_index_hash.data,
-            cpp.proof.gen_index_hash.data(),
-            cpp.proof.gen_index_hash.size());
+            result.proof.revocation_tag.data,
+            cpp.proof.revocation_tag.data(),
+            cpp.proof.revocation_tag.size());
     std::memcpy(
             result.proof.rotating_pubkey.data,
             cpp.proof.rotating_pubkey.data(),
@@ -1418,7 +1418,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     for (size_t index = 0; index < result.items_count; ++index) {
         const ProRevocationItem& src = cpp.items[index];
         session_pro_backend_pro_revocation_item& dest = result.items[index];
-        std::memcpy(dest.gen_index_hash.data, src.gen_index_hash.data(), src.gen_index_hash.size());
+        std::memcpy(dest.revocation_tag.data, src.revocation_tag.data(), src.revocation_tag.size());
         dest.expiry_ts = session::epoch_seconds(src.expiry_unix_ts);
     }
     return result;

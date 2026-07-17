@@ -169,7 +169,7 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
 
         auto proof_dict = root["p"];
         proof_dict["@"] = pro.proof.version;
-        proof_dict["g"] = pro.proof.gen_index_hash;
+        proof_dict["g"] = pro.proof.revocation_tag;
         proof_dict["e"] = epoch_seconds(pro.proof.expiry_unix_ts);
         proof_dict["s"] = pro.proof.sig;
 
@@ -333,14 +333,14 @@ LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
 
 LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro_pro_config* pro) {
     if (auto val = unbox<UserProfile>(conf)->get_pro_config(); val) {
-        static_assert(sizeof pro->proof.gen_index_hash == sizeof(val->proof.gen_index_hash));
+        static_assert(sizeof pro->proof.revocation_tag == sizeof(val->proof.revocation_tag));
         static_assert(sizeof pro->proof.rotating_pubkey == sizeof(val->proof.rotating_pubkey));
         static_assert(sizeof pro->proof.sig == sizeof(val->proof.sig));
         pro->proof.version = val->proof.version;
         std::memcpy(
-                pro->proof.gen_index_hash.data,
-                val->proof.gen_index_hash.data(),
-                val->proof.gen_index_hash.size());
+                pro->proof.revocation_tag.data,
+                val->proof.revocation_tag.data(),
+                val->proof.revocation_tag.size());
         std::memcpy(
                 pro->proof.rotating_pubkey.data,
                 val->proof.rotating_pubkey.data(),
@@ -360,9 +360,9 @@ LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro
     ProConfig val = {};
     val.proof.version = pro->proof.version;
     std::memcpy(
-            val.proof.gen_index_hash.data(),
-            pro->proof.gen_index_hash.data,
-            val.proof.gen_index_hash.size());
+            val.proof.revocation_tag.data(),
+            pro->proof.revocation_tag.data,
+            val.proof.revocation_tag.size());
     std::memcpy(
             val.proof.rotating_pubkey.data(),
             pro->proof.rotating_pubkey.data,

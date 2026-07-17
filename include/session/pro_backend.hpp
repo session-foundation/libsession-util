@@ -323,8 +323,8 @@ struct GetProRevocationsRequest {
 };
 
 struct ProRevocationItem {
-    /// 32-byte hash of the generation index, identifying a proof
-    array_uc32 gen_index_hash;
+    /// 32-byte opaque revocation tag identifying a proof
+    array_uc32 revocation_tag;
 
     /// Unix timestamp when the proof expires
     sys_seconds expiry_unix_ts;

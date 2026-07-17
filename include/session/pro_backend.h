@@ -191,7 +191,7 @@ struct session_pro_backend_get_pro_revocations_request {
 
 typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
 struct session_pro_backend_pro_revocation_item {
-    bytes32 gen_index_hash;
+    bytes32 revocation_tag;
     int64_t expiry_ts;
 };
 
