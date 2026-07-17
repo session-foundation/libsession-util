@@ -135,7 +135,7 @@ target_link_libraries(
     nlohmann_json::nlohmann_json
     session::SQLite
     mlkem_native::mlkem768
-    quic
+    oxen::quic
 )
 
 target_link_libraries(config
@@ -174,7 +174,7 @@ if(ENABLE_NETWORKING)
     target_link_libraries(network
         PUBLIC
         crypto
-        quic
+        oxen::quic
         PRIVATE
         nlohmann_json::nlohmann_json
         sessiondep::libsodium

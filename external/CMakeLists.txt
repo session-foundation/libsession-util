@@ -41,7 +41,7 @@ if(ENABLE_NETWORKING)
         libsession_static_bundle(session-router::libsessionrouter)
     else()
         set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
-        sessiondep_or_submodule(liboxenquic 1.8.0 session-router/external/oxen-libquic quic)
+        sessiondep_or_submodule(liboxenquic 1.8.0 session-router/external/oxen-libquic oxen::quic)
     endif()
 endif()
 
