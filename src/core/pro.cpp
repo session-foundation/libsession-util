@@ -10,12 +10,12 @@
 namespace session::core {
 
 bool Pro::proof_is_revoked(
-        std::span<const std::byte, 32> gen_index_hash,
+        std::span<const std::byte, 32> revocation_tag,
         std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
     return conn().prepared_get<int>(
             "SELECT EXISTS (SELECT 1 FROM pro_revocations"
-            " WHERE gen_index_hash = ? AND expiry_unix_ts_ms <= ?)",
-            gen_index_hash,
+            " WHERE revocation_tag = ? AND expiry_unix_ts_ms <= ?)",
+            revocation_tag,
             unix_ts.time_since_epoch().count());
 }
 
@@ -47,23 +47,23 @@ void Pro::update_revocations(
 
     std::unordered_set<b32, decltype(already_hashed)> to_remove;
     for (auto id :
-         c.prepared_results<sqlite::blob_guts<b32>>("SELECT gen_index_hash FROM pro_revocations"))
+         c.prepared_results<sqlite::blob_guts<b32>>("SELECT revocation_tag FROM pro_revocations"))
         to_remove.insert(id);
 
     for (auto st = c.prepared_st(
-                 "INSERT INTO pro_revocations (gen_index_hash, expiry_unix_ts_ms) VALUES (?, ?)"
-                 " ON CONFLICT (gen_index_hash) "
+                 "INSERT INTO pro_revocations (revocation_tag, expiry_unix_ts_ms) VALUES (?, ?)"
+                 " ON CONFLICT (revocation_tag) "
                  " DO UPDATE SET expiry_unix_ts_ms = excluded.expiry_unix_ts_ms"
                  " WHERE excluded.expiry_unix_ts_ms != expiry_unix_ts_ms");
          const auto& revoke : revocations) {
 
-        exec_query(st, revoke.gen_index_hash, revoke.expiry_unix_ts.time_since_epoch().count());
-        to_remove.erase(revoke.gen_index_hash);
+        exec_query(st, revoke.revocation_tag, revoke.expiry_unix_ts.time_since_epoch().count());
+        to_remove.erase(revoke.revocation_tag);
         st->reset();
     }
 
     if (!to_remove.empty()) {
-        auto st = c.prepared_st("DELETE FROM pro_revocations WHERE gen_index_hash = ?");
+        auto st = c.prepared_st("DELETE FROM pro_revocations WHERE revocation_tag = ?");
         for (const auto& id : to_remove) {
             exec_query(st, id);
             st->reset();

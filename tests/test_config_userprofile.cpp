@@ -603,18 +603,18 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         pro_cpp.proof.version = 2;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_unix_ts = std::chrono::sys_seconds(1s);
-        constexpr auto gen_index_hash =
+        constexpr auto revocation_tag =
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_b;
-        static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
+        static_assert(pro_cpp.proof.revocation_tag.max_size() == revocation_tag.size());
         std::memcpy(
-                pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
+                pro_cpp.proof.revocation_tag.data(), revocation_tag.data(), revocation_tag.size());
 
         // C
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
         pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
         pro.proof.expiry_ts = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
-        std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
+        std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
     }
 
     UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{123s});

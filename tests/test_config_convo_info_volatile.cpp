@@ -613,7 +613,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                         std::chrono::sys_seconds{std::chrono::duration_cast<std::chrono::seconds>(
                                 std::chrono::milliseconds{unix_timestamp(i)})};
 
-                auto& hash = c.pro_gen_index_hash.emplace();
+                auto& hash = c.pro_revocation_tag.emplace();
                 std::fill(hash.begin(), hash.end(), static_cast<std::byte>(i % 256));
             }
 
@@ -815,10 +815,10 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
     c.pro_expiry_ts = 10000;
 
     std::fill(
-            c.pro_gen_index_hash.data,
-            c.pro_gen_index_hash.data + 32,
+            c.pro_revocation_tag.data,
+            c.pro_revocation_tag.data + 32,
             static_cast<unsigned char>(3));
-    c.has_pro_gen_index_hash = true;
+    c.has_pro_revocation_tag = true;
     convo_info_volatile_set_1to1(conf, &c);
 
     // Fake push:
@@ -849,7 +849,7 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
             conf2, &c2, "051111111111111111111111111111111111111111111111111111111111111111"));
 
     CHECK(c2.pro_expiry_ts == c.pro_expiry_ts);
-    CHECK(c.has_pro_gen_index_hash);
-    CHECK(c2.has_pro_gen_index_hash);
-    CHECK(oxenc::to_hex(c2.pro_gen_index_hash.data) == oxenc::to_hex(c.pro_gen_index_hash.data));
+    CHECK(c.has_pro_revocation_tag);
+    CHECK(c2.has_pro_revocation_tag);
+    CHECK(oxenc::to_hex(c2.pro_revocation_tag.data) == oxenc::to_hex(c.pro_revocation_tag.data));
 }

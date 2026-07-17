@@ -17,13 +17,13 @@ class Pro final : detail::CoreComponent {
   public:
     /// API: core/Pro::pro_proof_is_revoked
     ///
-    /// Check if the proof identified by its `gen_index_hash` is revoked as of the given
+    /// Check if the proof identified by its `revocation_tag` is revoked as of the given
     /// timestamp from the list of proofs stored in the database.
     ///
     /// Outputs:
     /// - `bool` -- True if the proof was revoked, false otherwise.
     bool proof_is_revoked(
-            std::span<const std::byte, 32> gen_index_hash,
+            std::span<const std::byte, 32> revocation_tag,
             std::chrono::sys_time<std::chrono::milliseconds> unix_ts);
 
     /// API: core/Pro::pro_update_revocations

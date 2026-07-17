@@ -21,8 +21,8 @@ static bool string8_equals(string8 s8, std::string_view str) {
 [[maybe_unused]] static void dump_pro_proof_to_stderr(const session_protocol_pro_proof& proof) {
     fprintf(stderr, "proof.version: %u\n", proof.version);
     fprintf(stderr,
-            "proof.gen_index_hash: %s\n",
-            oxenc::to_hex(proof.gen_index_hash.data, std::end(proof.gen_index_hash.data)).c_str());
+            "proof.revocation_tag: %s\n",
+            oxenc::to_hex(proof.revocation_tag.data, std::end(proof.revocation_tag.data)).c_str());
     fprintf(stderr,
             "proof.rotating_pubkey: %s\n",
             oxenc::to_hex(proof.rotating_pubkey.data, std::end(proof.rotating_pubkey.data))
@@ -70,8 +70,8 @@ static bool string8_equals(string8 s8, std::string_view str) {
         const session_pro_backend_pro_revocation_item& item) {
     fprintf(stderr, "item.expiry_unix_ts: %" PRId64 "zu\n", item.expiry_ts);
     fprintf(stderr,
-            "item.gen_index_hash: %s\n",
-            oxenc::to_hex(item.gen_index_hash.data, std::end(item.gen_index_hash.data)).c_str());
+            "item.revocation_tag: %s\n",
+            oxenc::to_hex(item.revocation_tag.data, std::end(item.revocation_tag.data)).c_str());
 }
 
 TEST_CASE("Pro Backend C API", "[pro_backend]") {
@@ -447,15 +447,15 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
         }
 
         SECTION("session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse") {
-            b32 fake_gen_index_hash;
-            randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
+            b32 fake_revocation_tag;
+            randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             nlohmann::json j;
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
                     {"version", 0},
                     {"expiry_ts", unix_ts},
-                    {"gen_index_hash", oxenc::to_hex(fake_gen_index_hash)},
+                    {"revocation_tag", oxenc::to_hex(fake_revocation_tag)},
                     {"rotating_pkey",
                      oxenc::to_hex(rotating_pubkey.data, std::end(rotating_pubkey.data))},
                     {"sig", oxenc::to_hex(master_privkey.data, std::end(master_privkey.data))}};
@@ -478,9 +478,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.header.errors == nullptr);
                 REQUIRE(result.proof.expiry_ts == unix_ts);
                 REQUIRE(std::memcmp(
-                                result.proof.gen_index_hash.data,
-                                fake_gen_index_hash.data(),
-                                fake_gen_index_hash.size()) == 0);
+                                result.proof.revocation_tag.data,
+                                fake_revocation_tag.data(),
+                                fake_revocation_tag.size()) == 0);
                 REQUIRE(std::memcmp(
                                 result.proof.rotating_pubkey.data,
                                 rotating_pubkey.data,
@@ -498,9 +498,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Validate C and CPP variants
                 REQUIRE(result.proof.version == result_cpp.proof.version);
                 REQUIRE(std::memcmp(
-                                result.proof.gen_index_hash.data,
-                                result_cpp.proof.gen_index_hash.data(),
-                                result_cpp.proof.gen_index_hash.size()) == 0);
+                                result.proof.revocation_tag.data,
+                                result_cpp.proof.revocation_tag.data(),
+                                result_cpp.proof.revocation_tag.size()) == 0);
                 REQUIRE(std::memcmp(
                                 result.proof.rotating_pubkey.data,
                                 result_cpp.proof.rotating_pubkey.data(),
@@ -552,12 +552,12 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             j["result"]["ticket"] = 123;
             j["result"]["items"] = nlohmann::json::array();
 
-            b32 fake_gen_index_hash;
-            randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
+            b32 fake_revocation_tag;
+            randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             auto obj = nlohmann::json::object();
             obj["expiry_ts"] = unix_ts;
-            obj["gen_index_hash"] = oxenc::to_hex(fake_gen_index_hash);
+            obj["revocation_tag"] = oxenc::to_hex(fake_revocation_tag);
             j["result"]["items"].push_back(obj);
 
             std::string json = j.dump();
@@ -578,9 +578,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].expiry_ts == unix_ts);
                 REQUIRE(std::memcmp(
-                                result.items[0].gen_index_hash.data,
-                                fake_gen_index_hash.data(),
-                                fake_gen_index_hash.size()) == 0);
+                                result.items[0].revocation_tag.data,
+                                fake_revocation_tag.data(),
+                                fake_revocation_tag.size()) == 0);
             }
 
             // After freeeing
