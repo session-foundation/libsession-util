@@ -54,12 +54,12 @@ session::b32 proof_hash_internal(
         std::uint8_t version,
         std::span<const std::byte> gen_index_hash,
         std::span<const std::byte> rotating_pubkey,
-        std::uint64_t expiry_unix_ts_ms) {
+        std::uint64_t expiry_ts) {
 
     // This must match the hashing routine at
     // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
     return session::hash::blake2b_pers<32>(
-            session::BUILD_PROOF_PERS, version, gen_index_hash, rotating_pubkey, expiry_unix_ts_ms);
+            session::BUILD_PROOF_PERS, version, gen_index_hash, rotating_pubkey, expiry_ts);
 }
 
 struct array_uc32_from_ptr_result {
@@ -101,7 +101,7 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
             result.proof.rotating_pubkey.data,
             cpp.proof.rotating_pubkey.data(),
             cpp.proof.rotating_pubkey.max_size());
-    result.proof.expiry_unix_ts_ms = session::epoch_ms(cpp.proof.expiry_unix_ts);
+    result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_unix_ts);
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
     result.msg_bitset.data = cpp.msg_bitset.data;
     result.profile_bitset.data = cpp.profile_bitset.data;
@@ -124,13 +124,13 @@ bool ProProof::verify_message(
     return ed25519::verify(sig, rotating_pubkey, msg);
 }
 
-bool ProProof::is_active(std::chrono::sys_time<std::chrono::milliseconds> unix_ts) const {
+bool ProProof::is_active(std::chrono::sys_seconds unix_ts) const {
     return unix_ts <= expiry_unix_ts;
 }
 
 ProStatus ProProof::status(
         std::span<const std::byte, 32> verify_pubkey,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        std::chrono::sys_seconds unix_ts,
         const std::optional<ProSignedMessage>& signed_msg) {
     ProStatus result = ProStatus::Valid;
     // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
@@ -152,7 +152,7 @@ ProStatus ProProof::status(
 
 b32 ProProof::hash() const {
     b32 result = proof_hash_internal(
-            version, gen_index_hash, rotating_pubkey, expiry_unix_ts.time_since_epoch().count());
+            version, gen_index_hash, rotating_pubkey, session::epoch_seconds(expiry_unix_ts));
     return result;
 }
 
@@ -548,8 +548,7 @@ static void parse_content_and_pro(
                     proof.rotating_pubkey.data(),
                     proto_proof.rotatingpublickey().data(),
                     proto_proof.rotatingpublickey().size());
-            proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                    std::chrono::milliseconds(proto_proof.expiryunixts()));
+            proof.expiry_unix_ts = session::as_sys_seconds(proto_proof.expiryunixts());
             std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
@@ -561,8 +560,9 @@ static void parse_content_and_pro(
             };
             // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
             // bytes, this means that we expected the user to have signed the padding as well.
-            auto unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                    std::chrono::milliseconds(content.sigtimestamp()));
+            auto unix_ts = std::chrono::floor<std::chrono::seconds>(
+                    std::chrono::sys_time<std::chrono::milliseconds>(
+                            std::chrono::milliseconds(content.sigtimestamp())));
             pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         }
     }
@@ -650,7 +650,7 @@ DecodedEnvelope decode_group_envelope(
 
 DecodedCommunityMessage decode_for_community(
         std::span<const std::byte> content_or_envelope_payload,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        std::chrono::sys_seconds unix_ts,
         std::span<const std::byte, 32> pro_backend_pubkey) {
     // TODO: Community message parsing requires a custom code path for now as we are planning to
     // migrate from sending plain `Content` to `Content` with a pro signature embedded in `Content`
@@ -787,8 +787,7 @@ DecodedCommunityMessage decode_for_community(
                 proof.rotating_pubkey.data(),
                 proto_proof.rotatingpublickey().data(),
                 proto_proof.rotatingpublickey().size());
-        proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(proto_proof.expiryunixts()));
+        proof.expiry_unix_ts = session::as_sys_seconds(proto_proof.expiryunixts());
         std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
         // Evaluate the pro status given the extracted components (was it signed, is it expired,
@@ -890,7 +889,7 @@ LIBSESSION_C_API cbytes32 session_protocol_pro_proof_hash(session_protocol_pro_p
             proof->version,
             to_byte_span(proof->gen_index_hash.data),
             to_byte_span(proof->rotating_pubkey.data),
-            proof->expiry_unix_ts_ms);
+            proof->expiry_ts);
     std::memcpy(result.data, hash.data(), hash.size());
     return result;
 }
@@ -905,7 +904,7 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
             proof->version,
             to_byte_span(proof->gen_index_hash.data),
             to_byte_span(proof->rotating_pubkey.data),
-            proof->expiry_unix_ts_ms);
+            proof->expiry_ts);
     return ed25519::verify(to_byte_span(proof->sig.data), to_byte_span<32>(verify_pubkey), hash);
 }
 
@@ -924,15 +923,15 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(
 }
 
 LIBSESSION_C_API bool session_protocol_pro_proof_is_active(
-        session_protocol_pro_proof const* proof, uint64_t unix_ts_ms) {
-    return unix_ts_ms <= proof->expiry_unix_ts_ms;
+        session_protocol_pro_proof const* proof, uint64_t ts) {
+    return ts <= proof->expiry_ts;
 }
 
 LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
         session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
-        uint64_t unix_ts_ms,
+        uint64_t ts,
         const session_protocol_pro_signed_message* signed_msg) {
     SESSION_PROTOCOL_PRO_STATUS result = SESSION_PROTOCOL_PRO_STATUS_VALID;
     if (!session_protocol_pro_proof_verify_signature(proof, verify_pubkey, verify_pubkey_len))
@@ -951,7 +950,7 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 
     // Check if the proof has expired
     if (result == SESSION_PROTOCOL_PRO_STATUS_VALID &&
-        !session_protocol_pro_proof_is_active(proof, unix_ts_ms))
+        !session_protocol_pro_proof_is_active(proof, ts))
         result = SESSION_PROTOCOL_PRO_STATUS_EXPIRED;
     return result;
 }
@@ -1222,7 +1221,7 @@ LIBSESSION_C_API
 session_protocol_decoded_community_message session_protocol_decode_for_community(
         const void* content_or_envelope_payload,
         size_t content_or_envelope_payload_len,
-        uint64_t unix_ts_ms,
+        uint64_t ts,
         OPTIONAL const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         OPTIONAL char* error,
@@ -1231,8 +1230,7 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
     std::span content_or_envelope_payload_span{
             static_cast<const std::byte*>(content_or_envelope_payload),
             content_or_envelope_payload_len};
-    auto unix_ts =
-            std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(unix_ts_ms));
+    auto unix_ts = session::as_sys_seconds(ts);
     array_uc32_from_ptr_result pro_backend_pubkey_cpp =
             array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
     if (!pro_backend_pubkey_cpp.success) {

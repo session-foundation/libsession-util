@@ -97,7 +97,7 @@ class ProProof {
     b32 rotating_pubkey;
 
     /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid to
-    sys_ms expiry_unix_ts;
+    std::chrono::sys_seconds expiry_unix_ts;
 
     /// Signature over the contents of the proof. It is signed by the Session Pro Backend key which
     /// is the entity responsible for issueing tamper-proof Sesison Pro certificates for Session
@@ -146,7 +146,7 @@ class ProProof {
     ///
     /// Outputs:
     /// - `bool` - True if proof is active (i.e. has not expired), false otherwise.
-    bool is_active(sys_ms unix_ts) const;
+    bool is_active(std::chrono::sys_seconds unix_ts) const;
 
     /// API: pro/Proof::status
     ///
@@ -172,7 +172,7 @@ class ProProof {
     ///   possible enum values. Otherwise this funtion can return all possible values.
     ProStatus status(
             std::span<const std::byte, 32> verify_pubkey,
-            sys_ms unix_ts,
+            std::chrono::sys_seconds unix_ts,
             const std::optional<ProSignedMessage>& signed_msg);
 
     /// API: pro/Proof::hash
@@ -561,7 +561,7 @@ DecodedEnvelope decode_group_envelope(
 ///   access to pro features if it's using any.
 DecodedCommunityMessage decode_for_community(
         std::span<const std::byte> content_or_envelope_payload,
-        sys_ms unix_ts,
+        std::chrono::sys_seconds unix_ts,
         std::span<const std::byte, 32> pro_backend_pubkey);
 
 }  // namespace session
