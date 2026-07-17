@@ -526,7 +526,7 @@ static void parse_content_and_pro(
             // clang-format off
             size_t proof_errors = 0;
             proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
-            proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.revocation_tag.max_size();
+            proof_errors += !proto_proof.has_revocationtag()      || proto_proof.revocationtag().size()      != proof.revocation_tag.max_size();
             proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
             proof_errors += !proto_proof.has_expiryunixts();
             proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
@@ -542,8 +542,8 @@ static void parse_content_and_pro(
 
             std::memcpy(
                     proof.revocation_tag.data(),
-                    proto_proof.genindexhash().data(),
-                    proto_proof.genindexhash().size());
+                    proto_proof.revocationtag().data(),
+                    proto_proof.revocationtag().size());
             std::memcpy(
                     proof.rotating_pubkey.data(),
                     proto_proof.rotatingpublickey().data(),
@@ -767,7 +767,7 @@ DecodedCommunityMessage decode_for_community(
         // clang-format off
         size_t proof_errors = 0;
         proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
-        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.revocation_tag.max_size();
+        proof_errors += !proto_proof.has_revocationtag()      || proto_proof.revocationtag().size()      != proof.revocation_tag.max_size();
         proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
         proof_errors += !proto_proof.has_expiryunixts();
         proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
@@ -781,8 +781,8 @@ DecodedCommunityMessage decode_for_community(
         pro.profile_bitset.data = pro_msg.profilebitset();
         std::memcpy(
                 proof.revocation_tag.data(),
-                proto_proof.genindexhash().data(),
-                proto_proof.genindexhash().size());
+                proto_proof.revocationtag().data(),
+                proto_proof.revocationtag().size());
         std::memcpy(
                 proof.rotating_pubkey.data(),
                 proto_proof.rotatingpublickey().data(),
