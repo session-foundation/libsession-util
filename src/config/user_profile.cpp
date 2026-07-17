@@ -170,7 +170,7 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
         auto proof_dict = root["p"];
         proof_dict["@"] = pro.proof.version;
         proof_dict["g"] = pro.proof.gen_index_hash;
-        proof_dict["e"] = pro.proof.expiry_unix_ts.time_since_epoch().count();
+        proof_dict["e"] = epoch_seconds(pro.proof.expiry_unix_ts);
         proof_dict["s"] = pro.proof.sig;
 
         const auto target_timestamp =
@@ -212,17 +212,15 @@ void UserProfile::set_animated_avatar(bool enabled) {
     }
 }
 
-std::optional<std::chrono::sys_time<std::chrono::milliseconds>> UserProfile::get_pro_access_expiry()
-        const {
+std::optional<std::chrono::sys_seconds> UserProfile::get_pro_access_expiry() const {
     if (auto* E = data["E"].integer(); E)
-        return std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{*E}};
+        return std::chrono::sys_seconds{std::chrono::seconds{*E}};
     return std::nullopt;
 }
 
-void UserProfile::set_pro_access_expiry(
-        std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms) {
-    if (access_expiry_ts_ms)
-        data["E"] = epoch_ms(*access_expiry_ts_ms);
+void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> access_expiry_ts) {
+    if (access_expiry_ts)
+        data["E"] = epoch_seconds(*access_expiry_ts);
     else
         data["E"].erase();
 }
@@ -347,7 +345,7 @@ LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro
                 pro->proof.rotating_pubkey.data,
                 val->proof.rotating_pubkey.data(),
                 val->proof.rotating_pubkey.size());
-        pro->proof.expiry_unix_ts_ms = epoch_ms(val->proof.expiry_unix_ts);
+        pro->proof.expiry_ts = epoch_seconds(val->proof.expiry_unix_ts);
         std::memcpy(pro->proof.sig.data, val->proof.sig.data(), val->proof.sig.size());
         std::memcpy(
                 pro->rotating_privkey.data,
@@ -369,8 +367,7 @@ LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro
             val.proof.rotating_pubkey.data(),
             pro->proof.rotating_pubkey.data,
             val.proof.rotating_pubkey.size());
-    val.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(pro->proof.expiry_unix_ts_ms));
+    val.proof.expiry_unix_ts = as_sys_seconds(pro->proof.expiry_ts);
     std::memcpy(val.proof.sig.data(), pro->proof.sig.data, val.proof.sig.size());
     std::memcpy(
             val.rotating_privkey.data(), pro->rotating_privkey.data, val.rotating_privkey.size());
@@ -396,20 +393,18 @@ LIBSESSION_C_API void user_profile_set_animated_avatar(config_object* conf, bool
     unbox<UserProfile>(conf)->set_animated_avatar(enabled);
 }
 
-LIBSESSION_C_API uint64_t user_profile_get_pro_access_expiry_ms(const config_object* conf) {
+LIBSESSION_C_API int64_t user_profile_get_pro_access_expiry(const config_object* conf) {
     if (auto expiry = unbox<UserProfile>(conf)->get_pro_access_expiry())
-        return epoch_ms(*expiry);
+        return epoch_seconds(*expiry);
     return 0;
 }
 
-LIBSESSION_C_API void user_profile_set_pro_access_expiry_ms(
-        config_object* conf, uint64_t access_expiry_ts_ms) {
-    if (access_expiry_ts_ms <= 0)
+LIBSESSION_C_API void user_profile_set_pro_access_expiry(
+        config_object* conf, int64_t access_expiry_ts) {
+    if (access_expiry_ts <= 0)
         unbox<UserProfile>(conf)->set_pro_access_expiry(std::nullopt);
     else
-        unbox<UserProfile>(conf)->set_pro_access_expiry(
-                std::chrono::sys_time<std::chrono::milliseconds>{
-                        std::chrono::milliseconds{access_expiry_ts_ms}});
+        unbox<UserProfile>(conf)->set_pro_access_expiry(as_sys_seconds(access_expiry_ts));
 }
 
 }  // extern "C"

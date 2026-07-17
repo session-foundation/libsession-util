@@ -25,7 +25,7 @@ TEST_CASE("Pro", "[config][pro]") {
         pro_cpp.rotating_privkey = rotating_sk;
         pro_cpp.proof.version = 2;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
-        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
+        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_seconds(1s);
         constexpr auto gen_index_hash =
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
         static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
@@ -36,7 +36,7 @@ TEST_CASE("Pro", "[config][pro]") {
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
         pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
-        pro.proof.expiry_unix_ts_ms = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
+        pro.proof.expiry_ts = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
         std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
     }
 
@@ -72,11 +72,10 @@ TEST_CASE("Pro", "[config][pro]") {
     // Verify expiry
     {
         CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts));
-        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1ms));
+        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1s));
 
-        CHECK(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms));
-        CHECK_FALSE(
-                session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms + 1));
+        CHECK(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_ts));
+        CHECK_FALSE(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_ts + 1));
     }
 
     // Verify it can verify messages signed with the rotating public key

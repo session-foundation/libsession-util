@@ -170,7 +170,7 @@ struct session_pro_backend_generate_pro_proof_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes32 rotating_pkey;
-    uint64_t ts;
+    int64_t ts;
     bytes64 master_sig;
     bytes64 rotating_sig;
 };
@@ -192,7 +192,7 @@ struct session_pro_backend_get_pro_revocations_request {
 typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
 struct session_pro_backend_pro_revocation_item {
     bytes32 gen_index_hash;
-    uint64_t expiry_ts;
+    int64_t expiry_ts;
 };
 
 typedef struct session_pro_backend_get_pro_revocations_response
@@ -211,7 +211,7 @@ struct session_pro_backend_get_pro_details_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes64 master_sig;
-    uint64_t ts;
+    int64_t ts;
     uint32_t count;
 };
 
@@ -225,13 +225,13 @@ struct session_pro_backend_pro_payment_item {
     const session_pro_backend_payment_provider_metadata* payment_provider_metadata;
 
     bool auto_renewing;
-    uint64_t unredeemed_ts;
-    uint64_t redeemed_ts;
-    uint64_t expiry_ts;
-    uint64_t grace_period_duration;
-    uint64_t platform_refund_expiry_ts;
-    uint64_t revoked_ts;
-    uint64_t refund_requested_ts;
+    int64_t unredeemed_ts;
+    int64_t redeemed_ts;
+    int64_t expiry_ts;
+    int64_t grace_period_duration;
+    int64_t platform_refund_expiry_ts;
+    int64_t revoked_ts;
+    int64_t refund_requested_ts;
 
     char google_payment_token[128];
     size_t google_payment_token_count;
@@ -257,9 +257,9 @@ struct session_pro_backend_get_pro_details_response {
     SESSION_PRO_BACKEND_USER_PRO_STATUS status;
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
     bool auto_renewing;
-    uint64_t expiry_ts;
-    uint64_t grace_period_duration;
-    uint64_t refund_requested_ts;
+    int64_t expiry_ts;
+    int64_t grace_period_duration;
+    int64_t refund_requested_ts;
     uint32_t payments_total;
 };
 
@@ -269,8 +269,8 @@ struct session_pro_backend_set_payment_refund_requested_request {
     uint8_t version;
     bytes32 master_pkey;
     bytes64 master_sig;
-    uint64_t ts;
-    uint64_t refund_requested_ts;
+    int64_t ts;
+    int64_t refund_requested_ts;
     session_pro_backend_add_pro_payment_user_transaction payment_tx;
 };
 
@@ -370,7 +370,7 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t ts) NON_NULL_ARG(2, 4);
+        int64_t ts) NON_NULL_ARG(2, 4);
 
 /// API: session_pro_backend/generate_pro_proof_request_build_to_json
 ///
@@ -386,7 +386,7 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t ts) NON_NULL_ARG(2, 4);
+        int64_t ts) NON_NULL_ARG(2, 4);
 
 /// API: session_pro_backend/get_pro_details_request_build_sig
 ///
@@ -410,7 +410,7 @@ session_pro_backend_signature session_pro_backend_get_pro_details_request_build_
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
+        int64_t ts,
         uint32_t count) NON_NULL_ARG(2);
 
 /// API: session_pro_backend/get_pro_details_request_build_to_json
@@ -425,7 +425,7 @@ session_pro_backend_to_json session_pro_backend_get_pro_details_request_build_to
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
+        int64_t ts,
         uint32_t count) NON_NULL_ARG(2);
 
 /// API: session_pro_backend/add_pro_payment_request_to_json
@@ -535,8 +535,8 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
-        uint64_t refund_requested_ts,
+        int64_t ts,
+        int64_t refund_requested_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
@@ -555,8 +555,8 @@ session_pro_backend_to_json session_pro_backend_set_payment_refund_requested_req
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
-        uint64_t refund_requested_ts,
+        int64_t ts,
+        int64_t refund_requested_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,

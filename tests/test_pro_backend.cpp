@@ -27,7 +27,7 @@ static bool string8_equals(string8 s8, std::string_view str) {
             "proof.rotating_pubkey: %s\n",
             oxenc::to_hex(proof.rotating_pubkey.data, std::end(proof.rotating_pubkey.data))
                     .c_str());
-    fprintf(stderr, "proof.expiry_unix_ts_ms: %" PRIu64 "\n", proof.expiry_unix_ts_ms);
+    fprintf(stderr, "proof.expiry_ts: %" PRId64 "\n", proof.expiry_ts);
     fprintf(stderr,
             "proof.sig: %s\n",
             oxenc::to_hex(proof.sig.data, std::end(proof.sig.data)).c_str());
@@ -39,16 +39,14 @@ static bool string8_equals(string8 s8, std::string_view str) {
     fprintf(stderr, "item.plan: %d\n", item.plan);
     fprintf(stderr, "item.payment_provider: %d\n", item.payment_provider);
     fprintf(stderr, "item.auto_renewing: %d\n", item.auto_renewing);
-    fprintf(stderr, "item.unredeemed_unix_ts_ms: %" PRIu64 "zu\n", item.unredeemed_unix_ts_ms);
-    fprintf(stderr, "item.redeemed_unix_ts_ms: %" PRIu64 "zu\n", item.redeemed_unix_ts_ms);
-    fprintf(stderr, "item.expiry_unix_ts_ms: %" PRIu64 "\n", item.expiry_unix_ts_ms);
+    fprintf(stderr, "item.unredeemed_ts: %" PRId64 "zu\n", item.unredeemed_ts);
+    fprintf(stderr, "item.redeemed_ts: %" PRId64 "zu\n", item.redeemed_ts);
+    fprintf(stderr, "item.expiry_ts: %" PRId64 "\n", item.expiry_ts);
+    fprintf(stderr, "item.grace_period_duration: %" PRId64 "zu\n", item.grace_period_duration);
     fprintf(stderr,
-            "item.grace_period_duration_ms: %" PRIu64 "zu\n",
-            item.grace_period_duration_ms);
-    fprintf(stderr,
-            "item.platform_refund_expiry_unix_ts_ms: %" PRIu64 "zu\n",
-            item.platform_refund_expiry_unix_ts_ms);
-    fprintf(stderr, "item.revoked_unix_ts_ms: %" PRIu64 "zu\n", item.revoked_unix_ts_ms);
+            "item.platform_refund_expiry_ts: %" PRId64 "zu\n",
+            item.platform_refund_expiry_ts);
+    fprintf(stderr, "item.revoked_ts: %" PRId64 "zu\n", item.revoked_ts);
     fprintf(stderr,
             "item.google_payment_token: %.*s\n",
             (int)item.google_payment_token_count,
@@ -70,7 +68,7 @@ static bool string8_equals(string8 s8, std::string_view str) {
 
 [[maybe_unused]] static void dump_pro_revocation(
         const session_pro_backend_pro_revocation_item& item) {
-    fprintf(stderr, "item.expiry_unix_ts: %" PRIu64 "zu\n", item.expiry_unix_ts_ms);
+    fprintf(stderr, "item.expiry_unix_ts: %" PRId64 "zu\n", item.expiry_ts);
     fprintf(stderr,
             "item.gen_index_hash: %s\n",
             oxenc::to_hex(item.gen_index_hash.data, std::end(item.gen_index_hash.data)).c_str());
@@ -107,7 +105,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
         std::memcpy(
                 payment_tx.order_id, fake_google_order_id_hex.data(), payment_tx.order_id_count);
 
-        uint64_t unix_ts_ms = 1698765432ULL * 1000;  // Arbitrary timestamp
+        int64_t unix_ts = 1698765432;  // Arbitrary timestamp (unix epoch seconds)
 
         SECTION("session_pro_backend_add_pro_payment_request_build_sigs") {
             // Valid inputs
@@ -175,7 +173,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     sizeof(master_privkey.data),
                     rotating_privkey.data,
                     sizeof(rotating_privkey.data),
-                    unix_ts_ms);
+                    unix_ts);
             REQUIRE(result.success);
             REQUIRE(result.error_count == 0);
 
@@ -184,8 +182,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     0,
                     master_privkey.data,
                     rotating_privkey.data,
-                    std::chrono::sys_time<std::chrono::milliseconds>(
-                            std::chrono::milliseconds{unix_ts_ms}));
+                    session::as_sys_seconds(unix_ts));
             REQUIRE(std::memcmp(
                             result.master_sig.data,
                             cpp_sigs.master_sig.data(),
@@ -202,7 +199,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     sizeof(master_privkey.data),
                     rotating_privkey.data,
                     sizeof(rotating_privkey.data) - 1,
-                    unix_ts_ms);
+                    unix_ts);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
         }
@@ -297,7 +294,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             request.version = 0;
             request.master_pkey = master_pubkey;
             request.rotating_pkey = rotating_pubkey;
-            request.unix_ts_ms = unix_ts_ms;
+            request.ts = unix_ts;
 
             session_pro_backend_master_rotating_signatures sigs =
                     session_pro_backend_generate_pro_proof_request_build_sigs(
@@ -306,7 +303,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             sizeof(master_privkey.data),
                             rotating_privkey.data,
                             sizeof(rotating_privkey.data),
-                            request.unix_ts_ms);
+                            request.ts);
 
             request.master_sig = sigs.master_sig;
             request.rotating_sig = sigs.rotating_sig;
@@ -327,8 +324,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         cpp.rotating_pkey.data(),
                         rotating_pubkey.data,
                         sizeof(rotating_pubkey.data));
-                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                        std::chrono::milliseconds{unix_ts_ms});
+                cpp.unix_ts = session::as_sys_seconds(unix_ts);
                 std::memcpy(
                         cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig.data));
                 std::memcpy(
@@ -345,7 +341,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        request.unix_ts_ms);
+                        request.ts);
                 REQUIRE(one_shot.success);
                 REQUIRE(one_shot.json.size == result.json.size);
                 INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
@@ -399,7 +395,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             session_pro_backend_get_pro_details_request request = {};
             request.version = 0;
             request.master_pkey = master_pubkey;
-            request.unix_ts_ms = unix_ts_ms;
+            request.ts = unix_ts;
             request.count = 10'000;
 
             session_pro_backend_signature sig =
@@ -407,7 +403,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             request.version,
                             master_privkey.data,
                             sizeof(master_privkey.data),
-                            request.unix_ts_ms,
+                            request.ts,
                             request.count);
 
             request.master_sig = sig.sig;
@@ -425,8 +421,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 cpp.version = 0;
                 std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey.data));
                 std::memcpy(cpp.master_sig.data(), sig.sig.data, sizeof(sig.sig.data));
-                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
-                        std::chrono::milliseconds{unix_ts_ms}};
+                cpp.unix_ts = session::as_sys_seconds(unix_ts);
                 cpp.count = request.count;
                 std::string cpp_json = cpp.to_json();
                 REQUIRE(string8_equals(result.json, cpp_json));
@@ -436,7 +431,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         request.version,
                         master_privkey.data,
                         sizeof(master_privkey.data),
-                        request.unix_ts_ms,
+                        request.ts,
                         request.count);
                 REQUIRE(one_shot.success);
                 REQUIRE(one_shot.json.size == result.json.size);
@@ -463,7 +458,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
                     {"version", 0},
-                    {"expiry_unix_ts_ms", unix_ts_ms},
+                    {"expiry_ts", unix_ts},
                     {"gen_index_hash", oxenc::to_hex(fake_gen_index_hash)},
                     {"rotating_pkey",
                      oxenc::to_hex(rotating_pubkey.data, std::end(rotating_pubkey.data))},
@@ -485,7 +480,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
                 REQUIRE(result.header.errors_count == 0);
                 REQUIRE(result.header.errors == nullptr);
-                REQUIRE(result.proof.expiry_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.proof.expiry_ts == unix_ts);
                 REQUIRE(std::memcmp(
                                 result.proof.gen_index_hash.data,
                                 fake_gen_index_hash.data(),
@@ -514,7 +509,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                 result.proof.rotating_pubkey.data,
                                 result_cpp.proof.rotating_pubkey.data(),
                                 result_cpp.proof.rotating_pubkey.size()) == 0);
-                REQUIRE(result.proof.expiry_unix_ts_ms ==
+                REQUIRE(result.proof.expiry_ts ==
                         result_cpp.proof.expiry_unix_ts.time_since_epoch().count());
                 REQUIRE(std::memcmp(
                                 result.proof.sig.data,
@@ -565,7 +560,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
 
             auto obj = nlohmann::json::object();
-            obj["expiry_unix_ts_ms"] = unix_ts_ms;
+            obj["expiry_ts"] = unix_ts;
             obj["gen_index_hash"] = oxenc::to_hex(fake_gen_index_hash);
             j["result"]["items"].push_back(obj);
 
@@ -585,7 +580,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.ticket == 123);
                 REQUIRE(result.items_count == 1);
                 REQUIRE(result.items != nullptr);
-                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.items[0].expiry_ts == unix_ts);
                 REQUIRE(std::memcmp(
                                 result.items[0].gen_index_hash.data,
                                 fake_gen_index_hash.data(),
@@ -628,9 +623,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"error_report",
                      SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR},
                     {"auto_renewing", true},
-                    {"expiry_unix_ts_ms", unix_ts_ms + 2},
-                    {"grace_period_duration_ms", 1000},
-                    {"refund_requested_unix_ts_ms", unix_ts_ms + 3602},
+                    {"expiry_ts", unix_ts + 2},
+                    {"grace_period_duration", 1000},
+                    {"refund_requested_ts", unix_ts + 3602},
                     {"payments_total", 3},
                     {"items",
                      nlohmann::json::array(
@@ -639,13 +634,13 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                {"payment_provider",
                                 SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
                                {"auto_renewing", false},
-                               {"unredeemed_unix_ts_ms", unix_ts_ms - 3600},
-                               {"redeemed_unix_ts_ms", unix_ts_ms - 3600},
-                               {"expiry_unix_ts_ms", unix_ts_ms},
-                               {"grace_period_duration_ms", 1001},
-                               {"platform_refund_expiry_unix_ts_ms", unix_ts_ms + 1},
-                               {"revoked_unix_ts_ms", unix_ts_ms + 3600},
-                               {"refund_requested_unix_ts_ms", unix_ts_ms + 3601},
+                               {"unredeemed_ts", unix_ts - 3600},
+                               {"redeemed_ts", unix_ts - 3600},
+                               {"expiry_ts", unix_ts},
+                               {"grace_period_duration", 1001},
+                               {"platform_refund_expiry_ts", unix_ts + 1},
+                               {"revoked_ts", unix_ts + 3600},
+                               {"refund_requested_ts", unix_ts + 3601},
                                {"google_payment_token",
                                 std::string(payment_tx.payment_id, payment_tx.payment_id_count)},
                                {"google_order_id",
@@ -669,22 +664,22 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR);
                 REQUIRE(result.items_count == 1);
                 REQUIRE(result.auto_renewing == true);
-                REQUIRE(result.grace_period_duration_ms == 1000);
-                REQUIRE(result.expiry_unix_ts_ms == unix_ts_ms + 2);
-                REQUIRE(result.refund_requested_unix_ts_ms == unix_ts_ms + 3602);
+                REQUIRE(result.grace_period_duration == 1000);
+                REQUIRE(result.expiry_ts == unix_ts + 2);
+                REQUIRE(result.refund_requested_ts == unix_ts + 3602);
                 REQUIRE(result.payments_total == 3);
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
                 REQUIRE(result.items[0].plan == SESSION_PRO_BACKEND_PLAN_ONE_MONTH);
                 REQUIRE(result.items[0].payment_provider ==
                         SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE);
-                REQUIRE(result.items[0].unredeemed_unix_ts_ms == unix_ts_ms - 3600);
-                REQUIRE(result.items[0].redeemed_unix_ts_ms == unix_ts_ms - 3600);
-                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
-                REQUIRE(result.items[0].grace_period_duration_ms == 1001);
-                REQUIRE(result.items[0].platform_refund_expiry_unix_ts_ms == unix_ts_ms + 1);
-                REQUIRE(result.items[0].revoked_unix_ts_ms == unix_ts_ms + 3600);
-                REQUIRE(result.items[0].refund_requested_unix_ts_ms == unix_ts_ms + 3601);
+                REQUIRE(result.items[0].unredeemed_ts == unix_ts - 3600);
+                REQUIRE(result.items[0].redeemed_ts == unix_ts - 3600);
+                REQUIRE(result.items[0].expiry_ts == unix_ts);
+                REQUIRE(result.items[0].grace_period_duration == 1001);
+                REQUIRE(result.items[0].platform_refund_expiry_ts == unix_ts + 1);
+                REQUIRE(result.items[0].revoked_ts == unix_ts + 3600);
+                REQUIRE(result.items[0].refund_requested_ts == unix_ts + 3601);
                 REQUIRE(result.items[0].google_payment_token_count == payment_tx.payment_id_count);
                 REQUIRE(std::memcmp(
                                 result.items[0].google_payment_token,
@@ -777,16 +772,16 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             session_pro_backend_set_payment_refund_requested_request request = {};
             request.version = 0;
             request.master_pkey = master_pubkey;
-            request.unix_ts_ms = unix_ts_ms;
-            request.refund_requested_unix_ts_ms = unix_ts_ms + 1;
+            request.ts = unix_ts;
+            request.refund_requested_ts = unix_ts + 1;
 
             session_pro_backend_signature sig =
                     session_pro_backend_set_payment_refund_requested_request_build_sigs(
                             request.version,
                             master_privkey.data,
                             sizeof(master_privkey.data),
-                            request.unix_ts_ms,
-                            request.refund_requested_unix_ts_ms,
+                            request.ts,
+                            request.refund_requested_ts,
                             payment_tx.provider,
                             reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
                             payment_tx.payment_id_count,
@@ -811,10 +806,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         cpp.master_pkey.data(),
                         request.master_pkey.data,
                         sizeof(request.master_pkey.data));
-                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                        std::chrono::milliseconds{unix_ts_ms});
-                cpp.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                        std::chrono::milliseconds{request.refund_requested_unix_ts_ms});
+                cpp.unix_ts = session::as_sys_seconds(unix_ts);
+                cpp.refund_requested_unix_ts = session::as_sys_seconds(request.refund_requested_ts);
                 std::memcpy(
                         cpp.master_sig.data(),
                         request.master_sig.data,
@@ -1031,7 +1024,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
     // Authorise new key
     {
-        uint64_t now_unix_ts_ms = time(nullptr) * 1000;
+        int64_t now_unix_ts = session::epoch_seconds(session::sysclock_now_s());
         // Build request
         session_pro_backend_master_rotating_signatures pro_sigs =
                 session_pro_backend_generate_pro_proof_request_build_sigs(
@@ -1040,13 +1033,13 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        now_unix_ts_ms);
+                        now_unix_ts);
 
         session_pro_backend_generate_pro_proof_request request = {};
         request.version = 0;
         request.master_pkey = master_pubkey;
         request.rotating_pkey = rotating_pubkey;
-        request.unix_ts_ms = now_unix_ts_ms;
+        request.ts = now_unix_ts;
         request.master_sig = pro_sigs.master_sig;
         request.rotating_sig = pro_sigs.rotating_sig;
 
@@ -1097,14 +1090,14 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         session_pro_backend_get_pro_details_request request = {};
         request.version = 0;
         request.master_pkey = master_pubkey;
-        request.unix_ts_ms = time(nullptr) * 1000;
+        request.ts = session::epoch_seconds(session::sysclock_now_s());
         request.count = 10'000;
 
         session_pro_backend_signature sig = session_pro_backend_get_pro_details_request_build_sig(
                 request.version,
                 master_privkey.data,
                 sizeof(master_privkey.data),
-                request.unix_ts_ms,
+                request.ts,
                 request.count);
         REQUIRE(sig.success);
         request.master_sig = sig.sig;
@@ -1146,13 +1139,13 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         session_pro_backend_get_pro_details_request request = {};
         request.version = 0;
         request.master_pkey = master_pubkey;
-        request.unix_ts_ms = time(nullptr) * 1000;
+        request.ts = session::epoch_seconds(session::sysclock_now_s());
 
         session_pro_backend_signature sig = session_pro_backend_get_pro_details_request_build_sig(
                 request.version,
                 master_privkey.data,
                 sizeof(master_privkey.data),
-                request.unix_ts_ms,
+                request.ts,
                 request.count);
         REQUIRE(sig.success);
         request.master_sig = sig.sig;
@@ -1305,14 +1298,14 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     // Set payment refund requested
     {
         // Build request
-        uint64_t now_unix_ts_ms = time(nullptr) * 1000;
+        int64_t now_unix_ts = session::epoch_seconds(session::sysclock_now_s());
         session_pro_backend_to_json request_json =
                 session_pro_backend_set_payment_refund_requested_request_build_to_json(
                         /*version*/ 0,
                         master_privkey.data,
                         sizeof(master_privkey.data),
-                        /*unix_ts_ms*/ now_unix_ts_ms,
-                        /*refund_requested_unix_ts_ms*/ now_unix_ts_ms,
+                        /*ts*/ now_unix_ts,
+                        /*refund_requested_ts*/ now_unix_ts,
                         another_payment_tx.provider,
                         reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
                         another_payment_tx.payment_id_count,

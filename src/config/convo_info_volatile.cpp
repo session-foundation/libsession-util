@@ -37,8 +37,7 @@ namespace convo {
                     pro_gen_index_hash->data(),
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->size());
-            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                    std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
+            pro_expiry_unix_ts = as_sys_seconds(c.pro_expiry_ts);
         }
     }
 
@@ -54,10 +53,10 @@ namespace convo {
                     pro_gen_index_hash->data(),
                     pro_gen_index_hash->size());
 
-            c.pro_expiry_unix_ts_ms = epoch_ms(pro_expiry_unix_ts);
+            c.pro_expiry_ts = epoch_seconds(pro_expiry_unix_ts);
         } else {
             c.has_pro_gen_index_hash = false;
-            c.pro_expiry_unix_ts_ms = 0;
+            c.pro_expiry_ts = 0;
         }
     }
 
@@ -133,8 +132,7 @@ namespace convo {
                     pro_gen_index_hash->data(),
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->size());
-            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                    std::chrono::milliseconds(c.pro_expiry_unix_ts_ms));
+            pro_expiry_unix_ts = as_sys_seconds(c.pro_expiry_ts);
         }
     }
 
@@ -150,10 +148,10 @@ namespace convo {
                     c.pro_gen_index_hash.data,
                     pro_gen_index_hash->data(),
                     pro_gen_index_hash->size());
-            c.pro_expiry_unix_ts_ms = epoch_ms(pro_expiry_unix_ts);
+            c.pro_expiry_ts = epoch_seconds(pro_expiry_unix_ts);
         } else {
             c.has_pro_gen_index_hash = false;
-            c.pro_expiry_unix_ts_ms = 0;
+            c.pro_expiry_ts = 0;
         }
     }
 
@@ -164,8 +162,7 @@ namespace convo {
         std::optional<std::vector<unsigned char>> maybe_pro_gen_index_hash =
                 maybe_vector(info_dict, "g");
         if (pro_expiry > 0 && maybe_pro_gen_index_hash && maybe_pro_gen_index_hash->size() == 32) {
-            pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                    std::chrono::milliseconds(pro_expiry));
+            pro_expiry_unix_ts = as_sys_seconds(pro_expiry);
             pro_gen_index_hash.emplace();
             std::memcpy(
                     pro_gen_index_hash->data(),
@@ -337,7 +334,7 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     auto info = data["1"][session_id_to_bytes(c.session_id)];
     set_base(c, info);
 
-    auto pro_expiry = epoch_ms(c.pro_expiry_unix_ts);
+    auto pro_expiry = epoch_seconds(c.pro_expiry_unix_ts);
     if (pro_expiry > 0 && c.pro_gen_index_hash) {
         set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_gen_index_hash;
@@ -443,7 +440,7 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
 
     set_nonzero_int(info["y"], c.legacy_blinding);
 
-    auto pro_expiry = epoch_ms(c.pro_expiry_unix_ts);
+    auto pro_expiry = epoch_seconds(c.pro_expiry_unix_ts);
     if (pro_expiry > 0 && c.pro_gen_index_hash) {
         set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_gen_index_hash;

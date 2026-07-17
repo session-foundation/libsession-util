@@ -1227,7 +1227,7 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(
 }
 
 LIBSESSION_C_API bool session_protocol_pro_proof_is_active(
-        session_protocol_pro_proof const* proof, uint64_t ts) {
+        session_protocol_pro_proof const* proof, int64_t ts) {
     return ts <= proof->expiry_ts;
 }
 
@@ -1235,7 +1235,7 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
         session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
-        uint64_t ts,
+        int64_t ts,
         const session_protocol_pro_signed_message* signed_msg) {
     SESSION_PROTOCOL_PRO_STATUS result = SESSION_PROTOCOL_PRO_STATUS_VALID;
     if (!session_protocol_pro_proof_verify_signature(proof, verify_pubkey, verify_pubkey_len))
@@ -1571,7 +1571,7 @@ LIBSESSION_C_API
 session_protocol_decoded_community_message session_protocol_decode_for_community(
         const void* content_or_envelope_payload,
         size_t content_or_envelope_payload_len,
-        uint64_t ts,
+        int64_t ts,
         OPTIONAL const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         OPTIONAL char* error,
