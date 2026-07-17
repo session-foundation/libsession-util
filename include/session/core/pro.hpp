@@ -23,8 +23,7 @@ class Pro final : detail::CoreComponent {
     /// Outputs:
     /// - `bool` -- True if the proof was revoked, false otherwise.
     bool proof_is_revoked(
-            std::span<const std::byte, 32> revocation_tag,
-            std::chrono::sys_time<std::chrono::milliseconds> unix_ts);
+            std::span<const std::byte, 32> revocation_tag, std::chrono::sys_seconds unix_ts);
 
     /// API: core/Pro::pro_update_revocations
     ///
@@ -36,8 +35,12 @@ class Pro final : detail::CoreComponent {
     ///   comes alongside the revocation list when queried.  This ticket changes whenever the
     ///   revocation list is updated and is used to identify when an actual update is needed.
     /// - `revocations` -- New list of Session Pro revocations.
+    /// - `retain_for` -- How long to keep each entry after it was last seen in a list, for
+    ///   memory-only aging (from the revocation response's `retain_for`).
     void update_revocations(
-            uint32_t ticket, std::span<const pro_backend::ProRevocationItem> revocations);
+            uint32_t ticket,
+            std::span<const pro_backend::ProRevocationItem> revocations,
+            std::chrono::seconds retain_for);
 
   private:
     friend class Core;

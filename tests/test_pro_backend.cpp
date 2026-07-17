@@ -68,7 +68,7 @@ static bool string8_equals(string8 s8, std::string_view str) {
 
 [[maybe_unused]] static void dump_pro_revocation(
         const session_pro_backend_pro_revocation_item& item) {
-    fprintf(stderr, "item.expiry_unix_ts: %" PRId64 "zu\n", item.expiry_ts);
+    fprintf(stderr, "item.effective_ts: %" PRId64 "\n", item.effective_ts);
     fprintf(stderr,
             "item.revocation_tag: %s\n",
             oxenc::to_hex(item.revocation_tag.data, std::end(item.revocation_tag.data)).c_str());
@@ -550,13 +550,15 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             nlohmann::json j;
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"]["ticket"] = 123;
+            j["result"]["retry_in"] = 3600;
+            j["result"]["retain_for"] = 2592000;
             j["result"]["items"] = nlohmann::json::array();
 
             b32 fake_revocation_tag;
             randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             auto obj = nlohmann::json::object();
-            obj["expiry_ts"] = unix_ts;
+            obj["effective_ts"] = unix_ts;
             obj["revocation_tag"] = oxenc::to_hex(fake_revocation_tag);
             j["result"]["items"].push_back(obj);
 
@@ -574,9 +576,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.header.errors_count == 0);
                 REQUIRE(result.header.errors == nullptr);
                 REQUIRE(result.ticket == 123);
+                REQUIRE(result.retry_in == 3600);
+                REQUIRE(result.retain_for == 2592000);
                 REQUIRE(result.items_count == 1);
                 REQUIRE(result.items != nullptr);
-                REQUIRE(result.items[0].expiry_ts == unix_ts);
+                REQUIRE(result.items[0].effective_ts == unix_ts);
                 REQUIRE(std::memcmp(
                                 result.items[0].revocation_tag.data,
                                 fake_revocation_tag.data(),
