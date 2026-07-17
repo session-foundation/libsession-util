@@ -92,7 +92,7 @@ struct session_protocol_pro_proof {
     uint8_t version;
     bytes32 gen_index_hash;
     bytes32 rotating_pubkey;
-    uint64_t expiry_unix_ts_ms;
+    uint64_t expiry_ts;
     bytes64 sig;
 };
 
@@ -321,22 +321,22 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_message(
 
 /// API: session_protocol/session_protocol_pro_proof_is_active
 ///
-/// Check if the Pro proof is currently entitled to Pro given the `unix_ts_ms` with respect to the
+/// Check if the Pro proof is currently entitled to Pro given the `ts` with respect to the
 /// proof's `expiry_unix_ts`
 ///
 /// Inputs:
 /// - `proof` -- Proof to verify
-/// - `unix_ts_ms` -- The unix timestamp to check the proof expiry time against
+/// - `ts` -- The unix timestamp to check the proof expiry time against
 ///
 /// Outputs:
 /// - `bool` -- True if expired, false otherwise
 LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
-        session_protocol_pro_proof const* proof, uint64_t unix_ts_ms) NON_NULL_ARG(1);
+        session_protocol_pro_proof const* proof, uint64_t ts) NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_pro_proof_status
 ///
 /// Evaluate the status of the pro proof by checking it is signed by the `verify_pubkey`, it has
-/// not expired via `unix_ts_ms` and optionally verify that the `signed_msg` was signed by the
+/// not expired via `ts` and optionally verify that the `signed_msg` was signed by the
 /// `rotating_pubkey` embedded in the proof.
 ///
 /// Internally this function calls `pro_proof_verify_signature`, `pro_proof_verify_message` and
@@ -350,7 +350,7 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
 ///   they are the original signatory of the proof.
 /// - `verify_pubkey_len` -- Length of the `verify_pubkey` should be 32 bytes
 ///   they are the original signatory of the proof.
-/// - `unix_ts_ms` -- Unix timestamp to compared against the embedded `expiry_unix_ts`
+/// - `ts` -- Unix timestamp to compared against the embedded `expiry_unix_ts`
 ///   to determine if the proof has expired or not
 /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
 ///   the embedded `rotating_pubkey` in the proof signed the given message.
@@ -363,7 +363,7 @@ LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
         session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
-        uint64_t unix_ts_ms,
+        uint64_t ts,
         OPTIONAL const session_protocol_pro_signed_message* signed_msg) NON_NULL_ARG(1, 2);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
@@ -798,7 +798,7 @@ LIBSESSION_EXPORT void session_protocol_decode_envelope_free(
 /// Inputs:
 /// - `content_or_envelope_payload` -- the unencrypted content or envelope payload containing the
 ///   community message
-/// - `unix_ts_ms` -- pass in the current system time which is used to determine, whether or
+/// - `ts` -- pass in the current system time which is used to determine, whether or
 ///   not the Session Pro proof has expired or not if it is in the payload. Ignored if there's no
 ///   proof in the message.
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
@@ -828,7 +828,7 @@ LIBSESSION_EXPORT void session_protocol_decode_envelope_free(
 LIBSESSION_EXPORT session_protocol_decoded_community_message session_protocol_decode_for_community(
         const void* content_or_envelope_payload,
         size_t content_or_envelope_payload_len,
-        uint64_t unix_ts_ms,
+        uint64_t ts,
         OPTIONAL const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         OPTIONAL char* error,

@@ -353,9 +353,9 @@ AddProPaymentOrGenerateProProofResponse AddProPaymentOrGenerateProProofResponse:
 
     // Parse payload
     result.proof.version = json_require<uint8_t>(result_obj, "version", result.errors);
-    auto expiry_unix_ts_ms = json_require<uint64_t>(result_obj, "expiry_unix_ts_ms", result.errors);
-    result.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(expiry_unix_ts_ms));
+    auto expiry_ts = json_require<uint64_t>(result_obj, "expiry_ts", result.errors);
+    result.proof.expiry_unix_ts = std::chrono::sys_seconds(
+            std::chrono::seconds(expiry_ts));
     json_require_fixed_bytes_from_hex(
             result_obj, "gen_index_hash", result.errors, result.proof.gen_index_hash);
     json_require_fixed_bytes_from_hex(
@@ -369,7 +369,7 @@ std::string GenerateProProofRequest::to_json() const {
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
-    j["unix_ts_ms"] = epoch_ms(unix_ts);
+    j["ts"] = epoch_seconds(unix_ts);
     j["master_sig"] = oxenc::to_hex(master_sig);
     j["rotating_sig"] = oxenc::to_hex(rotating_sig);
     std::string result = j.dump();
@@ -380,7 +380,7 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
         std::uint8_t request_version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
+        std::chrono::sys_seconds unix_ts) {
 
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == 32) {
@@ -405,7 +405,7 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
     uint8_t version = 0;
-    uint64_t unix_ts_ms = epoch_ms(unix_ts);
+    int64_t ts = epoch_seconds(unix_ts);
     array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state = {};
     make_blake2b32_hasher(
@@ -417,9 +417,9 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
             &state, master_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
     crypto_generichash_blake2b_update(
             &state, rotating_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
-    oxenc::host_to_little_inplace(unix_ts_ms);
+    oxenc::host_to_little_inplace(ts);
     crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms));
+            &state, reinterpret_cast<uint8_t*>(&ts), sizeof(ts));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash with both keys
@@ -443,7 +443,7 @@ std::string GenerateProProofRequest::build_to_json(
         std::uint8_t request_version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts) {
+        std::chrono::sys_seconds unix_ts) {
     // Rederive keys from 32 byte seed if given
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == 32) {
@@ -529,11 +529,10 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
 
         // Parse revocation item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto expiry_unix_ts = json_require<uint64_t>(obj, "expiry_unix_ts_ms", result.errors);
+        auto expiry_unix_ts = json_require<uint64_t>(obj, "expiry_ts", result.errors);
 
         ProRevocationItem item = {};
-        item.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(expiry_unix_ts));
+        item.expiry_unix_ts = as_sys_seconds(expiry_unix_ts);
         json_require_fixed_bytes_from_hex(
                 obj, "gen_index_hash", result.errors, item.gen_index_hash);
 
@@ -551,7 +550,7 @@ std::string GetProDetailsRequest::to_json() const {
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["master_sig"] = oxenc::to_hex(master_sig);
-    j["unix_ts_ms"] = epoch_ms(unix_ts);
+    j["ts"] = epoch_seconds(unix_ts);
     j["count"] = count;
     std::string result = j.dump();
     return result;
@@ -560,7 +559,7 @@ std::string GetProDetailsRequest::to_json() const {
 array_uc64 GetProDetailsRequest::build_sig(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        std::chrono::sys_seconds unix_ts,
         uint32_t count) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
@@ -576,7 +575,7 @@ array_uc64 GetProDetailsRequest::build_sig(
     //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
     array_uc32 hash_to_sign = {};
     crypto_generichash_blake2b_state state = {};
-    uint64_t unix_ts_ms = epoch_ms(unix_ts);
+    int64_t ts = epoch_seconds(unix_ts);
     make_blake2b32_hasher(
             &state,
             {SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION,
@@ -586,10 +585,10 @@ array_uc64 GetProDetailsRequest::build_sig(
             &state,
             master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
             crypto_sign_ed25519_PUBLICKEYBYTES);
-    oxenc::host_to_little_inplace(unix_ts_ms);
+    oxenc::host_to_little_inplace(ts);
     oxenc::host_to_little_inplace(count);
     crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<unsigned char*>(&unix_ts_ms), sizeof(unix_ts_ms));
+            &state, reinterpret_cast<unsigned char*>(&ts), sizeof(ts));
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<unsigned char*>(&count), sizeof(count));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
@@ -608,7 +607,7 @@ array_uc64 GetProDetailsRequest::build_sig(
 std::string GetProDetailsRequest::build_to_json(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
+        std::chrono::sys_seconds unix_ts,
         uint32_t count) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
@@ -675,17 +674,13 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
 
     result.payments_total = json_require<uint32_t>(result_obj, "payments_total", result.errors);
 
-    uint64_t expiry_unix_ts_ms =
-            json_require<uint64_t>(result_obj, "expiry_unix_ts_ms", result.errors);
-    uint64_t grace_period_duration_ms =
-            json_require<uint64_t>(result_obj, "grace_period_duration_ms", result.errors);
-    uint64_t refund_requested_unix_ts_ms =
-            json_require<uint64_t>(result_obj, "refund_requested_unix_ts_ms", result.errors);
-    result.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(expiry_unix_ts_ms));
-    result.grace_period_duration = std::chrono::milliseconds(grace_period_duration_ms);
-    result.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds(refund_requested_unix_ts_ms));
+    result.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(
+            json_require<uint64_t>(result_obj, "expiry_ts", result.errors)));
+    result.grace_period_duration = std::chrono::seconds(
+            json_require<uint64_t>(result_obj, "grace_period_duration", result.errors));
+    result.refund_requested_unix_ts = std::chrono::sys_seconds(
+            std::chrono::seconds(
+                    json_require<uint64_t>(result_obj, "refund_requested_ts", result.errors)));
 
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
@@ -703,16 +698,16 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
         auto plan = json_require<uint64_t>(obj, "plan", result.errors);
         auto payment_provider = json_require<uint32_t>(obj, "payment_provider", result.errors);
         auto auto_renewing = json_require<bool>(obj, "auto_renewing", result.errors);
-        auto unredeemed_ts = json_require<uint64_t>(obj, "unredeemed_unix_ts_ms", result.errors);
-        auto redeemed_ts = json_require<uint64_t>(obj, "redeemed_unix_ts_ms", result.errors);
-        auto expiry_ts = json_require<uint64_t>(obj, "expiry_unix_ts_ms", result.errors);
-        auto grace_period_duration_ms =
-                json_require<uint64_t>(obj, "grace_period_duration_ms", result.errors);
+        auto unredeemed_ts = json_require<uint64_t>(obj, "unredeemed_ts", result.errors);
+        auto redeemed_ts = json_require<uint64_t>(obj, "redeemed_ts", result.errors);
+        auto expiry_ts = json_require<uint64_t>(obj, "expiry_ts", result.errors);
+        auto grace_period_duration =
+                json_require<uint64_t>(obj, "grace_period_duration", result.errors);
         auto platform_refund_expiry_ts =
-                json_require<uint64_t>(obj, "platform_refund_expiry_unix_ts_ms", result.errors);
-        auto revoked_ts = json_require<uint64_t>(obj, "revoked_unix_ts_ms", result.errors);
+                json_require<uint64_t>(obj, "platform_refund_expiry_ts", result.errors);
+        auto revoked_ts = json_require<uint64_t>(obj, "revoked_ts", result.errors);
         auto refund_requested_ts =
-                json_require<uint64_t>(obj, "refund_requested_unix_ts_ms", result.errors);
+                json_require<uint64_t>(obj, "refund_requested_ts", result.errors);
 
         ProPaymentItem item = {};
         if (status > SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL &&
@@ -740,19 +735,19 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
         }
 
         item.auto_renewing = auto_renewing;
-        item.unredeemed_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(unredeemed_ts));
-        item.redeemed_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(redeemed_ts));
-        item.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(expiry_ts));
-        item.grace_period_duration_ms = std::chrono::milliseconds(grace_period_duration_ms);
-        item.platform_refund_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(platform_refund_expiry_ts));
-        item.revoked_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(revoked_ts));
-        item.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(refund_requested_ts));
+        item.unredeemed_unix_ts = std::chrono::sys_seconds(
+                std::chrono::seconds(unredeemed_ts));
+        item.redeemed_unix_ts = std::chrono::sys_seconds(
+                std::chrono::seconds(redeemed_ts));
+        item.expiry_unix_ts = std::chrono::sys_seconds(
+                std::chrono::seconds(expiry_ts));
+        item.grace_period_duration = std::chrono::seconds(grace_period_duration);
+        item.platform_refund_expiry_unix_ts = std::chrono::sys_seconds(
+                std::chrono::seconds(platform_refund_expiry_ts));
+        item.revoked_unix_ts = std::chrono::sys_seconds(
+                std::chrono::seconds(revoked_ts));
+        item.refund_requested_unix_ts = std::chrono::sys_seconds(
+                std::chrono::seconds(refund_requested_ts));
         switch (item.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
@@ -801,8 +796,8 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
 array_uc64 SetPaymentRefundRequestedRequest::build_sig(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-        std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
+        std::chrono::sys_seconds unix_ts,
+        std::chrono::sys_seconds refund_requested_unix_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         std::span<const uint8_t> payment_tx_payment_id,
         std::span<const uint8_t> payment_tx_order_id) {
@@ -831,16 +826,16 @@ array_uc64 SetPaymentRefundRequestedRequest::build_sig(
             crypto_sign_ed25519_PUBLICKEYBYTES);
 
     // Timestamps
-    uint64_t unix_ts_ms = epoch_ms(unix_ts);
-    uint64_t refund_requested_unix_ts_ms = epoch_ms(refund_requested_unix_ts);
-    oxenc::host_to_little_inplace(unix_ts_ms);
-    oxenc::host_to_little_inplace(refund_requested_unix_ts_ms);
+    int64_t ts = epoch_seconds(unix_ts);
+    int64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
+    oxenc::host_to_little_inplace(ts);
+    oxenc::host_to_little_inplace(refund_requested_ts);
     crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<const uint8_t*>(&unix_ts_ms), sizeof(unix_ts_ms));
+            &state, reinterpret_cast<const uint8_t*>(&ts), sizeof(ts));
     crypto_generichash_blake2b_update(
             &state,
-            reinterpret_cast<const uint8_t*>(&refund_requested_unix_ts_ms),
-            sizeof(refund_requested_unix_ts_ms));
+            reinterpret_cast<const uint8_t*>(&refund_requested_ts),
+            sizeof(refund_requested_ts));
 
     // Payment provider
     uint8_t provider_u8 = payment_tx_provider;
@@ -871,8 +866,8 @@ array_uc64 SetPaymentRefundRequestedRequest::build_sig(
 std::string SetPaymentRefundRequestedRequest::build_to_json(
         uint8_t version,
         std::span<const uint8_t> master_privkey,
-        std::chrono::sys_time<std::chrono::milliseconds> unix_ts,
-        std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts,
+        std::chrono::sys_seconds unix_ts,
+        std::chrono::sys_seconds refund_requested_unix_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         std::span<const uint8_t> payment_tx_payment_id,
         std::span<const uint8_t> payment_tx_order_id) {
@@ -909,8 +904,8 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     nlohmann::json j;
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
-    j["unix_ts_ms"] = epoch_ms(unix_ts);
-    j["refund_requested_unix_ts_ms"] = epoch_ms(refund_requested_unix_ts);
+    j["ts"] = epoch_seconds(unix_ts);
+    j["refund_requested_ts"] = epoch_seconds(refund_requested_unix_ts);
     j["payment_tx"]["provider"] = payment_tx.provider;
     switch (payment_tx.provider) {
         case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
@@ -1060,20 +1055,18 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t unix_ts_ms) {
+        uint64_t ts) {
 
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::chrono::milliseconds ts{unix_ts_ms};
-
     session_pro_backend_master_rotating_signatures result = {};
     try {
         auto sigs = GenerateProProofRequest::build_sigs(
                 request_version,
                 master_span,
                 rotating_span,
-                std::chrono::sys_time<std::chrono::milliseconds>(ts));
+                session::as_sys_seconds(ts));
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
@@ -1096,19 +1089,17 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t unix_ts_ms) {
+        uint64_t ts) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::chrono::milliseconds ts{unix_ts_ms};
-
     session_pro_backend_to_json result = {};
     try {
         auto json = GenerateProProofRequest::build_to_json(
                 request_version,
                 master_span,
                 rotating_span,
-                std::chrono::sys_time<std::chrono::milliseconds>(ts));
+                session::as_sys_seconds(ts));
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1128,15 +1119,14 @@ session_pro_backend_get_pro_details_request_build_sig(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t unix_ts_ms,
+        uint64_t ts,
         uint32_t count) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
-    std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
-
     session_pro_backend_signature result = {};
     try {
-        auto sig = GetProDetailsRequest::build_sig(request_version, master_span, ts, count);
+        auto sig = GetProDetailsRequest::build_sig(
+                request_version, master_span, session::as_sys_seconds(ts), count);
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1156,15 +1146,14 @@ session_pro_backend_get_pro_details_request_build_to_json(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t unix_ts_ms,
+        uint64_t ts,
         uint32_t count) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
-    std::chrono::sys_time<std::chrono::milliseconds> ts{std::chrono::milliseconds(unix_ts_ms)};
-
     session_pro_backend_to_json result = {};
     try {
-        auto json = GetProDetailsRequest::build_to_json(request_version, master_span, ts, count);
+        auto json = GetProDetailsRequest::build_to_json(
+                request_version, master_span, session::as_sys_seconds(ts), count);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1226,8 +1215,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_generate_pro_pr
     cpp.version = request->version;
     std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
     std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
-    cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
-            std::chrono::milliseconds(request->unix_ts_ms)};
+    cpp.unix_ts = session::as_sys_seconds(request->ts);
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
     std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
 
@@ -1289,8 +1277,7 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_details
     std::memcpy(
             cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
-    cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
-            std::chrono::milliseconds{request->unix_ts_ms}};
+    cpp.unix_ts = session::as_sys_seconds(request->ts);
     cpp.count = request->count;
 
     try {
@@ -1350,7 +1337,7 @@ session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
     // error response returns the same struct just with different fields populated.
     result.header.status = cpp.status;
     result.proof.version = cpp.proof.version;
-    result.proof.expiry_unix_ts_ms = session::epoch_ms(cpp.proof.expiry_unix_ts);
+    result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_unix_ts);
     std::memcpy(
             result.proof.gen_index_hash.data,
             cpp.proof.gen_index_hash.data(),
@@ -1432,7 +1419,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
         const ProRevocationItem& src = cpp.items[index];
         session_pro_backend_pro_revocation_item& dest = result.items[index];
         std::memcpy(dest.gen_index_hash.data, src.gen_index_hash.data(), src.gen_index_hash.size());
-        dest.expiry_unix_ts_ms = session::epoch_ms(src.expiry_unix_ts);
+        dest.expiry_ts = session::epoch_seconds(src.expiry_unix_ts);
     }
     return result;
 }
@@ -1471,7 +1458,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         result.header.internal_arena_buf_ = arena.data;
     }
 
-    using session::epoch_ms;
+    using session::epoch_seconds;
 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
     result.header.status = cpp.status;
@@ -1481,9 +1468,9 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
             &arena, result.items_count * sizeof(*result.items));
     result.auto_renewing = cpp.auto_renewing;
-    result.expiry_unix_ts_ms = epoch_ms(cpp.expiry_unix_ts);
-    result.grace_period_duration_ms = cpp.grace_period_duration.count();
-    result.refund_requested_unix_ts_ms = epoch_ms(cpp.refund_requested_unix_ts);
+    result.expiry_ts = epoch_seconds(cpp.expiry_unix_ts);
+    result.grace_period_duration = cpp.grace_period_duration.count();
+    result.refund_requested_ts = epoch_seconds(cpp.refund_requested_unix_ts);
     result.payments_total = cpp.payments_total;
 
     for (size_t index = 0; index < result.items_count; ++index) {
@@ -1493,13 +1480,13 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         dest.plan = src.plan;
         dest.payment_provider = src.payment_provider;
         dest.payment_provider_metadata = src.payment_provider_metadata;
-        dest.unredeemed_unix_ts_ms = epoch_ms(src.unredeemed_unix_ts);
-        dest.redeemed_unix_ts_ms = epoch_ms(src.redeemed_unix_ts);
-        dest.expiry_unix_ts_ms = epoch_ms(src.expiry_unix_ts);
-        dest.grace_period_duration_ms = session::duration_ms(src.grace_period_duration_ms);
-        dest.platform_refund_expiry_unix_ts_ms = epoch_ms(src.platform_refund_expiry_unix_ts);
-        dest.revoked_unix_ts_ms = epoch_ms(src.revoked_unix_ts);
-        dest.refund_requested_unix_ts_ms = epoch_ms(src.refund_requested_unix_ts);
+        dest.unredeemed_ts = epoch_seconds(src.unredeemed_unix_ts);
+        dest.redeemed_ts = epoch_seconds(src.redeemed_unix_ts);
+        dest.expiry_ts = epoch_seconds(src.expiry_unix_ts);
+        dest.grace_period_duration = src.grace_period_duration.count();
+        dest.platform_refund_expiry_ts = epoch_seconds(src.platform_refund_expiry_unix_ts);
+        dest.revoked_ts = epoch_seconds(src.revoked_unix_ts);
+        dest.refund_requested_ts = epoch_seconds(src.refund_requested_unix_ts);
 
         switch (dest.payment_provider) {
             case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
@@ -1555,8 +1542,8 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t unix_ts_ms,
-        uint64_t refund_requested_unix_ts_ms,
+        uint64_t ts,
+        uint64_t refund_requested_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
@@ -1564,9 +1551,9 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         size_t payment_tx_order_id_len) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
-    std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
-    std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
-            std::chrono::milliseconds(refund_requested_unix_ts_ms)};
+    std::chrono::sys_seconds unix_ts = session::as_sys_seconds(ts);
+    std::chrono::sys_seconds refund_requested_unix_ts =
+            session::as_sys_seconds(refund_requested_ts);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
     std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
@@ -1600,8 +1587,8 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
         uint8_t request_version,
         const uint8_t* master_privkey,
         size_t master_privkey_len,
-        uint64_t unix_ts_ms,
-        uint64_t refund_requested_unix_ts_ms,
+        uint64_t ts,
+        uint64_t refund_requested_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const uint8_t* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
@@ -1610,9 +1597,9 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
 
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
-    std::chrono::sys_time<std::chrono::milliseconds> unix_ts{std::chrono::milliseconds(unix_ts_ms)};
-    std::chrono::sys_time<std::chrono::milliseconds> refund_requested_unix_ts{
-            std::chrono::milliseconds(refund_requested_unix_ts_ms)};
+    std::chrono::sys_seconds unix_ts = session::as_sys_seconds(ts);
+    std::chrono::sys_seconds refund_requested_unix_ts =
+            session::as_sys_seconds(refund_requested_ts);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
     std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
@@ -1654,10 +1641,8 @@ session_pro_backend_set_payment_refund_requested_request_to_json(
     std::memcpy(
             cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
-    cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
-            std::chrono::milliseconds{request->unix_ts_ms}};
-    cpp.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-            std::chrono::milliseconds{request->refund_requested_unix_ts_ms});
+    cpp.unix_ts = session::as_sys_seconds(request->ts);
+    cpp.refund_requested_unix_ts = session::as_sys_seconds(request->refund_requested_ts);
     cpp.payment_tx.provider = request->payment_tx.provider;
     cpp.payment_tx.payment_id =
             std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);

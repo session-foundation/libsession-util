@@ -142,6 +142,7 @@ inline std::chrono::sys_seconds sysclock_now_s() {
     return sysclock_now<std::chrono::seconds>();
 }
 using sys_ms = std::chrono::sys_time<std::chrono::milliseconds>;
+using sys_seconds = std::chrono::sys_seconds;
 // Shortcut for sysclock_now<std::chrono::sys_time<std::chrono::milliseconds>>();
 inline sys_ms sysclock_now_ms() {
     return sysclock_now<std::chrono::milliseconds>();

@@ -245,7 +245,7 @@ struct GenerateProProofRequest {
     array_uc32 rotating_pkey;
 
     /// Unix timestamp of the request
-    sys_ms unix_ts;
+    sys_seconds unix_ts;
 
     /// 64-byte signature proving knowledge of the master key's secret component
     array_uc64 master_sig;
@@ -271,7 +271,7 @@ struct GenerateProProofRequest {
             std::uint8_t request_version,
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
-            sys_ms unix_ts);
+            sys_seconds unix_ts);
 
     /// API: pro/GenerateProProofRequest::build_to_json
     ///
@@ -290,7 +290,7 @@ struct GenerateProProofRequest {
             std::uint8_t request_version,
             std::span<const uint8_t> master_privkey,
             std::span<const uint8_t> rotating_privkey,
-            sys_ms unix_ts);
+            sys_seconds unix_ts);
 
     /// API: pro/GenerateProProofRequest::to_json
     ///
@@ -327,7 +327,7 @@ struct ProRevocationItem {
     array_uc32 gen_index_hash;
 
     /// Unix timestamp when the proof expires
-    sys_ms expiry_unix_ts;
+    sys_seconds expiry_unix_ts;
 };
 
 struct GetProRevocationsResponse : public ResponseHeader {
@@ -362,7 +362,7 @@ struct GetProDetailsRequest {
     array_uc64 master_sig;
 
     /// Unix timestamp of the request
-    sys_ms unix_ts;
+    sys_seconds unix_ts;
 
     /// Max amount of historical payments to request from the backend
     uint32_t count;
@@ -384,7 +384,7 @@ struct GetProDetailsRequest {
     static array_uc64 build_sig(
             uint8_t version,
             std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
+            sys_seconds unix_ts,
             uint32_t count);
 
     /// API: pro/GetProDetailsRequest::build_to_json
@@ -403,7 +403,7 @@ struct GetProDetailsRequest {
     static std::string build_to_json(
             std::uint8_t version,
             std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
+            sys_seconds unix_ts,
             uint32_t count);
 
     /// API: pro/GenerateProProofRequest::to_json
@@ -441,30 +441,30 @@ struct ProPaymentItem {
     bool auto_renewing;
 
     /// Unix timestamp of when the payment was witnessed by the Pro Backend. Always set
-    sys_ms unredeemed_unix_ts;
+    sys_seconds unredeemed_unix_ts;
 
     /// Unix timestamp of when the payment was redeemed. 0 if not activated
-    sys_ms redeemed_unix_ts;
+    sys_seconds redeemed_unix_ts;
 
     /// Unix timestamp of when the payment was expiry. 0 if not activated
-    sys_ms expiry_unix_ts;
+    sys_seconds expiry_unix_ts;
 
     /// Duration of the grace period, e.g. when the payment provider will start to attempt to renew
     /// the Session Pro subscription. During the period between
-    /// [expiry_unix_ts, expiry_unix_ts + grace_period_duration_ms] the user continues to have
+    /// [expiry_unix_ts, expiry_unix_ts + grace_period_duration] the user continues to have
     /// entitlement to Session Pro. This value is only applicable if `auto_renewing` is `true`.
-    std::chrono::milliseconds grace_period_duration_ms;
+    std::chrono::seconds grace_period_duration;
 
     /// Unix deadline timestamp of when the user is able to refund the subscription via the payment
     /// provider. Thereafter the user must initiate a refund manually via Session support.
-    sys_ms platform_refund_expiry_unix_ts;
+    sys_seconds platform_refund_expiry_unix_ts;
 
     /// Unix timestamp of when the payment was revoked or refunded. 0 if not applicable.
-    sys_ms revoked_unix_ts;
+    sys_seconds revoked_unix_ts;
 
     /// UNIX timestamp at which a refund request was requested for this payment. This is set to 0
     /// if no refund has been requested for this payment yet.
-    sys_ms refund_requested_unix_ts;
+    sys_seconds refund_requested_unix_ts;
 
     /// When payment provider is set to Google Play Store, this is the platform-specific purchase
     /// token. This information should be considered as confidential and stored appropriately.
@@ -532,18 +532,18 @@ struct GetProDetailsResponse : public ResponseHeader {
     /// This timestamp may be in the past if the user no longer has active payments. Overtime the
     /// Pro Backend may prune user history and so after long lapses of activity, a user's
     /// subscription history may be deleted.
-    sys_ms expiry_unix_ts;
+    sys_seconds expiry_unix_ts;
 
     /// Duration that a user is entitled to for their grace period. This value is to be ignored if
     /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
     /// subtracting `expiry_unix_ts_ms` from this value.
-    std::chrono::milliseconds grace_period_duration;
+    std::chrono::seconds grace_period_duration;
 
     /// UNIX timestamp at which a refund request was requested by this user. This timestamp comes
     /// from the latest payment that the backend has deemed to be active for the user (e.g. the
     /// payment associated with the `expiry_unix_ts_ms`). This value is 0 if no refund has been
     /// requested on the active payment.
-    sys_ms refund_requested_unix_ts;
+    sys_seconds refund_requested_unix_ts;
 
     /// Total number of payments known by the backend for the user. This may be greater than the
     /// length of items if the request, requested less than the number of payments the user has.
@@ -573,10 +573,10 @@ struct SetPaymentRefundRequestedRequest {
     array_uc64 master_sig;
 
     /// Unix timestamp of the current time
-    sys_ms unix_ts;
+    sys_seconds unix_ts;
 
     /// Unix timestamp to set as the timestamp that a refund was requested on this payment.
-    sys_ms refund_requested_unix_ts;
+    sys_seconds refund_requested_unix_ts;
 
     /// Payment details to set the refund request on
     AddProPaymentUserTransaction payment_tx;
@@ -607,8 +607,8 @@ struct SetPaymentRefundRequestedRequest {
     static array_uc64 build_sig(
             uint8_t version,
             std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
-            sys_ms refund_requested_unix_ts,
+            sys_seconds unix_ts,
+            sys_seconds refund_requested_unix_ts,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
             std::span<const uint8_t> payment_tx_payment_id,
             std::span<const uint8_t> payment_tx_order_id);
@@ -637,8 +637,8 @@ struct SetPaymentRefundRequestedRequest {
     static std::string build_to_json(
             std::uint8_t version,
             std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
-            sys_ms refund_requested_unix_ts,
+            sys_seconds unix_ts,
+            sys_seconds refund_requested_unix_ts,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
             std::span<const uint8_t> payment_tx_payment_id,
             std::span<const uint8_t> payment_tx_order_id);
