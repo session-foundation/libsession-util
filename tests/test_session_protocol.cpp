@@ -63,9 +63,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             result.proof.gen_index_hash.data(), result.proof.gen_index_hash.size());
     proto_proof->set_rotatingpublickey(
             result.proof.rotating_pubkey.data(), result.proof.rotating_pubkey.size());
-    proto_proof->set_expiryunixts(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                          result.proof.expiry_unix_ts.time_since_epoch())
-                                          .count());
+    proto_proof->set_expiryunixts(session::epoch_seconds(result.proof.expiry_unix_ts));
     proto_proof->set_sig(result.proof.sig.data(), result.proof.sig.size());
 
     // Generate the plaintext
@@ -761,7 +759,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_decoded_community_message decoded = session_protocol_decode_for_community(
                 encoded.ciphertext.data,
                 encoded.ciphertext.size,
-                timestamp_ms.time_since_epoch().count(),
+                timestamp_s.time_since_epoch().count(),
                 keys.ed_pk1.data(),
                 keys.ed_pk1.size(),
                 error,
@@ -784,7 +782,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_decoded_community_message decoded = session_protocol_decode_for_community(
                 encoded.ciphertext.data,
                 encoded.ciphertext.size,
-                timestamp_ms.time_since_epoch().count(),
+                timestamp_s.time_since_epoch().count(),
                 keys.ed_pk1.data(),
                 keys.ed_pk1.size(),
                 error,
@@ -805,7 +803,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_decoded_community_message decoded = session_protocol_decode_for_community(
                 envelope_plaintext.data(),
                 envelope_plaintext.size(),
-                timestamp_ms.time_since_epoch().count(),
+                timestamp_s.time_since_epoch().count(),
                 keys.ed_pk1.data(),
                 keys.ed_pk1.size(),
                 error,
@@ -829,7 +827,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_decoded_community_message decoded = session_protocol_decode_for_community(
                 envelope_plaintext.data(),
                 envelope_plaintext.size(),
-                timestamp_ms.time_since_epoch().count(),
+                timestamp_s.time_since_epoch().count(),
                 keys.ed_pk1.data(),
                 keys.ed_pk1.size(),
                 error,
@@ -892,7 +890,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         session_protocol_decoded_community_message decoded = session_protocol_decode_for_community(
                 decrypted_cipher.data(),
                 decrypted_cipher.size(),
-                timestamp_ms.time_since_epoch().count(),
+                timestamp_s.time_since_epoch().count(),
                 keys.ed_pk1.data(),
                 keys.ed_pk1.size(),
                 error,

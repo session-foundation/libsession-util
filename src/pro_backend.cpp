@@ -276,7 +276,7 @@ AddProPaymentOrGenerateProProofResponse AddProPaymentOrGenerateProProofResponse:
 
     // Parse payload
     result.proof.version = json_require<uint8_t>(result_obj, "version", result.errors);
-    auto expiry_ts = json_require<uint64_t>(result_obj, "expiry_ts", result.errors);
+    auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", result.errors);
     result.proof.expiry_unix_ts = as_sys_seconds(expiry_ts);
     json_require_fixed_bytes_from_hex(
             result_obj, "gen_index_hash", result.errors, result.proof.gen_index_hash);
@@ -379,7 +379,7 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
 
         // Parse revocation item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto expiry_unix_ts = json_require<uint64_t>(obj, "expiry_ts", result.errors);
+        auto expiry_unix_ts = json_require<int64_t>(obj, "expiry_ts", result.errors);
 
         ProRevocationItem item = {};
         item.expiry_unix_ts = as_sys_seconds(expiry_unix_ts);
@@ -477,11 +477,11 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
 
     result.payments_total = json_require<uint32_t>(result_obj, "payments_total", result.errors);
 
-    uint64_t expiry_ts = json_require<uint64_t>(result_obj, "expiry_ts", result.errors);
-    uint64_t grace_period_duration =
-            json_require<uint64_t>(result_obj, "grace_period_duration", result.errors);
-    uint64_t refund_requested_ts =
-            json_require<uint64_t>(result_obj, "refund_requested_ts", result.errors);
+    int64_t expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", result.errors);
+    int64_t grace_period_duration =
+            json_require<int64_t>(result_obj, "grace_period_duration", result.errors);
+    int64_t refund_requested_ts =
+            json_require<int64_t>(result_obj, "refund_requested_ts", result.errors);
     result.expiry_unix_ts = as_sys_seconds(expiry_ts);
     result.grace_period_duration = std::chrono::seconds(grace_period_duration);
     result.refund_requested_unix_ts = as_sys_seconds(refund_requested_ts);
@@ -502,16 +502,15 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
         auto plan = json_require<uint64_t>(obj, "plan", result.errors);
         auto payment_provider = json_require<uint32_t>(obj, "payment_provider", result.errors);
         auto auto_renewing = json_require<bool>(obj, "auto_renewing", result.errors);
-        auto unredeemed_ts = json_require<uint64_t>(obj, "unredeemed_ts", result.errors);
-        auto redeemed_ts = json_require<uint64_t>(obj, "redeemed_ts", result.errors);
-        auto expiry_ts = json_require<uint64_t>(obj, "expiry_ts", result.errors);
+        auto unredeemed_ts = json_require<int64_t>(obj, "unredeemed_ts", result.errors);
+        auto redeemed_ts = json_require<int64_t>(obj, "redeemed_ts", result.errors);
+        auto expiry_ts = json_require<int64_t>(obj, "expiry_ts", result.errors);
         auto grace_period_duration =
-                json_require<uint64_t>(obj, "grace_period_duration", result.errors);
+                json_require<int64_t>(obj, "grace_period_duration", result.errors);
         auto platform_refund_expiry_ts =
-                json_require<uint64_t>(obj, "platform_refund_expiry_ts", result.errors);
-        auto revoked_ts = json_require<uint64_t>(obj, "revoked_ts", result.errors);
-        auto refund_requested_ts =
-                json_require<uint64_t>(obj, "refund_requested_ts", result.errors);
+                json_require<int64_t>(obj, "platform_refund_expiry_ts", result.errors);
+        auto revoked_ts = json_require<int64_t>(obj, "revoked_ts", result.errors);
+        auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", result.errors);
 
         ProPaymentItem item = {};
         if (status > SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL &&
@@ -790,7 +789,7 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
         size_t master_privkey_len,
         const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t ts) {
+        int64_t ts) {
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
@@ -814,7 +813,7 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
         size_t master_privkey_len,
         const unsigned char* rotating_privkey,
         size_t rotating_privkey_len,
-        uint64_t ts) {
+        int64_t ts) {
     session_pro_backend_to_json result = {};
     try {
         ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
@@ -834,7 +833,7 @@ session_pro_backend_get_pro_details_request_build_sig(
         uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
+        int64_t ts,
         uint32_t count) {
     session_pro_backend_signature result = {};
     try {
@@ -854,7 +853,7 @@ session_pro_backend_get_pro_details_request_build_to_json(
         uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
+        int64_t ts,
         uint32_t count) {
     session_pro_backend_to_json result = {};
     try {
@@ -1210,8 +1209,8 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
-        uint64_t refund_requested_ts,
+        int64_t ts,
+        int64_t refund_requested_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,
@@ -1247,8 +1246,8 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
         uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
-        uint64_t ts,
-        uint64_t refund_requested_ts,
+        int64_t ts,
+        int64_t refund_requested_ts,
         SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
         const unsigned char* payment_tx_payment_id,
         size_t payment_tx_payment_id_len,

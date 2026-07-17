@@ -375,7 +375,7 @@ LIBSESSION_EXPORT void user_profile_set_pro_badge(config_object* conf, bool enab
 /// - `enabled` -- Flag which specifies whether the users display picture is animated or not.
 LIBSESSION_EXPORT void user_profile_set_animated_avatar(config_object* conf, bool enabled);
 
-/// API: user_profile/user_profile_get_pro_access_expiry_ms
+/// API: user_profile/user_profile_get_pro_access_expiry
 ///
 /// Retrieves the Session Pro access expiry unix timestamp if it has been set, this should generally
 /// be the expiry value returned from /get_pro_details.
@@ -384,20 +384,20 @@ LIBSESSION_EXPORT void user_profile_set_animated_avatar(config_object* conf, boo
 /// - `conf` -- [in] Pointer to the config object
 ///
 /// Outputs:
-/// - `uint64_t` - The unix timestamp in milliseconds that the users pro access will expire, or 0 if
+/// - `int64_t` - The unix timestamp in seconds that the users pro access will expire, or 0 if
 /// unset.
-LIBSESSION_EXPORT uint64_t user_profile_get_pro_access_expiry_ms(const config_object* conf);
+LIBSESSION_EXPORT int64_t user_profile_get_pro_access_expiry(const config_object* conf);
 
-/// API: user_profile/user_profile_set_pro_access_expiry_ms
+/// API: user_profile/user_profile_set_pro_access_expiry
 ///
 /// Updates the Session Pro access expiry unix timestamp.
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
-/// - `access_expiry_ts_ms` -- The timestamp that the users Session Pro access will expire, or 0 to
-/// remove the value.
-LIBSESSION_EXPORT void user_profile_set_pro_access_expiry_ms(
-        config_object* conf, uint64_t access_expiry_ts_ms);
+/// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
+/// will expire, or 0 to remove the value.
+LIBSESSION_EXPORT void user_profile_set_pro_access_expiry(
+        config_object* conf, int64_t access_expiry_ts);
 
 #ifdef __cplusplus
 }  // extern "C"

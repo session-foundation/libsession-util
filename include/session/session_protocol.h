@@ -81,7 +81,7 @@ struct session_protocol_pro_proof {
     uint8_t version;
     cbytes32 gen_index_hash;
     cbytes32 rotating_pubkey;
-    uint64_t expiry_ts;
+    int64_t expiry_ts;
     cbytes64 sig;
 };
 
@@ -301,7 +301,7 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_message(
 /// Outputs:
 /// - `bool` -- True if expired, false otherwise
 LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
-        session_protocol_pro_proof const* proof, uint64_t ts) NON_NULL_ARG(1);
+        session_protocol_pro_proof const* proof, int64_t ts) NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_pro_proof_status
 ///
@@ -333,7 +333,7 @@ LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
         session_protocol_pro_proof const* proof,
         const uint8_t* verify_pubkey,
         size_t verify_pubkey_len,
-        uint64_t ts,
+        int64_t ts,
         OPTIONAL const session_protocol_pro_signed_message* signed_msg) NON_NULL_ARG(1, 2);
 
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
@@ -749,7 +749,7 @@ LIBSESSION_EXPORT void session_protocol_decode_envelope_free(
 LIBSESSION_EXPORT session_protocol_decoded_community_message session_protocol_decode_for_community(
         const void* content_or_envelope_payload,
         size_t content_or_envelope_payload_len,
-        uint64_t ts,
+        int64_t ts,
         OPTIONAL const void* pro_backend_pubkey,
         size_t pro_backend_pubkey_len,
         OPTIONAL char* error,

@@ -90,9 +90,9 @@ namespace convo {
         /// Hash of the generation index set by the Session Pro Backend
         std::optional<b32> pro_gen_index_hash;
 
-        /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid
-        /// to
-        sys_ms pro_expiry_unix_ts{};
+        /// Unix epoch timestamp (seconds) until which this proof's entitlement to Session Pro
+        /// features is valid
+        std::chrono::sys_seconds pro_expiry_unix_ts{};
 
       protected:
         using base::base;

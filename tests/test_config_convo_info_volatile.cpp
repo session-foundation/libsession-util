@@ -609,8 +609,9 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                 c.unread = true;
 
             if (i % 7 == 0) {
-                c.pro_expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
-                        std::chrono::milliseconds{unix_timestamp(i)}};
+                c.pro_expiry_unix_ts =
+                        std::chrono::sys_seconds{std::chrono::duration_cast<std::chrono::seconds>(
+                                std::chrono::milliseconds{unix_timestamp(i)})};
 
                 auto& hash = c.pro_gen_index_hash.emplace();
                 std::fill(hash.begin(), hash.end(), static_cast<std::byte>(i % 256));
@@ -811,7 +812,7 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
     c.last_read = std::chrono::duration_cast<std::chrono::milliseconds>(
                           std::chrono::system_clock::now().time_since_epoch())
                           .count();
-    c.pro_expiry_unix_ts_ms = 10000;
+    c.pro_expiry_ts = 10000;
 
     std::fill(
             c.pro_gen_index_hash.data,
@@ -847,7 +848,7 @@ TEST_CASE("Conversation pro data", "[config][conversations][pro]") {
     CHECK(convo_info_volatile_get_or_construct_1to1(
             conf2, &c2, "051111111111111111111111111111111111111111111111111111111111111111"));
 
-    CHECK(c2.pro_expiry_unix_ts_ms == c.pro_expiry_unix_ts_ms);
+    CHECK(c2.pro_expiry_ts == c.pro_expiry_ts);
     CHECK(c.has_pro_gen_index_hash);
     CHECK(c2.has_pro_gen_index_hash);
     CHECK(oxenc::to_hex(c2.pro_gen_index_hash.data) == oxenc::to_hex(c.pro_gen_index_hash.data));
