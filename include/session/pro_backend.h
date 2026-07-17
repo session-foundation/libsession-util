@@ -192,7 +192,8 @@ struct session_pro_backend_get_pro_revocations_request {
 typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
 struct session_pro_backend_pro_revocation_item {
     bytes32 revocation_tag;
-    int64_t expiry_ts;
+    /// Unix timestamp (seconds); a matching proof is revoked once the client clock reaches this
+    int64_t effective_ts;
 };
 
 typedef struct session_pro_backend_get_pro_revocations_response
@@ -200,6 +201,8 @@ typedef struct session_pro_backend_get_pro_revocations_response
 struct session_pro_backend_get_pro_revocations_response {
     session_pro_backend_response_header header;
     int64_t ticket;
+    int64_t retry_in;    /// Recommended seconds to wait before polling the list again
+    int64_t retain_for;  /// Seconds to retain each item after first seeing it (memory-only aging)
     /// Array of items, with items_count elements
     session_pro_backend_pro_revocation_item* items;
     size_t items_count;

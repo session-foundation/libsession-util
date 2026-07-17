@@ -516,6 +516,10 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
 
     // Parse payload
     result.ticket = json_require<int64_t>(result_obj, "ticket", result.errors);
+    result.retry_in =
+            std::chrono::seconds(json_require<int64_t>(result_obj, "retry_in", result.errors));
+    result.retain_for =
+            std::chrono::seconds(json_require<int64_t>(result_obj, "retain_for", result.errors));
 
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
@@ -529,10 +533,10 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
 
         // Parse revocation item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto expiry_unix_ts = json_require<int64_t>(obj, "expiry_ts", result.errors);
+        auto effective_ts = json_require<int64_t>(obj, "effective_ts", result.errors);
 
         ProRevocationItem item = {};
-        item.expiry_unix_ts = as_sys_seconds(expiry_unix_ts);
+        item.effective_unix_ts = as_sys_seconds(effective_ts);
         json_require_fixed_bytes_from_hex(
                 obj, "revocation_tag", result.errors, item.revocation_tag);
 
@@ -1400,6 +1404,8 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
     result.header.status = cpp.status;
     result.ticket = cpp.ticket;
+    result.retry_in = cpp.retry_in.count();
+    result.retain_for = cpp.retain_for.count();
 
     // Copy errors
     result.header.errors_count = cpp.errors.size();
@@ -1419,7 +1425,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
         const ProRevocationItem& src = cpp.items[index];
         session_pro_backend_pro_revocation_item& dest = result.items[index];
         std::memcpy(dest.revocation_tag.data, src.revocation_tag.data(), src.revocation_tag.size());
-        dest.expiry_ts = session::epoch_seconds(src.expiry_unix_ts);
+        dest.effective_ts = session::epoch_seconds(src.effective_unix_ts);
     }
     return result;
 }

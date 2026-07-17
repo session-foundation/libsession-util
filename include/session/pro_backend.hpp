@@ -302,8 +302,8 @@ struct GenerateProProofRequest {
 };
 
 /// Retrieve the current list of revocations for currently active Session Pro proofs (because of
-/// refunds for example). The caller should maintain this list until the revocation has expiry and
-/// periodically retrieve this list from the backend every hour.
+/// refunds for example). The caller retains each returned item for the response's `retain_for`
+/// window after first seeing it (memory-only aging) and polls again after `retry_in`.
 struct GetProRevocationsRequest {
     /// Request version. The latest accepted version is 0
     std::uint8_t version;
@@ -326,14 +326,22 @@ struct ProRevocationItem {
     /// 32-byte opaque revocation tag identifying a proof
     array_uc32 revocation_tag;
 
-    /// Unix timestamp when the proof expires
-    sys_seconds expiry_unix_ts;
+    /// A matching proof is revoked once the client's clock reaches this unix timestamp (not before)
+    sys_seconds effective_unix_ts;
 };
 
 struct GetProRevocationsResponse : public ResponseHeader {
     /// 64-bit monotonic integer for the latest revocation list iteration.
     /// Update the caller's ticket to this value for subsequent requests.
     std::int64_t ticket;
+
+    /// Recommended interval to wait before polling the revocation list again.
+    std::chrono::seconds retry_in;
+
+    /// How long a client should retain each item after first seeing it, for memory-only local
+    /// aging (roughly the maximum proof-validity window). Applied as `seen + retain_for`; holding
+    /// an entry longer is harmless.
+    std::chrono::seconds retain_for;
 
     /// List of revoked Session Pro proofs
     std::vector<ProRevocationItem> items;
