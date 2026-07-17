@@ -120,8 +120,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = parse_json(
-                *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
+        auto p = parse_json(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         // No prior hash for any node — must not send last_hash.
         CHECK_FALSE(p.contains("last_hash"));
     }
@@ -136,8 +135,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = parse_json(
-                *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
+        auto p = parse_json(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         CHECK(p["last_hash"] == "xyz");
     }
 
@@ -147,8 +145,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = parse_json(
-                *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
+        auto p = parse_json(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         // B has no recorded hash — must not send last_hash so we get everything.
         CHECK_FALSE(p.contains("last_hash"));
     }
@@ -165,8 +162,7 @@ TEST_CASE(
     TestHelper::poll(*c);
     REQUIRE(mock_net->sent_requests.size() == 1);
     {
-        auto p = parse_json(
-                *mock_net->sent_requests[0].request.body)["requests"][1]["params"];
+        auto p = parse_json(*mock_net->sent_requests[0].request.body)["requests"][1]["params"];
         CHECK(p["last_hash"] == "xyz");
     }
 }
