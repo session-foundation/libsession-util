@@ -3,7 +3,6 @@
 #include <sodium.h>
 
 #include <catch2/catch_test_macros.hpp>
-#include <cinttypes>
 #include <nlohmann/json.hpp>
 #include <session/pro_backend.hpp>
 #include <string>
@@ -18,49 +17,6 @@ extern std::string g_test_pro_backend_dev_server_url;
 static bool string8_equals(string8 s8, std::string_view str) {
     return s8.size == str.size() && std::memcmp(s8.data, str.data(), s8.size) == 0;
 }
-[[maybe_unused]] static void dump_pro_proof_to_stderr(const session_protocol_pro_proof& proof) {
-    fprintf(stderr, "proof.version: %u\n", proof.version);
-    fprintf(stderr,
-            "proof.revocation_tag: %s\n",
-            oxenc::to_hex(proof.revocation_tag.data, std::end(proof.revocation_tag.data)).c_str());
-    fprintf(stderr,
-            "proof.rotating_pubkey: %s\n",
-            oxenc::to_hex(proof.rotating_pubkey.data, std::end(proof.rotating_pubkey.data))
-                    .c_str());
-    fprintf(stderr, "proof.expiry_ts: %" PRId64 "\n", proof.expiry_ts);
-    fprintf(stderr,
-            "proof.sig: %s\n",
-            oxenc::to_hex(proof.sig.data, std::end(proof.sig.data)).c_str());
-}
-
-[[maybe_unused]] static void dump_pro_payment_item(
-        const session_pro_backend_pro_payment_item& item) {
-    fprintf(stderr, "item.status: %d\n", item.status);
-    fprintf(stderr, "item.plan: %.*s\n", (int)item.plan_count, item.plan);
-    fprintf(stderr,
-            "item.payment_provider: %.*s\n",
-            (int)item.payment_provider_count,
-            item.payment_provider);
-    fprintf(stderr, "item.auto_renewing: %d\n", item.auto_renewing);
-    fprintf(stderr, "item.purchased_ts: %f\n", item.purchased_ts);
-    fprintf(stderr, "item.redeemed_ts: %" PRId64 "zu\n", item.redeemed_ts);
-    fprintf(stderr, "item.expiry_ts: %" PRId64 "\n", item.expiry_ts);
-    fprintf(stderr, "item.grace_period_duration: %" PRId64 "zu\n", item.grace_period_duration);
-    fprintf(stderr,
-            "item.platform_refund_expiry_ts: %" PRId64 "zu\n",
-            item.platform_refund_expiry_ts);
-    fprintf(stderr, "item.revoked_ts: %f\n", item.revoked_ts);
-    fprintf(stderr, "item.payment_id: %.*s\n", (int)item.payment_id_count, item.payment_id);
-}
-
-[[maybe_unused]] static void dump_pro_revocation(
-        const session_pro_backend_pro_revocation_item& item) {
-    fprintf(stderr, "item.effective_ts: %" PRId64 "\n", item.effective_ts);
-    fprintf(stderr,
-            "item.revocation_tag: %s\n",
-            oxenc::to_hex(item.revocation_tag.data, std::end(item.revocation_tag.data)).c_str());
-}
-
 TEST_CASE("Pro Backend C API", "[pro_backend]") {
     // Setup: Generate keys and payment token hash
     cbytes32 master_pubkey = {};
@@ -920,11 +876,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         response_json.data(), response_json.size());
         scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
+        INFO("ERROR: JSON response: " << response_json.c_str());
         for (size_t index = 0; index < response.header.errors_count; index++) {
-            if (index == 0)
-                fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
             string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
+            UNSCOPED_INFO("ERROR: " << error.data);
         }
         REQUIRE(response.header.errors_count == 0);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
@@ -974,11 +929,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
 
         // Verify the response
+        INFO("ERROR: JSON response: " << response_json.c_str());
         for (size_t index = 0; index < response.header.errors_count; index++) {
-            if (index == 0)
-                fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
             string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
+            UNSCOPED_INFO("ERROR: " << error.data);
         }
         REQUIRE(response.header.errors_count == 0);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
@@ -1016,11 +970,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         scope_exit response_free{
                 [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
 
+        INFO("ERROR: JSON response: " << response_json.c_str());
         for (size_t index = 0; index < response.header.errors_count; index++) {
-            if (index == 0)
-                fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
             string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
+            UNSCOPED_INFO("ERROR: " << error.data);
         }
 
         // Verify the response
@@ -1124,7 +1077,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         INFO("ERROR: JSON response: " << response_json.c_str());
         for (size_t index = 0; index < response.header.errors_count; index++) {
             string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
+            UNSCOPED_INFO("ERROR: " << error.data);
         }
 
         // Verify the response
@@ -1178,7 +1131,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         INFO("ERROR: JSON response: " << response_json.c_str());
         for (size_t index = 0; index < response.header.errors_count; index++) {
             string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
+            UNSCOPED_INFO("ERROR: " << error.data);
         }
 
         // Verify the response
