@@ -557,38 +557,33 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     session::config::UserProfile profile{seed, std::nullopt};
 
     // Ensure the bitset is being updated correctly
-    CHECK(profile.get_profile_bitset().data == 0);
+    CHECK(profile.get_profile_flags() == ProProfileFlags::None);
 
     profile.set_pro_badge(true);
-    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+    CHECK(contains(profile.get_profile_flags(), ProProfileFlags::ProBadge));
 
     profile.set_pro_badge(false);
-    CHECK(profile.get_profile_bitset().data == 0);
+    CHECK(profile.get_profile_flags() == ProProfileFlags::None);
 
     profile.set_animated_avatar(true);
-    CHECK(profile.get_profile_bitset().is_set(
-            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK(contains(profile.get_profile_flags(), ProProfileFlags::AnimatedAvatar));
 
     profile.set_animated_avatar(false);
-    CHECK(profile.get_profile_bitset().data == 0);
+    CHECK(profile.get_profile_flags() == ProProfileFlags::None);
 
     profile.set_pro_badge(true);
     profile.set_animated_avatar(true);
-    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-    CHECK(profile.get_profile_bitset().is_set(
-            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK(contains(profile.get_profile_flags(), ProProfileFlags::ProBadge));
+    CHECK(contains(profile.get_profile_flags(), ProProfileFlags::AnimatedAvatar));
 
     profile.set_animated_avatar(false);
-    CHECK(profile.get_profile_bitset().is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-    CHECK_FALSE(profile.get_profile_bitset().is_set(
-            SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+    CHECK(contains(profile.get_profile_flags(), ProProfileFlags::ProBadge));
+    CHECK_FALSE(contains(profile.get_profile_flags(), ProProfileFlags::AnimatedAvatar));
 
     {
         session::config::UserProfile profile2{seed, profile.dump()};
-        CHECK(profile2.get_profile_bitset().is_set(
-                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-        CHECK_FALSE(profile2.get_profile_bitset().is_set(
-                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+        CHECK(contains(profile2.get_profile_flags(), ProProfileFlags::ProBadge));
+        CHECK_FALSE(contains(profile2.get_profile_flags(), ProProfileFlags::AnimatedAvatar));
     }
 
     // Ensure the pro config is being stored correctly

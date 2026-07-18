@@ -96,7 +96,7 @@ struct contact_info {
     std::chrono::seconds exp_timer{0};                 // The expiration timer (in seconds)
     int64_t created = 0;  // Unix timestamp (seconds) when this contact was added
 
-    ProProfileBitset profile_bitset = {};
+    ProProfileFlags profile_flags = ProProfileFlags::None;
 
     explicit contact_info(std::string sid);
 
@@ -141,7 +141,7 @@ struct blinded_contact_info {
     bool legacy_blinding;
     std::chrono::sys_seconds created{};  // Unix timestamp (seconds) when this contact was added
 
-    ProProfileBitset profile_bitset = {};
+    ProProfileFlags profile_flags = ProProfileFlags::None;
 
     blinded_contact_info() = default;
     explicit blinded_contact_info(
@@ -443,7 +443,7 @@ class Contacts : public ConfigBase {
     /// Inputs:
     /// - `session_id` -- hex string of the session id
     /// - `features` -- The updated profile features to use
-    void set_pro_features(std::string_view session_id, ProProfileBitset features);
+    void set_pro_features(std::string_view session_id, ProProfileFlags features);
 
     /// API: contacts/contacts::erase
     ///

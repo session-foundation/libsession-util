@@ -35,27 +35,6 @@
 /// messages is libsession itself and that it will provide wrapper/proxy types for and handle
 /// converting those into the wire format.
 
-// NOTE: In the CPP file we use C-style enums for bitfields and CPP-style enums for non-bitfield
-// enums where we can to benefit from the type-safety of strong enums.
-//
-// CPP doesn't support named bitfields without casting or operator overloads but C-style
-// enums support it very well. The only issue is that using a native C-style enum enforces some type
-// restrictions that compilers dislike when attempting to manipulate bit fields. For example:
-//
-//   enum Feature {x = 1 << 0, y = 1 << 1}
-//   Feature f = x | y
-//
-// Causes the compiler to complain about trying to do bit ops/assign an unsigned integer to an enum
-// `Feature`. We use a common C pattern/trick by suffixing an underscore to the the original enum,
-// then type define the non-suffixed enum to an unsigned integer:
-//
-//   enum Feature_ {x = 1 << 0, y = 1 << 1}
-//   typedef U64 Feature
-//   Feature f = x | y
-//
-// Does not trigger errors as the underlying type of `f` is actually an unsigned integer. The type
-// define is merely a hint to the user to what flags are to be used when manipulating the variable.
-
 namespace session {
 
 enum ProProofVersion { ProProofVersion_v0 };
@@ -196,24 +175,68 @@ enum class ProFeaturesForMsgStatus {
     ExceedsCharacterLimit = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
 };
 
-struct ProProfileBitset {
-    uint64_t data;
-    void set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
-    void unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
-    bool is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const;
+// Session Pro profile feature flags. The enumerator values are the single-bit masks (`1 <<
+// position`) and are the source of truth for these feature bits; the C API re-exposes the same
+// values as `extern const uint64_t SESSION_PROTOCOL_PRO_PROFILE_FEATURE_*` constants. Combine and
+// test them with the bitwise operators defined below.
+enum class ProProfileFlags : uint64_t {
+    None = 0,
+    ProBadge = 1ull << 0,
+    AnimatedAvatar = 1ull << 1,
 };
 
-struct ProMessageBitset {
-    uint64_t data;
-    void set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
-    void unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
-    bool is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const;
+// Session Pro message feature flags (see ProProfileFlags).
+enum class ProMessageFlags : uint64_t {
+    None = 0,
+    CharLimit10k = 1ull << 0,
 };
+
+namespace detail {
+    template <typename>
+    inline constexpr bool is_pro_flags = false;
+    template <>
+    inline constexpr bool is_pro_flags<ProProfileFlags> = true;
+    template <>
+    inline constexpr bool is_pro_flags<ProMessageFlags> = true;
+
+    template <typename E>
+    concept ProFlags = is_pro_flags<E>;
+}  // namespace detail
+
+// Bitwise algebra for the Pro feature flag sets above. Defined once for every flag enum via the
+// `ProFlags` concept so the two types can't be accidentally mixed and so the logic lives in a
+// single place.
+template <detail::ProFlags E>
+constexpr E operator|(E a, E b) {
+    return static_cast<E>(static_cast<uint64_t>(a) | static_cast<uint64_t>(b));
+}
+template <detail::ProFlags E>
+constexpr E& operator|=(E& a, E b) {
+    return a = a | b;
+}
+template <detail::ProFlags E>
+constexpr E operator&(E a, E b) {
+    return static_cast<E>(static_cast<uint64_t>(a) & static_cast<uint64_t>(b));
+}
+template <detail::ProFlags E>
+constexpr E& operator&=(E& a, E b) {
+    return a = a & b;
+}
+template <detail::ProFlags E>
+constexpr E operator~(E a) {
+    return static_cast<E>(~static_cast<uint64_t>(a));
+}
+
+// True if every bit set in `flag` is also set in `flags` (i.e. `flags` contains `flag`).
+template <detail::ProFlags E>
+constexpr bool contains(E flags, E flag) {
+    return (flags & flag) == flag;
+}
 
 struct ProFeaturesForMsg {
     ProFeaturesForMsgStatus status;
     std::string_view error;
-    ProMessageBitset bitset;
+    ProMessageFlags flags;
     size_t codepoint_count;
 };
 
@@ -237,8 +260,8 @@ struct DecodedPro {
     // Session Pro proof that was embedded in the envelope, this is always populated irrespective of
     // the status but the validity of the contents should be verified by checking `status`
     ProProof proof;
-    ProMessageBitset msg_bitset;
-    ProProfileBitset profile_bitset;
+    ProMessageFlags msg_flags;
+    ProProfileFlags profile_flags;
 };
 
 struct DecodedEnvelope {

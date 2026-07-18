@@ -30,8 +30,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
         const ed25519::PrivKeySpan& pro_backend_privkey,
         std::chrono::sys_seconds content_unix_ts,
         std::chrono::sys_seconds pro_expiry_unix_ts,
-        session_protocol_pro_message_bitset msg_bitset,
-        session_protocol_pro_profile_bitset profile_bitset) {
+        uint64_t msg_bitset,
+        uint64_t profile_bitset) {
     SerialisedProtobufContentWithProForTesting result = {};
 
     // Create protobuf `Content.dataMessage`
@@ -53,8 +53,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Create protobuf `Content.proMessage`
     SessionProtos::ProMessage* pro = content.mutable_promessage();
-    pro->set_profilebitset(profile_bitset.data);
-    pro->set_msgbitset(msg_bitset.data);
+    pro->set_profilebitset(profile_bitset);
+    pro->set_msgbitset(msg_bitset);
 
     // Create protobuf `Content.proMessage.proof`
     SessionProtos::ProProof* proto_proof = pro->mutable_proof();
@@ -100,7 +100,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             session_protocol_pro_features_for_msg pro_msg =
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
-            REQUIRE(pro_msg.bitset.data == 0);
+            REQUIRE(pro_msg.bitset == 0);
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
@@ -120,8 +120,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             session_protocol_pro_features_for_msg pro_msg =
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
-            REQUIRE(session_protocol_pro_message_bitset_is_set(
-                    pro_msg.bitset, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
+            REQUIRE((pro_msg.bitset & SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT));
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
@@ -131,8 +130,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             session_protocol_pro_features_for_msg pro_msg =
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
-            REQUIRE(session_protocol_pro_message_bitset_is_set(
-                    pro_msg.bitset, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
+            REQUIRE((pro_msg.bitset & SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT));
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
@@ -143,7 +141,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status ==
                     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT);
-            REQUIRE(pro_msg.bitset.data == 0);
+            REQUIRE(pro_msg.bitset == 0);
             REQUIRE(pro_msg.codepoint_count == msg.size());
         }
     }
@@ -270,8 +268,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                 session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(decrypt_result.pro.status ==
                 SESSION_PROTOCOL_PRO_STATUS_NIL);  // Pro was not attached
-        REQUIRE(decrypt_result.pro.msg_bitset.data == 0);
-        REQUIRE(decrypt_result.pro.profile_bitset.data == 0);
+        REQUIRE(decrypt_result.pro.msg_bitset == 0);
+        REQUIRE(decrypt_result.pro.profile_bitset == 0);
         REQUIRE(std::memcmp(
                         decrypt_result_pro_hash.data,
                         nil_hash.data(),
@@ -396,8 +394,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
                 0);
-        REQUIRE(decrypt_result.pro.msg_bitset.data == 0);      // No features requested
-        REQUIRE(decrypt_result.pro.profile_bitset.data == 0);  // No features requested
+        REQUIRE(decrypt_result.pro.msg_bitset == 0);      // No features requested
+        REQUIRE(decrypt_result.pro.profile_bitset == 0);  // No features requested
 
         // Verify the content can be parsed w/ protobufs
         SessionProtos::Content decrypt_content = {};
@@ -415,12 +413,10 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         session_protocol_pro_features_for_msg pro_msg =
                 session_protocol_pro_features_for_utf8(large_message.data(), large_message.size());
-        REQUIRE(session_protocol_pro_message_bitset_is_set(
-                pro_msg.bitset, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
+        REQUIRE((pro_msg.bitset & SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT));
 
-        session_protocol_pro_profile_bitset profile_bitset = {};
-        session_protocol_pro_profile_bitset_set(
-                &profile_bitset, SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        uint64_t profile_bitset = 0;
+        profile_bitset |= SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE;
 
         SerialisedProtobufContentWithProForTesting protobuf_content_with_pro_and_features =
                 build_protobuf_content_with_session_pro(
@@ -472,12 +468,12 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
                 0);
-        REQUIRE(session_protocol_pro_profile_bitset_is_set(
-                decrypt_result.pro.profile_bitset,
-                SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-        REQUIRE(session_protocol_pro_message_bitset_is_set(
-                decrypt_result.pro.msg_bitset,
-                SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT));
+        REQUIRE(
+                (decrypt_result.pro.profile_bitset &
+                 SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE));
+        REQUIRE(
+                (decrypt_result.pro.msg_bitset &
+                 SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT));
 
         // Verify the content can be parsed w/ protobufs
         SessionProtos::Content decrypt_content = {};
@@ -619,8 +615,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             REQUIRE(std::memcmp(
                             hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
                     0);
-            REQUIRE(decrypt_result.pro.msg_bitset.data == 0);      // No features requested
-            REQUIRE(decrypt_result.pro.profile_bitset.data == 0);  // No features requested
+            REQUIRE(decrypt_result.pro.msg_bitset == 0);      // No features requested
+            REQUIRE(decrypt_result.pro.profile_bitset == 0);  // No features requested
 
             // Verify the content can be parsed w/ protobufs
             SessionProtos::Content decrypt_content = {};

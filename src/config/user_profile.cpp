@@ -2,6 +2,8 @@
 
 #include <sodium/crypto_sign_ed25519.h>
 
+#include <bit>
+
 #include "internal.hpp"
 #include "session/config/contacts.hpp"
 #include "session/config/error.h"
@@ -183,16 +185,18 @@ bool UserProfile::remove_pro_config() {
     return result;
 }
 
-session::ProProfileBitset UserProfile::get_profile_bitset() const {
-    ProProfileBitset result = {};
+session::ProProfileFlags UserProfile::get_profile_flags() const {
+    ProProfileFlags result = ProProfileFlags::None;
     if (const config::set* set = data["f"].set())
-        result.data = bitset_from_set_of_int64_or_0(*set);
+        result = to_flags<ProProfileFlags>(*set);
     return result;
 }
 
-void UserProfile::set_pro_badge(bool enabled) {
-    auto feature = SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE;
-    bool dirtied = enabled ? data["f"].set_insert(feature) : data["f"].set_erase(feature);
+void UserProfile::set_profile_feature(ProProfileFlags flag, bool enabled) {
+    // The "f" set stores feature bit *positions*, so deflate the single-bit mask to its position.
+    assert(std::has_single_bit(static_cast<uint64_t>(flag)));
+    auto position = std::countr_zero(static_cast<uint64_t>(flag));
+    bool dirtied = enabled ? data["f"].set_insert(position) : data["f"].set_erase(position);
     if (dirtied) {
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
@@ -200,14 +204,12 @@ void UserProfile::set_pro_badge(bool enabled) {
     }
 }
 
+void UserProfile::set_pro_badge(bool enabled) {
+    set_profile_feature(ProProfileFlags::ProBadge, enabled);
+}
+
 void UserProfile::set_animated_avatar(bool enabled) {
-    auto feature = SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR;
-    bool dirtied = enabled ? data["f"].set_insert(feature) : data["f"].set_erase(feature);
-    if (dirtied) {
-        const auto target_timestamp =
-                (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
-        data[target_timestamp] = clock_now_s();
-    }
+    set_profile_feature(ProProfileFlags::AnimatedAvatar, enabled);
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_pro_access_expiry() const {
@@ -376,11 +378,8 @@ LIBSESSION_C_API bool user_profile_remove_pro_config(config_object* conf) {
     return unbox<UserProfile>(conf)->remove_pro_config();
 }
 
-LIBSESSION_C_API session_protocol_pro_profile_bitset
-user_profile_get_pro_features(const config_object* conf) {
-    session_protocol_pro_profile_bitset result = {};
-    result.data = unbox<UserProfile>(conf)->get_profile_bitset().data;
-    return result;
+LIBSESSION_C_API uint64_t user_profile_get_pro_features(const config_object* conf) {
+    return static_cast<uint64_t>(unbox<UserProfile>(conf)->get_profile_flags());
 }
 
 LIBSESSION_C_API void user_profile_set_pro_badge(config_object* conf, bool enabled) {
