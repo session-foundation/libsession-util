@@ -32,9 +32,8 @@ enum {
 };
 
 // clang-format off
-/// Session Pro personalisation bytes for hashing. Must match
-///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/backend.py#L21
-///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/server.py#L571
+/// Session Pro personalisation bytes for hashing; must match the personalisation strings in
+/// pro-wire-protocol.md §2 (proof) and §3 (signed requests).
 static const char SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION[]               = "ProGenerateProof";
 static const char SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION[]                  = "ProProof________";
 static const char SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION[]              = "ProAddPayment___";

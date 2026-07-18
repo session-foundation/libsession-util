@@ -75,8 +75,7 @@ session::array_uc32 proof_hash_internal(
         std::span<const std::uint8_t> rotating_pubkey,
         std::int64_t expiry_ts) {
 
-    // This must match the hashing routine at
-    // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
+    // This must match the Pro proof signed digest in pro-wire-protocol.md §2.
     session::array_uc32 result = {};
     crypto_generichash_blake2b_state state = {};
     session::make_blake2b32_hasher(
