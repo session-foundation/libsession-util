@@ -30,35 +30,35 @@ if(NOT TARGET oxenc::oxenc)
     sessiondep_or_submodule(liboxenc 1.6.0 session-router/external/oxen-libquic/external/oxen-encoding oxenc::oxenc)
 endif()
 
-if(ENABLE_NETWORKING)
-    if(ENABLE_NETWORKING_SROUTER)
-        set(SROUTER_FULL OFF CACHE BOOL "")
-        set(SROUTER_DAEMON OFF CACHE BOOL "")
-        set(SROUTER_NATIVE_BUILD OFF CACHE BOOL "")
-        set(SROUTER_JEMALLOC OFF CACHE BOOL "")
+if(ENABLE_NETWORKING_SROUTER)
+    set(SROUTER_FULL OFF CACHE BOOL "")
+    set(SROUTER_DAEMON OFF CACHE BOOL "")
+    set(SROUTER_NATIVE_BUILD OFF CACHE BOOL "")
+    set(SROUTER_JEMALLOC OFF CACHE BOOL "")
 
-        add_static_subdirectory(session-router EXCLUDE_FROM_ALL)
-        libsession_static_bundle(session-router::libsessionrouter)
-    else()
-        set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
-        sessiondep_or_submodule(liboxenquic 1.8.0 session-router/external/oxen-libquic oxen::quic)
-    endif()
+    add_static_subdirectory(session-router EXCLUDE_FROM_ALL)
+    libsession_static_bundle(session-router::libsessionrouter)
+endif()
+
+# The network library always needs oxen::quic.  When session-router is built (SROUTER, above) it
+# provides oxen::quic transitively; otherwise pull in oxen-libquic on its own.
+if(NOT TARGET oxen::quic)
+    set(LIBQUIC_BUILD_TESTS OFF CACHE BOOL "")
+    sessiondep_or_submodule(liboxenquic 1.8.0 session-router/external/oxen-libquic oxen::quic)
 endif()
 
 if(NOT TARGET oxen::logging)
-    sessiondep_or_submodule(liboxen-logging 1.2.0 session-router/external/oxen-libquic/external/oxen-logging oxen::logging)
-
-    # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
-    # but this script will give us them:
-    if(OXENLOGGING_FOUND)
-        if(NOT TARGET oxen::logging)
-            include(session-router/external/oxen-libquic/external/oxen-logging/cmake/load_fmt_spdlog.cmake)
-
-            add_library(oxen-logging-fmt-spdlog INTERFACE)
-            target_link_libraries(oxen-logging-fmt-spdlog INTERFACE oxenlogging::oxenlogging ${OXEN_LOGGING_FMT_TARGET} ${OXEN_LOGGING_SPDLOG_TARGET})
-            add_library(oxen::logging ALIAS oxen-logging-fmt-spdlog)
-        endif()
+    # oxen-logging can't go through sessiondep_or_submodule: its public headers expose fmt types and
+    # a system liboxen-logging's .pc doesn't pull in fmt/spdlog, so consumers must add them
+    # explicitly.  oxen-logging ships a cmake/load.cmake that resolves oxen::logging for us -- either
+    # a system liboxen-logging bundled with suitable fmt/spdlog targets, or the submodule (which
+    # builds its own fmt/spdlog).  This is the same loader oxen-libquic uses.  We just force the
+    # submodule path when our other deps would also prefer submodules over system libs.
+    option(DEPS_FORCE_liboxen-logging_SUBMODULE "force using liboxen-logging submodule" OFF)
+    if(BUILD_STATIC_DEPS OR DEPS_FORCE_SUBMODULE OR DEPS_FORCE_liboxen-logging_SUBMODULE)
+        set(OXEN_LOGGING_FORCE_SUBMODULES ON)
     endif()
+    include(session-router/external/oxen-libquic/external/oxen-logging/cmake/load.cmake)
 endif()
 
 

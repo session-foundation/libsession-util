@@ -146,59 +146,57 @@ target_link_libraries(config
     sessiondep::libsodium
 )
 
-if(ENABLE_NETWORKING)
-    session_dep(libevent_core 2.1)
+session_dep(libevent_core 2.1)
 
-    add_libsession_util_library(network
-        onionreq/builder.cpp
-        onionreq/hop_encryption.cpp
-        onionreq/parser.cpp
-        onionreq/response_parser.cpp
-        network/key_types.cpp
-        network/network_config.cpp
-        network/request_queue.cpp
-        network/service_node.cpp
-        network/session_network_internal.cpp
-        network/session_network_types.cpp
-        network/session_network.cpp
-        network/snode_pool.cpp
-        network/swarm.cpp
-        network/backends/quic_file_client.cpp
-        network/backends/session_file_server.cpp
-        network/backends/session_open_group_server.cpp
-        network/transport/quic_transport.cpp
-        network/routing/direct_router.cpp
-        network/routing/onion_request_router.cpp
-    )
+add_libsession_util_library(network
+    onionreq/builder.cpp
+    onionreq/hop_encryption.cpp
+    onionreq/parser.cpp
+    onionreq/response_parser.cpp
+    network/key_types.cpp
+    network/network_config.cpp
+    network/request_queue.cpp
+    network/service_node.cpp
+    network/session_network_internal.cpp
+    network/session_network_types.cpp
+    network/session_network.cpp
+    network/snode_pool.cpp
+    network/swarm.cpp
+    network/backends/quic_file_client.cpp
+    network/backends/session_file_server.cpp
+    network/backends/session_open_group_server.cpp
+    network/transport/quic_transport.cpp
+    network/routing/direct_router.cpp
+    network/routing/onion_request_router.cpp
+)
 
-    target_link_libraries(network
-        PUBLIC
-        crypto
-        oxen::quic
+target_link_libraries(network
+    PUBLIC
+    crypto
+    oxen::quic
+    PRIVATE
+    nlohmann_json::nlohmann_json
+    sessiondep::libsodium
+    sessiondep::nettle
+    date::date
+    sessiondep::libevent_core
+)
+
+if(ENABLE_NETWORKING_SROUTER)
+    target_sources(network
         PRIVATE
-        nlohmann_json::nlohmann_json
-        sessiondep::libsodium
-        sessiondep::nettle
-        date::date
-        sessiondep::libevent_core
-    )
-
-    if(ENABLE_NETWORKING_SROUTER)
-        target_sources(network
-            PRIVATE
-            network/routing/session_router_router.cpp)
-        target_link_libraries(network PUBLIC session-router::libsessionrouter)
-        target_compile_definitions(network PUBLIC ENABLE_NETWORKING_SROUTER)
-    endif()
-
-    if (BUILD_STATIC_DEPS)
-        target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
-    endif()
-
-    # core's public headers expose network::Network and it constructs network::Request, so it
-    # depends on the network target (defined after core above).
-    target_link_libraries(core PUBLIC network)
+        network/routing/session_router_router.cpp)
+    target_link_libraries(network PUBLIC session-router::libsessionrouter)
+    target_compile_definitions(network PUBLIC ENABLE_NETWORKING_SROUTER)
 endif()
+
+if (BUILD_STATIC_DEPS)
+    target_include_directories(network PUBLIC ${CMAKE_BINARY_DIR}/static-deps/include)
+endif()
+
+# core's public headers expose network::Network and it constructs network::Request, so it
+# depends on the network target (defined after core above).
+target_link_libraries(core PUBLIC network)
 
 if(WARNINGS_AS_ERRORS AND NOT USE_LTO AND CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION MATCHES "^11\\.")
     # GCC 11 has an overzealous (and false) stringop-overread warning, but only when LTO is off.

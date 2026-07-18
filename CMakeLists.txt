@@ -64,7 +64,7 @@ set(BUILD_STATIC_DEPS ${static_default} CACHE BOOL "Build all dependencies stati
 
 include(cmake/session-deps/Deps.cmake)
 
-option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${static_default})
+option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${BUILD_STATIC_DEPS})
 
 if(STATIC_BUNDLE AND NOT BUILD_STATIC_DEPS)
     message(FATAL_ERROR "STATIC_BUNDLE requires BUILD_STATIC_DEPS to be enabled")
@@ -91,9 +91,7 @@ option(STATIC_LIBSTD "Statically link libstdc++/libgcc" ${default_static_libstd}
 
 option(USE_LTO "Use Link-Time Optimization" ${use_lto_default})
 
-# Provide this as an option for now because GMP and Desktop are sometimes unhappy with each other.
-option(ENABLE_NETWORKING "Build with networking functionality" ON)
-option(ENABLE_NETWORKING_SROUTER "Build with session-router networking support (requires ENABLE_NETWORKING)" ON)
+option(ENABLE_NETWORKING_SROUTER "Build with session-router networking support" ON)
 
 if(USE_LTO)
   include(CheckIPOSupported)
@@ -149,9 +147,7 @@ endif()
 
 add_subdirectory(external)
 
-if(ENABLE_NETWORKING)
-    session_dep(nettle 3)
-endif()
+session_dep(nettle 3)
 
 add_subdirectory(src)
 add_subdirectory(proto)

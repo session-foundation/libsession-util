@@ -8,9 +8,7 @@
 
 #include "utils.hpp"
 
-#ifndef DISABLE_NETWORKING
 #include <oxen/quic/network.hpp>
-#endif
 
 using namespace session;
 using namespace oxen;
@@ -89,7 +87,6 @@ TEST_CASE("Logging callbacks", "[logging]") {
                   line1));
 }
 
-#ifndef DISABLE_NETWORKING
 TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
     oxen::log::clear_sinks();
     simple_logs.clear();
@@ -108,4 +105,3 @@ TEST_CASE("Logging callbacks with quic::Network", "[logging][network]") {
         return s.find("[quic:") != std::string::npos;
     }));
 }
-#endif

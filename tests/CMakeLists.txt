@@ -39,21 +39,20 @@ set(LIB_SESSION_UTESTS_SOURCES
     test_session_protocol.cpp
     test_xed25519.cpp
     test_unicode_operations.cpp
-    test_backend_session_file_server.cpp
-    test_backed_session_open_group_server.cpp
 
     case_logger.cpp
 )
 
-if(ENABLE_NETWORKING)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_network_swarm.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_onionreq.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_onion_request_router.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_snode_pool.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_core_network.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_poll.cpp)
-    list(APPEND LIB_SESSION_UTESTS_SOURCES test_pfs_key_cache.cpp)
-endif()
+list(APPEND LIB_SESSION_UTESTS_SOURCES
+    test_backend_session_file_server.cpp
+    test_backed_session_open_group_server.cpp
+    test_network_swarm.cpp
+    test_onionreq.cpp
+    test_onion_request_router.cpp
+    test_snode_pool.cpp
+    test_core_network.cpp
+    test_poll.cpp
+    test_pfs_key_cache.cpp)
 
 add_library(test_libs INTERFACE)
 
@@ -67,11 +66,7 @@ target_link_libraries(test_libs INTERFACE
     nlohmann_json::nlohmann_json
     oxen::logging)
 
-if (ENABLE_NETWORKING)
-    target_link_libraries(test_libs INTERFACE libsession::network)
-else()
-    target_compile_definitions(test_libs INTERFACE DISABLE_NETWORKING)
-endif()
+target_link_libraries(test_libs INTERFACE libsession::network)
 
 add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
 target_link_libraries(testAll PRIVATE
@@ -99,13 +94,9 @@ if(NOT TARGET check)
         COMMAND testAll)
 endif()
 
-option(BUILD_LIVE_TESTS "Build the live testnet integration tests (requires ENABLE_NETWORKING)" ${ENABLE_NETWORKING})
+option(BUILD_LIVE_TESTS "Build the live testnet integration tests" ON)
 
 if(BUILD_LIVE_TESTS)
-    if(NOT ENABLE_NETWORKING)
-        message(FATAL_ERROR "BUILD_LIVE_TESTS requires ENABLE_NETWORKING")
-    endif()
-
     add_executable(testLive
         live/main.cpp
         live/test_swarm.cpp
