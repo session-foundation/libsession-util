@@ -154,14 +154,6 @@ namespace {
     constexpr char get_pro_revocations_endpoint[] = "get_pro_revocations";
     constexpr char set_refund_endpoint[] = "set_payment_refund_requested";
 
-    // Wire-format version emitted per request type (library-owned; not caller-settable). Kept
-    // independent so a future bump of one request type doesn't drag the others along.
-    constexpr uint8_t add_payment_version = 0;
-    constexpr uint8_t generate_proof_version = 0;
-    constexpr uint8_t get_pro_details_version = 0;
-    constexpr uint8_t get_pro_revocations_version = 0;
-    constexpr uint8_t set_refund_version = 0;
-
     // --- add-payment (endpoint add_pro_payment) ---
 
     b32 add_payment_hash(
@@ -171,12 +163,7 @@ namespace {
             std::span<const std::byte> payment_id) {
         // Must match the add-payment signed-request hash in pro-wire-protocol.md §3.2 (+ §3.5).
         return hash::blake2b_pers<32>(
-                ADD_PRO_PAYMENT_PERS,
-                add_payment_version,
-                master_pubkey,
-                rotating_pubkey,
-                provider_code,
-                payment_id);
+                ADD_PRO_PAYMENT_PERS, master_pubkey, rotating_pubkey, provider_code, payment_id);
     }
 
     // Serialise an add-payment request body from already-computed fields (shared by the C++
@@ -189,7 +176,6 @@ namespace {
             std::span<const std::byte> master_sig,
             std::span<const std::byte> rotating_sig) {
         nlohmann::json j;
-        j["version"] = add_payment_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
         j["payment_tx"]["provider"] = provider_code;
@@ -335,8 +321,7 @@ namespace {
             std::chrono::sys_seconds unix_ts) {
         // Must match the generate-proof signed-request hash in pro-wire-protocol.md §3.1.
         uint64_t ts = epoch_seconds(unix_ts);
-        return hash::blake2b_pers<32>(
-                GENERATE_PROOF_PERS, generate_proof_version, master_pubkey, rotating_pubkey, ts);
+        return hash::blake2b_pers<32>(GENERATE_PROOF_PERS, master_pubkey, rotating_pubkey, ts);
     }
 
     std::string generate_proof_body(
@@ -346,7 +331,6 @@ namespace {
             std::span<const std::byte> master_sig,
             std::span<const std::byte> rotating_sig) {
         nlohmann::json j;
-        j["version"] = generate_proof_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
         j["ts"] = epoch_seconds(unix_ts);
@@ -384,7 +368,6 @@ ProRequest pro_proof_request(
 
 ProRequest revocations_request(std::int64_t ticket) {
     nlohmann::json j;
-    j["version"] = get_pro_revocations_version;
     j["ticket"] = ticket;
     return {get_pro_revocations_endpoint, j.dump()};
 }
@@ -454,8 +437,7 @@ namespace {
             uint32_t count) {
         // Must match the get-pro-details signed-request hash in pro-wire-protocol.md §3.4.
         uint64_t ts = epoch_seconds(unix_ts);
-        return hash::blake2b_pers<32>(
-                GET_PRO_DETAILS_PERS, get_pro_details_version, master_pubkey, ts, count);
+        return hash::blake2b_pers<32>(GET_PRO_DETAILS_PERS, master_pubkey, ts, count);
     }
 
     std::string payment_details_body(
@@ -464,7 +446,6 @@ namespace {
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
         nlohmann::json j;
-        j["version"] = get_pro_details_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["master_sig"] = oxenc::to_hex(master_sig);
         j["ts"] = epoch_seconds(unix_ts);
@@ -620,7 +601,6 @@ namespace {
         uint64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
         return hash::blake2b_pers<32>(
                 SET_PAYMENT_REFUND_REQUESTED_PERS,
-                set_refund_version,
                 master_pubkey,
                 ts,
                 refund_requested_ts,
@@ -636,7 +616,6 @@ namespace {
             std::string_view payment_id,
             std::span<const std::byte> master_sig) {
         nlohmann::json j;
-        j["version"] = set_refund_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["ts"] = epoch_seconds(unix_ts);
         j["refund_requested_ts"] = epoch_seconds(refund_requested_unix_ts);
@@ -698,7 +677,6 @@ SetPaymentRefundRequestedResponse parse_refund(std::string_view json) {
         return result;
 
     // Parse payload
-    result.version = json_require<uint8_t>(result_obj, "version", result.errors);
     result.updated = json_require<bool>(result_obj, "updated", result.errors);
     return result;
 }
@@ -1165,7 +1143,6 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
 
     // Copy to C struct
     result.header.status = cpp.status;
-    result.version = cpp.version;
     result.updated = cpp.updated;
 
     // Copy errors

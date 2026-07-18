@@ -51,14 +51,15 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
 
 namespace {
 session::b32 proof_hash_internal(
-        std::uint8_t version,
         std::span<const std::byte> revocation_tag,
         std::span<const std::byte> rotating_pubkey,
         std::uint64_t expiry_ts) {
 
-    // This must match the Pro proof signed digest in pro-wire-protocol.md §2.
+    // This must match the Pro proof signed digest in pro-wire-protocol.md §2. The proof version is
+    // NOT hashed as a byte; it selects the personalisation (v0 -> "ProProof_v0_____"), and that
+    // choice of personalisation is what binds the version into the signature.
     return session::hash::blake2b_pers<32>(
-            session::BUILD_PROOF_PERS, version, revocation_tag, rotating_pubkey, expiry_ts);
+            session::BUILD_PROOF_PERS, revocation_tag, rotating_pubkey, expiry_ts);
 }
 
 struct array_uc32_from_ptr_result {
@@ -151,7 +152,7 @@ ProStatus ProProof::status(
 
 b32 ProProof::hash() const {
     b32 result = proof_hash_internal(
-            version, revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_unix_ts));
+            revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_unix_ts));
     return result;
 }
 
@@ -885,7 +886,6 @@ LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
 LIBSESSION_C_API cbytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
     cbytes32 result = {};
     session::b32 hash = proof_hash_internal(
-            proof->version,
             to_byte_span(proof->revocation_tag.data),
             to_byte_span(proof->rotating_pubkey.data),
             proof->expiry_ts);
@@ -900,7 +900,6 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
     if (verify_pubkey_len != 32)
         return false;
     session::b32 hash = proof_hash_internal(
-            proof->version,
             to_byte_span(proof->revocation_tag.data),
             to_byte_span(proof->rotating_pubkey.data),
             proof->expiry_ts);

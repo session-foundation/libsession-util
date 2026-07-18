@@ -63,7 +63,7 @@ enum ProProofVersion { ProProofVersion_v0 };
 /// Session Pro personalisation bytes for hashing; must match the personalisation strings in
 /// pro-wire-protocol.md §2 (proof) and §3 (signed requests).
 inline constexpr auto GENERATE_PROOF_PERS = "ProGenerateProof"_b2b_pers;
-inline constexpr auto BUILD_PROOF_PERS = "ProProof________"_b2b_pers;
+inline constexpr auto BUILD_PROOF_PERS = "ProProof_v0_____"_b2b_pers;
 inline constexpr auto ADD_PRO_PAYMENT_PERS = "ProAddPayment___"_b2b_pers;
 inline constexpr auto SET_PAYMENT_REFUND_REQUESTED_PERS = "ProSetRefundReq_"_b2b_pers;
 inline constexpr auto GET_PRO_DETAILS_PERS = "ProGetProDetReq_"_b2b_pers;
