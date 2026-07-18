@@ -64,6 +64,34 @@ const T json_require(
     return result;
 }
 
+// Reads a JSON number that may be an integer *or* a float, as a double. Used for the two
+// upstream-provider event instants (`purchased_ts`, `revoked_ts`) which the backend emits as floats
+// carrying the provider's sub-second precision (pro-wire-protocol.md §1).
+double json_require_number(
+        const nlohmann::json& j, std::string_view key, std::vector<std::string>& errors) {
+    auto it = j.find(key);
+    if (it == j.end())
+        errors.push_back(fmt::format("Key '{}' is missing", key));
+    else if (it->is_number())
+        return it->get<double>();
+    else
+        errors.push_back(fmt::format("Key value ({}, {}) was not a number", key, it->dump(1)));
+    return 0;
+}
+
+// Fractional UNIX seconds (double) -> millisecond-precision system time, preserving the provider's
+// sub-second precision (rounded to the nearest millisecond).
+session::sys_ms sys_ms_from_seconds(double seconds) {
+    return session::sys_ms(
+            std::chrono::round<std::chrono::milliseconds>(std::chrono::duration<double>(seconds)));
+}
+
+// Millisecond-precision system time -> fractional UNIX seconds (double); the C API carries these
+// two instants as double seconds (millisecond-precise, having passed through sys_ms).
+double epoch_seconds_double(session::sys_ms t) {
+    return std::chrono::duration<double>(t.time_since_epoch()).count();
+}
+
 void parse_json_response_errors(const nlohmann::json& j, std::vector<std::string>& errors) {
     const auto& array = json_require<nlohmann::json::array_t>(j, "errors", errors);
     errors.reserve(errors.size() + array.size());
@@ -619,14 +647,17 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         auto payment_provider = json_require<std::string>(obj, "payment_provider", result.errors);
         auto payment_id = json_require<std::string>(obj, "payment_id", result.errors);
         auto auto_renewing = json_require<bool>(obj, "auto_renewing", result.errors);
-        auto unredeemed_ts = json_require<int64_t>(obj, "unredeemed_ts", result.errors);
+        // purchased_ts and revoked_ts are upstream-provider event instants: floats on the wire
+        // carrying sub-second precision (kept as millisecond-precision sys_ms). All other
+        // timestamps are whole-second integers.
+        auto purchased_ts = json_require_number(obj, "purchased_ts", result.errors);
         auto redeemed_ts = json_require<int64_t>(obj, "redeemed_ts", result.errors);
         auto expiry_ts = json_require<int64_t>(obj, "expiry_ts", result.errors);
         auto grace_period_duration =
                 json_require<int64_t>(obj, "grace_period_duration", result.errors);
         auto platform_refund_expiry_ts =
                 json_require<int64_t>(obj, "platform_refund_expiry_ts", result.errors);
-        auto revoked_ts = json_require<int64_t>(obj, "revoked_ts", result.errors);
+        auto revoked_ts = json_require_number(obj, "revoked_ts", result.errors);
         auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", result.errors);
 
         ProPaymentItem item = {};
@@ -642,13 +673,13 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         item.payment_id = std::move(payment_id);
 
         item.auto_renewing = auto_renewing;
-        item.unredeemed_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(unredeemed_ts));
+        item.purchased_unix_ts = sys_ms_from_seconds(purchased_ts);
         item.redeemed_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(redeemed_ts));
         item.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_ts));
         item.grace_period_duration = std::chrono::seconds(grace_period_duration);
         item.platform_refund_expiry_unix_ts =
                 std::chrono::sys_seconds(std::chrono::seconds(platform_refund_expiry_ts));
-        item.revoked_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(revoked_ts));
+        item.revoked_unix_ts = sys_ms_from_seconds(revoked_ts);
         item.refund_requested_unix_ts =
                 std::chrono::sys_seconds(std::chrono::seconds(refund_requested_ts));
 
@@ -1180,12 +1211,12 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
                 sizeof(dest.payment_provider),
                 "%s",
                 src.payment_provider.c_str());
-        dest.unredeemed_ts = epoch_seconds(src.unredeemed_unix_ts);
+        dest.purchased_ts = epoch_seconds_double(src.purchased_unix_ts);
         dest.redeemed_ts = epoch_seconds(src.redeemed_unix_ts);
         dest.expiry_ts = epoch_seconds(src.expiry_unix_ts);
         dest.grace_period_duration = src.grace_period_duration.count();
         dest.platform_refund_expiry_ts = epoch_seconds(src.platform_refund_expiry_unix_ts);
-        dest.revoked_ts = epoch_seconds(src.revoked_unix_ts);
+        dest.revoked_ts = epoch_seconds_double(src.revoked_unix_ts);
         dest.refund_requested_ts = epoch_seconds(src.refund_requested_unix_ts);
 
         dest.payment_id_count = snprintf_clamped(

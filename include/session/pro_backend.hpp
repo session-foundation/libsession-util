@@ -276,8 +276,10 @@ struct ProPaymentItem {
     /// billing cycle.
     bool auto_renewing;
 
-    /// Unix timestamp of when the payment was witnessed by the Pro Backend. Always set
-    sys_seconds unredeemed_unix_ts;
+    /// Provider purchase time (when the upstream provider recorded the purchase). Always set.
+    /// Carries the provider's sub-second precision as a millisecond-resolution `sys_ms`; the wire
+    /// sends it as a float of seconds.
+    sys_ms purchased_unix_ts;
 
     /// Unix timestamp of when the payment was redeemed. 0 if not activated
     sys_seconds redeemed_unix_ts;
@@ -295,8 +297,10 @@ struct ProPaymentItem {
     /// provider. Thereafter the user must initiate a refund manually via Session support.
     sys_seconds platform_refund_expiry_unix_ts;
 
-    /// Unix timestamp of when the payment was revoked or refunded. 0 if not applicable.
-    sys_seconds revoked_unix_ts;
+    /// Provider revocation instant (when the payment was revoked). Epoch (0) if not applicable.
+    /// Carries the provider's sub-second precision as a millisecond-resolution `sys_ms`; the wire
+    /// sends it as a float of seconds.
+    sys_ms revoked_unix_ts;
 
     /// UNIX timestamp at which a refund request was requested for this payment. This is set to 0
     /// if no refund has been requested for this payment yet.

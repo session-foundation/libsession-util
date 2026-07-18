@@ -42,14 +42,14 @@ static bool string8_equals(string8 s8, std::string_view str) {
             (int)item.payment_provider_count,
             item.payment_provider);
     fprintf(stderr, "item.auto_renewing: %d\n", item.auto_renewing);
-    fprintf(stderr, "item.unredeemed_ts: %" PRId64 "zu\n", item.unredeemed_ts);
+    fprintf(stderr, "item.purchased_ts: %f\n", item.purchased_ts);
     fprintf(stderr, "item.redeemed_ts: %" PRId64 "zu\n", item.redeemed_ts);
     fprintf(stderr, "item.expiry_ts: %" PRId64 "\n", item.expiry_ts);
     fprintf(stderr, "item.grace_period_duration: %" PRId64 "zu\n", item.grace_period_duration);
     fprintf(stderr,
             "item.platform_refund_expiry_ts: %" PRId64 "zu\n",
             item.platform_refund_expiry_ts);
-    fprintf(stderr, "item.revoked_ts: %" PRId64 "zu\n", item.revoked_ts);
+    fprintf(stderr, "item.revoked_ts: %f\n", item.revoked_ts);
     fprintf(stderr, "item.payment_id: %.*s\n", (int)item.payment_id_count, item.payment_id);
 }
 
@@ -521,12 +521,14 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                {"payment_provider",
                                 SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY},
                                {"auto_renewing", false},
-                               {"unredeemed_ts", unix_ts - 3600},
+                               // purchased_ts/revoked_ts are floats on the wire (sub-second
+                               // precision); libsession truncates to whole seconds.
+                               {"purchased_ts", unix_ts - 3600 + 0.5},
                                {"redeemed_ts", unix_ts - 3600},
                                {"expiry_ts", unix_ts},
                                {"grace_period_duration", 1001},
                                {"platform_refund_expiry_ts", unix_ts + 1},
-                               {"revoked_ts", unix_ts + 3600},
+                               {"revoked_ts", unix_ts + 3600 + 0.75},
                                {"refund_requested_ts", unix_ts + 3601},
                                {"payment_id",
                                 std::string(
@@ -561,12 +563,13 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                 result.items[0].payment_provider,
                                 result.items[0].payment_provider_count) ==
                         SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY);
-                REQUIRE(result.items[0].unredeemed_ts == unix_ts - 3600);
+                // Sub-second precision preserved through sys_ms (0.5s = 500ms) round-trips exactly
+                REQUIRE(result.items[0].purchased_ts == unix_ts - 3600 + 0.5);
                 REQUIRE(result.items[0].redeemed_ts == unix_ts - 3600);
                 REQUIRE(result.items[0].expiry_ts == unix_ts);
                 REQUIRE(result.items[0].grace_period_duration == 1001);
                 REQUIRE(result.items[0].platform_refund_expiry_ts == unix_ts + 1);
-                REQUIRE(result.items[0].revoked_ts == unix_ts + 3600);
+                REQUIRE(result.items[0].revoked_ts == unix_ts + 3600 + 0.75);  // 750ms preserved
                 REQUIRE(result.items[0].refund_requested_ts == unix_ts + 3601);
                 REQUIRE(result.items[0].payment_id_count == payment_tx.payment_id_count);
                 REQUIRE(std::memcmp(
