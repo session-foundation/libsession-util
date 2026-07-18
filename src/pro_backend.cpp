@@ -7,6 +7,7 @@
 #include <chrono>
 #include <concepts>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <session/hash.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
@@ -114,158 +115,255 @@ bool json_require_fixed_bytes_from_hex(
 };  // namespace
 
 namespace session::pro_backend {
-std::string AddProPaymentRequest::to_json() const {
-    nlohmann::json j;
-    j["version"] = version;
-    j["master_pkey"] = oxenc::to_hex(master_pkey);
-    j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
-    j["payment_tx"]["provider"] = payment_tx.provider_code;
-    j["payment_tx"]["payment_id"] = payment_tx.payment_id;
-    j["master_sig"] = oxenc::to_hex(master_sig);
-    j["rotating_sig"] = oxenc::to_hex(rotating_sig);
-    std::string result = j.dump();
-    return result;
+
+namespace {
+
+    // Endpoint paths (single master storage). Both the C `SESSION_PRO_BACKEND_*_ENDPOINT` symbols
+    // and the C++ `*_request()` return values point at these — the path is defined exactly once.
+    constexpr char add_payment_endpoint[] = "add_pro_payment";
+    constexpr char generate_proof_endpoint[] = "generate_pro_proof";
+    constexpr char get_pro_details_endpoint[] = "get_pro_details";
+    constexpr char get_pro_revocations_endpoint[] = "get_pro_revocations";
+    constexpr char set_refund_endpoint[] = "set_payment_refund_requested";
+
+    // Wire-format version emitted per request type (library-owned; not caller-settable). Kept
+    // independent so a future bump of one request type doesn't drag the others along.
+    constexpr uint8_t add_payment_version = 0;
+    constexpr uint8_t generate_proof_version = 0;
+    constexpr uint8_t get_pro_details_version = 0;
+    constexpr uint8_t get_pro_revocations_version = 0;
+    constexpr uint8_t set_refund_version = 0;
+
+    // --- add-payment (endpoint add_pro_payment) ---
+
+    b32 add_payment_hash(
+            std::span<const std::byte> master_pubkey,
+            std::span<const std::byte> rotating_pubkey,
+            std::string_view provider_code,
+            std::span<const std::byte> payment_id) {
+        // The tail is the provider code string followed by the opaque payment id (spec §1); must
+        // match the backend's signed-hash construction.
+        return hash::blake2b_pers<32>(
+                ADD_PRO_PAYMENT_PERS,
+                add_payment_version,
+                master_pubkey,
+                rotating_pubkey,
+                provider_code,
+                payment_id);
+    }
+
+    // Serialise an add-payment request body from already-computed fields (shared by the C++
+    // add_payment_request and the C ..._request_to_json wrapper).
+    std::string add_payment_body(
+            std::span<const std::byte> master_pubkey,
+            std::span<const std::byte> rotating_pubkey,
+            std::string_view provider_code,
+            std::string_view payment_id,
+            std::span<const std::byte> master_sig,
+            std::span<const std::byte> rotating_sig) {
+        nlohmann::json j;
+        j["version"] = add_payment_version;
+        j["master_pkey"] = oxenc::to_hex(master_pubkey);
+        j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
+        j["payment_tx"]["provider"] = provider_code;
+        j["payment_tx"]["payment_id"] = payment_id;
+        j["master_sig"] = oxenc::to_hex(master_sig);
+        j["rotating_sig"] = oxenc::to_hex(rotating_sig);
+        return j.dump();
+    }
+
+}  // namespace
+
+// C endpoint symbols: each points at the single master endpoint string defined above, so the C API
+// and the C++ `ProRequest::endpoint` values are backed by one definition.
+extern "C" {
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT =
+        add_payment_endpoint;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT =
+        generate_proof_endpoint;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_DETAILS_ENDPOINT =
+        get_pro_details_endpoint;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_REVOCATIONS_ENDPOINT =
+        get_pro_revocations_endpoint;
+LIBSESSION_EXPORT extern const char* const
+        SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT = set_refund_endpoint;
 }
 
-MasterRotatingSignatures AddProPaymentRequest::build_sigs(
-        std::uint8_t version,
+std::optional<ProviderUrls> provider_urls(std::string_view provider_code) {
+    if (provider_code == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY)
+        return ProviderUrls{
+                "https://support.google.com/googleplay/workflow/9813244?",
+                "https://getsession.org/android-refund",
+                "https://getsession.org/android-refund",
+                "https://play.google.com/store/account/"
+                "subscriptions?package=network.loki.messenger",
+                "https://play.google.com/store/account/"
+                "subscriptions?package=network.loki.messenger"};
+    if (provider_code == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE)
+        return ProviderUrls{
+                "https://support.apple.com/118223",
+                "https://support.apple.com/118223",
+                "https://support.apple.com/118224",
+                "https://apps.apple.com/account/subscriptions",
+                "https://account.apple.com/account/manage/section/subscriptions"};
+    // rangeproof and unknown providers have no applicable URLs
+    return std::nullopt;
+}
+
+LIBSESSION_C_API session_pro_backend_provider_urls
+session_pro_backend_get_provider_urls(const char* provider_code) {
+    // No URLs → all-NULL fields; otherwise each view is a static, null-terminated literal.
+    if (auto u = provider_urls(provider_code))
+        return {u->refund_platform_url.data(),
+                u->refund_support_url.data(),
+                u->refund_status_url.data(),
+                u->update_subscription_url.data(),
+                u->cancel_subscription_url.data()};
+    return {nullptr, nullptr, nullptr, nullptr, nullptr};
+}
+
+MasterRotatingSignatures add_payment_sigs(
         const ed25519::PrivKeySpan& master_privkey,
         const ed25519::PrivKeySpan& rotating_privkey,
-        std::string_view payment_tx_provider_code,
-        std::span<const std::byte> payment_tx_payment_id) {
-    // Hash components to 32 bytes. The tail is the provider code string followed by the opaque
-    // payment id (spec §1); must match the backend's signed-hash construction.
-    auto hash_to_sign = hash::blake2b_pers<32>(
-            ADD_PRO_PAYMENT_PERS,
-            version,
-            master_privkey.pubkey(),
-            rotating_privkey.pubkey(),
-            payment_tx_provider_code,
-            payment_tx_payment_id);
-
+        std::string_view provider_code,
+        std::span<const std::byte> payment_id) {
+    auto hash = add_payment_hash(
+            master_privkey.pubkey(), rotating_privkey.pubkey(), provider_code, payment_id);
     MasterRotatingSignatures result = {};
-    result.master_sig = ed25519::sign(master_privkey, hash_to_sign);
-    result.rotating_sig = ed25519::sign(rotating_privkey, hash_to_sign);
+    result.master_sig = ed25519::sign(master_privkey, hash);
+    result.rotating_sig = ed25519::sign(rotating_privkey, hash);
     return result;
 }
 
-std::string AddProPaymentRequest::build_to_json(
-        std::uint8_t version,
+ProRequest add_payment_request(
         const ed25519::PrivKeySpan& master_privkey,
         const ed25519::PrivKeySpan& rotating_privkey,
-        std::string_view payment_tx_provider_code,
-        std::span<const std::byte> payment_tx_payment_id) {
-    auto sigs = AddProPaymentRequest::build_sigs(
-            version,
-            master_privkey,
-            rotating_privkey,
-            payment_tx_provider_code,
-            payment_tx_payment_id);
-
-    AddProPaymentRequest request = {};
-    request.version = version;
-    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
-    std::ranges::copy(rotating_privkey.pubkey(), request.rotating_pkey.begin());
-    request.payment_tx.provider_code = payment_tx_provider_code;
-    request.payment_tx.payment_id = to_string_view(payment_tx_payment_id);
-    request.master_sig = sigs.master_sig;
-    request.rotating_sig = sigs.rotating_sig;
-
-    return request.to_json();
+        std::string_view provider_code,
+        std::span<const std::byte> payment_id) {
+    auto sigs = add_payment_sigs(master_privkey, rotating_privkey, provider_code, payment_id);
+    return {add_payment_endpoint,
+            add_payment_body(
+                    master_privkey.pubkey(),
+                    rotating_privkey.pubkey(),
+                    provider_code,
+                    to_string_view(payment_id),
+                    sigs.master_sig,
+                    sigs.rotating_sig)};
 }
 
-AddProPaymentOrGenerateProProofResponse AddProPaymentOrGenerateProProofResponse::parse(
-        std::string_view json) {
-    // Parse basics
-    AddProPaymentOrGenerateProProofResponse result = {};
-    nlohmann::json j = json_parse(json, result.errors);
-    result.status = json_require<uint8_t>(j, "status", result.errors);
-    if (result.errors.size()) {
-        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
-        return result;
+namespace {
+    // Shared parse for the proof-carrying responses (add-payment and generate-proof both reply with
+    // exactly a proof); fills the common ProProofResponse base of whichever derived response is
+    // passed.
+    void fill_proof_response(std::string_view json, ProProofResponse& result) {
+        // Parse basics
+        nlohmann::json j = json_parse(json, result.errors);
+        result.status = json_require<uint8_t>(j, "status", result.errors);
+        if (result.errors.size()) {
+            result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+            return;
+        }
+
+        // Parse errors
+        if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+            parse_json_response_errors(j, result.errors);
+            return;
+        }
+
+        auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
+        if (result.errors.size())
+            return;
+
+        // Parse payload
+        result.proof.version = json_require<uint8_t>(result_obj, "version", result.errors);
+        auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", result.errors);
+        result.proof.expiry_unix_ts = as_sys_seconds(expiry_ts);
+        json_require_fixed_bytes_from_hex(
+                result_obj, "revocation_tag", result.errors, result.proof.revocation_tag);
+        json_require_fixed_bytes_from_hex(
+                result_obj, "rotating_pkey", result.errors, result.proof.rotating_pubkey);
+        json_require_fixed_bytes_from_hex(result_obj, "sig", result.errors, result.proof.sig);
     }
+}  // namespace
 
-    // Parse errors
-    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, result.errors);
-        return result;
-    }
-
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
-    if (result.errors.size())
-        return result;
-
-    // Parse payload
-    result.proof.version = json_require<uint8_t>(result_obj, "version", result.errors);
-    auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", result.errors);
-    result.proof.expiry_unix_ts = as_sys_seconds(expiry_ts);
-    json_require_fixed_bytes_from_hex(
-            result_obj, "revocation_tag", result.errors, result.proof.revocation_tag);
-    json_require_fixed_bytes_from_hex(
-            result_obj, "rotating_pkey", result.errors, result.proof.rotating_pubkey);
-    json_require_fixed_bytes_from_hex(result_obj, "sig", result.errors, result.proof.sig);
+AddProPaymentResponse parse_add_payment(std::string_view json) {
+    AddProPaymentResponse result = {};
+    fill_proof_response(json, result);
     return result;
 }
 
-std::string GenerateProProofRequest::to_json() const {
-    nlohmann::json j;
-    j["version"] = version;
-    j["master_pkey"] = oxenc::to_hex(master_pkey);
-    j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
-    j["ts"] = epoch_seconds(unix_ts);
-    j["master_sig"] = oxenc::to_hex(master_sig);
-    j["rotating_sig"] = oxenc::to_hex(rotating_sig);
-    std::string result = j.dump();
+GenerateProProofResponse parse_pro_proof(std::string_view json) {
+    GenerateProProofResponse result = {};
+    fill_proof_response(json, result);
     return result;
 }
 
-MasterRotatingSignatures GenerateProProofRequest::build_sigs(
-        std::uint8_t request_version,
+namespace {
+
+    // --- generate-proof (endpoint generate_pro_proof) ---
+
+    b32 generate_proof_hash(
+            std::span<const std::byte> master_pubkey,
+            std::span<const std::byte> rotating_pubkey,
+            std::chrono::sys_seconds unix_ts) {
+        // Must match:
+        //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
+        uint64_t ts = epoch_seconds(unix_ts);
+        return hash::blake2b_pers<32>(
+                GENERATE_PROOF_PERS, generate_proof_version, master_pubkey, rotating_pubkey, ts);
+    }
+
+    std::string generate_proof_body(
+            std::span<const std::byte> master_pubkey,
+            std::span<const std::byte> rotating_pubkey,
+            std::chrono::sys_seconds unix_ts,
+            std::span<const std::byte> master_sig,
+            std::span<const std::byte> rotating_sig) {
+        nlohmann::json j;
+        j["version"] = generate_proof_version;
+        j["master_pkey"] = oxenc::to_hex(master_pubkey);
+        j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
+        j["ts"] = epoch_seconds(unix_ts);
+        j["master_sig"] = oxenc::to_hex(master_sig);
+        j["rotating_sig"] = oxenc::to_hex(rotating_sig);
+        return j.dump();
+    }
+
+}  // namespace
+
+MasterRotatingSignatures pro_proof_sigs(
         const ed25519::PrivKeySpan& master_privkey,
         const ed25519::PrivKeySpan& rotating_privkey,
         std::chrono::sys_seconds unix_ts) {
-
-    // Hash components to 32 bytes, must match:
-    //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
-    uint8_t version = 0;
-    uint64_t ts = epoch_seconds(unix_ts);
-    auto hash_to_sign = hash::blake2b_pers<32>(
-            GENERATE_PROOF_PERS, version, master_privkey.pubkey(), rotating_privkey.pubkey(), ts);
-
+    auto hash = generate_proof_hash(master_privkey.pubkey(), rotating_privkey.pubkey(), unix_ts);
     MasterRotatingSignatures result = {};
-    result.master_sig = ed25519::sign(master_privkey, hash_to_sign);
-    result.rotating_sig = ed25519::sign(rotating_privkey, hash_to_sign);
+    result.master_sig = ed25519::sign(master_privkey, hash);
+    result.rotating_sig = ed25519::sign(rotating_privkey, hash);
     return result;
 }
 
-std::string GenerateProProofRequest::build_to_json(
-        std::uint8_t request_version,
+ProRequest pro_proof_request(
         const ed25519::PrivKeySpan& master_privkey,
         const ed25519::PrivKeySpan& rotating_privkey,
         std::chrono::sys_seconds unix_ts) {
-    auto sigs = GenerateProProofRequest::build_sigs(
-            request_version, master_privkey, rotating_privkey, unix_ts);
-
-    GenerateProProofRequest request = {};
-    request.version = request_version;
-    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
-    std::ranges::copy(rotating_privkey.pubkey(), request.rotating_pkey.begin());
-    request.unix_ts = unix_ts;
-    request.master_sig = sigs.master_sig;
-    request.rotating_sig = sigs.rotating_sig;
-
-    return request.to_json();
+    auto sigs = pro_proof_sigs(master_privkey, rotating_privkey, unix_ts);
+    return {generate_proof_endpoint,
+            generate_proof_body(
+                    master_privkey.pubkey(),
+                    rotating_privkey.pubkey(),
+                    unix_ts,
+                    sigs.master_sig,
+                    sigs.rotating_sig)};
 }
 
-std::string GetProRevocationsRequest::to_json() const {
+ProRequest revocations_request(std::int64_t ticket) {
     nlohmann::json j;
-    j["version"] = version;
+    j["version"] = get_pro_revocations_version;
     j["ticket"] = ticket;
-    std::string result = j.dump();
-    return result;
+    return {get_pro_revocations_endpoint, j.dump()};
 }
 
-GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json) {
+GetProRevocationsResponse parse_revocations(std::string_view json) {
     // Parse basics
     GetProRevocationsResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
@@ -320,47 +418,55 @@ GetProRevocationsResponse GetProRevocationsResponse::parse(std::string_view json
     return result;
 }
 
-std::string GetProDetailsRequest::to_json() const {
-    nlohmann::json j;
-    j["version"] = version;
-    j["master_pkey"] = oxenc::to_hex(master_pkey);
-    j["master_sig"] = oxenc::to_hex(master_sig);
-    j["ts"] = epoch_seconds(unix_ts);
-    j["count"] = count;
-    std::string result = j.dump();
-    return result;
-}
+namespace {
 
-b64 GetProDetailsRequest::build_sig(
-        uint8_t version,
+    // --- payment-details / get-pro-details (endpoint get_pro_details) ---
+
+    b32 payment_details_hash(
+            std::span<const std::byte> master_pubkey,
+            std::chrono::sys_seconds unix_ts,
+            uint32_t count) {
+        // Must match:
+        //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
+        uint64_t ts = epoch_seconds(unix_ts);
+        return hash::blake2b_pers<32>(
+                GET_PRO_DETAILS_PERS, get_pro_details_version, master_pubkey, ts, count);
+    }
+
+    std::string payment_details_body(
+            std::span<const std::byte> master_pubkey,
+            std::span<const std::byte> master_sig,
+            std::chrono::sys_seconds unix_ts,
+            uint32_t count) {
+        nlohmann::json j;
+        j["version"] = get_pro_details_version;
+        j["master_pkey"] = oxenc::to_hex(master_pubkey);
+        j["master_sig"] = oxenc::to_hex(master_sig);
+        j["ts"] = epoch_seconds(unix_ts);
+        j["count"] = count;
+        return j.dump();
+    }
+
+}  // namespace
+
+b64 payment_details_sig(
         const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_seconds unix_ts,
         uint32_t count) {
-    // Hash components to 32 bytes, must match:
-    //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
-    uint64_t ts = epoch_seconds(unix_ts);
-    auto hash_to_sign = hash::blake2b_pers<32>(
-            GET_PRO_DETAILS_PERS, version, master_privkey.pubkey(), ts, count);
-
-    return ed25519::sign(master_privkey, hash_to_sign);
+    auto hash = payment_details_hash(master_privkey.pubkey(), unix_ts, count);
+    return ed25519::sign(master_privkey, hash);
 }
 
-std::string GetProDetailsRequest::build_to_json(
-        uint8_t version,
+ProRequest payment_details_request(
         const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_seconds unix_ts,
         uint32_t count) {
-    GetProDetailsRequest request = {};
-    request.version = version;
-    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
-    request.master_sig = GetProDetailsRequest::build_sig(version, master_privkey, unix_ts, count);
-    request.unix_ts = unix_ts;
-    request.count = count;
-
-    return request.to_json();
+    auto sig = payment_details_sig(master_privkey, unix_ts, count);
+    return {get_pro_details_endpoint,
+            payment_details_body(master_privkey.pubkey(), sig, unix_ts, count)};
 }
 
-GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
+GetProDetailsResponse parse_payment_details(std::string_view json) {
     // Parse basics
     GetProDetailsResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
@@ -470,70 +576,80 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
     return result;
 }
 
-b64 SetPaymentRefundRequestedRequest::build_sig(
-        uint8_t version,
+namespace {
+
+    // --- refund / set-payment-refund-requested (endpoint set_payment_refund_requested) ---
+
+    b32 refund_hash(
+            std::span<const std::byte> master_pubkey,
+            std::chrono::sys_seconds unix_ts,
+            std::chrono::sys_seconds refund_requested_unix_ts,
+            std::string_view provider_code,
+            std::span<const std::byte> payment_id) {
+        // The tail is the provider code string followed by the opaque payment id (spec §1); must
+        // match the backend's signed-hash construction.
+        uint64_t ts = epoch_seconds(unix_ts);
+        uint64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
+        return hash::blake2b_pers<32>(
+                SET_PAYMENT_REFUND_REQUESTED_PERS,
+                set_refund_version,
+                master_pubkey,
+                ts,
+                refund_requested_ts,
+                provider_code,
+                payment_id);
+    }
+
+    std::string refund_body(
+            std::span<const std::byte> master_pubkey,
+            std::chrono::sys_seconds unix_ts,
+            std::chrono::sys_seconds refund_requested_unix_ts,
+            std::string_view provider_code,
+            std::string_view payment_id,
+            std::span<const std::byte> master_sig) {
+        nlohmann::json j;
+        j["version"] = set_refund_version;
+        j["master_pkey"] = oxenc::to_hex(master_pubkey);
+        j["ts"] = epoch_seconds(unix_ts);
+        j["refund_requested_ts"] = epoch_seconds(refund_requested_unix_ts);
+        j["payment_tx"]["provider"] = provider_code;
+        j["payment_tx"]["payment_id"] = payment_id;
+        j["master_sig"] = oxenc::to_hex(master_sig);
+        return j.dump();
+    }
+
+}  // namespace
+
+b64 refund_sig(
         const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_seconds unix_ts,
         std::chrono::sys_seconds refund_requested_unix_ts,
-        std::string_view payment_tx_provider_code,
-        std::span<const std::byte> payment_tx_payment_id) {
-    // Hash components to 32 bytes. The tail is the provider code string followed by the opaque
-    // payment id (spec §1); must match the backend's signed-hash construction.
-    uint64_t ts = epoch_seconds(unix_ts);
-    uint64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
-    auto hash_to_sign = hash::blake2b_pers<32>(
-            SET_PAYMENT_REFUND_REQUESTED_PERS,
-            version,
-            master_privkey.pubkey(),
-            ts,
-            refund_requested_ts,
-            payment_tx_provider_code,
-            payment_tx_payment_id);
-
-    return ed25519::sign(master_privkey, hash_to_sign);
+        std::string_view provider_code,
+        std::span<const std::byte> payment_id) {
+    auto hash = refund_hash(
+            master_privkey.pubkey(), unix_ts, refund_requested_unix_ts, provider_code, payment_id);
+    return ed25519::sign(master_privkey, hash);
 }
 
-std::string SetPaymentRefundRequestedRequest::build_to_json(
-        uint8_t version,
+ProRequest refund_request(
         const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_seconds unix_ts,
         std::chrono::sys_seconds refund_requested_unix_ts,
-        std::string_view payment_tx_provider_code,
-        std::span<const std::byte> payment_tx_payment_id) {
-    auto sig = SetPaymentRefundRequestedRequest::build_sig(
-            version,
-            master_privkey,
-            unix_ts,
-            refund_requested_unix_ts,
-            payment_tx_provider_code,
-            payment_tx_payment_id);
-
-    SetPaymentRefundRequestedRequest request = {};
-    request.version = version;
-    std::ranges::copy(master_privkey.pubkey(), request.master_pkey.begin());
-    request.payment_tx.provider_code = payment_tx_provider_code;
-    request.payment_tx.payment_id = to_string_view(payment_tx_payment_id);
-    request.master_sig = sig;
-    request.unix_ts = unix_ts;
-    request.refund_requested_unix_ts = refund_requested_unix_ts;
-
-    return request.to_json();
+        std::string_view provider_code,
+        std::span<const std::byte> payment_id) {
+    auto sig = refund_sig(
+            master_privkey, unix_ts, refund_requested_unix_ts, provider_code, payment_id);
+    return {set_refund_endpoint,
+            refund_body(
+                    master_privkey.pubkey(),
+                    unix_ts,
+                    refund_requested_unix_ts,
+                    provider_code,
+                    to_string_view(payment_id),
+                    sig)};
 }
 
-std::string SetPaymentRefundRequestedRequest::to_json() const {
-    nlohmann::json j;
-    j["version"] = version;
-    j["master_pkey"] = oxenc::to_hex(master_pkey);
-    j["ts"] = epoch_seconds(unix_ts);
-    j["refund_requested_ts"] = epoch_seconds(refund_requested_unix_ts);
-    j["payment_tx"]["provider"] = payment_tx.provider_code;
-    j["payment_tx"]["payment_id"] = payment_tx.payment_id;
-    j["master_sig"] = oxenc::to_hex(master_sig);
-    std::string result = j.dump();
-    return result;
-}
-
-SetPaymentRefundRequestedResponse SetPaymentRefundRequestedResponse::parse(std::string_view json) {
+SetPaymentRefundRequestedResponse parse_refund(std::string_view json) {
     // Parse basics
     SetPaymentRefundRequestedResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
@@ -572,7 +688,6 @@ static string8 C_PARSE_ERROR_INVALID_ARGS = STRING8_LIT("One or more C arguments
 
 LIBSESSION_C_API session_pro_backend_master_rotating_signatures
 session_pro_backend_add_pro_payment_request_build_sigs(
-        uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
         const unsigned char* rotating_privkey,
@@ -588,57 +703,19 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         auto payment_tx_payment_id_span =
                 to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
 
-        auto sigs = AddProPaymentRequest::build_sigs(
-                request_version,
-                master_span,
-                rotating_span,
-                payment_tx_provider_code,
-                payment_tx_payment_id_span);
+        auto sigs = add_payment_sigs(
+                master_span, rotating_span, payment_tx_provider_code, payment_tx_payment_id_span);
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
     } catch (const std::exception& e) {
         result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
     }
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_to_json
-session_pro_backend_add_pro_payment_request_build_to_json(
-        uint8_t request_version,
-        const unsigned char* master_privkey,
-        size_t master_privkey_len,
-        const unsigned char* rotating_privkey,
-        size_t rotating_privkey_len,
-        const char* payment_tx_provider_code,
-        const unsigned char* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) {
-    session_pro_backend_to_json result = {};
-
-    try {
-        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
-        ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
-        auto payment_tx_payment_id_span =
-                to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
-
-        std::string json = AddProPaymentRequest::build_to_json(
-                request_version,
-                master_span,
-                rotating_span,
-                payment_tx_provider_code,
-                payment_tx_payment_id_span);
-        result.json = session::string8_copy_or_throw(json.data(), json.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
-    }
-
     return result;
 }
 
 LIBSESSION_C_API session_pro_backend_master_rotating_signatures
 session_pro_backend_generate_pro_proof_request_build_sigs(
-        uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
         const unsigned char* rotating_privkey,
@@ -649,32 +726,9 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
     try {
         ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
         ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
-        auto sigs = GenerateProProofRequest::build_sigs(
-                request_version, master_span, rotating_span, session::as_sys_seconds(ts));
+        auto sigs = pro_proof_sigs(master_span, rotating_span, session::as_sys_seconds(ts));
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
-    }
-    return result;
-}
-
-LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build_to_json(
-        uint8_t request_version,
-        const unsigned char* master_privkey,
-        size_t master_privkey_len,
-        const unsigned char* rotating_privkey,
-        size_t rotating_privkey_len,
-        int64_t ts) {
-    session_pro_backend_to_json result = {};
-    try {
-        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
-        ed25519::PrivKeySpan rotating_span{rotating_privkey, rotating_privkey_len};
-        auto json = GenerateProProofRequest::build_to_json(
-                request_version, master_span, rotating_span, session::as_sys_seconds(ts));
-        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
@@ -684,7 +738,6 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
 
 LIBSESSION_C_API session_pro_backend_signature
 session_pro_backend_get_pro_details_request_build_sig(
-        uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
         int64_t ts,
@@ -692,29 +745,8 @@ session_pro_backend_get_pro_details_request_build_sig(
     session_pro_backend_signature result = {};
     try {
         ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
-        auto sig = GetProDetailsRequest::build_sig(
-                request_version, master_span, session::as_sys_seconds(ts), count);
+        auto sig = payment_details_sig(master_span, session::as_sys_seconds(ts), count);
         std::memcpy(result.sig.data, sig.data(), sig.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
-    }
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_to_json
-session_pro_backend_get_pro_details_request_build_to_json(
-        uint8_t request_version,
-        const unsigned char* master_privkey,
-        size_t master_privkey_len,
-        int64_t ts,
-        uint32_t count) {
-    session_pro_backend_to_json result = {};
-    try {
-        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
-        auto json = GetProDetailsRequest::build_to_json(
-                request_version, master_span, session::as_sys_seconds(ts), count);
-        result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
         result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
@@ -728,20 +760,14 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
     if (!request)
         return result;
 
-    // Construct C++ struct
-    AddProPaymentRequest cpp = {};
-    cpp.version = request->version;
-    std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
-    std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
-    cpp.payment_tx.provider_code =
-            std::string(request->payment_tx.provider_code, request->payment_tx.provider_code_count);
-    cpp.payment_tx.payment_id =
-            std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);
-    std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
-    std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
-
     try {
-        std::string json = cpp.to_json();
+        std::string json = add_payment_body(
+                to_byte_span(request->master_pkey.data),
+                to_byte_span(request->rotating_pkey.data),
+                {request->payment_tx.provider_code, request->payment_tx.provider_code_count},
+                {request->payment_tx.payment_id, request->payment_tx.payment_id_count},
+                to_byte_span(request->master_sig.data),
+                to_byte_span(request->rotating_sig.data));
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -757,17 +783,13 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_generate_pro_pr
     if (!request)
         return result;
 
-    // Construct C++ struct
-    GenerateProProofRequest cpp;
-    cpp.version = request->version;
-    std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
-    std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
-    cpp.unix_ts = session::as_sys_seconds(request->ts);
-    std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
-    std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
-
     try {
-        std::string json = cpp.to_json();
+        std::string json = generate_proof_body(
+                to_byte_span(request->master_pkey.data),
+                to_byte_span(request->rotating_pkey.data),
+                session::as_sys_seconds(request->ts),
+                to_byte_span(request->master_sig.data),
+                to_byte_span(request->rotating_sig.data));
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -784,13 +806,8 @@ session_pro_backend_get_pro_revocations_request_to_json(
     if (!request)
         return result;
 
-    // Construct C++ struct
-    GetProRevocationsRequest cpp = {};
-    cpp.version = request->version;
-    cpp.ticket = request->ticket;
-
     try {
-        std::string json = cpp.to_json();
+        std::string json = revocations_request(request->ticket).body;
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -806,17 +823,12 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_details
     if (!request)
         return result;
 
-    // Construct C++ struct
-    GetProDetailsRequest cpp = {};
-    cpp.version = request->version;
-    std::memcpy(
-            cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
-    std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
-    cpp.unix_ts = session::as_sys_seconds(request->ts);
-    cpp.count = request->count;
-
     try {
-        std::string json = cpp.to_json();
+        std::string json = payment_details_body(
+                to_byte_span(request->master_pkey.data),
+                to_byte_span(request->master_sig.data),
+                session::as_sys_seconds(request->ts),
+                request->count);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -826,11 +838,10 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_get_pro_details
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_add_pro_payment_or_generate_pro_proof_response
-session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
-        const char* json, size_t json_len) {
+LIBSESSION_C_API session_pro_backend_pro_proof_response
+session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) {
 
-    session_pro_backend_add_pro_payment_or_generate_pro_proof_response result = {};
+    session_pro_backend_pro_proof_response result = {};
     if (!json) {
         result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
@@ -839,7 +850,9 @@ session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = AddProPaymentOrGenerateProProofResponse::parse({json, json_len});
+    // add-payment and generate-proof share the proof-response shape; the C response struct is
+    // generic, so either derived parser works here.
+    auto cpp = parse_add_payment({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -899,7 +912,7 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    GetProRevocationsResponse cpp = GetProRevocationsResponse::parse({json, json_len});
+    GetProRevocationsResponse cpp = parse_revocations({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -966,7 +979,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = GetProDetailsResponse::parse({json, json_len});
+    auto cpp = parse_payment_details({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -1036,7 +1049,6 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
 
 LIBSESSION_C_API
 session_pro_backend_signature session_pro_backend_set_payment_refund_requested_request_build_sigs(
-        uint8_t request_version,
         const unsigned char* master_privkey,
         size_t master_privkey_len,
         int64_t ts,
@@ -1052,8 +1064,7 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
                 session::as_sys_seconds(refund_requested_ts);
         auto payment_tx_payment_id_span =
                 to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
-        auto sig = SetPaymentRefundRequestedRequest::build_sig(
-                request_version,
+        auto sig = refund_sig(
                 master_span,
                 unix_ts,
                 refund_requested_unix_ts,
@@ -1068,61 +1079,20 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
 }
 
 LIBSESSION_C_API session_pro_backend_to_json
-session_pro_backend_set_payment_refund_requested_request_build_to_json(
-        uint8_t request_version,
-        const unsigned char* master_privkey,
-        size_t master_privkey_len,
-        int64_t ts,
-        int64_t refund_requested_ts,
-        const char* payment_tx_provider_code,
-        const unsigned char* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) {
-
-    session_pro_backend_to_json result = {};
-    try {
-        ed25519::PrivKeySpan master_span{master_privkey, master_privkey_len};
-        std::chrono::sys_seconds unix_ts = session::as_sys_seconds(ts);
-        std::chrono::sys_seconds refund_requested_unix_ts =
-                session::as_sys_seconds(refund_requested_ts);
-        auto payment_tx_payment_id_span =
-                to_byte_span(payment_tx_payment_id, payment_tx_payment_id_len);
-        auto json = SetPaymentRefundRequestedRequest::build_to_json(
-                request_version,
-                master_span,
-                unix_ts,
-                refund_requested_unix_ts,
-                payment_tx_provider_code,
-                payment_tx_payment_id_span);
-        result.json = session::string8_copy_or_throw(json.data(), json.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
-    }
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_to_json
 session_pro_backend_set_payment_refund_requested_request_to_json(
         const session_pro_backend_set_payment_refund_requested_request* request) {
     session_pro_backend_to_json result = {};
     if (!request)
         return result;
 
-    // Construct C++ struct
-    SetPaymentRefundRequestedRequest cpp = {};
-    cpp.version = request->version;
-    std::memcpy(
-            cpp.master_pkey.data(), request->master_pkey.data, sizeof(request->master_pkey.data));
-    std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
-    cpp.unix_ts = session::as_sys_seconds(request->ts);
-    cpp.refund_requested_unix_ts = session::as_sys_seconds(request->refund_requested_ts);
-    cpp.payment_tx.provider_code =
-            std::string(request->payment_tx.provider_code, request->payment_tx.provider_code_count);
-    cpp.payment_tx.payment_id =
-            std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);
-
     try {
-        std::string json = cpp.to_json();
+        std::string json = refund_body(
+                to_byte_span(request->master_pkey.data),
+                session::as_sys_seconds(request->ts),
+                session::as_sys_seconds(request->refund_requested_ts),
+                {request->payment_tx.provider_code, request->payment_tx.provider_code_count},
+                {request->payment_tx.payment_id, request->payment_tx.payment_id_count},
+                to_byte_span(request->master_sig.data));
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1143,7 +1113,7 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
     }
 
     // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = SetPaymentRefundRequestedResponse::parse({json, json_len});
+    auto cpp = parse_refund({json, json_len});
 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
@@ -1189,8 +1159,8 @@ LIBSESSION_C_API void session_pro_backend_to_json_free(session_pro_backend_to_js
     }
 }
 
-LIBSESSION_C_API void session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(
-        session_pro_backend_add_pro_payment_or_generate_pro_proof_response* response) {
+LIBSESSION_C_API void session_pro_backend_pro_proof_response_free(
+        session_pro_backend_pro_proof_response* response) {
     if (response) {
         free(response->header.internal_arena_buf_);
         *response = {};

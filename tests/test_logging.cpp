@@ -3,12 +3,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <oxen/quic/network.hpp>
 #include <regex>
 #include <session/logging.hpp>
 
 #include "utils.hpp"
-
-#include <oxen/quic/network.hpp>
 
 using namespace session;
 using namespace oxen;
