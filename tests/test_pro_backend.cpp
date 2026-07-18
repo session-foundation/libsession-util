@@ -709,7 +709,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             nlohmann::json j;
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"]["updated"] = true;
-            j["result"]["version"] = 0;
             std::string json = j.dump();
 
             // Valid JSON
@@ -725,7 +724,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.header.errors_count == 0);
                 REQUIRE(result.header.errors == nullptr);
                 REQUIRE(result.updated);
-                REQUIRE(result.version == 0);
             }
 
             // After freeing
@@ -1192,7 +1190,6 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         // Verify the response
         REQUIRE(response.header.errors_count == 0);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-        REQUIRE(response.version == 0);
         REQUIRE(response.updated);
     }
 }

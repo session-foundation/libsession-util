@@ -70,19 +70,19 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
 
 namespace {
 session::array_uc32 proof_hash_internal(
-        std::uint8_t version,
         std::span<const std::uint8_t> revocation_tag,
         std::span<const std::uint8_t> rotating_pubkey,
         std::int64_t expiry_ts) {
 
-    // This must match the Pro proof signed digest in pro-wire-protocol.md §2.
+    // This must match the Pro proof signed digest in pro-wire-protocol.md §2. The proof version is
+    // NOT hashed as a byte; it selects the personalisation (v0 -> "ProProof_v0_____"), and that
+    // choice of personalisation is what binds the version into the signature.
     session::array_uc32 result = {};
     crypto_generichash_blake2b_state state = {};
     session::make_blake2b32_hasher(
             &state,
             {SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION,
              sizeof(SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION) - 1});
-    crypto_generichash_blake2b_update(&state, &version, sizeof(version));
     crypto_generichash_blake2b_update(&state, revocation_tag.data(), revocation_tag.size());
     crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
     oxenc::host_to_little_inplace(expiry_ts);
@@ -225,8 +225,8 @@ ProStatus ProProof::status(
 }
 
 array_uc32 ProProof::hash() const {
-    array_uc32 result = proof_hash_internal(
-            version, revocation_tag, rotating_pubkey, epoch_seconds(expiry_unix_ts));
+    array_uc32 result =
+            proof_hash_internal(revocation_tag, rotating_pubkey, epoch_seconds(expiry_unix_ts));
     return result;
 }
 
@@ -1189,10 +1189,7 @@ LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
 LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
     bytes32 result = {};
     session::array_uc32 hash = proof_hash_internal(
-            proof->version,
-            proof->revocation_tag.data,
-            proof->rotating_pubkey.data,
-            proof->expiry_ts);
+            proof->revocation_tag.data, proof->rotating_pubkey.data, proof->expiry_ts);
     std::memcpy(result.data, hash.data(), hash.size());
     return result;
 }
@@ -1205,10 +1202,7 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
         return false;
     auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
     session::array_uc32 hash = proof_hash_internal(
-            proof->version,
-            proof->revocation_tag.data,
-            proof->rotating_pubkey.data,
-            proof->expiry_ts);
+            proof->revocation_tag.data, proof->rotating_pubkey.data, proof->expiry_ts);
     bool result = proof_verify_signature_internal(hash, proof->sig.data, verify_pubkey_span);
     return result;
 }

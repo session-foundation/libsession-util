@@ -35,7 +35,7 @@ enum {
 /// Session Pro personalisation bytes for hashing; must match the personalisation strings in
 /// pro-wire-protocol.md §2 (proof) and §3 (signed requests).
 static const char SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION[]               = "ProGenerateProof";
-static const char SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION[]                  = "ProProof________";
+static const char SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION[]                  = "ProProof_v0_____";
 static const char SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION[]              = "ProAddPayment___";
 static const char SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION[] = "ProSetRefundReq_";
 static const char SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION[]              = "ProGetProDetReq_";

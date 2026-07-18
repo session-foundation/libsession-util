@@ -151,14 +151,6 @@ namespace {
     constexpr char get_pro_revocations_endpoint[] = "get_pro_revocations";
     constexpr char set_refund_endpoint[] = "set_payment_refund_requested";
 
-    // Wire-format version emitted per request type (library-owned; not caller-settable). Kept
-    // independent so a future bump of one request type doesn't drag the others along.
-    constexpr uint8_t add_payment_version = 0;
-    constexpr uint8_t generate_proof_version = 0;
-    constexpr uint8_t get_pro_details_version = 0;
-    constexpr uint8_t get_pro_revocations_version = 0;
-    constexpr uint8_t set_refund_version = 0;
-
     // Normalise an Ed25519 private key to libsodium's 64-byte form (seed(32) || pubkey(32)): a
     // 32-byte seed is expanded, a 64-byte key copied, anything else throws. The public key is then
     // available at bytes [32, 64) so callers never need a second derivation.
@@ -198,8 +190,6 @@ namespace {
                 &state,
                 {SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION,
                  sizeof(SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(
-                &state, &add_payment_version, sizeof(add_payment_version));
         crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
         crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
         crypto_generichash_blake2b_update(
@@ -236,7 +226,6 @@ namespace {
             std::span<const uint8_t> master_sig,
             std::span<const uint8_t> rotating_sig) {
         nlohmann::json j;
-        j["version"] = add_payment_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
         j["payment_tx"]["provider"] = provider_code;
@@ -387,8 +376,6 @@ namespace {
                 &state,
                 {SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION,
                  sizeof(SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(
-                &state, &generate_proof_version, sizeof(generate_proof_version));
         crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
         crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
         oxenc::host_to_little_inplace(ts);
@@ -417,7 +404,6 @@ namespace {
             std::span<const uint8_t> master_sig,
             std::span<const uint8_t> rotating_sig) {
         nlohmann::json j;
-        j["version"] = generate_proof_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
         j["ts"] = epoch_seconds(unix_ts);
@@ -455,7 +441,6 @@ ProRequest pro_proof_request(
 
 ProRequest revocations_request(std::int64_t ticket) {
     nlohmann::json j;
-    j["version"] = get_pro_revocations_version;
     j["ticket"] = ticket;
     return {get_pro_revocations_endpoint, j.dump()};
 }
@@ -531,8 +516,6 @@ namespace {
                 &state,
                 {SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION,
                  sizeof(SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(
-                &state, &get_pro_details_version, sizeof(get_pro_details_version));
         crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
         oxenc::host_to_little_inplace(ts);
         oxenc::host_to_little_inplace(count);
@@ -558,7 +541,6 @@ namespace {
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
         nlohmann::json j;
-        j["version"] = get_pro_details_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["master_sig"] = oxenc::to_hex(master_sig);
         j["ts"] = epoch_seconds(unix_ts);
@@ -712,7 +694,6 @@ namespace {
                 &state,
                 {SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION,
                  sizeof(SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(&state, &set_refund_version, sizeof(set_refund_version));
         crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
         oxenc::host_to_little_inplace(ts);
         oxenc::host_to_little_inplace(refund_requested_ts);
@@ -752,7 +733,6 @@ namespace {
             std::string_view payment_id,
             std::span<const uint8_t> master_sig) {
         nlohmann::json j;
-        j["version"] = set_refund_version;
         j["master_pkey"] = oxenc::to_hex(master_pubkey);
         j["ts"] = epoch_seconds(unix_ts);
         j["refund_requested_ts"] = epoch_seconds(refund_requested_unix_ts);
@@ -813,7 +793,6 @@ SetPaymentRefundRequestedResponse parse_refund(std::string_view json) {
         return result;
 
     // Parse payload
-    result.version = json_require<uint8_t>(result_obj, "version", result.errors);
     result.updated = json_require<bool>(result_obj, "updated", result.errors);
     return result;
 }
@@ -1339,7 +1318,6 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
 
     // Copy to C struct
     result.header.status = cpp.status;
-    result.version = cpp.version;
     result.updated = cpp.updated;
 
     // Copy errors

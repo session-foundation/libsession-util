@@ -401,9 +401,6 @@ ProRequest refund_request(
         std::span<const uint8_t> payment_id);
 
 struct SetPaymentRefundRequestedResponse : Response {
-    /// Version from the request
-    std::uint8_t version;
-
     /// True if a payment was found matching the given payment information and that the refund
     /// request unix timestamp was set
     bool updated;

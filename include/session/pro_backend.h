@@ -263,7 +263,6 @@ typedef struct session_pro_backend_set_payment_refund_requested_response
         session_pro_backend_set_payment_refund_requested_response;
 struct session_pro_backend_set_payment_refund_requested_response {
     session_pro_backend_response_header header;
-    uint8_t version;
     bool updated;
 };
 
