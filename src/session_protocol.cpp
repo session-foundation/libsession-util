@@ -62,20 +62,17 @@ session::b32 proof_hash_internal(
             session::BUILD_PROOF_PERS, version, gen_index_hash, rotating_pubkey, expiry_unix_ts_ms);
 }
 
-struct array_uc32_from_ptr_result {
-    bool success;
-    session::b32 data;
-};
-
-static array_uc32_from_ptr_result array_uc32_from_ptr(const void* ptr, size_t len) {
-    array_uc32_from_ptr_result result = {};
+// Copies an optional 32-byte value out of a possibly-null C pointer. A null pointer yields a
+// zero-filled value (the "not provided" case); a non-null pointer with the wrong length yields
+// nullopt to signal an error.
+static std::optional<session::b32> optional_uc32_from_ptr(const void* ptr, size_t len) {
+    session::b32 out = {};
     if (ptr) {
-        if (len != result.data.max_size())
-            return result;
-        std::memcpy(result.data.data(), ptr, len);
+        if (len != out.max_size())
+            return std::nullopt;
+        std::memcpy(out.data(), ptr, len);
     }
-    result.success = true;
-    return result;
+    return out;
 }
 
 static session_protocol_envelope envelope_from_cpp(const session::Envelope& cpp) {
@@ -384,6 +381,19 @@ std::vector<std::byte> encode_for_group(
             /*padding*/ 256);
 }
 
+// Parses the optional envelope metadata fields that are encoded identically for every message type
+// (source device and server timestamp) into an Envelope.
+static void parse_common_envelope_fields(Envelope& env, const SessionProtos::Envelope& pb) {
+    if (pb.has_sourcedevice()) {
+        env.source_device = pb.sourcedevice();
+        env.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE_DEVICE;
+    }
+    if (pb.has_servertimestamp()) {
+        env.server_timestamp = pb.servertimestamp();
+        env.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SERVER_TIMESTAMP;
+    }
+}
+
 // Shared helper 1: parses envelope metadata fields (timestamp, source, etc.) from an
 // already-parsed Envelope protobuf.
 static void parse_envelope_fields(
@@ -429,17 +439,44 @@ static void parse_envelope_fields(
         }
     }
 
-    // Parse source device (optional)
-    if (envelope.has_sourcedevice()) {
-        result.envelope.source_device = envelope.sourcedevice();
-        result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE_DEVICE;
-    }
+    parse_common_envelope_fields(result.envelope, envelope);
+}
 
-    // Parse server timestamp (optional)
-    if (envelope.has_servertimestamp()) {
-        result.envelope.server_timestamp = envelope.servertimestamp();
-        result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SERVER_TIMESTAMP;
-    }
+// Parses and validates the proof and feature flags embedded in a protobuf ProMessage into a
+// DecodedPro. Throws if the proof is missing or malformed. The caller is responsible for evaluating
+// the resulting proof's `.status`.
+static DecodedPro parse_pro_message(const SessionProtos::ProMessage& pro_msg) {
+    DecodedPro pro = {};
+    if (!pro_msg.has_proof())
+        throw std::runtime_error{"Parse failed, pro config missing proof"};
+
+    const SessionProtos::ProProof& proto_proof = pro_msg.proof();
+    ProProof& proof = pro.proof;
+    bool valid = proto_proof.has_version() &&
+                 proto_proof.version() == static_cast<std::uint32_t>(ProProofVersion_v0) &&
+                 proto_proof.has_genindexhash() &&
+                 proto_proof.genindexhash().size() == proof.gen_index_hash.max_size() &&
+                 proto_proof.has_rotatingpublickey() &&
+                 proto_proof.rotatingpublickey().size() == proof.rotating_pubkey.max_size() &&
+                 proto_proof.has_expiryunixts() && proto_proof.has_sig() &&
+                 proto_proof.sig().size() == proof.sig.max_size();
+    if (!valid)
+        throw std::runtime_error{"Parse failed, pro metadata was malformed"};
+
+    pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
+    pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
+    std::memcpy(
+            proof.gen_index_hash.data(),
+            proto_proof.genindexhash().data(),
+            proto_proof.genindexhash().size());
+    std::memcpy(
+            proof.rotating_pubkey.data(),
+            proto_proof.rotatingpublickey().data(),
+            proto_proof.rotatingpublickey().size());
+    proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
+            std::chrono::milliseconds(proto_proof.expiryunixts()));
+    std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+    return pro;
 }
 
 // Shared helper 2: parses Content protobuf from result.content_plaintext (which must already be
@@ -488,45 +525,7 @@ static void parse_content_and_pro(
 
             // Mark the envelope as having a pro signature that the caller can use.
             result.envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG;
-            DecodedPro& pro = result.pro.emplace();
-
-            // Extract the pro message
-            const SessionProtos::ProMessage& pro_msg = content.promessage();
-            if (!pro_msg.has_proof())
-                throw std::runtime_error(
-                        "Parse decrypted message failed, pro config missing proof");
-
-            // Parse the proof from protobufs
-            const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-            session::ProProof& proof = pro.proof;
-            // clang-format off
-            size_t proof_errors = 0;
-            proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
-            proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
-            proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
-            proof_errors += !proto_proof.has_expiryunixts();
-            proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
-            // clang-format on
-            if (proof_errors)
-                throw std::runtime_error(
-                        "Parse decrypted message failed, pro metadata was malformed");
-
-            // Fill out the resulting proof structure, we have parsed successfully
-            pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
-            pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
-            std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
-
-            std::memcpy(
-                    proof.gen_index_hash.data(),
-                    proto_proof.genindexhash().data(),
-                    proto_proof.genindexhash().size());
-            std::memcpy(
-                    proof.rotating_pubkey.data(),
-                    proto_proof.rotatingpublickey().data(),
-                    proto_proof.rotatingpublickey().size());
-            proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                    std::chrono::milliseconds(proto_proof.expiryunixts()));
-            std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+            DecodedPro& pro = result.pro.emplace(parse_pro_message(content.promessage()));
 
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
             // was the message signed validly?)
@@ -539,7 +538,7 @@ static void parse_content_and_pro(
             // bytes, this means that we expected the user to have signed the padding as well.
             auto unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
                     std::chrono::milliseconds(content.sigtimestamp()));
-            pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+            pro.status = pro.proof.status(pro_backend_pubkey, unix_ts, signed_msg);
         }
     }
 }
@@ -669,17 +668,7 @@ DecodedCommunityMessage decode_for_community(
                 envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE;
             }
 
-            // Parse source device (optional)
-            if (pb_envelope.has_sourcedevice()) {
-                envelope.source_device = pb_envelope.sourcedevice();
-                envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE_DEVICE;
-            }
-
-            // Parse server timestamp (optional)
-            if (pb_envelope.has_servertimestamp()) {
-                envelope.server_timestamp = pb_envelope.servertimestamp();
-                envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SERVER_TIMESTAMP;
-            }
+            parse_common_envelope_fields(envelope, pb_envelope);
 
             // Parse pro signature (optional)
             if (pb_envelope.has_prosig()) {
@@ -731,41 +720,7 @@ DecodedCommunityMessage decode_for_community(
     }
 
     if (result.pro_sig && content.has_promessage()) {
-        // Extract the pro message
-        DecodedPro& pro = result.pro.emplace();
-        const SessionProtos::ProMessage& pro_msg = content.promessage();
-        if (!pro_msg.has_proof())
-            throw std::runtime_error("Decoding community message failed, pro config missing proof");
-
-        // Parse the proof from protobufs
-        const SessionProtos::ProProof& proto_proof = pro_msg.proof();
-        session::ProProof& proof = pro.proof;
-        // clang-format off
-        size_t proof_errors = 0;
-        proof_errors += !proto_proof.has_version()           || proto_proof.version()                  != static_cast<std::uint32_t>(session::ProProofVersion_v0);
-        proof_errors += !proto_proof.has_genindexhash()      || proto_proof.genindexhash().size()      != proof.gen_index_hash.max_size();
-        proof_errors += !proto_proof.has_rotatingpublickey() || proto_proof.rotatingpublickey().size() != proof.rotating_pubkey.max_size();
-        proof_errors += !proto_proof.has_expiryunixts();
-        proof_errors += !proto_proof.has_sig()               || proto_proof.sig().size() != proof.sig.max_size();
-        // clang-format on
-        if (proof_errors)
-            throw std::runtime_error(
-                    "Decoding community message failed, pro metadata was malformed");
-
-        // Fill out the resulting proof structure, we have parsed successfully
-        pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
-        pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
-        std::memcpy(
-                proof.gen_index_hash.data(),
-                proto_proof.genindexhash().data(),
-                proto_proof.genindexhash().size());
-        std::memcpy(
-                proof.rotating_pubkey.data(),
-                proto_proof.rotatingpublickey().data(),
-                proto_proof.rotatingpublickey().size());
-        proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                std::chrono::milliseconds(proto_proof.expiryunixts()));
-        std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
+        DecodedPro& pro = result.pro.emplace(parse_pro_message(content.promessage()));
 
         // Evaluate the pro status given the extracted components (was it signed, is it expired,
         // was the message signed validly?)
@@ -778,7 +733,7 @@ DecodedCommunityMessage decode_for_community(
             // Entering the `pro_sig` and `result.envelope` branch means that the envelope must have
             // a pro signature.
             assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
-            pro.status = proof.status(
+            pro.status = pro.proof.status(
                     pro_backend_pubkey,
                     unix_ts,
                     ProSignedMessage{*result.pro_sig, result.content_plaintext});
@@ -794,7 +749,7 @@ DecodedCommunityMessage decode_for_community(
             std::vector<std::byte> content_copy_without_sig_payload =
                     pad_message(to_span(content_copy_without_sig.SerializeAsString()));
 
-            pro.status = proof.status(
+            pro.status = pro.proof.status(
                     pro_backend_pubkey,
                     unix_ts,
                     ProSignedMessage{*result.pro_sig, to_span(content_copy_without_sig_payload)});
@@ -1060,9 +1015,9 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     session_protocol_decoded_envelope result = {};
 
     // Setup the pro backend pubkey
-    array_uc32_from_ptr_result pro_backend_pubkey_cpp =
-            array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
-    if (!pro_backend_pubkey_cpp.success) {
+    auto pro_backend_pubkey_cpp =
+            optional_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    if (!pro_backend_pubkey_cpp) {
         result.error_len_incl_null_terminator = format_c_str(
                 error,
                 error_len,
@@ -1090,8 +1045,8 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
         }
 
         try {
-            result_cpp = decode_group_envelope(
-                    group_keys, group_pk, payload, pro_backend_pubkey_cpp.data);
+            result_cpp =
+                    decode_group_envelope(group_keys, group_pk, payload, *pro_backend_pubkey_cpp);
             result.success = true;
         } catch (const std::exception& e) {
             result.error_len_incl_null_terminator = format_c_str(error, error_len, "{}", e.what());
@@ -1109,7 +1064,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
             try {
                 ed25519::PrivKeySpan privkey{
                         keys->decrypt_keys[index].data, keys->decrypt_keys[index].size};
-                result_cpp = decode_dm_envelope(privkey, payload, pro_backend_pubkey_cpp.data);
+                result_cpp = decode_dm_envelope(privkey, payload, *pro_backend_pubkey_cpp);
                 result.success = true;
                 break;
             } catch (const std::exception& e) {
@@ -1179,9 +1134,9 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
             content_or_envelope_payload_len};
     auto unix_ts =
             std::chrono::sys_time<std::chrono::milliseconds>(std::chrono::milliseconds(unix_ts_ms));
-    array_uc32_from_ptr_result pro_backend_pubkey_cpp =
-            array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
-    if (!pro_backend_pubkey_cpp.success) {
+    auto pro_backend_pubkey_cpp =
+            optional_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    if (!pro_backend_pubkey_cpp) {
         result.error_len_incl_null_terminator = format_c_str(
                 error,
                 error_len,
@@ -1192,7 +1147,7 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
 
     try {
         DecodedCommunityMessage decoded = decode_for_community(
-                content_or_envelope_payload_span, unix_ts, pro_backend_pubkey_cpp.data);
+                content_or_envelope_payload_span, unix_ts, *pro_backend_pubkey_cpp);
         result.has_envelope = decoded.envelope.has_value();
         if (result.has_envelope)
             result.envelope = envelope_from_cpp(*decoded.envelope);
