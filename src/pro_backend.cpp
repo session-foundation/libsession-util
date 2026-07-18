@@ -67,6 +67,34 @@ const T json_require(
     return result;
 }
 
+// Reads a JSON number that may be an integer *or* a float, as a double. Used for the two
+// upstream-provider event instants (`purchased_ts`, `revoked_ts`) which the backend emits as floats
+// carrying the provider's sub-second precision (pro-wire-protocol.md §1).
+double json_require_number(
+        const nlohmann::json& j, std::string_view key, std::vector<std::string>& errors) {
+    auto it = j.find(key);
+    if (it == j.end())
+        errors.push_back(fmt::format("Key '{}' is missing", key));
+    else if (it->is_number())
+        return it->get<double>();
+    else
+        errors.push_back(fmt::format("Key value ({}, {}) was not a number", key, it->dump(1)));
+    return 0;
+}
+
+// Fractional UNIX seconds (double) -> millisecond-precision system time, preserving the provider's
+// sub-second precision (rounded to the nearest millisecond).
+session::sys_ms sys_ms_from_seconds(double seconds) {
+    return session::sys_ms(
+            std::chrono::round<std::chrono::milliseconds>(std::chrono::duration<double>(seconds)));
+}
+
+// Millisecond-precision system time -> fractional UNIX seconds (double); the C API carries these
+// two instants as double seconds (millisecond-precise, having passed through sys_ms).
+double epoch_seconds_double(session::sys_ms t) {
+    return std::chrono::duration<double>(t.time_since_epoch()).count();
+}
+
 void parse_json_response_errors(const nlohmann::json& j, std::vector<std::string>& errors) {
     const auto& array = json_require<nlohmann::json::array_t>(j, "errors", errors);
     errors.reserve(errors.size() + array.size());
@@ -141,8 +169,7 @@ namespace {
             std::span<const std::byte> rotating_pubkey,
             std::string_view provider_code,
             std::span<const std::byte> payment_id) {
-        // The tail is the provider code string followed by the opaque payment id (spec §1); must
-        // match the backend's signed-hash construction.
+        // Must match the add-payment signed-request hash in pro-wire-protocol.md §3.2 (+ §3.5).
         return hash::blake2b_pers<32>(
                 ADD_PRO_PAYMENT_PERS,
                 add_payment_version,
@@ -306,8 +333,7 @@ namespace {
             std::span<const std::byte> master_pubkey,
             std::span<const std::byte> rotating_pubkey,
             std::chrono::sys_seconds unix_ts) {
-        // Must match:
-        //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L631
+        // Must match the generate-proof signed-request hash in pro-wire-protocol.md §3.1.
         uint64_t ts = epoch_seconds(unix_ts);
         return hash::blake2b_pers<32>(
                 GENERATE_PROOF_PERS, generate_proof_version, master_pubkey, rotating_pubkey, ts);
@@ -426,8 +452,7 @@ namespace {
             std::span<const std::byte> master_pubkey,
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
-        // Must match:
-        //   https://github.com/Doy-lee/session-pro-backend/blob/635b14fc93302658de6c07c017f705673fc7c57f/server.py#L395
+        // Must match the get-pro-details signed-request hash in pro-wire-protocol.md §3.4.
         uint64_t ts = epoch_seconds(unix_ts);
         return hash::blake2b_pers<32>(
                 GET_PRO_DETAILS_PERS, get_pro_details_version, master_pubkey, ts, count);
@@ -534,14 +559,17 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         auto payment_provider = json_require<std::string>(obj, "payment_provider", result.errors);
         auto payment_id = json_require<std::string>(obj, "payment_id", result.errors);
         auto auto_renewing = json_require<bool>(obj, "auto_renewing", result.errors);
-        auto unredeemed_ts = json_require<int64_t>(obj, "unredeemed_ts", result.errors);
+        // purchased_ts and revoked_ts are upstream-provider event instants: floats on the wire
+        // carrying sub-second precision (kept as millisecond-precision sys_ms). All other
+        // timestamps are whole-second integers.
+        auto purchased_ts = json_require_number(obj, "purchased_ts", result.errors);
         auto redeemed_ts = json_require<int64_t>(obj, "redeemed_ts", result.errors);
         auto expiry_ts = json_require<int64_t>(obj, "expiry_ts", result.errors);
         auto grace_period_duration =
                 json_require<int64_t>(obj, "grace_period_duration", result.errors);
         auto platform_refund_expiry_ts =
                 json_require<int64_t>(obj, "platform_refund_expiry_ts", result.errors);
-        auto revoked_ts = json_require<int64_t>(obj, "revoked_ts", result.errors);
+        auto revoked_ts = json_require_number(obj, "revoked_ts", result.errors);
         auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", result.errors);
 
         ProPaymentItem item = {};
@@ -559,12 +587,12 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         item.payment_id = std::move(payment_id);
 
         item.auto_renewing = auto_renewing;
-        item.unredeemed_unix_ts = as_sys_seconds(unredeemed_ts);
+        item.purchased_unix_ts = sys_ms_from_seconds(purchased_ts);
         item.redeemed_unix_ts = as_sys_seconds(redeemed_ts);
         item.expiry_unix_ts = as_sys_seconds(expiry_ts);
         item.grace_period_duration = std::chrono::seconds(grace_period_duration);
         item.platform_refund_expiry_unix_ts = as_sys_seconds(platform_refund_expiry_ts);
-        item.revoked_unix_ts = as_sys_seconds(revoked_ts);
+        item.revoked_unix_ts = sys_ms_from_seconds(revoked_ts);
         item.refund_requested_unix_ts = as_sys_seconds(refund_requested_ts);
 
         // Handle parsing result
@@ -586,8 +614,8 @@ namespace {
             std::chrono::sys_seconds refund_requested_unix_ts,
             std::string_view provider_code,
             std::span<const std::byte> payment_id) {
-        // The tail is the provider code string followed by the opaque payment id (spec §1); must
-        // match the backend's signed-hash construction.
+        // Must match the set-payment-refund-requested signed-request hash in pro-wire-protocol.md
+        // §3.3 (+ §3.5 for payment_id).
         uint64_t ts = epoch_seconds(unix_ts);
         uint64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
         return hash::blake2b_pers<32>(
@@ -1024,12 +1052,12 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         dest.plan_count = session::copy_c_str(dest.plan, src.plan) - 1;
         dest.payment_provider_count =
                 session::copy_c_str(dest.payment_provider, src.payment_provider) - 1;
-        dest.unredeemed_ts = epoch_seconds(src.unredeemed_unix_ts);
+        dest.purchased_ts = epoch_seconds_double(src.purchased_unix_ts);
         dest.redeemed_ts = epoch_seconds(src.redeemed_unix_ts);
         dest.expiry_ts = epoch_seconds(src.expiry_unix_ts);
         dest.grace_period_duration = src.grace_period_duration.count();
         dest.platform_refund_expiry_ts = epoch_seconds(src.platform_refund_expiry_unix_ts);
-        dest.revoked_ts = epoch_seconds(src.revoked_unix_ts);
+        dest.revoked_ts = epoch_seconds_double(src.revoked_unix_ts);
         dest.refund_requested_ts = epoch_seconds(src.refund_requested_unix_ts);
 
         dest.payment_id_count = session::copy_c_str(dest.payment_id, src.payment_id) - 1;

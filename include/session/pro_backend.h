@@ -221,12 +221,15 @@ struct session_pro_backend_pro_payment_item {
     size_t payment_provider_count;
 
     bool auto_renewing;
-    int64_t unredeemed_ts;
+    /// Provider purchase time, fractional UNIX seconds. Millisecond-precise: the value passes
+    /// through a millisecond-resolution representation, so sub-millisecond digits are not retained.
+    double purchased_ts;
     int64_t redeemed_ts;
     int64_t expiry_ts;
     int64_t grace_period_duration;
     int64_t platform_refund_expiry_ts;
-    int64_t revoked_ts;
+    /// Provider revocation instant, fractional UNIX seconds (millisecond-precise; 0 if not revoked)
+    double revoked_ts;
     int64_t refund_requested_ts;
 
     /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
