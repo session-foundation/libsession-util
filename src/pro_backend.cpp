@@ -14,54 +14,6 @@
 #include <session/sodium_array.hpp>
 #include <session/types.hpp>
 
-// clang-format off
-const session_pro_backend_payment_provider_metadata SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT] = {
-    /*SESSION_PRO_PAYMENT_PROVIDER_NIL*/ {
-        .device                             = string8_literal(""),
-        .store                              = string8_literal(""),
-        .platform                           = string8_literal(""),
-        .platform_account                   = string8_literal(""),
-        .refund_platform_url                = string8_literal(""),
-        .refund_support_url                 = string8_literal(""),
-        .refund_status_url                  = string8_literal(""),
-        .update_subscription_url            = string8_literal(""),
-        .cancel_subscription_url            = string8_literal(""),
-    },
-    /*SESSION_PRO_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE*/ {
-        .device                             = string8_literal("Android"),
-        .store                              = string8_literal("Google Play Store"),
-        .platform                           = string8_literal("Google"),
-        .platform_account                   = string8_literal("Google account"),
-        .refund_platform_url                = string8_literal("https://support.google.com/googleplay/workflow/9813244?"),
-        .refund_support_url                 = string8_literal("https://getsession.org/android-refund"),
-        .refund_status_url                  = string8_literal("https://getsession.org/android-refund"),
-        .update_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
-        .cancel_subscription_url            = string8_literal("https://play.google.com/store/account/subscriptions?package=network.loki.messenger"),
-    },
-    /*SESSION_PRO_PAYMENT_PROVIDER_IOS_APP_STORE*/ {
-        .device                             = string8_literal("iOS"),
-        .store                              = string8_literal("Apple App Store"),
-        .platform                           = string8_literal("Apple"),
-        .platform_account                   = string8_literal("Apple account"),
-        .refund_platform_url                = string8_literal("https://support.apple.com/118223"),
-        .refund_support_url                 = string8_literal("https://support.apple.com/118223"),
-        .refund_status_url                  = string8_literal("https://support.apple.com/118224"),
-        .update_subscription_url            = string8_literal("https://apps.apple.com/account/subscriptions"),
-        .cancel_subscription_url            = string8_literal("https://account.apple.com/account/manage/section/subscriptions"),
-    },
-    /*SESSION_PRO_PAYMENT_PROVIDER_RANGEPROOF*/ {
-        .device                             = string8_literal(""),
-        .store                              = string8_literal(""),
-        .platform                           = string8_literal(""),
-        .platform_account                   = string8_literal(""),
-        .refund_platform_url                = string8_literal(""),
-        .refund_support_url                 = string8_literal(""),
-        .refund_status_url                  = string8_literal(""),
-        .update_subscription_url            = string8_literal(""),
-        .cancel_subscription_url            = string8_literal(""),
-    }
-};
-
 namespace {
 const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
     nlohmann::json result;
@@ -165,19 +117,8 @@ std::string AddProPaymentRequest::to_json() const {
     j["version"] = version;
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["rotating_pkey"] = oxenc::to_hex(rotating_pkey);
-    j["payment_tx"]["provider"] = payment_tx.provider;
-    switch (payment_tx.provider) {
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
-            j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
-            j["payment_tx"]["google_order_id"] = payment_tx.order_id;
-        } break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
-            j["payment_tx"]["apple_tx_id"] = payment_tx.payment_id;
-        } break;
-    }
+    j["payment_tx"]["provider"] = payment_tx.provider_code;
+    j["payment_tx"]["payment_id"] = payment_tx.payment_id;
     j["master_sig"] = oxenc::to_hex(master_sig);
     j["rotating_sig"] = oxenc::to_hex(rotating_sig);
     std::string result = j.dump();
@@ -188,9 +129,8 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         std::uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::string_view payment_tx_provider_code,
+        std::span<const uint8_t> payment_tx_payment_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -211,18 +151,6 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
         throw std::invalid_argument{"Invalid rotating_privkey: expected 32 or 64 bytes"};
     }
 
-    if (payment_tx_provider == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE) {
-        if (payment_tx_order_id.empty())
-            throw std::invalid_argument{
-                    "Invalid payment_tx_order_id: order ID must be set for a Google Play store "
-                    "payment"};
-    } else {
-        if (payment_tx_order_id.size())
-            throw std::invalid_argument{
-                    "Invalid payment_tx_order_id: order ID must not be set for an iOS App store "
-                    "payment"};
-    }
-
     // Hash components to 32 bytes, must match:
     //   https://github.com/Doy-lee/session-pro-backend/blob/5b66b1a4a64dc8da0225507019cbe21d7642fa78/backend.py#L171
     array_uc32 hash_to_sign = {};
@@ -241,18 +169,14 @@ MasterRotatingSignatures AddProPaymentRequest::build_sigs(
             rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
             crypto_sign_ed25519_PUBLICKEYBYTES);
 
-    uint8_t provider_u8 = payment_tx_provider;
-    crypto_generichash_blake2b_update(&state, &provider_u8, sizeof(provider_u8));
+    crypto_generichash_blake2b_update(
+            &state,
+            reinterpret_cast<const uint8_t*>(payment_tx_provider_code.data()),
+            payment_tx_provider_code.size());
     crypto_generichash_blake2b_update(
             &state,
             reinterpret_cast<const uint8_t*>(payment_tx_payment_id.data()),
             payment_tx_payment_id.size());
-    if (payment_tx_order_id.size()) {
-        crypto_generichash_blake2b_update(
-                &state,
-                reinterpret_cast<const uint8_t*>(payment_tx_order_id.data()),
-                payment_tx_order_id.size());
-    }
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash with both keys
@@ -276,9 +200,8 @@ std::string AddProPaymentRequest::build_to_json(
         std::uint8_t version,
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::string_view payment_tx_provider_code,
+        std::span<const uint8_t> payment_tx_payment_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -303,9 +226,8 @@ std::string AddProPaymentRequest::build_to_json(
             version,
             master_privkey,
             rotating_privkey,
-            payment_tx_provider,
-            payment_tx_payment_id,
-            payment_tx_order_id);
+            payment_tx_provider_code,
+            payment_tx_payment_id);
 
     AddProPaymentRequest request = {};
     request.version = version;
@@ -317,12 +239,10 @@ std::string AddProPaymentRequest::build_to_json(
             request.rotating_pkey.data(),
             rotating_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
             crypto_sign_ed25519_PUBLICKEYBYTES);
-    request.payment_tx.provider = payment_tx_provider;
+    request.payment_tx.provider_code = std::string(payment_tx_provider_code);
     request.payment_tx.payment_id = std::string(
             reinterpret_cast<const char*>(payment_tx_payment_id.data()),
             payment_tx_payment_id.size());
-    request.payment_tx.order_id = std::string(
-            reinterpret_cast<const char*>(payment_tx_order_id.data()), payment_tx_order_id.size());
     request.master_sig = sigs.master_sig;
     request.rotating_sig = sigs.rotating_sig;
 
@@ -354,8 +274,7 @@ AddProPaymentOrGenerateProProofResponse AddProPaymentOrGenerateProProofResponse:
     // Parse payload
     result.proof.version = json_require<uint8_t>(result_obj, "version", result.errors);
     auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", result.errors);
-    result.proof.expiry_unix_ts = std::chrono::sys_seconds(
-            std::chrono::seconds(expiry_ts));
+    result.proof.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_ts));
     json_require_fixed_bytes_from_hex(
             result_obj, "revocation_tag", result.errors, result.proof.revocation_tag);
     json_require_fixed_bytes_from_hex(
@@ -418,8 +337,7 @@ MasterRotatingSignatures GenerateProProofRequest::build_sigs(
     crypto_generichash_blake2b_update(
             &state, rotating_privkey.data() + 32, crypto_sign_ed25519_PUBLICKEYBYTES);
     oxenc::host_to_little_inplace(ts);
-    crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<uint8_t*>(&ts), sizeof(ts));
+    crypto_generichash_blake2b_update(&state, reinterpret_cast<uint8_t*>(&ts), sizeof(ts));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash with both keys
@@ -591,8 +509,7 @@ array_uc64 GetProDetailsRequest::build_sig(
             crypto_sign_ed25519_PUBLICKEYBYTES);
     oxenc::host_to_little_inplace(ts);
     oxenc::host_to_little_inplace(count);
-    crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<unsigned char*>(&ts), sizeof(ts));
+    crypto_generichash_blake2b_update(&state, reinterpret_cast<unsigned char*>(&ts), sizeof(ts));
     crypto_generichash_blake2b_update(
             &state, reinterpret_cast<unsigned char*>(&count), sizeof(count));
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
@@ -678,13 +595,12 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
 
     result.payments_total = json_require<uint32_t>(result_obj, "payments_total", result.errors);
 
-    result.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(
-            json_require<int64_t>(result_obj, "expiry_ts", result.errors)));
+    result.expiry_unix_ts = std::chrono::sys_seconds(
+            std::chrono::seconds(json_require<int64_t>(result_obj, "expiry_ts", result.errors)));
     result.grace_period_duration = std::chrono::seconds(
             json_require<int64_t>(result_obj, "grace_period_duration", result.errors));
-    result.refund_requested_unix_ts = std::chrono::sys_seconds(
-            std::chrono::seconds(
-                    json_require<int64_t>(result_obj, "refund_requested_ts", result.errors)));
+    result.refund_requested_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(
+            json_require<int64_t>(result_obj, "refund_requested_ts", result.errors)));
 
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
     result.items.reserve(array.size());
@@ -699,8 +615,9 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
         auto status = json_require<uint64_t>(obj, "status", result.errors);
-        auto plan = json_require<uint64_t>(obj, "plan", result.errors);
-        auto payment_provider = json_require<uint32_t>(obj, "payment_provider", result.errors);
+        auto plan = json_require<std::string>(obj, "plan", result.errors);
+        auto payment_provider = json_require<std::string>(obj, "payment_provider", result.errors);
+        auto payment_id = json_require<std::string>(obj, "payment_id", result.errors);
         auto auto_renewing = json_require<bool>(obj, "auto_renewing", result.errors);
         auto unredeemed_ts = json_require<int64_t>(obj, "unredeemed_ts", result.errors);
         auto redeemed_ts = json_require<int64_t>(obj, "redeemed_ts", result.errors);
@@ -710,8 +627,7 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
         auto platform_refund_expiry_ts =
                 json_require<int64_t>(obj, "platform_refund_expiry_ts", result.errors);
         auto revoked_ts = json_require<int64_t>(obj, "revoked_ts", result.errors);
-        auto refund_requested_ts =
-                json_require<int64_t>(obj, "refund_requested_ts", result.errors);
+        auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", result.errors);
 
         ProPaymentItem item = {};
         if (status > SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL &&
@@ -721,72 +637,20 @@ GetProDetailsResponse GetProDetailsResponse::parse(std::string_view json) {
             result.errors.push_back(fmt::format("Status value was out-of-bounds: {}", status));
         }
 
-        if (plan > SESSION_PRO_BACKEND_PLAN_NIL && plan < SESSION_PRO_BACKEND_PLAN_COUNT) {
-            item.plan = static_cast<SESSION_PRO_BACKEND_PLAN>(plan);
-        } else {
-            result.errors.push_back(fmt::format("Plan value was out-of-bounds: {}", plan));
-        }
-
-        if (payment_provider > SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL &&
-            payment_provider < SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT) {
-            item.payment_provider =
-                    static_cast<SESSION_PRO_BACKEND_PAYMENT_PROVIDER>(payment_provider);
-            item.payment_provider_metadata =
-                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA + payment_provider;
-        } else {
-            result.errors.push_back(
-                    fmt::format("Payment provider value was out-of-bounds: {}", payment_provider));
-        }
+        item.plan = std::move(plan);
+        item.payment_provider = std::move(payment_provider);
+        item.payment_id = std::move(payment_id);
 
         item.auto_renewing = auto_renewing;
-        item.unredeemed_unix_ts = std::chrono::sys_seconds(
-                std::chrono::seconds(unredeemed_ts));
-        item.redeemed_unix_ts = std::chrono::sys_seconds(
-                std::chrono::seconds(redeemed_ts));
-        item.expiry_unix_ts = std::chrono::sys_seconds(
-                std::chrono::seconds(expiry_ts));
+        item.unredeemed_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(unredeemed_ts));
+        item.redeemed_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(redeemed_ts));
+        item.expiry_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(expiry_ts));
         item.grace_period_duration = std::chrono::seconds(grace_period_duration);
-        item.platform_refund_expiry_unix_ts = std::chrono::sys_seconds(
-                std::chrono::seconds(platform_refund_expiry_ts));
-        item.revoked_unix_ts = std::chrono::sys_seconds(
-                std::chrono::seconds(revoked_ts));
-        item.refund_requested_unix_ts = std::chrono::sys_seconds(
-                std::chrono::seconds(refund_requested_ts));
-        switch (item.payment_provider) {
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: [[fallthrough]];
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: {
-            } break;
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
-                item.google_payment_token =
-                        json_require<std::string>(obj, "google_payment_token", result.errors);
-                assert(item.google_payment_token.size() <
-                       sizeof(((session_pro_backend_pro_payment_item*)0)->google_payment_token));
-                item.google_order_id =
-                        json_require<std::string>(obj, "google_order_id", result.errors);
-                assert(item.google_order_id.size() <
-                       sizeof(((session_pro_backend_pro_payment_item*)0)->google_order_id));
-            } break;
-
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
-                item.apple_original_tx_id =
-                        json_require<std::string>(obj, "apple_original_tx_id", result.errors);
-                item.apple_tx_id = json_require<std::string>(obj, "apple_tx_id", result.errors);
-                item.apple_web_line_order_id =
-                        json_require<std::string>(obj, "apple_web_line_order_id", result.errors);
-                assert(item.apple_original_tx_id.size() <
-                       sizeof(((session_pro_backend_pro_payment_item*)0)->apple_original_tx_id));
-                assert(item.apple_tx_id.size() <
-                       sizeof(((session_pro_backend_pro_payment_item*)0)->apple_tx_id));
-                assert(item.apple_web_line_order_id.size() <
-                       sizeof(((session_pro_backend_pro_payment_item*)0)->apple_web_line_order_id));
-            } break;
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
-                item.rangeproof_order_id =
-                          json_require<std::string>(obj, "rangeproof_order_id", result.errors);
-                assert(item.rangeproof_order_id.size() <
-                        sizeof(((session_pro_backend_pro_payment_item*)0)->rangeproof_order_id));
-            } break;
-        }
+        item.platform_refund_expiry_unix_ts =
+                std::chrono::sys_seconds(std::chrono::seconds(platform_refund_expiry_ts));
+        item.revoked_unix_ts = std::chrono::sys_seconds(std::chrono::seconds(revoked_ts));
+        item.refund_requested_unix_ts =
+                std::chrono::sys_seconds(std::chrono::seconds(refund_requested_ts));
 
         // Handle parsing result
         if (result.errors.size())
@@ -802,9 +666,8 @@ array_uc64 SetPaymentRefundRequestedRequest::build_sig(
         std::span<const uint8_t> master_privkey,
         std::chrono::sys_seconds unix_ts,
         std::chrono::sys_seconds refund_requested_unix_ts,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::string_view payment_tx_provider_code,
+        std::span<const uint8_t> payment_tx_payment_id) {
     cleared_uc64 master_from_seed;
     if (master_privkey.size() == crypto_sign_ed25519_SEEDBYTES) {
         array_uc32 master_pubkey;
@@ -834,26 +697,21 @@ array_uc64 SetPaymentRefundRequestedRequest::build_sig(
     int64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
     oxenc::host_to_little_inplace(ts);
     oxenc::host_to_little_inplace(refund_requested_ts);
-    crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<const uint8_t*>(&ts), sizeof(ts));
+    crypto_generichash_blake2b_update(&state, reinterpret_cast<const uint8_t*>(&ts), sizeof(ts));
     crypto_generichash_blake2b_update(
             &state,
             reinterpret_cast<const uint8_t*>(&refund_requested_ts),
             sizeof(refund_requested_ts));
 
     // Payment provider
-    uint8_t provider_u8 = payment_tx_provider;
-    crypto_generichash_blake2b_update(&state, &provider_u8, sizeof(provider_u8));
+    crypto_generichash_blake2b_update(
+            &state,
+            reinterpret_cast<const uint8_t*>(payment_tx_provider_code.data()),
+            payment_tx_provider_code.size());
     crypto_generichash_blake2b_update(
             &state,
             reinterpret_cast<const uint8_t*>(payment_tx_payment_id.data()),
             payment_tx_payment_id.size());
-    if (payment_tx_order_id.size()) {
-        crypto_generichash_blake2b_update(
-                &state,
-                reinterpret_cast<const uint8_t*>(payment_tx_order_id.data()),
-                payment_tx_order_id.size());
-    }
     crypto_generichash_blake2b_final(&state, hash_to_sign.data(), hash_to_sign.size());
 
     // Sign the hash
@@ -872,17 +730,15 @@ std::string SetPaymentRefundRequestedRequest::build_to_json(
         std::span<const uint8_t> master_privkey,
         std::chrono::sys_seconds unix_ts,
         std::chrono::sys_seconds refund_requested_unix_ts,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-        std::span<const uint8_t> payment_tx_payment_id,
-        std::span<const uint8_t> payment_tx_order_id) {
+        std::string_view payment_tx_provider_code,
+        std::span<const uint8_t> payment_tx_payment_id) {
     array_uc64 sig = SetPaymentRefundRequestedRequest::build_sig(
             version,
             master_privkey,
             unix_ts,
             refund_requested_unix_ts,
-            payment_tx_provider,
-            payment_tx_payment_id,
-            payment_tx_order_id);
+            payment_tx_provider_code,
+            payment_tx_payment_id);
 
     SetPaymentRefundRequestedRequest request = {};
     request.version = version;
@@ -890,12 +746,10 @@ std::string SetPaymentRefundRequestedRequest::build_to_json(
             request.master_pkey.data(),
             master_privkey.data() + crypto_sign_ed25519_SEEDBYTES,
             crypto_sign_ed25519_PUBLICKEYBYTES);
-    request.payment_tx.provider = payment_tx_provider;
+    request.payment_tx.provider_code = std::string(payment_tx_provider_code);
     request.payment_tx.payment_id = std::string(
             reinterpret_cast<const char*>(payment_tx_payment_id.data()),
             payment_tx_payment_id.size());
-    request.payment_tx.order_id = std::string(
-            reinterpret_cast<const char*>(payment_tx_order_id.data()), payment_tx_order_id.size());
     request.master_sig = sig;
     request.unix_ts = unix_ts;
     request.refund_requested_unix_ts = refund_requested_unix_ts;
@@ -910,19 +764,8 @@ std::string SetPaymentRefundRequestedRequest::to_json() const {
     j["master_pkey"] = oxenc::to_hex(master_pkey);
     j["ts"] = epoch_seconds(unix_ts);
     j["refund_requested_ts"] = epoch_seconds(refund_requested_unix_ts);
-    j["payment_tx"]["provider"] = payment_tx.provider;
-    switch (payment_tx.provider) {
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {assert(false && "Unimplemented");} break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
-            j["payment_tx"]["google_payment_token"] = payment_tx.payment_id;
-            j["payment_tx"]["google_order_id"] = payment_tx.order_id;
-        } break;
-        case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
-            j["payment_tx"]["apple_tx_id"] = payment_tx.payment_id;
-        } break;
-    }
+    j["payment_tx"]["provider"] = payment_tx.provider_code;
+    j["payment_tx"]["payment_id"] = payment_tx.payment_id;
     j["master_sig"] = oxenc::to_hex(master_sig);
     std::string result = j.dump();
     return result;
@@ -971,18 +814,15 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) {
+        size_t payment_tx_payment_id_len) {
 
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_master_rotating_signatures result = {};
     try {
@@ -990,9 +830,8 @@ session_pro_backend_add_pro_payment_request_build_sigs(
                 request_version,
                 master_span,
                 rotating_span,
-                payment_tx_provider,
-                payment_tx_payment_id_span,
-                payment_tx_order_id_span);
+                payment_tx_provider_code,
+                payment_tx_payment_id_span);
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
@@ -1015,11 +854,9 @@ session_pro_backend_add_pro_payment_request_build_to_json(
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) {
+        size_t payment_tx_payment_id_len) {
     session_pro_backend_to_json result = {};
 
     // Convert C inputs to C++ types
@@ -1027,16 +864,14 @@ session_pro_backend_add_pro_payment_request_build_to_json(
     std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     try {
         std::string json = AddProPaymentRequest::build_to_json(
                 request_version,
                 master_span,
                 rotating_span,
-                payment_tx_provider,
-                payment_tx_payment_id_span,
-                payment_tx_order_id_span);
+                payment_tx_provider_code,
+                payment_tx_payment_id_span);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1067,10 +902,7 @@ session_pro_backend_generate_pro_proof_request_build_sigs(
     session_pro_backend_master_rotating_signatures result = {};
     try {
         auto sigs = GenerateProProofRequest::build_sigs(
-                request_version,
-                master_span,
-                rotating_span,
-                session::as_sys_seconds(ts));
+                request_version, master_span, rotating_span, session::as_sys_seconds(ts));
         std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
         std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
         result.success = true;
@@ -1100,10 +932,7 @@ session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_build
     session_pro_backend_to_json result = {};
     try {
         auto json = GenerateProProofRequest::build_to_json(
-                request_version,
-                master_span,
-                rotating_span,
-                session::as_sys_seconds(ts));
+                request_version, master_span, rotating_span, session::as_sys_seconds(ts));
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1183,11 +1012,10 @@ LIBSESSION_C_API session_pro_backend_to_json session_pro_backend_add_pro_payment
     cpp.version = request->version;
     std::memcpy(cpp.master_pkey.data(), request->master_pkey.data, cpp.master_pkey.size());
     std::memcpy(cpp.rotating_pkey.data(), request->rotating_pkey.data, cpp.rotating_pkey.size());
-    cpp.payment_tx.provider = request->payment_tx.provider;
+    cpp.payment_tx.provider_code =
+            std::string(request->payment_tx.provider_code, request->payment_tx.provider_code_count);
     cpp.payment_tx.payment_id =
             std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);
-    cpp.payment_tx.order_id =
-            std::string(request->payment_tx.order_id, request->payment_tx.order_id_count);
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, cpp.master_sig.size());
     std::memcpy(cpp.rotating_sig.data(), request->rotating_sig.data, cpp.rotating_sig.size());
 
@@ -1483,9 +1311,12 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         const ProPaymentItem& src = cpp.items[index];
         session_pro_backend_pro_payment_item& dest = result.items[index];
         dest.status = src.status;
-        dest.plan = src.plan;
-        dest.payment_provider = src.payment_provider;
-        dest.payment_provider_metadata = src.payment_provider_metadata;
+        dest.plan_count = snprintf_clamped(dest.plan, sizeof(dest.plan), "%s", src.plan.c_str());
+        dest.payment_provider_count = snprintf_clamped(
+                dest.payment_provider,
+                sizeof(dest.payment_provider),
+                "%s",
+                src.payment_provider.c_str());
         dest.unredeemed_ts = epoch_seconds(src.unredeemed_unix_ts);
         dest.redeemed_ts = epoch_seconds(src.redeemed_unix_ts);
         dest.expiry_ts = epoch_seconds(src.expiry_unix_ts);
@@ -1494,41 +1325,8 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         dest.revoked_ts = epoch_seconds(src.revoked_unix_ts);
         dest.refund_requested_ts = epoch_seconds(src.refund_requested_unix_ts);
 
-        switch (dest.payment_provider) {
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL: [[fallthrough]];
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT: break;
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE: {
-                dest.google_payment_token_count = snprintf_clamped(
-                        dest.google_payment_token,
-                        sizeof(dest.google_payment_token),
-                        src.google_payment_token.data());
-                dest.google_order_id_count = snprintf_clamped(
-                        dest.google_order_id,
-                        sizeof(dest.google_order_id),
-                        src.google_order_id.data());
-            } break;
-
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE: {
-                dest.apple_original_tx_id_count = snprintf_clamped(
-                        dest.apple_original_tx_id,
-                        sizeof(dest.apple_original_tx_id),
-                        src.apple_original_tx_id.data());
-                dest.apple_tx_id_count = snprintf_clamped(
-                        dest.apple_tx_id, sizeof(dest.apple_tx_id), src.apple_tx_id.data());
-                dest.apple_web_line_order_id_count = snprintf_clamped(
-                        dest.apple_web_line_order_id,
-                        sizeof(dest.apple_web_line_order_id),
-                        src.apple_web_line_order_id.data());
-            } break;
-            case SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF: {
-                dest.rangeproof_order_id_count = snprintf_clamped(
-                        dest.rangeproof_order_id,
-                        sizeof(dest.rangeproof_order_id),
-                        src.rangeproof_order_id.data());
-
-            } break;
-
-        }
+        dest.payment_id_count = snprintf_clamped(
+                dest.payment_id, sizeof(dest.payment_id), "%s", src.payment_id.c_str());
     }
 
     // Copy errors
@@ -1550,11 +1348,9 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         size_t master_privkey_len,
         int64_t ts,
         int64_t refund_requested_ts,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) {
+        size_t payment_tx_payment_id_len) {
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
     std::chrono::sys_seconds unix_ts = session::as_sys_seconds(ts);
@@ -1562,7 +1358,6 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
             session::as_sys_seconds(refund_requested_ts);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_signature result = {};
     try {
@@ -1571,9 +1366,8 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
                 master_span,
                 unix_ts,
                 refund_requested_unix_ts,
-                payment_tx_provider,
-                payment_tx_payment_id_span,
-                payment_tx_order_id_span);
+                payment_tx_provider_code,
+                payment_tx_payment_id_span);
         std::memcpy(result.sig.data, sig.data(), sig.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1595,11 +1389,9 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
         size_t master_privkey_len,
         int64_t ts,
         int64_t refund_requested_ts,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) {
+        size_t payment_tx_payment_id_len) {
 
     // Convert C inputs to C++ types
     std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
@@ -1608,7 +1400,6 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
             session::as_sys_seconds(refund_requested_ts);
     std::span<const uint8_t> payment_tx_payment_id_span(
             payment_tx_payment_id, payment_tx_payment_id_len);
-    std::span<const uint8_t> payment_tx_order_id_span(payment_tx_order_id, payment_tx_order_id_len);
 
     session_pro_backend_to_json result = {};
     try {
@@ -1617,9 +1408,8 @@ session_pro_backend_set_payment_refund_requested_request_build_to_json(
                 master_span,
                 unix_ts,
                 refund_requested_unix_ts,
-                payment_tx_provider,
-                payment_tx_payment_id_span,
-                payment_tx_order_id_span);
+                payment_tx_provider_code,
+                payment_tx_payment_id_span);
         result.json = session::string8_copy_or_throw(json.data(), json.size());
         result.success = true;
     } catch (const std::exception& e) {
@@ -1649,11 +1439,10 @@ session_pro_backend_set_payment_refund_requested_request_to_json(
     std::memcpy(cpp.master_sig.data(), request->master_sig.data, sizeof(request->master_sig.data));
     cpp.unix_ts = session::as_sys_seconds(request->ts);
     cpp.refund_requested_unix_ts = session::as_sys_seconds(request->refund_requested_ts);
-    cpp.payment_tx.provider = request->payment_tx.provider;
+    cpp.payment_tx.provider_code =
+            std::string(request->payment_tx.provider_code, request->payment_tx.provider_code_count);
     cpp.payment_tx.payment_id =
             std::string(request->payment_tx.payment_id, request->payment_tx.payment_id_count);
-    cpp.payment_tx.order_id =
-            std::string(request->payment_tx.order_id, request->payment_tx.order_id_count);
 
     try {
         std::string json = cpp.to_json();

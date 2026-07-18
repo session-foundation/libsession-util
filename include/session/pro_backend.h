@@ -19,15 +19,13 @@ enum {
     SESSION_PRO_BACKEND_STATUS_PARSE_ERROR = 2,
 };
 
-/// Store front that a Session Pro payment came from. Must match:
-///   https://github.com/session-foundation/session-pro-backend/blob/8ec0aacca2e5975407df1b60f5346477e17de44d/base.py#L78
-typedef enum SESSION_PRO_BACKEND_PAYMENT_PROVIDER {
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_NIL,
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE,
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_IOS_APP_STORE,
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF,
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT,
-} SESSION_PRO_BACKEND_PAYMENT_PROVIDER;
+/// Canonical payment-provider `code` strings — the value transmitted on the wire and folded into
+/// the add-payment / set-refund signed hashes (spec §1). Reference these constants rather than
+/// hardcoding the slug so a sent code cannot drift from what libsession hashes/parses. Unknown
+/// codes (e.g. a future provider) are still valid on the wire and pass through as opaque strings.
+static const char SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY[] = "google_play";
+static const char SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE[] = "app_store";
+static const char SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF[] = "rangeproof";
 
 /// Must match:
 ///   https://github.com/Doy-lee/session-pro-backend/blob/f4e2c84794470e7932ba1a1968fdb49117bb5870/backend.py#L18
@@ -36,19 +34,9 @@ typedef enum SESSION_PRO_BACKEND_PAYMENT_STATUS {
     SESSION_PRO_BACKEND_PAYMENT_STATUS_UNREDEEMED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_EXPIRED,
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_REFUNDED,
+    SESSION_PRO_BACKEND_PAYMENT_STATUS_REVOKED,
     SESSION_PRO_BACKEND_PAYMENT_STATUS_COUNT,
 } SESSION_PRO_BACKEND_PAYMENT_STATUS;
-
-/// Must match:
-///   https://github.com/Doy-lee/session-pro-backend/blob/b9fb4301fecbd82e4631536fa378d4c1220b1a4d/base.py#L53
-typedef enum SESSION_PRO_BACKEND_PLAN {
-    SESSION_PRO_BACKEND_PLAN_NIL,
-    SESSION_PRO_BACKEND_PLAN_ONE_MONTH,
-    SESSION_PRO_BACKEND_PLAN_THREE_MONTHS,
-    SESSION_PRO_BACKEND_PLAN_TWELVE_MONTHS,
-    SESSION_PRO_BACKEND_PLAN_COUNT,
-} SESSION_PRO_BACKEND_PLAN;
 
 /// Must match:
 ///   https://github.com/Doy-lee/session-pro-backend/blob/a0e0ba24bc4ab3a062465d861aa57df2269b6dde/server.py#L373
@@ -78,35 +66,6 @@ typedef enum SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS {
     SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ALREADY_REDEEMED = 100,
     SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_UNKNOWN_PAYMENT = 101,
 } SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS;
-
-/// Bundle of hard-coded strings that are associated with each platform for clients to use for
-/// string substitution typically. This structure is stored in a global table
-/// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA` that is can be indexed into using the
-/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER value directly.
-typedef struct session_pro_backend_payment_provider_metadata
-        session_pro_backend_payment_provider_metadata;
-struct session_pro_backend_payment_provider_metadata {
-    string8 device;
-    string8 store;
-    string8 platform;
-    string8 platform_account;
-    string8 refund_platform_url;
-
-    /// Some platforms disallow a refund via their native support channels after some time period
-    /// (e.g. 48 hours after a purchase on Google, refunds must be dealt by the developers
-    /// themselves). If a platform does not have this restriction, this URL is typically the same as
-    /// the `refund_platform_url`.
-    string8 refund_support_url;
-
-    string8 refund_status_url;
-    string8 update_subscription_url;
-    string8 cancel_subscription_url;
-};
-
-/// The centralised list of common URLs and properties for handling payment provider specific
-/// integrations. Especially useful for cross-device management of Session Pro subscriptions.
-extern const session_pro_backend_payment_provider_metadata
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA[SESSION_PRO_BACKEND_PAYMENT_PROVIDER_COUNT];
 
 typedef struct session_pro_backend_response_header session_pro_backend_response_header;
 struct session_pro_backend_response_header {
@@ -146,11 +105,14 @@ struct session_pro_backend_signature {
 typedef struct session_pro_backend_add_pro_payment_user_transaction
         session_pro_backend_add_pro_payment_user_transaction;
 struct session_pro_backend_add_pro_payment_user_transaction {
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
+    /// Provider code string (see SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*); opaque slug
+    char provider_code[64];
+    size_t provider_code_count;
+    /// Opaque payment identifier from the provider's purchase flow. Multi-part providers fold their
+    /// parts into this one string per a backend-defined composite (e.g. Google "token|order_id");
+    /// libsession treats it as opaque bytes hashed verbatim.
     char payment_id[128];
     size_t payment_id_count;
-    char order_id[128];
-    size_t order_id_count;
 };
 
 typedef struct session_pro_backend_add_pro_payment_request
@@ -221,11 +183,12 @@ struct session_pro_backend_get_pro_details_request {
 typedef struct session_pro_backend_pro_payment_item session_pro_backend_pro_payment_item;
 struct session_pro_backend_pro_payment_item {
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
-    SESSION_PRO_BACKEND_PLAN plan;
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
-    /// Pointer to payment provider metadata. This pointer is always defined to be pointing to valid
-    /// memory when the structure is received through the pro_backend APIs.
-    const session_pro_backend_payment_provider_metadata* payment_provider_metadata;
+    /// Billing-period code (e.g. "1m"/"3m"/"1y"); opaque, may be free-form for non-period plans
+    char plan[64];
+    size_t plan_count;
+    /// Provider code (e.g. "google_play"); opaque -- an unknown value passes through as-is
+    char payment_provider[64];
+    size_t payment_provider_count;
 
     bool auto_renewing;
     int64_t unredeemed_ts;
@@ -236,18 +199,10 @@ struct session_pro_backend_pro_payment_item {
     int64_t revoked_ts;
     int64_t refund_requested_ts;
 
-    char google_payment_token[128];
-    size_t google_payment_token_count;
-    char google_order_id[128];
-    size_t google_order_id_count;
-    char apple_original_tx_id[128];
-    size_t apple_original_tx_id_count;
-    char apple_tx_id[128];
-    size_t apple_tx_id_count;
-    char apple_web_line_order_id[128];
-    size_t apple_web_line_order_id_count;
-    char rangeproof_order_id[128];
-    size_t rangeproof_order_id_count;
+    /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
+    /// parts in per the backend-defined composite -- libsession does not interpret it)
+    char payment_id[128];
+    size_t payment_id_count;
 };
 
 typedef struct session_pro_backend_get_pro_details_response
@@ -297,13 +252,11 @@ struct session_pro_backend_set_payment_refund_requested_response {
 /// - `master_privkey_len` -- Length of master_privkey.
 /// - `rotating_privkey` -- Ed25519 rotating private key (32-byte or 64-byte libsodium format).
 /// - `rotating_privkey_len` -- Length of rotating_privkey.
-/// - `payment_tx_provider` -- Provider that the payment to register is coming from
-/// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment provider.
-///   See `AddProPaymentUserTransaction`
-/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
-/// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+/// - `payment_tx_provider_code` -- Null-terminated provider code string the payment is coming from
+///   (use a SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* constant)
+/// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
 ///   `AddProPaymentUserTransaction`
-/// - `payment_tx_order_id_len` -- Length of the `payment_tx_order_id` payload
+/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
 ///
 /// Outputs:
 /// - `success` - True if signatures are built successfully, false otherwise.
@@ -319,11 +272,9 @@ session_pro_backend_add_pro_payment_request_build_sigs(
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 4, 7, 9);
+        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 4, 6, 7);
 
 /// API: session_pro_backend/add_pro_payment_request_build_to_json
 ///
@@ -339,11 +290,9 @@ session_pro_backend_to_json session_pro_backend_add_pro_payment_request_build_to
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 4, 7, 9);
+        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 4, 6, 7);
 
 /// API: session_pro_backend/generate_pro_proof_request_build_sigs
 ///
@@ -520,13 +469,11 @@ session_pro_backend_get_pro_details_response session_pro_backend_get_pro_details
 /// - `ts` -- Unix timestamp for the request
 /// - `refund_requested_ts` -- Unix timestamp to set as the timestamp that a refund was
 ///   requested on this payment
-/// - `payment_tx_provider` -- Provider that the payment to register is coming from
-/// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment provider.
-///   See `AddProPaymentUserTransaction`
-/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
-/// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+/// - `payment_tx_provider_code` -- Null-terminated provider code string the payment is coming from
+///   (use a SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* constant)
+/// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
 ///   `AddProPaymentUserTransaction`
-/// - `payment_tx_order_id_len` -- Length of the `payment_tx_order_id` payload
+/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
 ///
 /// Outputs:
 /// - `bool` -- True if signatures are built successfully, false otherwise.
@@ -540,11 +487,9 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         size_t master_privkey_len,
         int64_t ts,
         int64_t refund_requested_ts,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 7, 9);
+        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 6, 7);
 
 /// API: session_pro_backend/set_payment_refund_requested_request_build_to_json
 ///
@@ -560,11 +505,9 @@ session_pro_backend_to_json session_pro_backend_set_payment_refund_requested_req
         size_t master_privkey_len,
         int64_t ts,
         int64_t refund_requested_ts,
-        SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
+        const char* payment_tx_provider_code,
         const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len,
-        const uint8_t* payment_tx_order_id,
-        size_t payment_tx_order_id_len) NON_NULL_ARG(2, 7, 9);
+        size_t payment_tx_payment_id_len) NON_NULL_ARG(2, 6, 7);
 
 /// API: session_pro_backend/set_payment_refund_requested_request_to_json
 ///
