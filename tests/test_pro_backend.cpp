@@ -36,8 +36,11 @@ static bool string8_equals(string8 s8, std::string_view str) {
 [[maybe_unused]] static void dump_pro_payment_item(
         const session_pro_backend_pro_payment_item& item) {
     fprintf(stderr, "item.status: %d\n", item.status);
-    fprintf(stderr, "item.plan: %d\n", item.plan);
-    fprintf(stderr, "item.payment_provider: %d\n", item.payment_provider);
+    fprintf(stderr, "item.plan: %.*s\n", (int)item.plan_count, item.plan);
+    fprintf(stderr,
+            "item.payment_provider: %.*s\n",
+            (int)item.payment_provider_count,
+            item.payment_provider);
     fprintf(stderr, "item.auto_renewing: %d\n", item.auto_renewing);
     fprintf(stderr, "item.unredeemed_ts: %" PRId64 "zu\n", item.unredeemed_ts);
     fprintf(stderr, "item.redeemed_ts: %" PRId64 "zu\n", item.redeemed_ts);
@@ -47,23 +50,7 @@ static bool string8_equals(string8 s8, std::string_view str) {
             "item.platform_refund_expiry_ts: %" PRId64 "zu\n",
             item.platform_refund_expiry_ts);
     fprintf(stderr, "item.revoked_ts: %" PRId64 "zu\n", item.revoked_ts);
-    fprintf(stderr,
-            "item.google_payment_token: %.*s\n",
-            (int)item.google_payment_token_count,
-            item.google_payment_token);
-    fprintf(stderr,
-            "item.apple_original_tx_id: %.*s\n",
-            (int)item.apple_original_tx_id_count,
-            item.apple_original_tx_id);
-    fprintf(stderr, "item.apple_tx_id: %.*s\n", (int)item.apple_tx_id_count, item.apple_tx_id);
-    fprintf(stderr,
-            "item.apple_web_line_order_id: %.*s\n",
-            (int)item.apple_web_line_order_id_count,
-            item.apple_web_line_order_id);
-    fprintf(stderr,
-            "item.rangeproof_order_id: %.*s\n",
-            (int)item.rangeproof_order_id_count,
-            item.rangeproof_order_id);
+    fprintf(stderr, "item.payment_id: %.*s\n", (int)item.payment_id_count, item.payment_id);
 }
 
 [[maybe_unused]] static void dump_pro_revocation(
@@ -87,23 +74,22 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
     {
         std::array<unsigned char, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::string fake_google_payment_token_hex =
-                "DEV." + oxenc::to_hex(fake_google_payment_token);
-
         std::array<unsigned char, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
+        // Google's composite payment_id is "<payment_token>|<order_id>"; libsession treats the
+        // whole thing as one opaque value.
+        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
+                                      oxenc::to_hex(fake_google_order_id);
 
         session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
-        payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
-        payment_tx.payment_id_count = fake_google_payment_token_hex.size();
-        payment_tx.order_id_count = fake_google_order_id_hex.size();
+        payment_tx.provider_code_count =
+                sizeof(SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY) - 1;
         std::memcpy(
-                payment_tx.payment_id,
-                fake_google_payment_token_hex.data(),
-                payment_tx.payment_id_count);
-        std::memcpy(
-                payment_tx.order_id, fake_google_order_id_hex.data(), payment_tx.order_id_count);
+                payment_tx.provider_code,
+                SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
+                sizeof(SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY));
+        payment_tx.payment_id_count = fake_payment_id.size();
+        std::memcpy(payment_tx.payment_id, fake_payment_id.data(), payment_tx.payment_id_count);
 
         int64_t unix_ts = 1698765432;  // Arbitrary timestamp (unix epoch seconds)
 
@@ -116,11 +102,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             sizeof(master_privkey.data),
                             rotating_privkey.data,
                             sizeof(rotating_privkey.data),
-                            payment_tx.provider,
+                            payment_tx.provider_code,
                             reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count,
-                            reinterpret_cast<const unsigned char*>(payment_tx.order_id),
-                            payment_tx.order_id_count);
+                            payment_tx.payment_id_count);
             INFO(result.error);
             REQUIRE(result.success);
             REQUIRE(result.error_count == 0);
@@ -130,9 +114,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     0,
                     master_privkey.data,
                     rotating_privkey.data,
-                    payment_tx.provider,
-                    to_byte_span(payment_tx.payment_id, payment_tx.payment_id_count),
-                    to_byte_span(payment_tx.order_id, payment_tx.order_id_count));
+                    payment_tx.provider_code,
+                    to_byte_span(payment_tx.payment_id, payment_tx.payment_id_count));
 
             REQUIRE(std::memcmp(
                             result.master_sig.data,
@@ -150,11 +133,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     sizeof(master_privkey.data) - 1,
                     rotating_privkey.data,
                     sizeof(rotating_privkey.data),
-                    payment_tx.provider,
+                    payment_tx.provider_code,
                     reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
-                    payment_tx.payment_id_count,
-                    reinterpret_cast<const unsigned char*>(payment_tx.order_id),
-                    payment_tx.order_id_count);
+                    payment_tx.payment_id_count);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
         }
@@ -214,11 +195,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             sizeof(master_privkey.data),
                             rotating_privkey.data,
                             sizeof(rotating_privkey.data),
-                            payment_tx.provider,
+                            payment_tx.provider_code,
                             reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count,
-                            reinterpret_cast<const unsigned char*>(payment_tx.order_id),
-                            payment_tx.order_id_count);
+                            payment_tx.payment_id_count);
 
             request.master_sig = sigs.master_sig;
             request.rotating_sig = sigs.rotating_sig;
@@ -242,11 +221,10 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         cpp.rotating_pkey.data(),
                         rotating_pubkey.data,
                         sizeof(rotating_pubkey.data));
-                cpp.payment_tx.provider = payment_tx.provider;
+                cpp.payment_tx.provider_code =
+                        std::string(payment_tx.provider_code, payment_tx.provider_code_count);
                 cpp.payment_tx.payment_id =
                         std::string(payment_tx.payment_id, payment_tx.payment_id_count);
-                cpp.payment_tx.order_id =
-                        std::string(payment_tx.order_id, payment_tx.order_id_count);
                 std::memcpy(
                         cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig.data));
                 std::memcpy(
@@ -263,11 +241,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        request.payment_tx.provider,
+                        request.payment_tx.provider_code,
                         reinterpret_cast<const unsigned char*>(request.payment_tx.payment_id),
-                        request.payment_tx.payment_id_count,
-                        reinterpret_cast<const unsigned char*>(request.payment_tx.order_id),
-                        request.payment_tx.order_id_count);
+                        request.payment_tx.payment_id_count);
                 REQUIRE(one_shot.success);
                 REQUIRE(one_shot.json.size == result.json.size);
                 INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
@@ -630,9 +606,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"items",
                      nlohmann::json::array(
                              {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED},
-                               {"plan", SESSION_PRO_BACKEND_PLAN_ONE_MONTH},
+                               {"plan", "1m"},
                                {"payment_provider",
-                                SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
+                                SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY},
                                {"auto_renewing", false},
                                {"unredeemed_ts", unix_ts - 3600},
                                {"redeemed_ts", unix_ts - 3600},
@@ -641,10 +617,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                {"platform_refund_expiry_ts", unix_ts + 1},
                                {"revoked_ts", unix_ts + 3600},
                                {"refund_requested_ts", unix_ts + 3601},
-                               {"google_payment_token",
-                                std::string(payment_tx.payment_id, payment_tx.payment_id_count)},
-                               {"google_order_id",
-                                std::string(payment_tx.order_id, payment_tx.order_id_count)}}})}};
+                               {"payment_id",
+                                std::string(
+                                        payment_tx.payment_id, payment_tx.payment_id_count)}}})}};
             std::string json = j.dump();
 
             // Valid Google JSON
@@ -670,9 +645,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.payments_total == 3);
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
-                REQUIRE(result.items[0].plan == SESSION_PRO_BACKEND_PLAN_ONE_MONTH);
-                REQUIRE(result.items[0].payment_provider ==
-                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE);
+                REQUIRE(std::string_view(result.items[0].plan, result.items[0].plan_count) == "1m");
+                REQUIRE(std::string_view(
+                                result.items[0].payment_provider,
+                                result.items[0].payment_provider_count) ==
+                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY);
                 REQUIRE(result.items[0].unredeemed_ts == unix_ts - 3600);
                 REQUIRE(result.items[0].redeemed_ts == unix_ts - 3600);
                 REQUIRE(result.items[0].expiry_ts == unix_ts);
@@ -680,25 +657,18 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.items[0].platform_refund_expiry_ts == unix_ts + 1);
                 REQUIRE(result.items[0].revoked_ts == unix_ts + 3600);
                 REQUIRE(result.items[0].refund_requested_ts == unix_ts + 3601);
-                REQUIRE(result.items[0].google_payment_token_count == payment_tx.payment_id_count);
+                REQUIRE(result.items[0].payment_id_count == payment_tx.payment_id_count);
                 REQUIRE(std::memcmp(
-                                result.items[0].google_payment_token,
+                                result.items[0].payment_id,
                                 payment_tx.payment_id,
                                 payment_tx.payment_id_count) == 0);
-                REQUIRE(result.items[0].google_order_id_count == payment_tx.order_id_count);
-                REQUIRE(std::memcmp(
-                                result.items[0].google_order_id,
-                                payment_tx.order_id,
-                                payment_tx.order_id_count) == 0);
             }
 
-            // Tweak JSON for Rangeproof
+            // Tweak JSON for a different provider. payment_id is opaque so nothing
+            // provider-specific changes in how libsession parses it.
             j["result"]["items"][0]["payment_provider"] =
-                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF;
-            j["result"]["items"][0].erase("google_payment_token");
-            j["result"]["items"][0].erase("google_order_id");
-            j["result"]["items"][0]["rangeproof_order_id"] =
-                    std::string(payment_tx.order_id, payment_tx.order_id_count);
+                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
+            j["result"]["items"][0]["payment_id"] = "rangeproof-opaque-id";
             json = j.dump();
 
             // Valid Rangeproof JSON
@@ -712,12 +682,14 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     INFO(result_rangeproof.header.errors[index].data);
 
                 // Only check what we expect to be different
-                REQUIRE(result_rangeproof.items[0].rangeproof_order_id_count ==
-                        payment_tx.order_id_count);
-                REQUIRE(std::memcmp(
-                                result_rangeproof.items[0].rangeproof_order_id,
-                                payment_tx.order_id,
-                                payment_tx.order_id_count) == 0);
+                REQUIRE(std::string_view(
+                                result_rangeproof.items[0].payment_provider,
+                                result_rangeproof.items[0].payment_provider_count) ==
+                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF);
+                REQUIRE(std::string_view(
+                                result_rangeproof.items[0].payment_id,
+                                result_rangeproof.items[0].payment_id_count) ==
+                        "rangeproof-opaque-id");
             }
 
             // After freeing
@@ -782,11 +754,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                             sizeof(master_privkey.data),
                             request.ts,
                             request.refund_requested_ts,
-                            payment_tx.provider,
+                            payment_tx.provider_code,
                             reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count,
-                            reinterpret_cast<const unsigned char*>(payment_tx.order_id),
-                            payment_tx.order_id_count);
+                            payment_tx.payment_id_count);
             request.master_sig = sig.sig;
             REQUIRE(sig.success);
 
@@ -944,23 +914,22 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     {
         std::array<unsigned char, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::string fake_google_payment_token_hex =
-                "DEV." + oxenc::to_hex(fake_google_payment_token);
-
         std::array<unsigned char, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
+        // Google's composite payment_id is "<payment_token>|<order_id>"; libsession treats the
+        // whole thing as one opaque value.
+        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
+                                      oxenc::to_hex(fake_google_order_id);
 
         session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
-        payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
-        payment_tx.payment_id_count = fake_google_payment_token_hex.size();
-        payment_tx.order_id_count = fake_google_order_id_hex.size();
+        payment_tx.provider_code_count =
+                sizeof(SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY) - 1;
         std::memcpy(
-                payment_tx.payment_id,
-                fake_google_payment_token_hex.data(),
-                payment_tx.payment_id_count);
-        std::memcpy(
-                payment_tx.order_id, fake_google_order_id_hex.data(), payment_tx.order_id_count);
+                payment_tx.provider_code,
+                SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
+                sizeof(SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY));
+        payment_tx.payment_id_count = fake_payment_id.size();
+        std::memcpy(payment_tx.payment_id, fake_payment_id.data(), payment_tx.payment_id_count);
 
         // Build request
         session_pro_backend_master_rotating_signatures add_pro_sigs =
@@ -970,11 +939,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        payment_tx.provider,
+                        payment_tx.provider_code,
                         reinterpret_cast<const unsigned char*>(payment_tx.payment_id),
-                        payment_tx.payment_id_count,
-                        reinterpret_cast<const unsigned char*>(payment_tx.order_id),
-                        payment_tx.order_id_count);
+                        payment_tx.payment_id_count);
 
         session_pro_backend_add_pro_payment_request request = {};
         request.version = 0;
@@ -1187,24 +1154,22 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     {
         std::array<unsigned char, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::string fake_google_payment_token_hex =
-                "DEV." + oxenc::to_hex(fake_google_payment_token);
-
         std::array<unsigned char, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
+        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
+                                      oxenc::to_hex(fake_google_order_id);
 
-        another_payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
-        another_payment_tx.payment_id_count = fake_google_payment_token_hex.size();
-        another_payment_tx.order_id_count = fake_google_order_id_hex.size();
+        another_payment_tx.provider_code_count =
+                sizeof(SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY) - 1;
+        std::memcpy(
+                another_payment_tx.provider_code,
+                SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
+                sizeof(SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY));
+        another_payment_tx.payment_id_count = fake_payment_id.size();
         std::memcpy(
                 another_payment_tx.payment_id,
-                fake_google_payment_token_hex.data(),
+                fake_payment_id.data(),
                 another_payment_tx.payment_id_count);
-        std::memcpy(
-                another_payment_tx.order_id,
-                fake_google_order_id_hex.data(),
-                another_payment_tx.order_id_count);
 
         // Build request
         session_pro_backend_master_rotating_signatures add_pro_sigs =
@@ -1214,11 +1179,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        another_payment_tx.provider,
+                        another_payment_tx.provider_code,
                         reinterpret_cast<const unsigned char*>(another_payment_tx.payment_id),
-                        another_payment_tx.payment_id_count,
-                        reinterpret_cast<const unsigned char*>(another_payment_tx.order_id),
-                        another_payment_tx.order_id_count);
+                        another_payment_tx.payment_id_count);
 
         session_pro_backend_add_pro_payment_request request = {};
         request.version = 0;
@@ -1306,11 +1269,9 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         sizeof(master_privkey.data),
                         /*ts*/ now_unix_ts,
                         /*refund_requested_ts*/ now_unix_ts,
-                        another_payment_tx.provider,
+                        another_payment_tx.provider_code,
                         reinterpret_cast<const unsigned char*>(another_payment_tx.payment_id),
-                        another_payment_tx.payment_id_count,
-                        reinterpret_cast<const unsigned char*>(another_payment_tx.order_id),
-                        another_payment_tx.order_id_count);
+                        another_payment_tx.payment_id_count);
 
         scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
 

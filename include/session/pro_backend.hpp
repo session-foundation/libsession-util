@@ -110,17 +110,14 @@ struct MasterRotatingSignatures {
 };
 
 struct AddProPaymentUserTransaction {
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
+    /// Provider code string (see SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*). Opaque slug; unknown
+    /// values are accepted and passed through verbatim.
+    std::string provider_code;
 
-    /// The payment ID to claim which is different per platform.
-    ///
-    ///   Google Play Store => purchase token
-    ///   iOS App Store     => transaction ID (note, not the original transaction id)
+    /// Opaque payment identifier from the provider's purchase flow. Multi-part providers fold their
+    /// parts into this one string per a backend-defined composite (e.g. Google "token|order_id");
+    /// libsession treats it as opaque bytes hashed verbatim.
     std::string payment_id;
-
-    /// Only for Google Play Store, set this to the purchase's order ID. Ignored for other payment
-    /// providers
-    std::string order_id;
 };
 
 /// Register a new Session Pro proof to the backend. The payment is registered under the
@@ -169,11 +166,9 @@ struct AddProPaymentRequest {
     /// - `request_version` -- Version of the request to build a hash for
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `payment_tx_provider` -- Provider that the payment to register is coming from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    /// - `payment_tx_provider_code` -- Provider code string the payment is coming from (see
+    ///   SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
+    /// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
     ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
@@ -182,9 +177,8 @@ struct AddProPaymentRequest {
             std::uint8_t request_version,
             const ed25519::PrivKeySpan& master_privkey,
             const ed25519::PrivKeySpan& rotating_privkey,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const std::byte> payment_tx_payment_id,
-            std::span<const std::byte> payment_tx_order_id);
+            std::string_view payment_tx_provider_code,
+            std::span<const std::byte> payment_tx_payment_id);
 
     /// API: pro/AddProPaymentRequest::build_to_json
     ///
@@ -195,11 +189,9 @@ struct AddProPaymentRequest {
     /// - `request_version` -- Version of the request to build a hash for
     /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
     /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `payment_tx_provider` -- Provider that the payment to register is coming from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    /// - `payment_tx_provider_code` -- Provider code string the payment is coming from (see
+    ///   SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
+    /// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
     ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
@@ -208,9 +200,8 @@ struct AddProPaymentRequest {
             std::uint8_t request_version,
             const ed25519::PrivKeySpan& master_privkey,
             const ed25519::PrivKeySpan& rotating_privkey,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const std::byte> payment_tx_payment_id,
-            std::span<const std::byte> payment_tx_order_id);
+            std::string_view payment_tx_provider_code,
+            std::span<const std::byte> payment_tx_payment_id);
 };
 
 /// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
@@ -436,17 +427,13 @@ struct ProPaymentItem {
     /// book-keeping purposes.
     SESSION_PRO_BACKEND_PAYMENT_STATUS status;
 
-    /// Session Pro product/plan item that was purchased
-    SESSION_PRO_BACKEND_PLAN plan;
+    /// Billing-period code that was purchased (e.g. "1m"/"3m"/"1y"); opaque string, may be
+    /// free-form for non-period plans
+    std::string plan;
 
-    /// Store front that this particular payment came from
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
-
-    /// Strings associated with platform's payment provider from
-    /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA`, provided for convenience. This pointer is
-    /// always pointing to valid memory.
-    const session_pro_backend_payment_provider_metadata* payment_provider_metadata =
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA;
+    /// Provider code this particular payment came from (e.g. "google_play"); opaque string, an
+    /// unknown value passes through as-is
+    std::string payment_provider;
 
     /// Flag indicating whether or not this payment will automatically bill itself at the end of the
     /// billing cycle.
@@ -478,30 +465,10 @@ struct ProPaymentItem {
     /// if no refund has been requested for this payment yet.
     std::chrono::sys_seconds refund_requested_unix_ts;
 
-    /// When payment provider is set to Google Play Store, this is the platform-specific purchase
-    /// token. This information should be considered as confidential and stored appropriately.
-    std::string google_payment_token;
-
-    /// When payment provider is set to Google Play Store, this is the platform-specific order
-    /// id. This information should be considered as confidential and stored appropriately.
-    std::string google_order_id;
-
-    /// When payment provider is set to iOS App Store, this is the platform-specific original
-    /// transaction ID. This information should be considered as confidential and stored
-    /// appropriately.
-    std::string apple_original_tx_id;
-
-    /// When payment provider is set to iOS App Store, this is the platform-specific transaction ID
-    /// This information should be considered as confidential and stored appropriately.
-    std::string apple_tx_id;
-
-    /// When payment provider is set to iOS App Store, this is the platform-specific web line order
-    /// ID. This information should be considered as confidential and stored appropriately.
-    std::string apple_web_line_order_id;
-
-    /// When payment provider is set to Rangeproof, this is the platform-specific order ID.
-    /// This information should be considered as confidential and stored appropriately.
-    std::string rangeproof_order_id;
+    /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
+    /// parts in per the backend-defined composite -- libsession does not interpret it). This
+    /// information should be considered confidential and stored appropriately.
+    std::string payment_id;
 };
 
 struct GetProDetailsResponse : public ResponseHeader {
@@ -606,12 +573,9 @@ struct SetPaymentRefundRequestedRequest {
     /// - `unix_ts` -- Unix timestamp for the request.
     /// - `refund_requested_unix_ts` -- Unix timestamp to set as the timestamp that a refund was
     ///   requested on this payment
-    /// - `payment_tx_provider` -- Provider that the payment to set a refund request on is coming
-    ///   from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    /// - `payment_tx_provider_code` -- Provider code string the payment to set a refund request on
+    ///   is coming from (see SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
+    /// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
     ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
@@ -621,9 +585,8 @@ struct SetPaymentRefundRequestedRequest {
             const ed25519::PrivKeySpan& master_privkey,
             std::chrono::sys_seconds unix_ts,
             std::chrono::sys_seconds refund_requested_unix_ts,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const std::byte> payment_tx_payment_id,
-            std::span<const std::byte> payment_tx_order_id);
+            std::string_view payment_tx_provider_code,
+            std::span<const std::byte> payment_tx_payment_id);
 
     /// API: pro/SetPaymentRefundRequested::build_to_json
     ///
@@ -636,12 +599,9 @@ struct SetPaymentRefundRequestedRequest {
     /// - `unix_ts` -- Unix timestamp for the request.
     /// - `refund_requested_unix_ts` -- Unix timestamp to set as the timestamp that a refund was
     ///   requested on this payment
-    /// - `payment_tx_provider` -- Provider that the payment to set a refund request on is coming
-    ///   from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
+    /// - `payment_tx_provider_code` -- Provider code string the payment to set a refund request on
+    ///   is coming from (see SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
+    /// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
     ///   `AddProPaymentUserTransaction`
     ///
     /// Outputs:
@@ -651,9 +611,8 @@ struct SetPaymentRefundRequestedRequest {
             const ed25519::PrivKeySpan& master_privkey,
             std::chrono::sys_seconds unix_ts,
             std::chrono::sys_seconds refund_requested_unix_ts,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const std::byte> payment_tx_payment_id,
-            std::span<const std::byte> payment_tx_order_id);
+            std::string_view payment_tx_provider_code,
+            std::span<const std::byte> payment_tx_payment_id);
 
     /// API: pro/SetPaymentRefundRequested::to_json
     ///
