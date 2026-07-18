@@ -85,41 +85,20 @@ struct session_protocol_pro_proof {
     cbytes64 sig;
 };
 
-// Feature flags for profile features where each enum value indicates the bit position in the
-// corresponding bitset, e.g. (1 << ENUM_VAL)
-typedef enum SESSION_PROTOCOL_PRO_PROFILE_FEATURES {
-    SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE,
-    SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR,
-    SESSION_PROTOCOL_PRO_PROFILE_FEATURES_COUNT,
-} SESSION_PROTOCOL_PRO_PROFILE_FEATURES;
-
-// Strongly typed bitset for profile features. Each profile enum value corresponds to the bit
-// position to set on the bitset (e.g. 1 << ENUM_VALUE). This bitset is wrapped in a struct and has
-// helper functions (`session_protocol_pro_profile_bitset_*` family of functions) that accepts the
-// typed-enum to mitigate against mixing up the profile features with the message features.
+// Session Pro feature flag bits. These are plain `uint64_t` bit masks (`1 << position`) that are
+// OR'd together into a profile/message feature bitset (itself just a `uint64_t`). They mirror the
+// C++ `session::ProProfileFlags` / `session::ProMessageFlags` enum classes, which are the source
+// of truth; these constants are defined from those enum values in session_protocol.cpp.
 //
-// The enums are kept as bit positions (ENUM_VAL = 1 << N) instead of bit values (ENUM_VAL = 1)
-// for ergonomic usage in the way we sync and store these bitsets on the protocol swarms. These
-// bitsets are stored as sets which allows us to do diffs and deltas on the set of values. The
-// syncing scheme does not allow bit-level deltas which makes handling conflicts between competing
-// synced configurations, awkward.
-typedef struct session_protocol_pro_profile_bitset session_protocol_pro_profile_bitset;
-struct session_protocol_pro_profile_bitset {
-    uint64_t data;
-};
+// Manipulate a bitset directly with the standard bitwise operators, e.g.:
+//   uint64_t features = 0;
+//   features |= SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE;   // set
+//   features &= ~SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE;  // unset
+//   if (features & SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE) { ... }  // test
+extern const uint64_t SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE;
+extern const uint64_t SESSION_PROTOCOL_PRO_PROFILE_FEATURE_ANIMATED_AVATAR;
 
-// Feature flags for message features where each enum value indicates the bit position in the
-// corresponding bitset.
-typedef enum SESSION_PROTOCOL_PRO_MESSAGE_FEATURES {
-    SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT,
-} SESSION_PROTOCOL_PRO_MESSAGE_FEATURES;
-
-// Strongly typed bitset for Session Pro message features (see
-// `session_protocol_pro_profile_bitset`)
-typedef struct session_protocol_pro_message_bitset session_protocol_pro_message_bitset;
-struct session_protocol_pro_message_bitset {
-    uint64_t data;
-};
+extern const uint64_t SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT;
 
 typedef enum SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS {  // See session::ProFeaturesForMsgStatus
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
@@ -159,8 +138,9 @@ typedef struct session_protocol_decoded_pro session_protocol_decoded_pro;
 struct session_protocol_decoded_pro {
     SESSION_PROTOCOL_PRO_STATUS status;
     session_protocol_pro_proof proof;
-    session_protocol_pro_message_bitset msg_bitset;
-    session_protocol_pro_profile_bitset profile_bitset;
+    // Bitsets of SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_* / SESSION_PROTOCOL_PRO_PROFILE_FEATURE_*
+    uint64_t msg_bitset;
+    uint64_t profile_bitset;
 };
 
 typedef struct session_protocol_decoded_envelope session_protocol_decoded_envelope;
@@ -198,41 +178,9 @@ struct session_protocol_decoded_community_message {
     size_t error_len_incl_null_terminator;
 };
 
-/// API: session_protocol/session_protocol_pro_profile_bitset_is_set
-///
-/// Check if the feature flag is set on the bitset
-LIBSESSION_EXPORT bool session_protocol_pro_profile_bitset_is_set(
-        session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
-
-/// API: session_protocol/session_protocol_pro_profile_bitset_set
-///
-/// Set the feature flag on the bitset
-LIBSESSION_EXPORT void session_protocol_pro_profile_bitset_set(
-        session_protocol_pro_profile_bitset* value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
-
-/// API: session_protocol/session_protocol_pro_profile_bitset_unset
-///
-/// Unset the feature flag on the bitset
-LIBSESSION_EXPORT void session_protocol_pro_profile_bitset_unset(
-        session_protocol_pro_profile_bitset* value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features);
-
-/// API: session_protocol/session_protocol_pro_profile_bitset_is_set
-///
-/// Check if the feature flag is set on the bitset
-LIBSESSION_EXPORT bool session_protocol_pro_message_bitset_is_set(
-        session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
-
-/// API: session_protocol/session_protocol_pro_profile_bitset_set
-///
-/// Set the feature flag on the bitset
-LIBSESSION_EXPORT void session_protocol_pro_message_bitset_set(
-        session_protocol_pro_message_bitset* value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
-
-/// API: session_protocol/session_protocol_pro_profile_bitset_unset
-///
-/// Unset the feature flag on the bitset
-LIBSESSION_EXPORT void session_protocol_pro_message_bitset_unset(
-        session_protocol_pro_message_bitset* value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
+// The Pro feature bitsets are plain `uint64_t` masks of SESSION_PROTOCOL_PRO_*_FEATURES_* bits;
+// set/unset/test them with the standard bitwise operators (see the feature constants above). No
+// accessor functions are needed.
 
 /// API: session_protocol/session_protocol_pro_proof_hash
 ///
@@ -340,7 +288,7 @@ LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 typedef struct session_protocol_pro_features_for_msg {
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS status;
     string8 error;
-    session_protocol_pro_message_bitset bitset;
+    uint64_t bitset;  // Mask of SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_* bits
     size_t codepoint_count;
 } session_protocol_pro_features_for_msg;
 

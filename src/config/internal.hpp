@@ -7,12 +7,14 @@
 #include <memory>
 #include <string_view>
 #include <type_traits>
+#include <variant>
 
 #include "../internal-util.hpp"
 #include "session/clock.hpp"
 #include "session/config/base.h"
 #include "session/config/base.hpp"
 #include "session/config/error.h"
+#include "session/session_protocol.hpp"
 #include "session/types.hpp"
 
 namespace session {
@@ -192,11 +194,34 @@ std::chrono::sys_seconds ts_or_epoch(const session::config::dict& d, const char*
 // Digs into a config `dict` to get out a string; nullopt if not there (or not string)
 std::optional<std::string> maybe_string(const session::config::dict& d, const char* key);
 
-// Extract a U64 bitset from a set of i64's
-uint64_t bitset_from_set_of_int64_or_0(const session::config::set& s);
+// A feature flag enum (ProProfileFlags/ProMessageFlags) is stored in a config as the *set of bit
+// positions* that are set (e.g. the flags 0b101 are stored as the set {0, 2}) rather than as a
+// single packed integer, so that the CRDT merges concurrent per-flag changes as a set union instead
+// of clobbering the whole value. These two helpers convert between that stored set and the enum.
 
-// Individually write each bit from bitset into a set consisting of int64's
-void set_int64_set_from_bitset(ConfigBase::DictFieldProxy&& field, uint64_t bitset);
+// Converts a config set of bit positions into flags of type `E`. Set elements that aren't int64s or
+// fall outside [0, 64) are ignored; an empty or absent set yields no flags.
+template <session::detail::ProFlags E>
+E to_flags(const session::config::set& positions) {
+    uint64_t mask = 0;
+    for (const auto& v : positions)
+        if (auto* pos = std::get_if<int64_t>(&v); pos && *pos >= 0 && *pos < 64)
+            mask |= 1ULL << *pos;
+    return static_cast<E>(mask);
+}
+
+// Inverse of to_flags(): writes `f` into `field` as the set of its set bit positions (inserting the
+// position of each set flag, erasing that of each unset one).
+template <session::detail::ProFlags E>
+void set_flags(ConfigBase::DictFieldProxy&& field, E f) {
+    auto mask = static_cast<uint64_t>(f);
+    for (int64_t pos = 0; pos < 64; pos++) {
+        if (mask & (1ULL << pos))
+            field.set_insert(pos);
+        else
+            field.set_erase(pos);
+    }
+}
 
 // Digs into a config `dict` to get out a string; ""s if not there (or not string)
 std::string string_or_empty(const session::config::dict& d, const char* key);

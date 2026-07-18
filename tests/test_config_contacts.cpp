@@ -1103,50 +1103,50 @@ TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
     {
         auto c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK(c.profile_bitset.data == 0);
+        CHECK(c.profile_flags == ProProfileFlags::None);
 
-        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        c.profile_flags |= ProProfileFlags::ProBadge;
         contacts.set(c);
 
         CHECK(contacts.is_dirty());
 
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
 
         contacts.set(c);
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK_FALSE(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+        CHECK_FALSE(contains(c.profile_flags, ProProfileFlags::AnimatedAvatar));
 
-        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR);
+        c.profile_flags |= ProProfileFlags::AnimatedAvatar;
         contacts.set(c);
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
 
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
+        CHECK(contains(c.profile_flags, ProProfileFlags::AnimatedAvatar));
     }
 
     // Set and unset the bitset from the profile on a new contact
     {
         auto c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000001"sv);
-        CHECK(c.profile_bitset.data == 0);
+        CHECK(c.profile_flags == ProProfileFlags::None);
 
-        c.profile_bitset.set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        c.profile_flags |= ProProfileFlags::ProBadge;
         contacts.set(c);
 
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000001"sv);
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
 
-        c.profile_bitset.unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE);
+        c.profile_flags &= ~ProProfileFlags::ProBadge;
         contacts.set(c);
 
         c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000001"sv);
-        CHECK(!c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
+        CHECK(!contains(c.profile_flags, ProProfileFlags::ProBadge));
     }
 
     CHECK(contacts.needs_push());
@@ -1164,8 +1164,8 @@ TEST_CASE("Contacts Pro Storage", "[config][contacts][pro]") {
     {
         auto c = contacts.get_or_construct(
                 "050000000000000000000000000000000000000000000000000000000000000000"sv);
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_PRO_BADGE));
-        CHECK(c.profile_bitset.is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES_ANIMATED_AVATAR));
+        CHECK(contains(c.profile_flags, ProProfileFlags::ProBadge));
+        CHECK(contains(c.profile_flags, ProProfileFlags::AnimatedAvatar));
         // This previously exposed a bug in set_erase_impl where the contact was being dirtied even
         // when nothing was actually being removed.
         contacts.set(c);

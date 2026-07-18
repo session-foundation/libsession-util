@@ -274,18 +274,18 @@ class UserProfile : public ConfigBase {
     /// - `bool` - Flag indicating whether the config had Session Pro config removed or not.
     bool remove_pro_config();
 
-    /// API: user_profile/UserProfile::get_pro_features
+    /// API: user_profile/UserProfile::get_profile_flags
     ///
-    /// Retrieves the bitset indicating which pro features the user currently has enabled.
+    /// Retrieves the flags indicating which pro features the user currently has enabled.
     ///
     /// Inputs: None
     ///
     /// Outputs:
-    /// - Bitset with individual bits set on it corresponding to
-    /// SESSION_PROTOCOL_PRO_PROFILE_FEATURES_BITSET. It is possible to receive bits set that don't
-    /// have a corresponding enum value if you are receiving a bitset from a newer client with newer
-    /// features enabled. These flags should be ignored by clients that do not recognise them.
-    ProProfileBitset get_profile_bitset() const;
+    /// - `ProProfileFlags` with the individual `ProProfileFlags::*` bits set that the user has
+    /// enabled. It is possible to receive bits set that don't have a corresponding enumerator if
+    /// you are receiving flags from a newer client with newer features enabled; unrecognised bits
+    /// should be ignored.
+    ProProfileFlags get_profile_flags() const;
 
     /// API: user_profile/UserProfile::set_pro_badge
     ///
@@ -329,6 +329,12 @@ class UserProfile : public ConfigBase {
     /// nullopt to remove the value.
     void set_pro_access_expiry(
             std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms);
+
+  private:
+    // Enables/disables a single profile feature flag in the synced "f" set. The set stores feature
+    // *bit positions*, so `flag` must be a single-bit ProProfileFlags value (deflated here to its
+    // position via countr_zero).
+    void set_profile_feature(ProProfileFlags flag, bool enabled);
 };
 
 }  // namespace session::config

@@ -103,8 +103,8 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
             cpp.proof.rotating_pubkey.max_size());
     result.proof.expiry_unix_ts_ms = session::epoch_ms(cpp.proof.expiry_unix_ts);
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
-    result.msg_bitset.data = cpp.msg_bitset.data;
-    result.profile_bitset.data = cpp.profile_bitset.data;
+    result.msg_bitset = static_cast<uint64_t>(cpp.msg_flags);
+    result.profile_bitset = static_cast<uint64_t>(cpp.profile_flags);
     return result;
 }
 }  // namespace
@@ -156,30 +156,6 @@ b32 ProProof::hash() const {
     return result;
 }
 
-void ProProfileBitset::set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    data |= (1ULL << static_cast<uint64_t>(features));
-}
-
-void ProProfileBitset::unset(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    data &= ~(1ULL << static_cast<uint64_t>(features));
-}
-
-bool ProProfileBitset::is_set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) const {
-    return data & (1ULL << static_cast<uint64_t>(features));
-}
-
-void ProMessageBitset::set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    data |= (1ULL << static_cast<uint64_t>(features));
-}
-
-void ProMessageBitset::unset(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    data &= ~(1ULL << static_cast<uint64_t>(features));
-}
-
-bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) const {
-    return data & (1ULL << static_cast<uint64_t>(features));
-}
-
 };  // namespace session
 
 namespace {
@@ -193,7 +169,7 @@ session::ProFeaturesForMsg pro_features_check(
 
         if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
             if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
-                result.bitset.set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT);
+                result.flags |= session::ProMessageFlags::CharLimit10k;
             } else {
                 result.error = "Message exceeds the maximum character limit allowed";
                 result.status = session::ProFeaturesForMsgStatus::ExceedsCharacterLimit;
@@ -536,8 +512,8 @@ static void parse_content_and_pro(
                         "Parse decrypted message failed, pro metadata was malformed");
 
             // Fill out the resulting proof structure, we have parsed successfully
-            pro.msg_bitset.data = pro_msg.msgbitset();
-            pro.profile_bitset.data = pro_msg.profilebitset();
+            pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
+            pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
             std::memcpy(result.envelope.pro_sig.data(), pro_sig.data(), pro_sig.size());
 
             std::memcpy(
@@ -777,8 +753,8 @@ DecodedCommunityMessage decode_for_community(
                     "Decoding community message failed, pro metadata was malformed");
 
         // Fill out the resulting proof structure, we have parsed successfully
-        pro.msg_bitset.data = pro_msg.msgbitset();
-        pro.profile_bitset.data = pro_msg.profilebitset();
+        pro.msg_flags = static_cast<ProMessageFlags>(pro_msg.msgbitset());
+        pro.profile_flags = static_cast<ProProfileFlags>(pro_msg.profilebitset());
         std::memcpy(
                 proof.gen_index_hash.data(),
                 proto_proof.genindexhash().data(),
@@ -844,45 +820,15 @@ static_assert((sizeof((session_protocol_pro_proof*)0)->gen_index_hash) == 32);
 static_assert(sizeof(std::declval<session_protocol_pro_proof>().rotating_pubkey) == 32);
 static_assert(sizeof(std::declval<session_protocol_pro_proof>().sig) == 64);
 
-static_assert(
-        SESSION_PROTOCOL_PRO_PROFILE_FEATURES_COUNT <=
-                sizeof(((session_protocol_pro_profile_bitset*)0)->data) * 8 /*bits per byte*/,
-        "There are more feature flags than is available in the bitset, the bitset needs to be "
-        "upgraded into an array of bytes");
-
-LIBSESSION_C_API bool session_protocol_pro_profile_bitset_is_set(
-        session_protocol_pro_profile_bitset value, SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    return value.data & (1ULL << features);
-}
-
-LIBSESSION_C_API void session_protocol_pro_profile_bitset_set(
-        session_protocol_pro_profile_bitset* value,
-        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    value->data |= (1ULL << features);
-}
-
-LIBSESSION_C_API void session_protocol_pro_profile_bitset_unset(
-        session_protocol_pro_profile_bitset* value,
-        SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
-    value->data &= ~(1ULL << features);
-}
-
-LIBSESSION_C_API bool session_protocol_pro_message_bitset_is_set(
-        session_protocol_pro_message_bitset value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    return value.data & (1ULL << features);
-}
-
-LIBSESSION_C_API void session_protocol_pro_message_bitset_set(
-        session_protocol_pro_message_bitset* value,
-        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    value->data |= (1ULL << features);
-}
-
-LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
-        session_protocol_pro_message_bitset* value,
-        SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) {
-    value->data &= ~(1ULL << features);
-}
+// Session Pro feature flag bit constants exposed to the C API. The C++ enum classes
+// (session::ProProfileFlags / session::ProMessageFlags) are the source of truth; these mirror their
+// underlying values so C callers can OR/test them against a plain uint64_t bitset.
+const uint64_t SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE =
+        static_cast<uint64_t>(ProProfileFlags::ProBadge);
+const uint64_t SESSION_PROTOCOL_PRO_PROFILE_FEATURE_ANIMATED_AVATAR =
+        static_cast<uint64_t>(ProProfileFlags::AnimatedAvatar);
+const uint64_t SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT =
+        static_cast<uint64_t>(ProMessageFlags::CharLimit10k);
 
 LIBSESSION_C_API cbytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
     cbytes32 result = {};
@@ -963,7 +909,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
     return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
-            .bitset = {result_cpp.bitset.data},
+            .bitset = static_cast<uint64_t>(result_cpp.flags),
             .codepoint_count = result_cpp.codepoint_count,
     };
 }
@@ -976,7 +922,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
     return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
-            .bitset = {result_cpp.bitset.data},
+            .bitset = static_cast<uint64_t>(result_cpp.flags),
             .codepoint_count = result_cpp.codepoint_count,
     };
 }
