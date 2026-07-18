@@ -56,8 +56,7 @@ session::b32 proof_hash_internal(
         std::span<const std::byte> rotating_pubkey,
         std::uint64_t expiry_ts) {
 
-    // This must match the hashing routine at
-    // https://github.com/Doy-lee/session-pro-backend/blob/9417e00adbff3bf608b7ae831f87045bdab06232/backend.py#L545-L558
+    // This must match the Pro proof signed digest in pro-wire-protocol.md §2.
     return session::hash::blake2b_pers<32>(
             session::BUILD_PROOF_PERS, version, revocation_tag, rotating_pubkey, expiry_ts);
 }

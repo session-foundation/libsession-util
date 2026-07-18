@@ -60,9 +60,8 @@ namespace session {
 
 enum ProProofVersion { ProProofVersion_v0 };
 
-/// Session Pro personalisation bytes for hashing. Must match
-///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/backend.py#L21
-///  https://github.com/Doy-lee/session-pro-backend/blob/fca5e10c9c5014d394cf15934cd2af8e911607b9/server.py#L571
+/// Session Pro personalisation bytes for hashing; must match the personalisation strings in
+/// pro-wire-protocol.md §2 (proof) and §3 (signed requests).
 inline constexpr auto GENERATE_PROOF_PERS = "ProGenerateProof"_b2b_pers;
 inline constexpr auto BUILD_PROOF_PERS = "ProProof________"_b2b_pers;
 inline constexpr auto ADD_PRO_PAYMENT_PERS = "ProAddPayment___"_b2b_pers;
