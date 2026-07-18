@@ -104,6 +104,20 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
     result.profile_bitset = static_cast<uint64_t>(cpp.profile_flags);
     return result;
 }
+
+// Builds a C++ ProProof from the C proof struct (the inverse of the proof half of
+// decoded_pro_from_cpp).
+static session::ProProof proof_from_c(const session_protocol_pro_proof& c) {
+    session::ProProof proof = {};
+    proof.version = c.version;
+    std::memcpy(
+            proof.gen_index_hash.data(), c.gen_index_hash.data, proof.gen_index_hash.max_size());
+    std::memcpy(
+            proof.rotating_pubkey.data(), c.rotating_pubkey.data, proof.rotating_pubkey.max_size());
+    proof.expiry_unix_ts = session::from_epoch_ms(c.expiry_unix_ts_ms);
+    std::memcpy(proof.sig.data(), c.sig.data, proof.sig.max_size());
+    return proof;
+}
 }  // namespace
 
 namespace session {
@@ -835,26 +849,33 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
         size_t verify_pubkey_len,
         uint64_t unix_ts_ms,
         const session_protocol_pro_signed_message* signed_msg) {
-    SESSION_PROTOCOL_PRO_STATUS result = SESSION_PROTOCOL_PRO_STATUS_VALID;
-    if (!session_protocol_pro_proof_verify_signature(proof, verify_pubkey, verify_pubkey_len))
-        result = SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG;
+    // ProProof::status is the single source of truth for the backend-sig -> user-sig -> expiry
+    // evaluation. The C API additionally validates the caller's buffer lengths (which the C++ API
+    // encodes as fixed-size spans), so handle those here and delegate the rest.
+    if (verify_pubkey_len != 32)
+        return SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG;
 
-    // Check if the message was signed if the user passed one in to verify against
-    if (result == SESSION_PROTOCOL_PRO_STATUS_VALID && signed_msg) {
-        if (!session_protocol_pro_proof_verify_message(
-                    proof,
-                    signed_msg->sig.data,
-                    signed_msg->sig.size,
-                    signed_msg->msg.data,
-                    signed_msg->msg.size))
-            result = SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG;
+    std::optional<ProSignedMessage> cpp_signed_msg;
+    bool bad_user_sig = false;
+    if (signed_msg) {
+        if (signed_msg->sig.size == 64)
+            cpp_signed_msg = ProSignedMessage{
+                    to_byte_span<64>(signed_msg->sig.data),
+                    to_byte_span(signed_msg->msg.data, signed_msg->msg.size)};
+        else
+            bad_user_sig = true;  // a wrong-length signature can never verify
     }
 
-    // Check if the proof has expired
-    if (result == SESSION_PROTOCOL_PRO_STATUS_VALID &&
-        !session_protocol_pro_proof_is_active(proof, unix_ts_ms))
-        result = SESSION_PROTOCOL_PRO_STATUS_EXPIRED;
-    return result;
+    ProStatus status = proof_from_c(*proof).status(
+            to_byte_span<32>(verify_pubkey), from_epoch_ms(unix_ts_ms), cpp_signed_msg);
+
+    // ProProof::status can't see a wrong-length signature (it takes a fixed-size span), so surface
+    // the C API's length check here while keeping the ordering: a bad user signature supersedes a
+    // valid or expired result, but not a failed backend signature.
+    if (bad_user_sig && status != ProStatus::InvalidProBackendSig)
+        status = ProStatus::InvalidUserSig;
+
+    return static_cast<SESSION_PROTOCOL_PRO_STATUS>(status);
 }
 
 LIBSESSION_C_API
