@@ -65,6 +65,11 @@ namespace session::pro_backend {
 constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_b;
 static_assert(PUBKEY.size() == 32);
 
+/// The Session Pro Backend's production base URL: POST a request body to `<URL>/<endpoint>` (see
+/// the SESSION_PRO_BACKEND_*_ENDPOINT paths). This is the canonical production value; a client may
+/// point at a different dev/test server if it chooses.
+constexpr std::string_view URL = "https://pro.session.codes";
+
 /// Domain used with ed25519::derive_subkey to derive the Session Pro signing keypair from the
 /// account's root Ed25519 seed.
 constexpr auto pro_subkey_domain = "SessionProRandom"_bytes;

@@ -39,6 +39,15 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_REVOCATIO
 LIBSESSION_EXPORT extern const char* const
         SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT;
 
+/// The Session Pro Backend's production base URL (POST a request body to `<URL>/<endpoint>`).
+/// Canonical production value; clients may override with a dev/test server. Points at the single
+/// master string owned in the C++ implementation.
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_URL;
+
+/// The Session Pro Backend's Ed25519 public signing key, 32 bytes, for verifying a proof was issued
+/// by the backend. Points at the same value as the C++ `session::pro_backend::PUBKEY`.
+LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY;
+
 /// Per-provider support/management URLs, keyed by provider code. These are identical for every user
 /// (not translation data), so libsession owns them as the single source of truth rather than each
 /// client duplicating them; the human-readable provider/store names are translation data and remain
