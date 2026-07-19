@@ -12,17 +12,24 @@
 # submodule-built networking stack (oxen-libquic / session-router) is the bulk of it. That's fine for
 # an occasional manual audit; it is deliberately not in CI.
 #
-# Requires: Docker able to run foreign-arch images via qemu-user/binfmt. Run from the repo root with
-# submodules checked out.
+# Requires: Docker, plus a one-time host install of qemu-user-static + binfmt-support (see below).
+# Run from the repo root with submodules checked out.
 set -euo pipefail
 
-# Register qemu-user binfmt handlers for s390x (idempotent; needs --privileged once per boot).
-docker run --privileged --rm tonistiigi/binfmt --install s390x
+# One-time host prerequisite (Debian/Ubuntu):
+#     sudo apt install qemu-user-static binfmt-support
+# That registers the binfmt_misc handlers with the "F" (fix-binary) flag, which is what lets Docker
+# transparently run foreign-arch images under emulation from inside a container — no privileged helper
+# container needed.
+if [ ! -e /proc/sys/fs/binfmt_misc/qemu-s390x ]; then
+    echo "s390x binfmt handler not registered; run: sudo apt install qemu-user-static binfmt-support" >&2
+    exit 1
+fi
 
 # Build + test inside an emulated s390x Debian. BUILD_STATIC_DEPS=OFF pulls the heavy deps
 # (libsodium, protobuf, curl, sqlite, zstd) as prebuilt s390x apt packages rather than compiling them
 # from source under emulation.
-docker run --platform=linux/s390x --rm -v "$PWD:/src" -w /src s390x/debian:bookworm bash -euxc '
+docker run --platform=linux/s390x --rm -v "$PWD:/src" -w /src debian:sid bash -euxc '
     apt-get update
     apt-get install -y --no-install-recommends \
         g++ cmake ninja-build pkg-config git ca-certificates \
