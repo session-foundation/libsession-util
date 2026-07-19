@@ -262,7 +262,7 @@ struct ProPaymentItem {
     /// For example, a payment can be in a redeemed state whilst also have a refunded timestamp set
     /// if the payment was refunded and then the refund was reversed. We preserve all timestamps for
     /// book-keeping purposes.
-    SESSION_PRO_BACKEND_PAYMENT_STATUS status;
+    std::string status;
 
     /// Billing-period code that was purchased (e.g. "1m"/"3m"/"1y"); opaque, may be free-form for
     /// non-period plans. The client maps/parses it for display.
@@ -317,7 +317,7 @@ struct GetProDetailsResponse : Response {
     std::vector<ProPaymentItem> items;
 
     /// Current Session Pro entitlement status for the master public key
-    SESSION_PRO_BACKEND_USER_PRO_STATUS user_status;
+    std::string user_status;
 
     /// Error code that indicates that the Session Pro Backend encountered an error book-keeping
     /// Session Pro entitlement for the user. If this value is not `SUCCESS` implementing clients
