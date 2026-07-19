@@ -75,7 +75,7 @@ class ProProof {
     b32 rotating_pubkey;
 
     /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid to
-    std::chrono::sys_seconds expiry_unix_ts;
+    std::chrono::sys_seconds expiry_at;
 
     /// Signature over the contents of the proof. It is signed by the Session Pro Backend key which
     /// is the entity responsible for issueing tamper-proof Sesison Pro certificates for Session
@@ -116,10 +116,10 @@ class ProProof {
     /// API: pro/Proof::is_active
     ///
     /// Check if Pro proof is currently entitled to Pro given the `unix_ts` with respect to the
-    /// proof's `expiry_unix_ts`
+    /// proof's `expiry_at`
     ///
     /// Inputs:
-    /// - `unix_ts` -- Unix timestamp to compare against the embedded `expiry_unix_ts`
+    /// - `unix_ts` -- Unix timestamp to compare against the embedded `expiry_at`
     ///   to determine if the proof has expired or not
     ///
     /// Outputs:
@@ -139,7 +139,7 @@ class ProProof {
     /// Inputs:
     /// - `verify_pubkey` -- 32 byte Ed25519 public key of the corresponding secret key to check if
     ///   they are the original signatory of the proof.
-    /// - `unix_ts` -- Unix timestamp to compared against the embedded `expiry_unix_ts`
+    /// - `unix_ts` -- Unix timestamp to compared against the embedded `expiry_at`
     ///   to determine if the proof has expired or not
     /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
     ///   the embedded `rotating_pubkey` in the proof signed the given message.
@@ -160,7 +160,7 @@ class ProProof {
 
     bool operator==(const ProProof& other) const {
         return version == other.version && revocation_tag == other.revocation_tag &&
-               rotating_pubkey == other.rotating_pubkey && expiry_unix_ts == other.expiry_unix_ts &&
+               rotating_pubkey == other.rotating_pubkey && expiry_at == other.expiry_at &&
                sig == other.sig;
     }
 };

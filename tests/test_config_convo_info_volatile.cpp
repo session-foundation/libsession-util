@@ -609,7 +609,7 @@ TEST_CASE("Conversation pruning", "[config][conversations][pruning]") {
                 c.unread = true;
 
             if (i % 7 == 0) {
-                c.pro_expiry_unix_ts =
+                c.pro_expiry_at =
                         std::chrono::sys_seconds{std::chrono::duration_cast<std::chrono::seconds>(
                                 std::chrono::milliseconds{unix_timestamp(i)})};
 

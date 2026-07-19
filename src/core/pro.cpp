@@ -51,7 +51,7 @@ void Pro::update_revocations(
         exec_query(
                 st,
                 revoke.revocation_tag,
-                revoke.effective_unix_ts.time_since_epoch().count(),
+                revoke.effective_at.time_since_epoch().count(),
                 now);
         st->reset();
     }

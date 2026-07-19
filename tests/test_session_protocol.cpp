@@ -28,8 +28,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
         std::string_view data_body,
         const ed25519::PrivKeySpan& user_rotating_privkey,
         const ed25519::PrivKeySpan& pro_backend_privkey,
-        std::chrono::sys_seconds content_unix_ts,
-        std::chrono::sys_seconds pro_expiry_unix_ts,
+        std::chrono::sys_seconds content_at,
+        std::chrono::sys_seconds pro_expiry_at,
         uint64_t msg_bitset,
         uint64_t profile_bitset) {
     SerialisedProtobufContentWithProForTesting result = {};
@@ -37,7 +37,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
     // Create protobuf `Content.dataMessage`
     SessionProtos::Content content = {};
     content.set_sigtimestamp(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     content_unix_ts.time_since_epoch())
+                                     content_at.time_since_epoch())
                                      .count());
 
     SessionProtos::DataMessage* data = content.mutable_datamessage();
@@ -45,7 +45,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Generate a dummy proof
     std::ranges::copy(user_rotating_privkey.pubkey(), result.proof.rotating_pubkey.begin());
-    result.proof.expiry_unix_ts = pro_expiry_unix_ts;
+    result.proof.expiry_at = pro_expiry_at;
 
     // Sign the proof by the dummy "Session Pro Backend" key
     result.pro_proof_hash = result.proof.hash();
@@ -63,7 +63,7 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             result.proof.revocation_tag.data(), result.proof.revocation_tag.size());
     proto_proof->set_rotatingpublickey(
             result.proof.rotating_pubkey.data(), result.proof.rotating_pubkey.size());
-    proto_proof->set_expiryunixts(session::epoch_seconds(result.proof.expiry_unix_ts));
+    proto_proof->set_expiryunixts(session::epoch_seconds(result.proof.expiry_at));
     proto_proof->set_sig(result.proof.sig.data(), result.proof.sig.size());
 
     // Generate the plaintext
@@ -292,8 +292,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     /*data_body*/ data_body,
                     /*user_rotating_privkey*/ user_pro_ed_sk,
                     /*pro_backend_privkey*/ keys.ed_sk1,
-                    /*content_unix_ts=*/timestamp_s,
-                    /*pro_expiry_unix_ts*/ timestamp_s,
+                    /*content_at=*/timestamp_s,
+                    /*pro_expiry_at*/ timestamp_s,
                     /*msg_bitset*/ {},
                     /*profile_bitset*/ {});
 
@@ -423,8 +423,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         /*data_body*/ large_message,
                         /*user_rotating_privkey*/ user_pro_ed_sk,
                         /*pro_backend_privkey*/ keys.ed_sk1,
-                        /*content_unix_ts*/ timestamp_s,
-                        /*pro_expiry_unix_ts*/ timestamp_s,
+                        /*content_at*/ timestamp_s,
+                        /*pro_expiry_at*/ timestamp_s,
                         /*msg_bitset*/ pro_msg.bitset,
                         /*proilfe_bitset*/ profile_bitset);
 
@@ -634,7 +634,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             // user's "Session Pro" key into `sig_over_plaintext_with_user_pro_key`
             std::chrono::milliseconds bad_timestamp_ms =
                     std::chrono::duration_cast<std::chrono::milliseconds>(
-                            protobuf_content.proof.expiry_unix_ts.time_since_epoch()) +
+                            protobuf_content.proof.expiry_at.time_since_epoch()) +
                     std::chrono::seconds(1);
 
             SerialisedProtobufContentWithProForTesting bad_protobuf_content =
@@ -642,11 +642,11 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                             /*data_body*/ data_body,
                             /*user_rotating_privkey*/ user_pro_ed_sk,
                             /*pro_backend_privkey*/ keys.ed_sk1,
-                            /*content_unix_ts=*/
+                            /*content_at=*/
                             std::chrono::sys_seconds(
                                     std::chrono::duration_cast<std::chrono::seconds>(
                                             bad_timestamp_ms)),
-                            /*pro_expiry_unix_ts*/ timestamp_s,
+                            /*pro_expiry_at*/ timestamp_s,
                             /*msg_bitset*/ {},
                             /*profile_bitset*/ {});
 

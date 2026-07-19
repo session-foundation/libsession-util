@@ -98,7 +98,7 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
             result.proof.rotating_pubkey.data,
             cpp.proof.rotating_pubkey.data(),
             cpp.proof.rotating_pubkey.max_size());
-    result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_unix_ts);
+    result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_at);
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
     result.msg_bitset = static_cast<uint64_t>(cpp.msg_flags);
     result.profile_bitset = static_cast<uint64_t>(cpp.profile_flags);
@@ -114,7 +114,7 @@ static session::ProProof proof_from_c(const session_protocol_pro_proof& c) {
             proof.revocation_tag.data(), c.revocation_tag.data, proof.revocation_tag.max_size());
     std::memcpy(
             proof.rotating_pubkey.data(), c.rotating_pubkey.data, proof.rotating_pubkey.max_size());
-    proof.expiry_unix_ts = session::as_sys_seconds(c.expiry_ts);
+    proof.expiry_at = session::as_sys_seconds(c.expiry_ts);
     std::memcpy(proof.sig.data(), c.sig.data, proof.sig.max_size());
     return proof;
 }
@@ -136,7 +136,7 @@ bool ProProof::verify_message(
 }
 
 bool ProProof::is_active(std::chrono::sys_seconds unix_ts) const {
-    return unix_ts <= expiry_unix_ts;
+    return unix_ts <= expiry_at;
 }
 
 ProStatus ProProof::status(
@@ -163,7 +163,7 @@ ProStatus ProProof::status(
 
 b32 ProProof::hash() const {
     b32 result = proof_hash_internal(
-            revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_unix_ts));
+            revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_at));
     return result;
 }
 
@@ -487,7 +487,7 @@ static DecodedPro parse_pro_message(const SessionProtos::ProMessage& pro_msg) {
             proof.rotating_pubkey.data(),
             proto_proof.rotatingpublickey().data(),
             proto_proof.rotatingpublickey().size());
-    proof.expiry_unix_ts = session::as_sys_seconds(proto_proof.expiryunixts());
+    proof.expiry_at = session::as_sys_seconds(proto_proof.expiryunixts());
     std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
     return pro;
 }
