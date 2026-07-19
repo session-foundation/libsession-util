@@ -18,7 +18,7 @@
 /// The high level summary of the functionality in this file. Clients can:
 ///
 /// 1. Build a request with `add_payment_request(...)` from a Session Pro payment and submit its
-///    `{endpoint, body}` to the backend to register the specified Ed25519 keys for Session Pro.
+///    `{endpoint, content_type, data}` to the backend to register the specified Ed25519 keys.
 ///
 ///    Parse the server's reply with `parse_add_payment(...)`. Clients should validate the response
 ///    and update their `UserProfile` by constructing a `ProConfig` with the `proof` from the
@@ -127,16 +127,24 @@ struct ProviderUrls {
 /// hunting for empty members.
 std::optional<ProviderUrls> provider_urls(std::string_view provider_code);
 
-/// Route + body pair for a request to be POSTed to the Session Pro backend, returned by the
-/// `*_request()` helpers below.
+/// Endpoint + content-type + opaque payload for a request to be POSTed to the Session Pro backend,
+/// returned by the `*_request()` helpers below. Callers relay `data` verbatim under `content_type`
+/// and never inspect or assume its format -- libsession owns the wire encoding.
 struct ProRequest {
     /// Endpoint path relative to the backend base URL, e.g. "add_pro_payment". As returned from a
     /// `*_request()` function this points at a static, null-terminated string, so using
     /// `endpoint.data()` as a C string is valid.
     std::string_view endpoint;
 
-    /// The JSON request body to POST to `endpoint`.
-    std::string body;
+    /// Content type to send as the request's `Content-Type` header. Points at a static,
+    /// null-terminated string. Clients MUST relay this verbatim and MUST NOT assume a particular
+    /// format: `data` is libsession's opaque payload for the backend and libsession owns the wire
+    /// encoding, which may change without client involvement.
+    std::string_view content_type;
+
+    /// The opaque request payload to POST to `endpoint`. This is libsession's data for the backend;
+    /// clients relay it untouched and must not parse, inspect, or modify it.
+    std::string data;
 };
 
 /// Register a new Session Pro payment with the backend (endpoint `add_pro_payment`). The payment is

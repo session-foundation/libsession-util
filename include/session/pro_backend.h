@@ -97,12 +97,22 @@ struct session_pro_backend_response_header {
     uint8_t* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
 };
 
-typedef struct session_pro_backend_to_json session_pro_backend_to_json;
-struct session_pro_backend_to_json {
+/// A built request to POST to the Session Pro backend. Mirrors the C++
+/// `session::pro_backend::ProRequest`: an `endpoint`, the `content_type` to send as the request's
+/// Content-Type header, and the opaque `data` payload. `data` is libsession's data for the backend
+/// -- relay it verbatim with the given `content_type` and do NOT parse, inspect, or assume a format
+/// for it. libsession owns the wire encoding and may change it without client involvement.
+typedef struct session_pro_backend_request session_pro_backend_request;
+struct session_pro_backend_request {
     char error[256];
     size_t error_count;
-    bool success;  /// True if conversion to JSON was successful, false if out-of-memory
-    string8 json;
+    bool success;  /// True if the request was built successfully, false if out-of-memory
+    /// Endpoint path (relative to the backend base URL) to POST to; static, null-terminated string.
+    const char* endpoint;
+    /// Value for the request's Content-Type header; static, null-terminated string. Relay verbatim.
+    const char* content_type;
+    /// The opaque request payload. Relay untouched; do not parse or modify.
+    string8 data;
 };
 
 typedef struct session_pro_backend_master_rotating_signatures
@@ -345,42 +355,46 @@ session_pro_backend_signature session_pro_backend_get_pro_details_request_build_
         const uint8_t* master_privkey, size_t master_privkey_len, int64_t ts, uint32_t count)
         NON_NULL_ARG(1);
 
-/// API: session_pro_backend/add_pro_payment_request_to_json
+/// API: session_pro_backend/add_pro_payment_request_build
 ///
-/// Serializes an `add_pro_payment_request` to a JSON string.
-/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+/// Builds the request to POST for an `add_pro_payment_request`, as a session_pro_backend_request
+/// (endpoint + content_type + opaque data).
+/// Free the returned request with `session_pro_backend_request_free`.
 ///
 /// Inputs:
 /// - `request` -- Pointer to the request struct.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_add_pro_payment_request_to_json(
+session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
         const session_pro_backend_add_pro_payment_request* request);
 
-/// API: session_pro_backend/generate_pro_proof_request_to_json
+/// API: session_pro_backend/generate_pro_proof_request_build
 ///
-/// Serializes a `generate_pro_proof_request` to a JSON string.
-/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+/// Builds the request to POST for a `generate_pro_proof_request`, as a session_pro_backend_request
+/// (endpoint + content_type + opaque data).
+/// Free the returned request with `session_pro_backend_request_free`.
 ///
 /// Inputs:
 /// - `request` -- Pointer to the request struct.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_generate_pro_proof_request_to_json(
+session_pro_backend_request session_pro_backend_generate_pro_proof_request_build(
         const session_pro_backend_generate_pro_proof_request* request);
 
-/// API: session_pro_backend/get_pro_revocations_request_to_json
+/// API: session_pro_backend/get_pro_revocations_request_build
 ///
-/// Serializes a `get_pro_revocations_request` to a JSON string.
-/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+/// Builds the request to POST for a `get_pro_revocations_request`, as a session_pro_backend_request
+/// (endpoint + content_type + opaque data).
+/// Free the returned request with `session_pro_backend_request_free`.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_revocations_request_to_json(
+session_pro_backend_request session_pro_backend_get_pro_revocations_request_build(
         const session_pro_backend_get_pro_revocations_request* request);
 
-/// API: session_pro_backend/get_pro_details_request_to_json
+/// API: session_pro_backend/get_pro_details_request_build
 ///
-/// Serializes a `get_pro_details_request` to a JSON string.
-/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+/// Builds the request to POST for a `get_pro_details_request`, as a session_pro_backend_request
+/// (endpoint + content_type + opaque data).
+/// Free the returned request with `session_pro_backend_request_free`.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_get_pro_details_request_to_json(
+session_pro_backend_request session_pro_backend_get_pro_details_request_build(
         const session_pro_backend_get_pro_details_request* request);
 
 /// API: session_pro_backend/pro_proof_response_parse
@@ -453,12 +467,13 @@ session_pro_backend_signature session_pro_backend_set_payment_refund_requested_r
         const uint8_t* payment_tx_payment_id,
         size_t payment_tx_payment_id_len) NON_NULL_ARG(1, 5, 6);
 
-/// API: session_pro_backend/set_payment_refund_requested_request_to_json
+/// API: session_pro_backend/set_payment_refund_requested_request_build
 ///
-/// Serializes a `set_payment_refund_requested_request` to a JSON string.
-/// The caller must free the returned string using `session_pro_backend_to_json_free`.
+/// Builds the request to POST for a `set_payment_refund_requested_request`, as a
+/// session_pro_backend_request (endpoint + content_type + opaque data). Free the returned request
+/// with `session_pro_backend_request_free`.
 LIBSESSION_EXPORT
-session_pro_backend_to_json session_pro_backend_set_payment_refund_requested_request_to_json(
+session_pro_backend_request session_pro_backend_set_payment_refund_requested_request_build(
         const session_pro_backend_set_payment_refund_requested_request* request);
 
 /// API: session_pro_backend/set_payment_refund_requested_response_parse
@@ -473,11 +488,11 @@ session_pro_backend_to_json session_pro_backend_set_payment_refund_requested_req
 LIBSESSION_EXPORT session_pro_backend_set_payment_refund_requested_response
 session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len);
 
-/// API: session_pro_backend/to_json_free
+/// API: session_pro_backend/request_free
 ///
-/// Frees the JSON
+/// Frees a `session_pro_backend_request` returned by a `*_request_build` function.
 LIBSESSION_EXPORT
-void session_pro_backend_to_json_free(session_pro_backend_to_json* to_json);
+void session_pro_backend_request_free(session_pro_backend_request* request);
 
 /// API: session_pro_backend/pro_proof_response_free
 ///
