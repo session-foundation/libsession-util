@@ -59,9 +59,11 @@
 
 namespace session::pro_backend {
 
-/// TODO: Assign the Session Pro backend public key for verifying proofs to allow users of the
-/// library to have the pubkey available for verifying proofs.
-constexpr auto PUBKEY = "0000000000000000000000000000000000000000000000000000000000000000"_hex_b;
+/// The Session Pro Backend's Ed25519 public key: verify that a proof was issued by the backend by
+/// checking its signature against this key (see ProProof::verify_signature). This is the current
+/// backend signing key (test deployment, expected to carry through to production).
+constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_b;
+static_assert(PUBKEY.size() == 32);
 
 /// Domain used with ed25519::derive_subkey to derive the Session Pro signing keypair from the
 /// account's root Ed25519 seed.
