@@ -238,3 +238,39 @@ TEST_CASE("SHA3-256 and SHAKE-256 known-answer tests", "[hash][sha3_256][shake25
     shake256("abc"_bytes)(shake_out);
     CHECK(sha3_out != shake_out);
 }
+
+TEST_CASE("blake2b_pers integer args are little-endian", "[hash][blake2b][endian]") {
+    using session::hash::blake2b_pers;
+
+    // make_hashable() must serialize integer arguments as fixed-width little-endian, independent of
+    // host endianness — the byte encoding underpinning every Session Pro signed digest. Pin the
+    // contract by requiring an integer to hash identically to its explicit little-endian bytes. On
+    // a little-endian host this guards the direct-reinterpret path; on a big-endian host (run via
+    // utils/test-bigendian.sh) it is the only thing exercising make_hashable's byte-swap branch.
+    constexpr auto pers = "EndianTestPers!!"_b2b_pers;
+
+    {
+        uint16_t v = 0x0102;
+        std::array<std::byte, 2> le{std::byte{0x02}, std::byte{0x01}};
+        CHECK(blake2b_pers<32>(pers, v) == blake2b_pers<32>(pers, le));
+    }
+    {
+        uint32_t v = 0x01020304;
+        std::array<std::byte, 4> le{
+                std::byte{0x04}, std::byte{0x03}, std::byte{0x02}, std::byte{0x01}};
+        CHECK(blake2b_pers<32>(pers, v) == blake2b_pers<32>(pers, le));
+    }
+    {
+        uint64_t v = 0x0102030405060708ULL;
+        std::array<std::byte, 8> le{
+                std::byte{0x08},
+                std::byte{0x07},
+                std::byte{0x06},
+                std::byte{0x05},
+                std::byte{0x04},
+                std::byte{0x03},
+                std::byte{0x02},
+                std::byte{0x01}};
+        CHECK(blake2b_pers<32>(pers, v) == blake2b_pers<32>(pers, le));
+    }
+}
