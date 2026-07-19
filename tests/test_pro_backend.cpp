@@ -563,6 +563,19 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
     }
 }
 
+TEST_CASE("Pro Backend X25519 pubkey matches the converted Ed25519 pubkey", "[pro_backend]") {
+    // PUBKEY_X25519 is a hardcoded convenience constant; assert it equals the runtime conversion of
+    // the Ed25519 PUBKEY so the two can never silently drift.
+    unsigned char converted[32] = {};
+    REQUIRE(crypto_sign_ed25519_pk_to_curve25519(
+                    converted, reinterpret_cast<const unsigned char*>(PUBKEY.data())) == 0);
+    REQUIRE(std::memcmp(converted, PUBKEY_X25519.data(), sizeof(converted)) == 0);
+    // The C export points at the same bytes.
+    REQUIRE(std::memcmp(
+                    SESSION_PRO_BACKEND_PUBKEY_X25519, PUBKEY_X25519.data(), sizeof(converted)) ==
+            0);
+}
+
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
 #include <curl/curl.h>
 

@@ -209,6 +209,8 @@ LIBSESSION_EXPORT extern const char* const
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_URL = URL.data();
 LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY =
         reinterpret_cast<const unsigned char*>(PUBKEY.data());
+LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY_X25519 =
+        reinterpret_cast<const unsigned char*>(PUBKEY_X25519.data());
 }
 
 std::optional<ProviderUrls> provider_urls(std::string_view provider_code) {

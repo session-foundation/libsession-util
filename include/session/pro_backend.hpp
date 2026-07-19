@@ -65,6 +65,14 @@ namespace session::pro_backend {
 constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_b;
 static_assert(PUBKEY.size() == 32);
 
+/// The X25519 form of `PUBKEY` (the same key converted via crypto_sign_ed25519_pk_to_curve25519),
+/// provided as a constant for clients that need the X25519 pubkey (e.g. to establish an encrypted
+/// channel to the backend) without doing the conversion themselves. A unit test asserts these bytes
+/// match the runtime conversion of `PUBKEY`, so the two cannot drift.
+constexpr auto PUBKEY_X25519 =
+        "ce5a75f64b6c43db6c1374d362c3ea9d85951c4f42a3d04cf94f87822d4f803b"_hex_b;
+static_assert(PUBKEY_X25519.size() == 32);
+
 /// The Session Pro Backend's production base URL: POST a request body to `<URL>/<endpoint>` (see
 /// the SESSION_PRO_BACKEND_*_ENDPOINT paths). This is the canonical production value; a client may
 /// point at a different dev/test server if it chooses.
