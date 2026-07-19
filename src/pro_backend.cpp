@@ -225,14 +225,13 @@ namespace {
             std::string_view payment_id,
             std::span<const uint8_t> master_sig,
             std::span<const uint8_t> rotating_sig) {
-        nlohmann::json j;
-        j["master_pkey"] = oxenc::to_hex(master_pubkey);
-        j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
-        j["payment_tx"]["provider"] = provider_code;
-        j["payment_tx"]["payment_id"] = payment_id;
-        j["master_sig"] = oxenc::to_hex(master_sig);
-        j["rotating_sig"] = oxenc::to_hex(rotating_sig);
-        return j.dump();
+        return nlohmann::json{
+                {"master_pkey", oxenc::to_hex(master_pubkey)},
+                {"rotating_pkey", oxenc::to_hex(rotating_pubkey)},
+                {"payment_tx", {{"provider", provider_code}, {"payment_id", payment_id}}},
+                {"master_sig", oxenc::to_hex(master_sig)},
+                {"rotating_sig", oxenc::to_hex(rotating_sig)}}
+                .dump();
     }
 
 }  // namespace
@@ -403,13 +402,13 @@ namespace {
             std::chrono::sys_seconds unix_ts,
             std::span<const uint8_t> master_sig,
             std::span<const uint8_t> rotating_sig) {
-        nlohmann::json j;
-        j["master_pkey"] = oxenc::to_hex(master_pubkey);
-        j["rotating_pkey"] = oxenc::to_hex(rotating_pubkey);
-        j["ts"] = epoch_seconds(unix_ts);
-        j["master_sig"] = oxenc::to_hex(master_sig);
-        j["rotating_sig"] = oxenc::to_hex(rotating_sig);
-        return j.dump();
+        return nlohmann::json{
+                {"master_pkey", oxenc::to_hex(master_pubkey)},
+                {"rotating_pkey", oxenc::to_hex(rotating_pubkey)},
+                {"ts", epoch_seconds(unix_ts)},
+                {"master_sig", oxenc::to_hex(master_sig)},
+                {"rotating_sig", oxenc::to_hex(rotating_sig)}}
+                .dump();
     }
 
 }  // namespace
@@ -540,12 +539,12 @@ namespace {
             std::span<const uint8_t> master_sig,
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
-        nlohmann::json j;
-        j["master_pkey"] = oxenc::to_hex(master_pubkey);
-        j["master_sig"] = oxenc::to_hex(master_sig);
-        j["ts"] = epoch_seconds(unix_ts);
-        j["count"] = count;
-        return j.dump();
+        return nlohmann::json{
+                {"master_pkey", oxenc::to_hex(master_pubkey)},
+                {"master_sig", oxenc::to_hex(master_sig)},
+                {"ts", epoch_seconds(unix_ts)},
+                {"count", count}}
+                .dump();
     }
 
 }  // namespace
@@ -732,14 +731,13 @@ namespace {
             std::string_view provider_code,
             std::string_view payment_id,
             std::span<const uint8_t> master_sig) {
-        nlohmann::json j;
-        j["master_pkey"] = oxenc::to_hex(master_pubkey);
-        j["ts"] = epoch_seconds(unix_ts);
-        j["refund_requested_ts"] = epoch_seconds(refund_requested_unix_ts);
-        j["payment_tx"]["provider"] = provider_code;
-        j["payment_tx"]["payment_id"] = payment_id;
-        j["master_sig"] = oxenc::to_hex(master_sig);
-        return j.dump();
+        return nlohmann::json{
+                {"master_pkey", oxenc::to_hex(master_pubkey)},
+                {"ts", epoch_seconds(unix_ts)},
+                {"refund_requested_ts", epoch_seconds(refund_requested_unix_ts)},
+                {"payment_tx", {{"provider", provider_code}, {"payment_id", payment_id}}},
+                {"master_sig", oxenc::to_hex(master_sig)}}
+                .dump();
     }
 
 }  // namespace
