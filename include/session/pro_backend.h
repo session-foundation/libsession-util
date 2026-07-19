@@ -47,6 +47,11 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_URL;
 /// by the backend. Points at the same value as the C++ `session::pro_backend::PUBKEY`.
 LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY;
 
+/// The X25519 form of SESSION_PRO_BACKEND_PUBKEY, 32 bytes (the Ed25519 key converted via
+/// crypto_sign_ed25519_pk_to_curve25519). Points at the same value as the C++
+/// `session::pro_backend::PUBKEY_X25519`.
+LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY_X25519;
+
 /// Per-provider support/management URLs, keyed by provider code. These are identical for every user
 /// (not translation data), so libsession owns them as the single source of truth rather than each
 /// client duplicating them; the human-readable provider/store names are translation data and remain

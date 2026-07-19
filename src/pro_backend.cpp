@@ -259,6 +259,8 @@ LIBSESSION_EXPORT extern const char* const
 // Backend base URL + Ed25519 pubkey: C symbols pointing at the single C++ definitions above.
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_URL = URL.data();
 LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY = PUBKEY.data();
+LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY_X25519 =
+        PUBKEY_X25519.data();
 }
 
 std::optional<ProviderUrls> provider_urls(std::string_view provider_code) {
