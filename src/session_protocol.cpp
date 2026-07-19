@@ -162,8 +162,8 @@ ProStatus ProProof::status(
 }
 
 b32 ProProof::hash() const {
-    b32 result = proof_hash_internal(
-            revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_at));
+    b32 result =
+            proof_hash_internal(revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_at));
     return result;
 }
 

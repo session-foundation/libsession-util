@@ -36,9 +36,9 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 
     // Create protobuf `Content.dataMessage`
     SessionProtos::Content content = {};
-    content.set_sigtimestamp(std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     content_at.time_since_epoch())
-                                     .count());
+    content.set_sigtimestamp(
+            std::chrono::duration_cast<std::chrono::milliseconds>(content_at.time_since_epoch())
+                    .count());
 
     SessionProtos::DataMessage* data = content.mutable_datamessage();
     data->set_body(std::string(data_body));

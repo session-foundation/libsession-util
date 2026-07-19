@@ -48,11 +48,7 @@ void Pro::update_revocations(
                                " ON CONFLICT (revocation_tag) DO UPDATE SET"
                                " effective_ts = excluded.effective_ts, seen_at = excluded.seen_at");
          const auto& revoke : revocations) {
-        exec_query(
-                st,
-                revoke.revocation_tag,
-                revoke.effective_at.time_since_epoch().count(),
-                now);
+        exec_query(st, revoke.revocation_tag, revoke.effective_at.time_since_epoch().count(), now);
         st->reset();
     }
 
