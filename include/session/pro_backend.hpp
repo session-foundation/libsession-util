@@ -1,5 +1,6 @@
 #pragma once
 
+#include <oxenc/hex.h>
 #include <session/pro_backend.h>
 
 #include <chrono>
@@ -56,12 +57,13 @@
 
 namespace session::pro_backend {
 
-/// TODO: Assign the Session Pro backend public key for verifying proofs to allow users of the
-/// library to have the pubkey available for verifying proofs.
-constexpr array_uc32 PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-static_assert(sizeof(PUBKEY) == array_uc32{}.size());
+using namespace oxenc::literals;
+
+/// The Session Pro Backend's Ed25519 public key: verify that a proof was issued by the backend by
+/// checking its signature against this key (see ProProof::verify_signature). This is the current
+/// backend signing key (test deployment, expected to carry through to production).
+constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_u;
+static_assert(PUBKEY.size() == 32);
 
 enum struct AddProPaymentResponseStatus {
     /// Payment was claimed and the pro proof was successfully generated
