@@ -61,26 +61,6 @@ struct session_pro_backend_provider_urls {
 LIBSESSION_EXPORT session_pro_backend_provider_urls
 session_pro_backend_get_provider_urls(const char* provider_code) NON_NULL_ARG(1);
 
-/// Must match:
-///   https://github.com/Doy-lee/session-pro-backend/blob/f4e2c84794470e7932ba1a1968fdb49117bb5870/backend.py#L18
-typedef enum SESSION_PRO_BACKEND_PAYMENT_STATUS {
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL,
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_UNREDEEMED,
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED,
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_EXPIRED,
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_REVOKED,
-    SESSION_PRO_BACKEND_PAYMENT_STATUS_COUNT,
-} SESSION_PRO_BACKEND_PAYMENT_STATUS;
-
-/// Must match:
-///   https://github.com/Doy-lee/session-pro-backend/blob/a0e0ba24bc4ab3a062465d861aa57df2269b6dde/server.py#L373
-typedef enum SESSION_PRO_BACKEND_USER_PRO_STATUS {
-    SESSION_PRO_BACKEND_USER_PRO_STATUS_NEVER_BEEN_PRO,
-    SESSION_PRO_BACKEND_USER_PRO_STATUS_ACTIVE,
-    SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED,
-    SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT,
-} SESSION_PRO_BACKEND_USER_PRO_STATUS;
-
 typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_SUCCESS,
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR,
@@ -212,7 +192,10 @@ struct session_pro_backend_get_pro_details_request {
 
 typedef struct session_pro_backend_pro_payment_item session_pro_backend_pro_payment_item;
 struct session_pro_backend_pro_payment_item {
-    SESSION_PRO_BACKEND_PAYMENT_STATUS status;
+    /// Opaque payment lifecycle status code (e.g. "unredeemed"/"redeemed"/"expired"/"revoked");
+    /// unknown values pass through as-is
+    char status[64];
+    size_t status_count;
     /// Billing-period code (e.g. "1m"/"3m"/"1y"); opaque, may be free-form for non-period plans
     char plan[64];
     size_t plan_count;
@@ -245,7 +228,9 @@ struct session_pro_backend_get_pro_details_response {
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
     size_t items_count;
-    SESSION_PRO_BACKEND_USER_PRO_STATUS status;
+    /// Opaque account Pro status code ("never"/"active"/"expired"); unknown values pass through
+    char status[64];
+    size_t status_count;
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
     bool auto_renewing;
     int64_t expiry_ts;

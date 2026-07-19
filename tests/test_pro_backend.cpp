@@ -458,7 +458,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             nlohmann::json j;
             j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
             j["result"] = {
-                    {"status", SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED},
+                    {"status", "expired"},
                     {"error_report",
                      SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR},
                     {"auto_renewing", true},
@@ -468,7 +468,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"payments_total", 3},
                     {"items",
                      nlohmann::json::array(
-                             {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED},
+                             {{{"status", "redeemed"},
                                {"plan", "1m"},
                                {"payment_provider",
                                 SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY},
@@ -499,7 +499,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
                 REQUIRE(result.header.errors_count == 0);
                 REQUIRE(result.header.errors == nullptr);
-                REQUIRE(result.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED);
+                REQUIRE(std::string_view(result.status, result.status_count) == "expired");
                 REQUIRE(result.error_report ==
                         SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR);
                 REQUIRE(result.items_count == 1);
@@ -509,7 +509,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.refund_requested_ts == unix_ts + 3602);
                 REQUIRE(result.payments_total == 3);
                 REQUIRE(result.items != nullptr);
-                REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
+                REQUIRE(std::string_view(result.items[0].status, result.items[0].status_count) ==
+                        "redeemed");
                 REQUIRE(std::string_view(result.items[0].plan, result.items[0].plan_count) == "1m");
                 REQUIRE(std::string_view(
                                 result.items[0].payment_provider,
@@ -936,7 +937,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         }
         REQUIRE(response.header.errors_count == 0);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-        REQUIRE(response.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_ACTIVE);
+        REQUIRE(std::string_view(response.status, response.status_count) == "active");
         REQUIRE(response.items_count > 0);
     }
 
@@ -979,7 +980,7 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         // Verify the response
         REQUIRE(response.header.errors_count == 0);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-        REQUIRE(response.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_ACTIVE);
+        REQUIRE(std::string_view(response.status, response.status_count) == "active");
         REQUIRE(response.items_count == 0);
     }
 

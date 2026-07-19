@@ -491,19 +491,15 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
     if (result.errors.size())
         return result;
 
-    // Parse payload
-    uint32_t user_status = json_require<uint32_t>(result_obj, "status", result.errors);
-    if (user_status >= SESSION_PRO_BACKEND_USER_PRO_STATUS_COUNT) {
-        result.errors.push_back(
-                fmt::format("User pro status value was out-of-bounds: {}", user_status));
-        return result;
-    }
-    result.user_status = static_cast<SESSION_PRO_BACKEND_USER_PRO_STATUS>(user_status);
+    // Parse payload. The account Pro status is an opaque string code ("never"/"active"/"expired");
+    // an unknown value passes through unchanged (§1: enums are codes) rather than failing the
+    // parse.
+    result.user_status = json_require<std::string>(result_obj, "status", result.errors);
 
     uint32_t error_report = json_require<uint32_t>(result_obj, "error_report", result.errors);
     if (error_report >= SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT) {
         result.errors.push_back(
-                fmt::format("Error report value was out-of-bounds: {}", user_status));
+                fmt::format("Error report value was out-of-bounds: {}", error_report));
         return result;
     }
     result.error_report =
@@ -534,7 +530,7 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
 
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto status = json_require<uint64_t>(obj, "status", result.errors);
+        auto status = json_require<std::string>(obj, "status", result.errors);
         auto plan = json_require<std::string>(obj, "plan", result.errors);
         auto payment_provider = json_require<std::string>(obj, "payment_provider", result.errors);
         auto payment_id = json_require<std::string>(obj, "payment_id", result.errors);
@@ -553,12 +549,7 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", result.errors);
 
         ProPaymentItem item = {};
-        if (status > SESSION_PRO_BACKEND_PAYMENT_STATUS_NIL &&
-            status < SESSION_PRO_BACKEND_PAYMENT_STATUS_COUNT) {
-            item.status = static_cast<SESSION_PRO_BACKEND_PAYMENT_STATUS>(status);
-        } else {
-            result.errors.push_back(fmt::format("Status value was out-of-bounds: {}", status));
-        }
+        item.status = std::move(status);
 
         // plan / payment_provider / payment_id are opaque strings; libsession does not validate or
         // interpret them (an unknown provider or plan code passes through as-is).
@@ -1010,7 +1001,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
     result.header.status = cpp.status;
-    result.status = cpp.user_status;
+    result.status_count = session::copy_c_str(result.status, cpp.user_status) - 1;
     result.error_report = cpp.error_report;
     result.items_count = cpp.items.size();
     result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
@@ -1024,7 +1015,7 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     for (size_t index = 0; index < result.items_count; ++index) {
         const ProPaymentItem& src = cpp.items[index];
         session_pro_backend_pro_payment_item& dest = result.items[index];
-        dest.status = src.status;
+        dest.status_count = session::copy_c_str(dest.status, src.status) - 1;
         dest.plan_count = session::copy_c_str(dest.plan, src.plan) - 1;
         dest.payment_provider_count =
                 session::copy_c_str(dest.payment_provider, src.payment_provider) - 1;
