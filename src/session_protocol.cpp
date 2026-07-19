@@ -53,7 +53,7 @@ namespace {
 session::b32 proof_hash_internal(
         std::span<const std::byte> revocation_tag,
         std::span<const std::byte> rotating_pubkey,
-        std::uint64_t expiry_ts) {
+        std::int64_t expiry_ts) {
 
     // This must match the Pro proof signed digest in pro-wire-protocol.md §2. The proof version is
     // NOT hashed as a byte; it selects the personalisation (v0 -> "ProProof_v0_____"), and that

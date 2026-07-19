@@ -319,7 +319,7 @@ namespace {
             std::span<const std::byte> rotating_pubkey,
             std::chrono::sys_seconds unix_ts) {
         // Must match the generate-proof signed-request hash in pro-wire-protocol.md §3.1.
-        uint64_t ts = epoch_seconds(unix_ts);
+        int64_t ts = epoch_seconds(unix_ts);
         return hash::blake2b_pers<32>(GENERATE_PROOF_PERS, master_pubkey, rotating_pubkey, ts);
     }
 
@@ -435,7 +435,7 @@ namespace {
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
         // Must match the get-pro-details signed-request hash in pro-wire-protocol.md §3.4.
-        uint64_t ts = epoch_seconds(unix_ts);
+        int64_t ts = epoch_seconds(unix_ts);
         return hash::blake2b_pers<32>(GET_PRO_DETAILS_PERS, master_pubkey, ts, count);
     }
 
@@ -596,8 +596,8 @@ namespace {
             std::span<const std::byte> payment_id) {
         // Must match the set-payment-refund-requested signed-request hash in pro-wire-protocol.md
         // §3.3 (+ §3.5 for payment_id).
-        uint64_t ts = epoch_seconds(unix_ts);
-        uint64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
+        int64_t ts = epoch_seconds(unix_ts);
+        int64_t refund_requested_ts = epoch_seconds(refund_requested_unix_ts);
         return hash::blake2b_pers<32>(
                 SET_PAYMENT_REFUND_REQUESTED_PERS,
                 master_pubkey,
