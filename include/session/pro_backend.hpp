@@ -223,7 +223,7 @@ struct ProRevocationItem {
     array_uc32 revocation_tag;
 
     /// A matching proof is revoked once the client's clock reaches this unix timestamp (not before)
-    sys_seconds effective_unix_ts;
+    sys_seconds effective_at;
 };
 
 struct GetProRevocationsResponse : Response {
@@ -286,32 +286,32 @@ struct ProPaymentItem {
     /// Provider purchase time (when the upstream provider recorded the purchase). Always set.
     /// Carries the provider's sub-second precision as a millisecond-resolution `sys_ms`; the wire
     /// sends it as a float of seconds.
-    sys_ms purchased_unix_ts;
+    sys_ms purchased_at;
 
     /// Unix timestamp of when the payment was redeemed. 0 if not activated
-    sys_seconds redeemed_unix_ts;
+    sys_seconds redeemed_at;
 
     /// Unix timestamp of when the payment was expiry. 0 if not activated
-    sys_seconds expiry_unix_ts;
+    sys_seconds expiry_at;
 
     /// Duration of the grace period, e.g. when the payment provider will start to attempt to renew
     /// the Session Pro subscription. During the period between
-    /// [expiry_unix_ts, expiry_unix_ts + grace_period_duration] the user continues to have
+    /// [expiry_at, expiry_at + grace_period_duration] the user continues to have
     /// entitlement to Session Pro. This value is only applicable if `auto_renewing` is `true`.
     std::chrono::seconds grace_period_duration;
 
     /// Unix deadline timestamp of when the user is able to refund the subscription via the payment
     /// provider. Thereafter the user must initiate a refund manually via Session support.
-    sys_seconds platform_refund_expiry_unix_ts;
+    sys_seconds platform_refund_expiry_at;
 
     /// Provider revocation instant (when the payment was revoked). Epoch (0) if not applicable.
     /// Carries the provider's sub-second precision as a millisecond-resolution `sys_ms`; the wire
     /// sends it as a float of seconds.
-    sys_ms revoked_unix_ts;
+    sys_ms revoked_at;
 
     /// UNIX timestamp at which a refund request was requested for this payment. This is set to 0
     /// if no refund has been requested for this payment yet.
-    sys_seconds refund_requested_unix_ts;
+    sys_seconds refund_requested_at;
 
     /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
     /// parts in per the backend-defined composite -- libsession does not interpret it).
@@ -347,10 +347,10 @@ struct GetProDetailsResponse : Response {
     /// some leeway as to the time required for the payment provider to successfully bill the user.
     /// This expiry timestamp is hence calculated as:
     ///
-    ///   expiry_unix_ts_ms = (subscription_expiry_unix_ts + grace_period_duration_ms)
+    ///   expiry_at = subscription_expiry + grace_period_duration
     ///
     /// E.g. The subscription expiry timestamp can be calculated by subtracting
-    /// `grace_period_duration_ms` to determine if the user is currently in a grace period. Some
+    /// `grace_period_duration` to determine if the user is currently in a grace period. Some
     /// platforms do not support a grace period so this value can be 0.
     ///
     /// Finally, a reminder that the grace period is not activated or included in this deadline
@@ -359,18 +359,18 @@ struct GetProDetailsResponse : Response {
     /// This timestamp may be in the past if the user no longer has active payments. Overtime the
     /// Pro Backend may prune user history and so after long lapses of activity, a user's
     /// subscription history may be deleted.
-    sys_seconds expiry_unix_ts;
+    sys_seconds expiry_at;
 
     /// Duration that a user is entitled to for their grace period. This value is to be ignored if
     /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
-    /// subtracting `expiry_unix_ts_ms` from this value.
+    /// subtracting it from `expiry_at`.
     std::chrono::seconds grace_period_duration;
 
     /// UNIX timestamp at which a refund request was requested by this user. This timestamp comes
     /// from the latest payment that the backend has deemed to be active for the user (e.g. the
-    /// payment associated with the `expiry_unix_ts_ms`). This value is 0 if no refund has been
+    /// payment associated with the `expiry_at`). This value is 0 if no refund has been
     /// requested on the active payment.
-    sys_seconds refund_requested_unix_ts;
+    sys_seconds refund_requested_at;
 
     /// Total number of payments known by the backend for the user. This may be greater than the
     /// length of items if the request, requested less than the number of payments the user has.
@@ -389,21 +389,21 @@ GetProDetailsResponse parse_payment_details(std::string_view json);
 /// Inputs:
 /// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
 /// - `unix_ts` -- Unix timestamp for the request
-/// - `refund_requested_unix_ts` -- timestamp to record as when the refund was requested
+/// - `refund_requested_at` -- timestamp to record as when the refund was requested
 /// - `provider_code` -- provider code string the payment is from (see
 ///   SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
 /// - `payment_id` -- opaque payment identifier from the provider (hashed verbatim)
 array_uc64 refund_sig(
         std::span<const uint8_t> master_privkey,
         sys_seconds unix_ts,
-        sys_seconds refund_requested_unix_ts,
+        sys_seconds refund_requested_at,
         std::string_view provider_code,
         std::span<const uint8_t> payment_id);
 
 ProRequest refund_request(
         std::span<const uint8_t> master_privkey,
         sys_seconds unix_ts,
-        sys_seconds refund_requested_unix_ts,
+        sys_seconds refund_requested_at,
         std::string_view provider_code,
         std::span<const uint8_t> payment_id);
 

@@ -321,7 +321,7 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_message(
 /// API: session_protocol/session_protocol_pro_proof_is_active
 ///
 /// Check if the Pro proof is currently entitled to Pro given the `ts` with respect to the
-/// proof's `expiry_unix_ts`
+/// proof's `expiry_at`
 ///
 /// Inputs:
 /// - `proof` -- Proof to verify
@@ -349,7 +349,7 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_is_active(
 ///   they are the original signatory of the proof.
 /// - `verify_pubkey_len` -- Length of the `verify_pubkey` should be 32 bytes
 ///   they are the original signatory of the proof.
-/// - `ts` -- Unix timestamp to compared against the embedded `expiry_unix_ts`
+/// - `ts` -- Unix timestamp to compared against the embedded `expiry_at`
 ///   to determine if the proof has expired or not
 /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
 ///   the embedded `rotating_pubkey` in the proof signed the given message.

@@ -170,7 +170,7 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
         auto proof_dict = root["p"];
         proof_dict["@"] = pro.proof.version;
         proof_dict["g"] = pro.proof.revocation_tag;
-        proof_dict["e"] = epoch_seconds(pro.proof.expiry_unix_ts);
+        proof_dict["e"] = epoch_seconds(pro.proof.expiry_at);
         proof_dict["s"] = pro.proof.sig;
 
         const auto target_timestamp =
@@ -345,7 +345,7 @@ LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro
                 pro->proof.rotating_pubkey.data,
                 val->proof.rotating_pubkey.data(),
                 val->proof.rotating_pubkey.size());
-        pro->proof.expiry_ts = epoch_seconds(val->proof.expiry_unix_ts);
+        pro->proof.expiry_ts = epoch_seconds(val->proof.expiry_at);
         std::memcpy(pro->proof.sig.data, val->proof.sig.data(), val->proof.sig.size());
         std::memcpy(
                 pro->rotating_privkey.data,
@@ -367,7 +367,7 @@ LIBSESSION_C_API void user_profile_set_pro_config(config_object* conf, const pro
             val.proof.rotating_pubkey.data(),
             pro->proof.rotating_pubkey.data,
             val.proof.rotating_pubkey.size());
-    val.proof.expiry_unix_ts = as_sys_seconds(pro->proof.expiry_ts);
+    val.proof.expiry_at = as_sys_seconds(pro->proof.expiry_ts);
     std::memcpy(val.proof.sig.data(), pro->proof.sig.data, val.proof.sig.size());
     std::memcpy(
             val.rotating_privkey.data(), pro->rotating_privkey.data, val.rotating_privkey.size());

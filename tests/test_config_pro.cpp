@@ -25,7 +25,7 @@ TEST_CASE("Pro", "[config][pro]") {
         pro_cpp.rotating_privkey = rotating_sk;
         pro_cpp.proof.version = 2;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
-        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_seconds(1s);
+        pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
         constexpr auto revocation_tag =
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
         static_assert(pro_cpp.proof.revocation_tag.max_size() == revocation_tag.size());
@@ -36,7 +36,7 @@ TEST_CASE("Pro", "[config][pro]") {
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
         pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
-        pro.proof.expiry_ts = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
+        pro.proof.expiry_ts = pro_cpp.proof.expiry_at.time_since_epoch().count();
         std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
     }
 
@@ -71,8 +71,8 @@ TEST_CASE("Pro", "[config][pro]") {
 
     // Verify expiry
     {
-        CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts));
-        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1s));
+        CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_at));
+        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_at + 1s));
 
         CHECK(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_ts));
         CHECK_FALSE(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_ts + 1));
@@ -108,7 +108,7 @@ TEST_CASE("Pro", "[config][pro]") {
                 /*version*/         {"@", proof.version},
                 /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
-                /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
+                /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
                 /*signature*/       {"s", std::string{reinterpret_cast<const char *>(proof.sig.data()), proof.sig.size()}},
             }}
         };
@@ -120,7 +120,7 @@ TEST_CASE("Pro", "[config][pro]") {
         CHECK(loaded_pro.proof.version == pro_cpp.proof.version);
         CHECK(loaded_pro.proof.revocation_tag == pro_cpp.proof.revocation_tag);
         CHECK(loaded_pro.proof.rotating_pubkey == pro_cpp.proof.rotating_pubkey);
-        CHECK(loaded_pro.proof.expiry_unix_ts == pro_cpp.proof.expiry_unix_ts);
+        CHECK(loaded_pro.proof.expiry_at == pro_cpp.proof.expiry_at);
         CHECK(loaded_pro.proof.sig == pro_cpp.proof.sig);
         CHECK(loaded_pro.proof.verify_signature(signing_pk));
     }
@@ -138,7 +138,7 @@ TEST_CASE("Pro", "[config][pro]") {
                 /*version*/         {"@", proof.version},
                 /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
-                /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
+                /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
                 /*signature*/       {"s", std::string{reinterpret_cast<const char *>(broken_sig.data()), broken_sig.size()}},
             }}
         };

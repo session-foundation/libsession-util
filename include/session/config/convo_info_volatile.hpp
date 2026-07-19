@@ -91,7 +91,7 @@ namespace convo {
 
         /// Unix epoch timestamp (seconds) until which this proof's entitlement to Session Pro
         /// features is valid
-        sys_seconds pro_expiry_unix_ts{};
+        sys_seconds pro_expiry_at{};
 
       protected:
         using base::base;

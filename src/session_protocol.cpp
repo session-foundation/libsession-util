@@ -165,7 +165,7 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
             result.proof.rotating_pubkey.data,
             cpp.proof.rotating_pubkey.data(),
             cpp.proof.rotating_pubkey.max_size());
-    result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_unix_ts);
+    result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_at);
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.max_size());
     result.msg_bitset.data = cpp.msg_bitset.data;
     result.profile_bitset.data = cpp.profile_bitset.data;
@@ -199,7 +199,7 @@ bool ProProof::verify_message(std::span<const uint8_t> sig, std::span<const uint
 }
 
 bool ProProof::is_active(sys_seconds unix_ts) const {
-    return unix_ts <= expiry_unix_ts;
+    return unix_ts <= expiry_at;
 }
 
 ProStatus ProProof::status(
@@ -226,7 +226,7 @@ ProStatus ProProof::status(
 
 array_uc32 ProProof::hash() const {
     array_uc32 result =
-            proof_hash_internal(revocation_tag, rotating_pubkey, epoch_seconds(expiry_unix_ts));
+            proof_hash_internal(revocation_tag, rotating_pubkey, epoch_seconds(expiry_at));
     return result;
 }
 
@@ -915,7 +915,7 @@ DecodedEnvelope decode_envelope(
                     proof.rotating_pubkey.data(),
                     proto_proof.rotatingpublickey().data(),
                     proto_proof.rotatingpublickey().size());
-            proof.expiry_unix_ts = as_sys_seconds(proto_proof.expiryunixts());
+            proof.expiry_at = as_sys_seconds(proto_proof.expiryunixts());
             std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
@@ -1075,7 +1075,7 @@ DecodedCommunityMessage decode_for_community(
                 proof.rotating_pubkey.data(),
                 proto_proof.rotatingpublickey().data(),
                 proto_proof.rotatingpublickey().size());
-        proof.expiry_unix_ts = as_sys_seconds(proto_proof.expiryunixts());
+        proof.expiry_at = as_sys_seconds(proto_proof.expiryunixts());
         std::memcpy(proof.sig.data(), proto_proof.sig().data(), proto_proof.sig().size());
 
         // Evaluate the pro status given the extracted components (was it signed, is it expired,

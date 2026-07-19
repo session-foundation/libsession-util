@@ -46,7 +46,7 @@ bool ProConfig::load(const dict& root) {
                 proof.revocation_tag.data(),
                 maybe_revocation_tag->data(),
                 proof.revocation_tag.size());
-        proof.expiry_unix_ts = *maybe_expiry;
+        proof.expiry_at = *maybe_expiry;
         std::memcpy(proof.sig.data(), maybe_sig->data(), proof.sig.size());
     }
 

@@ -353,7 +353,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                 result_cpp.proof.rotating_pubkey.data(),
                                 result_cpp.proof.rotating_pubkey.size()) == 0);
                 REQUIRE(result.proof.expiry_ts ==
-                        result_cpp.proof.expiry_unix_ts.time_since_epoch().count());
+                        result_cpp.proof.expiry_at.time_since_epoch().count());
                 REQUIRE(std::memcmp(
                                 result.proof.sig.data,
                                 result_cpp.proof.sig.data(),

@@ -37,7 +37,7 @@ namespace convo {
                     pro_revocation_tag->data(),
                     c.pro_revocation_tag.data,
                     pro_revocation_tag->size());
-            pro_expiry_unix_ts = as_sys_seconds(c.pro_expiry_ts);
+            pro_expiry_at = as_sys_seconds(c.pro_expiry_ts);
         }
     }
 
@@ -53,7 +53,7 @@ namespace convo {
                     pro_revocation_tag->data(),
                     pro_revocation_tag->size());
 
-            c.pro_expiry_ts = epoch_seconds(pro_expiry_unix_ts);
+            c.pro_expiry_ts = epoch_seconds(pro_expiry_at);
         } else {
             c.has_pro_revocation_tag = false;
             c.pro_expiry_ts = 0;
@@ -132,7 +132,7 @@ namespace convo {
                     pro_revocation_tag->data(),
                     c.pro_revocation_tag.data,
                     pro_revocation_tag->size());
-            pro_expiry_unix_ts = as_sys_seconds(c.pro_expiry_ts);
+            pro_expiry_at = as_sys_seconds(c.pro_expiry_ts);
         }
     }
 
@@ -148,7 +148,7 @@ namespace convo {
                     c.pro_revocation_tag.data,
                     pro_revocation_tag->data(),
                     pro_revocation_tag->size());
-            c.pro_expiry_ts = epoch_seconds(pro_expiry_unix_ts);
+            c.pro_expiry_ts = epoch_seconds(pro_expiry_at);
         } else {
             c.has_pro_revocation_tag = false;
             c.pro_expiry_ts = 0;
@@ -162,7 +162,7 @@ namespace convo {
         std::optional<std::vector<unsigned char>> maybe_pro_revocation_tag =
                 maybe_vector(info_dict, "g");
         if (pro_expiry > 0 && maybe_pro_revocation_tag && maybe_pro_revocation_tag->size() == 32) {
-            pro_expiry_unix_ts = as_sys_seconds(pro_expiry);
+            pro_expiry_at = as_sys_seconds(pro_expiry);
             pro_revocation_tag.emplace();
             std::memcpy(
                     pro_revocation_tag->data(),
@@ -334,7 +334,7 @@ void ConvoInfoVolatile::set(const convo::one_to_one& c) {
     auto info = data["1"][session_id_to_bytes(c.session_id)];
     set_base(c, info);
 
-    auto pro_expiry = epoch_seconds(c.pro_expiry_unix_ts);
+    auto pro_expiry = epoch_seconds(c.pro_expiry_at);
     if (pro_expiry > 0 && c.pro_revocation_tag) {
         set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_revocation_tag;
@@ -362,7 +362,7 @@ static bool is_stale(const C& c, std::chrono::system_clock::time_point cutoff) {
     if (c.unread)
         return false;
     if constexpr (std::derived_from<C, convo::pro_base>)
-        if (c.pro_revocation_tag.has_value() && c.pro_expiry_unix_ts >= cutoff)
+        if (c.pro_revocation_tag.has_value() && c.pro_expiry_at >= cutoff)
             return false;
     return sys_ms{std::chrono::milliseconds{c.last_read}} < cutoff;
 }
@@ -440,7 +440,7 @@ void ConvoInfoVolatile::set(const convo::blinded_one_to_one& c) {
 
     set_nonzero_int(info["y"], c.legacy_blinding);
 
-    auto pro_expiry = epoch_seconds(c.pro_expiry_unix_ts);
+    auto pro_expiry = epoch_seconds(c.pro_expiry_at);
     if (pro_expiry > 0 && c.pro_revocation_tag) {
         set_nonzero_int(info["e"], pro_expiry);
         info["g"] = *c.pro_revocation_tag;
