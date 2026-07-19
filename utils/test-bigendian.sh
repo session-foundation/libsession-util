@@ -10,9 +10,13 @@
 # the [endian] known-answer test (hash::blake2b_pers integer args must be little-endian) on an actual
 # big-endian machine, where make_hashable takes its otherwise-never-compiled swap branch.
 #
-# Cost: everything runs under qemu-user emulation, so the build is slow (tens of minutes) — the
-# submodule-built networking stack (oxen-libquic / session-router) is the bulk of it. That's fine for
-# an occasional manual audit; it is deliberately not in CI.
+# session-router (the onion-routing layer) is endian-irrelevant to what we test and drags in the
+# heaviest deps, so we build with -DENABLE_NETWORKING_SROUTER=OFF. This branch has no ENABLE_NETWORKING
+# toggle (networking is always required), so oxen::quic still builds regardless — we satisfy it with
+# libngtcp2 + gnutls from apt (nghttp3 is not needed; libquic uses raw QUIC).
+#
+# Cost: everything runs under qemu-user emulation, so expect a slow build (oxen-libquic is the bulk of
+# it). Fine for an occasional manual audit; it is deliberately not in CI.
 #
 # Requires: Docker, plus a one-time host install of qemu-user-static + binfmt-support (see below).
 # Run from the repo root with submodules checked out.
@@ -28,19 +32,28 @@ if [ ! -e /proc/sys/fs/binfmt_misc/qemu-s390x ]; then
     exit 1
 fi
 
-# Build + test inside an emulated s390x Debian. BUILD_STATIC_DEPS=OFF pulls the heavy deps
-# (libsodium, protobuf, curl, sqlite, zstd) as prebuilt s390x apt packages rather than compiling them
-# from source under emulation.
+# Build + test inside an emulated s390x Debian. BUILD_STATIC_DEPS=OFF pulls the heavy deps (libsodium,
+# protobuf, sqlite, zstd, and the oxen::quic deps libngtcp2/gnutls/libevent) as prebuilt s390x apt
+# packages rather than compiling them from source under emulation.
 docker run --platform=linux/s390x --rm -v "$PWD:/src" -w /src debian:sid bash -euxc '
     apt-get update
     apt-get install -y --no-install-recommends \
         g++ cmake ninja-build pkg-config git ca-certificates \
         libsodium-dev libprotobuf-dev protobuf-compiler libcurl4-openssl-dev \
-        libsqlite3-dev libzstd-dev
-    cmake -B build-bigendian -G Ninja -DBUILD_STATIC_DEPS=OFF -DCMAKE_BUILD_TYPE=Release
+        libsqlite3-dev libzstd-dev \
+        libngtcp2-dev libngtcp2-crypto-gnutls-dev libgnutls28-dev libevent-dev
+    rm -rf build-bigendian   # fresh configure each run; the dir lives in the mounted tree and would otherwise reuse a stale CMake cache
+    cmake -B build-bigendian -G Ninja -DBUILD_STATIC_DEPS=OFF -DENABLE_NETWORKING_SROUTER=OFF -DCMAKE_BUILD_TYPE=Release
     cmake --build build-bigendian --target testAll
-    # [endian] is the make_hashable little-endian known-answer test; the Pro / protocol / config tags
-    # also exercise serialization on this big-endian host. Drop the filter for a full run.
-    ./build-bigendian/tests/testAll "[endian],[hash],[pro_backend],[session_protocol],[config]"
+    # Run the endian-sensitive tags on this big-endian host. [endian] is the make_hashable little-endian
+    # known-answer test; the hash / protocol / Pro / config tags also exercise serialization here. Catch2
+    # exits 0 even when a filter clause matches no tests, so capture the output and fail loudly if any tag
+    # went unmatched — that guards against a tag rename silently shrinking the audit.
+    out=$(./build-bigendian/tests/testAll "[endian],[hash],[session-protocol],[pro_backend],[config]")
+    echo "$out"
+    if echo "$out" | grep -q "No test cases matched"; then
+        echo "ERROR: a filter tag matched no tests — the audit under-ran (tag renamed?)" >&2
+        exit 1
+    fi
 '
 echo "big-endian audit passed"
