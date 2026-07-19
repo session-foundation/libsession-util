@@ -65,6 +65,11 @@ using namespace oxenc::literals;
 constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_u;
 static_assert(PUBKEY.size() == 32);
 
+/// The Session Pro Backend's production base URL: POST a request body to `<URL>/<endpoint>` (see
+/// the SESSION_PRO_BACKEND_*_ENDPOINT paths). This is the canonical production value; a client may
+/// point at a different dev/test server if it chooses.
+constexpr std::string_view URL = "https://pro.session.codes";
+
 enum struct AddProPaymentResponseStatus {
     /// Payment was claimed and the pro proof was successfully generated
     Success = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_SUCCESS,

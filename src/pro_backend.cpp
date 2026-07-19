@@ -249,6 +249,10 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_REVOCATIO
         get_pro_revocations_endpoint;
 LIBSESSION_EXPORT extern const char* const
         SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT = set_refund_endpoint;
+
+// Backend base URL + Ed25519 pubkey: C symbols pointing at the single C++ definitions above.
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_URL = URL.data();
+LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY = PUBKEY.data();
 }
 
 std::optional<ProviderUrls> provider_urls(std::string_view provider_code) {
