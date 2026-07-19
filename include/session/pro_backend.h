@@ -113,69 +113,14 @@ struct session_pro_backend_request {
     const char* content_type;
     /// The opaque request payload. Relay untouched; do not parse or modify.
     string8 data;
-};
-
-typedef struct session_pro_backend_master_rotating_signatures
-        session_pro_backend_master_rotating_signatures;
-struct session_pro_backend_master_rotating_signatures {
-    bool success;
-    char error[256];
-    size_t error_count;
-    bytes64 master_sig;
-    bytes64 rotating_sig;
-};
-
-typedef struct session_pro_backend_signature session_pro_backend_signature;
-struct session_pro_backend_signature {
-    bool success;
-    char error[256];
-    size_t error_count;
-    bytes64 sig;
-};
-
-typedef struct session_pro_backend_add_pro_payment_user_transaction
-        session_pro_backend_add_pro_payment_user_transaction;
-struct session_pro_backend_add_pro_payment_user_transaction {
-    /// Provider code string (see SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*); opaque slug
-    char provider_code[64];
-    size_t provider_code_count;
-    /// Opaque payment identifier from the provider's purchase flow. Multi-part providers fold their
-    /// parts into this one string per a backend-defined composite (e.g. Google "token|order_id");
-    /// libsession treats it as opaque bytes hashed verbatim.
-    char payment_id[128];
-    size_t payment_id_count;
-};
-
-typedef struct session_pro_backend_add_pro_payment_request
-        session_pro_backend_add_pro_payment_request;
-struct session_pro_backend_add_pro_payment_request {
-    bytes32 master_pkey;
-    bytes32 rotating_pkey;
-    session_pro_backend_add_pro_payment_user_transaction payment_tx;
-    bytes64 master_sig;
-    bytes64 rotating_sig;
-};
-
-typedef struct session_pro_backend_generate_pro_proof_request
-        session_pro_backend_generate_pro_proof_request;
-struct session_pro_backend_generate_pro_proof_request {
-    bytes32 master_pkey;
-    bytes32 rotating_pkey;
-    int64_t ts;
-    bytes64 master_sig;
-    bytes64 rotating_sig;
+    /// Owned C++ object backing endpoint/content_type/data; do not touch (freed by request_free).
+    void* internal_;
 };
 
 typedef struct session_pro_backend_pro_proof_response session_pro_backend_pro_proof_response;
 struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
-};
-
-typedef struct session_pro_backend_get_pro_revocations_request
-        session_pro_backend_get_pro_revocations_request;
-struct session_pro_backend_get_pro_revocations_request {
-    int64_t ticket;
 };
 
 typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
@@ -195,15 +140,6 @@ struct session_pro_backend_get_pro_revocations_response {
     /// Array of items, with items_count elements
     session_pro_backend_pro_revocation_item* items;
     size_t items_count;
-};
-
-typedef struct session_pro_backend_get_pro_details_request
-        session_pro_backend_get_pro_details_request;
-struct session_pro_backend_get_pro_details_request {
-    bytes32 master_pkey;
-    bytes64 master_sig;
-    int64_t ts;
-    uint32_t count;
 };
 
 typedef struct session_pro_backend_pro_payment_item session_pro_backend_pro_payment_item;
@@ -255,16 +191,6 @@ struct session_pro_backend_get_pro_details_response {
     uint32_t payments_total;
 };
 
-typedef struct session_pro_backend_set_payment_refund_requested_request
-        session_pro_backend_set_payment_refund_requested_request;
-struct session_pro_backend_set_payment_refund_requested_request {
-    bytes32 master_pkey;
-    bytes64 master_sig;
-    int64_t ts;
-    int64_t refund_requested_ts;
-    session_pro_backend_add_pro_payment_user_transaction payment_tx;
-};
-
 typedef struct session_pro_backend_set_payment_refund_requested_response
         session_pro_backend_set_payment_refund_requested_response;
 struct session_pro_backend_set_payment_refund_requested_response {
@@ -272,130 +198,73 @@ struct session_pro_backend_set_payment_refund_requested_response {
     bool updated;
 };
 
-/// API: session_pro_backend/add_pro_payment_request_build_sigs
+/// API: session_pro_backend/add_pro_payment_request_build
 ///
-/// Builds master and rotating signatures for an `add_pro_payment_request`.
-/// Returns false if the keys (32-byte or 64-byte libsodium format) or payment token hash are
-/// incorrectly sized. Using 64-byte libsodium keys is more efficient.
+/// Builds the add-payment request to POST, as a session_pro_backend_request (endpoint +
+/// content_type + opaque data). Free it with `session_pro_backend_request_free`. On a key-size
+/// error `success` is false and `error`/`error_count` describe it.
 ///
 /// Inputs:
-/// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
-/// - `master_privkey_len` -- Length of master_privkey.
-/// - `rotating_privkey` -- Ed25519 rotating private key (32-byte or 64-byte libsodium format).
-/// - `rotating_privkey_len` -- Length of rotating_privkey.
-/// - `payment_tx_provider_code` -- Null-terminated provider code string the payment is coming from
-///   (use a SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* constant)
-/// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
-///   `AddProPaymentUserTransaction`
-/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
-///
-/// Outputs:
-/// - `success` - True if signatures are built successfully, false otherwise.
-/// - `error` - Backing error buffer for the signatures if `success` is false
-/// - `errors_count` - length of the error if `success` is false
-/// - `master_sig` - Generated master signature
-/// - `rotating_sig` - Generated rotating signature
+/// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
+/// libsodium).
+/// - `rotating_privkey` / `rotating_privkey_len` -- Ed25519 rotating private key (32 or 64-byte).
+/// - `provider_code` -- null-terminated provider code
+/// (SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*).
+/// - `payment_id` / `payment_id_len` -- opaque provider payment identifier.
 LIBSESSION_EXPORT
-session_pro_backend_master_rotating_signatures
-session_pro_backend_add_pro_payment_request_build_sigs(
+session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        const char* payment_tx_provider_code,
-        const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) NON_NULL_ARG(1, 3, 5, 6);
+        const char* provider_code,
+        const uint8_t* payment_id,
+        size_t payment_id_len) NON_NULL_ARG(1, 3, 5, 6);
 
-/// API: session_pro_backend/generate_pro_proof_request_build_sigs
+/// API: session_pro_backend/generate_pro_proof_request_build
 ///
-/// Builds master and rotating signatures for a `generate_pro_proof_request`.
-/// Returns false if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
-/// Using 64-byte libsodium keys is more efficient.
+/// Builds the generate-proof request to POST, as a session_pro_backend_request (endpoint +
+/// content_type + opaque data). Free it with `session_pro_backend_request_free`. On a key-size
+/// error `success` is false and `error`/`error_count` describe it.
 ///
 /// Inputs:
-/// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
-/// - `master_privkey_len` -- Length of master_privkey.
-/// - `rotating_privkey` -- Ed25519 rotating private key (32-byte or 64-byte libsodium format).
-/// - `rotating_privkey_len` -- Length of rotating_privkey.
-/// - `ts` -- Unix timestamp for the request.
-///
-/// Outputs:
-/// - `bool` - True if signatures are built successfully, false otherwise.
-/// - `error` - Backing error buffer for the signatures if `success` is false
-/// - `errors_count` - length of the error if `success` is false
-/// - `master_sig` - Master signature
-/// - `rotating_sig` - Rotating signature
+/// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
+/// libsodium).
+/// - `rotating_privkey` / `rotating_privkey_len` -- Ed25519 rotating private key (32 or 64-byte).
+/// - `ts` -- Unix timestamp (seconds) for the request.
 LIBSESSION_EXPORT
-session_pro_backend_master_rotating_signatures
-session_pro_backend_generate_pro_proof_request_build_sigs(
+session_pro_backend_request session_pro_backend_generate_pro_proof_request_build(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
         int64_t ts) NON_NULL_ARG(1, 3);
 
-/// API: session_pro_backend/get_pro_details_request_build_sig
-///
-/// Builds the JSON for a `get_pro_details_request`. Returns false if the keys (32-byte or
-/// 64-byte libsodium format) are incorrectly sized. Using 64-byte libsodium keys is more efficient.
-///
-/// Inputs:
-/// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
-/// - `master_privkey_len` -- Length of master_privkey.
-/// - `ts` -- Unix timestamp for the request.
-/// - `count` -- Amount of historical payments to request
-///
-/// Outputs:
-/// - `bool` -- True if signatures are built successfully, false otherwise.
-/// - `error` -- Backing error buffer for the signatures if `success` is false
-/// - `errors_count` -- length of the error if `success` is false
-/// - `sig` -- The generated signature
-LIBSESSION_EXPORT
-session_pro_backend_signature session_pro_backend_get_pro_details_request_build_sig(
-        const uint8_t* master_privkey, size_t master_privkey_len, int64_t ts, uint32_t count)
-        NON_NULL_ARG(1);
-
-/// API: session_pro_backend/add_pro_payment_request_build
-///
-/// Builds the request to POST for an `add_pro_payment_request`, as a session_pro_backend_request
-/// (endpoint + content_type + opaque data).
-/// Free the returned request with `session_pro_backend_request_free`.
-///
-/// Inputs:
-/// - `request` -- Pointer to the request struct.
-LIBSESSION_EXPORT
-session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
-        const session_pro_backend_add_pro_payment_request* request);
-
-/// API: session_pro_backend/generate_pro_proof_request_build
-///
-/// Builds the request to POST for a `generate_pro_proof_request`, as a session_pro_backend_request
-/// (endpoint + content_type + opaque data).
-/// Free the returned request with `session_pro_backend_request_free`.
-///
-/// Inputs:
-/// - `request` -- Pointer to the request struct.
-LIBSESSION_EXPORT
-session_pro_backend_request session_pro_backend_generate_pro_proof_request_build(
-        const session_pro_backend_generate_pro_proof_request* request);
-
 /// API: session_pro_backend/get_pro_revocations_request_build
 ///
-/// Builds the request to POST for a `get_pro_revocations_request`, as a session_pro_backend_request
-/// (endpoint + content_type + opaque data).
-/// Free the returned request with `session_pro_backend_request_free`.
+/// Builds the get-revocations request to POST, as a session_pro_backend_request (endpoint +
+/// content_type + opaque data). Free it with `session_pro_backend_request_free`.
+///
+/// Inputs:
+/// - `ticket` -- revocation-list ticket to resume from (0 for a full list).
 LIBSESSION_EXPORT
-session_pro_backend_request session_pro_backend_get_pro_revocations_request_build(
-        const session_pro_backend_get_pro_revocations_request* request);
+session_pro_backend_request session_pro_backend_get_pro_revocations_request_build(int64_t ticket);
 
 /// API: session_pro_backend/get_pro_details_request_build
 ///
-/// Builds the request to POST for a `get_pro_details_request`, as a session_pro_backend_request
-/// (endpoint + content_type + opaque data).
-/// Free the returned request with `session_pro_backend_request_free`.
+/// Builds the get-details request to POST, as a session_pro_backend_request (endpoint +
+/// content_type + opaque data). Free it with `session_pro_backend_request_free`. On a key-size
+/// error `success` is false and `error`/`error_count` describe it.
+///
+/// Inputs:
+/// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
+/// libsodium).
+/// - `ts` -- Unix timestamp (seconds) for the request.
+/// - `count` -- number of historical payments to request.
 LIBSESSION_EXPORT
 session_pro_backend_request session_pro_backend_get_pro_details_request_build(
-        const session_pro_backend_get_pro_details_request* request);
+        const uint8_t* master_privkey, size_t master_privkey_len, int64_t ts, uint32_t count)
+        NON_NULL_ARG(1);
 
 /// API: session_pro_backend/pro_proof_response_parse
 ///
@@ -434,47 +303,29 @@ LIBSESSION_EXPORT
 session_pro_backend_get_pro_details_response session_pro_backend_get_pro_details_response_parse(
         const char* json, size_t json_len);
 
-/// API: session_pro_backend/set_payment_refund_requested_request_build_sigs
+/// API: session_pro_backend/set_payment_refund_requested_request_build
 ///
-/// Builds master and rotating signatures for an `set_payment_refund_requested_request`.
-/// Returns false if the keys (32-byte or 64-byte libsodium format) or payment token hash are
-/// incorrectly sized. Using 64-byte libsodium keys is more efficient.
+/// Builds the set-refund-requested request to POST, as a session_pro_backend_request (endpoint +
+/// content_type + opaque data). Free it with `session_pro_backend_request_free`. On a key-size
+/// error `success` is false and `error`/`error_count` describe it.
 ///
 /// Inputs:
-/// - `master_privkey` -- Ed25519 master private key (32-byte or 64-byte libsodium format).
-/// - `master_privkey_len` -- Length of master_privkey.
-/// - `ts` -- Unix timestamp for the request
-/// - `refund_requested_ts` -- Unix timestamp to set as the timestamp that a refund was
-///   requested on this payment
-/// - `payment_tx_provider_code` -- Null-terminated provider code string the payment is coming from
-///   (use a SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* constant)
-/// - `payment_tx_payment_id` -- Opaque payment identifier from the provider. See
-///   `AddProPaymentUserTransaction`
-/// - `payment_tx_payment_id_len` -- Length of the `payment_tx_payment_id` payload
-///
-/// Outputs:
-/// - `bool` -- True if signatures are built successfully, false otherwise.
-/// - `error` -- Backing error buffer for the signatures if `success` is false
-/// - `errors_count` -- length of the error if `success` is false
-/// - `sig` -- The generated signature
+/// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
+/// libsodium).
+/// - `ts` -- Unix timestamp (seconds) for the request.
+/// - `refund_requested_ts` -- Unix timestamp (seconds) to record the refund request at.
+/// - `provider_code` -- null-terminated provider code
+/// (SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*).
+/// - `payment_id` / `payment_id_len` -- opaque provider payment identifier.
 LIBSESSION_EXPORT
-session_pro_backend_signature session_pro_backend_set_payment_refund_requested_request_build_sigs(
+session_pro_backend_request session_pro_backend_set_payment_refund_requested_request_build(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         int64_t ts,
         int64_t refund_requested_ts,
-        const char* payment_tx_provider_code,
-        const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) NON_NULL_ARG(1, 5, 6);
-
-/// API: session_pro_backend/set_payment_refund_requested_request_build
-///
-/// Builds the request to POST for a `set_payment_refund_requested_request`, as a
-/// session_pro_backend_request (endpoint + content_type + opaque data). Free the returned request
-/// with `session_pro_backend_request_free`.
-LIBSESSION_EXPORT
-session_pro_backend_request session_pro_backend_set_payment_refund_requested_request_build(
-        const session_pro_backend_set_payment_refund_requested_request* request);
+        const char* provider_code,
+        const uint8_t* payment_id,
+        size_t payment_id_len) NON_NULL_ARG(1, 5, 6);
 
 /// API: session_pro_backend/set_payment_refund_requested_response_parse
 ///

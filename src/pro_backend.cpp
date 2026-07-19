@@ -173,8 +173,9 @@ namespace {
     }
 
     // Public-key view (bytes [32, 64)) of a normalised 64-byte private key.
-    std::span<const uint8_t> pubkey_of(const cleared_uc64& priv64) {
-        return {priv64.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES};
+    std::span<const uint8_t, 32> pubkey_of(const cleared_uc64& priv64) {
+        return std::span<const uint8_t, 32>(
+                priv64.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
     }
 
     std::string_view payment_id_view(std::span<const uint8_t> payment_id) {
@@ -184,8 +185,8 @@ namespace {
     // --- add-payment (endpoint add_pro_payment) ---
 
     array_uc32 add_payment_hash(
-            std::span<const uint8_t> master_pubkey,
-            std::span<const uint8_t> rotating_pubkey,
+            std::span<const uint8_t, 32> master_pubkey,
+            std::span<const uint8_t, 32> rotating_pubkey,
             std::string_view provider_code,
             std::span<const uint8_t> payment_id) {
         // Must match the add-payment signed-request hash in pro-wire-protocol.md §3.2 (+ §3.5).
@@ -224,12 +225,12 @@ namespace {
     // Serialise an add-payment request body from already-computed fields (shared by the C++
     // add_payment_request and the C ..._request_build wrapper).
     std::string add_payment_body(
-            std::span<const uint8_t> master_pubkey,
-            std::span<const uint8_t> rotating_pubkey,
+            std::span<const uint8_t, 32> master_pubkey,
+            std::span<const uint8_t, 32> rotating_pubkey,
             std::string_view provider_code,
             std::string_view payment_id,
-            std::span<const uint8_t> master_sig,
-            std::span<const uint8_t> rotating_sig) {
+            std::span<const uint8_t, 64> master_sig,
+            std::span<const uint8_t, 64> rotating_sig) {
         return nlohmann::json{
                 {"master_pkey", oxenc::to_hex(master_pubkey)},
                 {"rotating_pkey", oxenc::to_hex(rotating_pubkey)},
@@ -374,8 +375,8 @@ namespace {
     // --- generate-proof (endpoint generate_pro_proof) ---
 
     array_uc32 generate_proof_hash(
-            std::span<const uint8_t> master_pubkey,
-            std::span<const uint8_t> rotating_pubkey,
+            std::span<const uint8_t, 32> master_pubkey,
+            std::span<const uint8_t, 32> rotating_pubkey,
             std::chrono::sys_seconds unix_ts) {
         // Must match the generate-proof signed-request hash in pro-wire-protocol.md §3.1.
         int64_t ts = epoch_seconds(unix_ts);
@@ -407,11 +408,11 @@ namespace {
     }
 
     std::string generate_proof_body(
-            std::span<const uint8_t> master_pubkey,
-            std::span<const uint8_t> rotating_pubkey,
+            std::span<const uint8_t, 32> master_pubkey,
+            std::span<const uint8_t, 32> rotating_pubkey,
             std::chrono::sys_seconds unix_ts,
-            std::span<const uint8_t> master_sig,
-            std::span<const uint8_t> rotating_sig) {
+            std::span<const uint8_t, 64> master_sig,
+            std::span<const uint8_t, 64> rotating_sig) {
         return nlohmann::json{
                 {"master_pkey", oxenc::to_hex(master_pubkey)},
                 {"rotating_pkey", oxenc::to_hex(rotating_pubkey)},
@@ -515,7 +516,7 @@ namespace {
     // --- payment-details / get-pro-details (endpoint get_pro_details) ---
 
     array_uc32 payment_details_hash(
-            std::span<const uint8_t> master_pubkey,
+            std::span<const uint8_t, 32> master_pubkey,
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
         // Must match the get-pro-details signed-request hash in pro-wire-protocol.md §3.4.
@@ -546,8 +547,8 @@ namespace {
     }
 
     std::string payment_details_body(
-            std::span<const uint8_t> master_pubkey,
-            std::span<const uint8_t> master_sig,
+            std::span<const uint8_t, 32> master_pubkey,
+            std::span<const uint8_t, 64> master_sig,
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
         return nlohmann::json{
@@ -681,7 +682,7 @@ namespace {
     // --- refund / set-payment-refund-requested (endpoint set_payment_refund_requested) ---
 
     array_uc32 refund_hash(
-            std::span<const uint8_t> master_pubkey,
+            std::span<const uint8_t, 32> master_pubkey,
             std::chrono::sys_seconds unix_ts,
             std::chrono::sys_seconds refund_requested_at,
             std::string_view provider_code,
@@ -728,12 +729,12 @@ namespace {
     }
 
     std::string refund_body(
-            std::span<const uint8_t> master_pubkey,
+            std::span<const uint8_t, 32> master_pubkey,
             std::chrono::sys_seconds unix_ts,
             std::chrono::sys_seconds refund_requested_at,
             std::string_view provider_code,
             std::string_view payment_id,
-            std::span<const uint8_t> master_sig) {
+            std::span<const uint8_t, 64> master_sig) {
         return nlohmann::json{
                 {"master_pkey", oxenc::to_hex(master_pubkey)},
                 {"ts", epoch_seconds(unix_ts)},
@@ -809,204 +810,90 @@ using namespace session::pro_backend;
 static string8 C_PARSE_ERROR_OUT_OF_MEMORY = STRING8_LIT("Ran out-of-memory creating C response");
 static string8 C_PARSE_ERROR_INVALID_ARGS = STRING8_LIT("One or more C arguments were NULL");
 
-LIBSESSION_C_API session_pro_backend_master_rotating_signatures
-session_pro_backend_add_pro_payment_request_build_sigs(
+// Wrap a freshly-built C++ ProRequest as an owning C session_pro_backend_request: heap-own the
+// ProRequest and point endpoint/content_type/data into it (zero copy). Released by
+// session_pro_backend_request_free.
+static session_pro_backend_request c_own_request(ProRequest&& req) {
+    auto* owned = new ProRequest(std::move(req));
+    session_pro_backend_request result = {};
+    result.internal_ = owned;
+    result.endpoint = owned->endpoint.data();
+    result.content_type = owned->content_type.data();
+    result.data = string8{owned->data.data(), owned->data.size()};
+    result.success = true;
+    return result;
+}
+
+// Fill a session_pro_backend_request's error buffer from a caught exception.
+static void c_request_error(session_pro_backend_request& result, const std::exception& e) {
+    const std::string& error = e.what();
+    result.error_count = snprintf_clamped(
+            result.error,
+            sizeof(result.error),
+            "%.*s",
+            static_cast<int>(error.size()),
+            error.data());
+}
+
+LIBSESSION_C_API session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
-        const char* payment_tx_provider_code,
-        const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) {
-
-    // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
-    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
-    std::span<const uint8_t> payment_tx_payment_id_span(
-            payment_tx_payment_id, payment_tx_payment_id_len);
-
-    session_pro_backend_master_rotating_signatures result = {};
+        const char* provider_code,
+        const uint8_t* payment_id,
+        size_t payment_id_len) {
+    session_pro_backend_request result = {};
     try {
-        auto sigs = add_payment_sigs(
-                master_span, rotating_span, payment_tx_provider_code, payment_tx_payment_id_span);
-        std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
-        std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
-        result.success = true;
+        result = c_own_request(add_payment_request(
+                {master_privkey, master_privkey_len},
+                {rotating_privkey, rotating_privkey_len},
+                provider_code,
+                {payment_id, payment_id_len}));
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        c_request_error(result, e);
     }
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_master_rotating_signatures
-session_pro_backend_generate_pro_proof_request_build_sigs(
+LIBSESSION_C_API session_pro_backend_request session_pro_backend_generate_pro_proof_request_build(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         const uint8_t* rotating_privkey,
         size_t rotating_privkey_len,
         int64_t ts) {
-
-    // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span(master_privkey, master_privkey_len);
-    std::span<const uint8_t> rotating_span(rotating_privkey, rotating_privkey_len);
-    session_pro_backend_master_rotating_signatures result = {};
-    try {
-        auto sigs = pro_proof_sigs(master_span, rotating_span, session::as_sys_seconds(ts));
-        std::memcpy(result.master_sig.data, sigs.master_sig.data(), sigs.master_sig.size());
-        std::memcpy(result.rotating_sig.data, sigs.rotating_sig.data(), sigs.rotating_sig.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
-    }
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_signature
-session_pro_backend_get_pro_details_request_build_sig(
-        const uint8_t* master_privkey, size_t master_privkey_len, int64_t ts, uint32_t count) {
-    // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
-    session_pro_backend_signature result = {};
-    try {
-        auto sig = payment_details_sig(master_span, session::as_sys_seconds(ts), count);
-        std::memcpy(result.sig.data, sig.data(), sig.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
-    }
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
-        const session_pro_backend_add_pro_payment_request* request) {
     session_pro_backend_request result = {};
-    if (!request)
-        return result;
-
     try {
-        result.endpoint = add_payment_endpoint;
-        std::string json = add_payment_body(
-                {request->master_pkey.data, sizeof(request->master_pkey.data)},
-                {request->rotating_pkey.data, sizeof(request->rotating_pkey.data)},
-                {request->payment_tx.provider_code, request->payment_tx.provider_code_count},
-                {request->payment_tx.payment_id, request->payment_tx.payment_id_count},
-                {request->master_sig.data, sizeof(request->master_sig.data)},
-                {request->rotating_sig.data, sizeof(request->rotating_sig.data)});
-        result.content_type = application_json;
-        result.data = session::string8_copy_or_throw(json.data(), json.size());
-        result.success = true;
+        result = c_own_request(pro_proof_request(
+                {master_privkey, master_privkey_len},
+                {rotating_privkey, rotating_privkey_len},
+                session::as_sys_seconds(ts)));
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        c_request_error(result, e);
     }
-
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_request session_pro_backend_generate_pro_proof_request_build(
-        const session_pro_backend_generate_pro_proof_request* request) {
+LIBSESSION_C_API session_pro_backend_request
+session_pro_backend_get_pro_revocations_request_build(int64_t ticket) {
     session_pro_backend_request result = {};
-    if (!request)
-        return result;
-
     try {
-        result.endpoint = generate_proof_endpoint;
-        std::string json = generate_proof_body(
-                {request->master_pkey.data, sizeof(request->master_pkey.data)},
-                {request->rotating_pkey.data, sizeof(request->rotating_pkey.data)},
-                session::as_sys_seconds(request->ts),
-                {request->master_sig.data, sizeof(request->master_sig.data)},
-                {request->rotating_sig.data, sizeof(request->rotating_sig.data)});
-        result.content_type = application_json;
-        result.data = session::string8_copy_or_throw(json.data(), json.size());
-        result.success = true;
+        result = c_own_request(revocations_request(ticket));
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        c_request_error(result, e);
     }
-
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_request session_pro_backend_get_pro_revocations_request_build(
-        const session_pro_backend_get_pro_revocations_request* request) {
-    session_pro_backend_request result = {};
-    if (!request)
-        return result;
-
-    try {
-        result.endpoint = get_pro_revocations_endpoint;
-        std::string json = revocations_request(request->ticket).data;
-        result.content_type = application_json;
-        result.data = session::string8_copy_or_throw(json.data(), json.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
-    }
-
     return result;
 }
 
 LIBSESSION_C_API session_pro_backend_request session_pro_backend_get_pro_details_request_build(
-        const session_pro_backend_get_pro_details_request* request) {
+        const uint8_t* master_privkey, size_t master_privkey_len, int64_t ts, uint32_t count) {
     session_pro_backend_request result = {};
-    if (!request)
-        return result;
-
     try {
-        result.endpoint = get_pro_details_endpoint;
-        std::string json = payment_details_body(
-                {request->master_pkey.data, sizeof(request->master_pkey.data)},
-                {request->master_sig.data, sizeof(request->master_sig.data)},
-                session::as_sys_seconds(request->ts),
-                request->count);
-        result.content_type = application_json;
-        result.data = session::string8_copy_or_throw(json.data(), json.size());
-        result.success = true;
+        result = c_own_request(payment_details_request(
+                {master_privkey, master_privkey_len}, session::as_sys_seconds(ts), count));
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        c_request_error(result, e);
     }
-
     return result;
 }
 
@@ -1225,73 +1112,26 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     return result;
 }
 
-LIBSESSION_C_API
-session_pro_backend_signature session_pro_backend_set_payment_refund_requested_request_build_sigs(
+LIBSESSION_C_API session_pro_backend_request
+session_pro_backend_set_payment_refund_requested_request_build(
         const uint8_t* master_privkey,
         size_t master_privkey_len,
         int64_t ts,
         int64_t refund_requested_ts,
-        const char* payment_tx_provider_code,
-        const uint8_t* payment_tx_payment_id,
-        size_t payment_tx_payment_id_len) {
-    // Convert C inputs to C++ types
-    std::span<const uint8_t> master_span{master_privkey, master_privkey_len};
-    std::chrono::sys_seconds unix_ts = session::as_sys_seconds(ts);
-    std::chrono::sys_seconds refund_requested_at = session::as_sys_seconds(refund_requested_ts);
-    std::span<const uint8_t> payment_tx_payment_id_span(
-            payment_tx_payment_id, payment_tx_payment_id_len);
-
-    session_pro_backend_signature result = {};
-    try {
-        auto sig = refund_sig(
-                master_span,
-                unix_ts,
-                refund_requested_at,
-                payment_tx_provider_code,
-                payment_tx_payment_id_span);
-        std::memcpy(result.sig.data, sig.data(), sig.size());
-        result.success = true;
-    } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
-    }
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_request
-session_pro_backend_set_payment_refund_requested_request_build(
-        const session_pro_backend_set_payment_refund_requested_request* request) {
+        const char* provider_code,
+        const uint8_t* payment_id,
+        size_t payment_id_len) {
     session_pro_backend_request result = {};
-    if (!request)
-        return result;
-
     try {
-        result.endpoint = set_refund_endpoint;
-        std::string json = refund_body(
-                {request->master_pkey.data, sizeof(request->master_pkey.data)},
-                session::as_sys_seconds(request->ts),
-                session::as_sys_seconds(request->refund_requested_ts),
-                {request->payment_tx.provider_code, request->payment_tx.provider_code_count},
-                {request->payment_tx.payment_id, request->payment_tx.payment_id_count},
-                {request->master_sig.data, sizeof(request->master_sig.data)});
-        result.content_type = application_json;
-        result.data = session::string8_copy_or_throw(json.data(), json.size());
-        result.success = true;
+        result = c_own_request(refund_request(
+                {master_privkey, master_privkey_len},
+                session::as_sys_seconds(ts),
+                session::as_sys_seconds(refund_requested_ts),
+                provider_code,
+                {payment_id, payment_id_len}));
     } catch (const std::exception& e) {
-        const std::string& error = e.what();
-        result.error_count = snprintf_clamped(
-                result.error,
-                sizeof(result.error_count),
-                "%.*s",
-                static_cast<int>(error.size()),
-                error.data());
+        c_request_error(result, e);
     }
-
     return result;
 }
 
@@ -1346,7 +1186,8 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
 
 LIBSESSION_C_API void session_pro_backend_request_free(session_pro_backend_request* request) {
     if (request) {
-        free(request->data.data);
+        if (request->internal_)
+            delete static_cast<ProRequest*>(request->internal_);
         *request = {};
     }
 }
