@@ -82,38 +82,15 @@ constexpr std::string_view URL = "https://pro.session.codes";
 /// account's root Ed25519 seed.
 constexpr auto pro_subkey_domain = "SessionProRandom"_bytes;
 
-enum struct AddProPaymentResponseStatus {
-    /// Payment was claimed and the pro proof was successfully generated
-    Success = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_SUCCESS,
-
-    /// Backend encountered an error when attempting to claim the payment
-    Error = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ERROR,
-
-    /// Request JSON failed to be parsed correctly, payload was malformed or missing values
-    ParseError = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_PARSE_ERROR,
-
-    /// Payment is already claimed
-    AlreadyRedeemed = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ALREADY_REDEEMED,
-
-    /// Payment transaction attempted to claim a payment that the backend does not have. Either the
-    /// payment doesn't exist or the backend has not witnessed the payment from the provider yet.
-    UnknownPayment = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_UNKNOWN_PAYMENT,
-};
-
 struct Response {
-    /// Status code for the response, maps to a specific enum for some requests otherwise it uses 0
-    /// for success, other values indicate errors. For the following responses, the status code maps
-    /// to
-    ///
-    ///  | Request            | Enum
-    ///  | AddProPayment      | AddProPaymentResponseStatus
-    ///  | Everything else ...| SESSION_PRO_BACKEND_STATUS_SUCCESS or
-    ///                         SESSION_PRO_BACKEND_STATUS_ERROR
-    std::uint32_t status;
-
-    /// List of parsing or processing errors. Empty if there are no parsing errors, if there are
-    /// errors, the parse may be partially complete, always check the errors before proceeding.
+    /// Parsing or processing errors, from the backend or from libsession while parsing. Empty on
+    /// success; may hold several messages (one request can fail multiple checks at once). On
+    /// failure the parse may be partial, so always check `success()`/`errors` before using other
+    /// fields.
     std::vector<std::string> errors;
+
+    /// True iff the response came back without any errors.
+    [[nodiscard]] bool success() const { return errors.empty(); }
 };
 
 struct MasterRotatingSignatures {
@@ -188,14 +165,16 @@ ProRequest add_payment_request(
 
 /// Common base for the responses that carry a freshly-issued Session Pro proof: both add-payment
 /// and generate-proof reply with exactly a proof. `AddProPaymentResponse` and
-/// `GenerateProProofResponse` are distinct, currently empty types (each parsed by its own free
-/// function below) that share every field today but can diverge independently later. `proof` is the
-/// raw parse result, convertible to a config::ProProof.
+/// `GenerateProProofResponse` are distinct types (each parsed by its own free function below) that
+/// share `proof` today but can diverge independently. `proof` is the raw parse result, convertible
+/// to a config::ProProof.
 struct ProProofResponse : Response {
     ProProof proof;
 };
 
-/// Response to `add_payment_request` (endpoint `add_pro_payment`).
+/// Response to `add_payment_request` (endpoint `add_pro_payment`). On failure the reason(s) are in
+/// `errors` (the backend sends a human-readable message, including for already-redeemed /
+/// unknown-payment); check `success()`.
 struct AddProPaymentResponse : ProProofResponse {};
 
 /// Response to `pro_proof_request` (endpoint `generate_pro_proof`).
