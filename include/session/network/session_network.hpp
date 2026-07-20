@@ -86,7 +86,9 @@ class Network : public std::enable_shared_from_this<Network> {
     /// - 'ignore_strike_count' - [in] flag indicating whether node strikes should be ignored when
     /// retrieving the swarm.
     /// - 'callback' - [in] callback to be called with the retrieved swarm (in the case of an error
-    /// the callback will be called with an empty list).
+    ///   the callback will be called with an empty list).  The order of items in the swarm vector
+    ///   will be shuffled (but may prioritize some nodes over others depend on observed past
+    ///   behaviour; see SnodePool::get_swarm).
     virtual void get_swarm(
             session::network::x25519_pubkey swarm_pubkey,
             bool ignore_strike_count,
