@@ -328,18 +328,17 @@ ProRequest add_payment_request(
 namespace {
     // Shared parse for the proof-carrying responses (add-payment and generate-proof both reply with
     // exactly a proof); fills the common ProProofResponse base of whichever derived response is
-    // passed.
+    // passed. On any failure `result.errors` is populated (the backend sends the human-readable
+    // reason there, including for already-redeemed / unknown-payment).
     void fill_proof_response(std::string_view json, ProProofResponse& result) {
         // Parse basics
         nlohmann::json j = json_parse(json, result.errors);
-        result.status = json_require<uint8_t>(j, "status", result.errors);
-        if (result.errors.size()) {
-            result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+        uint32_t status = json_require<uint8_t>(j, "status", result.errors);
+        if (result.errors.size())
             return;
-        }
 
         // Parse errors
-        if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+        if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
             parse_json_response_errors(j, result.errors);
             return;
         }
@@ -462,14 +461,12 @@ GetProRevocationsResponse parse_revocations(std::string_view json) {
     // Parse basics
     GetProRevocationsResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
-    result.status = json_require<uint8_t>(j, "status", result.errors);
-    if (result.errors.size()) {
-        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+    uint32_t status = json_require<uint8_t>(j, "status", result.errors);
+    if (result.errors.size())
         return result;
-    }
 
     // Parse errors
-    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
         parse_json_response_errors(j, result.errors);
         return result;
     }
@@ -582,14 +579,12 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
     // Parse basics
     GetProDetailsResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
-    result.status = json_require<uint8_t>(j, "status", result.errors);
-    if (result.errors.size()) {
-        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+    uint32_t status = json_require<uint8_t>(j, "status", result.errors);
+    if (result.errors.size())
         return result;
-    }
 
     // Parse errors
-    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
         parse_json_response_errors(j, result.errors);
         return result;
     }
@@ -781,14 +776,12 @@ SetPaymentRefundRequestedResponse parse_refund(std::string_view json) {
     // Parse basics
     SetPaymentRefundRequestedResponse result = {};
     nlohmann::json j = json_parse(json, result.errors);
-    result.status = json_require<uint8_t>(j, "status", result.errors);
-    if (result.errors.size()) {
-        result.status = SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR;
+    uint32_t status = json_require<uint8_t>(j, "status", result.errors);
+    if (result.errors.size())
         return result;
-    }
 
     // Parse errors
-    if (result.status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
+    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
         parse_json_response_errors(j, result.errors);
         return result;
     }
@@ -904,7 +897,6 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
 
     session_pro_backend_pro_proof_response result = {};
     if (!json) {
-        result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
         result.header.errors_count = 1;
         return result;
@@ -925,7 +917,6 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
             arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.status = 1;
             result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
             result.header.errors_count = 1;
             return result;
@@ -938,7 +929,6 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
     // Note that a response error and success case folds into the same code path. A success and
     // error response returns the same struct just with different fields populated.
-    result.header.status = cpp.status;
     result.proof.version = cpp.proof.version;
     result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_at);
     std::memcpy(
@@ -966,7 +956,6 @@ LIBSESSION_C_API session_pro_backend_get_pro_revocations_response
 session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t json_len) {
     session_pro_backend_get_pro_revocations_response result = {};
     if (!json) {
-        result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
         result.header.errors_count = 1;
         return result;
@@ -990,7 +979,6 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
             arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.status = 1;
             result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
             result.header.errors_count = 1;
             return result;
@@ -1001,7 +989,6 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     }
 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
-    result.header.status = cpp.status;
     result.ticket = cpp.ticket;
     result.retry_in = cpp.retry_in.count();
     result.retain_for = cpp.retain_for.count();
@@ -1033,7 +1020,6 @@ LIBSESSION_C_API session_pro_backend_get_pro_details_response
 session_pro_backend_get_pro_details_response_parse(const char* json, size_t json_len) {
     session_pro_backend_get_pro_details_response result = {};
     if (!json) {
-        result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
         result.header.errors_count = 1;
         return result;
@@ -1053,7 +1039,6 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
             arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.status = 1;
             result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
             result.header.errors_count = 1;
             return result;
@@ -1066,7 +1051,6 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     using session::epoch_seconds;
 
     // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
-    result.header.status = cpp.status;
     result.status_count =
             snprintf_clamped(result.status, sizeof(result.status), "%s", cpp.user_status.c_str());
     result.error_report = cpp.error_report;
@@ -1141,7 +1125,6 @@ LIBSESSION_C_API session_pro_backend_set_payment_refund_requested_response
 session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len) {
     session_pro_backend_set_payment_refund_requested_response result = {};
     if (!json) {
-        result.header.status = 1;
         result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
         result.header.errors_count = 1;
         return result;
@@ -1160,7 +1143,6 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
             arena.data = static_cast<uint8_t*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.status = 1;
             result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
             result.header.errors_count = 1;
             return result;
@@ -1171,7 +1153,6 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
     }
 
     // Copy to C struct
-    result.header.status = cpp.status;
     result.updated = cpp.updated;
 
     // Copy errors

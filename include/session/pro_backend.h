@@ -80,23 +80,10 @@ typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT,
 } SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT;
 
-/// Must match the backend's add-pro-payment response status enum (session-pro-backend server.py).
-typedef enum SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS {
-    SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_SUCCESS =
-            SESSION_PRO_BACKEND_STATUS_SUCCESS,
-    SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_PARSE_ERROR =
-            SESSION_PRO_BACKEND_STATUS_PARSE_ERROR,
-    SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ERROR =
-            SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR,
-
-    SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ALREADY_REDEEMED = 100,
-    SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_UNKNOWN_PAYMENT = 101,
-} SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS;
-
 typedef struct session_pro_backend_response_header session_pro_backend_response_header;
 struct session_pro_backend_response_header {
-    uint32_t status;
-    /// Array of error messages (NULL if no errors), with errors_count elements
+    /// Error messages (NULL if none), with errors_count elements. The response succeeded iff
+    /// errors_count == 0; on failure the messages carry the reason(s) (backend- or parse-supplied).
     string8* errors;
     size_t errors_count;
     uint8_t* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
