@@ -40,31 +40,27 @@ TEST_CASE("Pro", "[config][pro]") {
         std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
     }
 
-    // Generate and write the hashes that are signed by the faux pro backend into the proof
+    // Sign the proof with the faux pro backend key (Ed25519 over the message directly). The C and
+    // C++ proof representations above mirror each other, so a single message signs both.
     {
-        // Generate the hashes
         static_assert(crypto_sign_ed25519_BYTES == pro_cpp.proof.sig.max_size());
-        std::array<uint8_t, 32> hash_to_sign_cpp = pro_cpp.proof.hash();
-        bytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
+        auto msg_to_sign = pro_cpp.proof.signed_message();
 
-        static_assert(hash_to_sign_cpp.size() == sizeof(hash_to_sign));
-        CHECK(std::memcmp(hash_to_sign_cpp.data(), hash_to_sign.data, hash_to_sign_cpp.size()) ==
-              0);
-
-        // Write the signature into the proof
+        // Write the signature into the C++ proof
         int sig_result = crypto_sign_ed25519_detached(
                 pro_cpp.proof.sig.data(),
                 nullptr,
-                hash_to_sign_cpp.data(),
-                hash_to_sign_cpp.size(),
+                msg_to_sign.data(),
+                msg_to_sign.size(),
                 signing_sk.data());
         CHECK(sig_result == 0);
 
+        // ... and into the C proof
         sig_result = crypto_sign_ed25519_detached(
                 pro.proof.sig.data,
                 nullptr,
-                hash_to_sign.data,
-                sizeof(hash_to_sign.data),
+                msg_to_sign.data(),
+                msg_to_sign.size(),
                 signing_sk.data());
         CHECK(sig_result == 0);
     }

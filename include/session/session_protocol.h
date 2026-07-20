@@ -31,16 +31,6 @@ enum {
     SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING = 160,
 };
 
-// clang-format off
-/// Session Pro personalisation bytes for hashing; must match the personalisation strings in
-/// pro-wire-protocol.md §2 (proof) and §3 (signed requests).
-static const char SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION[]               = "ProGenerateProof";
-static const char SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION[]                  = "ProProof_v0_____";
-static const char SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION[]              = "ProAddPayment___";
-static const char SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION[] = "ProSetRefundReq_";
-static const char SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION[]              = "ProGetProDetReq_";
-// clang-format on
-
 /// Bundle of hard-coded strings that an implementing application may use for various scenarios.
 typedef struct session_protocol_strings session_protocol_strings;
 struct session_protocol_strings {
@@ -262,20 +252,6 @@ LIBSESSION_EXPORT void session_protocol_pro_message_bitset_set(
 /// Unset the feature flag on the bitset
 LIBSESSION_EXPORT void session_protocol_pro_message_bitset_unset(
         session_protocol_pro_message_bitset* value, SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features);
-
-/// API: session_protocol/session_protocol_pro_proof_hash
-///
-/// Generate the 32 byte hash that is to be signed by the rotating key or Session Pro Backend key to
-/// embed in the envelope or proof respectively which other clients use to authenticate the validity
-/// of a proof.
-///
-/// Inputs:
-/// - `proof` -- Proof to calculate the hash from
-///
-/// Outputs:
-/// - `bytes32` -- The 32 byte hash calculated from the proof
-LIBSESSION_EXPORT bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof)
-        NON_NULL_ARG(1);
 
 /// API: session_protocol/session_protocol_pro_proof_verify_signature
 ///

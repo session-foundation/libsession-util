@@ -54,6 +54,20 @@
 
 namespace session {
 
+// Session Pro 16-byte signing domain prefixes; each prefixes the Ed25519-signed message for its
+// endpoint (pro-wire-protocol.md §2 proof, §3 signed requests). ASCII, `_`-right-padded to 16
+// bytes (formerly the BLAKE2b personalisation, back when messages were pre-hashed).
+inline constexpr std::string_view GENERATE_PROOF_DOMAIN = "ProGenerateProof";
+inline constexpr std::string_view BUILD_PROOF_DOMAIN = "ProProof_v0_____";
+inline constexpr std::string_view ADD_PRO_PAYMENT_DOMAIN = "ProAddPayment___";
+inline constexpr std::string_view SET_PAYMENT_REFUND_REQUESTED_DOMAIN = "ProSetRefundReq_";
+inline constexpr std::string_view GET_PRO_DETAILS_DOMAIN = "ProGetProDetReq_";
+static_assert(GENERATE_PROOF_DOMAIN.size() == 16);
+static_assert(BUILD_PROOF_DOMAIN.size() == 16);
+static_assert(ADD_PRO_PAYMENT_DOMAIN.size() == 16);
+static_assert(SET_PAYMENT_REFUND_REQUESTED_DOMAIN.size() == 16);
+static_assert(GET_PRO_DETAILS_DOMAIN.size() == 16);
+
 enum ProProofVersion { ProProofVersion_v0 };
 
 enum class ProStatus {
@@ -162,10 +176,12 @@ class ProProof {
             sys_seconds unix_ts,
             const std::optional<ProSignedMessage>& signed_msg);
 
-    /// API: pro/Proof::hash
+    /// API: pro/Proof::signed_message
     ///
-    /// Create a 32-byte hash from the proof. This hash is the payload that is signed in the proof.
-    array_uc32 hash() const;
+    /// Build the exact byte string that the backend signs to produce this proof's `sig`, and that
+    /// verification reconstructs to check it (pro-wire-protocol.md §2, per §1.1). The message is
+    /// Ed25519-signed directly — there is no pre-hash.
+    std::vector<unsigned char> signed_message() const;
 
     bool operator==(const ProProof& other) const {
         return version == other.version && revocation_tag == other.revocation_tag &&
@@ -639,8 +655,4 @@ DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
         sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey);
-
-/// Initialiser the blake2b hashing context to generate 32 byte hashes for Session Pro features.
-void make_blake2b32_hasher(
-        struct crypto_generichash_blake2b_state* hasher, std::string_view personalization);
 }  // namespace session

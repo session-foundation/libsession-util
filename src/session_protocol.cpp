@@ -3,7 +3,6 @@
 #include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
 #include <simdutf.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
@@ -16,27 +15,8 @@
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
+#include "pro_message.hpp"
 #include "session/export.h"
-
-static_assert(
-        sizeof(SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION) - 1 ==
-        crypto_generichash_blake2b_PERSONALBYTES);
-
-static_assert(
-        sizeof(SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION) - 1 ==
-        crypto_generichash_blake2b_PERSONALBYTES);
-
-static_assert(
-        sizeof(SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION) - 1 ==
-        crypto_generichash_blake2b_PERSONALBYTES);
-
-static_assert(
-        sizeof(SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION) - 1 ==
-        crypto_generichash_blake2b_PERSONALBYTES);
-
-static_assert(
-        sizeof(SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION) - 1 ==
-        crypto_generichash_blake2b_PERSONALBYTES);
 
 // clang-format off
 const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
@@ -69,43 +49,16 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
 // clang-format on
 
 namespace {
-session::array_uc32 proof_hash_internal(
+std::vector<unsigned char> proof_signed_message(
         std::span<const std::uint8_t> revocation_tag,
         std::span<const std::uint8_t> rotating_pubkey,
         std::int64_t expiry_ts) {
 
-    // This must match the Pro proof signed digest in pro-wire-protocol.md §2. The proof version is
-    // NOT hashed as a byte; it selects the personalisation (v0 -> "ProProof_v0_____"), and that
-    // choice of personalisation is what binds the version into the signature.
-    session::array_uc32 result = {};
-    crypto_generichash_blake2b_state state = {};
-    session::make_blake2b32_hasher(
-            &state,
-            {SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION,
-             sizeof(SESSION_PROTOCOL_BUILD_PROOF_HASH_PERSONALISATION) - 1});
-    crypto_generichash_blake2b_update(&state, revocation_tag.data(), revocation_tag.size());
-    crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
-    oxenc::host_to_little_inplace(expiry_ts);
-    crypto_generichash_blake2b_update(
-            &state, reinterpret_cast<uint8_t*>(&expiry_ts), sizeof(expiry_ts));
-    crypto_generichash_blake2b_final(&state, result.data(), result.size());
-    return result;
-}
-
-bool proof_verify_signature_internal(
-        std::span<const std::uint8_t> hash,
-        std::span<const std::uint8_t> sig,
-        std::span<const std::uint8_t> verify_pubkey) {
-    // The C/C++ interface verifies that the payloads are the correct size using the type system so
-    // only need asserts here.
-    assert(hash.size() == 32);
-    assert(sig.size() == crypto_sign_ed25519_BYTES);
-    assert(verify_pubkey.size() == crypto_sign_ed25519_PUBLICKEYBYTES);
-
-    int verify_result = crypto_sign_ed25519_verify_detached(
-            sig.data(), hash.data(), hash.size(), verify_pubkey.data());
-    bool result = verify_result == 0;
-    return result;
+    // This must match the Pro proof signed message in pro-wire-protocol.md §2 (built per §1.1). The
+    // proof version is NOT part of the message; it selects the 16-byte domain prefix (v0 ->
+    // "ProProof_v0_____"), and that choice of prefix is what binds the version into the signature.
+    return session::pro::signed_message(
+            session::BUILD_PROOF_DOMAIN, revocation_tag, rotating_pubkey, expiry_ts);
 }
 
 bool proof_verify_message_internal(
@@ -185,8 +138,8 @@ bool ProProof::verify_signature(const std::span<const uint8_t>& verify_pubkey) c
                 "Invalid verify_pubkey: Must be 32 byte Ed25519 public key (was: {})",
                 verify_pubkey.size())};
 
-    array_uc32 hash_to_sign = hash();
-    bool result = proof_verify_signature_internal(hash_to_sign, sig, verify_pubkey);
+    auto msg = proof_signed_message(revocation_tag, rotating_pubkey, epoch_seconds(expiry_at));
+    bool result = proof_verify_message_internal(verify_pubkey, sig, msg);
     return result;
 }
 
@@ -224,10 +177,8 @@ ProStatus ProProof::status(
     return result;
 }
 
-array_uc32 ProProof::hash() const {
-    array_uc32 result =
-            proof_hash_internal(revocation_tag, rotating_pubkey, epoch_seconds(expiry_at));
-    return result;
+std::vector<unsigned char> ProProof::signed_message() const {
+    return proof_signed_message(revocation_tag, rotating_pubkey, epoch_seconds(expiry_at));
 }
 
 void ProProfileBitset::set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
@@ -1120,20 +1071,6 @@ DecodedCommunityMessage decode_for_community(
 
     return result;
 }
-
-void make_blake2b32_hasher(
-        crypto_generichash_blake2b_state* hasher, std::string_view personalization) {
-    assert(personalization.data() == nullptr ||
-           (personalization.data() &&
-            personalization.size() == crypto_generichash_blake2b_PERSONALBYTES));
-    crypto_generichash_blake2b_init_salt_personal(
-            hasher,
-            /*key*/ nullptr,
-            0,
-            32,
-            /*salt*/ nullptr,
-            reinterpret_cast<const unsigned char*>(personalization.data()));
-}
 }  // namespace session
 
 using namespace session;
@@ -1186,14 +1123,6 @@ LIBSESSION_C_API void session_protocol_pro_message_bitset_unset(
     value->data &= ~(1ULL << features);
 }
 
-LIBSESSION_C_API bytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
-    bytes32 result = {};
-    session::array_uc32 hash = proof_hash_internal(
-            proof->revocation_tag.data, proof->rotating_pubkey.data, proof->expiry_ts);
-    std::memcpy(result.data, hash.data(), hash.size());
-    return result;
-}
-
 LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
         session_protocol_pro_proof const* proof,
         uint8_t const* verify_pubkey,
@@ -1201,9 +1130,9 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
     if (verify_pubkey_len != crypto_sign_ed25519_PUBLICKEYBYTES)
         return false;
     auto verify_pubkey_span = std::span<const std::uint8_t>(verify_pubkey, verify_pubkey_len);
-    session::array_uc32 hash = proof_hash_internal(
+    auto msg = proof_signed_message(
             proof->revocation_tag.data, proof->rotating_pubkey.data, proof->expiry_ts);
-    bool result = proof_verify_signature_internal(hash, proof->sig.data, verify_pubkey_span);
+    bool result = proof_verify_message_internal(verify_pubkey_span, proof->sig.data, msg);
     return result;
 }
 

@@ -1,9 +1,7 @@
 #include <fmt/core.h>
-#include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/export.h>
 #include <session/pro_backend.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <chrono>
@@ -13,6 +11,9 @@
 #include <session/session_encrypt.hpp>
 #include <session/sodium_array.hpp>
 #include <session/types.hpp>
+#include <session/util.hpp>
+
+#include "pro_message.hpp"
 
 namespace {
 const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
@@ -160,33 +161,21 @@ namespace {
                 priv64.data() + crypto_sign_ed25519_SEEDBYTES, crypto_sign_ed25519_PUBLICKEYBYTES);
     }
 
-    std::string_view payment_id_view(std::span<const uint8_t> payment_id) {
-        return {reinterpret_cast<const char*>(payment_id.data()), payment_id.size()};
-    }
-
     // --- add-payment (endpoint add_pro_payment) ---
 
-    array_uc32 add_payment_hash(
+    std::vector<unsigned char> add_payment_message(
             std::span<const uint8_t, 32> master_pubkey,
             std::span<const uint8_t, 32> rotating_pubkey,
             std::string_view provider_code,
             std::span<const uint8_t> payment_id) {
-        // Must match the add-payment signed-request hash in pro-wire-protocol.md §3.2 (+ §3.5).
-        array_uc32 hash = {};
-        crypto_generichash_blake2b_state state = {};
-        make_blake2b32_hasher(
-                &state,
-                {SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION,
-                 sizeof(SESSION_PROTOCOL_ADD_PRO_PAYMENT_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
-        crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
-        crypto_generichash_blake2b_update(
-                &state,
-                reinterpret_cast<const uint8_t*>(provider_code.data()),
-                provider_code.size());
-        crypto_generichash_blake2b_update(&state, payment_id.data(), payment_id.size());
-        crypto_generichash_blake2b_final(&state, hash.data(), hash.size());
-        return hash;
+        // Must match the add-payment signed-request message in pro-wire-protocol.md §3.2
+        // (+ §3.5), built per §1.1.
+        return session::pro::signed_message(
+                session::ADD_PRO_PAYMENT_DOMAIN,
+                master_pubkey,
+                rotating_pubkey,
+                provider_code,
+                to_string_view(payment_id));
     }
 
     MasterRotatingSignatures add_payment_sign(
@@ -194,13 +183,13 @@ namespace {
             const cleared_uc64& rotating,
             std::string_view provider_code,
             std::span<const uint8_t> payment_id) {
-        auto hash =
-                add_payment_hash(pubkey_of(master), pubkey_of(rotating), provider_code, payment_id);
+        auto msg = add_payment_message(
+                pubkey_of(master), pubkey_of(rotating), provider_code, payment_id);
         MasterRotatingSignatures result = {};
         crypto_sign_ed25519_detached(
-                result.master_sig.data(), nullptr, hash.data(), hash.size(), master.data());
+                result.master_sig.data(), nullptr, msg.data(), msg.size(), master.data());
         crypto_sign_ed25519_detached(
-                result.rotating_sig.data(), nullptr, hash.data(), hash.size(), rotating.data());
+                result.rotating_sig.data(), nullptr, msg.data(), msg.size(), rotating.data());
         return result;
     }
 
@@ -302,7 +291,7 @@ ProRequest add_payment_request(
                     pubkey_of(master),
                     pubkey_of(rotating),
                     provider_code,
-                    payment_id_view(payment_id),
+                    to_string_view(payment_id),
                     sigs.master_sig,
                     sigs.rotating_sig)};
 }
@@ -396,36 +385,29 @@ namespace {
 
     // --- generate-proof (endpoint generate_pro_proof) ---
 
-    array_uc32 generate_proof_hash(
+    std::vector<unsigned char> generate_proof_message(
             std::span<const uint8_t, 32> master_pubkey,
             std::span<const uint8_t, 32> rotating_pubkey,
             std::chrono::sys_seconds unix_ts) {
-        // Must match the generate-proof signed-request hash in pro-wire-protocol.md §3.1.
-        int64_t ts = epoch_seconds(unix_ts);
-        array_uc32 hash = {};
-        crypto_generichash_blake2b_state state = {};
-        make_blake2b32_hasher(
-                &state,
-                {SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION,
-                 sizeof(SESSION_PROTOCOL_GENERATE_PROOF_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
-        crypto_generichash_blake2b_update(&state, rotating_pubkey.data(), rotating_pubkey.size());
-        oxenc::host_to_little_inplace(ts);
-        crypto_generichash_blake2b_update(&state, reinterpret_cast<uint8_t*>(&ts), sizeof(ts));
-        crypto_generichash_blake2b_final(&state, hash.data(), hash.size());
-        return hash;
+        // Must match the generate-proof signed-request message in pro-wire-protocol.md §3.1,
+        // built per §1.1.
+        return session::pro::signed_message(
+                session::GENERATE_PROOF_DOMAIN,
+                master_pubkey,
+                rotating_pubkey,
+                epoch_seconds(unix_ts));
     }
 
     MasterRotatingSignatures generate_proof_sign(
             const cleared_uc64& master,
             const cleared_uc64& rotating,
             std::chrono::sys_seconds unix_ts) {
-        auto hash = generate_proof_hash(pubkey_of(master), pubkey_of(rotating), unix_ts);
+        auto msg = generate_proof_message(pubkey_of(master), pubkey_of(rotating), unix_ts);
         MasterRotatingSignatures result = {};
         crypto_sign_ed25519_detached(
-                result.master_sig.data(), nullptr, hash.data(), hash.size(), master.data());
+                result.master_sig.data(), nullptr, msg.data(), msg.size(), master.data());
         crypto_sign_ed25519_detached(
-                result.rotating_sig.data(), nullptr, hash.data(), hash.size(), rotating.data());
+                result.rotating_sig.data(), nullptr, msg.data(), msg.size(), rotating.data());
         return result;
     }
 
@@ -526,34 +508,21 @@ namespace {
 
     // --- payment-details / get-pro-details (endpoint get_pro_details) ---
 
-    array_uc32 payment_details_hash(
+    std::vector<unsigned char> payment_details_message(
             std::span<const uint8_t, 32> master_pubkey,
             std::chrono::sys_seconds unix_ts,
-            uint32_t count) {
-        // Must match the get-pro-details signed-request hash in pro-wire-protocol.md §3.4.
-        int64_t ts = epoch_seconds(unix_ts);
-        array_uc32 hash = {};
-        crypto_generichash_blake2b_state state = {};
-        make_blake2b32_hasher(
-                &state,
-                {SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION,
-                 sizeof(SESSION_PROTOCOL_GET_PRO_DETAILS_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
-        oxenc::host_to_little_inplace(ts);
-        oxenc::host_to_little_inplace(count);
-        crypto_generichash_blake2b_update(
-                &state, reinterpret_cast<unsigned char*>(&ts), sizeof(ts));
-        crypto_generichash_blake2b_update(
-                &state, reinterpret_cast<unsigned char*>(&count), sizeof(count));
-        crypto_generichash_blake2b_final(&state, hash.data(), hash.size());
-        return hash;
+            int64_t count) {
+        // Must match the get-pro-details signed-request message in pro-wire-protocol.md §3.4,
+        // built per §1.1. `count` is a signed integer (a decimal-ASCII -1 requests "all").
+        return session::pro::signed_message(
+                session::GET_PRO_DETAILS_DOMAIN, master_pubkey, epoch_seconds(unix_ts), count);
     }
 
     array_uc64 payment_details_sign(
             const cleared_uc64& master, std::chrono::sys_seconds unix_ts, uint32_t count) {
-        auto hash = payment_details_hash(pubkey_of(master), unix_ts, count);
+        auto msg = payment_details_message(pubkey_of(master), unix_ts, count);
         array_uc64 sig = {};
-        crypto_sign_ed25519_detached(sig.data(), nullptr, hash.data(), hash.size(), master.data());
+        crypto_sign_ed25519_detached(sig.data(), nullptr, msg.data(), msg.size(), master.data());
         return sig;
     }
 
@@ -684,38 +653,21 @@ namespace {
 
     // --- refund / set-payment-refund-requested (endpoint set_payment_refund_requested) ---
 
-    array_uc32 refund_hash(
+    std::vector<unsigned char> refund_message(
             std::span<const uint8_t, 32> master_pubkey,
             std::chrono::sys_seconds unix_ts,
             std::chrono::sys_seconds refund_requested_at,
             std::string_view provider_code,
             std::span<const uint8_t> payment_id) {
-        // Must match the set-payment-refund-requested signed-request hash in pro-wire-protocol.md
-        // §3.3 (+ §3.5 for payment_id).
-        int64_t ts = epoch_seconds(unix_ts);
-        int64_t refund_requested_ts = epoch_seconds(refund_requested_at);
-        array_uc32 hash = {};
-        crypto_generichash_blake2b_state state = {};
-        make_blake2b32_hasher(
-                &state,
-                {SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION,
-                 sizeof(SESSION_PROTOCOL_SET_PAYMENT_REFUND_REQUESTED_HASH_PERSONALISATION) - 1});
-        crypto_generichash_blake2b_update(&state, master_pubkey.data(), master_pubkey.size());
-        oxenc::host_to_little_inplace(ts);
-        oxenc::host_to_little_inplace(refund_requested_ts);
-        crypto_generichash_blake2b_update(
-                &state, reinterpret_cast<const uint8_t*>(&ts), sizeof(ts));
-        crypto_generichash_blake2b_update(
-                &state,
-                reinterpret_cast<const uint8_t*>(&refund_requested_ts),
-                sizeof(refund_requested_ts));
-        crypto_generichash_blake2b_update(
-                &state,
-                reinterpret_cast<const uint8_t*>(provider_code.data()),
-                provider_code.size());
-        crypto_generichash_blake2b_update(&state, payment_id.data(), payment_id.size());
-        crypto_generichash_blake2b_final(&state, hash.data(), hash.size());
-        return hash;
+        // Must match the set-payment-refund-requested signed-request message in
+        // pro-wire-protocol.md §3.3 (+ §3.5 for payment_id), built per §1.1.
+        return session::pro::signed_message(
+                session::SET_PAYMENT_REFUND_REQUESTED_DOMAIN,
+                master_pubkey,
+                epoch_seconds(unix_ts),
+                epoch_seconds(refund_requested_at),
+                provider_code,
+                to_string_view(payment_id));
     }
 
     array_uc64 refund_sign(
@@ -724,10 +676,10 @@ namespace {
             std::chrono::sys_seconds refund_requested_at,
             std::string_view provider_code,
             std::span<const uint8_t> payment_id) {
-        auto hash = refund_hash(
+        auto msg = refund_message(
                 pubkey_of(master), unix_ts, refund_requested_at, provider_code, payment_id);
         array_uc64 sig = {};
-        crypto_sign_ed25519_detached(sig.data(), nullptr, hash.data(), hash.size(), master.data());
+        crypto_sign_ed25519_detached(sig.data(), nullptr, msg.data(), msg.size(), master.data());
         return sig;
     }
 
@@ -774,7 +726,7 @@ ProRequest refund_request(
                     unix_ts,
                     refund_requested_at,
                     provider_code,
-                    payment_id_view(payment_id),
+                    to_string_view(payment_id),
                     sig)};
 }
 
