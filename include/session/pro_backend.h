@@ -11,13 +11,6 @@
 extern "C" {
 #endif
 
-/// Response status codes; must match the backend's status enum (session-pro-backend server.py).
-enum {
-    SESSION_PRO_BACKEND_STATUS_SUCCESS = 0,
-    SESSION_PRO_BACKEND_STATUS_GENERIC_ERROR = 1,
-    SESSION_PRO_BACKEND_STATUS_PARSE_ERROR = 2,
-};
-
 /// Canonical payment-provider `code` strings — the value transmitted on the wire and folded into
 /// the add-payment / set-refund signed hashes (spec §1). Reference these constants rather than
 /// hardcoding the slug so a sent code cannot drift from what libsession hashes/parses. Unknown
@@ -80,12 +73,27 @@ typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT,
 } SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT;
 
+/// Response outcome (wire `status`, spec §5). CLOSED/exhaustive: the backend will never add a
+/// value, so an unrecognized wire status is reported as a protocol error (RESPONSE_STATUS_ERROR +
+/// error_code "invalid_response"). Mirrors C++ session::pro_backend::ResponseStatus.
+typedef enum SESSION_PRO_BACKEND_RESPONSE_STATUS {
+    SESSION_PRO_BACKEND_RESPONSE_STATUS_OK,     ///< Success; the response's payload fields are set.
+    SESSION_PRO_BACKEND_RESPONSE_STATUS_FAIL,   ///< Rejected on client input / a precondition.
+    SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR,  ///< Backend fault; the same request may succeed
+                                                ///< later.
+} SESSION_PRO_BACKEND_RESPONSE_STATUS;
+
 typedef struct session_pro_backend_response_header session_pro_backend_response_header;
 struct session_pro_backend_response_header {
-    /// Error messages (NULL if none), with errors_count elements. The response succeeded iff
-    /// errors_count == 0; on failure the messages carry the reason(s) (backend- or parse-supplied).
-    string8* errors;
-    size_t errors_count;
+    /// Outcome category. Success iff `status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK`.
+    SESSION_PRO_BACKEND_RESPONSE_STATUS status;
+    /// On non-OK, the machine-readable outcome slug (spec §5.1); {NULL, 0} on success. Opaque and
+    /// forward-compatible (unknown slugs pass through); "invalid_response" if libsession could not
+    /// parse the reply at all.
+    string8 error_code;
+    /// On non-OK, an English diagnostic string (NOT user-facing text -- that comes from mapping
+    /// error_code to a localized string); {NULL, 0} on success. Always safe to log.
+    string8 error;
     uint8_t* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
 };
 
