@@ -27,7 +27,7 @@
 ///    response and filling in the relevant rotating private key that the proof was authorised for.
 ///
 ///    The server will only respond successfully if it can also independently verify the purchase
-///    otherwise an error is returned and can be read from the `Response` after parsing the
+///    otherwise an error is returned and can be read from the `ResponseBase` after parsing the
 ///    raw response.
 ///
 /// 2. Attach the `ProProof` constructed from (1) into their messages. Libsession has helper
@@ -82,15 +82,36 @@ constexpr std::string_view URL = "https://pro.session.codes";
 /// account's root Ed25519 seed.
 constexpr auto pro_subkey_domain = "SessionProRandom"_bytes;
 
-struct Response {
-    /// Parsing or processing errors, from the backend or from libsession while parsing. Empty on
-    /// success; may hold several messages (one request can fail multiple checks at once). On
-    /// failure the parse may be partial, so always check `success()`/`errors` before using other
-    /// fields.
-    std::vector<std::string> errors;
+/// Response outcome category (the wire `status`, spec §5). CLOSED/exhaustive by design: the backend
+/// will never add a fourth value, so libsession treats any unrecognized wire status as a protocol
+/// error (fail-closed) rather than passing it through. New categories/detail arrive via
+/// `error_code`, which IS open/extensible.
+enum class ResponseStatus {
+    Ok,     ///< Success; the response's payload fields are populated.
+    Fail,   ///< Request rejected on client input / a precondition; retrying the identical request
+            ///< won't help (except the `stale_request` error_code). See `error_code`.
+    Error,  ///< Backend fault; the client did nothing wrong and the same request may succeed later.
+};
 
-    /// True iff the response came back without any errors.
-    [[nodiscard]] bool success() const { return errors.empty(); }
+struct ResponseBase {
+    /// Outcome category; the `explicit operator bool()` is the usual check. See ResponseStatus.
+    ResponseStatus status = ResponseStatus::Ok;
+
+    /// On non-Ok, a stable machine-readable slug identifying the outcome (spec §5.1), e.g.
+    /// "unknown_payment", "expired", "stale_request". std::nullopt on success. Opaque and
+    /// forward-compatible: map known slugs to localized text; for an unrecognized one fall back to
+    /// `error` / the `status` category. (libsession synthesizes "invalid_response" if it cannot
+    /// parse the backend's reply at all.)
+    std::optional<std::string> error_code;
+
+    /// On non-Ok, an English diagnostic string. NOT user-facing text (that comes from mapping
+    /// `error_code` to a localized string); show it only when the slug is unrecognized, and it is
+    /// always safe to log. std::nullopt on success.
+    std::optional<std::string> error;
+
+    /// Contextually convertible to bool: `if (response) { ... }` is true iff the request succeeded
+    /// (status == Ok). Explicit, so it can't silently leak into arithmetic or comparisons.
+    explicit operator bool() const { return status == ResponseStatus::Ok; }
 };
 
 struct MasterRotatingSignatures {
@@ -168,7 +189,7 @@ ProRequest add_payment_request(
 /// `GenerateProProofResponse` are distinct types (each parsed by its own free function below) that
 /// share `proof` today but can diverge independently. `proof` is the raw parse result, convertible
 /// to a config::ProProof.
-struct ProProofResponse : Response {
+struct ProProofResponse : ResponseBase {
     ProProof proof;
 };
 
@@ -225,7 +246,7 @@ struct ProRevocationItem {
     std::chrono::sys_seconds effective_at;
 };
 
-struct GetProRevocationsResponse : Response {
+struct GetProRevocationsResponse : ResponseBase {
     /// 64-bit monotonic integer for the latest revocation list iteration.
     /// Update the caller's ticket to this value for subsequent requests.
     std::int64_t ticket;
@@ -322,7 +343,7 @@ struct ProPaymentItem {
     std::string payment_id;
 };
 
-struct GetProDetailsResponse : Response {
+struct GetProDetailsResponse : ResponseBase {
     /// List of payment items for the master public key
     std::vector<ProPaymentItem> items;
 
@@ -410,7 +431,7 @@ ProRequest refund_request(
         std::string_view provider_code,
         std::span<const std::byte> payment_id);
 
-struct SetPaymentRefundRequestedResponse : Response {
+struct SetPaymentRefundRequestedResponse : ResponseBase {
     /// True if a payment was found matching the given payment information and that the refund
     /// request unix timestamp was set
     bool updated;

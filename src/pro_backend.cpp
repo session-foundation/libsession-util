@@ -95,24 +95,6 @@ double epoch_seconds_double(session::sys_ms t) {
     return std::chrono::duration<double>(t.time_since_epoch()).count();
 }
 
-void parse_json_response_errors(const nlohmann::json& j, std::vector<std::string>& errors) {
-    const auto& array = json_require<nlohmann::json::array_t>(j, "errors", errors);
-    errors.reserve(errors.size() + array.size());
-    for (size_t index = 0; index < array.size(); index++) {
-        const auto& it = array[index];
-        if (it.is_string()) {
-            errors.push_back(it.get<std::string>());
-        } else {
-            errors.push_back(fmt::format(
-                    "Aborting parse, 'result.errors[{}]' was not a string "
-                    "error: '{}'",
-                    index,
-                    it.dump(1)));
-            break;
-        }
-    }
-}
-
 bool json_require_fixed_bytes_from_hex(
         const nlohmann::json& j,
         std::string_view key,
@@ -277,48 +259,87 @@ ProRequest add_payment_request(
 }
 
 namespace {
-    // Shared parse for the proof-carrying responses (add-payment and generate-proof both reply with
-    // exactly a proof); fills the common ProProofResponse base of whichever derived response is
-    // passed.
-    void fill_proof_response(std::string_view json, ProProofResponse& result) {
-        // Parse basics
-        nlohmann::json j = json_parse(json, result.errors);
-        uint32_t status = json_require<uint8_t>(j, "status", result.errors);
-        if (result.errors.size()) {
-            return;
+    // libsession-side slug when the backend's reply can't be parsed at all (malformed envelope,
+    // missing/unrecognized status). Distinct from any backend error_code slug.
+    constexpr std::string_view invalid_response_code = "invalid_response";
+
+    // Put a ResponseBase into a protocol-error state (a libsession-side parse failure, distinct
+    // from a backend-reported fail/error).
+    void set_protocol_error(ResponseBase& result, std::string message) {
+        result.status = ResponseStatus::Error;
+        result.error_code = std::string(invalid_response_code);
+        result.error = std::move(message);
+    }
+
+    // Read the response envelope (spec §5) into `result`: string `status` -> ResponseStatus (a
+    // CLOSED set -- an unrecognized value is a protocol error, never passed through) and, on
+    // non-ok, `error_code` + `error`. Returns the `result` object to read the payload from when
+    // status is "ok" (an empty object otherwise; the caller returns early). libsession-side parse
+    // problems accumulate in `errs` for the caller to fold into a protocol error.
+    nlohmann::json::object_t read_envelope(
+            std::string_view json, ResponseBase& result, std::vector<std::string>& errs) {
+        nlohmann::json j = json_parse(json, errs);
+        auto status = json_require<std::string>(j, "status", errs);
+        if (!errs.empty())
+            return {};
+        if (status == "ok") {
+            result.status = ResponseStatus::Ok;
+            return json_require<nlohmann::json::object_t>(j, "result", errs);
         }
-
-        // Parse errors
-        if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-            parse_json_response_errors(j, result.errors);
-            return;
+        if (status == "fail" || status == "error") {
+            result.status = status == "fail" ? ResponseStatus::Fail : ResponseStatus::Error;
+            result.error_code = json_require<std::string>(j, "error_code", errs);
+            result.error = json_require<std::string>(j, "error", errs);
+            return {};
         }
+        errs.push_back(fmt::format("Unrecognized response status: '{}'", status));
+        return {};
+    }
 
-        auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
-        if (result.errors.size())
-            return;
-
-        // Parse payload
-        result.proof.version = json_require<uint8_t>(result_obj, "version", result.errors);
-        auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", result.errors);
+    // Fills the common proof payload (add-payment and generate-proof both reply with exactly a
+    // proof) from the already-extracted `result` object.
+    void fill_proof(
+            const nlohmann::json::object_t& result_obj,
+            ProProofResponse& result,
+            std::vector<std::string>& errs) {
+        result.proof.version = json_require<uint8_t>(result_obj, "version", errs);
+        auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", errs);
         result.proof.expiry_at = as_sys_seconds(expiry_ts);
         json_require_fixed_bytes_from_hex(
-                result_obj, "revocation_tag", result.errors, result.proof.revocation_tag);
+                result_obj, "revocation_tag", errs, result.proof.revocation_tag);
         json_require_fixed_bytes_from_hex(
-                result_obj, "rotating_pkey", result.errors, result.proof.rotating_pubkey);
-        json_require_fixed_bytes_from_hex(result_obj, "sig", result.errors, result.proof.sig);
+                result_obj, "rotating_pkey", errs, result.proof.rotating_pubkey);
+        json_require_fixed_bytes_from_hex(result_obj, "sig", errs, result.proof.sig);
     }
 }  // namespace
 
 AddProPaymentResponse parse_add_payment(std::string_view json) {
     AddProPaymentResponse result = {};
-    fill_proof_response(json, result);
+    std::vector<std::string> errs;
+    auto result_obj = read_envelope(json, result, errs);
+    if (!result || !errs.empty()) {
+        if (!errs.empty())
+            set_protocol_error(result, errs.front());
+        return result;
+    }
+    fill_proof(result_obj, result, errs);
+    if (!errs.empty())
+        set_protocol_error(result, errs.front());
     return result;
 }
 
 GenerateProProofResponse parse_pro_proof(std::string_view json) {
     GenerateProProofResponse result = {};
-    fill_proof_response(json, result);
+    std::vector<std::string> errs;
+    auto result_obj = read_envelope(json, result, errs);
+    if (!result || !errs.empty()) {
+        if (!errs.empty())
+            set_protocol_error(result, errs.front());
+        return result;
+    }
+    fill_proof(result_obj, result, errs);
+    if (!errs.empty())
+        set_protocol_error(result, errs.front());
     return result;
 }
 
@@ -387,54 +408,45 @@ ProRequest revocations_request(std::int64_t ticket) {
 GetProRevocationsResponse parse_revocations(std::string_view json) {
     // Parse basics
     GetProRevocationsResponse result = {};
-    nlohmann::json j = json_parse(json, result.errors);
-    uint32_t status = json_require<uint8_t>(j, "status", result.errors);
-    if (result.errors.size()) {
+    std::vector<std::string> errs;
+    auto result_obj = read_envelope(json, result, errs);
+    if (!result || !errs.empty()) {
+        if (!errs.empty())
+            set_protocol_error(result, errs.front());
         return result;
     }
-
-    // Parse errors
-    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, result.errors);
-        return result;
-    }
-
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
-    if (result.errors.size())
-        return result;
 
     // Parse payload
-    result.ticket = json_require<int64_t>(result_obj, "ticket", result.errors);
-    result.retry_in =
-            std::chrono::seconds(json_require<int64_t>(result_obj, "retry_in", result.errors));
-    result.retain_for =
-            std::chrono::seconds(json_require<int64_t>(result_obj, "retain_for", result.errors));
+    result.ticket = json_require<int64_t>(result_obj, "ticket", errs);
+    result.retry_in = std::chrono::seconds(json_require<int64_t>(result_obj, "retry_in", errs));
+    result.retain_for = std::chrono::seconds(json_require<int64_t>(result_obj, "retain_for", errs));
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
+    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", errs);
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
         if (!it.is_object()) {
-            result.errors.push_back(fmt::format(
+            errs.push_back(fmt::format(
                     "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
             break;
         }
 
         // Parse revocation item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto effective_ts = json_require<int64_t>(obj, "effective_ts", result.errors);
+        auto effective_ts = json_require<int64_t>(obj, "effective_ts", errs);
 
         ProRevocationItem item = {};
         item.effective_at = as_sys_seconds(effective_ts);
-        json_require_fixed_bytes_from_hex(
-                obj, "revocation_tag", result.errors, item.revocation_tag);
+        json_require_fixed_bytes_from_hex(obj, "revocation_tag", errs, item.revocation_tag);
 
         // Handle parsing result
-        if (result.errors.size())
+        if (errs.size())
             break;
         result.items.emplace_back(std::move(item));
     }
 
+    if (!errs.empty())
+        set_protocol_error(result, errs.front());
     return result;
 }
 
@@ -487,78 +499,68 @@ ProRequest payment_details_request(
 GetProDetailsResponse parse_payment_details(std::string_view json) {
     // Parse basics
     GetProDetailsResponse result = {};
-    nlohmann::json j = json_parse(json, result.errors);
-    uint32_t status = json_require<uint8_t>(j, "status", result.errors);
-    if (result.errors.size()) {
+    std::vector<std::string> errs;
+    auto result_obj = read_envelope(json, result, errs);
+    if (!result || !errs.empty()) {
+        if (!errs.empty())
+            set_protocol_error(result, errs.front());
         return result;
     }
-
-    // Parse errors
-    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, result.errors);
-        return result;
-    }
-
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
-    if (result.errors.size())
-        return result;
 
     // Parse payload. The account Pro status is an opaque string code ("never"/"active"/"expired");
     // an unknown value passes through unchanged (§1: enums are codes) rather than failing the
     // parse.
-    result.user_status = json_require<std::string>(result_obj, "status", result.errors);
+    result.user_status = json_require<std::string>(result_obj, "user_status", errs);
 
-    uint32_t error_report = json_require<uint32_t>(result_obj, "error_report", result.errors);
+    uint32_t error_report = json_require<uint32_t>(result_obj, "error_report", errs);
     if (error_report >= SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT) {
-        result.errors.push_back(
-                fmt::format("Error report value was out-of-bounds: {}", error_report));
+        errs.push_back(fmt::format("Error report value was out-of-bounds: {}", error_report));
+        set_protocol_error(result, errs.front());
         return result;
     }
     result.error_report =
             static_cast<SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT>(error_report);
 
-    result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", result.errors);
+    result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", errs);
 
-    result.payments_total = json_require<uint32_t>(result_obj, "payments_total", result.errors);
+    result.payments_total = json_require<uint32_t>(result_obj, "payments_total", errs);
 
-    int64_t expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", result.errors);
+    int64_t expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", errs);
     int64_t grace_period_duration =
-            json_require<int64_t>(result_obj, "grace_period_duration", result.errors);
-    int64_t refund_requested_ts =
-            json_require<int64_t>(result_obj, "refund_requested_ts", result.errors);
+            json_require<int64_t>(result_obj, "grace_period_duration", errs);
+    int64_t refund_requested_ts = json_require<int64_t>(result_obj, "refund_requested_ts", errs);
     result.expiry_at = as_sys_seconds(expiry_ts);
     result.grace_period_duration = std::chrono::seconds(grace_period_duration);
     result.refund_requested_at = as_sys_seconds(refund_requested_ts);
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", result.errors);
+    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", errs);
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
         if (!it.is_object()) {
-            result.errors.push_back(fmt::format(
+            errs.push_back(fmt::format(
                     "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
             break;
         }
 
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto status = json_require<std::string>(obj, "status", result.errors);
-        auto plan = json_require<std::string>(obj, "plan", result.errors);
-        auto payment_provider = json_require<std::string>(obj, "payment_provider", result.errors);
-        auto payment_id = json_require<std::string>(obj, "payment_id", result.errors);
-        auto auto_renewing = json_require<bool>(obj, "auto_renewing", result.errors);
+        auto status = json_require<std::string>(obj, "status", errs);
+        auto plan = json_require<std::string>(obj, "plan", errs);
+        auto payment_provider = json_require<std::string>(obj, "payment_provider", errs);
+        auto payment_id = json_require<std::string>(obj, "payment_id", errs);
+        auto auto_renewing = json_require<bool>(obj, "auto_renewing", errs);
         // purchased_ts and revoked_ts are upstream-provider event instants: floats on the wire
         // carrying sub-second precision (kept as millisecond-precision sys_ms). All other
         // timestamps are whole-second integers.
-        auto purchased_ts = json_require_number(obj, "purchased_ts", result.errors);
-        auto redeemed_ts = json_require<int64_t>(obj, "redeemed_ts", result.errors);
-        auto expiry_ts = json_require<int64_t>(obj, "expiry_ts", result.errors);
-        auto grace_period_duration =
-                json_require<int64_t>(obj, "grace_period_duration", result.errors);
+        auto purchased_ts = json_require_number(obj, "purchased_ts", errs);
+        auto redeemed_ts = json_require<int64_t>(obj, "redeemed_ts", errs);
+        auto expiry_ts = json_require<int64_t>(obj, "expiry_ts", errs);
+        auto grace_period_duration = json_require<int64_t>(obj, "grace_period_duration", errs);
         auto platform_refund_expiry_ts =
-                json_require<int64_t>(obj, "platform_refund_expiry_ts", result.errors);
-        auto revoked_ts = json_require_number(obj, "revoked_ts", result.errors);
-        auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", result.errors);
+                json_require<int64_t>(obj, "platform_refund_expiry_ts", errs);
+        auto revoked_ts = json_require_number(obj, "revoked_ts", errs);
+        auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", errs);
 
         ProPaymentItem item = {};
         item.status = std::move(status);
@@ -579,11 +581,14 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         item.refund_requested_at = as_sys_seconds(refund_requested_ts);
 
         // Handle parsing result
-        if (result.errors.size())
+        if (errs.size())
             break;
 
         result.items.emplace_back(std::move(item));
     }
+
+    if (!errs.empty())
+        set_protocol_error(result, errs.front());
     return result;
 }
 
@@ -660,24 +665,18 @@ ProRequest refund_request(
 SetPaymentRefundRequestedResponse parse_refund(std::string_view json) {
     // Parse basics
     SetPaymentRefundRequestedResponse result = {};
-    nlohmann::json j = json_parse(json, result.errors);
-    uint32_t status = json_require<uint8_t>(j, "status", result.errors);
-    if (result.errors.size()) {
+    std::vector<std::string> errs;
+    auto result_obj = read_envelope(json, result, errs);
+    if (!result || !errs.empty()) {
+        if (!errs.empty())
+            set_protocol_error(result, errs.front());
         return result;
     }
-
-    // Parse errors
-    if (status != SESSION_PRO_BACKEND_STATUS_SUCCESS) {
-        parse_json_response_errors(j, result.errors);
-        return result;
-    }
-
-    auto result_obj = json_require<nlohmann::json::object_t>(j, "result", result.errors);
-    if (result.errors.size())
-        return result;
 
     // Parse payload
-    result.updated = json_require<bool>(result_obj, "updated", result.errors);
+    result.updated = json_require<bool>(result_obj, "updated", errs);
+    if (!errs.empty())
+        set_protocol_error(result, errs.front());
     return result;
 }
 }  // namespace session::pro_backend
@@ -691,6 +690,41 @@ using namespace session::pro_backend;
 
 static string8 C_PARSE_ERROR_OUT_OF_MEMORY = STRING8_LIT("Ran out-of-memory creating C response");
 static string8 C_PARSE_ERROR_INVALID_ARGS = STRING8_LIT("One or more C arguments were NULL");
+// error_code slug libsession reports when it can't parse/build the C response at all.
+static string8 C_INVALID_RESPONSE_CODE = STRING8_LIT("invalid_response");
+
+// Map the C++ ResponseStatus to the C enum.
+static SESSION_PRO_BACKEND_RESPONSE_STATUS c_response_status(ResponseStatus status) {
+    switch (status) {
+        case ResponseStatus::Ok: return SESSION_PRO_BACKEND_RESPONSE_STATUS_OK;
+        case ResponseStatus::Fail: return SESSION_PRO_BACKEND_RESPONSE_STATUS_FAIL;
+        case ResponseStatus::Error: break;
+    }
+    return SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+}
+
+// Arena bytes needed for a header's error_code + error strings.
+static size_t c_header_arena_bytes(const ResponseBase& cpp) {
+    size_t n = 0;
+    if (cpp.error_code)
+        n += cpp.error_code->size() + 1;
+    if (cpp.error)
+        n += cpp.error->size() + 1;
+    return n;
+}
+
+// Fill a C response header's status + error_code/error from a C++ ResponseBase, copying the two
+// optional strings into the arena (which must already have room; see c_header_arena_bytes).
+static void fill_c_header(
+        session_pro_backend_response_header& header, const ResponseBase& cpp, arena_t& arena) {
+    header.status = c_response_status(cpp.status);
+    header.error_code =
+            cpp.error_code
+                    ? arena_alloc_to_string8(&arena, cpp.error_code->data(), cpp.error_code->size())
+                    : string8{};
+    header.error = cpp.error ? arena_alloc_to_string8(&arena, cpp.error->data(), cpp.error->size())
+                             : string8{};
+}
 
 // Wrap a freshly-built C++ ProRequest as an owning C session_pro_backend_request: heap-own the
 // ProRequest and point endpoint/content_type/data into it (zero copy). Released by
@@ -783,8 +817,9 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
 
     session_pro_backend_pro_proof_response result = {};
     if (!json) {
-        result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
-        result.header.errors_count = 1;
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_INVALID_ARGS;
         return result;
     }
 
@@ -796,15 +831,15 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
     {
-        for (const auto& it : cpp.errors)
-            arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
+        arena.max += c_header_arena_bytes(cpp);
 
         if (arena.max)
             arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
-            result.header.errors_count = 1;
+            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+            result.header.error_code = C_INVALID_RESPONSE_CODE;
+            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
             return result;
         }
 
@@ -827,14 +862,8 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
             cpp.proof.rotating_pubkey.size());
     std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.size());
 
-    // Copy errors
-    result.header.errors_count = cpp.errors.size();
-    result.header.errors = static_cast<string8*>(
-            arena_alloc(&arena, result.header.errors_count * sizeof(*result.header.errors)));
-    for (size_t index = 0; index < cpp.errors.size(); index++) {
-        const std::string& it = cpp.errors[index];
-        result.header.errors[index] = arena_alloc_to_string8(&arena, it.data(), it.size());
-    }
+    // Copy status + error code/message
+    fill_c_header(result.header, cpp, arena);
     return result;
 }
 
@@ -842,8 +871,9 @@ LIBSESSION_C_API session_pro_backend_get_pro_revocations_response
 session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t json_len) {
     session_pro_backend_get_pro_revocations_response result = {};
     if (!json) {
-        result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
-        result.header.errors_count = 1;
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_INVALID_ARGS;
         return result;
     }
 
@@ -858,15 +888,15 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
                 sizeof(cpp.items[0]) >= sizeof(*result.items),
                 "Ensure we allocate enough memory. We might slightly over-allocate but that's not "
                 "a big deal");
-        for (auto it : cpp.errors)
-            arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
+        arena.max += c_header_arena_bytes(cpp);
 
         if (arena.max)
             arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
-            result.header.errors_count = 1;
+            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+            result.header.error_code = C_INVALID_RESPONSE_CODE;
+            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
             return result;
         }
 
@@ -879,14 +909,8 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     result.retry_in = cpp.retry_in.count();
     result.retain_for = cpp.retain_for.count();
 
-    // Copy errors
-    result.header.errors_count = cpp.errors.size();
-    result.header.errors = (string8*)arena_alloc(
-            &arena, result.header.errors_count * sizeof(*result.header.errors));
-    for (size_t index = 0; index < cpp.errors.size(); index++) {
-        const std::string& it = cpp.errors[index];
-        result.header.errors[index] = arena_alloc_to_string8(&arena, it.data(), it.size());
-    }
+    // Copy status + error code/message
+    fill_c_header(result.header, cpp, arena);
 
     // Copy items
     result.items_count = cpp.items.size();
@@ -906,8 +930,9 @@ LIBSESSION_C_API session_pro_backend_get_pro_details_response
 session_pro_backend_get_pro_details_response_parse(const char* json, size_t json_len) {
     session_pro_backend_get_pro_details_response result = {};
     if (!json) {
-        result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
-        result.header.errors_count = 1;
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_INVALID_ARGS;
         return result;
     }
 
@@ -918,15 +943,15 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
     arena_t arena = {};
     {
         arena.max += cpp.items.size() * sizeof(*result.items);
-        for (auto it : cpp.errors)
-            arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
+        arena.max += c_header_arena_bytes(cpp);
 
         if (arena.max)
             arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
-            result.header.errors_count = 1;
+            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+            result.header.error_code = C_INVALID_RESPONSE_CODE;
+            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
             return result;
         }
 
@@ -966,14 +991,8 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         dest.payment_id_count = session::copy_c_str(dest.payment_id, src.payment_id) - 1;
     }
 
-    // Copy errors
-    result.header.errors_count = cpp.errors.size();
-    result.header.errors = (string8*)arena_alloc(
-            &arena, result.header.errors_count * sizeof(*result.header.errors));
-    for (size_t index = 0; index < cpp.errors.size(); index++) {
-        const std::string& it = cpp.errors[index];
-        result.header.errors[index] = arena_alloc_to_string8(&arena, it.data(), it.size());
-    }
+    // Copy status + error code/message
+    fill_c_header(result.header, cpp, arena);
 
     return result;
 }
@@ -1005,8 +1024,9 @@ LIBSESSION_C_API session_pro_backend_set_payment_refund_requested_response
 session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len) {
     session_pro_backend_set_payment_refund_requested_response result = {};
     if (!json) {
-        result.header.errors = &C_PARSE_ERROR_INVALID_ARGS;
-        result.header.errors_count = 1;
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_INVALID_ARGS;
         return result;
     }
 
@@ -1016,15 +1036,15 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
     // Calculate how much memory we need and create an arena
     arena_t arena = {};
     {
-        for (auto it : cpp.errors)
-            arena.max += sizeof(*result.header.errors) + (it.size() + 1 /*null-terminator*/);
+        arena.max += c_header_arena_bytes(cpp);
 
         if (arena.max)
             arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
 
         if (arena.max && !arena.data) {
-            result.header.errors = &C_PARSE_ERROR_OUT_OF_MEMORY;
-            result.header.errors_count = 1;
+            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+            result.header.error_code = C_INVALID_RESPONSE_CODE;
+            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
             return result;
         }
 
@@ -1035,14 +1055,8 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
     // Copy to C struct
     result.updated = cpp.updated;
 
-    // Copy errors
-    result.header.errors_count = cpp.errors.size();
-    result.header.errors = (string8*)arena_alloc(
-            &arena, result.header.errors_count * sizeof(*result.header.errors));
-    for (size_t index = 0; index < cpp.errors.size(); index++) {
-        const std::string& it = cpp.errors[index];
-        result.header.errors[index] = arena_alloc_to_string8(&arena, it.data(), it.size());
-    }
+    // Copy status + error code/message
+    fill_c_header(result.header, cpp, arena);
 
     return result;
 }

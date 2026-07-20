@@ -166,7 +166,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"] = {
                     {"version", 0},
                     {"expiry_ts", unix_ts},
@@ -183,11 +183,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{
                         [&]() { session_pro_backend_pro_proof_response_free(&result); }};
 
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
+                if (result.header.error.data)
+                    INFO(result.header.error.data);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error.data == nullptr);
                 REQUIRE(result.proof.expiry_ts == unix_ts);
                 REQUIRE(std::memcmp(
                                 result.proof.revocation_tag.data,
@@ -227,8 +227,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
             // After freeing
             REQUIRE(result.header.internal_arena_buf_ == nullptr);
-            REQUIRE(result.header.errors == nullptr);
-            REQUIRE(result.header.errors_count == 0);
+            REQUIRE(result.header.error.data == nullptr);
+            REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
 
             // Invalid JSON
             json = "{invalid}";
@@ -236,9 +236,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             {
                 scope_exit result_free{
                         [&]() { session_pro_backend_pro_proof_response_free(&result); }};
-                REQUIRE(result.header.errors_count != 0);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code.data != nullptr);
             }
 
             // After freeing
@@ -247,16 +247,16 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
             // Null JSON
             result = session_pro_backend_pro_proof_response_parse(nullptr, 0);
-            REQUIRE(result.header.errors_count != 0);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code.data != nullptr);
 
             // No need to free, as errors point to static memory
         }
 
         SECTION("session_pro_backend_get_pro_revocations_response_parse") {
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"]["ticket"] = 123;
             j["result"]["retry_in"] = 3600;
             j["result"]["retain_for"] = 2592000;
@@ -278,11 +278,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_revocations_response_free(&result); }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
+                if (result.header.error.data)
+                    INFO(result.header.error.data);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error.data == nullptr);
                 REQUIRE(result.ticket == 123);
                 REQUIRE(result.retry_in == 3600);
                 REQUIRE(result.retain_for == 2592000);
@@ -307,10 +307,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         json.data(), json.size());
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_revocations_response_free(&result); }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    REQUIRE(result.header.errors_count != 0);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code.data != nullptr);
             }
 
             // After freeing
@@ -318,16 +317,16 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
             // Null JSON
             result = session_pro_backend_get_pro_revocations_response_parse(nullptr, 0);
-            REQUIRE(result.header.errors_count != 0);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code.data != nullptr);
         }
 
         SECTION("session_pro_backend_get_pro_details_response_parse") {
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"] = {
-                    {"status", "expired"},
+                    {"user_status", "expired"},
                     {"error_report",
                      SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR},
                     {"auto_renewing", true},
@@ -361,12 +360,12 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
+                if (result.header.error.data)
+                    INFO(result.header.error.data);
 
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error.data == nullptr);
                 REQUIRE(std::string_view(result.status, result.status_count) == "expired");
                 REQUIRE(result.error_report ==
                         SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR);
@@ -413,8 +412,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{[&]() {
                     session_pro_backend_get_pro_details_response_free(&result_rangeproof);
                 }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result_rangeproof.header.errors[index].data);
+                if (result_rangeproof.header.error.data)
+                    INFO(result_rangeproof.header.error.data);
 
                 // Only check what we expect to be different
                 REQUIRE(std::string_view(
@@ -438,9 +437,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
-                REQUIRE(result.header.errors_count != 0);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code.data != nullptr);
             }
 
             // After freeing
@@ -449,9 +448,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
             // Null JSON
             result = session_pro_backend_get_pro_details_response_parse(nullptr, 0);
-            REQUIRE(result.header.errors_count != 0);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code.data != nullptr);
         }
 
         SECTION("Memory management edge cases") {
@@ -515,7 +514,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
         SECTION("session_pro_backend_set_payment_refund_requested_response_parse") {
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"]["updated"] = true;
             std::string json = j.dump();
 
@@ -526,11 +525,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{[&]() {
                     session_pro_backend_set_payment_refund_requested_response_free(&result);
                 }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
+                if (result.header.error.data)
+                    INFO(result.header.error.data);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error.data == nullptr);
                 REQUIRE(result.updated);
             }
 
@@ -545,10 +544,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{[&]() {
                     session_pro_backend_set_payment_refund_requested_response_free(&result);
                 }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    REQUIRE(result.header.errors_count != 0);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code.data != nullptr);
             }
 
             // After freeing
@@ -556,9 +554,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
             // Null JSON
             result = session_pro_backend_set_payment_refund_requested_response_parse(nullptr, 0);
-            REQUIRE(result.header.errors_count != 0);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code.data != nullptr);
         }
     }
 }
@@ -672,10 +670,8 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         response_json.data(), response_json.size());
         scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            INFO("ERROR: " << error.data);
-        }
+        if (response.header.error.data)
+            INFO("ERROR: " << response.header.error.data);
 
         // Verify response
         first_pro_proof = response.proof;
@@ -720,12 +716,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            UNSCOPED_INFO("ERROR: " << error.data);
-        }
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.errors_count == 0);
+        if (response.header.error.data)
+            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
 
         // Verify response
         session_protocol_pro_proof proof = response.proof;
@@ -764,12 +758,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            UNSCOPED_INFO("ERROR: " << error.data);
-        }
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.errors_count == 0);
+        if (response.header.error.data)
+            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(std::string_view(response.status, response.status_count) == "active");
         REQUIRE(response.items_count > 0);
     }
@@ -799,12 +791,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            UNSCOPED_INFO("ERROR: " << error.data);
-        }
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.errors_count == 0);
+        if (response.header.error.data)
+            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(std::string_view(response.status, response.status_count) == "active");
         REQUIRE(response.items_count == 0);
     }
@@ -879,12 +869,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
         // Verify response
         INFO("ERROR: JSON response: " << response_json.c_str());
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            UNSCOPED_INFO("ERROR: " << error.data);
-        }
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.errors_count == 0);
+        if (response.header.error.data)
+            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.ticket == 0);
         REQUIRE(response.items_count == 0);
     }
@@ -921,12 +909,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
         // Verify response
         INFO("ERROR: JSON response: " << response_json.c_str());
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            UNSCOPED_INFO("ERROR: " << error.data);
-        }
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.errors_count == 0);
+        if (response.header.error.data)
+            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.updated);
     }
 }
