@@ -39,13 +39,19 @@ namespace session {
 
 enum ProProofVersion { ProProofVersion_v0 };
 
-/// Session Pro personalisation bytes for hashing; must match the personalisation strings in
-/// pro-wire-protocol.md §2 (proof) and §3 (signed requests).
-inline constexpr auto GENERATE_PROOF_PERS = "ProGenerateProof"_b2b_pers;
-inline constexpr auto BUILD_PROOF_PERS = "ProProof_v0_____"_b2b_pers;
-inline constexpr auto ADD_PRO_PAYMENT_PERS = "ProAddPayment___"_b2b_pers;
-inline constexpr auto SET_PAYMENT_REFUND_REQUESTED_PERS = "ProSetRefundReq_"_b2b_pers;
-inline constexpr auto GET_PRO_DETAILS_PERS = "ProGetProDetReq_"_b2b_pers;
+// Session Pro 16-byte signing domain prefixes; each prefixes the Ed25519-signed message for its
+// endpoint (pro-wire-protocol.md §2 proof, §3 signed requests). ASCII, `_`-right-padded to 16
+// bytes.
+inline constexpr std::string_view GENERATE_PROOF_DOMAIN = "ProGenerateProof";
+inline constexpr std::string_view BUILD_PROOF_DOMAIN = "ProProof_v0_____";
+inline constexpr std::string_view ADD_PRO_PAYMENT_DOMAIN = "ProAddPayment___";
+inline constexpr std::string_view SET_PAYMENT_REFUND_REQUESTED_DOMAIN = "ProSetRefundReq_";
+inline constexpr std::string_view GET_PRO_DETAILS_DOMAIN = "ProGetProDetReq_";
+static_assert(GENERATE_PROOF_DOMAIN.size() == 16);
+static_assert(BUILD_PROOF_DOMAIN.size() == 16);
+static_assert(ADD_PRO_PAYMENT_DOMAIN.size() == 16);
+static_assert(SET_PAYMENT_REFUND_REQUESTED_DOMAIN.size() == 16);
+static_assert(GET_PRO_DETAILS_DOMAIN.size() == 16);
 
 enum class ProStatus {
     // Pro proof sig was not signed by the Pro backend key
@@ -153,10 +159,12 @@ class ProProof {
             std::chrono::sys_seconds unix_ts,
             const std::optional<ProSignedMessage>& signed_msg);
 
-    /// API: pro/Proof::hash
+    /// API: pro/Proof::signed_message
     ///
-    /// Create a 32-byte hash from the proof. This hash is the payload that is signed in the proof.
-    b32 hash() const;
+    /// Build the exact byte string that the backend signs to produce this proof's `sig`, and that
+    /// verification reconstructs to check it (pro-wire-protocol.md §2, per §1.1). The message is
+    /// Ed25519-signed directly — there is no pre-hash.
+    std::vector<std::byte> signed_message() const;
 
     bool operator==(const ProProof& other) const {
         return version == other.version && revocation_tag == other.revocation_tag &&

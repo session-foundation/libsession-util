@@ -39,21 +39,15 @@ TEST_CASE("Pro", "[config][pro]") {
         std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
     }
 
-    // Generate and write the hashes that are signed by the faux pro backend into the proof
+    // Sign the proof with the faux pro backend key
     {
-        // Generate the hashes
+        // Sign the proof with the faux pro backend key (Ed25519 over the message directly). The C
+        // and C++ proof representations mirror each other, so a single message signs both.
         static_assert(crypto_sign_ed25519_BYTES == pro_cpp.proof.sig.max_size());
-        b32 hash_to_sign_cpp = pro_cpp.proof.hash();
-        cbytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
+        auto msg_to_sign = pro_cpp.proof.signed_message();
 
-        static_assert(hash_to_sign_cpp.size() == sizeof(hash_to_sign));
-        CHECK(std::memcmp(hash_to_sign_cpp.data(), hash_to_sign.data, hash_to_sign_cpp.size()) ==
-              0);
-
-        // Write the signature into the proof
-        ed25519::sign(pro_cpp.proof.sig, signing_sk, hash_to_sign_cpp);
-        ed25519::sign(
-                to_byte_span(pro.proof.sig.data), signing_sk, to_byte_span(hash_to_sign.data));
+        ed25519::sign(pro_cpp.proof.sig, signing_sk, msg_to_sign);
+        ed25519::sign(to_byte_span(pro.proof.sig.data), signing_sk, msg_to_sign);
     }
 
     // Verify expiry

@@ -6,7 +6,6 @@
 #include <sodium/randombytes.h>
 
 #include <oxen/log.hpp>
-#include <session/hash.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
@@ -17,6 +16,7 @@
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
 #include "internal-util.hpp"
+#include "pro_message.hpp"
 #include "session/export.h"
 
 // clang-format off
@@ -50,16 +50,16 @@ const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
 // clang-format on
 
 namespace {
-session::b32 proof_hash_internal(
+std::vector<std::byte> proof_signed_message(
         std::span<const std::byte> revocation_tag,
         std::span<const std::byte> rotating_pubkey,
         std::int64_t expiry_ts) {
 
-    // This must match the Pro proof signed digest in pro-wire-protocol.md §2. The proof version is
-    // NOT hashed as a byte; it selects the personalisation (v0 -> "ProProof_v0_____"), and that
-    // choice of personalisation is what binds the version into the signature.
-    return session::hash::blake2b_pers<32>(
-            session::BUILD_PROOF_PERS, revocation_tag, rotating_pubkey, expiry_ts);
+    // This must match the Pro proof signed message in pro-wire-protocol.md §2 (built per §1.1). The
+    // proof version is NOT part of the message; it selects the 16-byte domain prefix (v0 ->
+    // "ProProof_v0_____"), and that choice of prefix is what binds the version into the signature.
+    return session::pro::signed_message(
+            session::BUILD_PROOF_DOMAIN, revocation_tag, rotating_pubkey, expiry_ts);
 }
 
 // Copies an optional 32-byte value out of a possibly-null C pointer. A null pointer yields a
@@ -127,7 +127,7 @@ static_assert(sizeof(std::declval<ProProof>().rotating_pubkey) == 32);
 static_assert(sizeof(std::declval<ProProof>().sig) == 64);
 
 bool ProProof::verify_signature(std::span<const std::byte, 32> verify_pubkey) const {
-    return ed25519::verify(sig, verify_pubkey, hash());
+    return ed25519::verify(sig, verify_pubkey, signed_message());
 }
 
 bool ProProof::verify_message(
@@ -161,10 +161,8 @@ ProStatus ProProof::status(
     return result;
 }
 
-b32 ProProof::hash() const {
-    b32 result =
-            proof_hash_internal(revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_at));
-    return result;
+std::vector<std::byte> ProProof::signed_message() const {
+    return proof_signed_message(revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_at));
 }
 
 };  // namespace session
@@ -799,27 +797,17 @@ const uint64_t SESSION_PROTOCOL_PRO_PROFILE_FEATURE_ANIMATED_AVATAR =
 const uint64_t SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT =
         static_cast<uint64_t>(ProMessageFlags::CharLimit10k);
 
-LIBSESSION_C_API cbytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof) {
-    cbytes32 result = {};
-    session::b32 hash = proof_hash_internal(
-            to_byte_span(proof->revocation_tag.data),
-            to_byte_span(proof->rotating_pubkey.data),
-            proof->expiry_ts);
-    std::memcpy(result.data, hash.data(), hash.size());
-    return result;
-}
-
 LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
         session_protocol_pro_proof const* proof,
         uint8_t const* verify_pubkey,
         size_t verify_pubkey_len) {
     if (verify_pubkey_len != 32)
         return false;
-    session::b32 hash = proof_hash_internal(
+    auto msg = proof_signed_message(
             to_byte_span(proof->revocation_tag.data),
             to_byte_span(proof->rotating_pubkey.data),
             proof->expiry_ts);
-    return ed25519::verify(to_byte_span(proof->sig.data), to_byte_span<32>(verify_pubkey), hash);
+    return ed25519::verify(to_byte_span(proof->sig.data), to_byte_span<32>(verify_pubkey), msg);
 }
 
 LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(

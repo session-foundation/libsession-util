@@ -182,20 +182,6 @@ struct session_protocol_decoded_community_message {
 // set/unset/test them with the standard bitwise operators (see the feature constants above). No
 // accessor functions are needed.
 
-/// API: session_protocol/session_protocol_pro_proof_hash
-///
-/// Generate the 32 byte hash that is to be signed by the rotating key or Session Pro Backend key to
-/// embed in the envelope or proof respectively which other clients use to authenticate the validity
-/// of a proof.
-///
-/// Inputs:
-/// - `proof` -- Proof to calculate the hash from
-///
-/// Outputs:
-/// - `cbytes32` -- The 32 byte hash calculated from the proof
-LIBSESSION_EXPORT cbytes32 session_protocol_pro_proof_hash(session_protocol_pro_proof const* proof)
-        NON_NULL_ARG(1);
-
 /// API: session_protocol/session_protocol_pro_proof_verify_signature
 ///
 /// Verify the proof was signed by the `verify_pubkey`

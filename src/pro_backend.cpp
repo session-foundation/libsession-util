@@ -8,7 +8,6 @@
 #include <concepts>
 #include <nlohmann/json.hpp>
 #include <optional>
-#include <session/hash.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/sodium_array.hpp>
@@ -16,6 +15,7 @@
 #include <session/util.hpp>
 
 #include "internal-util.hpp"
+#include "pro_message.hpp"
 
 namespace {
 const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
@@ -143,14 +143,19 @@ namespace {
 
     // --- add-payment (endpoint add_pro_payment) ---
 
-    b32 add_payment_hash(
+    std::vector<std::byte> add_payment_message(
             std::span<const std::byte, 32> master_pubkey,
             std::span<const std::byte, 32> rotating_pubkey,
             std::string_view provider_code,
             std::span<const std::byte> payment_id) {
-        // Must match the add-payment signed-request hash in pro-wire-protocol.md §3.2 (+ §3.5).
-        return hash::blake2b_pers<32>(
-                ADD_PRO_PAYMENT_PERS, master_pubkey, rotating_pubkey, provider_code, payment_id);
+        // Must match the add-payment signed-request message in pro-wire-protocol.md §3.2
+        // (+ §3.5), built per §1.1.
+        return pro::signed_message(
+                ADD_PRO_PAYMENT_DOMAIN,
+                master_pubkey,
+                rotating_pubkey,
+                provider_code,
+                to_string_view(payment_id));
     }
 
     // Serialise an add-payment request body from already-computed fields (shared by the C++
@@ -233,11 +238,11 @@ MasterRotatingSignatures add_payment_sigs(
         const ed25519::PrivKeySpan& rotating_privkey,
         std::string_view provider_code,
         std::span<const std::byte> payment_id) {
-    auto hash = add_payment_hash(
+    auto msg = add_payment_message(
             master_privkey.pubkey(), rotating_privkey.pubkey(), provider_code, payment_id);
     MasterRotatingSignatures result = {};
-    result.master_sig = ed25519::sign(master_privkey, hash);
-    result.rotating_sig = ed25519::sign(rotating_privkey, hash);
+    result.master_sig = ed25519::sign(master_privkey, msg);
+    result.rotating_sig = ed25519::sign(rotating_privkey, msg);
     return result;
 }
 
@@ -347,13 +352,14 @@ namespace {
 
     // --- generate-proof (endpoint generate_pro_proof) ---
 
-    b32 generate_proof_hash(
+    std::vector<std::byte> generate_proof_message(
             std::span<const std::byte, 32> master_pubkey,
             std::span<const std::byte, 32> rotating_pubkey,
             std::chrono::sys_seconds unix_ts) {
-        // Must match the generate-proof signed-request hash in pro-wire-protocol.md §3.1.
-        int64_t ts = epoch_seconds(unix_ts);
-        return hash::blake2b_pers<32>(GENERATE_PROOF_PERS, master_pubkey, rotating_pubkey, ts);
+        // Must match the generate-proof signed-request message in pro-wire-protocol.md §3.1,
+        // built per §1.1.
+        return pro::signed_message(
+                GENERATE_PROOF_DOMAIN, master_pubkey, rotating_pubkey, epoch_seconds(unix_ts));
     }
 
     std::string generate_proof_body(
@@ -377,10 +383,10 @@ MasterRotatingSignatures pro_proof_sigs(
         const ed25519::PrivKeySpan& master_privkey,
         const ed25519::PrivKeySpan& rotating_privkey,
         std::chrono::sys_seconds unix_ts) {
-    auto hash = generate_proof_hash(master_privkey.pubkey(), rotating_privkey.pubkey(), unix_ts);
+    auto msg = generate_proof_message(master_privkey.pubkey(), rotating_privkey.pubkey(), unix_ts);
     MasterRotatingSignatures result = {};
-    result.master_sig = ed25519::sign(master_privkey, hash);
-    result.rotating_sig = ed25519::sign(rotating_privkey, hash);
+    result.master_sig = ed25519::sign(master_privkey, msg);
+    result.rotating_sig = ed25519::sign(rotating_privkey, msg);
     return result;
 }
 
@@ -454,13 +460,14 @@ namespace {
 
     // --- payment-details / get-pro-details (endpoint get_pro_details) ---
 
-    b32 payment_details_hash(
+    std::vector<std::byte> payment_details_message(
             std::span<const std::byte, 32> master_pubkey,
             std::chrono::sys_seconds unix_ts,
             uint32_t count) {
-        // Must match the get-pro-details signed-request hash in pro-wire-protocol.md §3.4.
-        int64_t ts = epoch_seconds(unix_ts);
-        return hash::blake2b_pers<32>(GET_PRO_DETAILS_PERS, master_pubkey, ts, count);
+        // Must match the get-pro-details signed-request message in pro-wire-protocol.md §3.4,
+        // built per §1.1.
+        return pro::signed_message(
+                GET_PRO_DETAILS_DOMAIN, master_pubkey, epoch_seconds(unix_ts), count);
     }
 
     std::string payment_details_body(
@@ -482,8 +489,8 @@ b64 payment_details_sig(
         const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_seconds unix_ts,
         uint32_t count) {
-    auto hash = payment_details_hash(master_privkey.pubkey(), unix_ts, count);
-    return ed25519::sign(master_privkey, hash);
+    auto msg = payment_details_message(master_privkey.pubkey(), unix_ts, count);
+    return ed25519::sign(master_privkey, msg);
 }
 
 ProRequest payment_details_request(
@@ -596,23 +603,21 @@ namespace {
 
     // --- refund / set-payment-refund-requested (endpoint set_payment_refund_requested) ---
 
-    b32 refund_hash(
+    std::vector<std::byte> refund_message(
             std::span<const std::byte, 32> master_pubkey,
             std::chrono::sys_seconds unix_ts,
             std::chrono::sys_seconds refund_requested_at,
             std::string_view provider_code,
             std::span<const std::byte> payment_id) {
-        // Must match the set-payment-refund-requested signed-request hash in pro-wire-protocol.md
-        // §3.3 (+ §3.5 for payment_id).
-        int64_t ts = epoch_seconds(unix_ts);
-        int64_t refund_requested_ts = epoch_seconds(refund_requested_at);
-        return hash::blake2b_pers<32>(
-                SET_PAYMENT_REFUND_REQUESTED_PERS,
+        // Must match the set-payment-refund-requested signed-request message in
+        // pro-wire-protocol.md §3.3 (+ §3.5 for payment_id), built per §1.1.
+        return pro::signed_message(
+                SET_PAYMENT_REFUND_REQUESTED_DOMAIN,
                 master_pubkey,
-                ts,
-                refund_requested_ts,
+                epoch_seconds(unix_ts),
+                epoch_seconds(refund_requested_at),
                 provider_code,
-                payment_id);
+                to_string_view(payment_id));
     }
 
     std::string refund_body(
@@ -639,9 +644,9 @@ b64 refund_sig(
         std::chrono::sys_seconds refund_requested_at,
         std::string_view provider_code,
         std::span<const std::byte> payment_id) {
-    auto hash = refund_hash(
+    auto msg = refund_message(
             master_privkey.pubkey(), unix_ts, refund_requested_at, provider_code, payment_id);
-    return ed25519::sign(master_privkey, hash);
+    return ed25519::sign(master_privkey, msg);
 }
 
 ProRequest refund_request(

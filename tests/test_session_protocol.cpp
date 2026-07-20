@@ -19,9 +19,7 @@ struct SerialisedProtobufContentWithProForTesting {
     std::vector<std::byte> plaintext_padded;
     b64 sig_over_plaintext_with_user_pro_key;
     b64 sig_over_plaintext_padded_with_user_pro_key;
-    b32 pro_proof_hash;
     cbytes64 sig_over_plaintext_with_user_pro_key_c;
-    cbytes32 pro_proof_hash_c;
 };
 
 static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_session_pro(
@@ -47,9 +45,8 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
     std::ranges::copy(user_rotating_privkey.pubkey(), result.proof.rotating_pubkey.begin());
     result.proof.expiry_at = pro_expiry_at;
 
-    // Sign the proof by the dummy "Session Pro Backend" key
-    result.pro_proof_hash = result.proof.hash();
-    result.proof.sig = ed25519::sign(pro_backend_privkey, result.pro_proof_hash);
+    // Sign the proof by the dummy "Session Pro Backend" key (Ed25519 over the message directly)
+    result.proof.sig = ed25519::sign(pro_backend_privkey, result.proof.signed_message());
 
     // Create protobuf `Content.proMessage`
     SessionProtos::ProMessage* pro = content.mutable_promessage();
@@ -83,10 +80,6 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
             result.sig_over_plaintext_with_user_pro_key_c.data,
             result.sig_over_plaintext_with_user_pro_key.data(),
             sizeof(result.sig_over_plaintext_with_user_pro_key_c.data));
-    std::memcpy(
-            result.pro_proof_hash_c.data,
-            result.pro_proof_hash.data(),
-            sizeof(result.pro_proof_hash_c.data));
     return result;
 }
 
@@ -263,17 +256,15 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Verify pro
         ProProof nil_proof = {};
-        b32 nil_hash = nil_proof.hash();
-        cbytes32 decrypt_result_pro_hash =
-                session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
         REQUIRE(decrypt_result.pro.status ==
                 SESSION_PROTOCOL_PRO_STATUS_NIL);  // Pro was not attached
         REQUIRE(decrypt_result.pro.msg_bitset == 0);
         REQUIRE(decrypt_result.pro.profile_bitset == 0);
+        // No proof was attached, so the decoded proof is empty (matches a default-constructed one).
         REQUIRE(std::memcmp(
-                        decrypt_result_pro_hash.data,
-                        nil_hash.data(),
-                        sizeof(decrypt_result_pro_hash.data)) == 0);
+                        decrypt_result.pro.proof.sig.data,
+                        nil_proof.sig.data(),
+                        sizeof(decrypt_result.pro.proof.sig.data)) == 0);
 
         // Verify it is decryptable
         SessionProtos::Content decrypt_content = {};
@@ -391,9 +382,12 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Verify pro
         REQUIRE(decrypt_result.pro.status ==
                 SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
-        cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
-        REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
-                0);
+        // The proof survived the encode/decode round-trip: its authenticating signature is
+        // unchanged (Ed25519 is deterministic over the canonical message).
+        REQUIRE(std::memcmp(
+                        decrypt_result.pro.proof.sig.data,
+                        protobuf_content.proof.sig.data(),
+                        sizeof(decrypt_result.pro.proof.sig.data)) == 0);
         REQUIRE(decrypt_result.pro.msg_bitset == 0);      // No features requested
         REQUIRE(decrypt_result.pro.profile_bitset == 0);  // No features requested
 
@@ -465,9 +459,12 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Verify pro
         REQUIRE(decrypt_result.pro.status ==
                 SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
-        cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
-        REQUIRE(std::memcmp(hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
-                0);
+        // The proof survived the encode/decode round-trip: its authenticating signature is
+        // unchanged (Ed25519 is deterministic over the canonical message).
+        REQUIRE(std::memcmp(
+                        decrypt_result.pro.proof.sig.data,
+                        protobuf_content.proof.sig.data(),
+                        sizeof(decrypt_result.pro.proof.sig.data)) == 0);
         REQUIRE(
                 (decrypt_result.pro.profile_bitset &
                  SESSION_PROTOCOL_PRO_PROFILE_FEATURE_PRO_BADGE));
@@ -611,10 +608,12 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
             // Verify pro
             REQUIRE(decrypt_result.pro.status ==
                     SESSION_PROTOCOL_PRO_STATUS_VALID);  // Pro was attached
-            cbytes32 hash = session_protocol_pro_proof_hash(&decrypt_result.pro.proof);
+            // The proof survived the encode/decode round-trip: its authenticating signature is
+            // unchanged (Ed25519 is deterministic over the canonical message).
             REQUIRE(std::memcmp(
-                            hash.data, protobuf_content.pro_proof_hash.data(), sizeof(hash.data)) ==
-                    0);
+                            decrypt_result.pro.proof.sig.data,
+                            protobuf_content.proof.sig.data(),
+                            sizeof(decrypt_result.pro.proof.sig.data)) == 0);
             REQUIRE(decrypt_result.pro.msg_bitset == 0);      // No features requested
             REQUIRE(decrypt_result.pro.profile_bitset == 0);  // No features requested
 
