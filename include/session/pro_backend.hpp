@@ -83,9 +83,9 @@ constexpr std::string_view URL = "https://pro.session.codes";
 /// error (fail-closed) rather than passing it through. New categories/detail arrive via
 /// `error_code`, which IS open/extensible.
 enum class ResponseStatus {
-    Ok,    ///< Success; the response's payload fields are populated.
-    Fail,  ///< Request rejected on client input / a precondition; retrying the identical request
-           ///< won't help (except the `stale_request` error_code). See `error_code`.
+    Ok,     ///< Success; the response's payload fields are populated.
+    Fail,   ///< Request rejected on client input / a precondition; retrying the identical request
+            ///< won't help (except the `stale_request` error_code). See `error_code`.
     Error,  ///< Backend fault; the client did nothing wrong and the same request may succeed later.
 };
 
