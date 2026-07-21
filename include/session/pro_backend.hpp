@@ -133,6 +133,13 @@ struct ProviderUrls {
 /// hunting for empty members.
 std::optional<ProviderUrls> provider_urls(std::string_view provider_code);
 
+/// The user-visible purchasable platforms, as provider-code slugs (a subset of the
+/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* values — currently "google_play" and "app_store").
+/// Order is not significant; clients pick their own. Hidden mechanisms (e.g. rangeproof) are
+/// excluded — they surface only for users who already hold them — so this is the set that drives a
+/// "purchase via …" store list.
+std::span<const std::string_view> visible_platforms();
+
 /// Endpoint + content-type + opaque payload for a request to be POSTed to the Session Pro backend,
 /// returned by the `*_request()` helpers below. Callers relay `data` verbatim under `content_type`
 /// and never inspect or assume its format -- libsession owns the wire encoding.

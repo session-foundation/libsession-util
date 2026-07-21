@@ -67,6 +67,14 @@ struct session_pro_backend_provider_urls {
 LIBSESSION_EXPORT session_pro_backend_provider_urls
 session_pro_backend_get_provider_urls(const char* provider_code) NON_NULL_ARG(1);
 
+/// API: session_pro_backend/visible_platforms
+///
+/// Returns the user-visible purchasable platforms as an array of `*count` provider-code C strings
+/// (a subset of the SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* values). Order is not significant;
+/// clients pick their own. Hidden mechanisms (e.g. rangeproof) are excluded. The returned array and
+/// its strings are static storage owned by libsession — do not free.
+LIBSESSION_EXPORT const char* const* session_pro_backend_visible_platforms(size_t* count);
+
 typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_SUCCESS,
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR,
