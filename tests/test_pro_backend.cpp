@@ -574,6 +574,30 @@ TEST_CASE("Pro Backend X25519 pubkey matches the converted Ed25519 pubkey", "[pr
             0);
 }
 
+TEST_CASE(
+        "Pro Backend visible_platforms lists purchasable stores, excludes rangeproof",
+        "[pro_backend]") {
+    auto platforms = visible_platforms();
+    auto has = [](std::span<const std::string_view> v, std::string_view s) {
+        for (auto x : v)
+            if (x == s)
+                return true;
+        return false;
+    };
+    REQUIRE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY));
+    REQUIRE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE));
+    // Hidden mechanisms are handled but never listed.
+    REQUIRE_FALSE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF));
+    REQUIRE(platforms.size() == 2);
+
+    // The C export returns the same slugs, in the same order (it is derived from the C++ list).
+    size_t count = 0;
+    const char* const* c = session_pro_backend_visible_platforms(&count);
+    REQUIRE(count == platforms.size());
+    for (size_t i = 0; i < count; i++)
+        REQUIRE(std::string_view{c[i]} == platforms[i]);
+}
+
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
 #include <curl/curl.h>
 

@@ -233,6 +233,27 @@ session_pro_backend_get_provider_urls(const char* provider_code) {
     return {nullptr, nullptr, nullptr, nullptr, nullptr};
 }
 
+std::span<const std::string_view> visible_platforms() {
+    static const std::array<std::string_view, 2> platforms = {
+            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
+            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE};
+    return platforms;
+}
+
+LIBSESSION_C_API const char* const* session_pro_backend_visible_platforms(size_t* count) {
+    // Derived from the C++ list (single source); each slug's data() is a static, null-terminated
+    // literal, so the pointer array is safe to hand out as static storage.
+    static const std::vector<const char*> codes = [] {
+        std::vector<const char*> v;
+        for (auto slug : visible_platforms())
+            v.push_back(slug.data());
+        return v;
+    }();
+    if (count)
+        *count = codes.size();
+    return codes.data();
+}
+
 MasterRotatingSignatures add_payment_sigs(
         const ed25519::PrivKeySpan& master_privkey,
         const ed25519::PrivKeySpan& rotating_privkey,
