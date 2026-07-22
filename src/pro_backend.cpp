@@ -4,6 +4,7 @@
 #include <session/pro_backend.h>
 #include <sodium/crypto_sign_ed25519.h>
 
+#include <charconv>
 #include <chrono>
 #include <concepts>
 #include <nlohmann/json.hpp>
@@ -238,6 +239,36 @@ std::span<const std::string_view> visible_platforms() {
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
             SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE};
     return platforms;
+}
+
+std::optional<ProPlanPeriod> parse_plan_period(std::string_view code) {
+    // pro-wire-protocol.md §1 / Delta #14: closed grammar. "lifetime", or "<N><unit>" with N a
+    // positive integer (no leading zeros) and unit one of s/d/w/m/y. Single-unit only.
+    if (code == "lifetime")
+        return ProPlanPeriod{0, ProPlanUnit::lifetime};
+
+    if (code.size() < 2)
+        return std::nullopt;
+    ProPlanUnit unit;
+    switch (code.back()) {
+        case 's': unit = ProPlanUnit::second; break;
+        case 'd': unit = ProPlanUnit::day; break;
+        case 'w': unit = ProPlanUnit::week; break;
+        case 'm': unit = ProPlanUnit::month; break;
+        case 'y': unit = ProPlanUnit::year; break;
+        default: return std::nullopt;
+    }
+
+    // N = [1-9][0-9]*: reject a leading zero (or sign) up front, then require from_chars to consume
+    // every remaining digit into a positive int (this also rejects overflow).
+    std::string_view digits = code.substr(0, code.size() - 1);
+    if (digits.empty() || digits.front() < '1' || digits.front() > '9')
+        return std::nullopt;
+    int count = 0;
+    auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), count);
+    if (ec != std::errc{} || ptr != digits.data() + digits.size())
+        return std::nullopt;
+    return ProPlanPeriod{count, unit};
 }
 
 LIBSESSION_C_API const char* const* session_pro_backend_visible_platforms(size_t* count) {
@@ -574,7 +605,11 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         // Parse payment item
         auto obj = it.get<nlohmann::json::object_t>();
         auto status = json_require<std::string>(obj, "status", errs);
-        auto plan = json_require<std::string>(obj, "plan", errs);
+        auto plan_code = json_require<std::string>(obj, "plan", errs);
+        auto plan = parse_plan_period(plan_code);
+        if (!plan)
+            errs.push_back(
+                    fmt::format("'plan' is not a recognized billing-period code: '{}'", plan_code));
         auto payment_provider = json_require<std::string>(obj, "payment_provider", errs);
         auto payment_id = json_require<std::string>(obj, "payment_id", errs);
         auto auto_renewing = json_require<bool>(obj, "auto_renewing", errs);
@@ -593,9 +628,11 @@ GetProDetailsResponse parse_payment_details(std::string_view json) {
         ProPaymentItem item = {};
         item.status = std::move(status);
 
-        // plan / payment_provider / payment_id are opaque strings; libsession does not validate or
-        // interpret them (an unknown provider or plan code passes through as-is).
-        item.plan = std::move(plan);
+        // `plan` is parsed (closed grammar, §1 / Delta #14); an unrecognized code is a protocol
+        // error (handled above). payment_provider / payment_id are opaque strings that pass through
+        // as-is.
+        if (plan)
+            item.plan = *plan;
         item.payment_provider = std::move(payment_provider);
         item.payment_id = std::move(payment_id);
 
@@ -1003,7 +1040,8 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         const ProPaymentItem& src = cpp.items[index];
         session_pro_backend_pro_payment_item& dest = result.items[index];
         dest.status_count = session::copy_c_str(dest.status, src.status) - 1;
-        dest.plan_count = session::copy_c_str(dest.plan, src.plan) - 1;
+        dest.plan_count = src.plan.count;
+        dest.plan_unit = static_cast<SESSION_PRO_BACKEND_PLAN_UNIT>(src.plan.unit);
         dest.payment_provider_count =
                 session::copy_c_str(dest.payment_provider, src.payment_provider) - 1;
         dest.purchased_ts = epoch_seconds_double(src.purchased_at);

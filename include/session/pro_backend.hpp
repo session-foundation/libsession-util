@@ -293,6 +293,25 @@ ProRequest payment_details_request(
         std::chrono::sys_seconds unix_ts,
         uint32_t count);
 
+/// Unit of a billing period (the `unit` of a parsed `plan` code, pro-wire-protocol.md §1 / Delta
+/// #14). A closed set: the backend emits only these, so an unrecognized code is a protocol error.
+enum class ProPlanUnit { second, day, week, month, year, lifetime };
+
+/// A parsed `plan` billing-period code. The `unit` is preserved exactly as transmitted and never
+/// canonicalized ("12m" and "1y" are the same duration but distinct values). `count` is meaningful
+/// only for the periodic units and is >= 1; for `lifetime` it is 0 (invariant: count == 0 iff unit
+/// == lifetime), so consumers switch on `unit` and never render "<count> <unit>" for lifetime.
+struct ProPlanPeriod {
+    int count;
+    ProPlanUnit unit;
+};
+
+/// Parse a `plan` billing-period code (pro-wire-protocol.md §1, Delta #14): "<N><unit>" with N a
+/// positive integer (no leading zeros) and unit one of s/d/w/m/y (second/day/week/month/year), or
+/// the literal "lifetime". Single-unit only ("1y6m" is invalid). Returns std::nullopt for any
+/// non-conforming code (the caller treats that as a protocol error).
+std::optional<ProPlanPeriod> parse_plan_period(std::string_view plan_code);
+
 struct ProPaymentItem {
     /// Describes the current status of the consumption of the payment for Session Pro entitlement
     /// The status should be used to determine which timestamps should be used.
@@ -302,9 +321,10 @@ struct ProPaymentItem {
     /// book-keeping purposes.
     std::string status;
 
-    /// Billing-period code that was purchased (e.g. "1m"/"3m"/"1y"); opaque, may be free-form for
-    /// non-period plans. The client maps/parses it for display.
-    std::string plan;
+    /// The parsed billing period that was purchased (e.g. "1m" -> {1, month}, "lifetime" -> {0,
+    /// lifetime}). libsession parses the closed `plan` grammar (§1 / Delta #14); the client just
+    /// localizes the display. The unit is preserved as transmitted, never canonicalized.
+    ProPlanPeriod plan;
 
     /// Provider code this payment came from (e.g. "google_play"); opaque -- an unknown value passes
     /// through as-is for the client to handle.

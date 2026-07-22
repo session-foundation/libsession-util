@@ -151,15 +151,30 @@ struct session_pro_backend_get_pro_revocations_response {
     size_t items_count;
 };
 
+/// Unit of a parsed billing period (`plan_unit` below); mirrors C++
+/// session::pro_backend::ProPlanUnit (same order). A closed set (pro-wire-protocol.md §1 / Delta
+/// #14).
+typedef enum SESSION_PRO_BACKEND_PLAN_UNIT {
+    SESSION_PRO_BACKEND_PLAN_UNIT_SECOND,
+    SESSION_PRO_BACKEND_PLAN_UNIT_DAY,
+    SESSION_PRO_BACKEND_PLAN_UNIT_WEEK,
+    SESSION_PRO_BACKEND_PLAN_UNIT_MONTH,
+    SESSION_PRO_BACKEND_PLAN_UNIT_YEAR,
+    SESSION_PRO_BACKEND_PLAN_UNIT_LIFETIME,
+} SESSION_PRO_BACKEND_PLAN_UNIT;
+
 typedef struct session_pro_backend_pro_payment_item session_pro_backend_pro_payment_item;
 struct session_pro_backend_pro_payment_item {
     /// Opaque payment lifecycle status code (e.g. "unredeemed"/"redeemed"/"expired"/"revoked");
     /// unknown values pass through as-is
     char status[64];
     size_t status_count;
-    /// Billing-period code (e.g. "1m"/"3m"/"1y"); opaque, may be free-form for non-period plans
-    char plan[64];
-    size_t plan_count;
+    /// Parsed billing period (pro-wire-protocol.md §1 / Delta #14). `plan_count` is the period
+    /// count
+    /// (>= 1 for periodic units); for `plan_unit == ..._LIFETIME` it is 0 and not meaningful
+    /// (switch on `plan_unit`, never render "<count> <unit>" for lifetime).
+    int plan_count;
+    SESSION_PRO_BACKEND_PLAN_UNIT plan_unit;
     /// Provider code (e.g. "google_play"); opaque -- an unknown value passes through as-is
     char payment_provider[64];
     size_t payment_provider_count;
