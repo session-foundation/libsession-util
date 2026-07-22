@@ -199,10 +199,18 @@ LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY =
         reinterpret_cast<const unsigned char*>(PUBKEY.data());
 LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY_X25519 =
         reinterpret_cast<const unsigned char*>(PUBKEY_X25519.data());
+
+// Payment-provider code strings: C symbols pointing at the single C++ definitions above.
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY =
+        PAYMENT_PROVIDER_GOOGLE_PLAY.data();
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE =
+        PAYMENT_PROVIDER_APP_STORE.data();
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF =
+        PAYMENT_PROVIDER_RANGEPROOF.data();
 }
 
 std::optional<ProviderUrls> provider_urls(std::string_view provider_code) {
-    if (provider_code == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY)
+    if (provider_code == PAYMENT_PROVIDER_GOOGLE_PLAY)
         return ProviderUrls{
                 "https://support.google.com/googleplay/workflow/9813244?",
                 "https://getsession.org/android-refund",
@@ -211,7 +219,7 @@ std::optional<ProviderUrls> provider_urls(std::string_view provider_code) {
                 "subscriptions?package=network.loki.messenger",
                 "https://play.google.com/store/account/"
                 "subscriptions?package=network.loki.messenger"};
-    if (provider_code == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE)
+    if (provider_code == PAYMENT_PROVIDER_APP_STORE)
         return ProviderUrls{
                 "https://support.apple.com/118223",
                 "https://support.apple.com/118223",
@@ -236,8 +244,7 @@ session_pro_backend_get_provider_urls(const char* provider_code) {
 
 std::span<const std::string_view> visible_platforms() {
     static const std::array<std::string_view, 2> platforms = {
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE};
+            PAYMENT_PROVIDER_GOOGLE_PLAY, PAYMENT_PROVIDER_APP_STORE};
     return platforms;
 }
 

@@ -12,12 +12,14 @@ extern "C" {
 #endif
 
 /// Canonical payment-provider `code` strings — the value transmitted on the wire and folded into
-/// the add-payment / set-refund signed hashes (spec §1). Reference these constants rather than
-/// hardcoding the slug so a sent code cannot drift from what libsession hashes/parses. Unknown
-/// codes (e.g. a future provider) are still valid on the wire and pass through as opaque strings.
-static const char SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY[] = "google_play";
-static const char SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE[] = "app_store";
-static const char SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF[] = "rangeproof";
+/// the add-payment / set-refund signed messages (§3). Reference these rather than hardcoding the
+/// slug so a sent code cannot drift from what libsession signs/parses. Unknown codes (e.g. a future
+/// provider) are still valid on the wire and pass through as opaque strings. Each points at the
+/// C++ `session::pro_backend::PAYMENT_PROVIDER_*` value (defined there — the primary; C
+/// references).
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
 
 /// Endpoint path (relative to the backend base URL) that each request type is POSTed to. libsession
 /// owns the body<->route pairing, so reference these rather than hardcoding the path client-side.
