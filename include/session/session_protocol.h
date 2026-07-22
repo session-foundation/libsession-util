@@ -26,32 +26,33 @@ LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_STANDARD_PINNED_CONVERSATION
 LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING;
 
 /// Bundle of hard-coded strings that an implementing application may use for various scenarios.
+/// Each is a static, null-terminated C string.
 typedef struct session_protocol_strings {
-    string8 build_variant_apk;
-    string8 build_variant_fdroid;
-    string8 build_variant_huawei;
-    string8 build_variant_ipa;
-    string8 url_donations;
-    string8 url_donations_app;
-    string8 url_download;
-    string8 url_faq;
-    string8 url_feedback;
-    string8 url_network;
-    string8 url_privacy_policy;
-    string8 url_pro_access_not_found;
-    string8 url_pro_faq;
-    string8 url_pro_page;
-    string8 url_pro_privacy_policy;
-    string8 url_pro_roadmap;
-    string8 url_pro_support;
-    string8 url_pro_terms_of_service;
-    string8 url_pro_upgrade;
-    string8 url_staking;
-    string8 url_support;
-    string8 url_survey;
-    string8 url_terms_of_service;
-    string8 url_token;
-    string8 url_translate;
+    const char* build_variant_apk;
+    const char* build_variant_fdroid;
+    const char* build_variant_huawei;
+    const char* build_variant_ipa;
+    const char* url_donations;
+    const char* url_donations_app;
+    const char* url_download;
+    const char* url_faq;
+    const char* url_feedback;
+    const char* url_network;
+    const char* url_privacy_policy;
+    const char* url_pro_access_not_found;
+    const char* url_pro_faq;
+    const char* url_pro_page;
+    const char* url_pro_privacy_policy;
+    const char* url_pro_roadmap;
+    const char* url_pro_support;
+    const char* url_pro_terms_of_service;
+    const char* url_pro_upgrade;
+    const char* url_staking;
+    const char* url_support;
+    const char* url_survey;
+    const char* url_terms_of_service;
+    const char* url_token;
+    const char* url_translate;
 } session_protocol_strings;
 extern const session_protocol_strings SESSION_PROTOCOL_STRINGS;
 
@@ -361,7 +362,9 @@ LIBSESSION_EXPORT SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 /// API: session_protocol/session_protocol_get_pro_features_for_msg
 typedef struct session_protocol_pro_features_for_msg {
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS status;
-    string8 error;
+    /// On error (status != OK), a static, null-terminated English diagnostic string; NULL when
+    /// there is no error.
+    const char* error;
     session_protocol_pro_message_bitset bitset;
     size_t codepoint_count;
 } session_protocol_pro_features_for_msg;

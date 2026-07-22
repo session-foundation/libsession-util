@@ -95,8 +95,8 @@ typedef struct session_pro_backend_request {
     const char* endpoint;
     /// Value for the request's Content-Type header; static, null-terminated string. Relay verbatim.
     const char* content_type;
-    /// The opaque request payload. Relay untouched; do not parse or modify.
-    string8 data;
+    /// The opaque request payload (raw bytes). Relay untouched; do not parse or modify.
+    span_u8 data;
     /// Owned C++ object backing endpoint/content_type/data; do not touch (freed by request_free).
     void* internal_;
 } session_pro_backend_request;
