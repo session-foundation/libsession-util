@@ -50,9 +50,14 @@ LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY_X
 /// Per-provider support/management URLs, keyed by provider code. These are identical for every user
 /// (not translation data), so libsession owns them as the single source of truth rather than each
 /// client duplicating them; the human-readable provider/store names are translation data and remain
-/// the client's job. An unknown provider code (or one with no applicable URLs, e.g. rangeproof)
-/// yields all-NULL fields. Otherwise each is a static, null-terminated C string.
+/// the client's job. Each URL field is NULL when that provider has no such URL, and is otherwise a
+/// static, null-terminated C string. Use `found` (not the URL fields) to tell an unknown provider
+/// code from a known provider that simply has no URLs.
 typedef struct session_pro_backend_provider_urls {
+    /// True if `provider_code` is a recognised provider; false if it is unknown (or e.g.
+    /// rangeproof), in which case every URL field below is NULL. A recognised provider may still
+    /// leave any or all URL fields NULL.
+    bool found;
     const char* refund_platform_url;      /// Native store refund flow
     const char* refund_support_url;       /// Session support page for requesting a refund
     const char* refund_status_url;        /// Where a user checks refund status
@@ -63,8 +68,9 @@ typedef struct session_pro_backend_provider_urls {
 /// API: session_pro_backend/get_provider_urls
 ///
 /// Returns the support/management URLs for `provider_code` (a
-/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* value). A provider with no applicable URLs (unknown
-/// code, or e.g. rangeproof) returns a struct with all fields NULL.
+/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* value). On an unrecognised code the result has
+/// `found == false` and all URL fields NULL; on a recognised code `found == true` and each URL
+/// field is either a static, null-terminated C string or NULL if that provider lacks that URL.
 LIBSESSION_EXPORT session_pro_backend_provider_urls
 session_pro_backend_get_provider_urls(const char* provider_code) NON_NULL_ARG(1);
 
