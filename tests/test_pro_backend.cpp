@@ -727,6 +727,157 @@ TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
         CHECK_FALSE(parse_plan_period(bad).has_value());
 }
 
+// ---------------------------------------------------------------------------
+// Known-answer vectors (tag [pro_kat]) -- SERVER-LESS (runs in an ordinary testAll build).
+//
+// These pin libsession's signed-message construction (wire spec 1.1 / 2 / 3.1-3.4, Delta #13) to
+// fixed byte vectors that were generated from the backend's *independent* implementation and then
+// hand-verified against the spec layout (generator: tests/pro_backend/gen_kat.py). The live
+// [pro_live] suite catches libsession<->backend *drift*; a KAT additionally catches a fault where
+// BOTH sides share the same wrong construction (they would still agree with each other), needs no
+// running backend, and freezes the wire format against silent future drift. Ed25519 is
+// deterministic (RFC 8032), so a signature over a fixed message under a fixed key is itself a known
+// answer.
+//
+// Fixed inputs: keypairs from 32-byte seeds 0x01.. / 0x02.. (backend key 0x03..), ts=1700000000,
+// refund_ts=1700000123, expiry=1704067200, count=10, provider="google_play",
+// payment_id="test-payment-id-123", revocation_tag=0x11 x32.
+TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
+    auto keypair = [](unsigned char seed_byte) {
+        std::array<unsigned char, 32> pk{};
+        std::array<unsigned char, 64> sk{};
+        std::array<unsigned char, 32> seed{};
+        seed.fill(seed_byte);
+        crypto_sign_seed_keypair(pk.data(), sk.data(), seed.data());
+        return std::pair{pk, sk};
+    };
+    auto [master_pk, master_sk] = keypair(0x01);
+    auto [rotating_pk, rotating_sk] = keypair(0x02);
+    auto [backend_pk, backend_sk] = keypair(0x03);
+    (void)backend_sk;
+
+    const auto ts = session::as_sys_seconds(1700000000);
+    const auto refund_ts = session::as_sys_seconds(1700000123);
+    const auto expiry = session::as_sys_seconds(1704067200);
+    const std::string provider = "google_play";
+    const std::string payment_id = "test-payment-id-123";
+    auto pid_span = [&]() {
+        return std::span<const uint8_t>{
+                reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()};
+    };
+
+    // Expected signed-message bytes (hex), each hand-verified against the spec field layout.
+    const std::string add_msg_hex =
+            "50726f4164645061796d656e745f5f5f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
+            "01"
+            "b40f6f5c8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394676f6f676c655f"
+            "70"
+            "6c617900746573742d7061796d656e742d69642d313233";
+    const std::string gen_msg_hex =
+            "50726f47656e657261746550726f6f668a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
+            "01"
+            "b40f6f5c8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b39431373030303030"
+            "303030";
+    // Delta #15: get_pro_details split into get_pro_status (master + ts) and paginated
+    // get_payment_details (master + ts + limit + before). Two details vectors pin the `before`
+    // framing: empty `before` (newest page) ends in the adjacency \0; a non-empty cursor is the
+    // opaque final field (no trailing separator).
+    const std::string status_msg_hex =
+            "50726f47657450726f5374617475735f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
+            "01b40f6f5c31373030303030303030";
+    const std::string details_empty_msg_hex =
+            "50726f47657450617944657461696c738a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
+            "01b40f6f5c3137303030303030303000313000";
+    const std::string details_cursor_msg_hex =
+            "50726f47657450617944657461696c738a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
+            "01b40f6f5c3137303030303030303000313000306131623263336434653566";
+    const std::string refund_msg_hex =
+            "50726f536574526566756e645265715f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
+            "01"
+            "b40f6f5c31373030303030303030003137303030303031323300676f6f676c655f706c617900746573742d"
+            "70"
+            "61796d656e742d69642d313233";
+    const std::string proof_msg_hex =
+            "50726f50726f6f665f76305f5f5f5f5f111111111111111111111111111111111111111111111111111111"
+            "1111"
+            "1111118139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b3943137303430363732"
+            "3030";
+
+    // Assert `field`'s hex signature in request body `body` is a valid Ed25519 signature of the
+    // expected message bytes under `pubkey` -- i.e. libsession signed *exactly* the spec message.
+    auto sig_covers = [](const std::string& body,
+                         const char* field,
+                         const std::string& expected_msg_hex,
+                         const std::array<unsigned char, 32>& pubkey) -> bool {
+        auto j = nlohmann::json::parse(body);
+        if (!j.contains(field))
+            return false;
+        auto sig = oxenc::from_hex(j.at(field).get<std::string>());
+        auto msg = oxenc::from_hex(expected_msg_hex);
+        return sig.size() == 64 && crypto_sign_verify_detached(
+                                           reinterpret_cast<const unsigned char*>(sig.data()),
+                                           reinterpret_cast<const unsigned char*>(msg.data()),
+                                           msg.size(),
+                                           pubkey.data()) == 0;
+    };
+
+    SECTION("add_pro_payment") {
+        auto req = add_payment_request(master_sk, rotating_sk, provider, pid_span());
+        CHECK(req.endpoint == SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT);
+        CHECK(sig_covers(req.data, "master_sig", add_msg_hex, master_pk));
+        CHECK(sig_covers(req.data, "rotating_sig", add_msg_hex, rotating_pk));
+        // Determinism pin: the exact master signature is itself a known answer.
+        CHECK(nlohmann::json::parse(req.data).at("master_sig").get<std::string>() ==
+              "746861ae1681d996e837d603dbd21c06c9544c5fc536eb4d3e3cad4f13692b79"
+              "0ef2b1282b729aa42f537d560b3b97b231b7f940be7021c0e16f894817a57609");
+    }
+    SECTION("generate_pro_proof") {
+        auto req = pro_proof_request(master_sk, rotating_sk, ts);
+        CHECK(req.endpoint == SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT);
+        CHECK(sig_covers(req.data, "master_sig", gen_msg_hex, master_pk));
+        CHECK(sig_covers(req.data, "rotating_sig", gen_msg_hex, rotating_pk));
+    }
+    SECTION("get_pro_status") {
+        auto req = pro_status_request(master_sk, ts);
+        CHECK(req.endpoint == SESSION_PRO_BACKEND_GET_PRO_STATUS_ENDPOINT);
+        CHECK(sig_covers(req.data, "master_sig", status_msg_hex, master_pk));
+    }
+    SECTION("get_payment_details (newest page, empty before)") {
+        auto req = payment_details_request(master_sk, ts, 10, "");
+        CHECK(req.endpoint == SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT);
+        CHECK(sig_covers(req.data, "master_sig", details_empty_msg_hex, master_pk));
+    }
+    SECTION("get_payment_details (with cursor)") {
+        auto req = payment_details_request(master_sk, ts, 10, "0a1b2c3d4e5f");
+        CHECK(req.endpoint == SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT);
+        CHECK(sig_covers(req.data, "master_sig", details_cursor_msg_hex, master_pk));
+    }
+    SECTION("set_payment_refund_requested") {
+        auto req = refund_request(master_sk, ts, refund_ts, provider, pid_span());
+        CHECK(req.endpoint == SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT);
+        CHECK(sig_covers(req.data, "master_sig", refund_msg_hex, master_pk));
+    }
+    SECTION("pro proof") {
+        session::ProProof proof;
+        proof.version = 0;
+        std::memset(proof.revocation_tag.data(), 0x11, proof.revocation_tag.size());
+        std::memcpy(proof.rotating_pubkey.data(), rotating_pk.data(), 32);
+        proof.expiry_at = expiry;
+        auto sig = oxenc::from_hex(
+                "767e7f14cec2d04fb67c6407e890cbe6a5cfdb7a0df3e729adda93164b13bc3f"
+                "b20ed4ea1b8f1ffc74115ff2598a51ac52285d923f0864c6bca08bfc771fb708");
+        std::memcpy(proof.sig.data(), sig.data(), 64);
+
+        // Direct pin of the proof (spec section 2) message construction.
+        CHECK(oxenc::to_hex(proof.signed_message()) == proof_msg_hex);
+        // The frozen backend signature (key 0x03 over that message) verifies; a wrong key does not.
+        CHECK(proof.verify_signature(backend_pk));
+        auto wrong = backend_pk;
+        wrong[0] ^= 0x01;
+        CHECK_FALSE(proof.verify_signature(wrong));
+    }
+}
+
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
 #include <curl/curl.h>
 
