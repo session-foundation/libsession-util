@@ -378,7 +378,7 @@ LIBSESSION_EXPORT void user_profile_set_animated_avatar(config_object* conf, boo
 /// API: user_profile/user_profile_get_pro_access_expiry
 ///
 /// Retrieves the Session Pro access expiry unix timestamp if it has been set, this should generally
-/// be the expiry value returned from /get_pro_details.
+/// be the expiry value returned from /get_pro_status.
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object

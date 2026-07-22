@@ -310,7 +310,7 @@ class UserProfile : public ConfigBase {
     /// API: user_profile/UserProfile::get_pro_access_expiry
     ///
     /// Retrieves the Session Pro access expiry unix timestamp if it has been set, this should
-    /// generally be the expiry value returned from /get_pro_details.
+    /// generally be the expiry value returned from /get_pro_status.
     ///
     /// Inputs:  None
     ///
