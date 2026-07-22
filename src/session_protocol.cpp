@@ -65,7 +65,7 @@ std::vector<std::byte> proof_signed_message(
 // Copies an optional 32-byte value out of a possibly-null C pointer. A null pointer yields a
 // zero-filled value (the "not provided" case); a non-null pointer with the wrong length yields
 // nullopt to signal an error.
-static std::optional<session::b32> optional_uc32_from_ptr(const void* ptr, size_t len) {
+static std::optional<session::b32> maybe_uc32_from_ptr(const void* ptr, size_t len) {
     session::b32 out = {};
     if (ptr) {
         if (len != out.max_size())
@@ -122,9 +122,9 @@ static session::ProProof proof_from_c(const session_protocol_pro_proof& c) {
 
 namespace session {
 
-static_assert(sizeof(std::declval<ProProof>().revocation_tag) == 32);
-static_assert(sizeof(std::declval<ProProof>().rotating_pubkey) == 32);
-static_assert(sizeof(std::declval<ProProof>().sig) == 64);
+static_assert(sizeof(ProProof::revocation_tag) == 32);
+static_assert(sizeof(ProProof::rotating_pubkey) == 32);
+static_assert(sizeof(ProProof::sig) == 64);
 
 bool ProProof::verify_signature(std::span<const std::byte, 32> verify_pubkey) const {
     return ed25519::verify(sig, verify_pubkey, signed_message());
@@ -176,8 +176,8 @@ session::ProFeaturesForMsg pro_features_check(
         result.status = session::ProFeaturesForMsgStatus::Success;
         result.codepoint_count = codepoints;
 
-        if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
-            if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
+        if (result.codepoint_count > session::STANDARD_CHARACTER_LIMIT) {
+            if (result.codepoint_count <= session::PRO_HIGHER_CHARACTER_LIMIT) {
                 result.flags |= session::ProMessageFlags::CharLimit10k;
             } else {
                 result.error = "Message exceeds the maximum character limit allowed";
@@ -217,10 +217,9 @@ std::vector<std::byte> pad_message(std::span<const std::byte> payload) {
     // Calculate amount of padding required
     size_t padded_content_size = payload.size() + 1 /*padding byte*/;
     uint8_t const bytes_for_padding =
-            SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING -
-            (padded_content_size % SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING);
+            COMMUNITY_OR_1O1_MSG_PADDING - (padded_content_size % COMMUNITY_OR_1O1_MSG_PADDING);
     padded_content_size += bytes_for_padding;
-    assert(padded_content_size % SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING == 0);
+    assert(padded_content_size % COMMUNITY_OR_1O1_MSG_PADDING == 0);
 
     // Do the padding
     std::vector<std::byte> result;
@@ -783,9 +782,21 @@ DecodedCommunityMessage decode_for_community(
 
 using namespace session;
 
-static_assert((sizeof((session_protocol_pro_proof*)0)->revocation_tag) == 32);
-static_assert(sizeof(std::declval<session_protocol_pro_proof>().rotating_pubkey) == 32);
-static_assert(sizeof(std::declval<session_protocol_pro_proof>().sig) == 64);
+// Protocol limit/padding constants: C symbols pointing at the single C++ definitions above.
+extern "C" {
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT =
+        STANDARD_CHARACTER_LIMIT;
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT =
+        PRO_HIGHER_CHARACTER_LIMIT;
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_STANDARD_PINNED_CONVERSATION_LIMIT =
+        STANDARD_PINNED_CONVERSATION_LIMIT;
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING =
+        COMMUNITY_OR_1O1_MSG_PADDING;
+}
+
+static_assert(sizeof(session_protocol_pro_proof::revocation_tag) == 32);
+static_assert(sizeof(session_protocol_pro_proof::rotating_pubkey) == 32);
+static_assert(sizeof(session_protocol_pro_proof::sig) == 64);
 
 // Session Pro feature flag bit constants exposed to the C API. The C++ enum classes
 // (session::ProProfileFlags / session::ProMessageFlags) are the source of truth; these mirror their
@@ -1022,8 +1033,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     session_protocol_decoded_envelope result = {};
 
     // Setup the pro backend pubkey
-    auto pro_backend_pubkey_cpp =
-            optional_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    auto pro_backend_pubkey_cpp = maybe_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
     if (!pro_backend_pubkey_cpp) {
         result.error_len_incl_null_terminator = format_c_str(
                 error,
@@ -1140,8 +1150,7 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
             static_cast<const std::byte*>(content_or_envelope_payload),
             content_or_envelope_payload_len};
     auto unix_ts = session::as_sys_seconds(ts);
-    auto pro_backend_pubkey_cpp =
-            optional_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    auto pro_backend_pubkey_cpp = maybe_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
     if (!pro_backend_pubkey_cpp) {
         result.error_len_incl_null_terminator = format_c_str(
                 error,

@@ -89,7 +89,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
     SECTION("Ensure get pro fetaures detects large message") {
         // Try a message below the size threshold
         {
-            auto msg = std::string(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT, 'a');
+            auto msg = std::string(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT, 'a');
             session_protocol_pro_features_for_msg pro_msg =
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
@@ -109,7 +109,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
         // Try a message exceeding the standard size threshold
         {
-            auto msg = std::string(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT + 1, 'a');
+            auto msg = std::string(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT + 1, 'a');
             session_protocol_pro_features_for_msg pro_msg =
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
@@ -403,7 +403,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     SECTION("Encrypt/decrypt for contact in default namespace with Pro + features") {
         std::string large_message;
-        large_message.resize(SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT + 1);
+        large_message.resize(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT + 1);
 
         session_protocol_pro_features_for_msg pro_msg =
                 session_protocol_pro_features_for_utf8(large_message.data(), large_message.size());

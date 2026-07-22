@@ -37,6 +37,19 @@
 
 namespace session {
 
+/// Maximum number of UTF-16 code points a standard (non-Pro) message can use; a longer message must
+/// activate the Session Pro higher-character-limit feature. (The C `SESSION_PROTOCOL_*` symbols
+/// point at these.)
+inline constexpr int STANDARD_CHARACTER_LIMIT = 2000;
+/// Maximum number of UTF-16 code points a Session Pro entitled user can send. Not used internally;
+/// provided to centralise the protocol definition for library consumers.
+inline constexpr int PRO_HIGHER_CHARACTER_LIMIT = 10000;
+/// Number of conversations a user without Session Pro can pin.
+inline constexpr int STANDARD_PINNED_CONVERSATION_LIMIT = 5;
+/// Byte multiple a community or 1o1 message `Content` is padded up to before wrapping in an
+/// envelope.
+inline constexpr int COMMUNITY_OR_1O1_MSG_PADDING = 160;
+
 enum ProProofVersion { ProProofVersion_v0 };
 
 // Session Pro 16-byte signing domain prefixes; each prefixes the Ed25519-signed message for its
