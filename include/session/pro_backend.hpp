@@ -128,23 +128,25 @@ struct MasterRotatingSignatures {
     b64 rotating_sig;
 };
 
-/// Per-provider support/management URLs. These are identical for every user (not translation data),
-/// so libsession owns them as the single source of truth rather than each client duplicating them;
-/// the human-readable provider/store *names* are translation data and remain the client's job.
-/// Returned by `provider_urls()`. The views point at static, null-terminated storage.
-struct ProviderUrls {
-    std::string_view refund_platform_url;      ///< Native store refund flow
-    std::string_view refund_support_url;       ///< Session support page for requesting a refund
-    std::string_view refund_status_url;        ///< Where a user checks refund status
-    std::string_view update_subscription_url;  ///< Manage/update the subscription
-    std::string_view cancel_subscription_url;  ///< Cancel the subscription
+/// Per-provider support/management URLs (from provider_urls()). These are identical for every user
+/// (not translation data), so libsession owns them as the single source of truth rather than each
+/// client duplicating them; the human-readable provider/store *names* are translation data and
+/// remain the client's job. Each field is std::nullopt when that provider has no such URL -- clients
+/// test the optional rather than an empty-string sentinel. Present views point at static,
+/// null-terminated string literals.
+struct ProviderURLs {
+    std::optional<std::string_view> refund_platform_url;  ///< Native store refund flow
+    std::optional<std::string_view> refund_support_url;   ///< Session page for requesting a refund
+    std::optional<std::string_view> refund_status_url;    ///< Where a user checks refund status
+    std::optional<std::string_view> update_subscription_url;  ///< Manage/update the subscription
+    std::optional<std::string_view> cancel_subscription_url;  ///< Cancel the subscription
 };
 
 /// Look up the support/management URLs for a provider code (see
-/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*). Returns std::nullopt for a provider with no
-/// applicable URLs (an unknown code, or e.g. rangeproof) — so callers test the optional rather than
-/// hunting for empty members.
-std::optional<ProviderUrls> provider_urls(std::string_view provider_code);
+/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*). Returns a pointer to a static per-provider
+/// constant, or nullptr for a provider with no applicable URLs at all (an unknown code, or e.g.
+/// rangeproof); within a returned set each field is present or std::nullopt per that provider.
+const ProviderURLs* provider_urls(std::string_view provider_code);
 
 /// The user-visible purchasable platforms, as provider-code slugs (a subset of the
 /// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* values — currently "google_play" and "app_store").

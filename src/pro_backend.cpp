@@ -209,37 +209,52 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_
         PAYMENT_PROVIDER_RANGEPROOF.data();
 }
 
-std::optional<ProviderUrls> provider_urls(std::string_view provider_code) {
+using namespace std::literals;
+
+// Fixed per-provider URL sets; provider_urls() just maps a provider code to one of these. The
+// values are `""sv` literals so clang-format keeps each URL on one line (it won't split a string
+// literal).
+constexpr ProviderURLs google_play_urls{
+        .refund_platform_url = "https://support.google.com/googleplay/workflow/9813244?"sv,
+        .refund_support_url = "https://getsession.org/android-refund"sv,
+        .refund_status_url = "https://getsession.org/android-refund"sv,
+        .update_subscription_url =
+                "https://play.google.com/store/account/subscriptions?package=network.loki.messenger"sv,
+        .cancel_subscription_url =
+                "https://play.google.com/store/account/subscriptions?package=network.loki.messenger"sv,
+};
+constexpr ProviderURLs app_store_urls{
+        .refund_platform_url = "https://support.apple.com/118223"sv,
+        .refund_support_url = "https://support.apple.com/118223"sv,
+        .refund_status_url = "https://support.apple.com/118224"sv,
+        .update_subscription_url = "https://apps.apple.com/account/subscriptions"sv,
+        .cancel_subscription_url =
+                "https://account.apple.com/account/manage/section/subscriptions"sv,
+};
+
+const ProviderURLs* provider_urls(std::string_view provider_code) {
     if (provider_code == PAYMENT_PROVIDER_GOOGLE_PLAY)
-        return ProviderUrls{
-                "https://support.google.com/googleplay/workflow/9813244?",
-                "https://getsession.org/android-refund",
-                "https://getsession.org/android-refund",
-                "https://play.google.com/store/account/"
-                "subscriptions?package=network.loki.messenger",
-                "https://play.google.com/store/account/"
-                "subscriptions?package=network.loki.messenger"};
+        return &google_play_urls;
     if (provider_code == PAYMENT_PROVIDER_APP_STORE)
-        return ProviderUrls{
-                "https://support.apple.com/118223",
-                "https://support.apple.com/118223",
-                "https://support.apple.com/118224",
-                "https://apps.apple.com/account/subscriptions",
-                "https://account.apple.com/account/manage/section/subscriptions"};
+        return &app_store_urls;
     // rangeproof and unknown providers have no applicable URLs
-    return std::nullopt;
+    return nullptr;
 }
 
 LIBSESSION_C_API session_pro_backend_provider_urls
 session_pro_backend_get_provider_urls(const char* provider_code) {
-    // No URLs → all-NULL fields; otherwise each view is a static, null-terminated literal.
+    // Each present field is a static, null-terminated literal; an absent one (or no URLs at all) is
+    // NULL.
+    auto c = [](const std::optional<std::string_view>& u) -> const char* {
+        return u ? u->data() : nullptr;
+    };
     if (auto u = provider_urls(provider_code))
-        return {u->refund_platform_url.data(),
-                u->refund_support_url.data(),
-                u->refund_status_url.data(),
-                u->update_subscription_url.data(),
-                u->cancel_subscription_url.data()};
-    return {nullptr, nullptr, nullptr, nullptr, nullptr};
+        return {.refund_platform_url = c(u->refund_platform_url),
+                .refund_support_url = c(u->refund_support_url),
+                .refund_status_url = c(u->refund_status_url),
+                .update_subscription_url = c(u->update_subscription_url),
+                .cancel_subscription_url = c(u->cancel_subscription_url)};
+    return {};
 }
 
 std::span<const std::string_view> visible_platforms() {
