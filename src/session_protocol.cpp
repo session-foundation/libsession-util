@@ -79,20 +79,17 @@ bool proof_verify_message_internal(
     return result;
 }
 
-struct array_uc32_from_ptr_result {
-    bool success;
-    session::array_uc32 data;
-};
-
-static array_uc32_from_ptr_result array_uc32_from_ptr(const void* ptr, size_t len) {
-    array_uc32_from_ptr_result result = {};
+// Copies an optional 32-byte value out of a possibly-null C pointer. A null pointer yields a
+// zero-filled value (the "not provided" case); a non-null pointer with the wrong length yields
+// nullopt to signal an error.
+static std::optional<session::array_uc32> maybe_uc32_from_ptr(const void* ptr, size_t len) {
+    session::array_uc32 out = {};
     if (ptr) {
-        if (len != result.data.max_size())
-            return result;
-        std::memcpy(result.data.data(), ptr, len);
+        if (len != out.max_size())
+            return std::nullopt;
+        std::memcpy(out.data(), ptr, len);
     }
-    result.success = true;
-    return result;
+    return out;
 }
 
 static session_protocol_envelope envelope_from_cpp(const session::Envelope& cpp) {
@@ -128,9 +125,9 @@ static session_protocol_decoded_pro decoded_pro_from_cpp(const session::DecodedP
 
 namespace session {
 
-static_assert(sizeof(((ProProof*)0)->revocation_tag) == 32);
-static_assert(sizeof(((ProProof*)0)->rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
-static_assert(sizeof(((ProProof*)0)->sig) == crypto_sign_ed25519_BYTES);
+static_assert(sizeof(ProProof::revocation_tag) == 32);
+static_assert(sizeof(ProProof::rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
+static_assert(sizeof(ProProof::sig) == crypto_sign_ed25519_BYTES);
 
 bool ProProof::verify_signature(const std::span<const uint8_t>& verify_pubkey) const {
     if (verify_pubkey.size() != crypto_sign_ed25519_PUBLICKEYBYTES)
@@ -208,20 +205,21 @@ bool ProMessageBitset::is_set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES features) co
 }
 
 session::ProFeaturesForMsg pro_features_for_utf8_or_16(
-        const void* utf, size_t utf_size, bool is_utf8) {
+        const void* text, size_t text_size, bool is_utf8) {
     session::ProFeaturesForMsg result = {};
-    simdutf::result validate = is_utf8 ? simdutf::validate_utf8_with_errors(
-                                                 reinterpret_cast<const char*>(utf), utf_size)
-                                       : simdutf::validate_utf16_with_errors(
-                                                 reinterpret_cast<const char16_t*>(utf), utf_size);
+    simdutf::result validate = is_utf8
+                                     ? simdutf::validate_utf8_with_errors(
+                                               reinterpret_cast<const char*>(text), text_size)
+                                     : simdutf::validate_utf16_with_errors(
+                                               reinterpret_cast<const char16_t*>(text), text_size);
     if (validate.is_ok()) {
         result.status = session::ProFeaturesForMsgStatus::Success;
         result.codepoint_count =
-                is_utf8 ? simdutf::count_utf8(reinterpret_cast<const char*>(utf), utf_size)
-                        : simdutf::count_utf16(reinterpret_cast<const char16_t*>(utf), utf_size);
+                is_utf8 ? simdutf::count_utf8(reinterpret_cast<const char*>(text), text_size)
+                        : simdutf::count_utf16(reinterpret_cast<const char16_t*>(text), text_size);
 
-        if (result.codepoint_count > SESSION_PROTOCOL_PRO_STANDARD_CHARACTER_LIMIT) {
-            if (result.codepoint_count <= SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT) {
+        if (result.codepoint_count > STANDARD_CHARACTER_LIMIT) {
+            if (result.codepoint_count <= PRO_HIGHER_CHARACTER_LIMIT) {
                 result.bitset.set(SESSION_PROTOCOL_PRO_MESSAGE_FEATURES_10K_CHARACTER_LIMIT);
             } else {
                 result.error = "Message exceeds the maximum character limit allowed";
@@ -238,13 +236,13 @@ session::ProFeaturesForMsg pro_features_for_utf8_or_16(
 
 namespace session {
 
-ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
+ProFeaturesForMsg pro_features_for_utf8(const char* text, size_t text_size) {
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(text, text_size, /*is_utf8*/ true);
     return result;
 }
 
-ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size) {
-    ProFeaturesForMsg result = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
+ProFeaturesForMsg pro_features_for_utf16(const char16_t* text, size_t text_size) {
+    ProFeaturesForMsg result = pro_features_for_utf8_or_16(text, text_size, /*is_utf8*/ false);
     return result;
 }
 
@@ -326,10 +324,9 @@ std::vector<uint8_t> pad_message(std::span<const uint8_t> payload) {
     // Calculate amount of padding required
     size_t padded_content_size = payload.size() + 1 /*padding byte*/;
     uint8_t const bytes_for_padding =
-            SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING -
-            (padded_content_size % SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING);
+            COMMUNITY_OR_1O1_MSG_PADDING - (padded_content_size % COMMUNITY_OR_1O1_MSG_PADDING);
     padded_content_size += bytes_for_padding;
-    assert(padded_content_size % SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING == 0);
+    assert(padded_content_size % COMMUNITY_OR_1O1_MSG_PADDING == 0);
 
     // Do the padding
     std::vector<uint8_t> result;
@@ -1075,15 +1072,26 @@ DecodedCommunityMessage decode_for_community(
 
 using namespace session;
 
-static_assert((sizeof((session_protocol_pro_proof*)0)->revocation_tag) == 32);
+// Protocol limit/padding constants: C symbols pointing at the single C++ definitions above.
+extern "C" {
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT =
+        STANDARD_CHARACTER_LIMIT;
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT =
+        PRO_HIGHER_CHARACTER_LIMIT;
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_STANDARD_PINNED_CONVERSATION_LIMIT =
+        STANDARD_PINNED_CONVERSATION_LIMIT;
+LIBSESSION_EXPORT extern const int SESSION_PROTOCOL_COMMUNITY_OR_1O1_MSG_PADDING =
+        COMMUNITY_OR_1O1_MSG_PADDING;
+}
+
+static_assert(sizeof(session_protocol_pro_proof::revocation_tag) == 32);
 static_assert(
-        (sizeof((session_protocol_pro_proof*)0)->rotating_pubkey) ==
-        crypto_sign_ed25519_PUBLICKEYBYTES);
-static_assert((sizeof((session_protocol_pro_proof*)0)->sig) == crypto_sign_ed25519_BYTES);
+        sizeof(session_protocol_pro_proof::rotating_pubkey) == crypto_sign_ed25519_PUBLICKEYBYTES);
+static_assert(sizeof(session_protocol_pro_proof::sig) == crypto_sign_ed25519_BYTES);
 
 static_assert(
         SESSION_PROTOCOL_PRO_PROFILE_FEATURES_COUNT <=
-                sizeof(((session_protocol_pro_profile_bitset*)0)->data) * 8 /*bits per byte*/,
+                sizeof(session_protocol_pro_profile_bitset::data) * 8 /*bits per byte*/,
         "There are more feature flags than is available in the bitset, the bitset needs to be "
         "upgraded into an array of bytes");
 
@@ -1183,8 +1191,8 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        const char* utf, size_t utf_size) {
-    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ true);
+        const char* text, size_t text_size) {
+    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(text, text_size, /*is_utf8*/ true);
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
@@ -1196,8 +1204,8 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
 
 LIBSESSION_C_API
 session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        const uint16_t* utf, size_t utf_size) {
-    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(utf, utf_size, /*is_utf8*/ false);
+        const uint16_t* text, size_t text_size) {
+    ProFeaturesForMsg result_cpp = pro_features_for_utf8_or_16(text, text_size, /*is_utf8*/ false);
     session_protocol_pro_features_for_msg result = {
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
@@ -1393,9 +1401,8 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
     session_protocol_decoded_envelope result = {};
 
     // Setup the pro backend pubkey
-    array_uc32_from_ptr_result pro_backend_pubkey_cpp =
-            array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
-    if (!pro_backend_pubkey_cpp.success) {
+    auto pro_backend_pubkey_cpp = maybe_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    if (!pro_backend_pubkey_cpp) {
         result.error_len_incl_null_terminator = snprintf_clamped(
                                                         error,
                                                         error_len,
@@ -1422,7 +1429,7 @@ session_protocol_decoded_envelope session_protocol_decode_envelope(
             result_cpp = decode_envelope(
                     keys_cpp,
                     {static_cast<const uint8_t*>(envelope_plaintext), envelope_plaintext_len},
-                    pro_backend_pubkey_cpp.data);
+                    *pro_backend_pubkey_cpp);
             result.success = true;
             break;
         } catch (const std::exception& e) {
@@ -1503,9 +1510,8 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
             reinterpret_cast<const uint8_t*>(content_or_envelope_payload),
             content_or_envelope_payload_len);
     auto unix_ts = as_sys_seconds(ts);
-    array_uc32_from_ptr_result pro_backend_pubkey_cpp =
-            array_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
-    if (!pro_backend_pubkey_cpp.success) {
+    auto pro_backend_pubkey_cpp = maybe_uc32_from_ptr(pro_backend_pubkey, pro_backend_pubkey_len);
+    if (!pro_backend_pubkey_cpp) {
         result.error_len_incl_null_terminator = snprintf_clamped(
                                                         error,
                                                         error_len,
@@ -1518,7 +1524,7 @@ session_protocol_decoded_community_message session_protocol_decode_for_community
 
     try {
         DecodedCommunityMessage decoded = decode_for_community(
-                content_or_envelope_payload_span, unix_ts, pro_backend_pubkey_cpp.data);
+                content_or_envelope_payload_span, unix_ts, *pro_backend_pubkey_cpp);
         result.has_envelope = decoded.envelope.has_value();
         if (result.has_envelope)
             result.envelope = envelope_from_cpp(*decoded.envelope);
