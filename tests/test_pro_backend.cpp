@@ -730,6 +730,13 @@ TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
 #include <curl/curl.h>
 
+#include <cstdlib>
+#include <functional>
+#include <session/network/key_types.hpp>
+#include <session/network/session_network_types.hpp>
+#include <session/onionreq/builder.hpp>
+#include <session/onionreq/response_parser.hpp>
+
 size_t curl_perform_callback(void* contents, size_t size, size_t nmemb, void* userp) {
     size_t total = size * nmemb;
     auto* response_json = static_cast<std::string*>(userp);
@@ -760,304 +767,437 @@ std::string curl_do_basic_blocking_post_request(
     return result;
 }
 
-TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
-    // Setup: Generate keys and payment token hash
-    bytes32 master_pubkey = {};
-    bytes64 master_privkey = {};
-    crypto_sign_ed25519_keypair(master_pubkey.data, master_privkey.data);
+// ---------------------------------------------------------------------------
+// Dev-server transport helpers.
+//
+// A transport delivers a Pro request body to a named endpoint on the running dev backend and
+// returns the response body (JSON). We drive the identical libsession C++ request builders/parsers
+// through each, so the same test flow can run over the two production request modes on pfs/dev:
+//
+//   * `make_direct_http_transport` -- plain HTTP POST to `<base>/<endpoint>`. This is the faithful
+//     representation of session-router mode, where libsession opens a tunnel to a private local
+//     address and makes unencrypted HTTP through it.
+//   * `make_onion_v4_transport`    -- builds only the innermost v4 onion piece (a zero-hop
+//     `onionreq::Builder` addressed to the backend's x25519 key), POSTs it to
+//     `<base>/oxen/v4/lsrpc`, and decrypts the reply with `onionreq::ResponseParser`. This is
+//     onion-request mode. (The stable backport uses only this transport.)
+//
+// Both move bytes with libcurl. The onion path does not build a real multi-hop route (that is a
+// separate, stable protocol tested elsewhere) -- only the final destination-encrypted layer, which
+// is exactly what `/oxen/v4/lsrpc` decrypts.
+// ---------------------------------------------------------------------------
 
-    bytes32 rotating_pubkey = {};
-    bytes64 rotating_privkey = {};
-    crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
+// A transport delivers a request (endpoint + content_type + opaque body) to the backend and returns
+// the response body. `content_type` is what libsession's *_request() builders emit; clients must
+// relay it verbatim (libsession owns the wire encoding and it may change).
+using PostFn = std::function<std::string(
+        std::string_view endpoint, std::string_view content_type, std::string_view body)>;
 
-    const auto DEV_BACKEND_PUBKEY =
-            "fc947730f49eb01427a66e050733294d9e520e545c7a27125a780634e0860a27"_hexbytes;
+// Drive a transport straight from a built ProRequest.
+static std::string send(const PostFn& transport, const ProRequest& r) {
+    return transport(r.endpoint, r.content_type, r.data);
+}
 
-    // Setup CURL
+// Split e.g. "http://127.0.0.1:5000" into protocol / host / port.
+struct ParsedBackendUrl {
+    std::string protocol;
+    std::string host;
+    uint16_t port;
+};
+static ParsedBackendUrl parse_backend_url(std::string_view url) {
+    ParsedBackendUrl r;
+    auto pos = url.find("://");
+    r.protocol = pos == std::string_view::npos ? "http" : std::string{url.substr(0, pos)};
+    std::string_view rest = pos == std::string_view::npos ? url : url.substr(pos + 3);
+    if (auto slash = rest.find('/'); slash != std::string_view::npos)
+        rest = rest.substr(0, slash);
+    if (auto colon = rest.find(':'); colon != std::string_view::npos) {
+        r.host = std::string{rest.substr(0, colon)};
+        r.port = static_cast<uint16_t>(std::stoi(std::string{rest.substr(colon + 1)}));
+    } else {
+        r.host = std::string{rest};
+        r.port = r.protocol == "https" ? 443 : 80;
+    }
+    return r;
+}
+
+static std::string join_url(std::string_view base, std::string_view path) {
+    std::string url{base};
+    if (!url.empty() && url.back() == '/')
+        url.pop_back();
+    if (!path.empty() && path.front() != '/')
+        url += '/';
+    url += path;
+    return url;
+}
+
+// Plain HTTP POST to `<base>/<endpoint>` (session-router tunnel mode), relaying content_type.
+static PostFn make_direct_http_transport(CURL* curl, std::string base_url) {
+    return [curl, base_url = std::move(base_url)](
+                   std::string_view endpoint,
+                   std::string_view content_type,
+                   std::string_view body) {
+        curl_slist* headers =
+                curl_slist_append(nullptr, ("Content-Type: " + std::string{content_type}).c_str());
+        scope_exit free_headers{[&]() { curl_slist_free_all(headers); }};
+        return curl_do_basic_blocking_post_request(
+                curl, headers, join_url(base_url, endpoint), body);
+    };
+}
+
+// Innermost v4 onion piece to `<base>/oxen/v4/lsrpc` (onion-request mode). `backend_ed25519_pubkey`
+// is the backend's signing pubkey (fetched from /status); its x25519 form is the destination key.
+static PostFn make_onion_v4_transport(
+        CURL* curl, std::string base_url, std::span<const uint8_t, 32> backend_ed25519_pubkey) {
+    using namespace session::network;
+    using namespace session::onionreq;
+
+    auto parts = parse_backend_url(base_url);
+    x25519_pubkey backend_x25519 = compute_x25519_pubkey(backend_ed25519_pubkey);
+
+    return [curl, base_url = std::move(base_url), parts, backend_x25519](
+                   std::string_view endpoint,
+                   std::string_view content_type,
+                   std::string_view body) {
+        // Relay content_type as the inner (proxied) request's Content-Type.
+        std::vector<std::pair<std::string, std::string>> inner_headers{
+                {"Content-Type", std::string{content_type}}};
+        ServerDestination dest{
+                parts.protocol,
+                parts.host,
+                backend_x25519,
+                parts.port,
+                std::move(inner_headers),
+                "POST"};
+
+        Builder builder{
+                network_destination{dest},
+                std::string{endpoint},
+                /*nodes=*/{},
+                EncryptType::xchacha20};
+
+        std::vector<unsigned char> body_bytes{
+                reinterpret_cast<const unsigned char*>(body.data()),
+                reinterpret_cast<const unsigned char*>(body.data()) + body.size()};
+        std::vector<unsigned char> blob = builder.generate_onion_blob(std::move(body_bytes));
+
+        // The lsrpc body is the raw encrypted onion blob; post it as opaque bytes. (An unheadered
+        // curl POST defaults to application/x-www-form-urlencoded, which makes Werkzeug consume the
+        // body into request.form and leaves request.data empty -> the backend 400s.)
+        curl_slist* octet_headers =
+                curl_slist_append(nullptr, "Content-Type: application/octet-stream");
+        scope_exit octet_free{[&]() { curl_slist_free_all(octet_headers); }};
+
+        std::string encrypted_response = curl_do_basic_blocking_post_request(
+                curl,
+                octet_headers,
+                join_url(base_url, "/oxen/v4/lsrpc"),
+                std::string_view{reinterpret_cast<const char*>(blob.data()), blob.size()});
+
+        // ResponseParser reuses the builder's saved ephemeral keypair to decrypt the reply.
+        ResponseParser parser{builder};
+        DecryptedResponse resp = parser.decrypted_response(encrypted_response);
+        return resp.body.value_or(std::string{});
+    };
+}
+
+// Live-backend tests (tag [pro_live]), run against an ephemeral dev backend stood up by
+// tests/pro_backend/run-dev-backend.sh: they drive the C++ API over the real request path against a
+// real backend (redemption via provider_dry_run + a DB-seeded witnessed payment). This first case
+// validates the infrastructure + both transports end-to-end via /status.
+TEST_CASE("Pro backend live /status round-trip", "[pro_backend][pro_live]") {
     curl_global_init(CURL_GLOBAL_DEFAULT);
     scope_exit curl_cleanup{[&]() { curl_global_cleanup(); }};
-
     CURL* curl = curl_easy_init();
     REQUIRE(curl);
     scope_exit curl_free{[&]() { curl_easy_cleanup(curl); }};
 
-    struct curl_slist* curl_headers = nullptr;
-    curl_headers = curl_slist_append(curl_headers, "Content-Type: application/json");
-    REQUIRE(curl_headers);
-    scope_exit curl_headers_free{[&]() { curl_slist_free_all(curl_headers); }};
+    const std::string& base_url = g_test_pro_backend_dev_server_url;
 
-    // Add pro payment
-    session_protocol_pro_proof first_pro_proof = {};
-    {
-        std::array<uint8_t, 8> fake_google_payment_token;
-        randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::array<uint8_t, 8> fake_google_order_id;
-        randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        // Google's composite payment_id is "<payment_token>|<order_id>"; libsession treats the
-        // whole thing as one opaque value.
-        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
-                                      oxenc::to_hex(fake_google_order_id);
+    // Parse the /status success envelope and return the signing pubkey (hex).
+    auto status_pubkey_hex = [](std::string_view response_json) -> std::string {
+        INFO("/status response: " << response_json);
+        auto j = nlohmann::json::parse(response_json);
+        REQUIRE(j.at("status").get<std::string>() == "ok");
+        const auto& result = j.at("result");
+        CHECK(result.contains("version"));
+        CHECK(result.contains("timestamp"));
+        auto pubkey = result.at("signing_pubkey").get<std::string>();
+        REQUIRE(pubkey.size() == 64);
+        REQUIRE(oxenc::is_hex(pubkey));
+        return pubkey;
+    };
 
-        session_pro_backend_request request_json =
-                session_pro_backend_add_pro_payment_request_build(
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        rotating_privkey.data,
-                        sizeof(rotating_privkey.data),
-                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
-                        reinterpret_cast<const uint8_t*>(fake_payment_id.data()),
-                        fake_payment_id.size());
-        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
-        REQUIRE(request_json.success);
+    // 1) Fetch /status over the direct (session-router-style) HTTP transport.
+    PostFn direct = make_direct_http_transport(curl, base_url);
+    std::string direct_pubkey = status_pubkey_hex(direct("status", "application/json", ""));
 
-        // Do curl request
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/add_pro_payment",
-                std::string_view(request_json.data.data, request_json.data.size));
+    // 2) Build the onion transport from the pubkey we just fetched, then re-fetch /status over it:
+    //    this exercises the full v4 onion encrypt/decrypt round-trip against the real backend.
+    auto pubkey_bytes = oxenc::from_hex(direct_pubkey);
+    REQUIRE(pubkey_bytes.size() == 32);
+    std::array<uint8_t, 32> ed_pubkey{};
+    std::memcpy(ed_pubkey.data(), pubkey_bytes.data(), ed_pubkey.size());
 
-        // Parse response
-        session_pro_backend_pro_proof_response response =
-                session_pro_backend_pro_proof_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
+    PostFn onion = make_onion_v4_transport(curl, base_url, ed_pubkey);
+    std::string onion_pubkey = status_pubkey_hex(onion("status", "application/json", ""));
 
-        if (response.header.error)
-            INFO("ERROR: " << response.header.error);
+    // Both transports must report the same signing key.
+    CHECK(onion_pubkey == direct_pubkey);
+}
 
-        // Verify response
-        first_pro_proof = response.proof;
-        INFO("Signature: " << oxenc::to_hex(
-                                      first_pro_proof.sig.data, std::end(first_pro_proof.sig.data))
-                           << ", backend pubkey: " << oxenc::to_hex(DEV_BACKEND_PUBKEY)
-                           << ", response: " << response_json);
-        REQUIRE(session_protocol_pro_proof_verify_signature(
-                &first_pro_proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
-        REQUIRE(std::memcmp(
-                        response.proof.rotating_pubkey.data,
-                        rotating_pubkey.data,
-                        sizeof(rotating_pubkey.data)) == 0);
+// Shell out to the python seeding helper (tests/pro_backend/seed_payment.py) to inject backend DB
+// state (a witnessed-unredeemed payment, or a revocation) directly. The launcher exports
+// PRO_SEED_PYTHON / PRO_SEED_SCRIPT / PRO_BACKEND_DIR and the shared SESH_PRO_BACKEND_DB_URL. Args
+// are test-controlled, so the naive single-quote wrapping is sufficient.
+static void run_seed_helper(const std::vector<std::string>& args) {
+    const char* py = std::getenv("PRO_SEED_PYTHON");
+    const char* script = std::getenv("PRO_SEED_SCRIPT");
+    REQUIRE(py != nullptr);
+    REQUIRE(script != nullptr);
+    std::string cmd = std::string(py) + " " + script;
+    for (const auto& a : args)
+        cmd += " '" + a + "'";
+    INFO("seed: " << cmd);
+    REQUIRE(std::system(cmd.c_str()) == 0);
+}
+
+static std::array<uint8_t, 32> fetch_backend_pubkey(const PostFn& transport) {
+    auto j = nlohmann::json::parse(transport("status", "application/json", ""));
+    REQUIRE(j.at("status").get<std::string>() == "ok");
+    auto hex = j.at("result").at("signing_pubkey").get<std::string>();
+    auto bytes = oxenc::from_hex(hex);
+    REQUIRE(bytes.size() == 32);
+    std::array<uint8_t, 32> out{};
+    std::memcpy(out.data(), bytes.data(), out.size());
+    return out;
+}
+
+// The core wire-contract flow: build *real* requests with the C++ API, send them over onion to a
+// backend that redeems a witnessed (seeded) payment, and check every response parses + the issued
+// proofs verify against the backend's signing key. Any signed-message drift on either side (field
+// order, integer encoding, `\0` framing, domain prefix -- Delta #13 signs the message bytes
+// directly, no hash) or a renamed JSON key breaks this. Runs the whole flow once per provider via
+// SECTIONs: google_play exercises the composite "token|order_id" payment_id, app_store the plain tx
+// id. Each SECTION uses fresh keys + a freshly-seeded payment, so the runs are independent on the
+// shared ephemeral backend.
+TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    scope_exit curl_cleanup{[&]() { curl_global_cleanup(); }};
+    CURL* curl = curl_easy_init();
+    REQUIRE(curl);
+    scope_exit curl_free{[&]() { curl_easy_cleanup(curl); }};
+
+    const std::string& base_url = g_test_pro_backend_dev_server_url;
+    PostFn direct = make_direct_http_transport(curl, base_url);
+    std::array<uint8_t, 32> backend_pubkey = fetch_backend_pubkey(direct);
+    PostFn onion = make_onion_v4_transport(curl, base_url, backend_pubkey);
+
+    // Provider under test; the whole flow below re-runs once per SECTION.
+    std::string provider;
+    SECTION("google_play") {
+        provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
+    }
+    SECTION("app_store") {
+        provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE;
+    }
+    INFO("provider=" << provider);
+
+    // Fresh account keys.
+    std::array<unsigned char, 32> master_pk{}, rotating_pk{};
+    std::array<unsigned char, 64> master_sk{}, rotating_sk{};
+    crypto_sign_ed25519_keypair(master_pk.data(), master_sk.data());
+    crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
+    std::string master_hex = oxenc::to_hex(master_pk);
+
+    // Opaque per-provider payment_id: google is the composite "<token>|<order_id>" (backend splits
+    // on the first '|'); app_store is a bare transaction id.
+    std::string payment_id = provider == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY
+                                   ? master_hex.substr(0, 16) + "|GPA." + master_hex.substr(16, 12)
+                                   : "20000000" + master_hex.substr(0, 10);
+
+    // Seed the witnessed-unredeemed payment; the client's real add_pro_payment (below) redeems it.
+    run_seed_helper(
+            {"payment",
+             "--provider",
+             provider,
+             "--payment-id",
+             payment_id,
+             "--master-pubkey",
+             master_hex,
+             "--plan",
+             "1m"});
+
+    auto now = session::sysclock_now_s();
+
+    // 1) add_pro_payment -> signed proof.
+    ProRequest add_req = add_payment_request(
+            master_sk,
+            rotating_sk,
+            provider,
+            std::span<const uint8_t>{
+                    reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()});
+    AddProPaymentResponse add = parse_add_payment(send(onion, add_req));
+    INFO("add_pro_payment" << add.error.value_or(""));
+    REQUIRE(add.status == ResponseStatus::Ok);
+    CHECK(add.status == ResponseStatus::Ok);
+    CHECK(add.proof.verify_signature(backend_pubkey));
+    CHECK(std::memcmp(add.proof.rotating_pubkey.data(), rotating_pk.data(), 32) == 0);
+
+    // 1b) generate_pro_proof: pair a NEW rotating key to the same subscription -> a fresh proof.
+    std::array<unsigned char, 32> rotating2_pk{};
+    std::array<unsigned char, 64> rotating2_sk{};
+    crypto_sign_ed25519_keypair(rotating2_pk.data(), rotating2_sk.data());
+    ProRequest gen_req = pro_proof_request(master_sk, rotating2_sk, now);
+    GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
+    INFO("generate_pro_proof" << gen.error.value_or(""));
+    REQUIRE(gen.status == ResponseStatus::Ok);
+    CHECK(gen.status == ResponseStatus::Ok);
+    CHECK(gen.proof.verify_signature(backend_pubkey));
+    CHECK(std::memcmp(gen.proof.rotating_pubkey.data(), rotating2_pk.data(), 32) == 0);
+    // Same subscription epoch -> the fresh proof shares the add-payment proof's revocation_tag.
+    CHECK(gen.proof.revocation_tag == add.proof.revocation_tag);
+
+    // 2) get_pro_status (Delta #15): account ACTIVE, no refund yet, and the single latest payment
+    //    is our redeemed one.
+    ProStatusResponse status = parse_pro_status(send(onion, pro_status_request(master_sk, now)));
+    INFO("get_pro_status " << status.error.value_or(""));
+    REQUIRE(status.status == ResponseStatus::Ok);
+    CHECK(status.user_status == "active");
+    CHECK(status.refund_requested_at.time_since_epoch().count() == 0);  // no refund requested yet
+    REQUIRE(status.latest_payment.has_value());
+    CHECK(status.latest_payment->payment_id == payment_id);
+    CHECK(status.latest_payment->payment_provider == provider);
+    // plan is the parsed billing period (Delta #14): "1m" -> {count 1, month}.
+    CHECK(status.latest_payment->plan.count == 1);
+    CHECK(status.latest_payment->plan.unit == ProPlanUnit::month);
+    CHECK(status.latest_payment->status == "redeemed");
+
+    // 2b) get_payment_details (Delta #15): newest page (empty cursor) carries our payment. This
+    //     master has exactly one payment, so it fits in one page and next_cursor is empty.
+    PaymentDetailsResponse det =
+            parse_payment_details(send(onion, payment_details_request(master_sk, now, 10, "")));
+    INFO("get_payment_details " << det.error.value_or(""));
+    REQUIRE(det.status == ResponseStatus::Ok);
+    CHECK(det.payments_total >= 1);
+    CHECK(det.items.size() >= 1);
+    CHECK_FALSE(det.next_cursor.has_value());  // limit 10 >= 1 payment -> no further page
+    bool found = false;
+    for (const auto& item : det.items) {
+        if (item.payment_id == payment_id) {
+            found = true;
+            CHECK(item.payment_provider == provider);
+            CHECK(item.plan.count == 1);
+            CHECK(item.plan.unit == ProPlanUnit::month);
+            CHECK(item.status == "redeemed");
+        }
+    }
+    CHECK(found);
+
+    // 3) get_payment_details pagination + opaque-cursor round-trip: a limit-1 page returns one item
+    //    and (being a full page) a next_cursor; re-requesting with that cursor echoed back verbatim
+    //    must be accepted and return the next page. With a single payment on this master, page 2 is
+    //    empty and terminates (next_cursor cleared). This is the real test of the opaque keyset
+    //    cursor -- a tampered/synthesized cursor would be rejected, so a clean round-trip proves
+    //    the client relayed it faithfully.
+    PaymentDetailsResponse page1 =
+            parse_payment_details(send(onion, payment_details_request(master_sk, now, 1, "")));
+    REQUIRE(page1.status == ResponseStatus::Ok);
+    CHECK(page1.items.size() == 1);
+    if (det.payments_total == 1) {
+        REQUIRE(page1.next_cursor.has_value());  // a full page yields a cursor to try next
+        PaymentDetailsResponse page2 = parse_payment_details(
+                send(onion, payment_details_request(master_sk, now, 1, *page1.next_cursor)));
+        REQUIRE(page2.status ==
+                ResponseStatus::Ok);  // the opaque cursor was accepted (echo round-trip)
+        CHECK(page2.items.empty());   // no more payments
+        CHECK_FALSE(page2.next_cursor.has_value());  // end of data
     }
 
-    // Authorise new key
-    {
-        int64_t now_unix_ts = session::epoch_seconds(session::sysclock_now_s());
-        session_pro_backend_request request_json =
-                session_pro_backend_generate_pro_proof_request_build(
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        rotating_privkey.data,
-                        sizeof(rotating_privkey.data),
-                        now_unix_ts);
-        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
-        REQUIRE(request_json.success);
-
-        // Do CURL request
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/generate_pro_proof",
-                std::string_view(request_json.data.data, request_json.data.size));
-
-        // Parse response
-        session_pro_backend_pro_proof_response response =
-                session_pro_backend_pro_proof_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
-
-        INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error)
-            UNSCOPED_INFO("ERROR: " << response.header.error);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-
-        // Verify response
-        session_protocol_pro_proof proof = response.proof;
-        REQUIRE(session_protocol_pro_proof_verify_signature(
-                &proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
-        REQUIRE(std::memcmp(
-                        response.proof.rotating_pubkey.data,
-                        rotating_pubkey.data,
-                        sizeof(rotating_pubkey.data)) == 0);
+    // 4) set_payment_refund_requested. Apple-only at the HTTP layer: app_store -> updated +
+    // reflected
+    //    in get_pro_status; google_play -> rejected (Google refunds are handled out-of-band).
+    ProRequest refund_req = refund_request(
+            master_sk,
+            now,
+            now,
+            provider,
+            std::span<const uint8_t>{
+                    reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()});
+    SetPaymentRefundRequestedResponse refund = parse_refund(send(onion, refund_req));
+    if (provider == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE) {
+        INFO("refund" << refund.error.value_or(""));
+        REQUIRE(refund.status == ResponseStatus::Ok);
+        CHECK(refund.updated);
+        // The soft "refund requested" marker is now reflected back in get_pro_status.
+        ProStatusResponse status2 =
+                parse_pro_status(send(onion, pro_status_request(master_sk, now)));
+        REQUIRE(status2.status == ResponseStatus::Ok);
+        CHECK(status2.refund_requested_at.time_since_epoch().count() != 0);
+    } else {
+        // The endpoint rejects non-App-Store providers.
+        CHECK_FALSE(refund.updated);
+        CHECK(refund.status != ResponseStatus::Ok);
     }
+}
 
-    // Get pro status (the hot path: account status + single latest payment)
-    {
-        session_pro_backend_request request_json = session_pro_backend_get_pro_status_request_build(
-                master_privkey.data,
-                sizeof(master_privkey.data),
-                session::epoch_seconds(session::sysclock_now_s()));
-        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
-        REQUIRE(request_json.success);
+// Revocation-list round-trip: seed + redeem a payment, seed a revocation for that generation, then
+// confirm get_pro_revocations surfaces it and its tag matches the issued proof. Kept independent of
+// the lifecycle flow so the revocation doesn't perturb those assertions.
+TEST_CASE("Pro backend live get_pro_revocations", "[pro_backend][pro_live]") {
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    scope_exit curl_cleanup{[&]() { curl_global_cleanup(); }};
+    CURL* curl = curl_easy_init();
+    REQUIRE(curl);
+    scope_exit curl_free{[&]() { curl_easy_cleanup(curl); }};
 
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/get_pro_status",
-                std::string_view(request_json.data.data, request_json.data.size));
+    const std::string& base_url = g_test_pro_backend_dev_server_url;
+    PostFn direct = make_direct_http_transport(curl, base_url);
+    std::array<uint8_t, 32> backend_pubkey = fetch_backend_pubkey(direct);
+    PostFn onion = make_onion_v4_transport(curl, base_url, backend_pubkey);
 
-        // Parse response
-        session_pro_backend_get_pro_status_response response =
-                session_pro_backend_get_pro_status_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{
-                [&]() { session_pro_backend_get_pro_status_response_free(&response); }};
+    std::array<unsigned char, 32> master_pk{}, rotating_pk{};
+    std::array<unsigned char, 64> master_sk{}, rotating_sk{};
+    crypto_sign_ed25519_keypair(master_pk.data(), master_sk.data());
+    crypto_sign_ed25519_keypair(rotating_pk.data(), rotating_sk.data());
+    std::string master_hex = oxenc::to_hex(master_pk);
 
-        INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error)
-            UNSCOPED_INFO("ERROR: " << response.header.error);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(std::string_view(response.status) == "active");
-        REQUIRE(response.has_latest_payment);
-    }
+    // Seed + redeem an app_store payment so the master has an active generation to revoke.
+    std::string payment_id = "20000000" + master_hex.substr(0, 10);
+    run_seed_helper(
+            {"payment",
+             "--provider",
+             "app_store",
+             "--payment-id",
+             payment_id,
+             "--master-pubkey",
+             master_hex,
+             "--plan",
+             "1m"});
+    ProRequest add_req = add_payment_request(
+            master_sk,
+            rotating_sk,
+            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE,
+            std::span<const uint8_t>{
+                    reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()});
+    AddProPaymentResponse add = parse_add_payment(send(onion, add_req));
+    REQUIRE(add.status == ResponseStatus::Ok);
+    CHECK(add.status == ResponseStatus::Ok);
 
-    // Get payment history (paginated) -- newest page
-    {
-        session_pro_backend_request request_json =
-                session_pro_backend_get_payment_details_request_build(
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        session::epoch_seconds(session::sysclock_now_s()),
-                        100,
-                        "");
-        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
-        REQUIRE(request_json.success);
+    // Revoke that payment's generation (revocation is terminal now -- revoked_at set once, no
+    // per-entry expiry), then poll: the list must carry our proof's revocation_tag.
+    run_seed_helper({"revoke", "--provider", "app_store", "--payment-id", payment_id});
 
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/get_payment_details",
-                std::string_view(request_json.data.data, request_json.data.size));
-
-        // Parse response
-        session_pro_backend_get_payment_details_response response =
-                session_pro_backend_get_payment_details_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{
-                [&]() { session_pro_backend_get_payment_details_response_free(&response); }};
-
-        INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error)
-            UNSCOPED_INFO("ERROR: " << response.header.error);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.items_count > 0);
-        REQUIRE(response.payments_total > 0);
-    }
-
-    // Add _another_ payment, same details
-    std::string another_payment_id;
-    {
-        std::array<uint8_t, 8> fake_google_payment_token;
-        randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::array<uint8_t, 8> fake_google_order_id;
-        randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        another_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
-                             oxenc::to_hex(fake_google_order_id);
-
-        session_pro_backend_request request_json =
-                session_pro_backend_add_pro_payment_request_build(
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        rotating_privkey.data,
-                        sizeof(rotating_privkey.data),
-                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
-                        reinterpret_cast<const uint8_t*>(another_payment_id.data()),
-                        another_payment_id.size());
-        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
-        REQUIRE(request_json.success);
-
-        // Do curl request
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/add_pro_payment",
-                std::string_view(request_json.data.data, request_json.data.size));
-
-        // Parse response
-        session_pro_backend_pro_proof_response response =
-                session_pro_backend_pro_proof_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
-
-        // Verify response
-        session_protocol_pro_proof proof = response.proof;
-        REQUIRE(session_protocol_pro_proof_verify_signature(
-                &proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
-        REQUIRE(std::memcmp(
-                        response.proof.rotating_pubkey.data,
-                        rotating_pubkey.data,
-                        sizeof(rotating_pubkey.data)) == 0);
-    }
-
-    // Get revocation list
-    {
-        session_pro_backend_request request_json =
-                session_pro_backend_get_pro_revocations_request_build(0);
-        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
-        REQUIRE(request_json.success);
-
-        // Do curl request
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/get_pro_revocations",
-                std::string_view(request_json.data.data, request_json.data.size));
-
-        // Parse response
-        session_pro_backend_get_pro_revocations_response response =
-                session_pro_backend_get_pro_revocations_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{
-                [&]() { session_pro_backend_get_pro_revocations_response_free(&response); }};
-
-        // Verify response
-        INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error)
-            UNSCOPED_INFO("ERROR: " << response.header.error);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.ticket == 0);
-        REQUIRE(response.items_count == 0);
-    }
-
-    // Set payment refund requested
-    {
-        int64_t now_unix_ts = session::epoch_seconds(session::sysclock_now_s());
-        session_pro_backend_request request_json =
-                session_pro_backend_set_payment_refund_requested_request_build(
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        /*ts*/ now_unix_ts,
-                        /*refund_requested_ts*/ now_unix_ts,
-                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
-                        reinterpret_cast<const uint8_t*>(another_payment_id.data()),
-                        another_payment_id.size());
-        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
-        REQUIRE(request_json.success);
-
-        // Do curl request
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/set_payment_refund_requested",
-                std::string_view(request_json.data.data, request_json.data.size));
-
-        // Parse response
-        session_pro_backend_set_payment_refund_requested_response response =
-                session_pro_backend_set_payment_refund_requested_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{[&]() {
-            session_pro_backend_set_payment_refund_requested_response_free(&response);
-        }};
-
-        // Verify response
-        INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error)
-            UNSCOPED_INFO("ERROR: " << response.header.error);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.updated);
-    }
+    ProRequest rev_req = revocations_request(0);
+    GetProRevocationsResponse rev = parse_revocations(send(onion, rev_req));
+    INFO("get_pro_revocations" << rev.error.value_or(""));
+    REQUIRE(rev.status == ResponseStatus::Ok);
+    CHECK(rev.retain_for.count() > 0);
+    CHECK_FALSE(rev.items.empty());
+    bool found = false;
+    for (const auto& it : rev.items)
+        if (it.revocation_tag == add.proof.revocation_tag)
+            found = true;
+    CHECK(found);
 }
 #endif

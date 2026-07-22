@@ -38,6 +38,18 @@ local add_stf_repo(image) = [
   'eatmydata ' + apt_get_quiet + ' update',
 ];
 
+// Fresh-container apt bootstrap shared by every post-build test step: eatmydata, optional STF repo,
+// upgrade, then install `pkgs`. When `pkgs` is empty the repo/upgrade block is skipped entirely
+// (only eatmydata is installed), matching the original inline behaviour.
+local apt_setup(image, pkgs, stf_repo=true) =
+  [apt_get_quiet + ' install -y eatmydata'] +
+  (if std.length(pkgs) > 0 then
+     (if stf_repo then add_stf_repo(image) else []) + [
+       'eatmydata ' + apt_get_quiet + ' update',
+       'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
+       'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y ' + std.join(' ', pkgs),
+     ] else []);
+
 // Do something on a debian-like system
 local debian_pipeline(name,
                       image,
@@ -102,6 +114,7 @@ local debian_build(name,
                    stf_repo=true,
                    kitware_repo=''/* ubuntu codename, if wanted */,
                    extra_setup=[],
+                   extra_steps=[],
                    allow_fail=false)
       = debian_pipeline(
   name,
@@ -131,21 +144,12 @@ local debian_build(name,
                    image: image,
                    pull: 'always',
                    [if allow_fail then 'failure']: 'ignore',
-                   commands:
-                     [apt_get_quiet + ' install -y eatmydata'] + (
-                       if std.length(test_deps) > 0 then (
-                         if stf_repo then add_stf_repo(image) else []
-                       ) + [
-                         'eatmydata ' + apt_get_quiet + ' update',
-                         'eatmydata ' + apt_get_quiet + ' dist-upgrade -y',
-                         'eatmydata ' + apt_get_quiet + ' install --no-install-recommends -y ' + std.join(' ', test_deps),
-                       ] else []
-                     ) + [
-                       'cd build',
-                       './tests/testLogging --colour-mode ansi -d yes',
-                       './tests/testAll --colour-mode ansi -d yes',
-                     ],
-                 }] else [])
+                   commands: apt_setup(image, test_deps, stf_repo=stf_repo) + [
+                     'cd build',
+                     './tests/testLogging --colour-mode ansi -d yes',
+                     './tests/testAll --colour-mode ansi -d yes',
+                   ],
+                 }] else []) + extra_steps
 );
 // windows cross compile on debian
 local windows_cross_pipeline(name,
@@ -195,6 +199,56 @@ local windows_cross_pipeline(name,
                      'wine-stable ./tests/testAll.exe --colour-mode ansi -d yes',
                    ],
                  }] else [])
+);
+
+// Live Pro-backend integration test: build testAll with the dev-server hook, stand up an ephemeral
+// backend (throwaway postgres + flask, provider_dry_run) via tests/pro_backend/run-dev-backend.sh,
+// and run the [pro_live] suite against it. The backend is a separate Python service, checked out at
+// a pinned ref (repos stay decoupled — CI keeps its own clone).
+local pro_backend_git = 'https://github.com/session-foundation/session-pro-backend.git';
+local pro_backend_ref = 'phase2-foundation';  // bump/pin as the backend advances in lockstep
+
+// Extra apt packages (beyond the standard test deps) the live Pro-backend step needs: postgres, the
+// session-router key tool, the backend's python3-* runtime, and clone/venv tooling.
+local pro_backend_pkgs = [
+  'postgresql',
+  'session-router-bin',
+  'python3-session-util',
+  'python3-nacl',
+  'python3-psycopg',
+  'python3-flask',
+  'python3-venv',
+  'python3-pip',
+  'git',
+  'curl',
+  'ca-certificates',
+] + default_test_deps;
+
+local pro_backend_live_pipeline(name, image) = debian_build(
+  name,
+  image,
+  // tests=false suppresses the default no-server testAll step; WITH_TESTS=ON (later -D wins) still
+  // builds testAll so the live step below can run it. The step goes through debian_build's own
+  // extra_steps hook -- no manual `steps` surgery.
+  tests=false,
+  cmake_extra='-DWITH_TESTS=ON -DTEST_PRO_BACKEND_WITH_DEV_SERVER=ON ',
+  extra_steps=[{
+    name: 'pro-backend live tests',
+    image: image,
+    pull: 'always',
+    commands: apt_setup(image, pro_backend_pkgs) + [
+      // Check out + provision the backend (venv reuses the apt-installed python3-* via system site
+      // packages; only the pip-only provider libraries are installed).
+      'git clone --depth=1 --branch ' + pro_backend_ref + ' ' + pro_backend_git + ' /opt/pro-backend',
+      'python3 -m venv --system-site-packages /opt/pro-backend/.venv',
+      '/opt/pro-backend/.venv/bin/pip install --no-input app-store-server-library google-cloud-pubsub google-api-python-client',
+      // initdb/pg_ctl refuse to run as root, so run the whole launcher as a non-root user; its temp
+      // dirs (postgres cluster, key) are created by that user, so initdb is satisfied.
+      'useradd -m pro && chown -R pro /opt/pro-backend',
+      'ws="$(pwd)"',
+      'su pro -c "cd $ws && SESSION_PRO_BACKEND_DIR=/opt/pro-backend PRO_BACKEND_PORT=5544 tests/pro_backend/run-dev-backend.sh ./build/tests/testAll --colour-mode ansi -d yes \'[pro_live]\'"',
+    ],
+  }],
 );
 
 local clang(version) = debian_build(
@@ -351,6 +405,10 @@ local static_build(name,
 
   // Various debian builds
   debian_build('Debian sid', docker_base + 'debian-sid'),
+
+  // Live Pro-backend integration tests (ephemeral backend + [pro_live]).
+  pro_backend_live_pipeline('Debian sid (Pro backend live)', docker_base + 'debian-sid'),
+
   debian_build('Debian sid/Debug', docker_base + 'debian-sid', build_type='Debug'),
   debian_build('Debian testing', docker_base + 'debian-testing'),
   clang(19),
