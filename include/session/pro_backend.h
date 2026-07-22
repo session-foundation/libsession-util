@@ -76,35 +76,6 @@ session_pro_backend_get_provider_urls(const char* provider_code) NON_NULL_ARG(1)
 /// its strings are static storage owned by libsession — do not free.
 LIBSESSION_EXPORT const char* const* session_pro_backend_visible_platforms(size_t* count);
 
-typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_SUCCESS,
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR,
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT,
-} SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT;
-
-/// Response outcome (wire `status`, spec §5). CLOSED/exhaustive: the backend will never add a
-/// value, so an unrecognized wire status is reported as a protocol error (RESPONSE_STATUS_ERROR +
-/// error_code "invalid_response"). Mirrors C++ session::pro_backend::ResponseStatus.
-typedef enum SESSION_PRO_BACKEND_RESPONSE_STATUS {
-    SESSION_PRO_BACKEND_RESPONSE_STATUS_OK,     ///< Success; the response's payload fields are set.
-    SESSION_PRO_BACKEND_RESPONSE_STATUS_FAIL,   ///< Rejected on client input / a precondition.
-    SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR,  ///< Backend fault; the same request may succeed
-                                                ///< later.
-} SESSION_PRO_BACKEND_RESPONSE_STATUS;
-
-typedef struct session_pro_backend_response_header {
-    /// Outcome category. Success iff `status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK`.
-    SESSION_PRO_BACKEND_RESPONSE_STATUS status;
-    /// On non-OK, the machine-readable outcome slug (spec §5.1); {NULL, 0} on success. Opaque and
-    /// forward-compatible (unknown slugs pass through); "invalid_response" if libsession could not
-    /// parse the reply at all.
-    string8 error_code;
-    /// On non-OK, an English diagnostic string (NOT user-facing text -- that comes from mapping
-    /// error_code to a localized string); {NULL, 0} on success. Always safe to log.
-    string8 error;
-    uint8_t* internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
-} session_pro_backend_response_header;
-
 /// A built request to POST to the Session Pro backend. Mirrors the C++
 /// `session::pro_backend::ProRequest`: an `endpoint`, the `content_type` to send as the request's
 /// Content-Type header, and the opaque `data` payload. `data` is libsession's data for the backend
@@ -124,13 +95,58 @@ typedef struct session_pro_backend_request {
     void* internal_;
 } session_pro_backend_request;
 
+/// API: session_pro_backend/request_free
+///
+/// Frees a `session_pro_backend_request` returned by a `*_request_build` function.
+LIBSESSION_EXPORT
+void session_pro_backend_request_free(session_pro_backend_request* request);
+
+typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_SUCCESS,
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR,
+    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT,
+} SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT;
+
+/// Response outcome (wire `status`, spec §5). CLOSED/exhaustive: the backend will never add a
+/// value, so an unrecognized wire status is reported as a protocol error (RESPONSE_STATUS_ERROR +
+/// error_code "invalid_response"). Mirrors C++ session::pro_backend::ResponseStatus.
+typedef enum SESSION_PRO_BACKEND_RESPONSE_STATUS {
+    SESSION_PRO_BACKEND_RESPONSE_STATUS_OK,     ///< Success; the response's payload fields are set.
+    SESSION_PRO_BACKEND_RESPONSE_STATUS_FAIL,   ///< Rejected on client input / a precondition.
+    SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR,  ///< Backend fault; the same request may succeed
+                                                ///< later.
+} SESSION_PRO_BACKEND_RESPONSE_STATUS;
+
+typedef struct session_pro_backend_response_header {
+    /// Outcome category. Success iff `status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK`.
+    SESSION_PRO_BACKEND_RESPONSE_STATUS status;
+    /// On non-OK, the machine-readable outcome slug (spec §5.1); NULL on success. Opaque and
+    /// forward-compatible (unknown slugs pass through); "invalid_response" if libsession could not
+    /// parse the reply at all. NUL-terminated; valid until the response is freed.
+    const char* error_code;
+    /// On non-OK, an English diagnostic string (NOT user-facing text -- that comes from mapping
+    /// error_code to a localized string); NULL on success. Always safe to log. NUL-terminated;
+    /// valid until the response is freed.
+    const char* error;
+    /// Opaque implementation detail; do not touch. Released by the response's *_free function.
+    void* internal_;
+} session_pro_backend_response_header;
+
 typedef struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
 } session_pro_backend_pro_proof_response;
 
+/// API: session_pro_backend/pro_proof_response_free
+///
+/// Frees the response.
+LIBSESSION_EXPORT
+void session_pro_backend_pro_proof_response_free(session_pro_backend_pro_proof_response* response);
+
 typedef struct session_pro_backend_pro_revocation_item {
-    bytes32 revocation_tag;
+    /// 32-byte revocation tag (compare for equality against a proof's tag); valid until the
+    /// response is freed.
+    const unsigned char* revocation_tag;
     /// Unix timestamp (seconds); a matching proof is revoked once the client clock reaches this
     int64_t effective_ts;
 } session_pro_backend_pro_revocation_item;
@@ -144,6 +160,13 @@ typedef struct session_pro_backend_get_pro_revocations_response {
     session_pro_backend_pro_revocation_item* items;
     size_t items_count;
 } session_pro_backend_get_pro_revocations_response;
+
+/// API: session_pro_backend/get_pro_revocations_response_free
+///
+/// Frees the response.
+LIBSESSION_EXPORT
+void session_pro_backend_get_pro_revocations_response_free(
+        session_pro_backend_get_pro_revocations_response* response);
 
 /// Unit of a parsed billing period (`plan_unit` below); mirrors C++
 /// session::pro_backend::ProPlanUnit (same order). A closed set (pro-wire-protocol.md §1 / Delta
@@ -159,18 +182,17 @@ typedef enum SESSION_PRO_BACKEND_PLAN_UNIT {
 
 typedef struct session_pro_backend_pro_payment_item {
     /// Opaque payment lifecycle status code (e.g. "unredeemed"/"redeemed"/"expired"/"revoked");
-    /// unknown values pass through as-is
-    char status[64];
-    size_t status_count;
+    /// unknown values pass through as-is. NUL-terminated; points into the response's `internal_`.
+    const char* status;
     /// Parsed billing period (pro-wire-protocol.md §1 / Delta #14). `plan_count` is the period
     /// count
     /// (>= 1 for periodic units); for `plan_unit == ..._LIFETIME` it is 0 and not meaningful
     /// (switch on `plan_unit`, never render "<count> <unit>" for lifetime).
     int plan_count;
     SESSION_PRO_BACKEND_PLAN_UNIT plan_unit;
-    /// Provider code (e.g. "google_play"); opaque -- an unknown value passes through as-is
-    char payment_provider[64];
-    size_t payment_provider_count;
+    /// Provider code (e.g. "google_play"); opaque -- an unknown value passes through as-is.
+    /// NUL-terminated; points into the response's `internal_`.
+    const char* payment_provider;
 
     bool auto_renewing;
     /// Provider purchase time, fractional UNIX seconds. Millisecond-precise: the value passes
@@ -185,9 +207,9 @@ typedef struct session_pro_backend_pro_payment_item {
     int64_t refund_requested_ts;
 
     /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
-    /// parts in per the backend-defined composite -- libsession does not interpret it)
-    char payment_id[128];
-    size_t payment_id_count;
+    /// parts in per the backend-defined composite -- libsession does not interpret it).
+    /// NUL-terminated; points into the response's `internal_`.
+    const char* payment_id;
 } session_pro_backend_pro_payment_item;
 
 typedef struct session_pro_backend_get_pro_details_response {
@@ -195,9 +217,9 @@ typedef struct session_pro_backend_get_pro_details_response {
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
     size_t items_count;
-    /// Opaque account Pro status code ("never"/"active"/"expired"); unknown values pass through
-    char status[64];
-    size_t status_count;
+    /// Opaque account Pro status code ("never"/"active"/"expired"); unknown values pass through.
+    /// NUL-terminated; points into the response's `internal_`.
+    const char* status;
     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
     bool auto_renewing;
     int64_t expiry_ts;
@@ -206,10 +228,24 @@ typedef struct session_pro_backend_get_pro_details_response {
     uint32_t payments_total;
 } session_pro_backend_get_pro_details_response;
 
+/// API: session_pro_backend/get_pro_details_response_free
+///
+/// Frees the response.
+LIBSESSION_EXPORT
+void session_pro_backend_get_pro_details_response_free(
+        session_pro_backend_get_pro_details_response* response);
+
 typedef struct session_pro_backend_set_payment_refund_requested_response {
     session_pro_backend_response_header header;
     bool updated;
 } session_pro_backend_set_payment_refund_requested_response;
+
+/// API: session_pro_backend/set_payment_refund_requested_response_free
+///
+/// Frees the response.
+LIBSESSION_EXPORT
+void session_pro_backend_set_payment_refund_requested_response_free(
+        session_pro_backend_set_payment_refund_requested_response* response);
 
 /// API: session_pro_backend/add_pro_payment_request_build
 ///
@@ -352,38 +388,6 @@ session_pro_backend_request session_pro_backend_set_payment_refund_requested_req
 LIBSESSION_EXPORT session_pro_backend_set_payment_refund_requested_response
 session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len);
 
-/// API: session_pro_backend/request_free
-///
-/// Frees a `session_pro_backend_request` returned by a `*_request_build` function.
-LIBSESSION_EXPORT
-void session_pro_backend_request_free(session_pro_backend_request* request);
-
-/// API: session_pro_backend/pro_proof_response_free
-///
-/// Frees the response
-LIBSESSION_EXPORT
-void session_pro_backend_pro_proof_response_free(session_pro_backend_pro_proof_response* response);
-
-/// API: session_pro_backend/get_pro_revocations_response_free
-///
-/// Frees the respone
-LIBSESSION_EXPORT
-void session_pro_backend_get_pro_revocations_response_free(
-        session_pro_backend_get_pro_revocations_response* response);
-
-/// API: session_pro_backend/get_pro_details_response_free
-///
-/// Frees the respone
-LIBSESSION_EXPORT
-void session_pro_backend_get_pro_details_response_free(
-        session_pro_backend_get_pro_details_response* response);
-
-/// API: session_pro_backend/session_pro_backend_set_payment_refund_requested_response_free
-///
-/// Frees the respone
-LIBSESSION_EXPORT
-void session_pro_backend_set_payment_refund_requested_response_free(
-        session_pro_backend_set_payment_refund_requested_response* response);
 #ifdef __cplusplus
 }  // extern "C"
 #endif

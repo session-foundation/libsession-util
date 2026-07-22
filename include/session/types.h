@@ -44,14 +44,6 @@ struct bytes64 {
     uint8_t data[64];
 };
 
-/// Basic bump allocating arena
-typedef struct arena_t arena_t;
-struct arena_t {
-    uint8_t* data;
-    size_t size;
-    size_t max;
-};
-
 /// A wrapper around snprintf that fixes a common bug in the value the printing function returns
 /// when a buffer is passed in. Irrespective of whether a buffer is passed in, snprintf is defined
 /// to return:
@@ -69,12 +61,6 @@ struct arena_t {
 /// NULL is passed in then this function returns the number of bytes actually needed to write the
 /// entire string (as per normal snprintf behaviour).
 int snprintf_clamped(char* buffer, size_t size, char const* fmt, ...);
-
-/// Allocate memory from the basic bump allocating arena. Returns a null pointer on failure.
-void* arena_alloc(arena_t* arena, size_t bytes);
-
-/// Create a string and allocate a copy of the data at pointer and size
-string8 arena_alloc_to_string8(arena_t* arena, void const* data, size_t size);
 
 #ifdef __cplusplus
 }
