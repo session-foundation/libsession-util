@@ -78,6 +78,15 @@ static_assert(PUBKEY_X25519.size() == 32);
 /// point at a different dev/test server if it chooses.
 constexpr std::string_view URL = "https://pro.session.codes";
 
+/// Canonical payment-provider code strings — the value transmitted on the wire and folded into the
+/// add-payment / set-refund signed messages (§3). Reference these rather than hardcoding the slug
+/// so a sent code cannot drift from what libsession signs/parses. The C
+/// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*` symbols point at these. An unknown code is still
+/// valid on the wire and passes through as an opaque string.
+constexpr std::string_view PAYMENT_PROVIDER_GOOGLE_PLAY = "google_play";
+constexpr std::string_view PAYMENT_PROVIDER_APP_STORE = "app_store";
+constexpr std::string_view PAYMENT_PROVIDER_RANGEPROOF = "rangeproof";
+
 /// Response outcome category (the wire `status`, spec §5). CLOSED/exhaustive by design: the backend
 /// will never add a fourth value, so libsession treats any unrecognized wire status as a protocol
 /// error (fail-closed) rather than passing it through. New categories/detail arrive via
