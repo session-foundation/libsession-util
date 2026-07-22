@@ -243,13 +243,15 @@ const ProviderURLs* provider_urls(std::string_view provider_code) {
 
 LIBSESSION_C_API session_pro_backend_provider_urls
 session_pro_backend_get_provider_urls(const char* provider_code) {
-    // Each present field is a static, null-terminated literal; an absent one (or no URLs at all) is
-    // NULL.
+    // Each present field is a static, null-terminated literal; an absent one is NULL. `found`
+    // distinguishes an unknown provider ({} -> found == false) from a recognised provider that
+    // simply has some/all URLs absent.
     auto c = [](const std::optional<std::string_view>& u) -> const char* {
         return u ? u->data() : nullptr;
     };
     if (auto u = provider_urls(provider_code))
-        return {.refund_platform_url = c(u->refund_platform_url),
+        return {.found = true,
+                .refund_platform_url = c(u->refund_platform_url),
                 .refund_support_url = c(u->refund_support_url),
                 .refund_status_url = c(u->refund_status_url),
                 .update_subscription_url = c(u->update_subscription_url),
