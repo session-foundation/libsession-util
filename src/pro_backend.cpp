@@ -854,7 +854,7 @@ static session_pro_backend_request c_own_request(ProRequest&& req) {
     result.internal_ = owned;
     result.endpoint = owned->endpoint.data();
     result.content_type = owned->content_type.data();
-    result.data = string8{owned->data.data(), owned->data.size()};
+    result.data = span_u8{reinterpret_cast<unsigned char*>(owned->data.data()), owned->data.size()};
     result.success = true;
     return result;
 }

@@ -104,7 +104,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                     session_protocol_pro_features_for_utf8(msg.data(), msg.size());
             REQUIRE(pro_msg.status ==
                     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR);
-            REQUIRE(pro_msg.error.size);
+            REQUIRE(pro_msg.error != nullptr);
+            REQUIRE(pro_msg.error[0] != '\0');
         }
 
         // Try a message exceeding the standard size threshold

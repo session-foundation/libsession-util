@@ -21,31 +21,31 @@
 
 // clang-format off
 const session_protocol_strings SESSION_PROTOCOL_STRINGS = {
-    .build_variant_apk        = string8_literal("APK"),
-    .build_variant_fdroid     = string8_literal("F-Droid Store"),
-    .build_variant_huawei     = string8_literal("Huawei App Gallery"),
-    .build_variant_ipa        = string8_literal("IPA"),
-    .url_donations            = string8_literal("https://getsession.org/donate"),
-    .url_donations_app        = string8_literal("https://getsession.org/donate#app"),
-    .url_download             = string8_literal("https://getsession.org/download"),
-    .url_faq                  = string8_literal("https://getsession.org/faq"),
-    .url_feedback             = string8_literal("https://getsession.org/feedback"),
-    .url_network              = string8_literal("https://docs.getsession.org/session-network"),
-    .url_privacy_policy       = string8_literal("https://getsession.org/privacy-policy"),
-    .url_pro_access_not_found = string8_literal("https://sessionapp.zendesk.com/hc/sections/4416517450649-Support"),
-    .url_pro_faq              = string8_literal("https://getsession.org/pro#faq"),
-    .url_pro_page             = string8_literal("https://getsession.org/pro"),
-    .url_pro_privacy_policy   = string8_literal("https://getsession.org/pro-privacy"),
-    .url_pro_roadmap          = string8_literal("https://getsession.org/pro#roadmap"),
-    .url_pro_support          = string8_literal("https://getsession.org/pro-support"),
-    .url_pro_terms_of_service = string8_literal("https://getsession.org/pro-terms"),
-    .url_pro_upgrade          = string8_literal("https://getsession.org/pro#upgrade"),
-    .url_staking              = string8_literal("https://docs.getsession.org/session-network/staking"),
-    .url_support              = string8_literal("https://getsession.org/support"),
-    .url_survey               = string8_literal("https://getsession.org/survey"),
-    .url_terms_of_service     = string8_literal("https://getsession.org/terms-of-service"),
-    .url_token                = string8_literal("https://token.getsession.org"),
-    .url_translate            = string8_literal("https://getsession.org/translate"),
+    .build_variant_apk        = "APK",
+    .build_variant_fdroid     = "F-Droid Store",
+    .build_variant_huawei     = "Huawei App Gallery",
+    .build_variant_ipa        = "IPA",
+    .url_donations            = "https://getsession.org/donate",
+    .url_donations_app        = "https://getsession.org/donate#app",
+    .url_download             = "https://getsession.org/download",
+    .url_faq                  = "https://getsession.org/faq",
+    .url_feedback             = "https://getsession.org/feedback",
+    .url_network              = "https://docs.getsession.org/session-network",
+    .url_privacy_policy       = "https://getsession.org/privacy-policy",
+    .url_pro_access_not_found = "https://sessionapp.zendesk.com/hc/sections/4416517450649-Support",
+    .url_pro_faq              = "https://getsession.org/pro#faq",
+    .url_pro_page             = "https://getsession.org/pro",
+    .url_pro_privacy_policy   = "https://getsession.org/pro-privacy",
+    .url_pro_roadmap          = "https://getsession.org/pro#roadmap",
+    .url_pro_support          = "https://getsession.org/pro-support",
+    .url_pro_terms_of_service = "https://getsession.org/pro-terms",
+    .url_pro_upgrade          = "https://getsession.org/pro#upgrade",
+    .url_staking              = "https://docs.getsession.org/session-network/staking",
+    .url_support              = "https://getsession.org/support",
+    .url_survey               = "https://getsession.org/survey",
+    .url_terms_of_service     = "https://getsession.org/terms-of-service",
+    .url_token                = "https://token.getsession.org",
+    .url_translate            = "https://getsession.org/translate",
 };
 // clang-format on
 
@@ -881,7 +881,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
     auto result_cpp = pro_features_for_utf8({msg, msg_size});
     return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
-            .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
+            .error = result_cpp.error.data(),
             .bitset = static_cast<uint64_t>(result_cpp.flags),
             .codepoint_count = result_cpp.codepoint_count,
     };
@@ -894,7 +894,7 @@ session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
             {std::launder(reinterpret_cast<const char16_t*>(msg)), msg_size});
     return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
-            .error = {const_cast<char*>(result_cpp.error.data()), result_cpp.error.size()},
+            .error = result_cpp.error.data(),
             .bitset = static_cast<uint64_t>(result_cpp.flags),
             .codepoint_count = result_cpp.codepoint_count,
     };

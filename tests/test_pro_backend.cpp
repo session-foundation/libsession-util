@@ -14,8 +14,8 @@ using namespace session::pro_backend;
 // NOTE: This is defined in main.cpp because it accepts a value from the CLI
 extern std::string g_test_pro_backend_dev_server_url;
 
-static bool string8_equals(string8 s8, std::string_view str) {
-    return s8.size == str.size() && std::memcmp(s8.data, str.data(), s8.size) == 0;
+static bool span_u8_equals(span_u8 s, std::string_view str) {
+    return std::string_view{reinterpret_cast<const char*>(s.data), s.size} == str;
 }
 TEST_CASE("Pro Backend C API", "[pro_backend]") {
     // Setup: Generate keys and payment token hash
@@ -69,7 +69,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT);
                 REQUIRE(std::string_view(result.content_type) == cpp.content_type);
                 REQUIRE(cpp.content_type == "application/json");
-                REQUIRE(string8_equals(result.data, cpp.data));
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
 
             // After freeing
@@ -108,7 +108,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         session::as_sys_seconds(unix_ts));
                 REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
                 REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT);
-                REQUIRE(string8_equals(result.data, cpp.data));
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
             REQUIRE(result.data.data == nullptr);
 
@@ -133,7 +133,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 auto cpp = revocations_request(123);
                 REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
                 REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PRO_REVOCATIONS_ENDPOINT);
-                REQUIRE(string8_equals(result.data, cpp.data));
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
             REQUIRE(result.data.data == nullptr);
         }
@@ -150,7 +150,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         master_privkey.data, session::as_sys_seconds(unix_ts), 10'000);
                 REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
                 REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PRO_DETAILS_ENDPOINT);
-                REQUIRE(string8_equals(result.data, cpp.data));
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
             REQUIRE(result.data.data == nullptr);
 
@@ -485,7 +485,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         to_byte_span(payment_id, payment_id_len));
                 REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
                 REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT);
-                REQUIRE(string8_equals(result.data, cpp.data));
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
             REQUIRE(result.data.data == nullptr);
 

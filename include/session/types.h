@@ -20,14 +20,6 @@ struct span_u8 {
     size_t size;
 };
 
-typedef struct string8 string8;
-struct string8 {
-    char* data;
-    size_t size;
-};
-
-#define string8_literal(literal) {(char*)literal, sizeof(literal) - 1}
-
 typedef struct cbytes32 cbytes32;
 struct cbytes32 {
     unsigned char data[32];
