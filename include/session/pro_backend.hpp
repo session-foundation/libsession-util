@@ -49,11 +49,12 @@
 ///    cache. Any incoming messages with a Pro proof that is in the list of revoked proofs will not
 ///    be entitled to Pro features.
 ///
-/// 4. Query the status (and optionally payment history) of a user's Session Pro Master Ed25519 key
-///    by building a `payment_details_request(...)` query and submitting it.
+/// 4. Query a user's Session Pro entitlement status for their Master Ed25519 key by building a
+///    `pro_status_request(...)` query (the hot "am I Pro?" path) and submitting it. Parse the reply
+///    with `parse_pro_status(...)`, which yields the account status plus its single latest payment.
 ///
-///    Parse the reply with `parse_payment_details(...)`, which they can use to populate their
-///    client's payment history.
+///    For the full payment history (e.g. a receipts view), page through it with
+///    `payment_details_request(...)` / `parse_payment_details(...)` using the opaque keyset cursor.
 ///
 /// See the unit tests for examples of using the APIs mentioned.
 
@@ -285,24 +286,42 @@ struct GetProRevocationsResponse : ResponseBase {
 /// `errors` is populated.
 GetProRevocationsResponse parse_revocations(std::string_view json);
 
-/// Query a master key's Session Pro payment/subscription details and history (endpoint
-/// `get_pro_details`). `payment_details_sig` computes the master signature;
-/// `payment_details_request` builds the whole request (signing internally) and returns the endpoint
-/// + JSON body. Both throw on an incorrectly-sized key.
+/// Query a master key's Session Pro status (endpoint `get_pro_status`): the account entitlement
+/// state plus its single latest payment -- the hot "am I Pro?" path. `pro_status_sig` computes the
+/// master signature; `pro_status_request` builds the whole request (signing internally) and returns
+/// the endpoint + JSON body. Both throw on an incorrectly-sized key.
 ///
 /// Inputs:
 /// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
 /// - `unix_ts` -- Unix timestamp for the request
-/// - `count` -- maximum number of historical payments to request
+b64 pro_status_sig(const ed25519::PrivKeySpan& master_privkey, std::chrono::sys_seconds unix_ts);
+
+ProRequest pro_status_request(
+        const ed25519::PrivKeySpan& master_privkey, std::chrono::sys_seconds unix_ts);
+
+/// Query a master key's Session Pro payment history (endpoint `get_payment_details`), one keyset
+/// page at a time. `payment_details_sig` computes the master signature; `payment_details_request`
+/// builds the whole request (signing internally) and returns the endpoint + JSON body. Both throw
+/// on an incorrectly-sized key.
+///
+/// Inputs:
+/// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
+/// - `unix_ts` -- Unix timestamp for the request
+/// - `limit` -- maximum payments to return on this page (the backend may clamp it)
+/// - `before` -- opaque pagination cursor from a previous page's `next_cursor` (see
+///   PaymentDetailsResponse); the empty string requests the newest page. Pass it through verbatim;
+///   it must not be parsed or synthesized.
 b64 payment_details_sig(
         const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_seconds unix_ts,
-        uint32_t count);
+        uint32_t limit,
+        std::string_view before);
 
 ProRequest payment_details_request(
         const ed25519::PrivKeySpan& master_privkey,
         std::chrono::sys_seconds unix_ts,
-        uint32_t count);
+        uint32_t limit,
+        std::string_view before);
 
 /// Unit of a billing period (the `unit` of a parsed `plan` code, pro-wire-protocol.md §1 / Delta
 /// #14). A closed set: the backend emits only these, so an unrecognized code is a protocol error.
@@ -381,17 +400,19 @@ struct ProPaymentItem {
     std::string payment_id;
 };
 
-struct GetProDetailsResponse : ResponseBase {
-    /// List of payment items for the master public key
-    std::vector<ProPaymentItem> items;
-
+struct ProStatusResponse : ResponseBase {
     /// Current Session Pro entitlement status for the master public key
+    /// ("never"/"active"/"expired"; opaque -- an unknown value passes through as-is).
     std::string user_status;
+
+    /// The single most-recent payment for the master public key, or std::nullopt when the account
+    /// has no payments. (The full payment history is a separate query -- parse_payment_details.)
+    std::optional<ProPaymentItem> latest_payment;
 
     /// Error code that indicates that the Session Pro Backend encountered an error book-keeping
     /// Session Pro entitlement for the user. If this value is not `SUCCESS` implementing clients
     /// can optionally prompt the user that they should contact support for investigation.
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
 
     /// Flag to indicate if the user will automatically renew their subscription.
     bool auto_renewing;
@@ -433,15 +454,31 @@ struct GetProDetailsResponse : ResponseBase {
     /// payment associated with the `expiry_at`). This value is 0 if no refund has been
     /// requested on the active payment.
     std::chrono::sys_seconds refund_requested_at;
+};
+
+struct PaymentDetailsResponse : ResponseBase {
+    /// One keyset page of the master public key's payment history, newest-first (at most the
+    /// `limit` passed to payment_details_request).
+    std::vector<ProPaymentItem> items;
 
     /// Total number of payments known by the backend for the user. This may be greater than the
-    /// length of items if the request, requested less than the number of payments the user has.
+    /// length of `items` when the requested page did not cover the full history.
     uint32_t payments_total;
+
+    /// Opaque keyset-pagination cursor for the next (older) page: re-request with this value as
+    /// `before` to continue, and stop when it is std::nullopt (end-of-data). Store and echo it
+    /// verbatim -- it is an encrypted token and MUST NOT be parsed or synthesized (a tampered or
+    /// foreign cursor is rejected). (pro-wire-protocol.md §5.3.)
+    std::optional<std::string> next_cursor;
 };
+
+/// Parse the reply to a `pro_status_request`. On failure `status` is set to an error state and
+/// `errors` is populated.
+ProStatusResponse parse_pro_status(std::string_view json);
 
 /// Parse the reply to a `payment_details_request`. On failure `status` is set to an error state and
 /// `errors` is populated.
-GetProDetailsResponse parse_payment_details(std::string_view json);
+PaymentDetailsResponse parse_payment_details(std::string_view json);
 
 /// Record a refund request against an existing Session Pro payment (endpoint
 /// `set_payment_refund_requested`). `refund_sig` computes the master signature; `refund_request`

@@ -28,7 +28,8 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_
 /// owned in the C++ implementation (defined once, shared by the C and C++ sides).
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT;
-LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_DETAILS_ENDPOINT;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_STATUS_ENDPOINT;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_REVOCATIONS_ENDPOINT;
 LIBSESSION_EXPORT extern const char* const
         SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT;
@@ -107,11 +108,11 @@ typedef struct session_pro_backend_request {
 LIBSESSION_EXPORT
 void session_pro_backend_request_free(session_pro_backend_request* request);
 
-typedef enum SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT {
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_SUCCESS,
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR,
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_COUNT,
-} SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT;
+typedef enum SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT {
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_SUCCESS,
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR,
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_COUNT,
+} SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT;
 
 /// Response outcome (wire `status`, spec §5). CLOSED/exhaustive: the backend will never add a
 /// value, so an unrecognized wire status is reported as a protocol error (RESPONSE_STATUS_ERROR +
@@ -218,28 +219,50 @@ typedef struct session_pro_backend_pro_payment_item {
     const char* payment_id;
 } session_pro_backend_pro_payment_item;
 
-typedef struct session_pro_backend_get_pro_details_response {
+typedef struct session_pro_backend_get_pro_status_response {
     session_pro_backend_response_header header;
-    /// Array of payment items, with items_count elements
-    session_pro_backend_pro_payment_item* items;
-    size_t items_count;
     /// Opaque account Pro status code ("never"/"active"/"expired"); unknown values pass through.
     /// NUL-terminated; points into the response's `internal_`.
     const char* status;
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
     bool auto_renewing;
     int64_t expiry_ts;
     int64_t grace_period_duration;
     int64_t refund_requested_ts;
-    uint32_t payments_total;
-} session_pro_backend_get_pro_details_response;
+    /// True if the account has at least one payment, in which case `latest_payment` is populated
+    /// with the most recent one; false means the account has no payments and `latest_payment` is
+    /// unset.
+    bool has_latest_payment;
+    session_pro_backend_pro_payment_item latest_payment;
+} session_pro_backend_get_pro_status_response;
 
-/// API: session_pro_backend/get_pro_details_response_free
+/// API: session_pro_backend/get_pro_status_response_free
 ///
 /// Frees the response.
 LIBSESSION_EXPORT
-void session_pro_backend_get_pro_details_response_free(
-        session_pro_backend_get_pro_details_response* response);
+void session_pro_backend_get_pro_status_response_free(
+        session_pro_backend_get_pro_status_response* response);
+
+typedef struct session_pro_backend_get_payment_details_response {
+    session_pro_backend_response_header header;
+    /// Array of payment items (one keyset page, newest-first), with items_count elements.
+    session_pro_backend_pro_payment_item* items;
+    size_t items_count;
+    /// Total number of payments the backend knows for the user (may exceed items_count).
+    uint32_t payments_total;
+    /// Opaque keyset-pagination cursor: pass as `before` to
+    /// session_pro_backend_get_payment_details_request_build to fetch the next (older) page. NULL
+    /// at end-of-data. NUL-terminated and points into the response's `internal_`; echo it verbatim,
+    /// do NOT parse or synthesize it.
+    const char* next_cursor;
+} session_pro_backend_get_payment_details_response;
+
+/// API: session_pro_backend/get_payment_details_response_free
+///
+/// Frees the response.
+LIBSESSION_EXPORT
+void session_pro_backend_get_payment_details_response_free(
+        session_pro_backend_get_payment_details_response* response);
 
 typedef struct session_pro_backend_set_payment_refund_requested_response {
     session_pro_backend_response_header header;
@@ -305,9 +328,9 @@ session_pro_backend_request session_pro_backend_generate_pro_proof_request_build
 LIBSESSION_EXPORT
 session_pro_backend_request session_pro_backend_get_pro_revocations_request_build(int64_t ticket);
 
-/// API: session_pro_backend/get_pro_details_request_build
+/// API: session_pro_backend/get_pro_status_request_build
 ///
-/// Builds the get-details request to POST, as a session_pro_backend_request (endpoint +
+/// Builds the get-pro-status request to POST, as a session_pro_backend_request (endpoint +
 /// content_type + opaque data). Free it with `session_pro_backend_request_free`. On a key-size
 /// error `success` is false and `error`/`error_count` describe it.
 ///
@@ -315,11 +338,31 @@ session_pro_backend_request session_pro_backend_get_pro_revocations_request_buil
 /// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
 /// libsodium).
 /// - `ts` -- Unix timestamp (seconds) for the request.
-/// - `count` -- number of historical payments to request.
 LIBSESSION_EXPORT
-session_pro_backend_request session_pro_backend_get_pro_details_request_build(
-        const unsigned char* master_privkey, size_t master_privkey_len, int64_t ts, uint32_t count)
-        NON_NULL_ARG(1);
+session_pro_backend_request session_pro_backend_get_pro_status_request_build(
+        const unsigned char* master_privkey, size_t master_privkey_len, int64_t ts) NON_NULL_ARG(1);
+
+/// API: session_pro_backend/get_payment_details_request_build
+///
+/// Builds the get-payment-details (paginated history) request to POST, as a
+/// session_pro_backend_request (endpoint + content_type + opaque data). Free it with
+/// `session_pro_backend_request_free`. On a key-size error `success` is false and
+/// `error`/`error_count` describe it.
+///
+/// Inputs:
+/// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
+/// libsodium).
+/// - `ts` -- Unix timestamp (seconds) for the request.
+/// - `limit` -- maximum payments to return on this page (the backend may clamp it).
+/// - `before` -- opaque pagination cursor from a previous response's `next_cursor`, or NULL / the
+///   empty string for the newest page. Pass through verbatim; do not parse or synthesize it.
+LIBSESSION_EXPORT
+session_pro_backend_request session_pro_backend_get_payment_details_request_build(
+        const unsigned char* master_privkey,
+        size_t master_privkey_len,
+        int64_t ts,
+        uint32_t limit,
+        const char* before) NON_NULL_ARG(1);
 
 /// API: session_pro_backend/pro_proof_response_parse
 ///
@@ -346,17 +389,29 @@ LIBSESSION_EXPORT
 session_pro_backend_get_pro_revocations_response
 session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t json_len);
 
-/// API: session_pro_backend/get_pro_details_response_parse
+/// API: session_pro_backend/get_pro_status_response_parse
 ///
-/// Parses a JSON string into a GetProPaymentsResponse struct.
-/// The caller must free the response using session_pro_backend_get_pro_details_response_free.
+/// Parses a JSON string into a session_pro_backend_get_pro_status_response struct.
+/// The caller must free the response using session_pro_backend_get_pro_status_response_free.
 ///
 /// Inputs:
 /// - `json` -- JSON string to parse.
 /// - `json_len` -- Length of the JSON string.
 LIBSESSION_EXPORT
-session_pro_backend_get_pro_details_response session_pro_backend_get_pro_details_response_parse(
+session_pro_backend_get_pro_status_response session_pro_backend_get_pro_status_response_parse(
         const char* json, size_t json_len);
+
+/// API: session_pro_backend/get_payment_details_response_parse
+///
+/// Parses a JSON string into a session_pro_backend_get_payment_details_response struct.
+/// The caller must free the response using session_pro_backend_get_payment_details_response_free.
+///
+/// Inputs:
+/// - `json` -- JSON string to parse.
+/// - `json_len` -- Length of the JSON string.
+LIBSESSION_EXPORT
+session_pro_backend_get_payment_details_response
+session_pro_backend_get_payment_details_response_parse(const char* json, size_t json_len);
 
 /// API: session_pro_backend/set_payment_refund_requested_request_build
 ///

@@ -138,25 +138,56 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             REQUIRE(result.data.data == nullptr);
         }
 
-        SECTION("session_pro_backend_get_pro_details_request_build") {
-            auto result = session_pro_backend_get_pro_details_request_build(
-                    master_privkey.data, sizeof(master_privkey.data), unix_ts, 10'000);
+        SECTION("session_pro_backend_get_pro_status_request_build") {
+            auto result = session_pro_backend_get_pro_status_request_build(
+                    master_privkey.data, sizeof(master_privkey.data), unix_ts);
+            {
+                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
+                REQUIRE(result.success);
+                REQUIRE(result.data.size > 0);
+
+                auto cpp =
+                        pro_status_request(master_privkey.data, session::as_sys_seconds(unix_ts));
+                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PRO_STATUS_ENDPOINT);
+                REQUIRE(span_u8_equals(result.data, cpp.data));
+            }
+            REQUIRE(result.data.data == nullptr);
+
+            // Invalid key size
+            result = session_pro_backend_get_pro_status_request_build(
+                    master_privkey.data, sizeof(master_privkey.data) - 1, unix_ts);
+            REQUIRE(!result.success);
+            REQUIRE(result.error_count > 0);
+        }
+
+        SECTION("session_pro_backend_get_payment_details_request_build") {
+            auto result = session_pro_backend_get_payment_details_request_build(
+                    master_privkey.data, sizeof(master_privkey.data), unix_ts, 100, "");
             {
                 scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
                 REQUIRE(result.success);
                 REQUIRE(result.data.size > 0);
 
                 auto cpp = payment_details_request(
-                        master_privkey.data, session::as_sys_seconds(unix_ts), 10'000);
+                        master_privkey.data, session::as_sys_seconds(unix_ts), 100, "");
                 REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
-                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PRO_DETAILS_ENDPOINT);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT);
                 REQUIRE(span_u8_equals(result.data, cpp.data));
+
+                // A NULL cursor is equivalent to the empty (newest-page) cursor.
+                auto result_null = session_pro_backend_get_payment_details_request_build(
+                        master_privkey.data, sizeof(master_privkey.data), unix_ts, 100, nullptr);
+                scope_exit result_null_free{
+                        [&]() { session_pro_backend_request_free(&result_null); }};
+                REQUIRE(result_null.success);
+                REQUIRE(span_u8_equals(result_null.data, cpp.data));
             }
             REQUIRE(result.data.data == nullptr);
 
             // Invalid key size
-            result = session_pro_backend_get_pro_details_request_build(
-                    master_privkey.data, sizeof(master_privkey.data) - 1, unix_ts, 10'000);
+            result = session_pro_backend_get_payment_details_request_build(
+                    master_privkey.data, sizeof(master_privkey.data) - 1, unix_ts, 100, "");
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
         }
@@ -322,98 +353,164 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             REQUIRE(result.header.error_code != nullptr);
         }
 
-        SECTION("session_pro_backend_get_pro_details_response_parse") {
+        // A single payment item (shared by the get-pro-status latest_payment and the
+        // get-payment-details items[] tests). purchased_ts/revoked_ts are floats on the wire
+        // (sub-second precision); the rest are whole-second integers.
+        auto make_payment_item = [&](std::string payment_id) {
+            return nlohmann::json{
+                    {"status", "redeemed"},
+                    {"plan", "1m"},
+                    {"payment_provider", SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY},
+                    {"auto_renewing", false},
+                    {"purchased_ts", unix_ts - 3600 + 0.5},
+                    {"redeemed_ts", unix_ts - 3600},
+                    {"expiry_ts", unix_ts},
+                    {"grace_period_duration", 1001},
+                    {"platform_refund_expiry_ts", unix_ts + 1},
+                    {"revoked_ts", unix_ts + 3600 + 0.75},
+                    {"refund_requested_ts", unix_ts + 3601},
+                    {"payment_id", std::move(payment_id)}};
+        };
+        auto check_payment_item = [&](const session_pro_backend_pro_payment_item& item,
+                                      std::string_view payment_id) {
+            REQUIRE(std::string_view(item.status) == "redeemed");
+            REQUIRE(item.plan_count == 1);
+            REQUIRE(item.plan_unit == SESSION_PRO_BACKEND_PLAN_UNIT_MONTH);
+            REQUIRE(std::string_view(item.payment_provider) ==
+                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY);
+            // Sub-second precision preserved through sys_ms (0.5s = 500ms) round-trips exactly
+            REQUIRE(item.purchased_ts == unix_ts - 3600 + 0.5);
+            REQUIRE(item.redeemed_ts == unix_ts - 3600);
+            REQUIRE(item.expiry_ts == unix_ts);
+            REQUIRE(item.grace_period_duration == 1001);
+            REQUIRE(item.platform_refund_expiry_ts == unix_ts + 1);
+            REQUIRE(item.revoked_ts == unix_ts + 3600 + 0.75);  // 750ms preserved
+            REQUIRE(item.refund_requested_ts == unix_ts + 3601);
+            REQUIRE(std::string_view(item.payment_id) == payment_id);
+        };
+
+        SECTION("session_pro_backend_get_pro_status_response_parse") {
             nlohmann::json j;
             j["status"] = "ok";
             j["result"] = {
                     {"user_status", "expired"},
-                    {"error_report",
-                     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR},
+                    {"error_report", SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR},
                     {"auto_renewing", true},
                     {"expiry_ts", unix_ts + 2},
                     {"grace_period_duration", 1000},
                     {"refund_requested_ts", unix_ts + 3602},
-                    {"payments_total", 3},
-                    {"items",
-                     nlohmann::json::array(
-                             {{{"status", "redeemed"},
-                               {"plan", "1m"},
-                               {"payment_provider",
-                                SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY},
-                               {"auto_renewing", false},
-                               // purchased_ts/revoked_ts are floats on the wire (sub-second
-                               // precision); libsession keeps them as millisecond-precise sys_ms.
-                               {"purchased_ts", unix_ts - 3600 + 0.5},
-                               {"redeemed_ts", unix_ts - 3600},
-                               {"expiry_ts", unix_ts},
-                               {"grace_period_duration", 1001},
-                               {"platform_refund_expiry_ts", unix_ts + 1},
-                               {"revoked_ts", unix_ts + 3600 + 0.75},
-                               {"refund_requested_ts", unix_ts + 3601},
-                               {"payment_id",
-                                std::string(fake_payment_id.data(), fake_payment_id.size())}}})}};
+                    {"latest_payment",
+                     make_payment_item(
+                             std::string(fake_payment_id.data(), fake_payment_id.size()))}};
             std::string json = j.dump();
 
-            // Valid Google JSON
+            // Valid response with a latest payment
             auto result =
-                    session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
+                    session_pro_backend_get_pro_status_response_parse(json.data(), json.size());
             {
                 scope_exit result_free{
-                        [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
+                        [&]() { session_pro_backend_get_pro_status_response_free(&result); }};
                 if (result.header.error)
                     INFO(result.header.error);
 
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(result.header.error == nullptr);
                 REQUIRE(std::string_view(result.status) == "expired");
                 REQUIRE(result.error_report ==
-                        SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR);
-                REQUIRE(result.items_count == 1);
+                        SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR);
                 REQUIRE(result.auto_renewing == true);
                 REQUIRE(result.grace_period_duration == 1000);
                 REQUIRE(result.expiry_ts == unix_ts + 2);
                 REQUIRE(result.refund_requested_ts == unix_ts + 3602);
-                REQUIRE(result.payments_total == 3);
-                REQUIRE(result.items != nullptr);
-                REQUIRE(std::string_view(result.items[0].status) == "redeemed");
-                REQUIRE(result.items[0].plan_count == 1);
-                REQUIRE(result.items[0].plan_unit == SESSION_PRO_BACKEND_PLAN_UNIT_MONTH);
-                REQUIRE(std::string_view(result.items[0].payment_provider) ==
-                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY);
-                // Sub-second precision preserved through sys_ms (0.5s = 500ms) round-trips exactly
-                REQUIRE(result.items[0].purchased_ts == unix_ts - 3600 + 0.5);
-                REQUIRE(result.items[0].redeemed_ts == unix_ts - 3600);
-                REQUIRE(result.items[0].expiry_ts == unix_ts);
-                REQUIRE(result.items[0].grace_period_duration == 1001);
-                REQUIRE(result.items[0].platform_refund_expiry_ts == unix_ts + 1);
-                REQUIRE(result.items[0].revoked_ts == unix_ts + 3600 + 0.75);  // 750ms preserved
-                REQUIRE(result.items[0].refund_requested_ts == unix_ts + 3601);
-                REQUIRE(std::string_view(result.items[0].payment_id) == fake_payment_id);
+                REQUIRE(result.has_latest_payment);
+                check_payment_item(result.latest_payment, fake_payment_id);
             }
 
-            // Tweak JSON for a different provider. payment_id is opaque so nothing
-            // provider-specific changes in how libsession parses it.
+            // A null latest_payment (account with no payments)
+            j["result"]["latest_payment"] = nullptr;
+            json = j.dump();
+            auto result_empty =
+                    session_pro_backend_get_pro_status_response_parse(json.data(), json.size());
+            {
+                scope_exit result_free{
+                        [&]() { session_pro_backend_get_pro_status_response_free(&result_empty); }};
+                if (result_empty.header.error)
+                    INFO(result_empty.header.error);
+                REQUIRE(result_empty.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result_empty.has_latest_payment == false);
+            }
+
+            // After freeing
+            REQUIRE(result.header.internal_ == nullptr);
+
+            // Invalid JSON
+            json = "{invalid}";
+            result = session_pro_backend_get_pro_status_response_parse(json.data(), json.size());
+            {
+                scope_exit result_free{
+                        [&]() { session_pro_backend_get_pro_status_response_free(&result); }};
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code != nullptr);
+            }
+            session_pro_backend_get_pro_status_response_free(&result);
+            REQUIRE(result.header.internal_ == nullptr);
+
+            // Null JSON
+            result = session_pro_backend_get_pro_status_response_parse(nullptr, 0);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code != nullptr);
+        }
+
+        SECTION("session_pro_backend_get_payment_details_response_parse") {
+            nlohmann::json j;
+            j["status"] = "ok";
+            j["result"] = {
+                    {"payments_total", 3},
+                    {"items",
+                     nlohmann::json::array({make_payment_item(
+                             std::string(fake_payment_id.data(), fake_payment_id.size()))})},
+                    {"next_cursor", "opaque-cursor-token"}};
+            std::string json = j.dump();
+
+            // Valid page with a cursor
+            auto result = session_pro_backend_get_payment_details_response_parse(
+                    json.data(), json.size());
+            {
+                scope_exit result_free{
+                        [&]() { session_pro_backend_get_payment_details_response_free(&result); }};
+                if (result.header.error)
+                    INFO(result.header.error);
+
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error == nullptr);
+                REQUIRE(result.payments_total == 3);
+                REQUIRE(result.items_count == 1);
+                REQUIRE(result.items != nullptr);
+                check_payment_item(result.items[0], fake_payment_id);
+                REQUIRE(result.next_cursor != nullptr);
+                REQUIRE(std::string_view(result.next_cursor) == "opaque-cursor-token");
+            }
+
+            // End-of-data: null next_cursor, and payment_id is opaque so a different provider's
+            // value passes through unchanged.
             j["result"]["items"][0]["payment_provider"] =
                     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
             j["result"]["items"][0]["payment_id"] = "rangeproof-opaque-id";
+            j["result"]["next_cursor"] = nullptr;
             json = j.dump();
-
-            // Valid Rangeproof JSON
-            auto result_rangeproof =
-                    session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
+            auto result_end = session_pro_backend_get_payment_details_response_parse(
+                    json.data(), json.size());
             {
                 scope_exit result_free{[&]() {
-                    session_pro_backend_get_pro_details_response_free(&result_rangeproof);
+                    session_pro_backend_get_payment_details_response_free(&result_end);
                 }};
-                if (result_rangeproof.header.error)
-                    INFO(result_rangeproof.header.error);
-
-                // Only check what we expect to be different
-                REQUIRE(std::string_view(result_rangeproof.items[0].payment_provider) ==
+                if (result_end.header.error)
+                    INFO(result_end.header.error);
+                REQUIRE(result_end.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(std::string_view(result_end.items[0].payment_provider) ==
                         SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF);
-                REQUIRE(std::string_view(result_rangeproof.items[0].payment_id) ==
-                        "rangeproof-opaque-id");
+                REQUIRE(std::string_view(result_end.items[0].payment_id) == "rangeproof-opaque-id");
+                REQUIRE(result_end.next_cursor == nullptr);  // end-of-data
             }
 
             // After freeing
@@ -423,23 +520,20 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
             // Invalid JSON
             json = "{invalid}";
-            result = session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
+            result = session_pro_backend_get_payment_details_response_parse(
+                    json.data(), json.size());
             {
                 scope_exit result_free{
-                        [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
+                        [&]() { session_pro_backend_get_payment_details_response_free(&result); }};
                 REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(result.header.error_code != nullptr);
-                REQUIRE(result.header.error_code != nullptr);
             }
-
-            // After freeing
-            session_pro_backend_get_pro_details_response_free(&result);
+            session_pro_backend_get_payment_details_response_free(&result);
             REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
-            result = session_pro_backend_get_pro_details_response_parse(nullptr, 0);
+            result = session_pro_backend_get_payment_details_response_parse(nullptr, 0);
             REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-            REQUIRE(result.header.error_code != nullptr);
             REQUIRE(result.header.error_code != nullptr);
         }
 
@@ -458,8 +552,12 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             session_pro_backend_get_pro_revocations_response_free(&rev_response);
             REQUIRE(rev_response.header.internal_ == nullptr);
 
-            session_pro_backend_get_pro_details_response pay_response = {};
-            session_pro_backend_get_pro_details_response_free(&pay_response);
+            session_pro_backend_get_pro_status_response status_response = {};
+            session_pro_backend_get_pro_status_response_free(&status_response);
+            REQUIRE(status_response.header.internal_ == nullptr);
+
+            session_pro_backend_get_payment_details_response pay_response = {};
+            session_pro_backend_get_payment_details_response_free(&pay_response);
             REQUIRE(pay_response.header.internal_ == nullptr);
         }
 
@@ -789,70 +887,67 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         sizeof(rotating_pubkey.data)) == 0);
     }
 
-    // Get pro status
+    // Get pro status (the hot path: account status + single latest payment)
     {
-        session_pro_backend_request request_json =
-                session_pro_backend_get_pro_details_request_build(
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        session::epoch_seconds(session::clock_now_s()),
-                        10'000);
+        session_pro_backend_request request_json = session_pro_backend_get_pro_status_request_build(
+                master_privkey.data,
+                sizeof(master_privkey.data),
+                session::epoch_seconds(session::clock_now_s()));
         scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
         REQUIRE(request_json.success);
 
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
-                g_test_pro_backend_dev_server_url + "/get_pro_details",
+                g_test_pro_backend_dev_server_url + "/get_pro_status",
                 std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
-        session_pro_backend_get_pro_details_response response =
-                session_pro_backend_get_pro_details_response_parse(
+        session_pro_backend_get_pro_status_response response =
+                session_pro_backend_get_pro_status_response_parse(
                         response_json.data(), response_json.size());
         scope_exit response_free{
-                [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
+                [&]() { session_pro_backend_get_pro_status_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
         if (response.header.error)
             UNSCOPED_INFO("ERROR: " << response.header.error);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(std::string_view(response.status) == "active");
-        REQUIRE(response.items_count > 0);
+        REQUIRE(response.has_latest_payment);
     }
 
-    // Get pro status without history
+    // Get payment history (paginated) -- newest page
     {
         session_pro_backend_request request_json =
-                session_pro_backend_get_pro_details_request_build(
+                session_pro_backend_get_payment_details_request_build(
                         master_privkey.data,
                         sizeof(master_privkey.data),
                         session::epoch_seconds(session::clock_now_s()),
-                        0);
+                        100,
+                        "");
         scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
         REQUIRE(request_json.success);
 
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
-                g_test_pro_backend_dev_server_url + "/get_pro_details",
+                g_test_pro_backend_dev_server_url + "/get_payment_details",
                 std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
-        session_pro_backend_get_pro_details_response response =
-                session_pro_backend_get_pro_details_response_parse(
+        session_pro_backend_get_payment_details_response response =
+                session_pro_backend_get_payment_details_response_parse(
                         response_json.data(), response_json.size());
         scope_exit response_free{
-                [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
+                [&]() { session_pro_backend_get_payment_details_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
         if (response.header.error)
             UNSCOPED_INFO("ERROR: " << response.header.error);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(std::string_view(response.status) == "active");
-        REQUIRE(response.items_count == 0);
+        REQUIRE(response.items_count > 0);
+        REQUIRE(response.payments_total > 0);
     }
 
     // Add _another_ payment, same details
