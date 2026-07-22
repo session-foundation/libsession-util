@@ -50,14 +50,13 @@ LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY_X
 /// client duplicating them; the human-readable provider/store names are translation data and remain
 /// the client's job. An unknown provider code (or one with no applicable URLs, e.g. rangeproof)
 /// yields all-NULL fields. Otherwise each is a static, null-terminated C string.
-typedef struct session_pro_backend_provider_urls session_pro_backend_provider_urls;
-struct session_pro_backend_provider_urls {
+typedef struct session_pro_backend_provider_urls {
     const char* refund_platform_url;      /// Native store refund flow
     const char* refund_support_url;       /// Session support page for requesting a refund
     const char* refund_status_url;        /// Where a user checks refund status
     const char* update_subscription_url;  /// Manage/update the subscription
     const char* cancel_subscription_url;  /// Cancel the subscription
-};
+} session_pro_backend_provider_urls;
 
 /// API: session_pro_backend/get_provider_urls
 ///
@@ -91,8 +90,7 @@ typedef enum SESSION_PRO_BACKEND_RESPONSE_STATUS {
                                                 ///< later.
 } SESSION_PRO_BACKEND_RESPONSE_STATUS;
 
-typedef struct session_pro_backend_response_header session_pro_backend_response_header;
-struct session_pro_backend_response_header {
+typedef struct session_pro_backend_response_header {
     /// Outcome category. Success iff `status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK`.
     SESSION_PRO_BACKEND_RESPONSE_STATUS status;
     /// On non-OK, the machine-readable outcome slug (spec §5.1); {NULL, 0} on success. Opaque and
@@ -104,15 +102,14 @@ struct session_pro_backend_response_header {
     string8 error;
     unsigned char*
             internal_arena_buf_;  /// Internal buffer for all the memory allocations, do not touch
-};
+} session_pro_backend_response_header;
 
 /// A built request to POST to the Session Pro backend. Mirrors the C++
 /// `session::pro_backend::ProRequest`: an `endpoint`, the `content_type` to send as the request's
 /// Content-Type header, and the opaque `data` payload. `data` is libsession's data for the backend
 /// -- relay it verbatim with the given `content_type` and do NOT parse, inspect, or assume a format
 /// for it. libsession owns the wire encoding and may change it without client involvement.
-typedef struct session_pro_backend_request session_pro_backend_request;
-struct session_pro_backend_request {
+typedef struct session_pro_backend_request {
     char error[256];
     size_t error_count;
     bool success;  /// True if the request was built successfully, false if out-of-memory
@@ -124,24 +121,20 @@ struct session_pro_backend_request {
     string8 data;
     /// Owned C++ object backing endpoint/content_type/data; do not touch (freed by request_free).
     void* internal_;
-};
+} session_pro_backend_request;
 
-typedef struct session_pro_backend_pro_proof_response session_pro_backend_pro_proof_response;
-struct session_pro_backend_pro_proof_response {
+typedef struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
-};
+} session_pro_backend_pro_proof_response;
 
-typedef struct session_pro_backend_pro_revocation_item session_pro_backend_pro_revocation_item;
-struct session_pro_backend_pro_revocation_item {
+typedef struct session_pro_backend_pro_revocation_item {
     cbytes32 revocation_tag;
     /// Unix timestamp (seconds); a matching proof is revoked once the client clock reaches this
     int64_t effective_ts;
-};
+} session_pro_backend_pro_revocation_item;
 
-typedef struct session_pro_backend_get_pro_revocations_response
-        session_pro_backend_get_pro_revocations_response;
-struct session_pro_backend_get_pro_revocations_response {
+typedef struct session_pro_backend_get_pro_revocations_response {
     session_pro_backend_response_header header;
     int64_t ticket;
     int64_t retry_in;    /// Recommended seconds to wait before polling the list again
@@ -149,7 +142,7 @@ struct session_pro_backend_get_pro_revocations_response {
     /// Array of items, with items_count elements
     session_pro_backend_pro_revocation_item* items;
     size_t items_count;
-};
+} session_pro_backend_get_pro_revocations_response;
 
 /// Unit of a parsed billing period (`plan_unit` below); mirrors C++
 /// session::pro_backend::ProPlanUnit (same order). A closed set (pro-wire-protocol.md §1 / Delta
@@ -163,8 +156,7 @@ typedef enum SESSION_PRO_BACKEND_PLAN_UNIT {
     SESSION_PRO_BACKEND_PLAN_UNIT_LIFETIME,
 } SESSION_PRO_BACKEND_PLAN_UNIT;
 
-typedef struct session_pro_backend_pro_payment_item session_pro_backend_pro_payment_item;
-struct session_pro_backend_pro_payment_item {
+typedef struct session_pro_backend_pro_payment_item {
     /// Opaque payment lifecycle status code (e.g. "unredeemed"/"redeemed"/"expired"/"revoked");
     /// unknown values pass through as-is
     char status[64];
@@ -195,11 +187,9 @@ struct session_pro_backend_pro_payment_item {
     /// parts in per the backend-defined composite -- libsession does not interpret it)
     char payment_id[128];
     size_t payment_id_count;
-};
+} session_pro_backend_pro_payment_item;
 
-typedef struct session_pro_backend_get_pro_details_response
-        session_pro_backend_get_pro_details_response;
-struct session_pro_backend_get_pro_details_response {
+typedef struct session_pro_backend_get_pro_details_response {
     session_pro_backend_response_header header;
     /// Array of payment items, with items_count elements
     session_pro_backend_pro_payment_item* items;
@@ -213,14 +203,12 @@ struct session_pro_backend_get_pro_details_response {
     int64_t grace_period_duration;
     int64_t refund_requested_ts;
     uint32_t payments_total;
-};
+} session_pro_backend_get_pro_details_response;
 
-typedef struct session_pro_backend_set_payment_refund_requested_response
-        session_pro_backend_set_payment_refund_requested_response;
-struct session_pro_backend_set_payment_refund_requested_response {
+typedef struct session_pro_backend_set_payment_refund_requested_response {
     session_pro_backend_response_header header;
     bool updated;
-};
+} session_pro_backend_set_payment_refund_requested_response;
 
 /// API: session_pro_backend/add_pro_payment_request_build
 ///
