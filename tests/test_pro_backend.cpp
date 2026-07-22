@@ -183,11 +183,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{
                         [&]() { session_pro_backend_pro_proof_response_free(&result); }};
 
-                if (result.header.error.data)
-                    INFO(result.header.error.data);
+                if (result.header.error)
+                    INFO(result.header.error);
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error.data == nullptr);
+                REQUIRE(result.header.error == nullptr);
                 REQUIRE(result.proof.expiry_ts == unix_ts);
                 REQUIRE(std::memcmp(
                                 result.proof.revocation_tag.data,
@@ -226,8 +226,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
-            REQUIRE(result.header.error.data == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
+            REQUIRE(result.header.error == nullptr);
             REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
 
             // Invalid JSON
@@ -237,19 +237,19 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{
                         [&]() { session_pro_backend_pro_proof_response_free(&result); }};
                 REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error_code.data != nullptr);
-                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
             }
 
             // After freeing
             session_pro_backend_pro_proof_response_free(&result);
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
             result = session_pro_backend_pro_proof_response_parse(nullptr, 0);
             REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-            REQUIRE(result.header.error_code.data != nullptr);
-            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
 
             // No need to free, as errors point to static memory
         }
@@ -278,11 +278,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_revocations_response_free(&result); }};
-                if (result.header.error.data)
-                    INFO(result.header.error.data);
+                if (result.header.error)
+                    INFO(result.header.error);
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error.data == nullptr);
+                REQUIRE(result.header.error == nullptr);
                 REQUIRE(result.ticket == 123);
                 REQUIRE(result.retry_in == 3600);
                 REQUIRE(result.retain_for == 2592000);
@@ -290,13 +290,13 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.items != nullptr);
                 REQUIRE(result.items[0].effective_ts == unix_ts);
                 REQUIRE(std::memcmp(
-                                result.items[0].revocation_tag.data,
+                                result.items[0].revocation_tag,
                                 fake_revocation_tag.data(),
                                 fake_revocation_tag.size()) == 0);
             }
 
             // After freeeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
             REQUIRE(result.items == nullptr);
             REQUIRE(result.items_count == 0);
 
@@ -308,18 +308,18 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_revocations_response_free(&result); }};
                 REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error_code.data != nullptr);
-                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
             result = session_pro_backend_get_pro_revocations_response_parse(nullptr, 0);
             REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-            REQUIRE(result.header.error_code.data != nullptr);
-            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
         }
 
         SECTION("session_pro_backend_get_pro_details_response_parse") {
@@ -360,13 +360,13 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
-                if (result.header.error.data)
-                    INFO(result.header.error.data);
+                if (result.header.error)
+                    INFO(result.header.error);
 
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error.data == nullptr);
-                REQUIRE(std::string_view(result.status, result.status_count) == "expired");
+                REQUIRE(result.header.error == nullptr);
+                REQUIRE(std::string_view(result.status) == "expired");
                 REQUIRE(result.error_report ==
                         SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR);
                 REQUIRE(result.items_count == 1);
@@ -376,13 +376,10 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.refund_requested_ts == unix_ts + 3602);
                 REQUIRE(result.payments_total == 3);
                 REQUIRE(result.items != nullptr);
-                REQUIRE(std::string_view(result.items[0].status, result.items[0].status_count) ==
-                        "redeemed");
+                REQUIRE(std::string_view(result.items[0].status) == "redeemed");
                 REQUIRE(result.items[0].plan_count == 1);
                 REQUIRE(result.items[0].plan_unit == SESSION_PRO_BACKEND_PLAN_UNIT_MONTH);
-                REQUIRE(std::string_view(
-                                result.items[0].payment_provider,
-                                result.items[0].payment_provider_count) ==
+                REQUIRE(std::string_view(result.items[0].payment_provider) ==
                         SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY);
                 // Sub-second precision preserved through sys_ms (0.5s = 500ms) round-trips exactly
                 REQUIRE(result.items[0].purchased_ts == unix_ts - 3600 + 0.5);
@@ -392,11 +389,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.items[0].platform_refund_expiry_ts == unix_ts + 1);
                 REQUIRE(result.items[0].revoked_ts == unix_ts + 3600 + 0.75);  // 750ms preserved
                 REQUIRE(result.items[0].refund_requested_ts == unix_ts + 3601);
-                REQUIRE(result.items[0].payment_id_count == fake_payment_id.size());
-                REQUIRE(std::memcmp(
-                                result.items[0].payment_id,
-                                fake_payment_id.data(),
-                                fake_payment_id.size()) == 0);
+                REQUIRE(std::string_view(result.items[0].payment_id) == fake_payment_id);
             }
 
             // Tweak JSON for a different provider. payment_id is opaque so nothing
@@ -413,22 +406,18 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{[&]() {
                     session_pro_backend_get_pro_details_response_free(&result_rangeproof);
                 }};
-                if (result_rangeproof.header.error.data)
-                    INFO(result_rangeproof.header.error.data);
+                if (result_rangeproof.header.error)
+                    INFO(result_rangeproof.header.error);
 
                 // Only check what we expect to be different
-                REQUIRE(std::string_view(
-                                result_rangeproof.items[0].payment_provider,
-                                result_rangeproof.items[0].payment_provider_count) ==
+                REQUIRE(std::string_view(result_rangeproof.items[0].payment_provider) ==
                         SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF);
-                REQUIRE(std::string_view(
-                                result_rangeproof.items[0].payment_id,
-                                result_rangeproof.items[0].payment_id_count) ==
+                REQUIRE(std::string_view(result_rangeproof.items[0].payment_id) ==
                         "rangeproof-opaque-id");
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
             REQUIRE(result.items == nullptr);
             REQUIRE(result.items_count == 0);
 
@@ -439,19 +428,19 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
                 REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error_code.data != nullptr);
-                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
             }
 
             // After freeing
             session_pro_backend_get_pro_details_response_free(&result);
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
             result = session_pro_backend_get_pro_details_response_parse(nullptr, 0);
             REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-            REQUIRE(result.header.error_code.data != nullptr);
-            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
         }
 
         SECTION("Memory management edge cases") {
@@ -463,15 +452,15 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
 
             session_pro_backend_pro_proof_response proof_response = {};
             session_pro_backend_pro_proof_response_free(&proof_response);
-            REQUIRE(proof_response.header.internal_arena_buf_ == nullptr);
+            REQUIRE(proof_response.header.internal_ == nullptr);
 
             session_pro_backend_get_pro_revocations_response rev_response = {};
             session_pro_backend_get_pro_revocations_response_free(&rev_response);
-            REQUIRE(rev_response.header.internal_arena_buf_ == nullptr);
+            REQUIRE(rev_response.header.internal_ == nullptr);
 
             session_pro_backend_get_pro_details_response pay_response = {};
             session_pro_backend_get_pro_details_response_free(&pay_response);
-            REQUIRE(pay_response.header.internal_arena_buf_ == nullptr);
+            REQUIRE(pay_response.header.internal_ == nullptr);
         }
 
         SECTION("session_pro_backend_set_payment_refund_requested_request_build") {
@@ -526,16 +515,16 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{[&]() {
                     session_pro_backend_set_payment_refund_requested_response_free(&result);
                 }};
-                if (result.header.error.data)
-                    INFO(result.header.error.data);
+                if (result.header.error)
+                    INFO(result.header.error);
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error.data == nullptr);
+                REQUIRE(result.header.error == nullptr);
                 REQUIRE(result.updated);
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Invalid JSON
             json = "{invalid}";
@@ -546,18 +535,18 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     session_pro_backend_set_payment_refund_requested_response_free(&result);
                 }};
                 REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error_code.data != nullptr);
-                REQUIRE(result.header.error_code.data != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
             result = session_pro_backend_set_payment_refund_requested_response_parse(nullptr, 0);
             REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-            REQUIRE(result.header.error_code.data != nullptr);
-            REQUIRE(result.header.error_code.data != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
         }
     }
 }
@@ -737,8 +726,8 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                         response_json.data(), response_json.size());
         scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
-        if (response.header.error.data)
-            INFO("ERROR: " << response.header.error.data);
+        if (response.header.error)
+            INFO("ERROR: " << response.header.error);
 
         // Verify response
         first_pro_proof = response.proof;
@@ -783,8 +772,8 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
         scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error.data)
-            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
 
@@ -825,11 +814,11 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error.data)
-            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(std::string_view(response.status, response.status_count) == "active");
+        REQUIRE(std::string_view(response.status) == "active");
         REQUIRE(response.items_count > 0);
     }
 
@@ -858,11 +847,11 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
 
         INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error.data)
-            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-        REQUIRE(std::string_view(response.status, response.status_count) == "active");
+        REQUIRE(std::string_view(response.status) == "active");
         REQUIRE(response.items_count == 0);
     }
 
@@ -936,8 +925,8 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
         // Verify response
         INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error.data)
-            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.ticket == 0);
@@ -976,8 +965,8 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
         // Verify response
         INFO("ERROR: JSON response: " << response_json.c_str());
-        if (response.header.error.data)
-            UNSCOPED_INFO("ERROR: " << response.header.error.data);
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.updated);

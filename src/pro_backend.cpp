@@ -754,14 +754,10 @@ SetPaymentRefundRequestedResponse parse_refund(std::string_view json) {
 using namespace session;
 using namespace session::pro_backend;
 
-/// Define a string8 from a c-string literal. The string should not be modified as it'll live in the
-/// data-section of the binary (or be interned, e.t.c)
-#define STRING8_LIT(val) {(char*)val, sizeof(val) - 1}
-
-static string8 C_PARSE_ERROR_OUT_OF_MEMORY = STRING8_LIT("Ran out-of-memory creating C response");
-static string8 C_PARSE_ERROR_INVALID_ARGS = STRING8_LIT("One or more C arguments were NULL");
-// error_code slug libsession reports when it can't parse/build the C response at all.
-static string8 C_INVALID_RESPONSE_CODE = STRING8_LIT("invalid_response");
+// error / error_code strings libsession synthesizes when it cannot parse or build the C response.
+static constexpr const char* C_PARSE_ERROR_OUT_OF_MEMORY = "Ran out-of-memory creating C response";
+static constexpr const char* C_PARSE_ERROR_INVALID_ARGS = "One or more C arguments were NULL";
+static constexpr const char* C_INVALID_RESPONSE_CODE = "invalid_response";
 
 // Map the C++ ResponseStatus to the C enum.
 static SESSION_PRO_BACKEND_RESPONSE_STATUS c_response_status(ResponseStatus status) {
@@ -773,27 +769,63 @@ static SESSION_PRO_BACKEND_RESPONSE_STATUS c_response_status(ResponseStatus stat
     return SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
 }
 
-// Arena bytes needed for a header's error_code + error strings.
-static size_t c_header_arena_bytes(const ResponseBase& cpp) {
-    size_t n = 0;
-    if (cpp.error_code)
-        n += cpp.error_code->size() + 1;
-    if (cpp.error)
-        n += cpp.error->size() + 1;
-    return n;
+// Fill a C response header from a C++ ResponseBase. error_code/error point into `cpp`
+// (NUL-terminated via c_str(), NULL when absent); `cpp` is owned by the response's
+// header.internal_.
+static void fill_c_header(session_pro_backend_response_header& header, const ResponseBase& cpp) {
+    header.status = c_response_status(cpp.status);
+    header.error_code = cpp.error_code ? cpp.error_code->c_str() : nullptr;
+    header.error = cpp.error ? cpp.error->c_str() : nullptr;
 }
 
-// Fill a C response header's status + error_code/error from a C++ ResponseBase, copying the two
-// optional strings into the arena (which must already have room; see c_header_arena_bytes).
-static void fill_c_header(
-        session_pro_backend_response_header& header, const ResponseBase& cpp, arena_t& arena) {
-    header.status = c_response_status(cpp.status);
-    header.error_code =
-            cpp.error_code
-                    ? arena_alloc_to_string8(&arena, cpp.error_code->data(), cpp.error_code->size())
-                    : string8{};
-    header.error = cpp.error ? arena_alloc_to_string8(&arena, cpp.error->data(), cpp.error->size())
-                             : string8{};
+// Project a parsed C++ item to its C view. The string members are pointers into `src` (valid while
+// the owning response lives) -- kept file-local rather than a public conversion operator, and
+// taking a non-const lvalue ref so a temporary (whose aliased strings would immediately dangle)
+// can't bind.
+static session_pro_backend_pro_revocation_item to_c(ProRevocationItem& src) {
+    return {
+            .revocation_tag = reinterpret_cast<const unsigned char*>(src.revocation_tag.data()),
+            .effective_ts = session::epoch_seconds(src.effective_at),
+    };
+}
+
+static session_pro_backend_pro_payment_item to_c(ProPaymentItem& src) {
+    return {
+            .status = src.status.c_str(),
+            .plan_count = src.plan.count,
+            .plan_unit = static_cast<SESSION_PRO_BACKEND_PLAN_UNIT>(src.plan.unit),
+            .payment_provider = src.payment_provider.c_str(),
+            .auto_renewing = src.auto_renewing,
+            .purchased_ts = epoch_seconds_double(src.purchased_at),
+            .redeemed_ts = session::epoch_seconds(src.redeemed_at),
+            .expiry_ts = session::epoch_seconds(src.expiry_at),
+            .grace_period_duration = src.grace_period_duration.count(),
+            .platform_refund_expiry_ts = session::epoch_seconds(src.platform_refund_expiry_at),
+            .revoked_ts = epoch_seconds_double(src.revoked_at),
+            .refund_requested_ts = session::epoch_seconds(src.refund_requested_at),
+            .payment_id = src.payment_id.c_str(),
+    };
+}
+
+// Owns the parsed C++ response object that a C response's fields point into, plus the C item-view
+// array. `header.internal_` points here; the response's *_free deletes it. (Item-less responses own
+// the bare C++ object directly.)
+struct GetProRevocationsCResponse : GetProRevocationsResponse {
+    std::vector<session_pro_backend_pro_revocation_item> item_views;
+};
+struct GetProDetailsCResponse : GetProDetailsResponse {
+    std::vector<session_pro_backend_pro_payment_item> item_views;
+};
+
+// Free any C response: delete the owned object (of concrete type `Owned`, as stored by the matching
+// *_parse) behind header.internal_, then zero the struct. `Owned` is a proof/refund response or a
+// *CResponse holder -- all deriving from ResponseBase.
+template <std::derived_from<ResponseBase> Owned, typename Response>
+static void c_free_response(Response* response) {
+    if (response) {
+        delete static_cast<Owned*>(response->header.internal_);
+        *response = {};
+    }
 }
 
 // Wrap a freshly-built C++ ProRequest as an owning C session_pro_backend_request: heap-own the
@@ -893,47 +925,30 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
         return result;
     }
 
-    // Note, parse is written to not throw so we can safely read without try-catch crap
-    // add-payment and generate-proof share the proof-response shape; the C response struct is
-    // generic, so either derived parser works here.
-    auto cpp = parse_add_payment({json, json_len});
+    try {
+        // add-payment and generate-proof share the proof-response shape; either parser works.
+        auto* owned = new AddProPaymentResponse(parse_add_payment({json, json_len}));
+        result.header.internal_ = owned;
+        fill_c_header(result.header, *owned);
 
-    // Calculate how much memory we need and create an arena
-    arena_t arena = {};
-    {
-        arena.max += c_header_arena_bytes(cpp);
-
-        if (arena.max)
-            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
-
-        if (arena.max && !arena.data) {
-            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-            result.header.error_code = C_INVALID_RESPONSE_CODE;
-            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
-            return result;
-        }
-
-        // Store the pointer to the backing memory. Upon freeing, we release this one pointer
-        result.header.internal_arena_buf_ = arena.data;
+        // Success and error responses fold into one path -- different fields populated.
+        const auto& p = owned->proof;
+        result.proof.version = p.version;
+        result.proof.expiry_ts = session::epoch_seconds(p.expiry_at);
+        std::memcpy(
+                result.proof.revocation_tag.data, p.revocation_tag.data(), p.revocation_tag.size());
+        std::memcpy(
+                result.proof.rotating_pubkey.data,
+                p.rotating_pubkey.data(),
+                p.rotating_pubkey.size());
+        std::memcpy(result.proof.sig.data, p.sig.data(), p.sig.size());
+    } catch (const std::exception&) {
+        delete static_cast<AddProPaymentResponse*>(result.header.internal_);
+        result = {};
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
     }
-
-    // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
-    // Note that a response error and success case folds into the same code path. A success and
-    // error response returns the same struct just with different fields populated.
-    result.proof.version = cpp.proof.version;
-    result.proof.expiry_ts = session::epoch_seconds(cpp.proof.expiry_at);
-    std::memcpy(
-            result.proof.revocation_tag.data,
-            cpp.proof.revocation_tag.data(),
-            cpp.proof.revocation_tag.size());
-    std::memcpy(
-            result.proof.rotating_pubkey.data,
-            cpp.proof.rotating_pubkey.data(),
-            cpp.proof.rotating_pubkey.size());
-    std::memcpy(result.proof.sig.data, cpp.proof.sig.data(), cpp.proof.sig.size());
-
-    // Copy status + error code/message
-    fill_c_header(result.header, cpp, arena);
     return result;
 }
 
@@ -947,51 +962,25 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
         return result;
     }
 
-    // Note, parse is written to not throw so we can safely read without try-catch crap
-    GetProRevocationsResponse cpp = parse_revocations({json, json_len});
+    try {
+        auto* owned = new GetProRevocationsCResponse{parse_revocations({json, json_len}), {}};
+        result.header.internal_ = owned;
+        fill_c_header(result.header, *owned);
+        result.ticket = owned->ticket;
+        result.retry_in = owned->retry_in.count();
+        result.retain_for = owned->retain_for.count();
 
-    // Calculate how much memory we need and create an arena
-    arena_t arena = {};
-    {
-        arena.max += cpp.items.size() * sizeof(*result.items);
-        static_assert(
-                sizeof(cpp.items[0]) >= sizeof(*result.items),
-                "Ensure we allocate enough memory. We might slightly over-allocate but that's not "
-                "a big deal");
-        arena.max += c_header_arena_bytes(cpp);
-
-        if (arena.max)
-            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
-
-        if (arena.max && !arena.data) {
-            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-            result.header.error_code = C_INVALID_RESPONSE_CODE;
-            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
-            return result;
-        }
-
-        // Store the pointer to the backing memory. Upon freeing, we release this one pointer
-        result.header.internal_arena_buf_ = arena.data;
-    }
-
-    // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
-    result.ticket = cpp.ticket;
-    result.retry_in = cpp.retry_in.count();
-    result.retain_for = cpp.retain_for.count();
-
-    // Copy status + error code/message
-    fill_c_header(result.header, cpp, arena);
-
-    // Copy items
-    result.items_count = cpp.items.size();
-    result.items = static_cast<session_pro_backend_pro_revocation_item*>(
-            arena_alloc(&arena, result.items_count * sizeof(*result.items)));
-
-    for (size_t index = 0; index < result.items_count; ++index) {
-        const ProRevocationItem& src = cpp.items[index];
-        session_pro_backend_pro_revocation_item& dest = result.items[index];
-        std::memcpy(dest.revocation_tag.data, src.revocation_tag.data(), src.revocation_tag.size());
-        dest.effective_ts = session::epoch_seconds(src.effective_at);
+        owned->item_views.reserve(owned->items.size());
+        for (auto& src : owned->items)
+            owned->item_views.push_back(to_c(src));
+        result.items = owned->item_views.data();
+        result.items_count = owned->item_views.size();
+    } catch (const std::exception&) {
+        delete static_cast<GetProRevocationsCResponse*>(result.header.internal_);
+        result = {};
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
     }
     return result;
 }
@@ -1006,65 +995,32 @@ session_pro_backend_get_pro_details_response_parse(const char* json, size_t json
         return result;
     }
 
-    // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = parse_payment_details({json, json_len});
+    try {
+        using session::epoch_seconds;
+        auto* owned = new GetProDetailsCResponse{parse_payment_details({json, json_len}), {}};
+        result.header.internal_ = owned;
+        fill_c_header(result.header, *owned);
 
-    // Calculate how much memory we need and create an arena
-    arena_t arena = {};
-    {
-        arena.max += cpp.items.size() * sizeof(*result.items);
-        arena.max += c_header_arena_bytes(cpp);
+        result.status = owned->user_status.c_str();
+        result.error_report = owned->error_report;
+        result.auto_renewing = owned->auto_renewing;
+        result.expiry_ts = epoch_seconds(owned->expiry_at);
+        result.grace_period_duration = owned->grace_period_duration.count();
+        result.refund_requested_ts = epoch_seconds(owned->refund_requested_at);
+        result.payments_total = owned->payments_total;
 
-        if (arena.max)
-            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
-
-        if (arena.max && !arena.data) {
-            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-            result.header.error_code = C_INVALID_RESPONSE_CODE;
-            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
-            return result;
-        }
-
-        // Store the pointer to the backing memory. Upon freeing, we release this one pointer
-        result.header.internal_arena_buf_ = arena.data;
+        owned->item_views.reserve(owned->items.size());
+        for (auto& src : owned->items)
+            owned->item_views.push_back(to_c(src));
+        result.items = owned->item_views.data();
+        result.items_count = owned->item_views.size();
+    } catch (const std::exception&) {
+        delete static_cast<GetProDetailsCResponse*>(result.header.internal_);
+        result = {};
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
     }
-
-    using session::epoch_seconds;
-
-    // Copy to C struct, this is guaranteed not to fail because we pre-allocated memory upfront.
-    result.status_count = session::copy_c_str(result.status, cpp.user_status) - 1;
-    result.error_report = cpp.error_report;
-    result.items_count = cpp.items.size();
-    result.items = (session_pro_backend_pro_payment_item*)arena_alloc(
-            &arena, result.items_count * sizeof(*result.items));
-    result.auto_renewing = cpp.auto_renewing;
-    result.expiry_ts = epoch_seconds(cpp.expiry_at);
-    result.grace_period_duration = cpp.grace_period_duration.count();
-    result.refund_requested_ts = epoch_seconds(cpp.refund_requested_at);
-    result.payments_total = cpp.payments_total;
-
-    for (size_t index = 0; index < result.items_count; ++index) {
-        const ProPaymentItem& src = cpp.items[index];
-        session_pro_backend_pro_payment_item& dest = result.items[index];
-        dest.status_count = session::copy_c_str(dest.status, src.status) - 1;
-        dest.plan_count = src.plan.count;
-        dest.plan_unit = static_cast<SESSION_PRO_BACKEND_PLAN_UNIT>(src.plan.unit);
-        dest.payment_provider_count =
-                session::copy_c_str(dest.payment_provider, src.payment_provider) - 1;
-        dest.purchased_ts = epoch_seconds_double(src.purchased_at);
-        dest.redeemed_ts = epoch_seconds(src.redeemed_at);
-        dest.expiry_ts = epoch_seconds(src.expiry_at);
-        dest.grace_period_duration = src.grace_period_duration.count();
-        dest.platform_refund_expiry_ts = epoch_seconds(src.platform_refund_expiry_at);
-        dest.revoked_ts = epoch_seconds_double(src.revoked_at);
-        dest.refund_requested_ts = epoch_seconds(src.refund_requested_at);
-
-        dest.payment_id_count = session::copy_c_str(dest.payment_id, src.payment_id) - 1;
-    }
-
-    // Copy status + error code/message
-    fill_c_header(result.header, cpp, arena);
-
     return result;
 }
 
@@ -1101,34 +1057,18 @@ session_pro_backend_set_payment_refund_requested_response_parse(const char* json
         return result;
     }
 
-    // Note, parse is written to not throw so we can safely read without try-catch crap
-    auto cpp = parse_refund({json, json_len});
-
-    // Calculate how much memory we need and create an arena
-    arena_t arena = {};
-    {
-        arena.max += c_header_arena_bytes(cpp);
-
-        if (arena.max)
-            arena.data = static_cast<unsigned char*>(calloc(1, arena.max));
-
-        if (arena.max && !arena.data) {
-            result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-            result.header.error_code = C_INVALID_RESPONSE_CODE;
-            result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
-            return result;
-        }
-
-        // Store the pointer to the backing memory. Upon freeing, we release this one pointer
-        result.header.internal_arena_buf_ = arena.data;
+    try {
+        auto* owned = new SetPaymentRefundRequestedResponse(parse_refund({json, json_len}));
+        result.header.internal_ = owned;
+        fill_c_header(result.header, *owned);
+        result.updated = owned->updated;
+    } catch (const std::exception&) {
+        delete static_cast<SetPaymentRefundRequestedResponse*>(result.header.internal_);
+        result = {};
+        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        result.header.error_code = C_INVALID_RESPONSE_CODE;
+        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
     }
-
-    // Copy to C struct
-    result.updated = cpp.updated;
-
-    // Copy status + error code/message
-    fill_c_header(result.header, cpp, arena);
-
     return result;
 }
 
@@ -1142,32 +1082,20 @@ LIBSESSION_C_API void session_pro_backend_request_free(session_pro_backend_reque
 
 LIBSESSION_C_API void session_pro_backend_pro_proof_response_free(
         session_pro_backend_pro_proof_response* response) {
-    if (response) {
-        free(response->header.internal_arena_buf_);
-        *response = {};
-    }
+    c_free_response<AddProPaymentResponse>(response);
 }
 
 LIBSESSION_C_API void session_pro_backend_get_pro_revocations_response_free(
         session_pro_backend_get_pro_revocations_response* response) {
-    if (response) {
-        free(response->header.internal_arena_buf_);
-        *response = {};
-    }
+    c_free_response<GetProRevocationsCResponse>(response);
 }
 
 LIBSESSION_C_API void session_pro_backend_get_pro_details_response_free(
         session_pro_backend_get_pro_details_response* response) {
-    if (response) {
-        free(response->header.internal_arena_buf_);
-        *response = {};
-    }
+    c_free_response<GetProDetailsCResponse>(response);
 }
 
 LIBSESSION_C_API void session_pro_backend_set_payment_refund_requested_response_free(
         session_pro_backend_set_payment_refund_requested_response* response) {
-    if (response) {
-        free(response->header.internal_arena_buf_);
-        *response = {};
-    }
+    c_free_response<SetPaymentRefundRequestedResponse>(response);
 }
