@@ -378,7 +378,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.items != nullptr);
                 REQUIRE(std::string_view(result.items[0].status, result.items[0].status_count) ==
                         "redeemed");
-                REQUIRE(std::string_view(result.items[0].plan, result.items[0].plan_count) == "1m");
+                REQUIRE(result.items[0].plan_count == 1);
+                REQUIRE(result.items[0].plan_unit == SESSION_PRO_BACKEND_PLAN_UNIT_MONTH);
                 REQUIRE(std::string_view(
                                 result.items[0].payment_provider,
                                 result.items[0].payment_provider_count) ==
@@ -595,6 +596,48 @@ TEST_CASE(
     REQUIRE(count == platforms.size());
     for (size_t i = 0; i < count; i++)
         REQUIRE(std::string_view{c[i]} == platforms[i]);
+}
+
+TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
+    using enum ProPlanUnit;
+    auto ok = [](std::string_view code, int n, ProPlanUnit u) {
+        auto p = parse_plan_period(code);
+        REQUIRE(p.has_value());
+        CHECK(p->count == n);
+        CHECK(p->unit == u);
+    };
+
+    // Every unit; count preserved verbatim.
+    ok("30s", 30, second);
+    ok("14d", 14, day);
+    ok("2w", 2, week);
+    ok("1m", 1, month);
+    ok("3m", 3, month);
+    ok("1y", 1, year);
+    // Unit is preserved, never canonicalized: "12m" stays (12, month), not (1, year).
+    ok("12m", 12, month);
+    // lifetime: count 0, and the invariant count == 0 iff unit == lifetime.
+    ok("lifetime", 0, lifetime);
+
+    // Non-conforming codes -> nullopt (caller treats as a protocol error; no raw pass-through).
+    for (std::string_view bad :
+         {"",
+          "m",
+          "1",
+          "0m",
+          "01m",
+          "1y6m",
+          "-1m",
+          "+1m",
+          "1x",
+          "1 m",
+          "1M",
+          "1mm",
+          "1.5m",
+          "9999999999999999999m",
+          "lifetime2",
+          "Lifetime"})
+        CHECK_FALSE(parse_plan_period(bad).has_value());
 }
 
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
