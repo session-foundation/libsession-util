@@ -13,9 +13,9 @@
 #include <string>
 
 /// Helper functions to construct payloads to communicate with the Session Pro Backend. The data
-/// structures here are largely bindings to the endpoints exposed on the Session Pro Backend:
-///
-///   https://github.com/Doy-lee/session-pro-backend/blob/06e82c9d5b5a0a881d12d0182358219a4081acf5/server.py#L2
+/// structures here are largely bindings to the endpoints exposed on the Session Pro Backend; the
+/// wire format they produce and parse is byte-pinned in pro-wire-protocol.md (the authoritative
+/// spec).
 ///
 /// The high level summary of the functionality in this file. Clients can:
 ///
