@@ -303,7 +303,7 @@ std::span<const std::string_view> visible_platforms() {
 }
 
 std::optional<ProPlanPeriod> parse_plan_period(std::string_view code) {
-    // pro-wire-protocol.md §1 / Delta #14: closed grammar. "lifetime", or "<N><unit>" with N a
+    // pro-wire-protocol.md §1: closed grammar. "lifetime", or "<N><unit>" with N a
     // positive integer (no leading zeros) and unit one of s/d/w/m/y. Single-unit only.
     if (code == "lifetime")
         return ProPlanPeriod{0, ProPlanUnit::lifetime};

@@ -176,8 +176,7 @@ void session_pro_backend_get_pro_revocations_response_free(
         session_pro_backend_get_pro_revocations_response* response);
 
 /// Unit of a parsed billing period (`plan_unit` below); mirrors C++
-/// session::pro_backend::ProPlanUnit (same order). A closed set (pro-wire-protocol.md §1 / Delta
-/// #14).
+/// session::pro_backend::ProPlanUnit (same order). A closed set (pro-wire-protocol.md §1).
 typedef enum SESSION_PRO_BACKEND_PLAN_UNIT {
     SESSION_PRO_BACKEND_PLAN_UNIT_SECOND,
     SESSION_PRO_BACKEND_PLAN_UNIT_DAY,
@@ -191,8 +190,7 @@ typedef struct session_pro_backend_pro_payment_item {
     /// Opaque payment lifecycle status code (e.g. "unredeemed"/"redeemed"/"expired"/"revoked");
     /// unknown values pass through as-is. NUL-terminated; points into the response's `internal_`.
     const char* status;
-    /// Parsed billing period (pro-wire-protocol.md §1 / Delta #14). `plan_count` is the period
-    /// count
+    /// Parsed billing period (pro-wire-protocol.md §1). `plan_count` is the period count
     /// (>= 1 for periodic units); for `plan_unit == ..._LIFETIME` it is 0 and not meaningful
     /// (switch on `plan_unit`, never render "<count> <unit>" for lifetime).
     int plan_count;
