@@ -269,7 +269,7 @@ std::span<const std::string_view> visible_platforms() {
 }
 
 std::optional<ProPlanPeriod> parse_plan_period(std::string_view code) {
-    // pro-wire-protocol.md §1 / Delta #14: closed grammar. "lifetime", or "<N><unit>" with N a
+    // pro-wire-protocol.md §1: closed grammar. "lifetime", or "<N><unit>" with N a
     // positive integer (no leading zeros) and unit one of s/d/w/m/y. Single-unit only.
     if (code == "lifetime")
         return ProPlanPeriod{0, ProPlanUnit::lifetime};
@@ -614,7 +614,7 @@ namespace {
 
         ProPaymentItem item = {};
         item.status = std::move(status);
-        // `plan` is parsed (closed grammar, §1 / Delta #14); an unrecognized code is a protocol
+        // `plan` is parsed (closed grammar, §1); an unrecognized code is a protocol
         // error (handled above). payment_provider / payment_id are opaque strings that pass through
         // as-is.
         if (plan)

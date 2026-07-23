@@ -323,8 +323,8 @@ ProRequest payment_details_request(
         uint32_t limit,
         std::string_view before);
 
-/// Unit of a billing period (the `unit` of a parsed `plan` code, pro-wire-protocol.md §1 / Delta
-/// #14). A closed set: the backend emits only these, so an unrecognized code is a protocol error.
+/// Unit of a billing period (the `unit` of a parsed `plan` code, pro-wire-protocol.md §1). A closed
+/// set: the backend emits only these, so an unrecognized code is a protocol error.
 enum class ProPlanUnit { second, day, week, month, year, lifetime };
 
 /// A parsed `plan` billing-period code. The `unit` is preserved exactly as transmitted and never
@@ -336,7 +336,7 @@ struct ProPlanPeriod {
     ProPlanUnit unit;
 };
 
-/// Parse a `plan` billing-period code (pro-wire-protocol.md §1, Delta #14): "<N><unit>" with N a
+/// Parse a `plan` billing-period code (pro-wire-protocol.md §1): "<N><unit>" with N a
 /// positive integer (no leading zeros) and unit one of s/d/w/m/y (second/day/week/month/year), or
 /// the literal "lifetime". Single-unit only ("1y6m" is invalid). Returns std::nullopt for any
 /// non-conforming code (the caller treats that as a protocol error).
@@ -352,7 +352,7 @@ struct ProPaymentItem {
     std::string status;
 
     /// The parsed billing period that was purchased (e.g. "1m" -> {1, month}, "lifetime" -> {0,
-    /// lifetime}). libsession parses the closed `plan` grammar (§1 / Delta #14); the client just
+    /// lifetime}). libsession parses the closed `plan` grammar (§1); the client just
     /// localizes the display. The unit is preserved as transmitted, never canonicalized.
     ProPlanPeriod plan;
 
