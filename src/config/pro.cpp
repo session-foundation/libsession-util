@@ -28,26 +28,25 @@ bool ProConfig::load(const dict& root) {
     // NOTE: Load into the proof object
     {
         std::optional<uint8_t> version = maybe_int(*p, "@");
-        std::optional<std::vector<unsigned char>> maybe_gen_index_hash = maybe_vector(*p, "g");
-        std::optional<std::chrono::sys_time<std::chrono::milliseconds>> maybe_expiry_unix_ts_ms =
-                maybe_ts_ms(*p, "e");
+        std::optional<std::vector<unsigned char>> maybe_revocation_tag = maybe_vector(*p, "g");
+        std::optional<std::chrono::sys_seconds> maybe_expiry = maybe_ts(*p, "e");
         std::optional<std::vector<unsigned char>> maybe_sig = maybe_vector(*p, "s");
 
         if (!version)
             return false;
-        if (!maybe_gen_index_hash || maybe_gen_index_hash->size() != proof.gen_index_hash.size())
+        if (!maybe_revocation_tag || maybe_revocation_tag->size() != proof.revocation_tag.size())
             return false;
         if (!maybe_sig || maybe_sig->size() != proof.sig.max_size())
             return false;
-        if (!maybe_expiry_unix_ts_ms)
+        if (!maybe_expiry)
             return false;
 
         proof.version = *version;
         std::memcpy(
-                proof.gen_index_hash.data(),
-                maybe_gen_index_hash->data(),
-                proof.gen_index_hash.size());
-        proof.expiry_unix_ts = *maybe_expiry_unix_ts_ms;
+                proof.revocation_tag.data(),
+                maybe_revocation_tag->data(),
+                proof.revocation_tag.size());
+        proof.expiry_at = *maybe_expiry;
         std::memcpy(proof.sig.data(), maybe_sig->data(), proof.sig.size());
     }
 

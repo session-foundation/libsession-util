@@ -618,19 +618,19 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         pro_cpp.rotating_privkey = rotating_sk;
         pro_cpp.proof.version = 2;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
-        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
-        constexpr auto gen_index_hash =
+        pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
+        constexpr auto revocation_tag =
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
-        static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
+        static_assert(pro_cpp.proof.revocation_tag.max_size() == revocation_tag.size());
         std::memcpy(
-                pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
+                pro_cpp.proof.revocation_tag.data(), revocation_tag.data(), revocation_tag.size());
 
         // C
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
         pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
-        pro.proof.expiry_unix_ts_ms = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
-        std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
+        pro.proof.expiry_ts = pro_cpp.proof.expiry_at.time_since_epoch().count();
+        std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
     }
 
     UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{123s});
@@ -648,8 +648,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     profile.remove_pro_config();
     CHECK_FALSE(profile.get_pro_config().has_value());
 
-    auto access_expiry_ms =
-            std::chrono::sys_time<std::chrono::milliseconds>{std::chrono::milliseconds{500}};
-    profile.set_pro_access_expiry(access_expiry_ms);
-    CHECK(profile.get_pro_access_expiry() == access_expiry_ms);
+    auto access_expiry = std::chrono::sys_seconds{std::chrono::seconds{500}};
+    profile.set_pro_access_expiry(access_expiry);
+    CHECK(profile.get_pro_access_expiry() == access_expiry);
 }

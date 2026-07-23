@@ -110,8 +110,13 @@ endif()
 
 libsession_system_or_submodule(OXENC oxenc oxenc::oxenc liboxenc>=1.5.0 session-router/external/oxen-libquic/external/oxen-encoding)
 
-libsession_system_or_submodule(OXENLOGGING oxenlogging oxen::logging liboxen-logging>=1.2.0 session-router/external/oxen-libquic/external/oxen-logging)
-if(OXENLOGGING_FOUND)
+if(NOT TARGET oxen::logging)
+    # Find this one using an intermediate target alias (oxenlogging::oxenlogging) rather than the
+    # final oxen::logging alias target that we actually use: that way either we go into using it as
+    # a submodule (in which case the submodule sets up oxen::logging), or else we find via system
+    # lib, in which case we need an extra intermediate interface library that also brings in fmt and
+    # spdlog.
+    libsession_system_or_submodule(OXENLOGGING oxen-logging oxenlogging::oxenlogging liboxen-logging>=1.2.0 session-router/external/oxen-libquic/external/oxen-logging)
     if(NOT TARGET oxen::logging)
         # If we load oxen-logging via system lib then we won't necessarily have fmt/spdlog targets,
         # but this script will give us them:

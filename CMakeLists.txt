@@ -17,7 +17,7 @@ if(CCACHE_PROGRAM)
 endif()
 
 project(libsession-util
-    VERSION 1.6.7
+    VERSION 1.7.0
     DESCRIPTION "Session client utility library"
     LANGUAGES ${LANGS})
 
@@ -59,7 +59,11 @@ else()
 endif()
 
 option(BUILD_STATIC_DEPS "Build all dependencies statically rather than trying to link to them on the system" ${static_default})
-option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${static_default})
+option(STATIC_BUNDLE "Build a single static .a containing everything (both code and dependencies)" ${BUILD_STATIC_DEPS})
+
+if(STATIC_BUNDLE AND NOT BUILD_STATIC_DEPS)
+    message(FATAL_ERROR "STATIC_BUNDLE requires BUILD_STATIC_DEPS=ON (cannot build a static bundle when using shared/system libs)")
+endif()
 
 if(BUILD_SHARED_LIBS OR libsession_IS_TOPLEVEL_PROJECT)
     set(install_default ON)

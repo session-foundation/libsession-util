@@ -25,58 +25,53 @@ TEST_CASE("Pro", "[config][pro]") {
         pro_cpp.rotating_privkey = rotating_sk;
         pro_cpp.proof.version = 2;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
-        pro_cpp.proof.expiry_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(1s);
-        constexpr auto gen_index_hash =
+        pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
+        constexpr auto revocation_tag =
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"_hex_u;
-        static_assert(pro_cpp.proof.gen_index_hash.max_size() == gen_index_hash.size());
+        static_assert(pro_cpp.proof.revocation_tag.max_size() == revocation_tag.size());
         std::memcpy(
-                pro_cpp.proof.gen_index_hash.data(), gen_index_hash.data(), gen_index_hash.size());
+                pro_cpp.proof.revocation_tag.data(), revocation_tag.data(), revocation_tag.size());
 
         // C
         std::memcpy(pro.rotating_privkey.data, rotating_sk.data(), rotating_sk.size());
         pro.proof.version = pro_cpp.proof.version;
         std::memcpy(pro.proof.rotating_pubkey.data, rotating_pk.data(), rotating_pk.size());
-        pro.proof.expiry_unix_ts_ms = pro_cpp.proof.expiry_unix_ts.time_since_epoch().count();
-        std::memcpy(pro.proof.gen_index_hash.data, gen_index_hash.data(), gen_index_hash.size());
+        pro.proof.expiry_ts = pro_cpp.proof.expiry_at.time_since_epoch().count();
+        std::memcpy(pro.proof.revocation_tag.data, revocation_tag.data(), revocation_tag.size());
     }
 
-    // Generate and write the hashes that are signed by the faux pro backend into the proof
+    // Sign the proof with the faux pro backend key (Ed25519 over the message directly). The C and
+    // C++ proof representations above mirror each other, so a single message signs both.
     {
-        // Generate the hashes
         static_assert(crypto_sign_ed25519_BYTES == pro_cpp.proof.sig.max_size());
-        std::array<uint8_t, 32> hash_to_sign_cpp = pro_cpp.proof.hash();
-        bytes32 hash_to_sign = session_protocol_pro_proof_hash(&pro.proof);
+        auto msg_to_sign = pro_cpp.proof.signed_message();
 
-        static_assert(hash_to_sign_cpp.size() == sizeof(hash_to_sign));
-        CHECK(std::memcmp(hash_to_sign_cpp.data(), hash_to_sign.data, hash_to_sign_cpp.size()) ==
-              0);
-
-        // Write the signature into the proof
+        // Write the signature into the C++ proof
         int sig_result = crypto_sign_ed25519_detached(
                 pro_cpp.proof.sig.data(),
                 nullptr,
-                hash_to_sign_cpp.data(),
-                hash_to_sign_cpp.size(),
+                msg_to_sign.data(),
+                msg_to_sign.size(),
                 signing_sk.data());
         CHECK(sig_result == 0);
 
+        // ... and into the C proof
         sig_result = crypto_sign_ed25519_detached(
                 pro.proof.sig.data,
                 nullptr,
-                hash_to_sign.data,
-                sizeof(hash_to_sign.data),
+                msg_to_sign.data(),
+                msg_to_sign.size(),
                 signing_sk.data());
         CHECK(sig_result == 0);
     }
 
     // Verify expiry
     {
-        CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts));
-        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_unix_ts + 1ms));
+        CHECK(pro_cpp.proof.is_active(pro_cpp.proof.expiry_at));
+        CHECK_FALSE(pro_cpp.proof.is_active(pro_cpp.proof.expiry_at + 1s));
 
-        CHECK(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms));
-        CHECK_FALSE(
-                session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_unix_ts_ms + 1));
+        CHECK(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_ts));
+        CHECK_FALSE(session_protocol_pro_proof_is_active(&pro.proof, pro.proof.expiry_ts + 1));
     }
 
     // Verify it can verify messages signed with the rotating public key
@@ -107,9 +102,9 @@ TEST_CASE("Pro", "[config][pro]") {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
             {"p", session::config::dict{
                 /*version*/         {"@", proof.version},
-                /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
+                /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
-                /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
+                /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
                 /*signature*/       {"s", std::string{reinterpret_cast<const char *>(proof.sig.data()), proof.sig.size()}},
             }}
         };
@@ -119,9 +114,9 @@ TEST_CASE("Pro", "[config][pro]") {
         CHECK(loaded_pro.load(good_dict));
         CHECK(loaded_pro.rotating_privkey == pro_cpp.rotating_privkey);
         CHECK(loaded_pro.proof.version == pro_cpp.proof.version);
-        CHECK(loaded_pro.proof.gen_index_hash == pro_cpp.proof.gen_index_hash);
+        CHECK(loaded_pro.proof.revocation_tag == pro_cpp.proof.revocation_tag);
         CHECK(loaded_pro.proof.rotating_pubkey == pro_cpp.proof.rotating_pubkey);
-        CHECK(loaded_pro.proof.expiry_unix_ts == pro_cpp.proof.expiry_unix_ts);
+        CHECK(loaded_pro.proof.expiry_at == pro_cpp.proof.expiry_at);
         CHECK(loaded_pro.proof.sig == pro_cpp.proof.sig);
         CHECK(loaded_pro.proof.verify_signature(signing_pk));
     }
@@ -137,9 +132,9 @@ TEST_CASE("Pro", "[config][pro]") {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
             {"p", session::config::dict{
                 /*version*/         {"@", proof.version},
-                /*gen_index_hash*/  {"g", std::string(reinterpret_cast<const char *>(proof.gen_index_hash.data()), proof.gen_index_hash.size())},
+                /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
-                /*expiry unix ts*/  {"e", proof.expiry_unix_ts.time_since_epoch().count()},
+                /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
                 /*signature*/       {"s", std::string{reinterpret_cast<const char *>(broken_sig.data()), broken_sig.size()}},
             }}
         };

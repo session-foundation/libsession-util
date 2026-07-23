@@ -310,24 +310,23 @@ class UserProfile : public ConfigBase {
     /// API: user_profile/UserProfile::get_pro_access_expiry
     ///
     /// Retrieves the Session Pro access expiry unix timestamp if it has been set, this should
-    /// generally be the expiry value returned from /get_pro_details.
+    /// generally be the expiry value returned from /get_pro_status.
     ///
     /// Inputs:  None
     ///
     /// Outputs:
-    /// - `std::optional<sys_ms>` - The unix timestamp in
-    /// milliseconds that the users pro access will expire, or nullopt if unset.
-    std::optional<sys_ms> get_pro_access_expiry() const;
+    /// - `std::optional<sys_seconds>` - The unix timestamp in
+    /// seconds that the users pro access will expire, or nullopt if unset.
+    std::optional<sys_seconds> get_pro_access_expiry() const;
 
     /// API: user_profile/UserProfile::set_pro_access_expiry
     ///
     /// Updates the Session Pro access expiry unix timestamp.
     ///
     /// Inputs:
-    /// - `access_expiry_ts_ms` -- The timestamp that the users Session Pro access will expire, or
-    /// nullopt to remove the value.
-    void set_pro_access_expiry(
-            std::optional<std::chrono::sys_time<std::chrono::milliseconds>> access_expiry_ts_ms);
+    /// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
+    /// will expire, or nullopt to remove the value.
+    void set_pro_access_expiry(std::optional<sys_seconds> access_expiry_ts);
 };
 
 }  // namespace session::config

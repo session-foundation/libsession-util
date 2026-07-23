@@ -3,7 +3,6 @@
 #include <sodium.h>
 
 #include <catch2/catch_test_macros.hpp>
-#include <cinttypes>
 #include <nlohmann/json.hpp>
 #include <session/pro_backend.hpp>
 #include <string>
@@ -15,67 +14,9 @@ using namespace session::pro_backend;
 // NOTE: This is defined in main.cpp because it accepts a value from the CLI
 extern std::string g_test_pro_backend_dev_server_url;
 
-static bool string8_equals(string8 s8, std::string_view str) {
-    return s8.size == str.size() && std::memcmp(s8.data, str.data(), s8.size) == 0;
+static bool span_u8_equals(span_u8 s, std::string_view str) {
+    return std::string_view{reinterpret_cast<const char*>(s.data), s.size} == str;
 }
-[[maybe_unused]] static void dump_pro_proof_to_stderr(const session_protocol_pro_proof& proof) {
-    fprintf(stderr, "proof.version: %u\n", proof.version);
-    fprintf(stderr,
-            "proof.gen_index_hash: %s\n",
-            oxenc::to_hex(proof.gen_index_hash.data, std::end(proof.gen_index_hash.data)).c_str());
-    fprintf(stderr,
-            "proof.rotating_pubkey: %s\n",
-            oxenc::to_hex(proof.rotating_pubkey.data, std::end(proof.rotating_pubkey.data))
-                    .c_str());
-    fprintf(stderr, "proof.expiry_unix_ts_ms: %" PRIu64 "\n", proof.expiry_unix_ts_ms);
-    fprintf(stderr,
-            "proof.sig: %s\n",
-            oxenc::to_hex(proof.sig.data, std::end(proof.sig.data)).c_str());
-}
-
-[[maybe_unused]] static void dump_pro_payment_item(
-        const session_pro_backend_pro_payment_item& item) {
-    fprintf(stderr, "item.status: %d\n", item.status);
-    fprintf(stderr, "item.plan: %d\n", item.plan);
-    fprintf(stderr, "item.payment_provider: %d\n", item.payment_provider);
-    fprintf(stderr, "item.auto_renewing: %d\n", item.auto_renewing);
-    fprintf(stderr, "item.unredeemed_unix_ts_ms: %" PRIu64 "zu\n", item.unredeemed_unix_ts_ms);
-    fprintf(stderr, "item.redeemed_unix_ts_ms: %" PRIu64 "zu\n", item.redeemed_unix_ts_ms);
-    fprintf(stderr, "item.expiry_unix_ts_ms: %" PRIu64 "\n", item.expiry_unix_ts_ms);
-    fprintf(stderr,
-            "item.grace_period_duration_ms: %" PRIu64 "zu\n",
-            item.grace_period_duration_ms);
-    fprintf(stderr,
-            "item.platform_refund_expiry_unix_ts_ms: %" PRIu64 "zu\n",
-            item.platform_refund_expiry_unix_ts_ms);
-    fprintf(stderr, "item.revoked_unix_ts_ms: %" PRIu64 "zu\n", item.revoked_unix_ts_ms);
-    fprintf(stderr,
-            "item.google_payment_token: %.*s\n",
-            (int)item.google_payment_token_count,
-            item.google_payment_token);
-    fprintf(stderr,
-            "item.apple_original_tx_id: %.*s\n",
-            (int)item.apple_original_tx_id_count,
-            item.apple_original_tx_id);
-    fprintf(stderr, "item.apple_tx_id: %.*s\n", (int)item.apple_tx_id_count, item.apple_tx_id);
-    fprintf(stderr,
-            "item.apple_web_line_order_id: %.*s\n",
-            (int)item.apple_web_line_order_id_count,
-            item.apple_web_line_order_id);
-    fprintf(stderr,
-            "item.rangeproof_order_id: %.*s\n",
-            (int)item.rangeproof_order_id_count,
-            item.rangeproof_order_id);
-}
-
-[[maybe_unused]] static void dump_pro_revocation(
-        const session_pro_backend_pro_revocation_item& item) {
-    fprintf(stderr, "item.expiry_unix_ts: %" PRIu64 "zu\n", item.expiry_unix_ts_ms);
-    fprintf(stderr,
-            "item.gen_index_hash: %s\n",
-            oxenc::to_hex(item.gen_index_hash.data, std::end(item.gen_index_hash.data)).c_str());
-}
-
 TEST_CASE("Pro Backend C API", "[pro_backend]") {
     // Setup: Generate keys and payment token hash
     bytes32 master_pubkey = {};
@@ -89,407 +30,200 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
     {
         std::array<uint8_t, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::string fake_google_payment_token_hex =
-                "DEV." + oxenc::to_hex(fake_google_payment_token);
-
         std::array<uint8_t, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
+        // Google's composite payment_id is "<payment_token>|<order_id>"; libsession treats the
+        // whole thing as one opaque value.
+        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
+                                      oxenc::to_hex(fake_google_order_id);
 
-        session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
-        payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
-        payment_tx.payment_id_count = fake_google_payment_token_hex.size();
-        payment_tx.order_id_count = fake_google_order_id_hex.size();
-        std::memcpy(
-                payment_tx.payment_id,
-                fake_google_payment_token_hex.data(),
-                payment_tx.payment_id_count);
-        std::memcpy(
-                payment_tx.order_id, fake_google_order_id_hex.data(), payment_tx.order_id_count);
+        const char* provider_code = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
+        auto payment_id = reinterpret_cast<const uint8_t*>(fake_payment_id.data());
+        size_t payment_id_len = fake_payment_id.size();
 
-        uint64_t unix_ts_ms = 1698765432ULL * 1000;  // Arbitrary timestamp
+        int64_t unix_ts = 1698765432;  // Arbitrary timestamp (unix epoch seconds)
 
-        SECTION("session_pro_backend_add_pro_payment_request_build_sigs") {
-            // Valid inputs
-            session_pro_backend_master_rotating_signatures result =
-                    session_pro_backend_add_pro_payment_request_build_sigs(
-                            /*version*/ 0,
-                            master_privkey.data,
-                            sizeof(master_privkey.data),
-                            rotating_privkey.data,
-                            sizeof(rotating_privkey.data),
-                            payment_tx.provider,
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count,
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
-                            payment_tx.order_id_count);
-            INFO(result.error);
-            REQUIRE(result.success);
-            REQUIRE(result.error_count == 0);
-
-            // Verify signatures match C++ implementation
-            auto cpp = AddProPaymentRequest::build_sigs(
-                    0,
+        SECTION("session_pro_backend_add_pro_payment_request_build") {
+            auto result = session_pro_backend_add_pro_payment_request_build(
                     master_privkey.data,
+                    sizeof(master_privkey.data),
                     rotating_privkey.data,
-                    payment_tx.provider,
-                    std::span<const uint8_t>(
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count),
-                    std::span<const uint8_t>(
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
-                            payment_tx.order_id_count));
+                    sizeof(rotating_privkey.data),
+                    provider_code,
+                    payment_id,
+                    payment_id_len);
+            {
+                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
+                INFO(result.error);
+                REQUIRE(result.success);
+                REQUIRE(result.data.data != nullptr);
+                REQUIRE(result.data.size > 0);
 
-            REQUIRE(std::memcmp(
-                            result.master_sig.data,
-                            cpp.master_sig.data(),
-                            sizeof(result.master_sig.data)) == 0);
-            REQUIRE(std::memcmp(
-                            result.rotating_sig.data,
-                            cpp.rotating_sig.data(),
-                            sizeof(result.rotating_sig.data)) == 0);
+                // Matches the C++ free-function implementation end to end.
+                auto cpp = add_payment_request(
+                        master_privkey.data,
+                        rotating_privkey.data,
+                        provider_code,
+                        std::span<const uint8_t>(payment_id, payment_id_len));
+                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT);
+                REQUIRE(std::string_view(result.content_type) == cpp.content_type);
+                REQUIRE(cpp.content_type == "application/json");
+                REQUIRE(span_u8_equals(result.data, cpp.data));
+            }
 
-            // Invalid master key size
-            result = session_pro_backend_add_pro_payment_request_build_sigs(
-                    0,
+            // After freeing
+            REQUIRE(result.data.data == nullptr);
+            REQUIRE(result.data.size == 0);
+
+            // Invalid key size -> failure, no allocation
+            result = session_pro_backend_add_pro_payment_request_build(
                     master_privkey.data,
                     sizeof(master_privkey.data) - 1,
                     rotating_privkey.data,
                     sizeof(rotating_privkey.data),
-                    payment_tx.provider,
-                    reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                    payment_tx.payment_id_count,
-                    reinterpret_cast<const uint8_t*>(payment_tx.order_id),
-                    payment_tx.order_id_count);
+                    provider_code,
+                    payment_id,
+                    payment_id_len);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
+            REQUIRE(result.data.data == nullptr);
         }
 
-        SECTION("session_pro_backend_generate_pro_proof_request_build_sigs") {
-            session_pro_backend_master_rotating_signatures result = {};
-
-            // Valid inputs
-            result = session_pro_backend_generate_pro_proof_request_build_sigs(
-                    0,
+        SECTION("session_pro_backend_generate_pro_proof_request_build") {
+            auto result = session_pro_backend_generate_pro_proof_request_build(
                     master_privkey.data,
                     sizeof(master_privkey.data),
                     rotating_privkey.data,
                     sizeof(rotating_privkey.data),
-                    unix_ts_ms);
-            REQUIRE(result.success);
-            REQUIRE(result.error_count == 0);
+                    unix_ts);
+            {
+                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
+                REQUIRE(result.success);
+                REQUIRE(result.data.size > 0);
 
-            // Verify signatures match C++ implementation
-            auto cpp_sigs = GenerateProProofRequest::build_sigs(
-                    0,
-                    master_privkey.data,
-                    rotating_privkey.data,
-                    std::chrono::sys_time<std::chrono::milliseconds>(
-                            std::chrono::milliseconds{unix_ts_ms}));
-            REQUIRE(std::memcmp(
-                            result.master_sig.data,
-                            cpp_sigs.master_sig.data(),
-                            sizeof(result.master_sig.data)) == 0);
-            REQUIRE(std::memcmp(
-                            result.rotating_sig.data,
-                            cpp_sigs.rotating_sig.data(),
-                            sizeof(result.rotating_sig.data)) == 0);
+                auto cpp = pro_proof_request(
+                        master_privkey.data,
+                        rotating_privkey.data,
+                        session::as_sys_seconds(unix_ts));
+                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT);
+                REQUIRE(span_u8_equals(result.data, cpp.data));
+            }
+            REQUIRE(result.data.data == nullptr);
 
             // Invalid rotating key size
-            result = session_pro_backend_generate_pro_proof_request_build_sigs(
-                    0,
+            result = session_pro_backend_generate_pro_proof_request_build(
                     master_privkey.data,
                     sizeof(master_privkey.data),
                     rotating_privkey.data,
                     sizeof(rotating_privkey.data) - 1,
-                    unix_ts_ms);
+                    unix_ts);
             REQUIRE(!result.success);
             REQUIRE(result.error_count > 0);
         }
 
-        SECTION("session_pro_backend_add_pro_payment_request_to_json") {
-            session_pro_backend_add_pro_payment_request request = {};
-            request.version = 0;
-            request.master_pkey = master_pubkey;
-            request.rotating_pkey = rotating_pubkey;
-            request.payment_tx = payment_tx;
-
-            session_pro_backend_master_rotating_signatures sigs =
-                    session_pro_backend_add_pro_payment_request_build_sigs(
-                            request.version,
-                            master_privkey.data,
-                            sizeof(master_privkey.data),
-                            rotating_privkey.data,
-                            sizeof(rotating_privkey.data),
-                            payment_tx.provider,
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count,
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
-                            payment_tx.order_id_count);
-
-            request.master_sig = sigs.master_sig;
-            request.rotating_sig = sigs.rotating_sig;
-
-            // Valid request
-            auto result = session_pro_backend_add_pro_payment_request_to_json(&request);
+        SECTION("session_pro_backend_get_pro_revocations_request_build") {
+            auto result = session_pro_backend_get_pro_revocations_request_build(123);
             {
-                scope_exit result_free{[&]() { session_pro_backend_to_json_free(&result); }};
+                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
                 REQUIRE(result.success);
-                REQUIRE(result.json.data != nullptr);
-                REQUIRE(result.json.size > 0);
+                REQUIRE(result.data.size > 0);
 
-                // Verify JSON matches C++ implementation
-                AddProPaymentRequest cpp = {};
-                static_assert(sizeof(master_pubkey.data) == cpp.master_pkey.max_size());
-                static_assert(sizeof(rotating_pubkey.data) == cpp.rotating_pkey.max_size());
-
-                cpp.version = request.version;
-                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey.data));
-                std::memcpy(
-                        cpp.rotating_pkey.data(),
-                        rotating_pubkey.data,
-                        sizeof(rotating_pubkey.data));
-                cpp.payment_tx.provider = payment_tx.provider;
-                cpp.payment_tx.payment_id =
-                        std::string(payment_tx.payment_id, payment_tx.payment_id_count);
-                cpp.payment_tx.order_id =
-                        std::string(payment_tx.order_id, payment_tx.order_id_count);
-                std::memcpy(
-                        cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig.data));
-                std::memcpy(
-                        cpp.rotating_sig.data(),
-                        sigs.rotating_sig.data,
-                        sizeof(sigs.rotating_sig.data));
-                std::string cpp_json = cpp.to_json();
-                REQUIRE(string8_equals(result.json, cpp_json));
-
-                // Verify that the helper one-shot-to-json function generates the same payload
-                auto one_shot = session_pro_backend_add_pro_payment_request_build_to_json(
-                        request.version,
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        rotating_privkey.data,
-                        sizeof(rotating_privkey.data),
-                        request.payment_tx.provider,
-                        reinterpret_cast<const unsigned char*>(request.payment_tx.payment_id),
-                        request.payment_tx.payment_id_count,
-                        reinterpret_cast<const unsigned char*>(request.payment_tx.order_id),
-                        request.payment_tx.order_id_count);
-                REQUIRE(one_shot.success);
-                REQUIRE(one_shot.json.size == result.json.size);
-                INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
-                REQUIRE(memcmp(one_shot.json.data, result.json.data, result.json.size) == 0);
+                auto cpp = revocations_request(123);
+                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PRO_REVOCATIONS_ENDPOINT);
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
-
-            // After freeing
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
-
-            // Null request
-            result = session_pro_backend_add_pro_payment_request_to_json(nullptr);
-            REQUIRE(!result.success);
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
+            REQUIRE(result.data.data == nullptr);
         }
 
-        SECTION("session_pro_backend_generate_pro_proof_request_to_json") {
-            session_pro_backend_generate_pro_proof_request request = {};
-            request.version = 0;
-            request.master_pkey = master_pubkey;
-            request.rotating_pkey = rotating_pubkey;
-            request.unix_ts_ms = unix_ts_ms;
-
-            session_pro_backend_master_rotating_signatures sigs =
-                    session_pro_backend_generate_pro_proof_request_build_sigs(
-                            request.version,
-                            master_privkey.data,
-                            sizeof(master_privkey.data),
-                            rotating_privkey.data,
-                            sizeof(rotating_privkey.data),
-                            request.unix_ts_ms);
-
-            request.master_sig = sigs.master_sig;
-            request.rotating_sig = sigs.rotating_sig;
-
-            // Valid request
-            auto result = session_pro_backend_generate_pro_proof_request_to_json(&request);
+        SECTION("session_pro_backend_get_pro_status_request_build") {
+            auto result = session_pro_backend_get_pro_status_request_build(
+                    master_privkey.data, sizeof(master_privkey.data), unix_ts);
             {
-                scope_exit result_free{[&]() { session_pro_backend_to_json_free(&result); }};
+                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
                 REQUIRE(result.success);
-                REQUIRE(result.json.data != nullptr);
-                REQUIRE(result.json.size > 0);
+                REQUIRE(result.data.size > 0);
 
-                // Verify JSON matches C++ implementation
-                GenerateProProofRequest cpp = {};
-                cpp.version = request.version;
-                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey.data));
-                std::memcpy(
-                        cpp.rotating_pkey.data(),
-                        rotating_pubkey.data,
-                        sizeof(rotating_pubkey.data));
-                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                        std::chrono::milliseconds{unix_ts_ms});
-                std::memcpy(
-                        cpp.master_sig.data(), sigs.master_sig.data, sizeof(sigs.master_sig.data));
-                std::memcpy(
-                        cpp.rotating_sig.data(),
-                        sigs.rotating_sig.data,
-                        sizeof(sigs.rotating_sig.data));
-                std::string cpp_json = cpp.to_json();
-                REQUIRE(string8_equals(result.json, cpp_json));
-
-                // Verify that the helper one-shot-to-json function generates the same payload
-                auto one_shot = session_pro_backend_generate_pro_proof_request_build_to_json(
-                        request.version,
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        rotating_privkey.data,
-                        sizeof(rotating_privkey.data),
-                        request.unix_ts_ms);
-                REQUIRE(one_shot.success);
-                REQUIRE(one_shot.json.size == result.json.size);
-                INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
-                REQUIRE(memcmp(one_shot.json.data, result.json.data, result.json.size) == 0);
+                auto cpp =
+                        pro_status_request(master_privkey.data, session::as_sys_seconds(unix_ts));
+                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PRO_STATUS_ENDPOINT);
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
+            REQUIRE(result.data.data == nullptr);
 
-            // After freeing
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
-
-            // Null request
-            result = session_pro_backend_generate_pro_proof_request_to_json(nullptr);
+            // Invalid key size
+            result = session_pro_backend_get_pro_status_request_build(
+                    master_privkey.data, sizeof(master_privkey.data) - 1, unix_ts);
             REQUIRE(!result.success);
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
+            REQUIRE(result.error_count > 0);
         }
 
-        SECTION("session_pro_backend_get_pro_revocations_request_to_json") {
-            session_pro_backend_get_pro_revocations_request request = {};
-            request.version = 0;
-            request.ticket = 123;
-
-            // Valid request
-            auto result = session_pro_backend_get_pro_revocations_request_to_json(&request);
+        SECTION("session_pro_backend_get_payment_details_request_build") {
+            auto result = session_pro_backend_get_payment_details_request_build(
+                    master_privkey.data, sizeof(master_privkey.data), unix_ts, 100, "");
             {
-                scope_exit result_free{[&]() { session_pro_backend_to_json_free(&result); }};
+                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
                 REQUIRE(result.success);
-                REQUIRE(result.json.data != nullptr);
-                REQUIRE(result.json.size > 0);
+                REQUIRE(result.data.size > 0);
 
-                // Verify JSON matches C++ implementation
-                GetProRevocationsRequest cpp = {};
-                cpp.version = request.version;
-                cpp.ticket = request.ticket;
-                std::string cpp_json = cpp.to_json();
-                REQUIRE(string8_equals(result.json, cpp_json));
+                auto cpp = payment_details_request(
+                        master_privkey.data, session::as_sys_seconds(unix_ts), 100, "");
+                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT);
+                REQUIRE(span_u8_equals(result.data, cpp.data));
+
+                // A NULL cursor is equivalent to the empty (newest-page) cursor.
+                auto result_null = session_pro_backend_get_payment_details_request_build(
+                        master_privkey.data, sizeof(master_privkey.data), unix_ts, 100, nullptr);
+                scope_exit result_null_free{
+                        [&]() { session_pro_backend_request_free(&result_null); }};
+                REQUIRE(result_null.success);
+                REQUIRE(span_u8_equals(result_null.data, cpp.data));
             }
+            REQUIRE(result.data.data == nullptr);
 
-            // After freeing
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
-
-            // Null request
-            result = session_pro_backend_get_pro_revocations_request_to_json(nullptr);
+            // Invalid key size
+            result = session_pro_backend_get_payment_details_request_build(
+                    master_privkey.data, sizeof(master_privkey.data) - 1, unix_ts, 100, "");
             REQUIRE(!result.success);
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
+            REQUIRE(result.error_count > 0);
         }
 
-        SECTION("session_pro_backend_get_pro_details_request_to_json") {
-            session_pro_backend_get_pro_details_request request = {};
-            request.version = 0;
-            request.master_pkey = master_pubkey;
-            request.unix_ts_ms = unix_ts_ms;
-            request.count = 10'000;
-
-            session_pro_backend_signature sig =
-                    session_pro_backend_get_pro_details_request_build_sig(
-                            request.version,
-                            master_privkey.data,
-                            sizeof(master_privkey.data),
-                            request.unix_ts_ms,
-                            request.count);
-
-            request.master_sig = sig.sig;
-
-            // Valid request
-            auto result = session_pro_backend_get_pro_details_request_to_json(&request);
-            {
-                scope_exit result_free{[&]() { session_pro_backend_to_json_free(&result); }};
-                REQUIRE(result.success);
-                REQUIRE(result.json.data != nullptr);
-                REQUIRE(result.json.size > 0);
-
-                // Verify JSON matches C++ implementation
-                GetProDetailsRequest cpp = {};
-                cpp.version = 0;
-                std::memcpy(cpp.master_pkey.data(), master_pubkey.data, sizeof(master_pubkey.data));
-                std::memcpy(cpp.master_sig.data(), sig.sig.data, sizeof(sig.sig.data));
-                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>{
-                        std::chrono::milliseconds{unix_ts_ms}};
-                cpp.count = request.count;
-                std::string cpp_json = cpp.to_json();
-                REQUIRE(string8_equals(result.json, cpp_json));
-
-                // Verify that the helper one-shot-to-json function generates the same payload
-                auto one_shot = session_pro_backend_get_pro_details_request_build_to_json(
-                        request.version,
-                        master_privkey.data,
-                        sizeof(master_privkey.data),
-                        request.unix_ts_ms,
-                        request.count);
-                REQUIRE(one_shot.success);
-                REQUIRE(one_shot.json.size == result.json.size);
-                INFO("One shot: " << one_shot.json.data << "\n\nJSON: " << result.json.data);
-                REQUIRE(memcmp(one_shot.json.data, result.json.data, result.json.size) == 0);
-            }
-
-            // After freeing
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
-
-            // Null request
-            result = session_pro_backend_get_pro_details_request_to_json(nullptr);
-            REQUIRE(!result.success);
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
-        }
-
-        SECTION("session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse") {
-            std::array<uint8_t, 32> fake_gen_index_hash;
-            randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
+        SECTION("session_pro_backend_pro_proof_response_parse") {
+            std::array<uint8_t, 32> fake_revocation_tag;
+            randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"] = {
                     {"version", 0},
-                    {"expiry_unix_ts_ms", unix_ts_ms},
-                    {"gen_index_hash", oxenc::to_hex(fake_gen_index_hash)},
+                    {"expiry_ts", unix_ts},
+                    {"revocation_tag", oxenc::to_hex(fake_revocation_tag)},
                     {"rotating_pkey",
                      oxenc::to_hex(rotating_pubkey.data, std::end(rotating_pubkey.data))},
                     {"sig", oxenc::to_hex(master_privkey.data, std::end(master_privkey.data))}};
             std::string json = j.dump();
 
             // Valid JSON
-            session_pro_backend_add_pro_payment_or_generate_pro_proof_response result =
-                    session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
-                            json.data(), json.size());
+            session_pro_backend_pro_proof_response result =
+                    session_pro_backend_pro_proof_response_parse(json.data(), json.size());
             {
-                scope_exit result_free{[&]() {
-                    session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(
-                            &result);
-                }};
+                scope_exit result_free{
+                        [&]() { session_pro_backend_pro_proof_response_free(&result); }};
 
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
-                REQUIRE(result.proof.expiry_unix_ts_ms == unix_ts_ms);
+                if (result.header.error)
+                    INFO(result.header.error);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error == nullptr);
+                REQUIRE(result.proof.expiry_ts == unix_ts);
                 REQUIRE(std::memcmp(
-                                result.proof.gen_index_hash.data,
-                                fake_gen_index_hash.data(),
-                                fake_gen_index_hash.size()) == 0);
+                                result.proof.revocation_tag.data,
+                                fake_revocation_tag.data(),
+                                fake_revocation_tag.size()) == 0);
                 REQUIRE(std::memcmp(
                                 result.proof.rotating_pubkey.data,
                                 rotating_pubkey.data,
@@ -502,20 +236,20 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Here we also create the CPP version, we will run the conversion functions into
                 // pro proofs (both C and CPP variants) and then compare the two structures to make
                 // sure the conversion functions are sound.
-                auto result_cpp = AddProPaymentOrGenerateProProofResponse::parse(json);
+                auto result_cpp = parse_add_payment(json);
 
                 // Validate C and CPP variants
                 REQUIRE(result.proof.version == result_cpp.proof.version);
                 REQUIRE(std::memcmp(
-                                result.proof.gen_index_hash.data,
-                                result_cpp.proof.gen_index_hash.data(),
-                                result_cpp.proof.gen_index_hash.size()) == 0);
+                                result.proof.revocation_tag.data,
+                                result_cpp.proof.revocation_tag.data(),
+                                result_cpp.proof.revocation_tag.size()) == 0);
                 REQUIRE(std::memcmp(
                                 result.proof.rotating_pubkey.data,
                                 result_cpp.proof.rotating_pubkey.data(),
                                 result_cpp.proof.rotating_pubkey.size()) == 0);
-                REQUIRE(result.proof.expiry_unix_ts_ms ==
-                        result_cpp.proof.expiry_unix_ts.time_since_epoch().count());
+                REQUIRE(result.proof.expiry_ts ==
+                        result_cpp.proof.expiry_at.time_since_epoch().count());
                 REQUIRE(std::memcmp(
                                 result.proof.sig.data,
                                 result_cpp.proof.sig.data(),
@@ -523,50 +257,48 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
-            REQUIRE(result.header.errors == nullptr);
-            REQUIRE(result.header.errors_count == 0);
+            REQUIRE(result.header.internal_ == nullptr);
+            REQUIRE(result.header.error == nullptr);
+            REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
 
             // Invalid JSON
             json = "{invalid}";
-            result = session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
-                    json.data(), json.size());
+            result = session_pro_backend_pro_proof_response_parse(json.data(), json.size());
             {
-                scope_exit result_free{[&]() {
-                    session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(
-                            &result);
-                }};
-                REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                scope_exit result_free{
+                        [&]() { session_pro_backend_pro_proof_response_free(&result); }};
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
             }
 
             // After freeing
-            session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(&result);
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            session_pro_backend_pro_proof_response_free(&result);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
-            result = session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
-                    nullptr, 0);
-            REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            result = session_pro_backend_pro_proof_response_parse(nullptr, 0);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
 
             // No need to free, as errors point to static memory
         }
 
         SECTION("session_pro_backend_get_pro_revocations_response_parse") {
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"]["ticket"] = 123;
+            j["result"]["retry_in"] = 3600;
+            j["result"]["retain_for"] = 2592000;
             j["result"]["items"] = nlohmann::json::array();
 
-            std::array<uint8_t, 32> fake_gen_index_hash;
-            randombytes_buf(fake_gen_index_hash.data(), fake_gen_index_hash.size());
+            std::array<uint8_t, 32> fake_revocation_tag;
+            randombytes_buf(fake_revocation_tag.data(), fake_revocation_tag.size());
 
             auto obj = nlohmann::json::object();
-            obj["expiry_unix_ts_ms"] = unix_ts_ms;
-            obj["gen_index_hash"] = oxenc::to_hex(fake_gen_index_hash);
+            obj["effective_ts"] = unix_ts;
+            obj["revocation_tag"] = oxenc::to_hex(fake_revocation_tag);
             j["result"]["items"].push_back(obj);
 
             std::string json = j.dump();
@@ -577,23 +309,25 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             {
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_revocations_response_free(&result); }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
+                if (result.header.error)
+                    INFO(result.header.error);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error == nullptr);
                 REQUIRE(result.ticket == 123);
+                REQUIRE(result.retry_in == 3600);
+                REQUIRE(result.retain_for == 2592000);
                 REQUIRE(result.items_count == 1);
                 REQUIRE(result.items != nullptr);
-                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
+                REQUIRE(result.items[0].effective_ts == unix_ts);
                 REQUIRE(std::memcmp(
-                                result.items[0].gen_index_hash.data,
-                                fake_gen_index_hash.data(),
-                                fake_gen_index_hash.size()) == 0);
+                                result.items[0].revocation_tag,
+                                fake_revocation_tag.data(),
+                                fake_revocation_tag.size()) == 0);
             }
 
             // After freeeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
             REQUIRE(result.items == nullptr);
             REQUIRE(result.items_count == 0);
 
@@ -604,242 +338,272 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                         json.data(), json.size());
                 scope_exit result_free{
                         [&]() { session_pro_backend_get_pro_revocations_response_free(&result); }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
             result = session_pro_backend_get_pro_revocations_response_parse(nullptr, 0);
-            REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
         }
 
-        SECTION("session_pro_backend_get_pro_details_response_parse") {
+        // A single payment item (shared by the get-pro-status latest_payment and the
+        // get-payment-details items[] tests). purchased_ts/revoked_ts are floats on the wire
+        // (sub-second precision); the rest are whole-second integers.
+        auto make_payment_item = [&](std::string payment_id) {
+            return nlohmann::json{
+                    {"status", "redeemed"},
+                    {"plan", "1m"},
+                    {"payment_provider", SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY},
+                    {"auto_renewing", false},
+                    {"purchased_ts", unix_ts - 3600 + 0.5},
+                    {"redeemed_ts", unix_ts - 3600},
+                    {"expiry_ts", unix_ts},
+                    {"grace_period_duration", 1001},
+                    {"platform_refund_expiry_ts", unix_ts + 1},
+                    {"revoked_ts", unix_ts + 3600 + 0.75},
+                    {"refund_requested_ts", unix_ts + 3601},
+                    {"payment_id", std::move(payment_id)}};
+        };
+        auto check_payment_item = [&](const session_pro_backend_pro_payment_item& item,
+                                      std::string_view payment_id) {
+            REQUIRE(std::string_view(item.status) == "redeemed");
+            REQUIRE(item.plan_count == 1);
+            REQUIRE(item.plan_unit == SESSION_PRO_BACKEND_PLAN_UNIT_MONTH);
+            REQUIRE(std::string_view(item.payment_provider) ==
+                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY);
+            // Sub-second precision preserved through sys_ms (0.5s = 500ms) round-trips exactly
+            REQUIRE(item.purchased_ts == unix_ts - 3600 + 0.5);
+            REQUIRE(item.redeemed_ts == unix_ts - 3600);
+            REQUIRE(item.expiry_ts == unix_ts);
+            REQUIRE(item.grace_period_duration == 1001);
+            REQUIRE(item.platform_refund_expiry_ts == unix_ts + 1);
+            REQUIRE(item.revoked_ts == unix_ts + 3600 + 0.75);  // 750ms preserved
+            REQUIRE(item.refund_requested_ts == unix_ts + 3601);
+            REQUIRE(std::string_view(item.payment_id) == payment_id);
+        };
+
+        SECTION("session_pro_backend_get_pro_status_response_parse") {
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"] = {
-                    {"status", SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED},
-                    {"error_report",
-                     SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR},
+                    {"user_status", "expired"},
+                    {"error_report", SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR},
                     {"auto_renewing", true},
-                    {"expiry_unix_ts_ms", unix_ts_ms + 2},
-                    {"grace_period_duration_ms", 1000},
-                    {"refund_requested_unix_ts_ms", unix_ts_ms + 3602},
-                    {"payments_total", 3},
-                    {"items",
-                     nlohmann::json::array(
-                             {{{"status", SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED},
-                               {"plan", SESSION_PRO_BACKEND_PLAN_ONE_MONTH},
-                               {"payment_provider",
-                                SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE},
-                               {"auto_renewing", false},
-                               {"unredeemed_unix_ts_ms", unix_ts_ms - 3600},
-                               {"redeemed_unix_ts_ms", unix_ts_ms - 3600},
-                               {"expiry_unix_ts_ms", unix_ts_ms},
-                               {"grace_period_duration_ms", 1001},
-                               {"platform_refund_expiry_unix_ts_ms", unix_ts_ms + 1},
-                               {"revoked_unix_ts_ms", unix_ts_ms + 3600},
-                               {"refund_requested_unix_ts_ms", unix_ts_ms + 3601},
-                               {"google_payment_token",
-                                std::string(payment_tx.payment_id, payment_tx.payment_id_count)},
-                               {"google_order_id",
-                                std::string(payment_tx.order_id, payment_tx.order_id_count)}}})}};
+                    {"expiry_ts", unix_ts + 2},
+                    {"grace_period_duration", 1000},
+                    {"refund_requested_ts", unix_ts + 3602},
+                    {"latest_payment",
+                     make_payment_item(
+                             std::string(fake_payment_id.data(), fake_payment_id.size()))}};
             std::string json = j.dump();
 
-            // Valid Google JSON
+            // Valid response with a latest payment
             auto result =
-                    session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
+                    session_pro_backend_get_pro_status_response_parse(json.data(), json.size());
             {
                 scope_exit result_free{
-                        [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
+                        [&]() { session_pro_backend_get_pro_status_response_free(&result); }};
+                if (result.header.error)
+                    INFO(result.header.error);
 
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
-                REQUIRE(result.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_EXPIRED);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error == nullptr);
+                REQUIRE(std::string_view(result.status) == "expired");
                 REQUIRE(result.error_report ==
-                        SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT_GENERIC_ERROR);
-                REQUIRE(result.items_count == 1);
+                        SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR);
                 REQUIRE(result.auto_renewing == true);
-                REQUIRE(result.grace_period_duration_ms == 1000);
-                REQUIRE(result.expiry_unix_ts_ms == unix_ts_ms + 2);
-                REQUIRE(result.refund_requested_unix_ts_ms == unix_ts_ms + 3602);
-                REQUIRE(result.payments_total == 3);
-                REQUIRE(result.items != nullptr);
-                REQUIRE(result.items[0].status == SESSION_PRO_BACKEND_PAYMENT_STATUS_REDEEMED);
-                REQUIRE(result.items[0].plan == SESSION_PRO_BACKEND_PLAN_ONE_MONTH);
-                REQUIRE(result.items[0].payment_provider ==
-                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE);
-                REQUIRE(result.items[0].unredeemed_unix_ts_ms == unix_ts_ms - 3600);
-                REQUIRE(result.items[0].redeemed_unix_ts_ms == unix_ts_ms - 3600);
-                REQUIRE(result.items[0].expiry_unix_ts_ms == unix_ts_ms);
-                REQUIRE(result.items[0].grace_period_duration_ms == 1001);
-                REQUIRE(result.items[0].platform_refund_expiry_unix_ts_ms == unix_ts_ms + 1);
-                REQUIRE(result.items[0].revoked_unix_ts_ms == unix_ts_ms + 3600);
-                REQUIRE(result.items[0].refund_requested_unix_ts_ms == unix_ts_ms + 3601);
-                REQUIRE(result.items[0].google_payment_token_count == payment_tx.payment_id_count);
-                REQUIRE(std::memcmp(
-                                result.items[0].google_payment_token,
-                                payment_tx.payment_id,
-                                payment_tx.payment_id_count) == 0);
-                REQUIRE(result.items[0].google_order_id_count == payment_tx.order_id_count);
-                REQUIRE(std::memcmp(
-                                result.items[0].google_order_id,
-                                payment_tx.order_id,
-                                payment_tx.order_id_count) == 0);
+                REQUIRE(result.grace_period_duration == 1000);
+                REQUIRE(result.expiry_ts == unix_ts + 2);
+                REQUIRE(result.refund_requested_ts == unix_ts + 3602);
+                REQUIRE(result.has_latest_payment);
+                check_payment_item(result.latest_payment, fake_payment_id);
             }
 
-            // Tweak JSON for Rangeproof
-            j["result"]["items"][0]["payment_provider"] =
-                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_RANGEPROOF;
-            j["result"]["items"][0].erase("google_payment_token");
-            j["result"]["items"][0].erase("google_order_id");
-            j["result"]["items"][0]["rangeproof_order_id"] =
-                    std::string(payment_tx.order_id, payment_tx.order_id_count);
+            // A null latest_payment (account with no payments)
+            j["result"]["latest_payment"] = nullptr;
             json = j.dump();
-
-            // Valid Rangeproof JSON
-            auto result_rangeproof =
-                    session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
+            auto result_empty =
+                    session_pro_backend_get_pro_status_response_parse(json.data(), json.size());
             {
-                scope_exit result_free{[&]() {
-                    session_pro_backend_get_pro_details_response_free(&result_rangeproof);
-                }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result_rangeproof.header.errors[index].data);
-
-                // Only check what we expect to be different
-                REQUIRE(result_rangeproof.items[0].rangeproof_order_id_count ==
-                        payment_tx.order_id_count);
-                REQUIRE(std::memcmp(
-                                result_rangeproof.items[0].rangeproof_order_id,
-                                payment_tx.order_id,
-                                payment_tx.order_id_count) == 0);
+                scope_exit result_free{
+                        [&]() { session_pro_backend_get_pro_status_response_free(&result_empty); }};
+                if (result_empty.header.error)
+                    INFO(result_empty.header.error);
+                REQUIRE(result_empty.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result_empty.has_latest_payment == false);
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
+
+            // Invalid JSON
+            json = "{invalid}";
+            result = session_pro_backend_get_pro_status_response_parse(json.data(), json.size());
+            {
+                scope_exit result_free{
+                        [&]() { session_pro_backend_get_pro_status_response_free(&result); }};
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code != nullptr);
+            }
+            session_pro_backend_get_pro_status_response_free(&result);
+            REQUIRE(result.header.internal_ == nullptr);
+
+            // Null JSON
+            result = session_pro_backend_get_pro_status_response_parse(nullptr, 0);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code != nullptr);
+        }
+
+        SECTION("session_pro_backend_get_payment_details_response_parse") {
+            nlohmann::json j;
+            j["status"] = "ok";
+            j["result"] = {
+                    {"payments_total", 3},
+                    {"items",
+                     nlohmann::json::array({make_payment_item(
+                             std::string(fake_payment_id.data(), fake_payment_id.size()))})},
+                    {"next_cursor", "opaque-cursor-token"}};
+            std::string json = j.dump();
+
+            // Valid page with a cursor
+            auto result = session_pro_backend_get_payment_details_response_parse(
+                    json.data(), json.size());
+            {
+                scope_exit result_free{
+                        [&]() { session_pro_backend_get_payment_details_response_free(&result); }};
+                if (result.header.error)
+                    INFO(result.header.error);
+
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error == nullptr);
+                REQUIRE(result.payments_total == 3);
+                REQUIRE(result.items_count == 1);
+                REQUIRE(result.items != nullptr);
+                check_payment_item(result.items[0], fake_payment_id);
+                REQUIRE(result.next_cursor != nullptr);
+                REQUIRE(std::string_view(result.next_cursor) == "opaque-cursor-token");
+            }
+
+            // End-of-data: null next_cursor, and payment_id is opaque so a different provider's
+            // value passes through unchanged.
+            j["result"]["items"][0]["payment_provider"] =
+                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
+            j["result"]["items"][0]["payment_id"] = "rangeproof-opaque-id";
+            j["result"]["next_cursor"] = nullptr;
+            json = j.dump();
+            auto result_end = session_pro_backend_get_payment_details_response_parse(
+                    json.data(), json.size());
+            {
+                scope_exit result_free{[&]() {
+                    session_pro_backend_get_payment_details_response_free(&result_end);
+                }};
+                if (result_end.header.error)
+                    INFO(result_end.header.error);
+                REQUIRE(result_end.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(std::string_view(result_end.items[0].payment_provider) ==
+                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF);
+                REQUIRE(std::string_view(result_end.items[0].payment_id) == "rangeproof-opaque-id");
+                REQUIRE(result_end.next_cursor == nullptr);  // end-of-data
+            }
+
+            // After freeing
+            REQUIRE(result.header.internal_ == nullptr);
             REQUIRE(result.items == nullptr);
             REQUIRE(result.items_count == 0);
 
             // Invalid JSON
             json = "{invalid}";
-            result = session_pro_backend_get_pro_details_response_parse(json.data(), json.size());
+            result = session_pro_backend_get_payment_details_response_parse(
+                    json.data(), json.size());
             {
                 scope_exit result_free{
-                        [&]() { session_pro_backend_get_pro_details_response_free(&result); }};
-                REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                        [&]() { session_pro_backend_get_payment_details_response_free(&result); }};
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code != nullptr);
             }
-
-            // After freeing
-            session_pro_backend_get_pro_details_response_free(&result);
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            session_pro_backend_get_payment_details_response_free(&result);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
-            result = session_pro_backend_get_pro_details_response_parse(nullptr, 0);
-            REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            result = session_pro_backend_get_payment_details_response_parse(nullptr, 0);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code != nullptr);
         }
 
         SECTION("Memory management edge cases") {
             // Test freeing null/empty structs
-            session_pro_backend_to_json to_json = {};
-            session_pro_backend_to_json_free(&to_json);
-            REQUIRE(to_json.json.data == nullptr);
-            REQUIRE(to_json.json.size == 0);
+            session_pro_backend_request to_json = {};
+            session_pro_backend_request_free(&to_json);
+            REQUIRE(to_json.data.data == nullptr);
+            REQUIRE(to_json.data.size == 0);
 
-            session_pro_backend_add_pro_payment_or_generate_pro_proof_response proof_response = {};
-            session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(
-                    &proof_response);
-            REQUIRE(proof_response.header.internal_arena_buf_ == nullptr);
+            session_pro_backend_pro_proof_response proof_response = {};
+            session_pro_backend_pro_proof_response_free(&proof_response);
+            REQUIRE(proof_response.header.internal_ == nullptr);
 
             session_pro_backend_get_pro_revocations_response rev_response = {};
             session_pro_backend_get_pro_revocations_response_free(&rev_response);
-            REQUIRE(rev_response.header.internal_arena_buf_ == nullptr);
+            REQUIRE(rev_response.header.internal_ == nullptr);
 
-            session_pro_backend_get_pro_details_response pay_response = {};
-            session_pro_backend_get_pro_details_response_free(&pay_response);
-            REQUIRE(pay_response.header.internal_arena_buf_ == nullptr);
+            session_pro_backend_get_pro_status_response status_response = {};
+            session_pro_backend_get_pro_status_response_free(&status_response);
+            REQUIRE(status_response.header.internal_ == nullptr);
+
+            session_pro_backend_get_payment_details_response pay_response = {};
+            session_pro_backend_get_payment_details_response_free(&pay_response);
+            REQUIRE(pay_response.header.internal_ == nullptr);
         }
 
-        SECTION("session_pro_backend_set_payment_refund_requested_request_to_json") {
-            session_pro_backend_set_payment_refund_requested_request request = {};
-            request.version = 0;
-            request.master_pkey = master_pubkey;
-            request.unix_ts_ms = unix_ts_ms;
-            request.refund_requested_unix_ts_ms = unix_ts_ms + 1;
-
-            session_pro_backend_signature sig =
-                    session_pro_backend_set_payment_refund_requested_request_build_sigs(
-                            request.version,
-                            master_privkey.data,
-                            sizeof(master_privkey.data),
-                            request.unix_ts_ms,
-                            request.refund_requested_unix_ts_ms,
-                            payment_tx.provider,
-                            reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                            payment_tx.payment_id_count,
-                            reinterpret_cast<const uint8_t*>(payment_tx.order_id),
-                            payment_tx.order_id_count);
-            request.master_sig = sig.sig;
-            REQUIRE(sig.success);
-
-            // Valid request
-            auto result =
-                    session_pro_backend_set_payment_refund_requested_request_to_json(&request);
+        SECTION("session_pro_backend_set_payment_refund_requested_request_build") {
+            auto result = session_pro_backend_set_payment_refund_requested_request_build(
+                    master_privkey.data,
+                    sizeof(master_privkey.data),
+                    unix_ts,
+                    unix_ts + 1,
+                    provider_code,
+                    payment_id,
+                    payment_id_len);
             {
-                scope_exit result_free{[&]() { session_pro_backend_to_json_free(&result); }};
+                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
                 REQUIRE(result.success);
-                REQUIRE(result.json.data != nullptr);
-                REQUIRE(result.json.size > 0);
+                REQUIRE(result.data.size > 0);
 
-                // Verify JSON matches C++ implementation
-                SetPaymentRefundRequestedRequest cpp = {};
-                cpp.version = request.version;
-                std::memcpy(
-                        cpp.master_pkey.data(),
-                        request.master_pkey.data,
-                        sizeof(request.master_pkey.data));
-                cpp.unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                        std::chrono::milliseconds{unix_ts_ms});
-                cpp.refund_requested_unix_ts = std::chrono::sys_time<std::chrono::milliseconds>(
-                        std::chrono::milliseconds{request.refund_requested_unix_ts_ms});
-                std::memcpy(
-                        cpp.master_sig.data(),
-                        request.master_sig.data,
-                        sizeof(request.master_sig.data));
-
-                std::string cpp_json = cpp.to_json();
-                REQUIRE(string8_equals(result.json, cpp_json));
+                auto cpp = refund_request(
+                        master_privkey.data,
+                        session::as_sys_seconds(unix_ts),
+                        session::as_sys_seconds(unix_ts + 1),
+                        provider_code,
+                        std::span<const uint8_t>(payment_id, payment_id_len));
+                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
+                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT);
+                REQUIRE(span_u8_equals(result.data, cpp.data));
             }
+            REQUIRE(result.data.data == nullptr);
 
-            // After freeing
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
-
-            // Null request
-            result = session_pro_backend_set_payment_refund_requested_request_to_json(nullptr);
+            // Invalid key size
+            result = session_pro_backend_set_payment_refund_requested_request_build(
+                    master_privkey.data,
+                    sizeof(master_privkey.data) - 1,
+                    unix_ts,
+                    unix_ts + 1,
+                    provider_code,
+                    payment_id,
+                    payment_id_len);
             REQUIRE(!result.success);
-            REQUIRE(result.json.data == nullptr);
-            REQUIRE(result.json.size == 0);
+            REQUIRE(result.error_count > 0);
         }
 
         SECTION("session_pro_backend_set_payment_refund_requested_response_parse") {
             nlohmann::json j;
-            j["status"] = SESSION_PRO_BACKEND_STATUS_SUCCESS;
+            j["status"] = "ok";
             j["result"]["updated"] = true;
-            j["result"]["version"] = 0;
             std::string json = j.dump();
 
             // Valid JSON
@@ -849,17 +613,16 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{[&]() {
                     session_pro_backend_set_payment_refund_requested_response_free(&result);
                 }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    INFO(result.header.errors[index].data);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count == 0);
-                REQUIRE(result.header.errors == nullptr);
+                if (result.header.error)
+                    INFO(result.header.error);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error == nullptr);
                 REQUIRE(result.updated);
-                REQUIRE(result.version == 0);
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Invalid JSON
             json = "{invalid}";
@@ -869,22 +632,99 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 scope_exit result_free{[&]() {
                     session_pro_backend_set_payment_refund_requested_response_free(&result);
                 }};
-                for (size_t index = 0; index < result.header.errors_count; index++)
-                    REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-                REQUIRE(result.header.errors_count > 0);
-                REQUIRE(result.header.errors != nullptr);
+                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+                REQUIRE(result.header.error_code != nullptr);
+                REQUIRE(result.header.error_code != nullptr);
             }
 
             // After freeing
-            REQUIRE(result.header.internal_arena_buf_ == nullptr);
+            REQUIRE(result.header.internal_ == nullptr);
 
             // Null JSON
             result = session_pro_backend_set_payment_refund_requested_response_parse(nullptr, 0);
-            REQUIRE(result.header.status != SESSION_PRO_BACKEND_STATUS_SUCCESS);
-            REQUIRE(result.header.errors_count == 1);
-            REQUIRE(result.header.errors != nullptr);
+            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+            REQUIRE(result.header.error_code != nullptr);
+            REQUIRE(result.header.error_code != nullptr);
         }
     }
+}
+
+TEST_CASE("Pro Backend X25519 pubkey matches the converted Ed25519 pubkey", "[pro_backend]") {
+    // PUBKEY_X25519 is a hardcoded convenience constant; assert it equals the runtime conversion of
+    // the Ed25519 PUBKEY so the two can never silently drift.
+    unsigned char converted[32] = {};
+    REQUIRE(crypto_sign_ed25519_pk_to_curve25519(converted, PUBKEY.data()) == 0);
+    REQUIRE(std::memcmp(converted, PUBKEY_X25519.data(), sizeof(converted)) == 0);
+    // The C export points at the same bytes.
+    REQUIRE(std::memcmp(
+                    SESSION_PRO_BACKEND_PUBKEY_X25519, PUBKEY_X25519.data(), sizeof(converted)) ==
+            0);
+}
+
+TEST_CASE(
+        "Pro Backend visible_platforms lists purchasable stores, excludes rangeproof",
+        "[pro_backend]") {
+    auto platforms = visible_platforms();
+    auto has = [](std::span<const std::string_view> v, std::string_view s) {
+        for (auto x : v)
+            if (x == s)
+                return true;
+        return false;
+    };
+    REQUIRE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY));
+    REQUIRE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE));
+    // Hidden mechanisms are handled but never listed.
+    REQUIRE_FALSE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF));
+    REQUIRE(platforms.size() == 2);
+
+    // The C export returns the same slugs, in the same order (it is derived from the C++ list).
+    size_t count = 0;
+    const char* const* c = session_pro_backend_visible_platforms(&count);
+    REQUIRE(count == platforms.size());
+    for (size_t i = 0; i < count; i++)
+        REQUIRE(std::string_view{c[i]} == platforms[i]);
+}
+
+TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
+    using enum ProPlanUnit;
+    auto ok = [](std::string_view code, int n, ProPlanUnit u) {
+        auto p = parse_plan_period(code);
+        REQUIRE(p.has_value());
+        CHECK(p->count == n);
+        CHECK(p->unit == u);
+    };
+
+    // Every unit; count preserved verbatim.
+    ok("30s", 30, second);
+    ok("14d", 14, day);
+    ok("2w", 2, week);
+    ok("1m", 1, month);
+    ok("3m", 3, month);
+    ok("1y", 1, year);
+    // Unit is preserved, never canonicalized: "12m" stays (12, month), not (1, year).
+    ok("12m", 12, month);
+    // lifetime: count 0, and the invariant count == 0 iff unit == lifetime.
+    ok("lifetime", 0, lifetime);
+
+    // Non-conforming codes -> nullopt (caller treats as a protocol error; no raw pass-through).
+    for (std::string_view bad :
+         {"",
+          "m",
+          "1",
+          "0m",
+          "01m",
+          "1y6m",
+          "-1m",
+          "+1m",
+          "1x",
+          "1 m",
+          "1M",
+          "1mm",
+          "1.5m",
+          "9999999999999999999m",
+          "lifetime2",
+          "Lifetime"})
+        CHECK_FALSE(parse_plan_period(bad).has_value());
 }
 
 #if defined(TEST_PRO_BACKEND_WITH_DEV_SERVER)
@@ -951,69 +791,40 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
     {
         std::array<uint8_t, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::string fake_google_payment_token_hex =
-                "DEV." + oxenc::to_hex(fake_google_payment_token);
-
         std::array<uint8_t, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
+        // Google's composite payment_id is "<payment_token>|<order_id>"; libsession treats the
+        // whole thing as one opaque value.
+        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
+                                      oxenc::to_hex(fake_google_order_id);
 
-        session_pro_backend_add_pro_payment_user_transaction payment_tx = {};
-        payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
-        payment_tx.payment_id_count = fake_google_payment_token_hex.size();
-        payment_tx.order_id_count = fake_google_order_id_hex.size();
-        std::memcpy(
-                payment_tx.payment_id,
-                fake_google_payment_token_hex.data(),
-                payment_tx.payment_id_count);
-        std::memcpy(
-                payment_tx.order_id, fake_google_order_id_hex.data(), payment_tx.order_id_count);
-
-        // Build request
-        session_pro_backend_master_rotating_signatures add_pro_sigs =
-                session_pro_backend_add_pro_payment_request_build_sigs(
-                        /*version*/ 0,
+        session_pro_backend_request request_json =
+                session_pro_backend_add_pro_payment_request_build(
                         master_privkey.data,
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        payment_tx.provider,
-                        reinterpret_cast<const uint8_t*>(payment_tx.payment_id),
-                        payment_tx.payment_id_count,
-                        reinterpret_cast<const uint8_t*>(payment_tx.order_id),
-                        payment_tx.order_id_count);
-
-        session_pro_backend_add_pro_payment_request request = {};
-        request.version = 0;
-        request.master_pkey = master_pubkey;
-        request.rotating_pkey = rotating_pubkey;
-        request.payment_tx = payment_tx;
-        request.master_sig = add_pro_sigs.master_sig;
-        request.rotating_sig = add_pro_sigs.rotating_sig;
-
-        session_pro_backend_to_json request_json =
-                session_pro_backend_add_pro_payment_request_to_json(&request);
-        scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
+                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
+                        reinterpret_cast<const uint8_t*>(fake_payment_id.data()),
+                        fake_payment_id.size());
+        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
+        REQUIRE(request_json.success);
 
         // Do curl request
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
                 g_test_pro_backend_dev_server_url + "/add_pro_payment",
-                std::string_view(request_json.json.data, request_json.json.size));
+                std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
-        session_pro_backend_add_pro_payment_or_generate_pro_proof_response response =
-                session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
+        session_pro_backend_pro_proof_response response =
+                session_pro_backend_pro_proof_response_parse(
                         response_json.data(), response_json.size());
-        scope_exit response_free{[&]() {
-            session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(&response);
-        }};
+        scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            INFO("ERROR: " << error.data);
-        }
+        if (response.header.error)
+            INFO("ERROR: " << response.header.error);
 
         // Verify response
         first_pro_proof = response.proof;
@@ -1025,58 +836,41 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 &first_pro_proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
         REQUIRE(std::memcmp(
                         response.proof.rotating_pubkey.data,
-                        request.rotating_pkey.data,
-                        sizeof(request.rotating_pkey.data)) == 0);
+                        rotating_pubkey.data,
+                        sizeof(rotating_pubkey.data)) == 0);
     }
 
     // Authorise new key
     {
-        uint64_t now_unix_ts_ms = time(nullptr) * 1000;
-        // Build request
-        session_pro_backend_master_rotating_signatures pro_sigs =
-                session_pro_backend_generate_pro_proof_request_build_sigs(
-                        /*version*/ 0,
+        int64_t now_unix_ts = session::epoch_seconds(session::sysclock_now_s());
+        session_pro_backend_request request_json =
+                session_pro_backend_generate_pro_proof_request_build(
                         master_privkey.data,
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        now_unix_ts_ms);
-
-        session_pro_backend_generate_pro_proof_request request = {};
-        request.version = 0;
-        request.master_pkey = master_pubkey;
-        request.rotating_pkey = rotating_pubkey;
-        request.unix_ts_ms = now_unix_ts_ms;
-        request.master_sig = pro_sigs.master_sig;
-        request.rotating_sig = pro_sigs.rotating_sig;
-
-        session_pro_backend_to_json request_json =
-                session_pro_backend_generate_pro_proof_request_to_json(&request);
-        scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
+                        now_unix_ts);
+        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
+        REQUIRE(request_json.success);
 
         // Do CURL request
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
                 g_test_pro_backend_dev_server_url + "/generate_pro_proof",
-                std::string_view(request_json.json.data, request_json.json.size));
+                std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
-        session_pro_backend_add_pro_payment_or_generate_pro_proof_response response =
-                session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
+        session_pro_backend_pro_proof_response response =
+                session_pro_backend_pro_proof_response_parse(
                         response_json.data(), response_json.size());
-        scope_exit response_free{[&]() {
-            session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(&response);
-        }};
+        scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            if (index == 0)
-                fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
-            string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
-        }
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
+        INFO("ERROR: JSON response: " << response_json.c_str());
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
 
         // Verify response
         session_protocol_pro_proof proof = response.proof;
@@ -1084,175 +878,107 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 &proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
         REQUIRE(std::memcmp(
                         response.proof.rotating_pubkey.data,
-                        request.rotating_pkey.data,
-                        sizeof(request.rotating_pkey.data)) == 0);
-
-        session_pro_backend_to_json_free(&request_json);
-        session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(&response);
+                        rotating_pubkey.data,
+                        sizeof(rotating_pubkey.data)) == 0);
     }
 
-    // Get pro status
+    // Get pro status (the hot path: account status + single latest payment)
     {
-        // Build request
-        session_pro_backend_get_pro_details_request request = {};
-        request.version = 0;
-        request.master_pkey = master_pubkey;
-        request.unix_ts_ms = time(nullptr) * 1000;
-        request.count = 10'000;
-
-        session_pro_backend_signature sig = session_pro_backend_get_pro_details_request_build_sig(
-                request.version,
+        session_pro_backend_request request_json = session_pro_backend_get_pro_status_request_build(
                 master_privkey.data,
                 sizeof(master_privkey.data),
-                request.unix_ts_ms,
-                request.count);
-        REQUIRE(sig.success);
-        request.master_sig = sig.sig;
-
-        // Do CURL request
-        session_pro_backend_to_json request_json =
-                session_pro_backend_get_pro_details_request_to_json(&request);
-        scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
+                session::epoch_seconds(session::sysclock_now_s()));
+        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
+        REQUIRE(request_json.success);
 
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
-                g_test_pro_backend_dev_server_url + "/get_pro_details",
-                std::string_view(request_json.json.data, request_json.json.size));
+                g_test_pro_backend_dev_server_url + "/get_pro_status",
+                std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
-        session_pro_backend_get_pro_details_response response =
-                session_pro_backend_get_pro_details_response_parse(
+        session_pro_backend_get_pro_status_response response =
+                session_pro_backend_get_pro_status_response_parse(
                         response_json.data(), response_json.size());
         scope_exit response_free{
-                [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
+                [&]() { session_pro_backend_get_pro_status_response_free(&response); }};
 
-        // Verify the response
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            if (index == 0)
-                fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
-            string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
-        }
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-        REQUIRE(response.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_ACTIVE);
+        INFO("ERROR: JSON response: " << response_json.c_str());
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(std::string_view(response.status) == "active");
+        REQUIRE(response.has_latest_payment);
+    }
+
+    // Get payment history (paginated) -- newest page
+    {
+        session_pro_backend_request request_json =
+                session_pro_backend_get_payment_details_request_build(
+                        master_privkey.data,
+                        sizeof(master_privkey.data),
+                        session::epoch_seconds(session::sysclock_now_s()),
+                        100,
+                        "");
+        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
+        REQUIRE(request_json.success);
+
+        std::string response_json = curl_do_basic_blocking_post_request(
+                curl,
+                curl_headers,
+                g_test_pro_backend_dev_server_url + "/get_payment_details",
+                std::string_view(request_json.data.data, request_json.data.size));
+
+        // Parse response
+        session_pro_backend_get_payment_details_response response =
+                session_pro_backend_get_payment_details_response_parse(
+                        response_json.data(), response_json.size());
+        scope_exit response_free{
+                [&]() { session_pro_backend_get_payment_details_response_free(&response); }};
+
+        INFO("ERROR: JSON response: " << response_json.c_str());
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.items_count > 0);
-    }
-
-    // Get pro status without history
-    {
-        // Build request
-        session_pro_backend_get_pro_details_request request = {};
-        request.version = 0;
-        request.master_pkey = master_pubkey;
-        request.unix_ts_ms = time(nullptr) * 1000;
-
-        session_pro_backend_signature sig = session_pro_backend_get_pro_details_request_build_sig(
-                request.version,
-                master_privkey.data,
-                sizeof(master_privkey.data),
-                request.unix_ts_ms,
-                request.count);
-        REQUIRE(sig.success);
-        request.master_sig = sig.sig;
-
-        // Do CURL request
-        session_pro_backend_to_json request_json =
-                session_pro_backend_get_pro_details_request_to_json(&request);
-        scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
-
-        std::string response_json = curl_do_basic_blocking_post_request(
-                curl,
-                curl_headers,
-                g_test_pro_backend_dev_server_url + "/get_pro_details",
-                std::string_view(request_json.json.data, request_json.json.size));
-
-        // Parse response
-        session_pro_backend_get_pro_details_response response =
-                session_pro_backend_get_pro_details_response_parse(
-                        response_json.data(), response_json.size());
-        scope_exit response_free{
-                [&]() { session_pro_backend_get_pro_details_response_free(&response); }};
-
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            if (index == 0)
-                fprintf(stderr, "ERROR: JSON response: %s\n", response_json.c_str());
-            string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
-        }
-
-        // Verify the response
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-        REQUIRE(response.status == SESSION_PRO_BACKEND_USER_PRO_STATUS_ACTIVE);
-        REQUIRE(response.items_count == 0);
+        REQUIRE(response.payments_total > 0);
     }
 
     // Add _another_ payment, same details
-    session_pro_backend_add_pro_payment_user_transaction another_payment_tx = {};
+    std::string another_payment_id;
     {
         std::array<uint8_t, 8> fake_google_payment_token;
         randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::string fake_google_payment_token_hex =
-                "DEV." + oxenc::to_hex(fake_google_payment_token);
-
         std::array<uint8_t, 8> fake_google_order_id;
         randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        std::string fake_google_order_id_hex = "DEV." + oxenc::to_hex(fake_google_order_id);
+        another_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
+                             oxenc::to_hex(fake_google_order_id);
 
-        another_payment_tx.provider = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_GOOGLE_PLAY_STORE;
-        another_payment_tx.payment_id_count = fake_google_payment_token_hex.size();
-        another_payment_tx.order_id_count = fake_google_order_id_hex.size();
-        std::memcpy(
-                another_payment_tx.payment_id,
-                fake_google_payment_token_hex.data(),
-                another_payment_tx.payment_id_count);
-        std::memcpy(
-                another_payment_tx.order_id,
-                fake_google_order_id_hex.data(),
-                another_payment_tx.order_id_count);
-
-        // Build request
-        session_pro_backend_master_rotating_signatures add_pro_sigs =
-                session_pro_backend_add_pro_payment_request_build_sigs(
-                        /*version*/ 0,
+        session_pro_backend_request request_json =
+                session_pro_backend_add_pro_payment_request_build(
                         master_privkey.data,
                         sizeof(master_privkey.data),
                         rotating_privkey.data,
                         sizeof(rotating_privkey.data),
-                        another_payment_tx.provider,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
-                        another_payment_tx.payment_id_count,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.order_id),
-                        another_payment_tx.order_id_count);
-
-        session_pro_backend_add_pro_payment_request request = {};
-        request.version = 0;
-        request.master_pkey = master_pubkey;
-        request.rotating_pkey = rotating_pubkey;
-        request.payment_tx = another_payment_tx;
-        request.master_sig = add_pro_sigs.master_sig;
-        request.rotating_sig = add_pro_sigs.rotating_sig;
-
-        session_pro_backend_to_json request_json =
-                session_pro_backend_add_pro_payment_request_to_json(&request);
-        scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
+                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
+                        reinterpret_cast<const uint8_t*>(another_payment_id.data()),
+                        another_payment_id.size());
+        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
+        REQUIRE(request_json.success);
 
         // Do curl request
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
                 g_test_pro_backend_dev_server_url + "/add_pro_payment",
-                std::string_view(request_json.json.data, request_json.json.size));
+                std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
-        session_pro_backend_add_pro_payment_or_generate_pro_proof_response response =
-                session_pro_backend_add_pro_payment_or_generate_pro_proof_response_parse(
+        session_pro_backend_pro_proof_response response =
+                session_pro_backend_pro_proof_response_parse(
                         response_json.data(), response_json.size());
-        scope_exit response_free{[&]() {
-            session_pro_backend_add_pro_payment_or_generate_pro_proof_response_free(&response);
-        }};
+        scope_exit response_free{[&]() { session_pro_backend_pro_proof_response_free(&response); }};
 
         // Verify response
         session_protocol_pro_proof proof = response.proof;
@@ -1260,26 +986,23 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
                 &proof, DEV_BACKEND_PUBKEY.data(), DEV_BACKEND_PUBKEY.size()));
         REQUIRE(std::memcmp(
                         response.proof.rotating_pubkey.data,
-                        request.rotating_pkey.data,
-                        sizeof(request.rotating_pkey.data)) == 0);
+                        rotating_pubkey.data,
+                        sizeof(rotating_pubkey.data)) == 0);
     }
 
     // Get revocation list
     {
-        // Build request
-        session_pro_backend_get_pro_revocations_request request = {};
-        request.version = 0;
-
-        session_pro_backend_to_json request_json =
-                session_pro_backend_get_pro_revocations_request_to_json(&request);
-        scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
+        session_pro_backend_request request_json =
+                session_pro_backend_get_pro_revocations_request_build(0);
+        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
+        REQUIRE(request_json.success);
 
         // Do curl request
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
                 g_test_pro_backend_dev_server_url + "/get_pro_revocations",
-                std::string_view(request_json.json.data, request_json.json.size));
+                std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
         session_pro_backend_get_pro_revocations_response response =
@@ -1290,43 +1013,35 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
         // Verify response
         INFO("ERROR: JSON response: " << response_json.c_str());
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
-        }
-
-        // Verify the response
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.ticket == 0);
         REQUIRE(response.items_count == 0);
     }
 
     // Set payment refund requested
     {
-        // Build request
-        uint64_t now_unix_ts_ms = time(nullptr) * 1000;
-        session_pro_backend_to_json request_json =
-                session_pro_backend_set_payment_refund_requested_request_build_to_json(
-                        /*version*/ 0,
+        int64_t now_unix_ts = session::epoch_seconds(session::sysclock_now_s());
+        session_pro_backend_request request_json =
+                session_pro_backend_set_payment_refund_requested_request_build(
                         master_privkey.data,
                         sizeof(master_privkey.data),
-                        /*unix_ts_ms*/ now_unix_ts_ms,
-                        /*refund_requested_unix_ts_ms*/ now_unix_ts_ms,
-                        another_payment_tx.provider,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.payment_id),
-                        another_payment_tx.payment_id_count,
-                        reinterpret_cast<const uint8_t*>(another_payment_tx.order_id),
-                        another_payment_tx.order_id_count);
-
-        scope_exit request_json_free{[&]() { session_pro_backend_to_json_free(&request_json); }};
+                        /*ts*/ now_unix_ts,
+                        /*refund_requested_ts*/ now_unix_ts,
+                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY,
+                        reinterpret_cast<const uint8_t*>(another_payment_id.data()),
+                        another_payment_id.size());
+        scope_exit request_json_free{[&]() { session_pro_backend_request_free(&request_json); }};
+        REQUIRE(request_json.success);
 
         // Do curl request
         std::string response_json = curl_do_basic_blocking_post_request(
                 curl,
                 curl_headers,
                 g_test_pro_backend_dev_server_url + "/set_payment_refund_requested",
-                std::string_view(request_json.json.data, request_json.json.size));
+                std::string_view(request_json.data.data, request_json.data.size));
 
         // Parse response
         session_pro_backend_set_payment_refund_requested_response response =
@@ -1338,15 +1053,10 @@ TEST_CASE("Pro Backend Dev Server", "[pro_backend][dev_server]") {
 
         // Verify response
         INFO("ERROR: JSON response: " << response_json.c_str());
-        for (size_t index = 0; index < response.header.errors_count; index++) {
-            string8 error = response.header.errors[index];
-            fprintf(stderr, "ERROR: %s\n", error.data);
-        }
-
-        // Verify the response
-        REQUIRE(response.header.errors_count == 0);
-        REQUIRE(response.header.status == SESSION_PRO_BACKEND_STATUS_SUCCESS);
-        REQUIRE(response.version == 0);
+        if (response.header.error)
+            UNSCOPED_INFO("ERROR: " << response.header.error);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
+        REQUIRE(response.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
         REQUIRE(response.updated);
     }
 }

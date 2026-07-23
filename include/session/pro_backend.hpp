@@ -1,30 +1,31 @@
 #pragma once
 
+#include <oxenc/hex.h>
 #include <session/pro_backend.h>
 
 #include <chrono>
+#include <optional>
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <span>
 #include <string>
 
 /// Helper functions to construct payloads to communicate with the Session Pro Backend. The data
-/// structures here are largely bindings to the endpoints exposed on the Session Pro Backend:
-///
-///   https://github.com/Doy-lee/session-pro-backend/blob/06e82c9d5b5a0a881d12d0182358219a4081acf5/server.py#L2
+/// structures here are largely bindings to the endpoints exposed on the Session Pro Backend; the
+/// wire format they produce and parse is byte-pinned in pro-wire-protocol.md (the authoritative
+/// spec).
 ///
 /// The high level summary of the functionality in this file. Clients can:
 ///
-/// 1. Build a request with `AddProPaymentRequest::build_to_json` from a Session Pro payment and
-///    submit it to the backend to register the specified Ed25519 keys for Session Pro.
+/// 1. Build a request with `add_payment_request(...)` from a Session Pro payment and submit its
+///    `{endpoint, content_type, data}` to the backend to register the specified Ed25519 keys.
 ///
-///    Server responds JSON to be parsed with `AddProPaymentOrGenerateProProofResponse::parse`.
-///    Clients should validate the response and update their `UserProfile` by constructing a
-///    `ProConfig` with the `proof` from the response and filling in the relevant rotating private
-///    key that the proof was authorised for.
+///    Parse the server's reply with `parse_add_payment(...)`. Clients should validate the response
+///    and update their `UserProfile` by constructing a `ProConfig` with the `proof` from the
+///    response and filling in the relevant rotating private key that the proof was authorised for.
 ///
 ///    The server will only respond successfully if it can also independently verify the purchase
-///    otherwise an error is returned and can be read from the `ResponseHeader` after parsing the
+///    otherwise an error is returned and can be read from the `ResponseBase` after parsing the
 ///    raw response.
 ///
 /// 2. Attach the `ProProof` constructed from (1) into their messages. Libsession has helper
@@ -39,65 +40,84 @@
 ///    to enable pro features for that message.
 ///
 /// 3. Periodically poll the global revocation list which overrides the validity of current
-///    circulating proofs. This is done by constructing the request via
-///    `GetProRevocationsRequest::to_json` and sending it to the backend.
+///    circulating proofs. This is done by building the request via `revocations_request(...)` and
+///    sending it to the backend.
 ///
-///    Server responds JSON to be parsed with `GetProRevocationResponse::parse` which contains the
-///    list that clients should cache. Any incoming messages with a Pro proof that is in the list of
-///    revoked proofs will not be entitled to Pro features.
+///    Parse the reply with `parse_revocations(...)`, which contains the list that clients should
+///    cache. Any incoming messages with a Pro proof that is in the list of revoked proofs will not
+///    be entitled to Pro features.
 ///
-/// 4. Query the status (and optionally payment history) of a user's Session Pro Master Ed25519 key
-///    has registered by building a `GetProDetailsRequest::build_to_json` query and submitting it.
+/// 4. Query a user's Session Pro entitlement status for their Master Ed25519 key by building a
+///    `pro_status_request(...)` query (the hot "am I Pro?" path) and submitting it. Parse the reply
+///    with `parse_pro_status(...)`, which yields the account status plus its single latest payment.
 ///
-///    Server responds JSON to be parsed with `GetProDetailsResponse::parse` which they can use to
-///    populate their client's payment history.
-///
-/// 5. Get a list of per-payment provider URLs, such as links to the support page for refunds and
-///    subscription via the `PAYMENT_PROVIDER_METADATA` global variable defined in the C header.
+///    For the full payment history (e.g. a receipts view), page through it with
+///    `payment_details_request(...)` / `parse_payment_details(...)` using the opaque keyset cursor.
 ///
 /// See the unit tests for examples of using the APIs mentioned.
 
 namespace session::pro_backend {
 
-/// TODO: Assign the Session Pro backend public key for verifying proofs to allow users of the
-/// library to have the pubkey available for verifying proofs.
-constexpr array_uc32 PUBKEY = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                               0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
-static_assert(sizeof(PUBKEY) == array_uc32{}.size());
+using namespace oxenc::literals;
 
-enum struct AddProPaymentResponseStatus {
-    /// Payment was claimed and the pro proof was successfully generated
-    Success = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_SUCCESS,
+/// The Session Pro Backend's Ed25519 public key: verify that a proof was issued by the backend by
+/// checking its signature against this key (see ProProof::verify_signature). This is the current
+/// backend signing key (test deployment, expected to carry through to production).
+constexpr auto PUBKEY = "479ffca8bcec7b4a0f0f7afe48b8a6d15635a8c7ff15ad16add05752c19414d4"_hex_u;
+static_assert(PUBKEY.size() == 32);
 
-    /// Backend encountered an error when attempting to claim the payment
-    Error = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ERROR,
+/// The X25519 form of `PUBKEY` (the same key converted via crypto_sign_ed25519_pk_to_curve25519),
+/// provided as a constant for clients that need the X25519 pubkey (e.g. to establish an encrypted
+/// channel to the backend) without doing the conversion themselves. A unit test asserts these bytes
+/// match the runtime conversion of `PUBKEY`, so the two cannot drift.
+constexpr auto PUBKEY_X25519 =
+        "ce5a75f64b6c43db6c1374d362c3ea9d85951c4f42a3d04cf94f87822d4f803b"_hex_u;
+static_assert(PUBKEY_X25519.size() == 32);
 
-    /// Request JSON failed to be parsed correctly, payload was malformed or missing values
-    ParseError = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_PARSE_ERROR,
+/// The Session Pro Backend's production base URL: POST a request body to `<URL>/<endpoint>` (see
+/// the SESSION_PRO_BACKEND_*_ENDPOINT paths). This is the canonical production value; a client may
+/// point at a different dev/test server if it chooses.
+constexpr std::string_view URL = "https://pro.session.codes";
 
-    /// Payment is already claimed
-    AlreadyRedeemed = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_ALREADY_REDEEMED,
+/// Canonical payment-provider code strings — the value transmitted on the wire and folded into the
+/// add-payment / set-refund signed messages (§3). Reference these rather than hardcoding the slug
+/// so a sent code cannot drift from what libsession signs/parses. The C
+/// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*` symbols point at these. An unknown code is still
+/// valid on the wire and passes through as an opaque string.
+constexpr std::string_view PAYMENT_PROVIDER_GOOGLE_PLAY = "google_play";
+constexpr std::string_view PAYMENT_PROVIDER_APP_STORE = "app_store";
+constexpr std::string_view PAYMENT_PROVIDER_RANGEPROOF = "rangeproof";
 
-    /// Payment transaction attempted to claim a payment that the backend does not have. Either the
-    /// payment doesn't exist or the backend has not witnessed the payment from the provider yet.
-    UnknownPayment = SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_RESPONSE_STATUS_UNKNOWN_PAYMENT,
+/// Response outcome category (the wire `status`, spec §5). CLOSED/exhaustive by design: the backend
+/// will never add a fourth value, so libsession treats any unrecognized wire status as a protocol
+/// error (fail-closed) rather than passing it through. New categories/detail arrive via
+/// `error_code`, which IS open/extensible.
+enum class ResponseStatus {
+    Ok,     ///< Success; the response's payload fields are populated.
+    Fail,   ///< Request rejected on client input / a precondition; retrying the identical request
+            ///< won't help (except the `stale_request` error_code). See `error_code`.
+    Error,  ///< Backend fault; the client did nothing wrong and the same request may succeed later.
 };
 
-struct ResponseHeader {
-    /// Status code for the response, maps to a specific enum for some requests otherwise it uses 0
-    /// for success, other values indicate errors. For the following responses, the status code maps
-    /// to
-    ///
-    ///  | Request            | Enum
-    ///  | AddProPayment      | AddProPaymentResponseStatus
-    ///  | Everything else ...| SESSION_PRO_BACKEND_STATUS_SUCCESS or
-    ///                         SESSION_PRO_BACKEND_STATUS_ERROR
-    std::uint32_t status;
+struct ResponseBase {
+    /// Outcome category; `success()` is the usual check. See ResponseStatus.
+    ResponseStatus status = ResponseStatus::Ok;
 
-    /// List of parsing or processing errors. Empty if there are no parsing errors, if there are
-    /// errors, the parse may be partially complete, always check the errors before proceeding.
-    std::vector<std::string> errors;
+    /// On non-Ok, a stable machine-readable slug identifying the outcome (spec §5.1), e.g.
+    /// "unknown_payment", "expired", "stale_request". std::nullopt on success. Opaque and
+    /// forward-compatible: map known slugs to localized text; for an unrecognized one fall back to
+    /// `error` / the `status` category. (libsession synthesizes "invalid_response" if it cannot
+    /// parse the backend's reply at all.)
+    std::optional<std::string> error_code;
+
+    /// On non-Ok, an English diagnostic string. NOT user-facing text (that comes from mapping
+    /// `error_code` to a localized string); show it only when the slug is unrecognized, and it is
+    /// always safe to log. std::nullopt on success.
+    std::optional<std::string> error;
+
+    /// Contextually convertible to bool: `if (response) { ... }` is true iff the request succeeded
+    /// (status == Ok). Explicit, so it can't silently leak into arithmetic or comparisons.
+    explicit operator bool() const { return status == ResponseStatus::Ok; }
 };
 
 struct MasterRotatingSignatures {
@@ -105,315 +125,217 @@ struct MasterRotatingSignatures {
     array_uc64 rotating_sig;
 };
 
-struct AddProPaymentUserTransaction {
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER provider;
-
-    /// The payment ID to claim which is different per platform.
-    ///
-    ///   Google Play Store => purchase token
-    ///   iOS App Store     => transaction ID (note, not the original transaction id)
-    std::string payment_id;
-
-    /// Only for Google Play Store, set this to the purchase's order ID. Ignored for other payment
-    /// providers
-    std::string order_id;
+/// Per-provider support/management URLs (from provider_urls()). These are identical for every user
+/// (not translation data), so libsession owns them as the single source of truth rather than each
+/// client duplicating them; the human-readable provider/store *names* are translation data and
+/// remain the client's job. Each field is std::nullopt when that provider has no such URL --
+/// clients test the optional rather than an empty-string sentinel. Present views point at static,
+/// null-terminated string literals.
+struct ProviderURLs {
+    std::optional<std::string_view> refund_platform_url;  ///< Native store refund flow
+    std::optional<std::string_view> refund_support_url;   ///< Session page for requesting a refund
+    std::optional<std::string_view> refund_status_url;    ///< Where a user checks refund status
+    std::optional<std::string_view> update_subscription_url;  ///< Manage/update the subscription
+    std::optional<std::string_view> cancel_subscription_url;  ///< Cancel the subscription
 };
 
-/// Register a new Session Pro proof to the backend. The payment is registered under the
-/// `master_pkey` and authorises the `rotating_pkey` to use the proof. In practice this means that
-/// the caller will receive a Session Pro Proof that can be attached to messages that have to be
-/// signed by the `rotating_pkey` for other clients to entitle that message to Pro privileges.
+/// Look up the support/management URLs for a provider code (see
+/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*). Returns a pointer to a static per-provider
+/// constant, or nullptr for a provider with no applicable URLs at all (an unknown code, or e.g.
+/// rangeproof); within a returned set each field is present or std::nullopt per that provider.
+const ProviderURLs* provider_urls(std::string_view provider_code);
+
+/// The user-visible purchasable platforms, as provider-code slugs (a subset of the
+/// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* values — currently "google_play" and "app_store").
+/// Order is not significant; clients pick their own. Hidden mechanisms (e.g. rangeproof) are
+/// excluded — they surface only for users who already hold them — so this is the set that drives a
+/// "purchase via …" store list.
+std::span<const std::string_view> visible_platforms();
+
+/// Endpoint + content-type + opaque payload for a request to be POSTed to the Session Pro backend,
+/// returned by the `*_request()` helpers below. Callers relay `data` verbatim under `content_type`
+/// and never inspect or assume its format -- libsession owns the wire encoding.
+struct ProRequest {
+    /// Endpoint path relative to the backend base URL, e.g. "add_pro_payment". As returned from a
+    /// `*_request()` function this points at a static, null-terminated string, so using
+    /// `endpoint.data()` as a C string is valid.
+    std::string_view endpoint;
+
+    /// Content type to send as the request's `Content-Type` header. Points at a static,
+    /// null-terminated string. Clients MUST relay this verbatim and MUST NOT assume a particular
+    /// format: `data` is libsession's opaque payload for the backend and libsession owns the wire
+    /// encoding, which may change without client involvement.
+    std::string_view content_type;
+
+    /// The opaque request payload to POST to `endpoint`. This is libsession's data for the backend;
+    /// clients relay it untouched and must not parse, inspect, or modify it.
+    std::string data;
+};
+
+/// Register a new Session Pro payment with the backend (endpoint `add_pro_payment`). The payment is
+/// registered under the master key and authorises the rotating key to use the resulting proof, so
+/// that proof can be attached to messages signed by the rotating key to entitle them to Pro.
 ///
-/// The attached signatures must sign over the contents of the request which can be generated by the
-/// helper function `build_sigs`.
-struct AddProPaymentRequest {
-    /// Request version. The latest accepted version is 0
-    std::uint8_t version;
+/// `add_payment_sigs` computes just the master+rotating signatures over the request;
+/// `add_payment_request` builds the whole request (computing the signatures internally) and returns
+/// the endpoint + JSON body. Both throw if a key is not a 32-byte Ed25519 seed or 64-byte libsodium
+/// key.
+///
+/// Inputs:
+/// - `master_privkey` / `rotating_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium private key
+/// - `provider_code` -- provider code string the payment is coming from (see
+///   SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
+/// - `payment_id` -- opaque payment identifier from the provider (multi-part providers fold their
+///   parts into this one value per a backend-defined composite; hashed verbatim)
+MasterRotatingSignatures add_payment_sigs(
+        std::span<const uint8_t> master_privkey,
+        std::span<const uint8_t> rotating_privkey,
+        std::string_view provider_code,
+        std::span<const uint8_t> payment_id);
 
-    /// 32-byte Ed25519 Session Pro master public key derived from the Session account seed to
-    /// register a Session Pro payment under.
-    array_uc32 master_pkey;
+ProRequest add_payment_request(
+        std::span<const uint8_t> master_privkey,
+        std::span<const uint8_t> rotating_privkey,
+        std::string_view provider_code,
+        std::span<const uint8_t> payment_id);
 
-    /// 32-byte Ed25519 Session Pro rotating public key to authorise to use the generated Session
-    /// Pro proof
-    array_uc32 rotating_pkey;
-
-    /// Transaction containing the payment details to register on the Session Pro backend
-    AddProPaymentUserTransaction payment_tx;
-
-    /// 64-byte signature proving knowledge of the master key's secret component
-    array_uc64 master_sig;
-
-    /// 64-byte signature proving knowledge of the rotating key's secret component
-    array_uc64 rotating_sig;
-
-    /// API: pro/AddProPaymentRequest::to_json
-    ///
-    /// Serializes the request to a JSON string.
-    ///
-    /// Outputs:
-    /// - `std::string` - JSON representation of the request.
-    std::string to_json() const;
-
-    /// API: pro/AddProPaymentRequest::build_sigs
-    ///
-    /// Builds the master and rotating signatures using the provided private keys and payment token
-    /// hash. Throws if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
-    /// Using 64-byte libsodium keys is more efficient.
-    ///
-    /// Inputs:
-    /// - `request_version` -- Version of the request to build a hash for
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `payment_tx_provider` -- Provider that the payment to register is coming from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
-    ///   `AddProPaymentUserTransaction`
-    ///
-    /// Outputs:
-    /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
-    static MasterRotatingSignatures build_sigs(
-            std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
-
-    /// API: pro/AddProPaymentRequest::build_to_json
-    ///
-    /// Builds a AddProPaymentRequest and serialize it to JSON. This function is the same as filling
-    /// the struct fields and calling `to_json`.
-    ///
-    /// Inputs:
-    /// - `request_version` -- Version of the request to build a hash for
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `payment_tx_provider` -- Provider that the payment to register is coming from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
-    ///   `AddProPaymentUserTransaction`
-    ///
-    /// Outputs:
-    /// - `std::string` -- Request serialised to JSON
-    static std::string build_to_json(
-            std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
-};
-
-/// The generated proof from the Session Pro backend that has been parsed from JSON. This structure
-/// is the raw parse result that can then be converted into the config::ProProof or equivalent
-/// structure.
-struct AddProPaymentOrGenerateProProofResponse : public ResponseHeader {
+/// Common base for the responses that carry a freshly-issued Session Pro proof: both add-payment
+/// and generate-proof reply with exactly a proof. `AddProPaymentResponse` and
+/// `GenerateProProofResponse` are distinct types (each parsed by its own free function below) that
+/// share `proof` today but can diverge independently. `proof` is the raw parse result, convertible
+/// to a config::ProProof.
+struct ProProofResponse : ResponseBase {
     ProProof proof;
-
-    /// API: pro/AddProPaymentOrGenerateProProofResponse::parse
-    ///
-    /// Parses a JSON string into the response struct.
-    ///
-    /// Inputs:
-    /// - `json` -- JSON string to parse.
-    ///
-    /// Outputs:
-    /// - The response struct with `status` set to an error state on failure. Errors are stored in
-    ///   `errors`
-    static AddProPaymentOrGenerateProProofResponse parse(std::string_view json);
 };
 
-/// Request a new Session Pro proof from the backend. The specified `master_pkey` must have
-/// previously already registered a payment to the backend that is still active and hence entitled
-/// to Session Pro features. This endpoint can then be used to pair a new Ed25519 key to be
-/// authorised to use a the Session Pro proof.
-struct GenerateProProofRequest {
-    /// Request version. The latest accepted version is 0
-    std::uint8_t version;
+/// Response to `add_payment_request` (endpoint `add_pro_payment`). On failure the reason(s) are in
+/// `errors` (the backend sends a human-readable message, including for already-redeemed /
+/// unknown-payment); check `success()`.
+struct AddProPaymentResponse : ProProofResponse {};
 
-    /// 32-byte Ed25519 Session Pro master public key to generate a Session Pro proof from. This key
-    /// must have had a prior, and still active payment registered under it for a new proof to be
-    /// generated successfully.
-    array_uc32 master_pkey;
+/// Response to `pro_proof_request` (endpoint `generate_pro_proof`).
+struct GenerateProProofResponse : ProProofResponse {};
 
-    /// 32-byte Ed25519 Session Pro rotating public key authorized to use the generated proof
-    array_uc32 rotating_pkey;
+/// Parse the reply to an add-payment / generate-proof request. On failure `status` is set to an
+/// error state and `errors` is populated; on success `proof` holds the issued proof.
+AddProPaymentResponse parse_add_payment(std::string_view json);
+GenerateProProofResponse parse_pro_proof(std::string_view json);
 
-    /// Unix timestamp of the request
-    sys_ms unix_ts;
+/// Request a new Session Pro proof from the backend (endpoint `generate_pro_proof`). The master key
+/// must already have a prior, still-active payment registered; this pairs a (new) rotating key to a
+/// freshly-issued proof.
+///
+/// `pro_proof_sigs` computes the master+rotating signatures; `pro_proof_request` builds the whole
+/// request (signing internally) and returns the endpoint + JSON body. Both throw on an
+/// incorrectly-sized key.
+///
+/// Inputs:
+/// - `master_privkey` / `rotating_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium private key
+/// - `unix_ts` -- Unix timestamp for the request
+MasterRotatingSignatures pro_proof_sigs(
+        std::span<const uint8_t> master_privkey,
+        std::span<const uint8_t> rotating_privkey,
+        sys_seconds unix_ts);
 
-    /// 64-byte signature proving knowledge of the master key's secret component
-    array_uc64 master_sig;
+ProRequest pro_proof_request(
+        std::span<const uint8_t> master_privkey,
+        std::span<const uint8_t> rotating_privkey,
+        sys_seconds unix_ts);
 
-    /// 64-byte signature proving knowledge of the rotating key's secret component
-    array_uc64 rotating_sig;
-
-    /// API: pro/GenerateProProofRequest::build_sigs
-    ///
-    /// Builds master and rotating signatures using the provided private keys and timestamp.
-    /// Throws if the keys (32-byte or 64-byte libsodium format) are incorrectly sized.
-    /// Using 64-byte libsodium keys is more efficient.
-    ///
-    /// Inputs:
-    /// - `request_version` -- Version of the request to build a hash for
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `unix_ts` -- Unix timestamp for the request.
-    ///
-    /// Outputs:
-    /// - `MasterRotatingSignatures` - Struct containing the 64-byte master and rotating signatures.
-    static MasterRotatingSignatures build_sigs(
-            std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
-            sys_ms unix_ts);
-
-    /// API: pro/GenerateProProofRequest::build_to_json
-    ///
-    /// Builds a GenerateProProofRequest and serialize it to JSON. This function is the same as
-    /// filling the struct fields and calling `to_json`.
-    ///
-    /// Inputs:
-    /// - `request_version` -- Version of the request to build a request for
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `rotating_privkey` -- 64-byte libsodium style or 32 byte Ed25519 rotating private key
-    /// - `unix_ts` -- Unix timestamp for the request.
-    ///
-    /// Outputs:
-    /// - `std::string` -- Request serialised to JSON
-    static std::string build_to_json(
-            std::uint8_t request_version,
-            std::span<const uint8_t> master_privkey,
-            std::span<const uint8_t> rotating_privkey,
-            sys_ms unix_ts);
-
-    /// API: pro/GenerateProProofRequest::to_json
-    ///
-    /// Serializes the request to a JSON string.
-    ///
-    /// Outputs:
-    /// - `std::string` - JSON representation of the request.
-    std::string to_json() const;
-};
-
-/// Retrieve the current list of revocations for currently active Session Pro proofs (because of
-/// refunds for example). The caller should maintain this list until the revocation has expiry and
-/// periodically retrieve this list from the backend every hour.
-struct GetProRevocationsRequest {
-    /// Request version. The latest accepted version is 0
-    std::uint8_t version;
-
-    /// 4-byte monotonic integer for the caller's revocation list iteration. Set to 0 if unknown;
-    /// otherwise, use the latest known `ticket` from a prior `GetProRevocationResponse` to allow
-    /// the Session Pro Backend to omit the revocation list if it has not changed.
-    std::uint32_t ticket;
-
-    /// API: pro/GenerateProProofRequest::to_json
-    ///
-    /// Serializes the request to a JSON string.
-    ///
-    /// Outputs:
-    /// - `std::string` - JSON representation of the request.
-    std::string to_json() const;
-};
+/// Build a request for the current Session Pro revocation list (endpoint `get_pro_revocations`).
+/// This request is unsigned. The caller retains each returned item for the response's `retain_for`
+/// window after first seeing it (memory-only aging) and polls again after `retry_in`.
+///
+/// Inputs:
+/// - `ticket` -- 64-bit monotonic revocation-list iteration. Pass 0 if unknown; otherwise the
+/// latest
+///   known `ticket` from a prior `GetProRevocationsResponse`, so the backend may omit an unchanged
+///   list.
+ProRequest revocations_request(std::int64_t ticket);
 
 struct ProRevocationItem {
-    /// 32-byte hash of the generation index, identifying a proof
-    array_uc32 gen_index_hash;
+    /// 32-byte opaque revocation tag identifying a proof
+    array_uc32 revocation_tag;
 
-    /// Unix timestamp when the proof expires
-    sys_ms expiry_unix_ts;
+    /// A matching proof is revoked once the client's clock reaches this unix timestamp (not before)
+    sys_seconds effective_at;
 };
 
-struct GetProRevocationsResponse : public ResponseHeader {
-    /// 4-byte monotonic integer for the latest revocation list iteration.
+struct GetProRevocationsResponse : ResponseBase {
+    /// 64-bit monotonic integer for the latest revocation list iteration.
     /// Update the caller's ticket to this value for subsequent requests.
-    std::uint32_t ticket;
+    std::int64_t ticket;
+
+    /// Recommended interval to wait before polling the revocation list again.
+    std::chrono::seconds retry_in;
+
+    /// How long a client should retain each item after first seeing it, for memory-only local
+    /// aging (roughly the maximum proof-validity window). Applied as `seen + retain_for`; holding
+    /// an entry longer is harmless.
+    std::chrono::seconds retain_for;
 
     /// List of revoked Session Pro proofs
     std::vector<ProRevocationItem> items;
-
-    /// API: pro/GetProRevocationsResponse::parse
-    ///
-    /// Parses a JSON string into the response struct.
-    ///
-    /// Inputs:
-    /// - `json` -- JSON string to parse.
-    ///
-    /// Outputs:
-    /// - The response struct with `status` set to an error state on failure. Errors are stored in
-    ///   `errors`
-    static GetProRevocationsResponse parse(std::string_view json);
 };
 
-struct GetProDetailsRequest {
-    /// Request version for the API
-    std::uint8_t version;
+/// Parse the reply to a `revocations_request`. On failure `status` is set to an error state and
+/// `errors` is populated.
+GetProRevocationsResponse parse_revocations(std::string_view json);
 
-    /// 32-byte Ed25519 master public key to retrieve payments for
-    array_uc32 master_pkey;
+/// Query a master key's Session Pro status (endpoint `get_pro_status`): the account entitlement
+/// state plus its single latest payment -- the hot "am I Pro?" path. `pro_status_sig` computes the
+/// master signature; `pro_status_request` builds the whole request (signing internally) and returns
+/// the endpoint + JSON body. Both throw on an incorrectly-sized key.
+///
+/// Inputs:
+/// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
+/// - `unix_ts` -- Unix timestamp for the request
+array_uc64 pro_status_sig(std::span<const uint8_t> master_privkey, sys_seconds unix_ts);
 
-    /// 64-byte signature proving knowledge of the master public key's secret component
-    array_uc64 master_sig;
+ProRequest pro_status_request(std::span<const uint8_t> master_privkey, sys_seconds unix_ts);
 
-    /// Unix timestamp of the request
-    sys_ms unix_ts;
+/// Query a master key's Session Pro payment history (endpoint `get_payment_details`), one keyset
+/// page at a time. `payment_details_sig` computes the master signature; `payment_details_request`
+/// builds the whole request (signing internally) and returns the endpoint + JSON body. Both throw
+/// on an incorrectly-sized key.
+///
+/// Inputs:
+/// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
+/// - `unix_ts` -- Unix timestamp for the request
+/// - `limit` -- maximum payments to return on this page (the backend may clamp it)
+/// - `before` -- opaque pagination cursor from a previous page's `next_cursor` (see
+///   PaymentDetailsResponse); the empty string requests the newest page. Pass it through verbatim;
+///   it must not be parsed or synthesized.
+array_uc64 payment_details_sig(
+        std::span<const uint8_t> master_privkey,
+        sys_seconds unix_ts,
+        uint32_t limit,
+        std::string_view before);
 
-    /// Max amount of historical payments to request from the backend
-    uint32_t count;
+ProRequest payment_details_request(
+        std::span<const uint8_t> master_privkey,
+        sys_seconds unix_ts,
+        uint32_t limit,
+        std::string_view before);
 
-    /// API: pro/AddProPaymentRequest::build_sigs
-    ///
-    /// Builds the master and rotating signatures using the provided private keys and payment token
-    /// hash. Throws if the keys (32-byte or 64-byte libsodium format) or 32-byte payment token hash
-    /// are passed with an incorrect size. Using 64-byte libsodium keys is more efficient.
-    ///
-    /// Inputs:
-    /// - `request_version` -- Version of the request to build a hash for
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `unix_ts` -- Unix timestamp for the request.
-    /// - `count` -- Amount of historical payments to request
-    ///
-    /// Outputs:
-    /// - `array_uc64` - the 64-byte signature
-    static array_uc64 build_sig(
-            uint8_t version,
-            std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
-            uint32_t count);
+/// Unit of a billing period (the `unit` of a parsed `plan` code, pro-wire-protocol.md §1). A closed
+/// set: the backend emits only these, so an unrecognized code is a protocol error.
+enum class ProPlanUnit { second, day, week, month, year, lifetime };
 
-    /// API: pro/GetProDetailsRequest::build_to_json
-    ///
-    /// Builds a GetProDetailsRequest and serialize it to JSON. This function is the same as filling
-    /// the struct fields and calling `to_json`.
-    ///
-    /// Inputs:
-    /// - `version` -- Version of the request to build a request from
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `unix_ts` -- Unix timestamp for the request.
-    /// - `count` -- Amount of historical payments to request
-    ///
-    /// Outputs:
-    /// - `std::string` -- Request serialised to JSON
-    static std::string build_to_json(
-            std::uint8_t version,
-            std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
-            uint32_t count);
-
-    /// API: pro/GenerateProProofRequest::to_json
-    ///
-    /// Serializes the request to a JSON string.
-    ///
-    /// Outputs:
-    /// - `std::string` - JSON representation of the request.
-    std::string to_json() const;
+/// A parsed `plan` billing-period code. The `unit` is preserved exactly as transmitted and never
+/// canonicalized ("12m" and "1y" are the same duration but distinct values). `count` is meaningful
+/// only for the periodic units and is >= 1; for `lifetime` it is 0 (invariant: count == 0 iff unit
+/// == lifetime), so consumers switch on `unit` and never render "<count> <unit>" for lifetime.
+struct ProPlanPeriod {
+    int count;
+    ProPlanUnit unit;
 };
+
+/// Parse a `plan` billing-period code (pro-wire-protocol.md §1): "<N><unit>" with N a
+/// positive integer (no leading zeros) and unit one of s/d/w/m/y (second/day/week/month/year), or
+/// the literal "lifetime". Single-unit only ("1y6m" is invalid). Returns std::nullopt for any
+/// non-conforming code (the caller treats that as a protocol error).
+std::optional<ProPlanPeriod> parse_plan_period(std::string_view plan_code);
 
 struct ProPaymentItem {
     /// Describes the current status of the consumption of the payment for Session Pro entitlement
@@ -422,87 +344,70 @@ struct ProPaymentItem {
     /// For example, a payment can be in a redeemed state whilst also have a refunded timestamp set
     /// if the payment was refunded and then the refund was reversed. We preserve all timestamps for
     /// book-keeping purposes.
-    SESSION_PRO_BACKEND_PAYMENT_STATUS status;
+    std::string status;
 
-    /// Session Pro product/plan item that was purchased
-    SESSION_PRO_BACKEND_PLAN plan;
+    /// The parsed billing period that was purchased (e.g. "1m" -> {1, month}, "lifetime" -> {0,
+    /// lifetime}). libsession parses the closed `plan` grammar (§1); the client just
+    /// localizes the display. The unit is preserved as transmitted, never canonicalized.
+    ProPlanPeriod plan;
 
-    /// Store front that this particular payment came from
-    SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_provider;
-
-    /// Strings associated with platform's payment provider from
-    /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA`, provided for convenience. This pointer is
-    /// always pointing to valid memory.
-    const session_pro_backend_payment_provider_metadata* payment_provider_metadata =
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_METADATA;
+    /// Provider code this payment came from (e.g. "google_play"); opaque -- an unknown value passes
+    /// through as-is for the client to handle.
+    std::string payment_provider;
 
     /// Flag indicating whether or not this payment will automatically bill itself at the end of the
     /// billing cycle.
     bool auto_renewing;
 
-    /// Unix timestamp of when the payment was witnessed by the Pro Backend. Always set
-    sys_ms unredeemed_unix_ts;
+    /// Provider purchase time (when the upstream provider recorded the purchase). Always set.
+    /// Carries the provider's sub-second precision as a millisecond-resolution `sys_ms`; the wire
+    /// sends it as a float of seconds.
+    sys_ms purchased_at;
 
     /// Unix timestamp of when the payment was redeemed. 0 if not activated
-    sys_ms redeemed_unix_ts;
+    sys_seconds redeemed_at;
 
     /// Unix timestamp of when the payment was expiry. 0 if not activated
-    sys_ms expiry_unix_ts;
+    sys_seconds expiry_at;
 
     /// Duration of the grace period, e.g. when the payment provider will start to attempt to renew
     /// the Session Pro subscription. During the period between
-    /// [expiry_unix_ts, expiry_unix_ts + grace_period_duration_ms] the user continues to have
+    /// [expiry_at, expiry_at + grace_period_duration] the user continues to have
     /// entitlement to Session Pro. This value is only applicable if `auto_renewing` is `true`.
-    std::chrono::milliseconds grace_period_duration_ms;
+    std::chrono::seconds grace_period_duration;
 
     /// Unix deadline timestamp of when the user is able to refund the subscription via the payment
     /// provider. Thereafter the user must initiate a refund manually via Session support.
-    sys_ms platform_refund_expiry_unix_ts;
+    sys_seconds platform_refund_expiry_at;
 
-    /// Unix timestamp of when the payment was revoked or refunded. 0 if not applicable.
-    sys_ms revoked_unix_ts;
+    /// Provider revocation instant (when the payment was revoked). Epoch (0) if not applicable.
+    /// Carries the provider's sub-second precision as a millisecond-resolution `sys_ms`; the wire
+    /// sends it as a float of seconds.
+    sys_ms revoked_at;
 
     /// UNIX timestamp at which a refund request was requested for this payment. This is set to 0
     /// if no refund has been requested for this payment yet.
-    sys_ms refund_requested_unix_ts;
+    sys_seconds refund_requested_at;
 
-    /// When payment provider is set to Google Play Store, this is the platform-specific purchase
-    /// token. This information should be considered as confidential and stored appropriately.
-    std::string google_payment_token;
-
-    /// When payment provider is set to Google Play Store, this is the platform-specific order
-    /// id. This information should be considered as confidential and stored appropriately.
-    std::string google_order_id;
-
-    /// When payment provider is set to iOS App Store, this is the platform-specific original
-    /// transaction ID. This information should be considered as confidential and stored
-    /// appropriately.
-    std::string apple_original_tx_id;
-
-    /// When payment provider is set to iOS App Store, this is the platform-specific transaction ID
-    /// This information should be considered as confidential and stored appropriately.
-    std::string apple_tx_id;
-
-    /// When payment provider is set to iOS App Store, this is the platform-specific web line order
-    /// ID. This information should be considered as confidential and stored appropriately.
-    std::string apple_web_line_order_id;
-
-    /// When payment provider is set to Rangeproof, this is the platform-specific order ID.
-    /// This information should be considered as confidential and stored appropriately.
-    std::string rangeproof_order_id;
+    /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
+    /// parts in per the backend-defined composite -- libsession does not interpret it).
+    /// Confidential; store appropriately.
+    std::string payment_id;
 };
 
-struct GetProDetailsResponse : public ResponseHeader {
-    /// List of payment items for the master public key
-    std::vector<ProPaymentItem> items;
-
+struct ProStatusResponse : ResponseBase {
     /// Current Session Pro entitlement status for the master public key
-    SESSION_PRO_BACKEND_USER_PRO_STATUS user_status;
+    /// ("never"/"active"/"expired"; opaque -- an unknown value passes through as-is).
+    std::string user_status;
+
+    /// The single most-recent payment for the master public key, or std::nullopt when the account
+    /// has no payments. (The full payment history is a separate query -- parse_payment_details.)
+    std::optional<ProPaymentItem> latest_payment;
 
     /// Error code that indicates that the Session Pro Backend encountered an error book-keeping
     /// Session Pro entitlement for the user. If this value is not `SUCCESS` implementing clients
     /// can optionally prompt the user that they should contact support for investigation.
-    SESSION_PRO_BACKEND_GET_PRO_DETAILS_ERROR_REPORT error_report;
+    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
 
     /// Flag to indicate if the user will automatically renew their subscription.
     bool auto_renewing;
@@ -520,10 +425,10 @@ struct GetProDetailsResponse : public ResponseHeader {
     /// some leeway as to the time required for the payment provider to successfully bill the user.
     /// This expiry timestamp is hence calculated as:
     ///
-    ///   expiry_unix_ts_ms = (subscription_expiry_unix_ts + grace_period_duration_ms)
+    ///   expiry_at = subscription_expiry + grace_period_duration
     ///
     /// E.g. The subscription expiry timestamp can be calculated by subtracting
-    /// `grace_period_duration_ms` to determine if the user is currently in a grace period. Some
+    /// `grace_period_duration` to determine if the user is currently in a grace period. Some
     /// platforms do not support a grace period so this value can be 0.
     ///
     /// Finally, a reminder that the grace period is not activated or included in this deadline
@@ -532,144 +437,77 @@ struct GetProDetailsResponse : public ResponseHeader {
     /// This timestamp may be in the past if the user no longer has active payments. Overtime the
     /// Pro Backend may prune user history and so after long lapses of activity, a user's
     /// subscription history may be deleted.
-    sys_ms expiry_unix_ts;
+    sys_seconds expiry_at;
 
     /// Duration that a user is entitled to for their grace period. This value is to be ignored if
     /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
-    /// subtracting `expiry_unix_ts_ms` from this value.
-    std::chrono::milliseconds grace_period_duration;
+    /// subtracting it from `expiry_at`.
+    std::chrono::seconds grace_period_duration;
 
     /// UNIX timestamp at which a refund request was requested by this user. This timestamp comes
     /// from the latest payment that the backend has deemed to be active for the user (e.g. the
-    /// payment associated with the `expiry_unix_ts_ms`). This value is 0 if no refund has been
+    /// payment associated with the `expiry_at`). This value is 0 if no refund has been
     /// requested on the active payment.
-    sys_ms refund_requested_unix_ts;
+    sys_seconds refund_requested_at;
+};
+
+struct PaymentDetailsResponse : ResponseBase {
+    /// One keyset page of the master public key's payment history, newest-first (at most the
+    /// `limit` passed to payment_details_request).
+    std::vector<ProPaymentItem> items;
 
     /// Total number of payments known by the backend for the user. This may be greater than the
-    /// length of items if the request, requested less than the number of payments the user has.
+    /// length of `items` when the requested page did not cover the full history.
     uint32_t payments_total;
 
-    /// API: pro/GetProDetailsResponse::parse
-    ///
-    /// Parses a JSON string into the response struct.
-    ///
-    /// Inputs:
-    /// - `json` -- JSON string to parse.
-    ///
-    /// Outputs:
-    /// - The response struct with `status` set to an error state on failure. Errors are stored in
-    ///   `errors`
-    static GetProDetailsResponse parse(std::string_view json);
+    /// Opaque keyset-pagination cursor for the next (older) page: re-request with this value as
+    /// `before` to continue, and stop when it is std::nullopt (end-of-data). Store and echo it
+    /// verbatim -- it is an encrypted token and MUST NOT be parsed or synthesized (a tampered or
+    /// foreign cursor is rejected). (pro-wire-protocol.md §5.3.)
+    std::optional<std::string> next_cursor;
 };
 
-struct SetPaymentRefundRequestedRequest {
-    /// Request version for the API
-    std::uint8_t version;
+/// Parse the reply to a `pro_status_request`. On failure `status` is set to an error state and
+/// `errors` is populated.
+ProStatusResponse parse_pro_status(std::string_view json);
 
-    /// 32-byte Ed25519 master public key to retrieve payments for
-    array_uc32 master_pkey;
+/// Parse the reply to a `payment_details_request`. On failure `status` is set to an error state and
+/// `errors` is populated.
+PaymentDetailsResponse parse_payment_details(std::string_view json);
 
-    /// 64-byte signature proving knowledge of the master public key's secret component
-    array_uc64 master_sig;
+/// Record a refund request against an existing Session Pro payment (endpoint
+/// `set_payment_refund_requested`). `refund_sig` computes the master signature; `refund_request`
+/// builds the whole request (signing internally) and returns the endpoint + JSON body. Both throw
+/// on an incorrectly-sized key.
+///
+/// Inputs:
+/// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
+/// - `unix_ts` -- Unix timestamp for the request
+/// - `refund_requested_at` -- timestamp to record as when the refund was requested
+/// - `provider_code` -- provider code string the payment is from (see
+///   SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
+/// - `payment_id` -- opaque payment identifier from the provider (hashed verbatim)
+array_uc64 refund_sig(
+        std::span<const uint8_t> master_privkey,
+        sys_seconds unix_ts,
+        sys_seconds refund_requested_at,
+        std::string_view provider_code,
+        std::span<const uint8_t> payment_id);
 
-    /// Unix timestamp of the current time
-    sys_ms unix_ts;
+ProRequest refund_request(
+        std::span<const uint8_t> master_privkey,
+        sys_seconds unix_ts,
+        sys_seconds refund_requested_at,
+        std::string_view provider_code,
+        std::span<const uint8_t> payment_id);
 
-    /// Unix timestamp to set as the timestamp that a refund was requested on this payment.
-    sys_ms refund_requested_unix_ts;
-
-    /// Payment details to set the refund request on
-    AddProPaymentUserTransaction payment_tx;
-
-    /// API: pro/SetPaymentRefundRequested::build_sigs
-    ///
-    /// Builds the signature that must be included in the request to authenticate and permit
-    /// updating the refund requested status of a payment. Throws if the keys (32-byte or
-    /// 64-byte libsodium format) are incorrectly sized. Using 64-byte libsodium keys is more
-    /// efficient.
-    ///
-    /// Inputs:
-    /// - `request_version` -- Version of the request to build a hash for
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `unix_ts` -- Unix timestamp for the request.
-    /// - `refund_requested_unix_ts` -- Unix timestamp to set as the timestamp that a refund was
-    ///   requested on this payment
-    /// - `payment_tx_provider` -- Provider that the payment to set a refund request on is coming
-    ///   from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
-    ///   `AddProPaymentUserTransaction`
-    ///
-    /// Outputs:
-    /// - `array_uc64` - the 64-byte signature
-    static array_uc64 build_sig(
-            uint8_t version,
-            std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
-            sys_ms refund_requested_unix_ts,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
-
-    /// API: pro/SetPaymentRefundRequested::build_to_json
-    ///
-    /// Builds a SetPaymentRefundRequested and serialize it to JSON. This function is the same as
-    /// filling the struct fields and calling `to_json`.
-    ///
-    /// Inputs:
-    /// - `version` -- Version of the request to build a request from
-    /// - `master_privkey` -- 64-byte libsodium style or 32 byte Ed25519 master private key
-    /// - `unix_ts` -- Unix timestamp for the request.
-    /// - `refund_requested_unix_ts` -- Unix timestamp to set as the timestamp that a refund was
-    ///   requested on this payment
-    /// - `payment_tx_provider` -- Provider that the payment to set a refund request on is coming
-    ///   from
-    /// - `payment_tx_payment_id` -- ID that is associated with the payment from the payment
-    ///   provider. See `AddProPaymentUserTransaction`
-    ///   this is the transaction ID).
-    /// - `payment_tx_order_id` -- Order ID that is associated with the payment see
-    ///   `AddProPaymentUserTransaction`
-    ///
-    /// Outputs:
-    /// - `std::string` -- Request serialised to JSON
-    static std::string build_to_json(
-            std::uint8_t version,
-            std::span<const uint8_t> master_privkey,
-            sys_ms unix_ts,
-            sys_ms refund_requested_unix_ts,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER payment_tx_provider,
-            std::span<const uint8_t> payment_tx_payment_id,
-            std::span<const uint8_t> payment_tx_order_id);
-
-    /// API: pro/SetPaymentRefundRequested::to_json
-    ///
-    /// Serializes the request to a JSON string.
-    ///
-    /// Outputs:
-    /// - `std::string` - JSON representation of the request.
-    std::string to_json() const;
-};
-
-struct SetPaymentRefundRequestedResponse : public ResponseHeader {
-    /// Version from the request
-    std::uint8_t version;
-
+struct SetPaymentRefundRequestedResponse : ResponseBase {
     /// True if a payment was found matching the given payment information and that the refund
     /// request unix timestamp was set
     bool updated;
-
-    /// API: pro/SetPaymentRefundRequestedResponse::parse
-    ///
-    /// Parses a JSON string into the response struct.
-    ///
-    /// Inputs:
-    /// - `json` -- JSON string to parse.
-    ///
-    /// Outputs:
-    /// - The response struct with `status` set to an error state on failure. Errors are stored in
-    ///   `errors`
-    static SetPaymentRefundRequestedResponse parse(std::string_view json);
 };
+
+/// Parse the reply to a `refund_request`. On failure `status` is set to an error state and `errors`
+/// is populated.
+SetPaymentRefundRequestedResponse parse_refund(std::string_view json);
 }  // namespace session::pro_backend

@@ -54,6 +54,35 @@
 
 namespace session {
 
+/// Maximum number of UTF-16 code points a standard (non-Pro) message can use; a longer message must
+/// activate the Session Pro higher-character-limit feature. (The C `SESSION_PROTOCOL_*` symbols
+/// point at these.)
+inline constexpr int STANDARD_CHARACTER_LIMIT = 2000;
+/// Maximum number of UTF-16 code points a Session Pro entitled user can send. Not used internally;
+/// provided to centralise the protocol definition for library consumers.
+inline constexpr int PRO_HIGHER_CHARACTER_LIMIT = 10000;
+/// Number of conversations a user without Session Pro can pin.
+inline constexpr int STANDARD_PINNED_CONVERSATION_LIMIT = 5;
+/// Byte multiple a community or 1o1 message `Content` is padded up to before wrapping in an
+/// envelope.
+inline constexpr int COMMUNITY_OR_1O1_MSG_PADDING = 160;
+
+// Session Pro 16-byte signing domain prefixes; each prefixes the Ed25519-signed message for its
+// endpoint (pro-wire-protocol.md §2 proof, §3 signed requests). ASCII, `_`-right-padded to 16
+// bytes (formerly the BLAKE2b personalisation, back when messages were pre-hashed).
+inline constexpr std::string_view GENERATE_PROOF_DOMAIN = "ProGenerateProof";
+inline constexpr std::string_view BUILD_PROOF_DOMAIN = "ProProof_v0_____";
+inline constexpr std::string_view ADD_PRO_PAYMENT_DOMAIN = "ProAddPayment___";
+inline constexpr std::string_view SET_PAYMENT_REFUND_REQUESTED_DOMAIN = "ProSetRefundReq_";
+inline constexpr std::string_view GET_PRO_STATUS_DOMAIN = "ProGetProStatus_";
+inline constexpr std::string_view GET_PAYMENT_DETAILS_DOMAIN = "ProGetPayDetails";
+static_assert(GENERATE_PROOF_DOMAIN.size() == 16);
+static_assert(BUILD_PROOF_DOMAIN.size() == 16);
+static_assert(ADD_PRO_PAYMENT_DOMAIN.size() == 16);
+static_assert(SET_PAYMENT_REFUND_REQUESTED_DOMAIN.size() == 16);
+static_assert(GET_PRO_STATUS_DOMAIN.size() == 16);
+static_assert(GET_PAYMENT_DETAILS_DOMAIN.size() == 16);
+
 enum ProProofVersion { ProProofVersion_v0 };
 
 enum class ProStatus {
@@ -75,8 +104,8 @@ class ProProof {
     /// Version of the proof set by the Session Pro Backend
     std::uint8_t version;
 
-    /// Hash of the generation index set by the Session Pro Backend
-    array_uc32 gen_index_hash;
+    /// Opaque revocation tag identifying this proof (from the Session Pro backend)
+    array_uc32 revocation_tag;
 
     /// The public key that the Session client registers their Session Pro entitlement under.
     /// Session clients must sign messages with this key along side the sending of this proof for
@@ -84,7 +113,7 @@ class ProProof {
     array_uc32 rotating_pubkey;
 
     /// Unix epoch timestamp to which this proof's entitlement to Session Pro features is valid to
-    sys_ms expiry_unix_ts;
+    sys_seconds expiry_at;
 
     /// Signature over the contents of the proof. It is signed by the Session Pro Backend key which
     /// is the entity responsible for issueing tamper-proof Sesison Pro certificates for Session
@@ -125,15 +154,15 @@ class ProProof {
     /// API: pro/Proof::is_active
     ///
     /// Check if Pro proof is currently entitled to Pro given the `unix_ts` with respect to the
-    /// proof's `expiry_unix_ts`
+    /// proof's `expiry_at`
     ///
     /// Inputs:
-    /// - `unix_ts` -- Unix timestamp to compare against the embedded `expiry_unix_ts`
+    /// - `unix_ts` -- Unix timestamp to compare against the embedded `expiry_at`
     ///   to determine if the proof has expired or not
     ///
     /// Outputs:
     /// - `bool` - True if proof is active (i.e. has not expired), false otherwise.
-    bool is_active(sys_ms unix_ts) const;
+    bool is_active(sys_seconds unix_ts) const;
 
     /// API: pro/Proof::status
     ///
@@ -148,7 +177,7 @@ class ProProof {
     /// Inputs:
     /// - `verify_pubkey` -- 32 byte Ed25519 public key of the corresponding secret key to check if
     ///   they are the original signatory of the proof.
-    /// - `unix_ts` -- Unix timestamp to compared against the embedded `expiry_unix_ts`
+    /// - `unix_ts` -- Unix timestamp to compared against the embedded `expiry_at`
     ///   to determine if the proof has expired or not
     /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
     ///   the embedded `rotating_pubkey` in the proof signed the given message.
@@ -159,17 +188,19 @@ class ProProof {
     ///   possible enum values. Otherwise this funtion can return all possible values.
     ProStatus status(
             std::span<const uint8_t> verify_pubkey,
-            sys_ms unix_ts,
+            sys_seconds unix_ts,
             const std::optional<ProSignedMessage>& signed_msg);
 
-    /// API: pro/Proof::hash
+    /// API: pro/Proof::signed_message
     ///
-    /// Create a 32-byte hash from the proof. This hash is the payload that is signed in the proof.
-    array_uc32 hash() const;
+    /// Build the exact byte string that the backend signs to produce this proof's `sig`, and that
+    /// verification reconstructs to check it (pro-wire-protocol.md §2, per §1.1). The message is
+    /// Ed25519-signed directly — there is no pre-hash.
+    std::vector<unsigned char> signed_message() const;
 
     bool operator==(const ProProof& other) const {
-        return version == other.version && gen_index_hash == other.gen_index_hash &&
-               rotating_pubkey == other.rotating_pubkey && expiry_unix_ts == other.expiry_unix_ts &&
+        return version == other.version && revocation_tag == other.revocation_tag &&
+               rotating_pubkey == other.rotating_pubkey && expiry_at == other.expiry_at &&
                sig == other.sig;
     }
 };
@@ -340,9 +371,9 @@ struct DecodeEnvelopeKey {
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `utf` -- the UTF8 string to count the number of codepoints in to determine if it needs the
+/// - `text` -- the UTF8 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
-/// - `utf_size` -- the size of the message in UTF8 code units to determine if the message requires
+/// - `text_size` -- the size of the message in UTF8 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
 ///
 /// Outputs:
@@ -353,16 +384,17 @@ struct DecodeEnvelopeKey {
 /// - `features` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size);
+ProFeaturesForMsg pro_features_for_utf8(const char* text, size_t text_size);
 
 /// API: session_protocol/pro_features_for_utf16
 ///
 /// Determine the Pro features that are used in a given conversation message.
 ///
 /// Inputs:
-/// - `utf` -- the UTF16 string to count the number of codepoints in to determine if it needs the
+/// - `text` -- the UTF16 string to count the number of codepoints in to determine if it needs the
 ///   higher character limit available in Session Pro
-/// - `utf_size` -- the size of the message in UTF16 code units to determine if the message requires
+/// - `text_size` -- the size of the message in UTF16 code units to determine if the message
+/// requires
 ///   access to the higher character limit available in Session Pro
 ///
 /// Outputs:
@@ -373,7 +405,7 @@ ProFeaturesForMsg pro_features_for_utf8(const char* utf, size_t utf_size);
 /// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf16(const char16_t* utf, size_t utf_size);
+ProFeaturesForMsg pro_features_for_utf16(const char16_t* text, size_t text_size);
 
 /// API: session_protocol/pad_message
 ///
@@ -637,10 +669,6 @@ DecodedEnvelope decode_envelope(
 ///   access to pro features if it's using any.
 DecodedCommunityMessage decode_for_community(
         std::span<const uint8_t> content_or_envelope_payload,
-        sys_ms unix_ts,
+        sys_seconds unix_ts,
         const array_uc32& pro_backend_pubkey);
-
-/// Initialiser the blake2b hashing context to generate 32 byte hashes for Session Pro features.
-void make_blake2b32_hasher(
-        struct crypto_generichash_blake2b_state* hasher, std::string_view personalization);
 }  // namespace session

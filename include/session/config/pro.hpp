@@ -14,7 +14,7 @@ namespace session::config {
 ///   |     |
 ///   |     +-- @ - version
 ///   |     +-- e - expiry unix timestamp (in milliseconds)
-///   |     +-- g - gen_index_hash
+///   |     +-- g - revocation_tag
 ///   |     +-- s - proof signature, signed by the Session Pro Backend's ed25519 key
 ///   |
 ///   +-- r - rotating ed25519 seed (32b)
