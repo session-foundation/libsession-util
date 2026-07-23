@@ -19,24 +19,41 @@ namespace session::network::open_group_server {
 constexpr std::string_view ENDPOINT_ROOM = "room/{}";
 constexpr std::string_view ENDPOINT_FILE = "room/{}/file/{}";
 
+// Some clients (e.g. older Android versions) generate community file download urls without the
+// room segment (`{base_url}/file/{file_id}`). We accept these as a fallback so their attachments
+// remain downloadable.
+constexpr std::string_view LEGACY_ENDPOINT_FILE = "file/{}";
+
 std::optional<DownloadInfo> parse_download_url(std::string_view url) {
     // Expected format: {base_url}/room/{room}/file/{file_id}(?:#d)
     // Examples:
-    //   https://example.com/room/file/123
-    //   https://example.com/room/file/123#d
+    //   https://example.com/room/test/file/123
+    //   https://example.com/room/test/file/123#d
+    // Legacy fallback (no room, e.g. from older Android clients): {base_url}/file/{file_id}
+    //   https://example.com/file/123
     DownloadInfo info{};
-
-    auto match = backends::match_endpoint(ENDPOINT_FILE, url);
-
-    if (!match || match->base.empty() || match->captures.size() != 2)
-        return std::nullopt;
-
-    info.room = std::string{match->captures[0]};
 
     int64_t file_id;
 
-    if (!quic::parse_int(match->captures[1], file_id))
-        return std::nullopt;
+    auto match = backends::match_endpoint(ENDPOINT_FILE, url);
+
+    if (match && !match->base.empty() && match->captures.size() == 2) {
+        info.room = std::string{match->captures[0]};
+
+        if (!quic::parse_int(match->captures[1], file_id))
+            return std::nullopt;
+    } else {
+        // Fall back to the legacy room-less endpoint. The room can't be recovered from such a url
+        // so it's left empty for the caller to populate from context (the conversation the
+        // attachment belongs to).
+        match = backends::match_endpoint(LEGACY_ENDPOINT_FILE, url);
+
+        if (!match || match->base.empty() || match->captures.size() != 1)
+            return std::nullopt;
+
+        if (!quic::parse_int(match->captures[0], file_id))
+            return std::nullopt;
+    }
 
     info.file_id = file_id;
     info.base_url = match->base;
