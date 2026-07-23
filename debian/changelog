@@ -1,3 +1,11 @@
+libsession-util (1.6.7-1~ubuntu2604) resolute; urgency=medium
+
+  [ Morgan Pretty ]
+  * Fall back to room-less file URL format when parsing open group download URLs
+  * Bumped the version number
+
+ -- Jason Rhinelander <jason@session.foundation>  Thu, 23 Jul 2026 00:51:06 -0300
+
 libsession-util (1.6.6-1~ubuntu2604) resolute; urgency=medium
 
   * Add missing header
