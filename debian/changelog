@@ -1,3 +1,11 @@
+libsession-util (1.6.7-1~deb14) forky; urgency=medium
+
+  [ Morgan Pretty ]
+  * Fall back to room-less file URL format when parsing open group download URLs
+  * Bumped the version number
+
+ -- Jason Rhinelander <jason@session.foundation>  Thu, 23 Jul 2026 00:50:59 -0300
+
 libsession-util (1.6.6-1~deb14) forky; urgency=medium
 
   * Add missing header
