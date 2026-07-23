@@ -50,6 +50,9 @@ namespace {
         if (main_config.custom_file_server_host)
             file_server_config.host = *main_config.custom_file_server_host;
 
+        if (main_config.custom_file_server_pubkey_hex)
+            file_server_config.pubkey_hex = *main_config.custom_file_server_pubkey_hex;
+
         if (main_config.custom_file_server_port)
             file_server_config.port = *main_config.custom_file_server_port;
 
