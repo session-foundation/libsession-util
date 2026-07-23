@@ -731,7 +731,7 @@ TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
 // ---------------------------------------------------------------------------
 // Known-answer vectors (tag [pro_kat]) -- SERVER-LESS (runs in an ordinary testAll build).
 //
-// These pin libsession's signed-message construction (wire spec 1.1 / 2 / 3.1-3.4, Delta #13) to
+// These pin libsession's signed-message construction (wire spec §1.1 / §2 / §3) to
 // fixed byte vectors that were generated from the backend's *independent* implementation and then
 // hand-verified against the spec layout (generator: tests/pro_backend/gen_kat.py). The live
 // [pro_live] suite catches libsession<->backend *drift*; a KAT additionally catches a fault where
@@ -775,7 +775,7 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
             "01"
             "b40f6f5c8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b39431373030303030"
             "303030";
-    // Delta #15: get_pro_details split into get_pro_status (master + ts) and paginated
+    // get_pro_details is split (§3.4) into get_pro_status (master + ts) and paginated
     // get_payment_details (master + ts + limit + before). Two details vectors pin the `before`
     // framing: empty `before` (newest page) ends in the adjacency \0; a non-empty cursor is the
     // opaque final field (no trailing separator).
@@ -1135,7 +1135,7 @@ static std::array<std::byte, 32> fetch_backend_pubkey(const PostFn& transport) {
 // The core wire-contract flow: build *real* requests with the C++ API, send them over onion to a
 // backend that redeems a witnessed (seeded) payment, and check every response parses + the issued
 // proofs verify against the backend's signing key. Any signed-message drift on either side (field
-// order, integer encoding, `\0` framing, domain prefix -- Delta #13 signs the message bytes
+// order, integer encoding, `\0` framing, domain prefix -- the scheme signs the message bytes
 // directly, no hash) or a renamed JSON key breaks this. Runs the whole flow once per provider via
 // SECTIONs: google_play exercises the composite "token|order_id" payment_id, app_store the plain tx
 // id. Each SECTION uses fresh keys + a freshly-seeded payment, so the runs are independent on the
@@ -1213,7 +1213,7 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
     // Same subscription epoch -> the fresh proof shares the add-payment proof's revocation_tag.
     CHECK(gen.proof.revocation_tag == add.proof.revocation_tag);
 
-    // 2) get_pro_status (Delta #15): account ACTIVE, no refund yet, and the single latest payment
+    // 2) get_pro_status: account ACTIVE, no refund yet, and the single latest payment
     //    is our redeemed one.
     ProStatusResponse status = parse_pro_status(send(onion, pro_status_request(master_sk, now)));
     INFO("get_pro_status " << status.error.value_or(""));
@@ -1223,12 +1223,12 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
     REQUIRE(status.latest_payment.has_value());
     CHECK(status.latest_payment->payment_id == payment_id);
     CHECK(status.latest_payment->payment_provider == provider);
-    // plan is the parsed billing period (Delta #14): "1m" -> {count 1, month}.
+    // plan is the parsed billing period (§1): "1m" -> {count 1, month}.
     CHECK(status.latest_payment->plan.count == 1);
     CHECK(status.latest_payment->plan.unit == ProPlanUnit::month);
     CHECK(status.latest_payment->status == "redeemed");
 
-    // 2b) get_payment_details (Delta #15): newest page (empty cursor) carries our payment. This
+    // 2b) get_payment_details: newest page (empty cursor) carries our payment. This
     //     master has exactly one payment, so it fits in one page and next_cursor is empty.
     PaymentDetailsResponse det =
             parse_payment_details(send(onion, payment_details_request(master_sk, now, 10, "")));
