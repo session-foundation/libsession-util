@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the known-answer vectors asserted by the [pro_kat] test in tests/test_pro_backend.cpp.
 
-These pin libsession's signed-message construction (wire spec 1.1 / 2 / 3.1-3.4, Delta #13). The
+These pin libsession's signed-message construction (wire spec §1.1 / §2 / §3). The
 vectors are produced here from the *backend's* independent implementation (backend.signed_message +
 the make_*_message / build_proof_message builders) for fixed, deterministic inputs, then hand-verified
 against the spec field layout before being frozen into the C++ test. Re-run this if the signed-message
@@ -48,7 +48,7 @@ def main():
     add_msg = backend.signed_message(
         backend.ADD_PRO_PAYMENT_DOMAIN, mpk, rpk, provider.value, pid)
     gen_msg = backend.make_generate_pro_proof_message(mpk, rpk, ts)
-    # Delta #15: get_pro_details split into get_pro_status + paginated get_payment_details.
+    # get_pro_details read request is split (§3.4) into get_pro_status + paginated get_payment_details.
     status_msg = backend.make_get_pro_status_message(mpk, ts)
     # Two payment_details cases: empty `before` (newest page) ends in the adjacency `\0`;
     # a non-empty `before` appends the opaque cursor verbatim as the final field (no trailing sep).

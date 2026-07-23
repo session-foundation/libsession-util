@@ -206,7 +206,7 @@ local windows_cross_pipeline(name,
 // and run the [pro_live] suite against it. The backend is a separate Python service, checked out at
 // a pinned ref (repos stay decoupled — CI keeps its own clone).
 local pro_backend_git = 'https://github.com/session-foundation/session-pro-backend.git';
-local pro_backend_ref = 'phase2-foundation';  // bump/pin as the backend advances in lockstep
+local pro_backend_ref = 'dev';  // track upstream mainline (session-foundation dev) -- the [pro_live] drift check is meant to follow it
 
 // Extra apt packages (beyond the standard test deps) the live Pro-backend step needs: postgres, the
 // session-router key tool, the backend's python3-* runtime, and clone/venv tooling.
