@@ -44,6 +44,24 @@ TEST_CASE("Download url parsing", "[backend][session_open_group_server]") {
     CHECK(parsed_download_url->file_id == 123);
     CHECK_FALSE(parsed_download_url->wants_stream_decryption);
 
+    // Falls back to the legacy room-less format (used by some older clients, e.g. Android),
+    // leaving the room empty for the caller to populate from context
+    parsed_download_url = open_group_server::parse_download_url("https://example.com/file/123"sv);
+    REQUIRE(parsed_download_url.has_value());
+    CHECK(parsed_download_url->base_url == "https://example.com"sv);
+    CHECK(parsed_download_url->room.empty());
+    CHECK(parsed_download_url->file_id == 123);
+    CHECK_FALSE(parsed_download_url->wants_stream_decryption);
+
+    // Handles the legacy room-less format with a trailing slash and stream-decryption fragment
+    parsed_download_url =
+            open_group_server::parse_download_url("https://example.com/file/123/#d"sv);
+    REQUIRE(parsed_download_url.has_value());
+    CHECK(parsed_download_url->base_url == "https://example.com"sv);
+    CHECK(parsed_download_url->room.empty());
+    CHECK(parsed_download_url->file_id == 123);
+    CHECK(parsed_download_url->wants_stream_decryption);
+
     // Doesn't have an issue with a url that isn't in the right format
     parsed_download_url =
             open_group_server::parse_download_url("https://example.com/test/test2/test3/5432"sv);
