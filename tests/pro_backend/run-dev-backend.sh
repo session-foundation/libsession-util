@@ -23,6 +23,14 @@
 #
 set -euo pipefail
 
+# Force a UTF-8 locale for the ephemeral cluster and every DB client. Backend migration SQL contains
+# non-ASCII bytes (e.g. an em-dash in a comment); psycopg encodes each query with the connection's
+# client encoding, which follows the DB/locale. A minimal CI container often runs a C/POSIX locale ->
+# ASCII client encoding -> `UnicodeEncodeError: 'ascii' codec can't encode '—'` while bootstrapping
+# the DB. C.UTF-8 is always present in glibc (no locale-gen needed), so this makes initdb build a UTF8
+# cluster and flask/seed/psql all speak UTF-8, matching production. Overrides any inherited C locale.
+export LC_ALL=C.UTF-8 LANG=C.UTF-8
+
 TESTALL="${1:?usage: run-dev-backend.sh <testAll binary> [catch2 args...]}"
 shift || true
 BACKEND_DIR="${SESSION_PRO_BACKEND_DIR:-$HOME/src/session-pro-backend-itest}"
@@ -56,7 +64,7 @@ echo ">> ephemeral signing key: $KEYFILE"
 session-router-config -f -k "$KEYFILE" >/dev/null
 
 echo ">> initdb: $PGDATA"
-"$PGBIN/initdb" -D "$PGDATA" --auth-local=trust --no-instructions -U "$USER" >/dev/null
+"$PGBIN/initdb" -D "$PGDATA" --encoding=UTF8 --auth-local=trust --no-instructions -U "$USER" >/dev/null
 
 echo ">> start postgres (unix socket in $WORK, port $PORT)"
 "$PGBIN/pg_ctl" -D "$PGDATA" -l "$PG_LOG" \
