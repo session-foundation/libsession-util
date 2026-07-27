@@ -101,9 +101,13 @@ inline std::string to_string(const Container& c) {
     return convert<std::string>(c);
 }
 
-template <typename OutChar = char, typename Container>
+template <typename Container>
+    requires requires(const Container& c) {
+        requires sizeof(*c.data()) == 1;
+        { c.size() } -> std::convertible_to<std::size_t>;
+    }
 inline std::string_view to_string_view(const Container& c) {
-    return {reinterpret_cast<const OutChar*>(c.data()), c.size()};
+    return {reinterpret_cast<const char*>(c.data()), static_cast<size_t>(c.size())};
 }
 
 /// Returns a fixed-extent std::byte span viewing N bytes starting at p.  Primarily useful for
