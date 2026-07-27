@@ -554,6 +554,13 @@ GetProRevocationsResponse parse_revocations(std::string_view json) {
     result.retry_in = std::chrono::seconds(json_require<int64_t>(result_obj, "retry_in", errs));
     result.retain_for = std::chrono::seconds(json_require<int64_t>(result_obj, "retain_for", errs));
 
+    // Clamp values against non-sensical/catastrophic values: retry_in of very small would result in
+    // excess retries, and an overly long retry (e.g. 10 years) would make the client not properly
+    // refresh at all.  The retain_for clamp is deliberately larger because that is only a hint as
+    // to when the record can be cleaned up.
+    result.retry_in = std::clamp<std::chrono::seconds>(result.retry_in, 60s, 48h);
+    result.retain_for = std::clamp<std::chrono::seconds>(result.retain_for, 24h, 365 * 24h);
+
     auto array = json_require<nlohmann::json::array_t>(result_obj, "items", errs);
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {

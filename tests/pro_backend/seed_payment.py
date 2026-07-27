@@ -67,10 +67,20 @@ def _payment_tx(provider, payment_id):
 
 
 def _obfuscated_id(provider, vk):
+    # The witnessed `platform_obfuscated_account_id` must equal what the backend recomputes from the
+    # request-signed master key at redeem time (backend.py add_pro_payment binding), per provider.
     if provider == "google_play":
-        return backend.google_obfuscated_account_id_from_master_pkey(vk)
+        # Google: the client sets setObfuscatedAccountId to the master pubkey verbatim, so the
+        # attested id IS the raw 32-byte master pubkey; the redeem binds by byte-equality.
+        return bytes(vk)
     if provider == "app_store":
-        return backend.apple_obfuscated_account_id_from_master_pkey(vk)
+        # Apple: appAccountToken = UUID(first 16 bytes of the master pubkey); the redeem binds by
+        # equality against the same recomputed UUID (stored lowercased on receipt). Import the Apple
+        # provider lazily -- its module pulls the Apple SDK -- so seeding a non-Apple payment doesn't
+        # need it.
+        from providers import app_store
+
+        return app_store.uuid_from_master_pk(bytes(vk)).lower()
     return b""
 
 
