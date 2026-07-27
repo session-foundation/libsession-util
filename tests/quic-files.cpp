@@ -4,7 +4,6 @@
 #include <sodium/randombytes.h>
 
 #include <CLI/CLI.hpp>
-#include <any>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -267,7 +266,7 @@ int run(const CliArgs& args, bool is_upload) {
                      (args.testnet ? "quic_files_cache_testnet" : "quic_files_cache");
     std::filesystem::create_directories(cache_dir);
 
-    std::vector<std::any> net_opts;
+    std::vector<net::opt::any> net_opts;
     net_opts.push_back(netid);
     net_opts.push_back(router);
     net_opts.push_back(net::opt::cache_directory{cache_dir});

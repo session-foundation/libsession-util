@@ -1,8 +1,8 @@
 #include "session/network/network_config.hpp"
 
-#include <any>
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <variant>
 
 using namespace oxen;
 using namespace oxen::log::literals;
@@ -11,69 +11,9 @@ namespace session::network::config {
 
 inline auto cat = oxen::log::Cat("network");
 
-Config::Config(const std::vector<std::any>& opts) {
-    for (const auto& opt_any : opts) {
-#define HANDLE_TYPE(T)                                \
-    if (const auto* p = std::any_cast<T>(&opt_any)) { \
-        handle_config_opt(*p);                        \
-        continue;                                     \
-    }
-
-        HANDLE_TYPE(opt::netid);
-        HANDLE_TYPE(opt::router);
-        HANDLE_TYPE(opt::transport);
-
-        // File server options
-        HANDLE_TYPE(opt::file_server_scheme);
-        HANDLE_TYPE(opt::file_server_host);
-        HANDLE_TYPE(opt::file_server_port);
-        HANDLE_TYPE(opt::file_server_pubkey_hex);
-        HANDLE_TYPE(opt::file_server_max_file_size);
-        HANDLE_TYPE(opt::file_server_use_stream_encryption);
-
-        // QUIC file server options
-        HANDLE_TYPE(opt::quic_file_server_ed_pubkey);
-        HANDLE_TYPE(opt::quic_file_server_address);
-        HANDLE_TYPE(opt::quic_file_server_port);
-
-        // General options
-        HANDLE_TYPE(opt::increase_no_file_limit);
-        HANDLE_TYPE(opt::path_length);
-        HANDLE_TYPE(opt::disable_subnet_diversity);
-        HANDLE_TYPE(opt::redirect_retry_count);
-        HANDLE_TYPE(opt::retry_delay);
-        HANDLE_TYPE(opt::num_nodes_to_check_for_network_offset);
-        HANDLE_TYPE(opt::min_resume_clock_resync_interval);
-
-        // Snode pool options
-        HANDLE_TYPE(opt::cache_directory);
-        HANDLE_TYPE(opt::fallback_snode_pool_path);
-        HANDLE_TYPE(opt::cache_expiration);
-        HANDLE_TYPE(opt::cache_min_lifetime);
-        HANDLE_TYPE(opt::cache_min_size);
-        HANDLE_TYPE(opt::cache_min_swarm_size);
-        HANDLE_TYPE(opt::cache_num_nodes_to_use_for_refresh);
-        HANDLE_TYPE(opt::cache_min_num_refresh_presence_to_include_node);
-        HANDLE_TYPE(opt::cache_node_strike_threshold);
-
-        // Quic transport options
-        HANDLE_TYPE(opt::quic_handshake_timeout);
-        HANDLE_TYPE(opt::quic_keep_alive);
-        HANDLE_TYPE(opt::quic_max_udp_payload);
-
-        // Onion request router options
-        HANDLE_TYPE(opt::onionreq_path_strike_threshold);
-        HANDLE_TYPE(opt::onionreq_min_path_count);
-        HANDLE_TYPE(opt::onionreq_single_path_mode);
-        HANDLE_TYPE(opt::onionreq_disable_pre_build_paths);
-        HANDLE_TYPE(opt::onionreq_path_build_retry_limit);
-        HANDLE_TYPE(opt::onionreq_path_rotation_frequency);
-        HANDLE_TYPE(opt::onionreq_edge_node_cache_duration);
-
-        log::warning(cat, "Ignoring unknown option type in Config constructor");
-#undef HANDLE_TYPE
-    }
-
+Config::Config(const std::vector<opt::any>& opts) {
+    for (const auto& o : opts)
+        std::visit([this](const auto& option) { handle_config_opt(option); }, o);
     _init();
 }
 

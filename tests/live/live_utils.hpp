@@ -38,7 +38,7 @@ inline std::shared_ptr<session::network::Network> make_testnet_network(
         std::filesystem::path cache_dir) {
     namespace opt = session::network::opt;
 
-    std::vector<std::any> net_opts;
+    std::vector<opt::any> net_opts;
     net_opts.push_back(opt::netid::testnet());
     net_opts.push_back(live_router_mode);
     net_opts.push_back(opt::cache_directory{std::move(cache_dir)});

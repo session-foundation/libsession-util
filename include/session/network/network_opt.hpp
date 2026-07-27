@@ -1,6 +1,8 @@
 #pragma once
 
 #include <filesystem>
+#include <type_traits>
+#include <variant>
 
 #include "session/network/service_node.hpp"
 #include "session/network/session_network_types.hpp"
@@ -24,11 +26,9 @@ namespace opt {
         }
     }  // namespace
 
-    struct base {};
-
     /// Can be used to override the default (mainnet) netid that the network will populate it's
     /// internal caches from, 'devnet' allows for specifying a custom server.
-    struct netid : base {
+    struct netid {
         enum class Target {
             mainnet,
             testnet,
@@ -135,7 +135,7 @@ namespace opt {
     };
 
     /// Can be used to override the default (onion_requests) routing method for requests.
-    struct router : base {
+    struct router {
         enum class Type {
             onion_requests,
             session_router,
@@ -156,7 +156,7 @@ namespace opt {
     };
 
     /// Can be used to override the default (quic_onionreq) transport layer used to send requests.
-    struct transport : base {
+    struct transport {
         enum class Type {
             quic,
         };
@@ -174,28 +174,28 @@ namespace opt {
     };
 
     /// Can be used to override the default file server scheme.
-    struct file_server_scheme : base {
+    struct file_server_scheme {
         std::string scheme;
 
         file_server_scheme(std::string scheme) : scheme{scheme} {}
     };
 
     /// Can be used to override the default file server host.
-    struct file_server_host : base {
+    struct file_server_host {
         std::string host;
 
         file_server_host(std::string host) : host{host} {}
     };
 
     /// Can be used to override the default file server port.
-    struct file_server_port : base {
+    struct file_server_port {
         uint16_t port;
 
         file_server_port(uint16_t port) : port{port} {}
     };
 
     /// Can be used to override the default file server pubkey.
-    struct file_server_pubkey_hex : base {
+    struct file_server_pubkey_hex {
         std::string pubkey_hex;
 
         file_server_pubkey_hex(std::string pubkey_hex) : pubkey_hex{pubkey_hex} {}
@@ -205,7 +205,7 @@ namespace opt {
     ///
     /// Note: This value is limited by the configuration on the file server, changing it will only
     /// result in checks that prevent requests we know will fail from being made.
-    struct file_server_max_file_size : base {
+    struct file_server_max_file_size {
         uint64_t max_file_size;
 
         file_server_max_file_size(uint16_t max_file_size) : max_file_size{max_file_size} {}
@@ -213,7 +213,7 @@ namespace opt {
 
     /// Can be used to override the default (false) flag indicating whether files uploaded to the
     /// file server should use XChaCha20-stream based encryption.
-    struct file_server_use_stream_encryption : base {
+    struct file_server_use_stream_encryption {
         bool use_stream_encryption;
 
         file_server_use_stream_encryption(bool use_stream_encryption) :
@@ -221,11 +221,11 @@ namespace opt {
     };
 
     /// Can be used to attempt to increase the NOFILE limit (can cause issues with automated tests).
-    struct increase_no_file_limit : base {};
+    struct increase_no_file_limit {};
 
     /// Can be used to override the default (3) path length used when building onion request or
     /// session router paths.
-    struct path_length : base {
+    struct path_length {
         uint8_t length;
 
         path_length(uint8_t length) : length{length} {}
@@ -233,17 +233,17 @@ namespace opt {
 
     /// Can be used to prevent the code from excluding nodes within the same `/24` subnet from being
     /// included in the same path when building onion request or session router paths.
-    struct disable_subnet_diversity : base {};
+    struct disable_subnet_diversity {};
 
     /// Can be used to override the default (1) number of request retries that will occur when
     /// receiving a 421 error.
-    struct redirect_retry_count : base {
+    struct redirect_retry_count {
         uint8_t count;
 
         redirect_retry_count(uint8_t count) : count{count} {}
     };
 
-    struct retry_delay : base {
+    struct retry_delay {
         std::chrono::milliseconds base_delay;
         std::chrono::milliseconds max_delay;
 
@@ -270,7 +270,7 @@ namespace opt {
 
     /// Can be used to override the default (3) number of nodes to fetch from when determining the
     /// median network offset from the local device time.
-    struct num_nodes_to_check_for_network_offset : base {
+    struct num_nodes_to_check_for_network_offset {
         uint8_t count;
 
         num_nodes_to_check_for_network_offset(uint8_t count) : count{count} {}
@@ -278,7 +278,7 @@ namespace opt {
 
     /// Can be used to override the default (10min) minimum duration that needs to pass before a
     /// clock resync after resuming the network.
-    struct min_resume_clock_resync_interval : base {
+    struct min_resume_clock_resync_interval {
         std::chrono::minutes duration;
 
         min_resume_clock_resync_interval(std::chrono::minutes duration) : duration{duration} {}
@@ -288,21 +288,21 @@ namespace opt {
 
     /// Can be used to override the default ('.') path the network uses to cache files (eg. snode
     /// pool and session router bootstrap).
-    struct cache_directory : base {
+    struct cache_directory {
         fs::path path;
         cache_directory(fs::path p) : path{p} {}
     };
 
     /// Can be used to specify a path to a snode pool cache file that should be used if we are
     /// unable to bootstrap.
-    struct fallback_snode_pool_path : base {
+    struct fallback_snode_pool_path {
         fs::path path;
         fallback_snode_pool_path(fs::path p) : path{p} {}
     };
 
     /// Can be used to override the default (2h) duration that the snode cache can be used for
     /// before it needs to be refreshed.
-    struct cache_expiration : base {
+    struct cache_expiration {
         std::chrono::minutes duration;
         cache_expiration(std::chrono::minutes duration) : duration{duration} {}
     };
@@ -310,7 +310,7 @@ namespace opt {
     /// Can be used to override the default (2s) minimum duration that the snode cache should live
     /// for, if a refresh is triggered within this period it will be delayed until the minimum
     /// duration has passed to prevent excessive looping.
-    struct cache_min_lifetime : base {
+    struct cache_min_lifetime {
         std::chrono::milliseconds duration;
         cache_min_lifetime(std::chrono::milliseconds duration) : duration{duration} {}
     };
@@ -321,7 +321,7 @@ namespace opt {
     /// Note: If the cache size is somehow smaller than this value (eg. Testnet is having issues)
     /// then the minimum size will be the full cache size (minus enough to build a path) or at least
     /// the size of a single path.
-    struct cache_min_size : base {
+    struct cache_min_size {
         size_t size;
         cache_min_size(size_t size) : size{size} {}
     };
@@ -329,7 +329,7 @@ namespace opt {
     /// Can be used to override the default (3) minimum number of nodes to return in a swarm, if
     /// enough nodes are excluded due to their strike count when retrieving a swarm then nodes which
     /// are over the threshold will be included until this minimum count is met.
-    struct cache_min_swarm_size : base {
+    struct cache_min_swarm_size {
         size_t size;
         cache_min_swarm_size(size_t size) : size{size} {}
     };
@@ -339,7 +339,7 @@ namespace opt {
     ///
     /// Note: Providing a value of `0` will result in the cache _always_ being refreshed using a
     /// seed node.
-    struct cache_num_nodes_to_use_for_refresh : base {
+    struct cache_num_nodes_to_use_for_refresh {
         uint8_t count;
         cache_num_nodes_to_use_for_refresh(uint8_t count) : count{count} {}
     };
@@ -349,7 +349,7 @@ namespace opt {
     ///
     /// Note: This does not apply when refreshing from seed nodes. A value of `0` is equivalet to a
     /// value of `1`.
-    struct cache_min_num_refresh_presence_to_include_node : base {
+    struct cache_min_num_refresh_presence_to_include_node {
         uint8_t count;
         cache_min_num_refresh_presence_to_include_node(uint8_t count) : count{count} {}
     };
@@ -357,7 +357,7 @@ namespace opt {
     /// Can be used to override the default (3) number of times a specific node in a path can
     /// receive an error before it is removed from the path and replaced by a new node (or the path
     /// is rebuilt if it happens to be the edge node).
-    struct cache_node_strike_threshold : base {
+    struct cache_node_strike_threshold {
         uint16_t count;
         cache_node_strike_threshold(uint16_t count) : count{count} {}
     };
@@ -365,19 +365,19 @@ namespace opt {
     // MARK: QUIC File Server Options
 
     /// Can be used to override the default QUIC file server Ed25519 pubkey (hex).
-    struct quic_file_server_ed_pubkey : base {
+    struct quic_file_server_ed_pubkey {
         std::string pubkey_hex;
         quic_file_server_ed_pubkey(std::string pubkey_hex) : pubkey_hex{std::move(pubkey_hex)} {}
     };
 
     /// Can be used to specify the direct address (IP:PORT) of the QUIC file server for direct mode.
-    struct quic_file_server_address : base {
+    struct quic_file_server_address {
         std::string address;
         quic_file_server_address(std::string address) : address{std::move(address)} {}
     };
 
     /// Can be used to override the default (11235) QUIC file server port.
-    struct quic_file_server_port : base {
+    struct quic_file_server_port {
         uint16_t port;
         quic_file_server_port(uint16_t port) : port{port} {}
     };
@@ -385,20 +385,20 @@ namespace opt {
     // MARK: Quic Transport Options
 
     /// Can be used to override the default (10s) handshake timeout duration for Quic connections.
-    struct quic_handshake_timeout : base {
+    struct quic_handshake_timeout {
         std::chrono::milliseconds duration;
         quic_handshake_timeout(std::chrono::milliseconds duration) : duration{duration} {}
     };
 
     /// Can be used to override the default (0ms) keep alive duration for Quic connections.
-    struct quic_keep_alive : base {
+    struct quic_keep_alive {
         std::chrono::seconds duration;
         quic_keep_alive(std::chrono::seconds duration) : duration{duration} {}
     };
 
     /// Caps the maximum QUIC UDP payload size for path MTU discovery.  PMTUD will still
     /// probe upward from 1200, but will not exceed this value.  Must be at least 1200.
-    struct quic_max_udp_payload : base {
+    struct quic_max_udp_payload {
         size_t size;
         explicit quic_max_udp_payload(size_t s) : size{s} {}
     };
@@ -407,7 +407,7 @@ namespace opt {
 
     /// Can be used to override the default (3) number of times a path can receive an error before
     /// it is dropped and replaced by a new path.
-    struct onionreq_path_strike_threshold : base {
+    struct onionreq_path_strike_threshold {
         uint16_t count;
 
         onionreq_path_strike_threshold(uint16_t count) : count{count} {}
@@ -415,7 +415,7 @@ namespace opt {
 
     /// Can be used to override the default (3) number of times a path can receive an error before
     /// it is dropped and replaced by a new path.
-    struct onionreq_path_build_retry_limit : base {
+    struct onionreq_path_build_retry_limit {
         uint16_t count;
 
         onionreq_path_build_retry_limit(uint16_t count) : count{count} {}
@@ -424,7 +424,7 @@ namespace opt {
     /// Can be used to override the default (2) minimum number of paths that are maintained for each
     /// request category when using onion requests. If `onionreq_single_path_mode` is provided this
     /// will be ignored.
-    struct onionreq_min_path_count : base {
+    struct onionreq_min_path_count {
         PathCategory category;
         uint8_t min_count;
 
@@ -435,24 +435,89 @@ namespace opt {
     /// Can be used to force the onion request router to only use a single path regardless of what
     /// category the requests sent have. When this option is provided `onionreq_min_path_count` will
     /// be ignored.
-    struct onionreq_single_path_mode : base {};
+    struct onionreq_single_path_mode {};
 
     /// Can be used to prevent the network instance from building onion request paths when
     /// initialised, when this option is provided paths will be built when the first request it
     /// made.
-    struct onionreq_disable_pre_build_paths : base {};
+    struct onionreq_disable_pre_build_paths {};
 
     /// Can be used to override the default (10min) frequency that onion request paths are rotated.
-    struct onionreq_path_rotation_frequency : base {
+    struct onionreq_path_rotation_frequency {
         std::chrono::minutes duration;
         onionreq_path_rotation_frequency(std::chrono::minutes duration) : duration{duration} {}
     };
 
     /// Can be used to override the default (10d) duration that edge nodes are reused for.
-    struct onionreq_edge_node_cache_duration : base {
+    struct onionreq_edge_node_cache_duration {
         std::chrono::days duration;
         onionreq_edge_node_cache_duration(std::chrono::days duration) : duration{duration} {}
     };
+
+    // A variant over every option type declared above.
+    using any = std::variant<
+            netid,
+            router,
+            transport,
+
+            // File server options
+            file_server_scheme,
+            file_server_host,
+            file_server_port,
+            file_server_pubkey_hex,
+            file_server_max_file_size,
+            file_server_use_stream_encryption,
+
+            // General options
+            increase_no_file_limit,
+            path_length,
+            disable_subnet_diversity,
+            redirect_retry_count,
+            retry_delay,
+            num_nodes_to_check_for_network_offset,
+            min_resume_clock_resync_interval,
+
+            // Snode pool options
+            cache_directory,
+            fallback_snode_pool_path,
+            cache_expiration,
+            cache_min_lifetime,
+            cache_min_size,
+            cache_min_swarm_size,
+            cache_num_nodes_to_use_for_refresh,
+            cache_min_num_refresh_presence_to_include_node,
+            cache_node_strike_threshold,
+
+            // QUIC file server options
+            quic_file_server_ed_pubkey,
+            quic_file_server_address,
+            quic_file_server_port,
+
+            // Quic transport options
+            quic_handshake_timeout,
+            quic_keep_alive,
+            quic_max_udp_payload,
+
+            // Onion request router options
+            onionreq_path_strike_threshold,
+            onionreq_path_build_retry_limit,
+            onionreq_min_path_count,
+            onionreq_single_path_mode,
+            onionreq_disable_pre_build_paths,
+            onionreq_path_rotation_frequency,
+            onionreq_edge_node_cache_duration>;
+
+    namespace detail {
+        template <typename T, typename Variant>
+        inline constexpr bool is_alternative = false;
+        template <typename T, typename... Ts>
+        inline constexpr bool is_alternative<T, std::variant<Ts...>> =
+                (std::is_same_v<T, Ts> || ...);
+    }  // namespace detail
+
+    // True if T is exactly one of the option types making up `any`.
+    template <typename T>
+    inline constexpr bool is_option = detail::is_alternative<T, any>;
 
 }  //  namespace opt
 }  // namespace session::network
