@@ -6,6 +6,8 @@
 #include <chrono>
 #include <exception>
 #include <fstream>
+#include <ranges>
+
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
 
