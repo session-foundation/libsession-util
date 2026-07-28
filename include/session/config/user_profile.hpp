@@ -26,7 +26,8 @@ using namespace std::literals;
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
 /// f - session pro features bitset
-/// s - session pro data (rotating seed + proof); see config/pro.hpp for the sub-dict layout.
+/// s - session pro credential (rotating seed + proof) as a single opaque bt-encoded string, stored
+///     as one value so it merges atomically; see config/pro.hpp.
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
 /// E - user pro access expiry unix timestamp (in seconds). Note: This can be different from the pro

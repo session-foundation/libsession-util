@@ -152,7 +152,7 @@ std::chrono::sys_seconds UserProfile::get_profile_updated() const {
 
 std::optional<ProConfig> UserProfile::get_pro_config() const {
     std::optional<ProConfig> result = {};
-    if (const config::dict* s = data["s"].dict()) {
+    if (auto* s = data["s"].string()) {
         ProConfig pro = {};
         if (pro.load(*s))
             result = std::move(pro);
@@ -163,18 +163,10 @@ std::optional<ProConfig> UserProfile::get_pro_config() const {
 void UserProfile::set_pro_config(const ProConfig& pro) {
     std::optional<ProConfig> curr = get_pro_config();
     if (!curr || *curr != pro) {
-        auto root = data["s"];
-        root["r"] = std::span<const std::byte>(
-                pro.rotating_privkey.data(), crypto_sign_ed25519_SEEDBYTES);
-
-        auto proof_dict = root["p"];
-        // The proof version is not persisted (see ProConfig::load): a per-key-merged dict can't
-        // carry a version that reliably describes its siblings. Erase any legacy "@" left by an
-        // older client so it stops bloating the config.
-        proof_dict["@"].erase();
-        proof_dict["g"] = pro.proof.revocation_tag;
-        proof_dict["e"] = epoch_seconds(pro.proof.expiry_at);
-        proof_dict["s"] = pro.proof.sig;
+        // Store the whole credential as one opaque, bt-encoded value so it merges atomically: a
+        // proof split across sibling config keys could have its signature stitched onto a different
+        // update's fields (see ProConfig). A single string swap can't slice.
+        data["s"] = pro.serialize();
 
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
