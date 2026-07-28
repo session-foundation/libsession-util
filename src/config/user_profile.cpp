@@ -226,8 +226,13 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_refund_requested() const {
-    if (auto* R = data["R"].integer())
-        return std::chrono::sys_seconds{std::chrono::seconds{*R}};
+    if (auto* R = data["R"].integer()) {
+        std::chrono::sys_seconds when{std::chrono::seconds{*R}};
+        // Ignore stale values: a request more than a week old is treated as absent, so a flag some
+        // client forgot to clear cannot linger indefinitely across the account's devices.
+        if (when >= clock_now_s() - std::chrono::weeks{1})
+            return when;
+    }
     return std::nullopt;
 }
 
