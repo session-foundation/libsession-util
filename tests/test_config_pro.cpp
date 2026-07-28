@@ -22,7 +22,8 @@ TEST_CASE("Pro", "[config][pro]") {
     {
         // CPP
         pro_cpp.rotating_privkey = rotating_sk;
-        pro_cpp.proof.version = 2;
+        // Config never persists the proof version (see ProConfig::load); a loaded proof is v0.
+        pro_cpp.proof.version = session::ProProofVersion_v0;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
         constexpr auto revocation_tag =
@@ -79,7 +80,6 @@ TEST_CASE("Pro", "[config][pro]") {
         session::config::dict good_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
             {"p", session::config::dict{
-                /*version*/         {"@", proof.version},
                 /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
                 /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
@@ -91,7 +91,7 @@ TEST_CASE("Pro", "[config][pro]") {
         session::config::ProConfig loaded_pro = {};
         CHECK(loaded_pro.load(good_dict));
         CHECK(loaded_pro.rotating_privkey == pro_cpp.rotating_privkey);
-        CHECK(loaded_pro.proof.version == pro_cpp.proof.version);
+        CHECK(loaded_pro.proof.version == session::ProProofVersion_v0);  // never persisted
         CHECK(loaded_pro.proof.revocation_tag == pro_cpp.proof.revocation_tag);
         CHECK(loaded_pro.proof.rotating_pubkey == pro_cpp.proof.rotating_pubkey);
         CHECK(loaded_pro.proof.expiry_at == pro_cpp.proof.expiry_at);
@@ -109,7 +109,6 @@ TEST_CASE("Pro", "[config][pro]") {
         session::config::dict bad_dict = {
             {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
             {"p", session::config::dict{
-                /*version*/         {"@", proof.version},
                 /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
                 /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
                 /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
