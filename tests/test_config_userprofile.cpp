@@ -630,4 +630,24 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     auto access_expiry = std::chrono::sys_seconds{std::chrono::seconds{500}};
     profile.set_pro_access_expiry(access_expiry);
     CHECK(profile.get_pro_access_expiry() == access_expiry);
+
+    // Refund-requested flag (synced via config, not the Pro backend)
+    CHECK_FALSE(profile.get_refund_requested().has_value());
+
+    UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{456s});
+    auto refund_at = std::chrono::sys_seconds{std::chrono::seconds{789}};
+    profile.set_refund_requested(refund_at);
+    CHECK(profile.get_refund_requested() == refund_at);
+    // Setting stamps the profile-updated timestamp so it time-orders across devices.
+    CHECK(profile.get_profile_updated().time_since_epoch().count() != 456);
+
+    {
+        // Round-trips through a dump/reload.
+        session::config::UserProfile profile2{seed, profile.dump()};
+        CHECK(profile2.get_refund_requested() == refund_at);
+    }
+
+    // Clearing removes it entirely.
+    profile.set_refund_requested(std::nullopt);
+    CHECK_FALSE(profile.get_refund_requested().has_value());
 }

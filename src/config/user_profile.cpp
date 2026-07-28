@@ -225,6 +225,23 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
         data["E"].erase();
 }
 
+std::optional<std::chrono::sys_seconds> UserProfile::get_refund_requested() const {
+    if (auto* R = data["R"].integer())
+        return std::chrono::sys_seconds{std::chrono::seconds{*R}};
+    return std::nullopt;
+}
+
+void UserProfile::set_refund_requested(std::optional<std::chrono::sys_seconds> when) {
+    if (when)
+        data["R"] = epoch_seconds(*when);
+    else
+        data["R"].erase();
+
+    // Stamp the profile-updated timestamp so the change is time-ordered across devices.
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] = clock_now_s();
+}
+
 extern "C" {
 
 using namespace session;
@@ -402,6 +419,19 @@ LIBSESSION_C_API void user_profile_set_pro_access_expiry(
         unbox<UserProfile>(conf)->set_pro_access_expiry(std::nullopt);
     else
         unbox<UserProfile>(conf)->set_pro_access_expiry(as_sys_seconds(access_expiry_ts));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_refund_requested(const config_object* conf) {
+    if (auto when = unbox<UserProfile>(conf)->get_refund_requested())
+        return epoch_seconds(*when);
+    return 0;
+}
+
+LIBSESSION_C_API void user_profile_set_refund_requested(config_object* conf, int64_t refund_ts) {
+    if (refund_ts <= 0)
+        unbox<UserProfile>(conf)->set_refund_requested(std::nullopt);
+    else
+        unbox<UserProfile>(conf)->set_refund_requested(as_sys_seconds(refund_ts));
 }
 
 }  // extern "C"

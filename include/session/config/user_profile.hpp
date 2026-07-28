@@ -26,10 +26,14 @@ using namespace std::literals;
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
 /// f - session pro features bitset
+/// s - session pro data (rotating seed + proof); see config/pro.hpp for the sub-dict layout.
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
 /// E - user pro access expiry unix timestamp (in milliseconds). Note: This can be different from
 ///     the pro proof expiry which can be sooner.
+/// R - unix timestamp (seconds) at which the user requested a refund of their current Session Pro
+///     subscription, for cross-device sync of the refund-requested state.  Omitted when no refund
+///     has been requested; cleared by the client when a new subscription begins.
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
 /// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
 ///     when `T > t`).
@@ -328,6 +332,31 @@ class UserProfile : public ConfigBase {
     /// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
     /// will expire, or nullopt to remove the value.
     void set_pro_access_expiry(std::optional<std::chrono::sys_seconds> access_expiry_ts);
+
+    /// API: user_profile/UserProfile::get_refund_requested
+    ///
+    /// Retrieves the timestamp at which the user requested a refund of their current Session Pro
+    /// subscription, if any.  This is synced across the user's devices so that a refund requested on
+    /// one device is reflected on the others; it does not go through the Pro backend.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::optional<std::chrono::sys_seconds>` - the unix timestamp (seconds) at which a refund
+    /// was requested, or nullopt if no refund has been requested.
+    std::optional<std::chrono::sys_seconds> get_refund_requested() const;
+
+    /// API: user_profile/UserProfile::set_refund_requested
+    ///
+    /// Records (or clears) that the user has requested a refund of their current Session Pro
+    /// subscription.  Setting this propagates the refund-requested state to the user's other
+    /// devices via config sync.  The client is responsible for clearing it (passing nullopt) when a
+    /// new subscription begins so a future subscription does not inherit a stale value.
+    ///
+    /// Inputs:
+    /// - `when` -- the timestamp (unix epoch seconds) at which the refund was requested, or nullopt
+    /// to clear the refund-requested state.
+    void set_refund_requested(std::optional<std::chrono::sys_seconds> when);
 
   private:
     // Enables/disables a single profile feature flag in the synced "f" set. The set stores feature
