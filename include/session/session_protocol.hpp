@@ -177,6 +177,29 @@ class ProProof {
     /// Ed25519-signed directly — there is no pre-hash.
     std::vector<std::byte> signed_message() const;
 
+    /// API: pro/Proof::rotating_seed
+    ///
+    /// Deterministically derive the rotating Session Pro seed for the (weekly) rotation period that
+    /// contains `timestamp`. Because every device derives the same seed for the same period with no
+    /// coordination, concurrent proof (re)generations converge on one credential instead of racing.
+    /// The seed is the private counterpart of the `rotating_pubkey` a proof for this period
+    /// authorizes: it is fed to generate_pro_proof, and once the backend returns a signed proof for
+    /// it the same seed is persisted in the config credential (its `r`) and is what subsequently
+    /// signs Pro messages.
+    ///
+    /// Inputs:
+    /// - `master_seed` -- the account's Session Pro *master* key/seed (as produced by
+    ///   ed25519_pro_privkey_for_ed25519_seed), NOT the session-id seed; its first 32 bytes are
+    ///   used. Rooting rotating keys under the Pro master keeps all Pro key material in one
+    ///   hierarchy and lets the Pro subsystem avoid ever touching the account's identity seed.
+    /// - `timestamp` -- any time within the desired rotation period; it is floored to the period
+    ///   (7 days) internally, so callers never compute epochs themselves.
+    ///
+    /// Outputs:
+    /// - The 32-byte rotating seed (secret; zeroed on destruction).
+    static cleared_b32 rotating_seed(
+            std::span<const std::byte> master_seed, std::chrono::sys_seconds timestamp);
+
     bool operator==(const ProProof& other) const {
         return version == other.version && revocation_tag == other.revocation_tag &&
                rotating_pubkey == other.rotating_pubkey && expiry_at == other.expiry_at &&

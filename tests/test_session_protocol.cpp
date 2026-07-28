@@ -2,6 +2,7 @@
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <oxenc/hex.h>
 #include <session/blinding.hpp>
 #include <session/pro_backend.hpp>
 #include <session/random.hpp>
@@ -894,4 +895,28 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         scope_exit decoded_free{[&]() { session_protocol_decode_for_community_free(&decoded); }};
         REQUIRE(!decoded.has_pro);
     }
+}
+
+TEST_CASE("Pro rotating-seed derivation", "[session-protocol][pro][pro_kat]") {
+    // Deterministic BLAKE2b of the Pro master seed and the floored rotation period, so every device
+    // derives the same seed for the same period. Vectors computed independently (Python
+    // hashlib.blake2b, person="ProRotatingSeed_", input = seed || decimal-ASCII(period_start)).
+    auto master =
+            oxenc::from_hex("0101010101010101010101010101010101010101010101010101010101010101");
+    auto seed_hex = [&](int64_t unix_ts) {
+        auto s = ProProof::rotating_seed(
+                to_byte_span(master.data(), master.size()),
+                std::chrono::sys_seconds{std::chrono::seconds{unix_ts}});
+        return oxenc::to_hex(s.begin(), s.end());
+    };
+
+    // KAT: 1700000000 floors to period start 1699488000; the next period starts at 1700092800.
+    CHECK(seed_hex(1700000000) ==
+          "e617ee563883b95a736a4e375e581f578150346046b08fdb58d07f6a317c2ff7");
+    CHECK(seed_hex(1700604800) ==
+          "01887cd6b6827c3b335c5ab677ce831a6b253016e3d23646639188036d97bd91");
+
+    // Idempotent within a rotation period (any ts in the same 7-day window), distinct across them.
+    CHECK(seed_hex(1700000000 + 3600) == seed_hex(1700000000));
+    CHECK(seed_hex(1700604800) != seed_hex(1700000000));
 }
