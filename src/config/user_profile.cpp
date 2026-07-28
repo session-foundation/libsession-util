@@ -136,7 +136,7 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
-    if (auto* M = data["M"].integer(); M)
+    if (auto* M = data["M"].integer())
         return static_cast<bool>(*M);
     return std::nullopt;
 }
@@ -213,7 +213,7 @@ void UserProfile::set_animated_avatar(bool enabled) {
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_pro_access_expiry() const {
-    if (auto* E = data["E"].integer(); E)
+    if (auto* E = data["E"].integer())
         return std::chrono::sys_seconds{std::chrono::seconds{*E}};
     return std::nullopt;
 }
@@ -276,7 +276,7 @@ LIBSESSION_C_API int user_profile_set_name(config_object* conf, const char* name
 
 LIBSESSION_C_API user_profile_pic user_profile_get_pic(const config_object* conf) {
     user_profile_pic p;
-    if (auto pic = unbox<UserProfile>(conf)->get_profile_pic(); pic) {
+    if (auto pic = unbox<UserProfile>(conf)->get_profile_pic()) {
         copy_c_str(p.url, pic.url);
         std::memcpy(p.key, pic.key.data(), 32);
     } else {
@@ -349,7 +349,7 @@ LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
 }
 
 LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro_pro_config* pro) {
-    if (auto val = unbox<UserProfile>(conf)->get_pro_config(); val) {
+    if (auto val = unbox<UserProfile>(conf)->get_pro_config()) {
         static_assert(sizeof pro->proof.revocation_tag == sizeof(val->proof.revocation_tag));
         static_assert(sizeof pro->proof.rotating_pubkey == sizeof(val->proof.rotating_pubkey));
         static_assert(sizeof pro->proof.sig == sizeof(val->proof.sig));
