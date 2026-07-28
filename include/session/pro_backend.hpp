@@ -173,14 +173,11 @@ struct ProRequest {
     std::string data;
 };
 
-/// Common base for the responses that carry a freshly-issued Session Pro proof. `proof` is the raw
-/// parse result, convertible to a config::ProProof.
-struct ProProofResponse : ResponseBase {
+/// Response to `pro_proof_request` (endpoint `generate_pro_proof`): carries the freshly-issued
+/// Session Pro proof. `proof` is the raw parse result, convertible to a config::ProProof.
+struct GenerateProProofResponse : ResponseBase {
     ProProof proof;
 };
-
-/// Response to `pro_proof_request` (endpoint `generate_pro_proof`).
-struct GenerateProProofResponse : ProProofResponse {};
 
 /// Parse the reply to a generate-proof request. On failure `status` is set to an error state and
 /// `errors` is populated; on success `proof` holds the issued proof.
