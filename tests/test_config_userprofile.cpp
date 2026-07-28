@@ -696,4 +696,42 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     REQUIRE(profile.get_pro_prepaid().has_value());
     profile.set_pro_prepaid(std::nullopt);
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // pro_renewal_target: centralised "when to renew" decision.
+    {
+        session::config::UserProfile pr{seed, std::nullopt};
+
+        // No proof yet -> renew immediately.
+        CHECK(pr.pro_renewal_target(now) == now);
+
+        auto store_proof = [&](std::chrono::sys_seconds expiry) {
+            session::config::ProConfig pc = {};
+            pc.rotating_privkey = rotating_sk;  // any valid 64-byte key (only sizes matter here)
+            pc.proof.version = session::ProProofVersion_v0;
+            pc.proof.rotating_pubkey = rotating_pk;
+            pc.proof.expiry_at = expiry;
+            pr.set_pro_config(pc);
+        };
+
+        // Valid proof (10 days out), entitlement a month out -> preemptive ~1h before expiry.
+        auto expiry = now + std::chrono::hours{24 * 10};
+        store_proof(expiry);
+        pr.set_pro_access_expiry(now + std::chrono::hours{24 * 30});
+        auto target = pr.pro_renewal_target(now);
+        REQUIRE(target.has_value());
+        CHECK(*target <= expiry - std::chrono::minutes{59});
+        CHECK(*target >= expiry - std::chrono::minutes{61});
+
+        // Same proof but entitlement ending within the hour -> don't renew.
+        pr.set_pro_access_expiry(now + std::chrono::minutes{30});
+        CHECK_FALSE(pr.pro_renewal_target(now).has_value());
+
+        // No access expiry at all -> don't preemptively renew.
+        pr.set_pro_access_expiry(std::nullopt);
+        CHECK_FALSE(pr.pro_renewal_target(now).has_value());
+
+        // Expired proof -> renew immediately, regardless of entitlement.
+        store_proof(now - std::chrono::hours{1});
+        CHECK(pr.pro_renewal_target(now) == now);
+    }
 }

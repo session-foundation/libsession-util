@@ -451,6 +451,20 @@ LIBSESSION_EXPORT int64_t user_profile_get_pro_prepaid(const config_object* conf
 /// to clear the marker.
 LIBSESSION_EXPORT void user_profile_set_pro_prepaid(config_object* conf, int64_t prepaid_ts);
 
+/// API: user_profile/user_profile_get_pro_renewal_target
+///
+/// Decide when to (re)request a Session Pro proof (see the C++ pro_renewal_target). Given `now`,
+/// returns the unix timestamp (seconds) at which a renewal should be attempted -- renew now if it
+/// is <= now, otherwise schedule for then -- or 0 if no renewal is needed.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `now` -- the caller's current unix timestamp (seconds)
+///
+/// Outputs:
+/// - `int64_t` - the renewal-target unix timestamp, or 0 for "no renewal needed".
+LIBSESSION_EXPORT int64_t user_profile_get_pro_renewal_target(const config_object* conf, int64_t now);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

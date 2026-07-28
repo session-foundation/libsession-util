@@ -37,6 +37,8 @@
 
 namespace session {
 
+using namespace std::literals;
+
 /// Maximum number of UTF-16 code points a standard (non-Pro) message can use; a longer message must
 /// activate the Session Pro higher-character-limit feature. (The C `SESSION_PROTOCOL_*` symbols
 /// point at these.)
@@ -51,6 +53,15 @@ inline constexpr int STANDARD_PINNED_CONVERSATION_LIMIT = 5;
 inline constexpr int COMMUNITY_OR_1O1_MSG_PADDING = 160;
 
 enum ProProofVersion { ProProofVersion_v0 };
+
+/// Rotation window for the Session Pro rotating key: ProProof::rotating_seed yields the same seed
+/// for all timestamps within one such period and a fresh one at each boundary.
+inline constexpr auto PRO_ROTATING_SEED_PERIOD = 7 * 24h;
+
+/// How long before a proof's expiry a client preemptively renews it -- and, correspondingly, the
+/// minimum remaining entitlement (access expiry beyond now) that makes a preemptive renewal worth
+/// doing. See UserProfile::pro_renewal_target.
+inline constexpr auto PRO_RENEWAL_LEAD = 60min;
 
 // Session Pro 16-byte signing domain prefixes; each prefixes the Ed25519-signed message for its
 // endpoint (pro-wire-protocol.md §2 proof, §3 signed requests). ASCII, `_`-right-padded to 16
