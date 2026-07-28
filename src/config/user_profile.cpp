@@ -213,8 +213,15 @@ void UserProfile::set_animated_avatar(bool enabled) {
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_pro_access_expiry() const {
-    if (auto* E = data["E"].integer())
-        return std::chrono::sys_seconds{std::chrono::seconds{*E}};
+    if (auto* E = data["E"].integer()) {
+        int64_t secs = *E;
+        // Backwards compatibility: older clients stored this as epoch *milliseconds*. A seconds
+        // value won't reach 1e12 until the year ~33658, while a millisecond value is ~1.7e12 today,
+        // so treat anything past that threshold as milliseconds and convert.
+        if (secs > 1'000'000'000'000)
+            secs /= 1000;
+        return std::chrono::sys_seconds{std::chrono::seconds{secs}};
+    }
     return std::nullopt;
 }
 
