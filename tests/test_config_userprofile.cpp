@@ -659,4 +659,41 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     // Clearing removes it entirely.
     profile.set_refund_requested(std::nullopt);
     CHECK_FALSE(profile.get_refund_requested().has_value());
+
+    // Pro-prepaid ("purchase in flight") marker: insert-only-if-not-pro, 1-week read gate, and
+    // auto-clear when entitlement lands. (No proof, access expiry in the past -> not currently pro.)
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    auto prepaid_at = now - std::chrono::hours{1};
+    profile.set_pro_prepaid(prepaid_at);
+    CHECK(profile.get_pro_prepaid() == prepaid_at);
+
+    // A stale (>1wk) marker is ignored on read.
+    profile.set_pro_prepaid(now - std::chrono::weeks{2});
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // Confirming a live access expiry clears the marker (entitlement arrived).
+    profile.set_pro_prepaid(prepaid_at);
+    REQUIRE(profile.get_pro_prepaid().has_value());
+    profile.set_pro_access_expiry(now + std::chrono::hours{1});
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // While pro (live access expiry), setting the marker is a no-op.
+    profile.set_pro_prepaid(prepaid_at);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // A landed (still-valid) proof also clears it: back to not-pro, mark pending, store a proof.
+    profile.set_pro_access_expiry(std::nullopt);
+    profile.set_pro_prepaid(prepaid_at);
+    REQUIRE(profile.get_pro_prepaid().has_value());
+    pro_cpp.proof.expiry_at = now + std::chrono::hours{1};
+    profile.set_pro_config(pro_cpp);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // Explicit clear via nullopt.
+    profile.remove_pro_config();
+    profile.set_pro_prepaid(prepaid_at);
+    REQUIRE(profile.get_pro_prepaid().has_value());
+    profile.set_pro_prepaid(std::nullopt);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
 }
