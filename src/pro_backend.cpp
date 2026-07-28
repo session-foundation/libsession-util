@@ -134,7 +134,6 @@ namespace {
     constexpr char get_pro_status_endpoint[] = "get_pro_status";
     constexpr char get_payment_details_endpoint[] = "get_payment_details";
     constexpr char get_pro_revocations_endpoint[] = "get_pro_revocations";
-    constexpr char set_refund_endpoint[] = "set_payment_refund_requested";
 
     // Content type for the request payload (single master storage, shared with the C API's
     // session_pro_backend_request.content_type). The wire encoding is libsession's to change; the
@@ -228,8 +227,6 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PAYMENT_DETAI
         get_payment_details_endpoint;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_REVOCATIONS_ENDPOINT =
         get_pro_revocations_endpoint;
-LIBSESSION_EXPORT extern const char* const
-        SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT = set_refund_endpoint;
 
 // Backend base URL + Ed25519 pubkey: C symbols pointing at the single C++ definitions above.
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_URL = URL.data();
@@ -688,7 +685,6 @@ namespace {
         auto platform_refund_expiry_ts =
                 json_require<int64_t>(obj, "platform_refund_expiry_ts", errs);
         auto revoked_ts = json_require_number(obj, "revoked_ts", errs);
-        auto refund_requested_ts = json_require<int64_t>(obj, "refund_requested_ts", errs);
 
         ProPaymentItem item = {};
         item.status = std::move(status);
@@ -704,8 +700,6 @@ namespace {
         item.platform_refund_expiry_at =
                 std::chrono::sys_seconds(std::chrono::seconds(platform_refund_expiry_ts));
         item.revoked_at = sys_ms_from_seconds(revoked_ts);
-        item.refund_requested_at =
-                std::chrono::sys_seconds(std::chrono::seconds(refund_requested_ts));
         return item;
     }
 
@@ -777,8 +771,6 @@ ProStatusResponse parse_pro_status(std::string_view json) {
             std::chrono::seconds(json_require<int64_t>(result_obj, "expiry_ts", errs)));
     result.grace_period_duration =
             std::chrono::seconds(json_require<int64_t>(result_obj, "grace_period_duration", errs));
-    result.refund_requested_at = std::chrono::sys_seconds(
-            std::chrono::seconds(json_require<int64_t>(result_obj, "refund_requested_ts", errs)));
 
     // `latest_payment` is a single payment item, or null when the account has no payments.
     if (auto it = result_obj.find("latest_payment"); it == result_obj.end()) {
@@ -846,102 +838,6 @@ PaymentDetailsResponse parse_payment_details(std::string_view json) {
     return result;
 }
 
-namespace {
-
-    // --- refund / set-payment-refund-requested (endpoint set_payment_refund_requested) ---
-
-    std::vector<unsigned char> refund_message(
-            std::span<const uint8_t, 32> master_pubkey,
-            std::chrono::sys_seconds unix_ts,
-            std::chrono::sys_seconds refund_requested_at,
-            std::string_view provider_code,
-            std::span<const uint8_t> payment_id) {
-        // Must match the set-payment-refund-requested signed-request message in
-        // pro-wire-protocol.md §3.3 (+ §3.5 for payment_id), built per §1.1.
-        return session::pro::signed_message(
-                session::SET_PAYMENT_REFUND_REQUESTED_DOMAIN,
-                master_pubkey,
-                epoch_seconds(unix_ts),
-                epoch_seconds(refund_requested_at),
-                provider_code,
-                to_string_view(payment_id));
-    }
-
-    array_uc64 refund_sign(
-            const cleared_uc64& master,
-            std::chrono::sys_seconds unix_ts,
-            std::chrono::sys_seconds refund_requested_at,
-            std::string_view provider_code,
-            std::span<const uint8_t> payment_id) {
-        auto msg = refund_message(
-                pubkey_of(master), unix_ts, refund_requested_at, provider_code, payment_id);
-        array_uc64 sig = {};
-        crypto_sign_ed25519_detached(sig.data(), nullptr, msg.data(), msg.size(), master.data());
-        return sig;
-    }
-
-    std::string refund_body(
-            std::span<const uint8_t, 32> master_pubkey,
-            std::chrono::sys_seconds unix_ts,
-            std::chrono::sys_seconds refund_requested_at,
-            std::string_view provider_code,
-            std::string_view payment_id,
-            std::span<const uint8_t, 64> master_sig) {
-        return nlohmann::json{
-                {"master_pkey", oxenc::to_hex(master_pubkey)},
-                {"ts", epoch_seconds(unix_ts)},
-                {"refund_requested_ts", epoch_seconds(refund_requested_at)},
-                {"payment_tx", {{"provider", provider_code}, {"payment_id", payment_id}}},
-                {"master_sig", oxenc::to_hex(master_sig)}}
-                .dump();
-    }
-
-}  // namespace
-
-array_uc64 refund_sig(
-        std::span<const uint8_t> master_privkey,
-        std::chrono::sys_seconds unix_ts,
-        std::chrono::sys_seconds refund_requested_at,
-        std::string_view provider_code,
-        std::span<const uint8_t> payment_id) {
-    auto master = normalize_privkey(master_privkey, "master_privkey");
-    return refund_sign(master, unix_ts, refund_requested_at, provider_code, payment_id);
-}
-
-ProRequest refund_request(
-        std::span<const uint8_t> master_privkey,
-        std::chrono::sys_seconds unix_ts,
-        std::chrono::sys_seconds refund_requested_at,
-        std::string_view provider_code,
-        std::span<const uint8_t> payment_id) {
-    auto master = normalize_privkey(master_privkey, "master_privkey");
-    auto sig = refund_sign(master, unix_ts, refund_requested_at, provider_code, payment_id);
-    return {set_refund_endpoint,
-            application_json,
-            refund_body(
-                    pubkey_of(master),
-                    unix_ts,
-                    refund_requested_at,
-                    provider_code,
-                    to_string_view(payment_id),
-                    sig)};
-}
-
-SetPaymentRefundRequestedResponse parse_refund(std::string_view json) {
-    SetPaymentRefundRequestedResponse result = {};
-    std::vector<std::string> errs;
-    auto result_obj = read_envelope(json, result, errs);
-    if (!result || !errs.empty()) {
-        if (!errs.empty())
-            set_protocol_error(result, errs.front());
-        return result;
-    }
-
-    result.updated = json_require<bool>(result_obj, "updated", errs);
-    if (!errs.empty())
-        set_protocol_error(result, errs.front());
-    return result;
-}
 }  // namespace session::pro_backend
 
 using namespace session::pro_backend;
@@ -994,7 +890,6 @@ static session_pro_backend_pro_payment_item to_c(ProPaymentItem& src) {
             .grace_period_duration = src.grace_period_duration.count(),
             .platform_refund_expiry_ts = session::epoch_seconds(src.platform_refund_expiry_at),
             .revoked_ts = epoch_seconds_double(src.revoked_at),
-            .refund_requested_ts = session::epoch_seconds(src.refund_requested_at),
             .payment_id = src.payment_id.c_str(),
     };
 }
@@ -1010,7 +905,7 @@ struct GetPaymentDetailsCResponse : PaymentDetailsResponse {
 };
 
 // Free any C response: delete the owned object (of concrete type `Owned`, as stored by the matching
-// *_parse) behind header.internal_, then zero the struct. `Owned` is a proof/refund response or a
+// *_parse) behind header.internal_, then zero the struct. `Owned` is a proof response or a
 // *CResponse holder -- all deriving from ResponseBase.
 template <std::derived_from<ResponseBase> Owned, typename Response>
 static void c_free_response(Response* response) {
@@ -1218,7 +1113,6 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
         result.auto_renewing = owned->auto_renewing;
         result.expiry_ts = epoch_seconds(owned->expiry_at);
         result.grace_period_duration = owned->grace_period_duration.count();
-        result.refund_requested_ts = epoch_seconds(owned->refund_requested_at);
         result.has_latest_payment = owned->latest_payment.has_value();
         if (owned->latest_payment)
             result.latest_payment = to_c(*owned->latest_payment);
@@ -1265,54 +1159,6 @@ session_pro_backend_get_payment_details_response_parse(const char* json, size_t 
     return result;
 }
 
-LIBSESSION_C_API session_pro_backend_request
-session_pro_backend_set_payment_refund_requested_request_build(
-        const uint8_t* master_privkey,
-        size_t master_privkey_len,
-        int64_t ts,
-        int64_t refund_requested_ts,
-        const char* provider_code,
-        const uint8_t* payment_id,
-        size_t payment_id_len) {
-    session_pro_backend_request result = {};
-    try {
-        result = c_own_request(refund_request(
-                {master_privkey, master_privkey_len},
-                session::as_sys_seconds(ts),
-                session::as_sys_seconds(refund_requested_ts),
-                provider_code,
-                {payment_id, payment_id_len}));
-    } catch (const std::exception& e) {
-        c_request_error(result, e);
-    }
-    return result;
-}
-
-LIBSESSION_C_API session_pro_backend_set_payment_refund_requested_response
-session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len) {
-    session_pro_backend_set_payment_refund_requested_response result = {};
-    if (!json) {
-        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-        result.header.error_code = C_INVALID_RESPONSE_CODE;
-        result.header.error = C_PARSE_ERROR_INVALID_ARGS;
-        return result;
-    }
-
-    try {
-        auto* owned = new SetPaymentRefundRequestedResponse(parse_refund({json, json_len}));
-        result.header.internal_ = owned;
-        fill_c_header(result.header, *owned);
-        result.updated = owned->updated;
-    } catch (const std::exception&) {
-        delete static_cast<SetPaymentRefundRequestedResponse*>(result.header.internal_);
-        result = {};
-        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-        result.header.error_code = C_INVALID_RESPONSE_CODE;
-        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
-    }
-    return result;
-}
-
 LIBSESSION_C_API void session_pro_backend_request_free(session_pro_backend_request* request) {
     if (request) {
         if (request->internal_)
@@ -1339,9 +1185,4 @@ LIBSESSION_C_API void session_pro_backend_get_pro_status_response_free(
 LIBSESSION_C_API void session_pro_backend_get_payment_details_response_free(
         session_pro_backend_get_payment_details_response* response) {
     c_free_response<GetPaymentDetailsCResponse>(response);
-}
-
-LIBSESSION_C_API void session_pro_backend_set_payment_refund_requested_response_free(
-        session_pro_backend_set_payment_refund_requested_response* response) {
-    c_free_response<SetPaymentRefundRequestedResponse>(response);
 }

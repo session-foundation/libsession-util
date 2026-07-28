@@ -368,7 +368,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"grace_period_duration", 1001},
                     {"platform_refund_expiry_ts", unix_ts + 1},
                     {"revoked_ts", unix_ts + 3600 + 0.75},
-                    {"refund_requested_ts", unix_ts + 3601},
                     {"payment_id", std::move(payment_id)}};
         };
         auto check_payment_item = [&](const session_pro_backend_pro_payment_item& item,
@@ -385,7 +384,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             REQUIRE(item.grace_period_duration == 1001);
             REQUIRE(item.platform_refund_expiry_ts == unix_ts + 1);
             REQUIRE(item.revoked_ts == unix_ts + 3600 + 0.75);  // 750ms preserved
-            REQUIRE(item.refund_requested_ts == unix_ts + 3601);
             REQUIRE(std::string_view(item.payment_id) == payment_id);
         };
 
@@ -398,7 +396,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"auto_renewing", true},
                     {"expiry_ts", unix_ts + 2},
                     {"grace_period_duration", 1000},
-                    {"refund_requested_ts", unix_ts + 3602},
                     {"latest_payment",
                      make_payment_item(
                              std::string(fake_payment_id.data(), fake_payment_id.size()))}};
@@ -421,7 +418,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.auto_renewing == true);
                 REQUIRE(result.grace_period_duration == 1000);
                 REQUIRE(result.expiry_ts == unix_ts + 2);
-                REQUIRE(result.refund_requested_ts == unix_ts + 3602);
                 REQUIRE(result.has_latest_payment);
                 check_payment_item(result.latest_payment, fake_payment_id);
             }
@@ -561,91 +557,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             REQUIRE(pay_response.header.internal_ == nullptr);
         }
 
-        SECTION("session_pro_backend_set_payment_refund_requested_request_build") {
-            auto result = session_pro_backend_set_payment_refund_requested_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data),
-                    unix_ts,
-                    unix_ts + 1,
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            {
-                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
-                REQUIRE(result.success);
-                REQUIRE(result.data.size > 0);
-
-                auto cpp = refund_request(
-                        master_privkey.data,
-                        session::as_sys_seconds(unix_ts),
-                        session::as_sys_seconds(unix_ts + 1),
-                        provider_code,
-                        std::span<const uint8_t>(payment_id, payment_id_len));
-                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
-                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT);
-                REQUIRE(span_u8_equals(result.data, cpp.data));
-            }
-            REQUIRE(result.data.data == nullptr);
-
-            // Invalid key size
-            result = session_pro_backend_set_payment_refund_requested_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data) - 1,
-                    unix_ts,
-                    unix_ts + 1,
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            REQUIRE(!result.success);
-            REQUIRE(result.error_count > 0);
-        }
-
-        SECTION("session_pro_backend_set_payment_refund_requested_response_parse") {
-            nlohmann::json j;
-            j["status"] = "ok";
-            j["result"]["updated"] = true;
-            std::string json = j.dump();
-
-            // Valid JSON
-            auto result = session_pro_backend_set_payment_refund_requested_response_parse(
-                    json.data(), json.size());
-            {
-                scope_exit result_free{[&]() {
-                    session_pro_backend_set_payment_refund_requested_response_free(&result);
-                }};
-                if (result.header.error)
-                    INFO(result.header.error);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error == nullptr);
-                REQUIRE(result.updated);
-            }
-
-            // After freeing
-            REQUIRE(result.header.internal_ == nullptr);
-
-            // Invalid JSON
-            json = "{invalid}";
-            {
-                result = session_pro_backend_set_payment_refund_requested_response_parse(
-                        json.data(), json.size());
-                scope_exit result_free{[&]() {
-                    session_pro_backend_set_payment_refund_requested_response_free(&result);
-                }};
-                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error_code != nullptr);
-                REQUIRE(result.header.error_code != nullptr);
-            }
-
-            // After freeing
-            REQUIRE(result.header.internal_ == nullptr);
-
-            // Null JSON
-            result = session_pro_backend_set_payment_refund_requested_response_parse(nullptr, 0);
-            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-            REQUIRE(result.header.error_code != nullptr);
-            REQUIRE(result.header.error_code != nullptr);
-        }
     }
 }
 
@@ -740,7 +651,7 @@ TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
 // answer.
 //
 // Fixed inputs: keypairs from 32-byte seeds 0x01.. / 0x02.. (backend key 0x03..), ts=1700000000,
-// refund_ts=1700000123, expiry=1704067200, count=10, provider="google_play",
+// expiry=1704067200, count=10, provider="google_play",
 // payment_id="test-payment-id-123", revocation_tag=0x11 x32.
 TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     auto keypair = [](unsigned char seed_byte) {
@@ -757,7 +668,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     (void)backend_sk;
 
     const auto ts = session::as_sys_seconds(1700000000);
-    const auto refund_ts = session::as_sys_seconds(1700000123);
     const auto expiry = session::as_sys_seconds(1704067200);
     const std::string provider = "google_play";
     const std::string payment_id = "test-payment-id-123";
@@ -791,12 +701,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     const std::string details_cursor_msg_hex =
             "50726f47657450617944657461696c738a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
             "01b40f6f5c3137303030303030303000313000306131623263336434653566";
-    const std::string refund_msg_hex =
-            "50726f536574526566756e645265715f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
-            "01"
-            "b40f6f5c31373030303030303030003137303030303031323300676f6f676c655f706c617900746573742d"
-            "70"
-            "61796d656e742d69642d313233";
     const std::string proof_msg_hex =
             "50726f50726f6f665f76305f5f5f5f5f111111111111111111111111111111111111111111111111111111"
             "1111"
@@ -851,11 +755,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
         auto req = payment_details_request(master_sk, ts, 10, "0a1b2c3d4e5f");
         CHECK(req.endpoint == SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT);
         CHECK(sig_covers(req.data, "master_sig", details_cursor_msg_hex, master_pk));
-    }
-    SECTION("set_payment_refund_requested") {
-        auto req = refund_request(master_sk, ts, refund_ts, provider, pid_span());
-        CHECK(req.endpoint == SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT);
-        CHECK(sig_covers(req.data, "master_sig", refund_msg_hex, master_pk));
     }
     SECTION("pro proof") {
         session::ProProof proof;
@@ -1209,13 +1108,11 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
     // Same subscription epoch -> the fresh proof shares the add-payment proof's revocation_tag.
     CHECK(gen.proof.revocation_tag == add.proof.revocation_tag);
 
-    // 2) get_pro_status: account ACTIVE, no refund yet, and the single latest payment
-    //    is our redeemed one.
+    // 2) get_pro_status: account ACTIVE and the single latest payment is our redeemed one.
     ProStatusResponse status = parse_pro_status(send(onion, pro_status_request(master_sk, now)));
     INFO("get_pro_status " << status.error.value_or(""));
     REQUIRE(status.status == ResponseStatus::Ok);
     CHECK(status.user_status == "active");
-    CHECK(status.refund_requested_at.time_since_epoch().count() == 0);  // no refund requested yet
     REQUIRE(status.latest_payment.has_value());
     CHECK(status.latest_payment->payment_id == payment_id);
     CHECK(status.latest_payment->payment_provider == provider);
@@ -1263,32 +1160,6 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
                 ResponseStatus::Ok);  // the opaque cursor was accepted (echo round-trip)
         CHECK(page2.items.empty());   // no more payments
         CHECK_FALSE(page2.next_cursor.has_value());  // end of data
-    }
-
-    // 4) set_payment_refund_requested. Apple-only at the HTTP layer: app_store -> updated +
-    // reflected
-    //    in get_pro_status; google_play -> rejected (Google refunds are handled out-of-band).
-    ProRequest refund_req = refund_request(
-            master_sk,
-            now,
-            now,
-            provider,
-            std::span<const uint8_t>{
-                    reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()});
-    SetPaymentRefundRequestedResponse refund = parse_refund(send(onion, refund_req));
-    if (provider == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE) {
-        INFO("refund" << refund.error.value_or(""));
-        REQUIRE(refund.status == ResponseStatus::Ok);
-        CHECK(refund.updated);
-        // The soft "refund requested" marker is now reflected back in get_pro_status.
-        ProStatusResponse status2 =
-                parse_pro_status(send(onion, pro_status_request(master_sk, now)));
-        REQUIRE(status2.status == ResponseStatus::Ok);
-        CHECK(status2.refund_requested_at.time_since_epoch().count() != 0);
-    } else {
-        // The endpoint rejects non-App-Store providers.
-        CHECK_FALSE(refund.updated);
-        CHECK(refund.status != ResponseStatus::Ok);
     }
 }
 
