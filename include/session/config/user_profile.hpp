@@ -32,7 +32,8 @@ using namespace std::literals;
 ///     the pro proof expiry which can be sooner.
 /// R - unix timestamp (seconds) at which the user requested a refund of their current Session Pro
 ///     subscription, for cross-device sync of the refund-requested state.  Omitted when no refund
-///     has been requested; cleared by the client when a new subscription begins.
+///     has been requested; cleared by the client when a new subscription begins.  Values more than
+///     a week in the past are ignored on read (treated as if unset).
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
 /// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
 ///     when `T > t`).
@@ -338,11 +339,14 @@ class UserProfile : public ConfigBase {
     /// subscription, if any.  This is synced across the user's devices so that a refund requested on
     /// one device is reflected on the others; it does not go through the Pro backend.
     ///
+    /// A stored value more than a week in the past is ignored (returns nullopt), so that a
+    /// refund-requested flag some client neglected to clear cannot linger indefinitely.
+    ///
     /// Inputs: None
     ///
     /// Outputs:
     /// - `std::optional<sys_seconds>` - the unix timestamp (seconds) at which a refund was
-    /// requested, or nullopt if no refund has been requested.
+    /// requested, or nullopt if no refund has been requested (or the stored value is stale).
     std::optional<sys_seconds> get_refund_requested() const;
 
     /// API: user_profile/UserProfile::set_refund_requested

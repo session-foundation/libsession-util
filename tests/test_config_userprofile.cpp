@@ -655,11 +655,14 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     // Refund-requested flag (synced via config, not the Pro backend)
     CHECK_FALSE(profile.get_refund_requested().has_value());
 
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+
+    // A recent request is returned as-is, and stamps the profile-updated timestamp so it
+    // time-orders across devices.
     UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{456s});
-    auto refund_at = std::chrono::sys_seconds{std::chrono::seconds{789}};
+    auto refund_at = now - std::chrono::hours{1};
     profile.set_refund_requested(refund_at);
     CHECK(profile.get_refund_requested() == refund_at);
-    // Setting stamps the profile-updated timestamp so it time-orders across devices.
     CHECK(profile.get_profile_updated().time_since_epoch().count() != 456);
 
     {
@@ -667,6 +670,10 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
         CHECK(profile2.get_refund_requested() == refund_at);
     }
+
+    // A stored value more than a week old is ignored on read (treated as absent).
+    profile.set_refund_requested(now - std::chrono::weeks{2});
+    CHECK_FALSE(profile.get_refund_requested().has_value());
 
     // Clearing removes it entirely.
     profile.set_refund_requested(std::nullopt);

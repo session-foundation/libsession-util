@@ -403,13 +403,14 @@ LIBSESSION_EXPORT void user_profile_set_pro_access_expiry(
 ///
 /// Retrieves the timestamp at which the user requested a refund of their current Session Pro
 /// subscription.  This state is synced across the user's devices via config (not the Pro backend).
+/// A stored value more than a week in the past is ignored (returns 0).
 ///
 /// Inputs:
 /// - `conf` -- [in] Pointer to the config object
 ///
 /// Outputs:
 /// - `int64_t` - the unix timestamp (seconds) at which a refund was requested, or 0 if no refund
-/// has been requested.
+/// has been requested (or the stored value is stale).
 LIBSESSION_EXPORT int64_t user_profile_get_refund_requested(const config_object* conf);
 
 /// API: user_profile/user_profile_set_refund_requested
