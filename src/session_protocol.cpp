@@ -191,10 +191,10 @@ cleared_uc32 ProProof::rotating_seed(
     // Floor the timestamp to the rotation period, then hash master_seed[0:32] ‖ dec(period_start),
     // where dec() is canonical decimal ASCII -- the same integer encoding the rest of the Pro wire
     // uses (signed_message, §1.1), so there's one integer convention and no endianness to pin.
-    constexpr std::int64_t period = 7 * 24 * 60 * 60;  // 604800 seconds
-    std::int64_t period_start = session::epoch_seconds(timestamp) / period * period;
+    auto period_start = timestamp - timestamp.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
     char dec[20];
-    auto [ptr, ec] = std::to_chars(dec, dec + sizeof(dec), period_start);
+    auto [ptr, ec] = std::to_chars(dec, dec + sizeof(dec), epoch_seconds(period_start));
+    assert(ec == std::errc{});  // dec is large enough for any int64, so this cannot fail
 
     auto seed = master_seed.first(32);
     std::vector<unsigned char> msg;

@@ -393,6 +393,25 @@ class UserProfile : public ConfigBase {
     /// - `when` -- the timestamp (unix epoch seconds) at which the purchase was initiated, or
     /// nullopt to clear the marker.
     void set_pro_prepaid(std::optional<sys_seconds> when);
+
+    /// API: user_profile/UserProfile::pro_renewal_target
+    ///
+    /// Decide when the client should (re)request a Session Pro proof, centralising logic clients
+    /// previously each implemented (and got inconsistently wrong). Returns the timestamp at which a
+    /// renewal should be attempted -- if it is <= the caller's clock, renew now; a future value can
+    /// be scheduled -- or nullopt when no renewal is needed. Given the stored proof and access
+    /// expiry:
+    ///   - no proof, or the proof already expired -> `now` (fetch immediately);
+    ///   - a valid proof with access expiry still more than an hour ahead -> an hour before the
+    ///     proof expires (preemptive), nudged off a rotation-period boundary so all devices agree;
+    ///   - otherwise (valid proof, entitlement ending or unknown) -> nullopt.
+    ///
+    /// Inputs:
+    /// - `now` -- the caller's current time.
+    ///
+    /// Outputs:
+    /// - `std::optional<sys_seconds>` - when to renew, or nullopt for "no renewal needed".
+    std::optional<sys_seconds> pro_renewal_target(sys_seconds now) const;
 };
 
 }  // namespace session::config

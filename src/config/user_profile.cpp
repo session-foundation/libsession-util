@@ -300,6 +300,31 @@ void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) 
     }
 }
 
+std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
+        std::chrono::sys_seconds now) const {
+    auto pro = get_pro_config();
+    if (!pro)
+        return now;  // no proof yet -> request one immediately
+    auto expiry = pro->proof.expiry_at;
+    if (expiry <= now)
+        return now;  // proof expired -> request one immediately
+
+    // Otherwise renew preemptively PRO_RENEWAL_LEAD before the proof expires, but only while
+    // entitlement clearly continues (access expiry at least that far ahead); a still-valid proof
+    // with no continuing entitlement is left to ride out.
+    auto access = get_pro_access_expiry();
+    if (!access || *access - now <= PRO_RENEWAL_LEAD)
+        return std::nullopt;
+
+    auto target = expiry - PRO_RENEWAL_LEAD;
+    // Nudge off a rotation-period boundary so every device floors this (shared) target into the
+    // same period and derives the same rotating seed for the renewal, even with small clock skew.
+    if (auto off = target.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
+        off <= 15s || off >= PRO_ROTATING_SEED_PERIOD - 15s)
+        target -= 30s;
+    return target;
+}
+
 extern "C" {
 
 using namespace session;
@@ -506,6 +531,12 @@ LIBSESSION_C_API void user_profile_set_pro_prepaid(config_object* conf, int64_t 
         unbox<UserProfile>(conf)->set_pro_prepaid(std::nullopt);
     else
         unbox<UserProfile>(conf)->set_pro_prepaid(as_sys_seconds(prepaid_ts));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_pro_renewal_target(const config_object* conf, int64_t now) {
+    if (auto t = unbox<UserProfile>(conf)->pro_renewal_target(as_sys_seconds(now)))
+        return epoch_seconds(*t);
+    return 0;
 }
 
 }  // extern "C"

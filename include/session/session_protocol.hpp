@@ -54,6 +54,8 @@
 
 namespace session {
 
+using namespace std::literals;
+
 /// Maximum number of UTF-16 code points a standard (non-Pro) message can use; a longer message must
 /// activate the Session Pro higher-character-limit feature. (The C `SESSION_PROTOCOL_*` symbols
 /// point at these.)
@@ -80,6 +82,15 @@ static_assert(GET_PRO_STATUS_DOMAIN.size() == 16);
 static_assert(GET_PAYMENT_DETAILS_DOMAIN.size() == 16);
 
 enum ProProofVersion { ProProofVersion_v0 };
+
+/// Rotation window for the Session Pro rotating key: ProProof::rotating_seed yields the same seed
+/// for all timestamps within one such period and a fresh one at each boundary.
+inline constexpr auto PRO_ROTATING_SEED_PERIOD = 7 * 24h;
+
+/// How long before a proof's expiry a client preemptively renews it -- and, correspondingly, the
+/// minimum remaining entitlement (access expiry beyond now) that makes a preemptive renewal worth
+/// doing. See UserProfile::pro_renewal_target.
+inline constexpr auto PRO_RENEWAL_LEAD = 60min;
 
 enum class ProStatus {
     // Pro proof sig was not signed by the Pro backend key
