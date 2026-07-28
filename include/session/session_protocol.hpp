@@ -58,13 +58,11 @@ enum ProProofVersion { ProProofVersion_v0 };
 inline constexpr std::string_view GENERATE_PROOF_DOMAIN = "ProGenerateProof";
 inline constexpr std::string_view BUILD_PROOF_DOMAIN = "ProProof_v0_____";
 inline constexpr std::string_view ADD_PRO_PAYMENT_DOMAIN = "ProAddPayment___";
-inline constexpr std::string_view SET_PAYMENT_REFUND_REQUESTED_DOMAIN = "ProSetRefundReq_";
 inline constexpr std::string_view GET_PRO_STATUS_DOMAIN = "ProGetProStatus_";
 inline constexpr std::string_view GET_PAYMENT_DETAILS_DOMAIN = "ProGetPayDetails";
 static_assert(GENERATE_PROOF_DOMAIN.size() == 16);
 static_assert(BUILD_PROOF_DOMAIN.size() == 16);
 static_assert(ADD_PRO_PAYMENT_DOMAIN.size() == 16);
-static_assert(SET_PAYMENT_REFUND_REQUESTED_DOMAIN.size() == 16);
 static_assert(GET_PRO_STATUS_DOMAIN.size() == 16);
 static_assert(GET_PAYMENT_DETAILS_DOMAIN.size() == 16);
 

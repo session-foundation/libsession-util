@@ -80,7 +80,7 @@ static_assert(PUBKEY_X25519.size() == 32);
 constexpr std::string_view URL = "https://pro.session.codes";
 
 /// Canonical payment-provider code strings — the value transmitted on the wire and folded into the
-/// add-payment / set-refund signed messages (§3). Reference these rather than hardcoding the slug
+/// add-payment signed message (§3). Reference these rather than hardcoding the slug
 /// so a sent code cannot drift from what libsession signs/parses. The C
 /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*` symbols point at these. An unknown code is still
 /// valid on the wire and passes through as an opaque string.
@@ -390,10 +390,6 @@ struct ProPaymentItem {
     /// sends it as a float of seconds.
     sys_ms revoked_at;
 
-    /// UNIX timestamp at which a refund request was requested for this payment. This is set to 0
-    /// if no refund has been requested for this payment yet.
-    std::chrono::sys_seconds refund_requested_at;
-
     /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
     /// parts in per the backend-defined composite -- libsession does not interpret it).
     /// Confidential; store appropriately.
@@ -448,12 +444,6 @@ struct ProStatusResponse : ResponseBase {
     /// `auto_renewing` is false. It can be used to calculate the subscription expiry timestamp by
     /// subtracting it from `expiry_at`.
     std::chrono::seconds grace_period_duration;
-
-    /// UNIX timestamp at which a refund request was requested by this user. This timestamp comes
-    /// from the latest payment that the backend has deemed to be active for the user (e.g. the
-    /// payment associated with the `expiry_at`). This value is 0 if no refund has been
-    /// requested on the active payment.
-    std::chrono::sys_seconds refund_requested_at;
 };
 
 struct PaymentDetailsResponse : ResponseBase {
@@ -479,40 +469,4 @@ ProStatusResponse parse_pro_status(std::string_view json);
 /// Parse the reply to a `payment_details_request`. On failure `status` is set to an error state and
 /// `errors` is populated.
 PaymentDetailsResponse parse_payment_details(std::string_view json);
-
-/// Record a refund request against an existing Session Pro payment (endpoint
-/// `set_payment_refund_requested`). `refund_sig` computes the master signature; `refund_request`
-/// builds the whole request (signing internally) and returns the endpoint + JSON body. Both throw
-/// on an incorrectly-sized key.
-///
-/// Inputs:
-/// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
-/// - `unix_ts` -- Unix timestamp for the request
-/// - `refund_requested_at` -- timestamp to record as when the refund was requested
-/// - `provider_code` -- provider code string the payment is from (see
-///   SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*)
-/// - `payment_id` -- opaque payment identifier from the provider (hashed verbatim)
-b64 refund_sig(
-        const ed25519::PrivKeySpan& master_privkey,
-        std::chrono::sys_seconds unix_ts,
-        std::chrono::sys_seconds refund_requested_at,
-        std::string_view provider_code,
-        std::span<const std::byte> payment_id);
-
-ProRequest refund_request(
-        const ed25519::PrivKeySpan& master_privkey,
-        std::chrono::sys_seconds unix_ts,
-        std::chrono::sys_seconds refund_requested_at,
-        std::string_view provider_code,
-        std::span<const std::byte> payment_id);
-
-struct SetPaymentRefundRequestedResponse : ResponseBase {
-    /// True if a payment was found matching the given payment information and that the refund
-    /// request unix timestamp was set
-    bool updated;
-};
-
-/// Parse the reply to a `refund_request`. On failure `status` is set to an error state and `errors`
-/// is populated.
-SetPaymentRefundRequestedResponse parse_refund(std::string_view json);
 }  // namespace session::pro_backend
