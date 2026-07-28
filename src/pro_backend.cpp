@@ -282,7 +282,7 @@ namespace {
     // proof) from the already-extracted `result` object.
     void fill_proof(
             const nlohmann::json::object_t& result_obj,
-            ProProofResponse& result,
+            GenerateProProofResponse& result,
             std::vector<std::string>& errs) {
         result.proof.version = json_require<uint8_t>(result_obj, "version", errs);
         auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", errs);
