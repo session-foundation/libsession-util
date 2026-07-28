@@ -1,61 +1,54 @@
 #include <session/config/pro.h>
 #include <session/pro_backend.h>
-#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 
+#include <oxenc/bt_producer.h>
+#include <oxenc/bt_serialize.h>
 #include <session/config/pro.hpp>
 #include <session/sodium_array.hpp>
-
-#include "internal.hpp"
+#include <session/util.hpp>
 
 namespace session::config {
 
-bool ProConfig::load(const dict& root) {
-    // Get proof fields from session pro data sitting in the 'p' (proof) dictionary
-    auto p_it = root.find("p");
-    if (p_it == root.end())
+bool ProConfig::load(std::string_view bt_encoded) {
+    if (bt_encoded.empty())
         return false;
 
-    // Lookup and get 'p'
-    const config::dict* p = std::get_if<config::dict>(&p_it->second);
-    if (!p)
-        return false;
+    try {
+        // A parse failure here -- including an older dict-shaped "s" from before the credential
+        // became one atomic value -- is caught and treated as "no credential", self-healing on the
+        // next proof fetch.
+        oxenc::bt_dict_consumer d{bt_encoded};
+        auto expiry = d.require<int64_t>("e");
+        auto tag = d.require_span<unsigned char, sizeof(proof.revocation_tag)>("g");
+        auto seed = d.require_span<unsigned char, crypto_sign_ed25519_SEEDBYTES>("r");
+        auto sig = d.require_span<unsigned char, sizeof(proof.sig)>("s");
 
-    std::optional<std::vector<unsigned char>> maybe_rotating_seed = maybe_vector(root, "r");
-    if (!maybe_rotating_seed || maybe_rotating_seed->size() != crypto_sign_ed25519_SEEDBYTES)
-        return false;
-
-    // NOTE: Load into the proof object
-    {
-        std::optional<std::vector<unsigned char>> maybe_revocation_tag = maybe_vector(*p, "g");
-        std::optional<std::chrono::sys_seconds> maybe_expiry = maybe_ts(*p, "e");
-        std::optional<std::vector<unsigned char>> maybe_sig = maybe_vector(*p, "s");
-
-        if (!maybe_revocation_tag || maybe_revocation_tag->size() != proof.revocation_tag.size())
-            return false;
-        if (!maybe_sig || maybe_sig->size() != proof.sig.max_size())
-            return false;
-        if (!maybe_expiry)
-            return false;
-
-        // The proof version is NOT persisted in the config: dicts merge per-key/non-atomically, so
-        // an in-dict version field can't reliably describe its sibling fields (a concurrent edit
-        // could stitch one update's version onto another's fields). The config proof format is v0
-        // by definition; a future format would take a new key, not a version marker here.
+        // The config proof format is v0 by definition (a future format takes a new key, not an
+        // in-dict version marker -- an opaque value can't carry a version that describes itself
+        // across a per-key merge).
         proof.version = ProProofVersion_v0;
-        std::memcpy(
-                proof.revocation_tag.data(),
-                maybe_revocation_tag->data(),
-                proof.revocation_tag.size());
-        proof.expiry_at = *maybe_expiry;
-        std::memcpy(proof.sig.data(), maybe_sig->data(), proof.sig.size());
-    }
+        proof.expiry_at = std::chrono::sys_seconds{std::chrono::seconds{expiry}};
+        std::memcpy(proof.revocation_tag.data(), tag.data(), proof.revocation_tag.size());
+        std::memcpy(proof.sig.data(), sig.data(), proof.sig.size());
 
-    // Derive the rotating public key from the seed and populate the proof's pubkey and the outer
-    // private key
-    crypto_sign_ed25519_seed_keypair(
-            proof.rotating_pubkey.data(), rotating_privkey.data(), maybe_rotating_seed->data());
-    return true;
+        // Derive the rotating public key + full private key from the stored seed.
+        crypto_sign_ed25519_seed_keypair(
+                proof.rotating_pubkey.data(), rotating_privkey.data(), seed.data());
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+std::string ProConfig::serialize() const {
+    oxenc::bt_dict_producer d;
+    // bt dict keys MUST be appended in sorted order: e, g, r, s.
+    d.append("e", epoch_seconds(proof.expiry_at));
+    d.append("g", proof.revocation_tag);
+    d.append("r", std::span{rotating_privkey}.first<crypto_sign_ed25519_SEEDBYTES>());
+    d.append("s", proof.sig);
+    return std::string{d.view()};
 }
 
 };  // namespace session::config
