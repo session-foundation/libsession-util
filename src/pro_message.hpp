@@ -17,8 +17,8 @@ namespace session::pro {
 ///   and self-delimiting;
 /// - **integer**: canonical decimal ASCII (`std::to_chars`, base 10, locale-independent — never a
 ///   locale-aware formatter);
-/// - **string_view** (`provider_code`, and the opaque variable-length `payment_id` via
-///   `to_string_view`): its bytes verbatim.
+/// - **string_view** (e.g. the opaque `before` pagination cursor of get_payment_details): its bytes
+///   verbatim.
 ///
 /// A single NUL byte is inserted between two *adjacent* variable-length fields (integer/string);
 /// raw fields need no separator, and the domain prefix (also raw) never precedes one. The message
