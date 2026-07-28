@@ -132,7 +132,6 @@ namespace {
 
     // Endpoint paths (single master storage). Both the C `SESSION_PRO_BACKEND_*_ENDPOINT` symbols
     // and the C++ `*_request()` return values point at these — the path is defined exactly once.
-    constexpr char add_payment_endpoint[] = "add_pro_payment";
     constexpr char generate_proof_endpoint[] = "generate_pro_proof";
     constexpr char get_pro_status_endpoint[] = "get_pro_status";
     constexpr char get_payment_details_endpoint[] = "get_payment_details";
@@ -143,48 +142,11 @@ namespace {
     // content type travels alongside the payload so clients never hardcode a format.
     constexpr char application_json[] = "application/json";
 
-    // --- add-payment (endpoint add_pro_payment) ---
-
-    std::vector<std::byte> add_payment_message(
-            std::span<const std::byte, 32> master_pubkey,
-            std::span<const std::byte, 32> rotating_pubkey,
-            std::string_view provider_code,
-            std::span<const std::byte> payment_id) {
-        // Must match the add-payment signed-request message in pro-wire-protocol.md §3.2
-        // (+ §3.5), built per §1.1.
-        return pro::signed_message(
-                ADD_PRO_PAYMENT_DOMAIN,
-                master_pubkey,
-                rotating_pubkey,
-                provider_code,
-                to_string_view(payment_id));
-    }
-
-    // Serialise an add-payment request body from already-computed fields (shared by the C++
-    // add_payment_request and the C ..._request_build wrapper).
-    std::string add_payment_body(
-            std::span<const std::byte, 32> master_pubkey,
-            std::span<const std::byte, 32> rotating_pubkey,
-            std::string_view provider_code,
-            std::string_view payment_id,
-            std::span<const std::byte, 64> master_sig,
-            std::span<const std::byte, 64> rotating_sig) {
-        return nlohmann::json{
-                {"master_pkey", oxenc::to_hex(master_pubkey)},
-                {"rotating_pkey", oxenc::to_hex(rotating_pubkey)},
-                {"payment_tx", {{"provider", provider_code}, {"payment_id", payment_id}}},
-                {"master_sig", oxenc::to_hex(master_sig)},
-                {"rotating_sig", oxenc::to_hex(rotating_sig)}}
-                .dump();
-    }
-
 }  // namespace
 
 // C endpoint symbols: each points at the single master endpoint string defined above, so the C API
 // and the C++ `ProRequest::endpoint` values are backed by one definition.
 extern "C" {
-LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT =
-        add_payment_endpoint;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT =
         generate_proof_endpoint;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_STATUS_ENDPOINT =
@@ -278,36 +240,6 @@ std::optional<ProPlanPeriod> parse_plan_period(std::string_view code) {
     return ProPlanPeriod{count, unit};
 }
 
-MasterRotatingSignatures add_payment_sigs(
-        const ed25519::PrivKeySpan& master_privkey,
-        const ed25519::PrivKeySpan& rotating_privkey,
-        std::string_view provider_code,
-        std::span<const std::byte> payment_id) {
-    auto msg = add_payment_message(
-            master_privkey.pubkey(), rotating_privkey.pubkey(), provider_code, payment_id);
-    MasterRotatingSignatures result = {};
-    result.master_sig = ed25519::sign(master_privkey, msg);
-    result.rotating_sig = ed25519::sign(rotating_privkey, msg);
-    return result;
-}
-
-ProRequest add_payment_request(
-        const ed25519::PrivKeySpan& master_privkey,
-        const ed25519::PrivKeySpan& rotating_privkey,
-        std::string_view provider_code,
-        std::span<const std::byte> payment_id) {
-    auto sigs = add_payment_sigs(master_privkey, rotating_privkey, provider_code, payment_id);
-    return {add_payment_endpoint,
-            application_json,
-            add_payment_body(
-                    master_privkey.pubkey(),
-                    rotating_privkey.pubkey(),
-                    provider_code,
-                    to_string_view(payment_id),
-                    sigs.master_sig,
-                    sigs.rotating_sig)};
-}
-
 namespace {
     // libsession-side slug when the backend's reply can't be parsed at all (malformed envelope,
     // missing/unrecognized status). Distinct from any backend error_code slug.
@@ -362,21 +294,6 @@ namespace {
         json_require_fixed_bytes_from_hex(result_obj, "sig", errs, result.proof.sig);
     }
 }  // namespace
-
-AddProPaymentResponse parse_add_payment(std::string_view json) {
-    AddProPaymentResponse result = {};
-    std::vector<std::string> errs;
-    auto result_obj = read_envelope(json, result, errs);
-    if (!result || !errs.empty()) {
-        if (!errs.empty())
-            set_protocol_error(result, errs.front());
-        return result;
-    }
-    fill_proof(result_obj, result, errs);
-    if (!errs.empty())
-        set_protocol_error(result, errs.front());
-    return result;
-}
 
 GenerateProProofResponse parse_pro_proof(std::string_view json) {
     GenerateProProofResponse result = {};
@@ -514,7 +431,7 @@ namespace {
 
     std::vector<std::byte> pro_status_message(
             std::span<const std::byte, 32> master_pubkey, std::chrono::sys_seconds unix_ts) {
-        // Must match the get-pro-status signed-request message in pro-wire-protocol.md §3.4, built
+        // Must match the get-pro-status signed-request message in pro-wire-protocol.md §3.2, built
         // per §1.1.
         return pro::signed_message(GET_PRO_STATUS_DOMAIN, master_pubkey, epoch_seconds(unix_ts));
     }
@@ -537,7 +454,7 @@ namespace {
             std::chrono::sys_seconds unix_ts,
             uint32_t limit,
             std::string_view before) {
-        // Must match the get-payment-details signed-request message in pro-wire-protocol.md §3.4,
+        // Must match the get-payment-details signed-request message in pro-wire-protocol.md §3.3,
         // built per §1.1. `before` is the opaque pagination cursor (§5.3), empty for the newest
         // page.
         return pro::signed_message(
@@ -867,27 +784,6 @@ LIBSESSION_C_API const char* const* session_pro_backend_visible_platforms(size_t
     return codes.data();
 }
 
-LIBSESSION_C_API session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
-        const unsigned char* master_privkey,
-        size_t master_privkey_len,
-        const unsigned char* rotating_privkey,
-        size_t rotating_privkey_len,
-        const char* provider_code,
-        const unsigned char* payment_id,
-        size_t payment_id_len) {
-    session_pro_backend_request result = {};
-    try {
-        result = c_own_request(add_payment_request(
-                ed25519::PrivKeySpan{master_privkey, master_privkey_len},
-                ed25519::PrivKeySpan{rotating_privkey, rotating_privkey_len},
-                provider_code,
-                to_byte_span(payment_id, payment_id_len)));
-    } catch (const std::exception& e) {
-        c_request_error(result, e);
-    }
-    return result;
-}
-
 LIBSESSION_C_API session_pro_backend_request session_pro_backend_generate_pro_proof_request_build(
         const unsigned char* master_privkey,
         size_t master_privkey_len,
@@ -961,8 +857,7 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
     }
 
     try {
-        // add-payment and generate-proof share the proof-response shape; either parser works.
-        auto* owned = new AddProPaymentResponse(parse_add_payment({json, json_len}));
+        auto* owned = new GenerateProProofResponse(parse_pro_proof({json, json_len}));
         result.header.internal_ = owned;
         fill_c_header(result.header, *owned);
 
@@ -978,7 +873,7 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
                 p.rotating_pubkey.size());
         std::memcpy(result.proof.sig.data, p.sig.data(), p.sig.size());
     } catch (const std::exception&) {
-        delete static_cast<AddProPaymentResponse*>(result.header.internal_);
+        delete static_cast<GenerateProProofResponse*>(result.header.internal_);
         result = {};
         result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
         result.header.error_code = C_INVALID_RESPONSE_CODE;
@@ -1098,7 +993,7 @@ LIBSESSION_C_API void session_pro_backend_request_free(session_pro_backend_reque
 
 LIBSESSION_C_API void session_pro_backend_pro_proof_response_free(
         session_pro_backend_pro_proof_response* response) {
-    c_free_response<AddProPaymentResponse>(response);
+    c_free_response<GenerateProProofResponse>(response);
 }
 
 LIBSESSION_C_API void session_pro_backend_get_pro_revocations_response_free(

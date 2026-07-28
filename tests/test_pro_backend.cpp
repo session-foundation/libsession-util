@@ -28,67 +28,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
-        std::array<unsigned char, 8> fake_google_payment_token;
-        randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::array<unsigned char, 8> fake_google_order_id;
-        randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        // Google's composite payment_id is "<payment_token>|<order_id>"; libsession treats the
-        // whole thing as one opaque value.
-        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
-                                      oxenc::to_hex(fake_google_order_id);
-
-        const char* provider_code = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
-        auto payment_id = reinterpret_cast<const uint8_t*>(fake_payment_id.data());
-        size_t payment_id_len = fake_payment_id.size();
-
         int64_t unix_ts = 1698765432;  // Arbitrary timestamp (unix epoch seconds)
 
-        SECTION("session_pro_backend_add_pro_payment_request_build") {
-            auto result = session_pro_backend_add_pro_payment_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data),
-                    rotating_privkey.data,
-                    sizeof(rotating_privkey.data),
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            {
-                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
-                INFO(result.error);
-                REQUIRE(result.success);
-                REQUIRE(result.data.data != nullptr);
-                REQUIRE(result.data.size > 0);
-
-                // Matches the C++ free-function implementation end to end.
-                auto cpp = add_payment_request(
-                        master_privkey.data,
-                        rotating_privkey.data,
-                        provider_code,
-                        to_byte_span(payment_id, payment_id_len));
-                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
-                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT);
-                REQUIRE(std::string_view(result.content_type) == cpp.content_type);
-                REQUIRE(cpp.content_type == "application/json");
-                REQUIRE(span_u8_equals(result.data, cpp.data));
-            }
-
-            // After freeing
-            REQUIRE(result.data.data == nullptr);
-            REQUIRE(result.data.size == 0);
-
-            // Invalid key size -> failure, no allocation
-            result = session_pro_backend_add_pro_payment_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data) - 1,
-                    rotating_privkey.data,
-                    sizeof(rotating_privkey.data),
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            REQUIRE(!result.success);
-            REQUIRE(result.error_count > 0);
-            REQUIRE(result.data.data == nullptr);
-        }
+        // Opaque, backend-owned payment identifier as it appears on a payment item (§5.2): the
+        // client stores and compares it for equality but never parses it.
+        std::string fake_payment_id = "DEV.opaque-payment-id-0123456789";
 
         SECTION("session_pro_backend_generate_pro_proof_request_build") {
             auto result = session_pro_backend_generate_pro_proof_request_build(
@@ -236,7 +180,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Here we also create the CPP version, we will run the conversion functions into
                 // pro proofs (both C and CPP variants) and then compare the two structures to make
                 // sure the conversion functions are sound.
-                auto result_cpp = parse_add_payment(json);
+                auto result_cpp = parse_pro_proof(json);
 
                 // Validate C and CPP variants
                 REQUIRE(result.proof.version == result_cpp.proof.version);
@@ -652,8 +596,7 @@ TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
 // answer.
 //
 // Fixed inputs: keypairs from 32-byte seeds 0x01.. / 0x02.. (backend key 0x03..), ts=1700000000,
-// expiry=1704067200, count=10, provider="google_play",
-// payment_id="test-payment-id-123", revocation_tag=0x11 x32.
+// expiry=1704067200, count=10, revocation_tag=0x11 x32.
 TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     auto keypair = [](unsigned char seed_byte) {
         std::array<unsigned char, 32> pk{};
@@ -670,25 +613,17 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
 
     const auto ts = session::as_sys_seconds(1700000000);
     const auto expiry = session::as_sys_seconds(1704067200);
-    const std::string provider = "google_play";
-    const std::string payment_id = "test-payment-id-123";
 
     // Expected signed-message bytes (hex), each hand-verified against the spec field layout.
-    const std::string add_msg_hex =
-            "50726f4164645061796d656e745f5f5f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
-            "01"
-            "b40f6f5c8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394676f6f676c655f"
-            "70"
-            "6c617900746573742d7061796d656e742d69642d313233";
     const std::string gen_msg_hex =
             "50726f47656e657261746550726f6f668a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
             "01"
             "b40f6f5c8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b39431373030303030"
             "303030";
-    // get_pro_details is split (§3.4) into get_pro_status (master + ts) and paginated
-    // get_payment_details (master + ts + limit + before). Two details vectors pin the `before`
-    // framing: empty `before` (newest page) ends in the adjacency \0; a non-empty cursor is the
-    // opaque final field (no trailing separator).
+    // The two read requests: get_pro_status (§3.2; master + ts) and paginated get_payment_details
+    // (§3.3; master + ts + limit + before). Two details vectors pin the `before` framing: empty
+    // `before` (newest page) ends in the adjacency \0; a non-empty cursor is the opaque final field
+    // (no trailing separator).
     const std::string status_msg_hex =
             "50726f47657450726f5374617475735f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
             "01b40f6f5c31373030303030303030";
@@ -722,20 +657,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
                                            pubkey.data()) == 0;
     };
 
-    SECTION("add_pro_payment") {
-        auto req = add_payment_request(
-                master_sk,
-                rotating_sk,
-                provider,
-                to_byte_span(payment_id.data(), payment_id.size()));
-        CHECK(req.endpoint == SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT);
-        CHECK(sig_covers(req.data, "master_sig", add_msg_hex, master_pk));
-        CHECK(sig_covers(req.data, "rotating_sig", add_msg_hex, rotating_pk));
-        // Determinism pin: the exact master signature is itself a known answer.
-        CHECK(nlohmann::json::parse(req.data).at("master_sig").get<std::string>() ==
-              "746861ae1681d996e837d603dbd21c06c9544c5fc536eb4d3e3cad4f13692b79"
-              "0ef2b1282b729aa42f537d560b3b97b231b7f940be7021c0e16f894817a57609");
-    }
     SECTION("generate_pro_proof") {
         auto req = pro_proof_request(master_sk, rotating_sk, ts);
         CHECK(req.endpoint == SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT);
@@ -1069,7 +990,8 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
                                    ? master_hex.substr(0, 16) + "|GPA." + master_hex.substr(16, 12)
                                    : "20000000" + master_hex.substr(0, 10);
 
-    // Seed the witnessed-unredeemed payment; the client's real add_pro_payment (below) redeems it.
+    // Seed the witnessed-unredeemed payment; a subsequent master-signed request (generate_pro_proof
+    // below) binds/redeems it implicitly -- there is no client-submitted add-payment step.
     run_seed_helper(
             {"payment",
              "--provider",
@@ -1083,29 +1005,27 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
 
     auto now = session::clock_now_s();
 
-    // 1) add_pro_payment -> signed proof.
-    ProRequest add_req = add_payment_request(
-            master_sk, rotating_sk, provider, to_byte_span(payment_id.data(), payment_id.size()));
-    AddProPaymentResponse add = parse_add_payment(send(onion, add_req));
-    INFO("add_pro_payment" << add.error.value_or(""));
-    REQUIRE(add.status == ResponseStatus::Ok);
-    CHECK(add.status == ResponseStatus::Ok);
-    CHECK(add.proof.verify_signature(backend_pubkey));
-    CHECK(std::memcmp(add.proof.rotating_pubkey.data(), rotating_pk.data(), 32) == 0);
+    // 1) generate_pro_proof: redemption is implicit, so this master-signed request binds the seeded
+    //    payment before answering and returns a signed proof for the paired rotating key.
+    ProRequest gen_req = pro_proof_request(master_sk, rotating_sk, now);
+    GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
+    INFO("generate_pro_proof " << gen.error.value_or(""));
+    REQUIRE(gen.status == ResponseStatus::Ok);
+    CHECK(gen.proof.verify_signature(backend_pubkey));
+    CHECK(std::memcmp(gen.proof.rotating_pubkey.data(), rotating_pk.data(), 32) == 0);
 
-    // 1b) generate_pro_proof: pair a NEW rotating key to the same subscription -> a fresh proof.
+    // 1b) generate_pro_proof again with a NEW rotating key -> a fresh proof for the same
+    //     subscription, so it shares the first proof's revocation_tag (same subscription epoch).
     std::array<unsigned char, 32> rotating2_pk{};
     std::array<unsigned char, 64> rotating2_sk{};
     crypto_sign_ed25519_keypair(rotating2_pk.data(), rotating2_sk.data());
-    ProRequest gen_req = pro_proof_request(master_sk, rotating2_sk, now);
-    GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
-    INFO("generate_pro_proof" << gen.error.value_or(""));
-    REQUIRE(gen.status == ResponseStatus::Ok);
-    CHECK(gen.status == ResponseStatus::Ok);
-    CHECK(gen.proof.verify_signature(backend_pubkey));
-    CHECK(std::memcmp(gen.proof.rotating_pubkey.data(), rotating2_pk.data(), 32) == 0);
-    // Same subscription epoch -> the fresh proof shares the add-payment proof's revocation_tag.
-    CHECK(gen.proof.revocation_tag == add.proof.revocation_tag);
+    ProRequest gen2_req = pro_proof_request(master_sk, rotating2_sk, now);
+    GenerateProProofResponse gen2 = parse_pro_proof(send(onion, gen2_req));
+    INFO("generate_pro_proof(2) " << gen2.error.value_or(""));
+    REQUIRE(gen2.status == ResponseStatus::Ok);
+    CHECK(gen2.proof.verify_signature(backend_pubkey));
+    CHECK(std::memcmp(gen2.proof.rotating_pubkey.data(), rotating2_pk.data(), 32) == 0);
+    CHECK(gen2.proof.revocation_tag == gen.proof.revocation_tag);
 
     // 2) get_pro_status: account ACTIVE and the single latest payment is our redeemed one.
     ProStatusResponse status = parse_pro_status(send(onion, pro_status_request(master_sk, now)));
@@ -1195,14 +1115,13 @@ TEST_CASE("Pro backend live get_pro_revocations", "[pro_backend][pro_live]") {
              master_hex,
              "--plan",
              "1m"});
-    ProRequest add_req = add_payment_request(
-            master_sk,
-            rotating_sk,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE,
-            to_byte_span(payment_id.data(), payment_id.size()));
-    AddProPaymentResponse add = parse_add_payment(send(onion, add_req));
-    REQUIRE(add.status == ResponseStatus::Ok);
-    CHECK(add.status == ResponseStatus::Ok);
+    // Bind + redeem it implicitly (any master-signed request binds unbound payments) and get a
+    // proof to revoke.
+    ProRequest gen_req = pro_proof_request(master_sk, rotating_sk, session::clock_now_s());
+    GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
+    INFO("generate_pro_proof " << gen.error.value_or(""));
+    REQUIRE(gen.status == ResponseStatus::Ok);
+    CHECK(gen.status == ResponseStatus::Ok);
 
     // Revoke that payment's generation (revocation is terminal now -- revoked_at set once, no
     // per-entry expiry), then poll: the list must carry our proof's revocation_tag.
@@ -1216,7 +1135,7 @@ TEST_CASE("Pro backend live get_pro_revocations", "[pro_backend][pro_live]") {
     CHECK_FALSE(rev.items.empty());
     bool found = false;
     for (const auto& it : rev.items)
-        if (it.revocation_tag == add.proof.revocation_tag)
+        if (it.revocation_tag == gen.proof.revocation_tag)
             found = true;
     CHECK(found);
 }
