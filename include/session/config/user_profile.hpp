@@ -29,8 +29,9 @@ using namespace std::literals;
 /// s - session pro data (rotating seed + proof); see config/pro.hpp for the sub-dict layout.
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
-/// E - user pro access expiry unix timestamp (in milliseconds). Note: This can be different from
-///     the pro proof expiry which can be sooner.
+/// E - user pro access expiry unix timestamp (in seconds). Note: This can be different from the pro
+///     proof expiry which can be sooner. (Some (unreleased) testing clients stored this in milliseconds; the getter
+///     migrates any such value on read -- see get_pro_access_expiry.)
 /// R - unix timestamp (seconds) at which the user requested a refund of their current Session Pro
 ///     subscription, for cross-device sync of the refund-requested state.  Omitted when no refund
 ///     has been requested; cleared by the client when a new subscription begins.  Values more than
