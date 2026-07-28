@@ -425,6 +425,32 @@ LIBSESSION_EXPORT int64_t user_profile_get_refund_requested(const config_object*
 /// clear the refund-requested state.
 LIBSESSION_EXPORT void user_profile_set_refund_requested(config_object* conf, int64_t refund_ts);
 
+/// API: user_profile/user_profile_get_pro_prepaid
+///
+/// Retrieves the timestamp at which a Session Pro purchase was initiated (the "purchase in flight"
+/// marker), synced across the user's devices. A stored value more than a week in the past is
+/// ignored (returns 0).
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int64_t` - the unix timestamp (seconds) at which a purchase was initiated, or 0 if none is
+/// pending (or the stored value is stale).
+LIBSESSION_EXPORT int64_t user_profile_get_pro_prepaid(const config_object* conf);
+
+/// API: user_profile/user_profile_set_pro_prepaid
+///
+/// Records (or clears) that a Session Pro purchase is in flight so the user's other devices poll
+/// the backend to pull the entitlement through. A no-op if the account is already Pro; cleared
+/// automatically once entitlement lands, or explicitly by passing 0.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `prepaid_ts` -- the timestamp (unix epoch seconds) at which the purchase was initiated, or 0
+/// to clear the marker.
+LIBSESSION_EXPORT void user_profile_set_pro_prepaid(config_object* conf, int64_t prepaid_ts);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

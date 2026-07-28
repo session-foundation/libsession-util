@@ -172,6 +172,10 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
         data[target_timestamp] = ts_now();
     }
+
+    // A live proof means any in-flight purchase has resolved: clear the prepaid marker.
+    if (pro.proof.expiry_at > ts_now() && data["I"].exists())
+        data["I"].erase();
 }
 
 bool UserProfile::remove_pro_config() {
@@ -225,6 +229,16 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
         data["E"] = epoch_seconds(*access_expiry_ts);
     else
         data["E"].erase();
+
+    // Confirming a live entitlement means any in-flight purchase resolved, and any long-stale
+    // refund request is moot -- opportunistically clear both (we're already writing E anyway).
+    if (access_expiry_ts && *access_expiry_ts > ts_now()) {
+        if (data["I"].exists())
+            data["I"].erase();
+        if (auto* R = data["R"].integer(); R && std::chrono::sys_seconds{std::chrono::seconds{*R}} <
+                                                          ts_now() - std::chrono::weeks{1})
+            data["R"].erase();
+    }
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_refund_requested() const {
@@ -248,6 +262,42 @@ void UserProfile::set_refund_requested(std::optional<std::chrono::sys_seconds> w
     const auto target_timestamp =
             (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
     data[target_timestamp] = ts_now();
+}
+
+std::optional<std::chrono::sys_seconds> UserProfile::get_pro_prepaid() const {
+    if (auto* I = data["I"].integer()) {
+        std::chrono::sys_seconds when{std::chrono::seconds{*I}};
+        // Ignore a stale marker (a purchase that never propagated) so devices don't poll forever.
+        if (when >= ts_now() - std::chrono::weeks{1})
+            return when;
+    }
+    return std::nullopt;
+}
+
+void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) {
+    bool changed = false;
+    if (!when) {
+        if (data["I"].exists()) {
+            data["I"].erase();
+            changed = true;
+        }
+    } else {
+        // Only mark a purchase pending if the account isn't already entitled to Pro (a live proof
+        // or a still-future access expiry); otherwise there's nothing to poll for.
+        bool already_pro = get_pro_config().has_value();
+        if (!already_pro)
+            if (auto e = get_pro_access_expiry(); e && *e > ts_now())
+                already_pro = true;
+        if (!already_pro) {
+            data["I"] = epoch_seconds(*when);
+            changed = true;
+        }
+    }
+    if (changed) {
+        const auto target_timestamp =
+                (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+        data[target_timestamp] = ts_now();
+    }
 }
 
 extern "C" {
@@ -443,6 +493,19 @@ LIBSESSION_C_API void user_profile_set_refund_requested(config_object* conf, int
         unbox<UserProfile>(conf)->set_refund_requested(std::nullopt);
     else
         unbox<UserProfile>(conf)->set_refund_requested(as_sys_seconds(refund_ts));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_pro_prepaid(const config_object* conf) {
+    if (auto when = unbox<UserProfile>(conf)->get_pro_prepaid())
+        return epoch_seconds(*when);
+    return 0;
+}
+
+LIBSESSION_C_API void user_profile_set_pro_prepaid(config_object* conf, int64_t prepaid_ts) {
+    if (prepaid_ts <= 0)
+        unbox<UserProfile>(conf)->set_pro_prepaid(std::nullopt);
+    else
+        unbox<UserProfile>(conf)->set_pro_prepaid(as_sys_seconds(prepaid_ts));
 }
 
 }  // extern "C"
