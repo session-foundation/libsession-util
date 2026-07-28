@@ -662,7 +662,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     // A recent request is returned as-is, and stamps the profile-updated timestamp so it
     // time-orders across devices.
     UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{456s});
-    auto refund_at = now - std::chrono::hours{1};
+    auto refund_at = now - 1h;
     profile.set_refund_requested(refund_at);
     CHECK(profile.get_refund_requested() == refund_at);
     CHECK(profile.get_profile_updated().time_since_epoch().count() != 456);
@@ -685,7 +685,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     // auto-clear when entitlement lands. (No proof, access expiry in the past -> not currently pro.)
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
 
-    auto prepaid_at = now - std::chrono::hours{1};
+    auto prepaid_at = now - 1h;
     profile.set_pro_prepaid(prepaid_at);
     CHECK(profile.get_pro_prepaid() == prepaid_at);
 
@@ -696,7 +696,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     // Confirming a live access expiry clears the marker (entitlement arrived).
     profile.set_pro_prepaid(prepaid_at);
     REQUIRE(profile.get_pro_prepaid().has_value());
-    profile.set_pro_access_expiry(now + std::chrono::hours{1});
+    profile.set_pro_access_expiry(now + 1h);
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
 
     // While pro (live access expiry), setting the marker is a no-op.
@@ -707,7 +707,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     profile.set_pro_access_expiry(std::nullopt);
     profile.set_pro_prepaid(prepaid_at);
     REQUIRE(profile.get_pro_prepaid().has_value());
-    pro_cpp.proof.expiry_at = now + std::chrono::hours{1};
+    pro_cpp.proof.expiry_at = now + 1h;
     profile.set_pro_config(pro_cpp);
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
 
@@ -735,16 +735,16 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         };
 
         // Valid proof (10 days out), entitlement a month out -> preemptive ~1h before expiry.
-        auto expiry = now + std::chrono::hours{24 * 10};
+        auto expiry = now + 10 * 24h;
         store_proof(expiry);
-        pr.set_pro_access_expiry(now + std::chrono::hours{24 * 30});
+        pr.set_pro_access_expiry(now + 30 * 24h);
         auto target = pr.pro_renewal_target(now);
         REQUIRE(target.has_value());
-        CHECK(*target <= expiry - std::chrono::minutes{59});
-        CHECK(*target >= expiry - std::chrono::minutes{61});
+        CHECK(*target <= expiry - 59min);
+        CHECK(*target >= expiry - 61min);
 
         // Same proof but entitlement ending within the hour -> don't renew.
-        pr.set_pro_access_expiry(now + std::chrono::minutes{30});
+        pr.set_pro_access_expiry(now + 30min);
         CHECK_FALSE(pr.pro_renewal_target(now).has_value());
 
         // No access expiry at all -> don't preemptively renew.
@@ -752,7 +752,7 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         CHECK_FALSE(pr.pro_renewal_target(now).has_value());
 
         // Expired proof -> renew immediately, regardless of entitlement.
-        store_proof(now - std::chrono::hours{1});
+        store_proof(now - 1h);
         CHECK(pr.pro_renewal_target(now) == now);
     }
 }
