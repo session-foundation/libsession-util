@@ -3,8 +3,12 @@
 #include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
 #include <simdutf.h>
+#include <sodium/crypto_generichash_blake2b.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
+
+#include <charconv>
+#include <vector>
 
 #include <oxen/log.hpp>
 #include <session/pro_backend.hpp>
@@ -176,6 +180,42 @@ ProStatus ProProof::status(
 
 std::vector<unsigned char> ProProof::signed_message() const {
     return proof_signed_message(revocation_tag, rotating_pubkey, epoch_seconds(expiry_at));
+}
+
+cleared_uc32 ProProof::rotating_seed(
+        std::span<const unsigned char> master_seed, std::chrono::sys_seconds timestamp) {
+    if (master_seed.size() != 32 && master_seed.size() != 64)
+        throw std::invalid_argument{
+                "Invalid master_seed: expected a 32-byte Ed25519 seed or 64-byte libsodium key"};
+
+    // Floor the timestamp to the rotation period, then hash master_seed[0:32] ‖ dec(period_start),
+    // where dec() is canonical decimal ASCII -- the same integer encoding the rest of the Pro wire
+    // uses (signed_message, §1.1), so there's one integer convention and no endianness to pin.
+    constexpr std::int64_t period = 7 * 24 * 60 * 60;  // 604800 seconds
+    std::int64_t period_start = session::epoch_seconds(timestamp) / period * period;
+    char dec[20];
+    auto [ptr, ec] = std::to_chars(dec, dec + sizeof(dec), period_start);
+
+    auto seed = master_seed.first(32);
+    std::vector<unsigned char> msg;
+    msg.reserve(seed.size() + static_cast<size_t>(ptr - dec));
+    msg.insert(msg.end(), seed.begin(), seed.end());
+    msg.insert(msg.end(), dec, ptr);
+
+    static constexpr std::string_view personal = "ProRotatingSeed_";
+    static_assert(personal.size() == crypto_generichash_blake2b_PERSONALBYTES);
+
+    cleared_uc32 out = {};
+    crypto_generichash_blake2b_salt_personal(
+            out.data(),
+            out.size(),
+            msg.data(),
+            msg.size(),
+            nullptr,  // key
+            0,
+            nullptr,  // salt
+            reinterpret_cast<const unsigned char*>(personal.data()));
+    return out;
 }
 
 void ProProfileBitset::set(SESSION_PROTOCOL_PRO_PROFILE_FEATURES features) {
@@ -1142,6 +1182,13 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
             proof->revocation_tag.data, proof->rotating_pubkey.data, proof->expiry_ts);
     bool result = proof_verify_message_internal(verify_pubkey_span, proof->sig.data, msg);
     return result;
+}
+
+LIBSESSION_C_API void session_protocol_pro_rotating_seed(
+        const unsigned char* master_seed, int64_t unix_ts, unsigned char* rotating_seed_out) {
+    auto seed = session::ProProof::rotating_seed(
+            {master_seed, 32}, std::chrono::sys_seconds{std::chrono::seconds{unix_ts}});
+    std::memcpy(rotating_seed_out, seed.data(), seed.size());
 }
 
 LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(

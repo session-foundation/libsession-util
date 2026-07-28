@@ -289,6 +289,24 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_signature(
         uint8_t const* verify_pubkey,
         size_t verify_pubkey_len) NON_NULL_ARG(1, 2);
 
+/// API: session_protocol/session_protocol_pro_rotating_seed
+///
+/// Deterministically derive the rotating Session Pro seed for the (weekly) rotation period that
+/// contains `unix_ts` (see the C++ ProProof::rotating_seed). Every device on an account derives the
+/// same 32-byte seed for the same period, so concurrent proof (re)generations converge rather than
+/// racing.
+///
+/// Inputs:
+/// - `master_seed` -- the account's Session Pro master key/seed (from
+///   session_ed25519_pro_privkey_for_ed25519_seed), NOT the session-id seed; first 32 bytes used.
+/// - `unix_ts` -- any unix timestamp (seconds) within the desired rotation period; it is floored to
+///   the period internally, so the caller never computes epochs.
+/// - `rotating_seed_out` -- [out] 32-byte buffer to receive the derived seed.
+LIBSESSION_EXPORT void session_protocol_pro_rotating_seed(
+        const unsigned char* master_seed,
+        int64_t unix_ts,
+        unsigned char* rotating_seed_out) NON_NULL_ARG(1, 3);
+
 /// API: session_protocol/session_protocol_pro_proof_verify_message
 ///
 /// Check if the `rotating_pubkey` in the proof was the signatory of the message and signature
