@@ -168,7 +168,10 @@ void UserProfile::set_pro_config(const ProConfig& pro) {
                 pro.rotating_privkey.data(), crypto_sign_ed25519_SEEDBYTES);
 
         auto proof_dict = root["p"];
-        proof_dict["@"] = pro.proof.version;
+        // The proof version is not persisted (see ProConfig::load): a per-key-merged dict can't
+        // carry a version that reliably describes its siblings. Erase any legacy "@" left by an
+        // older client so it stops bloating the config.
+        proof_dict["@"].erase();
         proof_dict["g"] = pro.proof.revocation_tag;
         proof_dict["e"] = epoch_seconds(pro.proof.expiry_at);
         proof_dict["s"] = pro.proof.sig;

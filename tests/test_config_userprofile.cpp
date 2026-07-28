@@ -616,7 +616,9 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     {
         // CPP
         pro_cpp.rotating_privkey = rotating_sk;
-        pro_cpp.proof.version = 2;
+        // The config does not persist the proof version (dicts merge per-key, so an in-dict version
+        // can't reliably describe its sibling fields); a config-loaded proof is always v0.
+        pro_cpp.proof.version = session::ProProofVersion_v0;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
         constexpr auto revocation_tag =
