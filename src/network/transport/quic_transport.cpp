@@ -360,18 +360,13 @@ void QuicTransport::_establish_connection(
                     }
                 },
                 [weak_self = weak_from_this(), address_pubkey_hex, initiating_req_id](
-                        oxen::quic::Connection& conn, uint64_t error_code) {
+                        oxen::quic::Connection&, uint64_t error_code) {
                     if (auto self = weak_self.lock())
                         self->_fail_connection(
-                                address_pubkey_hex,
-                                initiating_req_id,
-                                conn.reference_id(),
-                                error_code,
-                                std::nullopt);
+                                address_pubkey_hex, initiating_req_id, error_code, std::nullopt);
                 });
     } catch (const std::exception& e) {
-        _fail_connection(
-                address_pubkey_hex, initiating_req_id, std::nullopt, std::nullopt, e.what());
+        _fail_connection(address_pubkey_hex, initiating_req_id, std::nullopt, e.what());
     }
 }
 
@@ -555,7 +550,6 @@ void QuicTransport::_send_on_connection(
 void QuicTransport::_fail_connection(
         const std::string& address_pubkey_hex,
         const std::string& initiating_req_id,
-        std::optional<oxen::quic::ConnectionID> /*conn_id*/,
         std::optional<uint64_t> error_code,
         std::optional<std::string> custom_error) {
     if (error_code == NGTCP2_NO_ERROR)

@@ -1087,7 +1087,6 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
         const unsigned char* user_ed25519_privkey,
         size_t user_ed25519_privkey_len,
         const unsigned char* group_ed25519_pubkey,
-        size_t group_ed25519_pubkey_len,
         const unsigned char* group_enc_key,
         size_t group_enc_key_len,
         const unsigned char* plaintext,
@@ -1100,7 +1099,7 @@ LIBSESSION_C_API session_encrypt_group_message session_encrypt_for_group(
     try {
         std::vector<unsigned char> result_cpp = encrypt_for_group(
                 {user_ed25519_privkey, user_ed25519_privkey_len},
-                {group_ed25519_pubkey, group_ed25519_pubkey_len},
+                {group_ed25519_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES},
                 {group_enc_key, group_enc_key_len},
                 {plaintext, plaintext_len},
                 compress,
@@ -1200,7 +1199,6 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         const span_u8* decrypt_ed25519_privkey_list,
         size_t decrypt_ed25519_privkey_len,
         const unsigned char* group_ed25519_pubkey,
-        size_t group_ed25519_pubkey_len,
         const unsigned char* ciphertext,
         size_t ciphertext_len,
         char* error,
@@ -1214,7 +1212,7 @@ LIBSESSION_C_API session_decrypt_group_message_result session_decrypt_group_mess
         try {
             result_cpp = decrypt_group_message(
                     {&key, 1},
-                    {group_ed25519_pubkey, group_ed25519_pubkey_len},
+                    {group_ed25519_pubkey, crypto_sign_ed25519_PUBLICKEYBYTES},
                     {ciphertext, ciphertext_len});
             result = {
                     .success = true,
