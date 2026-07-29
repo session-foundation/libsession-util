@@ -145,7 +145,7 @@ ProStatus ProProof::status(
         std::span<const std::byte, 32> verify_pubkey,
         std::chrono::sys_seconds unix_ts,
         std::optional<std::span<const std::byte, 64>> user_sig,
-        std::span<const std::byte> signed_msg) {
+        std::span<const std::byte> signed_msg) const {
     ProStatus result = ProStatus::Valid;
     // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
     // issued by an authoritative backend)

@@ -177,7 +177,7 @@ class ProProof {
             std::span<const std::byte, 32> verify_pubkey,
             std::chrono::sys_seconds unix_ts,
             std::optional<std::span<const std::byte, 64>> user_sig = std::nullopt,
-            std::span<const std::byte> signed_msg = {});
+            std::span<const std::byte> signed_msg = {}) const;
 
     /// API: pro/Proof::signed_message
     ///
