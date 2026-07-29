@@ -84,6 +84,7 @@ else()
   set(use_lto_default ON)
 endif()
 
+option(WARN_UNUSED_PARAMETERS "Enabled unused parameter warnings" ON)
 option(WARNINGS_AS_ERRORS "Treat all compiler warnings as errors" OFF)
 option(FATAL_MISSING_DECLARATIONS "Developer/CI option: fatal error on non-static definitions without prior declarations (-Werror=missing-declarations)" OFF)
 

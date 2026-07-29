@@ -47,7 +47,6 @@ namespace {
 
     void blind_id_impl(
             std::span<const std::byte> session_id,
-            std::span<const std::byte> server_pk,
             std::span<const std::byte, 32> blind_factor,
             std::span<std::byte, 33> out,
             std::byte prefix) {
@@ -65,7 +64,7 @@ namespace {
             std::span<const std::byte> session_id,
             std::span<const std::byte, 32> server_pk,
             std::span<std::byte, 33> out) {
-        blind_id_impl(session_id, server_pk, blind15_factor(server_pk), out, std::byte{0x15});
+        blind_id_impl(session_id, blind15_factor(server_pk), out, std::byte{0x15});
     }
 
     void blind25_id_impl(
@@ -73,7 +72,7 @@ namespace {
             std::span<const std::byte, 32> server_pk,
             std::span<std::byte, 33> out) {
         blind_id_impl(
-                session_id, server_pk, blind25_factor(session_id, server_pk), out, std::byte{0x25});
+                session_id, blind25_factor(session_id, server_pk), out, std::byte{0x25});
     }
 
     // Parses server_pk from either 32 raw bytes or 64 hex digits.

@@ -45,7 +45,7 @@ struct pseudo_client {
 
     pseudo_client(
             std::span<const std::byte, 32> seed,
-            bool admin,
+            bool /*admin*/,
             std::span<const std::byte, 32> gpk,
             const ed25519::OptionalPrivKeySpan& gsk,
             std::optional<std::span<const std::byte>> info_dump = std::nullopt,
