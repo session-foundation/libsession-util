@@ -213,6 +213,19 @@ b64 sign(const PrivKeySpan& ed25519_privkey, std::span<const std::byte> msg) {
     return sig;
 }
 
+b64 decoy_signature() {
+    b64 sig;
+    // R = r·B for a random scalar r: a canonical point in the prime-order (main) subgroup, exactly
+    // like a real signature's R. (A directly-sampled random group element lands off the main
+    // subgroup ~7/8 of the time -- detectable via an L-torsion check.)
+    std::array<unsigned char, crypto_core_ed25519_SCALARBYTES> r;
+    crypto_core_ed25519_scalar_random(r.data());
+    crypto_scalarmult_ed25519_base_noclamp(to_unsigned(sig.data()), r.data());
+    // s = a second, independent random scalar in ]0, L[, used as-is.
+    crypto_core_ed25519_scalar_random(to_unsigned(sig.data() + crypto_core_ed25519_BYTES));
+    return sig;
+}
+
 bool verify(
         std::span<const std::byte, 64> sig,
         std::span<const std::byte, 32> pubkey,

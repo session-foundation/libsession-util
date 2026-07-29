@@ -161,6 +161,13 @@ void sign(
 /// Return-value form.
 b64 sign(const PrivKeySpan& ed25519_privkey, std::span<const std::byte> msg);
 
+/// Produces a random but validly-*encoded* Ed25519 signature: a uniformly random group element (the
+/// `R` half) followed by a uniformly random scalar mod L (the `s` half). It is not a signature of
+/// any message and verifies against nothing -- it exists only as a decoy, so a payload carrying a
+/// real signature is indistinguishable on the wire from one carrying none. Far cheaper than signing
+/// throwaway data, and independent of message size.
+b64 decoy_signature();
+
 /// Verify a message and signature for a given pubkey.
 ///
 /// Inputs:

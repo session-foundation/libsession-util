@@ -278,20 +278,14 @@ static std::span<const std::byte> unpad_message(std::span<const std::byte> paylo
     return payload.first(size_without_padding);
 }
 
-// Attaches a Session Pro signature to an envelope.  If no pro key is provided, a dummy
-// (unverifiable) signature from a throwaway key is used so that pro and non-pro messages are
-// indistinguishable on the wire.
+// Attaches a Session Pro signature to an envelope. With no pro key a decoy signature is attached
+// instead, so that pro and non-pro messages are indistinguishable on the wire (see
+// ed25519::decoy_signature).
 static void attach_pro_sig_to_envelope(
         SessionProtos::Envelope& envelope,
         std::span<const std::byte> content,
         const ed25519::OptionalPrivKeySpan& pro_key) {
-    b64 signature;
-    if (!pro_key) {
-        auto [dummy_pk, dummy_sk] = ed25519::keypair();
-        signature = ed25519::sign(dummy_sk, content);
-    } else {
-        signature = ed25519::sign(*pro_key, content);
-    }
+    b64 signature = pro_key ? ed25519::sign(*pro_key, content) : ed25519::decoy_signature();
     std::string* pro_sig = envelope.mutable_prosig();
     pro_sig->assign(reinterpret_cast<const char*>(signature.data()), signature.size());
 }
