@@ -60,7 +60,7 @@ void QuicTransport::suspend() {
     });
 }
 
-void QuicTransport::resume(bool automatically_reconnect) {
+void QuicTransport::resume(bool /*automatically_reconnect*/) {
     // Use 'call_get' to force this to be synchronous
     _loop->call_get([this] {
         // Recreate the endpoint before updating the `_suspended` flag to avoid the chance that
@@ -85,7 +85,7 @@ void QuicTransport::set_node_failure_reporter(node_failure_reporter_t reporter) 
 
 void QuicTransport::verify_connectivity(
         service_node node,
-        std::chrono::milliseconds timeout,
+        std::chrono::milliseconds /*timeout*/,
         const std::string& request_id,
         const RequestCategory category,
         std::function<void(bool success, std::optional<uint64_t> error_code)> callback) {
@@ -285,7 +285,7 @@ void QuicTransport::_send_request_internal(Request request, network_response_cal
 void QuicTransport::_establish_connection(
         const oxen::quic::RemoteAddress& address,
         const std::string& initiating_req_id,
-        const RequestCategory category) {
+        const RequestCategory /*category*/) {
     const auto address_pubkey_hex = oxenc::to_hex(address.view_remote_key());
 
     try {
@@ -555,7 +555,7 @@ void QuicTransport::_send_on_connection(
 void QuicTransport::_fail_connection(
         const std::string& address_pubkey_hex,
         const std::string& initiating_req_id,
-        std::optional<oxen::quic::ConnectionID> conn_id,
+        std::optional<oxen::quic::ConnectionID> /*conn_id*/,
         std::optional<uint64_t> error_code,
         std::optional<std::string> custom_error) {
     if (error_code == NGTCP2_NO_ERROR)

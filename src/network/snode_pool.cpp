@@ -602,7 +602,7 @@ void SnodePool::_launch_next_refresh_request(
                         bool success,
                         bool timeout,
                         int16_t status_code,
-                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::vector<std::pair<std::string, std::string>> /*headers*/,
                         std::optional<std::string> response) {
                     // If the refresh was cancelled or completed while we were in-flight, do nothing
                     if (!_current_snode_cache_refresh_id ||

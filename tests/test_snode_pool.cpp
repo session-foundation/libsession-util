@@ -31,8 +31,8 @@ class TestSnodePool : public SnodePool {
     }
 
     void refresh_if_needed(
-            const std::vector<service_node>& in_use_nodes,
-            std::function<void()> on_refresh_complete = nullptr) override {
+            const std::vector<service_node>& /*in_use_nodes*/,
+            std::function<void()> /*on_refresh_complete*/ = nullptr) override {
         // Do nothing (don't want to trigger a cache refresh)
     }
 };

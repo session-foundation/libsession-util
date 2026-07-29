@@ -301,7 +301,7 @@ std::array<std::byte, ENCRYPT_KEY_SIZE> encrypt(
         const std::filesystem::path& file,
         Domain domain,
         std::function<std::span<std::byte>(size_t enc_size)> make_buffer,
-        bool allow_large) {
+        bool /*allow_large*/) {
 
     std::ifstream in;
     in.exceptions(std::ios::badbit);
@@ -660,7 +660,7 @@ void Decryptor::process_header(std::span<const std::byte, 1 + ENCRYPT_HEADER> hd
     header = true;
 }
 
-void Decryptor::process_chunk(std::span<const std::byte> chunk, bool is_final) {
+void Decryptor::process_chunk(std::span<const std::byte> chunk, bool /*is_final*/) {
     if (hit_final) {
         failed = true;
         return;

@@ -80,6 +80,7 @@ else()
 endif()
 
 option(WARNINGS_AS_ERRORS "Treat all compiler warnings as errors" OFF)
+option(WARN_UNUSED_PARAMETERS "Enabled unused parameter warnings" ON)
 
 option(STATIC_LIBSTD "Statically link libstdc++/libgcc" ${default_static_libstd})
 
