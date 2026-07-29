@@ -92,6 +92,16 @@ inline constexpr auto PRO_ROTATING_SEED_PERIOD = 7 * 24h;
 /// doing. See UserProfile::pro_renewal_target.
 inline constexpr auto PRO_RENEWAL_LEAD = 60min;
 
+/// When a renewal has come due but the current time lands right at a rotation-period boundary,
+/// pro_renewal_target defers it by this long rather than renewing at the ambiguous instant, giving a
+/// device cleanly on one side of the boundary a chance to renew first. Best-effort collision
+/// avoidance only.
+inline constexpr auto PRO_RENEWAL_BOUNDARY_DEFER = 1min;
+
+/// The boundary deferral above is skipped (renew now instead) unless the deferred renewal would
+/// still leave at least this much of the current proof's validity.
+inline constexpr auto PRO_RENEWAL_BOUNDARY_MIN_VALIDITY = 5min;
+
 enum class ProStatus {
     // Pro proof sig was not signed by the Pro backend key
     InvalidProBackendSig = SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG,
@@ -205,8 +215,8 @@ class ProProof {
 
     /// API: pro/Proof::rotating_seed
     ///
-    /// Deterministically derive the rotating Session Pro seed for the (weekly) rotation period that
-    /// contains `now`. Because every device derives the same seed for the same period with no
+    /// Deterministically derive the rotating Session Pro seed for the weekly rotation period as of
+    /// `now`. Because every device derives the same seed for the same period with no
     /// coordination, concurrent proof (re)generations converge on one credential instead of racing.
     /// The seed is the private counterpart of the `rotating_pubkey` a proof for this period
     /// authorizes: it is fed to generate_pro_proof, and once the backend returns a signed proof for
@@ -218,9 +228,7 @@ class ProProof {
     ///   ed25519_pro_privkey_for_ed25519_seed), NOT the session-id seed; its first 32 bytes are
     ///   used. Rooting rotating keys under the Pro master keeps all Pro key material in one
     ///   hierarchy and lets the Pro subsystem avoid ever touching the account's identity seed.
-    /// - `now` -- the current time; the seed is for the rotation period that contains it (floored to
-    ///   the 7-day period internally, so callers never compute epochs). Named `now` because the
-    ///   current time is what a caller passes -- there is no reason to derive for another period.
+    /// - `now` -- the current time (floored to its 7-day rotation period internally).
     ///
     /// Outputs:
     /// - The 32-byte rotating seed (secret; zeroed on destruction).
