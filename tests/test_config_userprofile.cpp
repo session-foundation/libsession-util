@@ -754,5 +754,18 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         // Expired proof -> renew immediately, regardless of entitlement.
         store_proof(now - 1h);
         CHECK(pr.pro_renewal_target(now) == now);
+
+        // Near-boundary deferral: when renewal is already due and `now` sits at a weekly rotation
+        // boundary, defer ~2min (a best-effort collision nudge) as long as that still leaves
+        // comfortable validity; otherwise just renew now.
+        auto at_boundary = now - now.time_since_epoch() % session::PRO_ROTATING_SEED_PERIOD;
+        pr.set_pro_access_expiry(at_boundary + 30 * 24h);
+        store_proof(at_boundary + 30min);  // due (within lead) with >7min validity left
+        CHECK(pr.pro_renewal_target(at_boundary) == at_boundary + 2min);
+
+        store_proof(at_boundary + 6min);  // due, but now+2min would leave <5min -> no defer
+        auto r = pr.pro_renewal_target(at_boundary);
+        REQUIRE(r.has_value());
+        CHECK(*r <= at_boundary);
     }
 }
