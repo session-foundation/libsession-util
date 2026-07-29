@@ -194,7 +194,7 @@ class ProProof {
             std::span<const uint8_t> verify_pubkey,
             sys_seconds unix_ts,
             std::optional<std::span<const uint8_t>> user_sig = std::nullopt,
-            std::span<const uint8_t> signed_msg = {});
+            std::span<const uint8_t> signed_msg = {}) const;
 
     /// API: pro/Proof::signed_message
     ///
