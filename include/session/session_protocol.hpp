@@ -366,12 +366,11 @@ struct DecodedCommunityMessage {
 /// - `msg` -- the UTF-8 string view to count the number of codepoints in to determine if it needs
 ///   the higher character limit available in Session Pro
 ///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
+/// Outputs (a ProFeaturesForMsg):
+/// - `status` -- Success, or the reason evaluation failed (UTF decoding error, or over the character
+///   limit). When not Success, only `error` is meaningful.
+/// - `error` -- On a non-Success `status`, a read-only description of the failure; empty otherwise.
+/// - `flags` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf8(std::u8string_view msg);
@@ -386,12 +385,11 @@ ProFeaturesForMsg pro_features_for_utf8(std::span<const std::byte> msg);
 /// - `msg` -- the UTF-16 string view to count the number of codepoints in to determine if it needs
 ///   the higher character limit available in Session Pro
 ///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `bitset` -- Feature flags suitable for writing directly into the protobuf
+/// Outputs (a ProFeaturesForMsg):
+/// - `status` -- Success, or the reason evaluation failed (UTF decoding error, or over the character
+///   limit). When not Success, only `error` is meaningful.
+/// - `error` -- On a non-Success `status`, a read-only description of the failure; empty otherwise.
+/// - `flags` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf16(std::u16string_view msg);
@@ -524,15 +522,12 @@ std::vector<std::byte> encode_for_group(
         std::span<const std::byte, 32> group_enc_key,
         const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey);
 
-/// API: session_protocol/decode_envelope
+/// API: session_protocol/decode_dm_envelope
 ///
-/// Given an envelope payload (i.e.: protobuf encoded stream of `WebsocketRequestMessage` which
-/// wraps an `Envelope` for 1o1 messages/sync messages, or `Envelope` encrypted using a Groups v2
-/// key) parse (or decrypt) the envelope and return the envelope content decrypted if necessary.
-///
-/// A groups v2 envelope will get decrypted with the group keys. A non-groups v2 envelope will get
-/// decrypted with the specified Ed25519 private key in the `keys` object. Only one of these keys
-/// need to be set depending on the type of envelope payload passed into the function.
+/// Decode a 1-on-1 (or legacy group) envelope: a WebSocket-wrapped protobuf `Envelope` whose inner
+/// `Content` is encrypted with the Session protocol (Ed25519 DH). Parse the envelope, decrypt the
+/// content, and return the plaintext along with any Session Pro metadata. (Groups v2 envelopes,
+/// where the envelope itself is encrypted with a group key, are handled by decode_group_envelope.)
 ///
 /// If the message does not use Session Pro features, the `pro` object will be set to nil. Otherwise
 /// the pro fields will be populated with data about the Session Pro proof embedded in the envelope
@@ -550,40 +545,26 @@ std::vector<std::byte> encode_for_group(
 /// field to verify if the Session Pro was present and/or valid or invalid.
 ///
 /// Inputs:
-/// - `keys` -- the keys to decrypt either the envelope or the envelope contents. Groups v2
-///   envelopes where the envelope is encrypted must set the group key. Envelopes with an encrypted
-///   content must set the the libsodium-style secret key of the receiver, 64 bytes. Can also be
-///   passed as a 32-byte seed.
-///
-///   If a group decryption key is specified, the recipient key is ignored and vice versa. Only one
-///   of the keys should be set depending on the type of envelope.
-///
-/// - `envelope_payload` -- the envelope payload either encrypted (groups v2 style) or unencrypted
-///   (1o1 or legacy groups).
+/// - `ed25519_privkey` -- the receiver's Ed25519 private key used to decrypt the envelope content;
+///   a libsodium-style 64-byte secret key, or a 32-byte seed.
+/// - `envelope_payload` -- the WebSocket-wrapped envelope payload (the inner content is encrypted).
 /// - `pro_backend_pubkey` -- the Session Pro backend public key to verify the signature embedded in
 ///   the proof, validating whether or not the attached proof was indeed issued by an authorised
 ///   issuer
 ///
 /// Outputs:
-/// - `envelope` -- Envelope structure that was decrypted/parsed from the `envelope_plaintext`
+/// - `envelope` -- Envelope structure that was parsed from the payload
 /// - `content_plaintext` -- Decrypted contents of the envelope structure. This is the protobuf
 ///   encoded stream that can be parsed into a protobuf `Content` structure.
 /// - `sender_ed25519_pubkey` -- The sender's ed25519 public key embedded in the encrypted payload.
-///   This is only set for session message envelopes. Groups envelopes only embed the sender's
-///   x25519 public key in which case this field is set to the zero public key.
-/// - `sender_x25519_pubkey` -- The sender's x25519 public key. It's always set on successful
-///   decryption either by extracting the key from the encrypted groups envelope, or, by deriving
-///   the x25519 key from the sender's ed25519 key in the case of a session message envelope.
-/// - `pro` -- Optional object that is set if there was pro metadata associatd with the envelope, if
-///   any. The `status` field in the decrypted pro object should be used to determine whether or not
+/// - `sender_x25519_pubkey` -- The sender's x25519 public key, derived from the sender's ed25519
+///   key.
+/// - `pro` -- Optional object that is set if there was pro metadata associated with the envelope, if
+///   any. The `status` field in the decoded pro object should be used to determine whether or not
 ///   the caller can respect the contents of the `proof` and `features`.
 ///
-///   If the `status` is set to valid the the caller can proceed with entitling the envelope with
+///   If the `status` is set to valid the caller can proceed with entitling the envelope with
 ///   access to pro features if it's using any.
-/// Decodes a 1-on-1 or legacy group envelope.  The envelope payload is a WebSocket-wrapped
-/// protobuf whose inner content is encrypted with the Session protocol (Ed25519 DH).
-///
-/// Throws on parse or decryption failure.
 DecodedEnvelope decode_dm_envelope(
         const ed25519::PrivKeySpan& ed25519_privkey,
         std::span<const std::byte> envelope_payload,
