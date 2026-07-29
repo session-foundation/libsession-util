@@ -101,11 +101,6 @@ enum class ProStatus {
     Expired = SESSION_PROTOCOL_PRO_STATUS_EXPIRED,  // Proof is verified; has expired
 };
 
-struct ProSignedMessage {
-    std::span<const uint8_t> sig;
-    std::span<const uint8_t> msg;
-};
-
 class ProProof {
   public:
     /// Version of the proof set by the Session Pro Backend
@@ -186,17 +181,20 @@ class ProProof {
     ///   they are the original signatory of the proof.
     /// - `unix_ts` -- Unix timestamp to compared against the embedded `expiry_at`
     ///   to determine if the proof has expired or not
-    /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
-    ///   the embedded `rotating_pubkey` in the proof signed the given message.
+    /// - `user_sig` -- optionally, the user's 64-byte signature over `signed_msg`; when set, this
+    ///   verifies that the proof's embedded `rotating_pubkey` produced it. Omit (the default) to
+    ///   skip the user-signature check.
+    /// - `signed_msg` -- the message bytes that `user_sig` signs; ignored when `user_sig` is unset.
     ///
     /// Outputs:
-    /// - `ProStatus` - The derived status given the components of the message. If `signed_msg` is
+    /// - `ProStatus` - The derived status given the components of the message. If `user_sig` is
     ///   not set then this function can never return `ProStatus::InvalidUserSig` from the set of
     ///   possible enum values. Otherwise this funtion can return all possible values.
     ProStatus status(
             std::span<const uint8_t> verify_pubkey,
             sys_seconds unix_ts,
-            const std::optional<ProSignedMessage>& signed_msg);
+            std::optional<std::span<const uint8_t>> user_sig = std::nullopt,
+            std::span<const uint8_t> signed_msg = {});
 
     /// API: pro/Proof::signed_message
     ///

@@ -159,7 +159,8 @@ bool ProProof::is_active(sys_seconds unix_ts) const {
 ProStatus ProProof::status(
         std::span<const uint8_t> verify_pubkey,
         sys_seconds unix_ts,
-        const std::optional<ProSignedMessage>& signed_msg) {
+        std::optional<std::span<const uint8_t>> user_sig,
+        std::span<const uint8_t> signed_msg) {
     ProStatus result = ProStatus::Valid;
     // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
     // issued by an authoritative backend)
@@ -167,8 +168,8 @@ ProStatus ProProof::status(
         result = ProStatus::InvalidProBackendSig;
 
     // Check if the message was signed if the user passed one in to verify against
-    if (result == ProStatus::Valid && signed_msg) {
-        if (!verify_message(signed_msg->sig, signed_msg->msg))
+    if (result == ProStatus::Valid && user_sig) {
+        if (!verify_message(*user_sig, signed_msg))
             result = ProStatus::InvalidUserSig;
     }
 
@@ -908,16 +909,14 @@ DecodedEnvelope decode_envelope(
 
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
             // was the message signed validly?)
-            ProSignedMessage signed_msg = {};
-            signed_msg.sig = to_span(pro_sig);
-
+            //
             // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
             // bytes, this means that we expected the user to have signed the padding as well.
             auto unix_ts = std::chrono::floor<std::chrono::seconds>(
                     std::chrono::sys_time<std::chrono::milliseconds>(
                             std::chrono::milliseconds(content.sigtimestamp())));
-            signed_msg.msg = to_span(envelope.content());
-            pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+            pro.status = proof.status(
+                    pro_backend_pubkey, unix_ts, to_span(pro_sig), to_span(envelope.content()));
         }
     }
     return result;
@@ -1068,9 +1067,7 @@ DecodedCommunityMessage decode_for_community(
 
         // Evaluate the pro status given the extracted components (was it signed, is it expired,
         // was the message signed validly?)
-        ProSignedMessage signed_msg = {};
-        signed_msg.sig = to_span(*result.pro_sig);
-
+        //
         // IMPORTANT: We have to bit-manipulate the content because we're including the signature
         // inside the payload itself that we had to sign. But we originally signed the payload
         // without a signature set in it. This is only the case if we're dealing with a `Content`
@@ -1079,8 +1076,8 @@ DecodedCommunityMessage decode_for_community(
             // Entering the `pro_sig` and `result.envelope` branch means that the envelope must have
             // a pro signature.
             assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
-            signed_msg.msg = result.content_plaintext;
-            pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+            pro.status = proof.status(
+                    pro_backend_pubkey, unix_ts, to_span(*result.pro_sig), result.content_plaintext);
         } else {
             SessionProtos::Content content_copy_without_sig = content;
             assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
@@ -1093,8 +1090,11 @@ DecodedCommunityMessage decode_for_community(
             std::vector<uint8_t> content_copy_without_sig_payload =
                     pad_message(to_span(content_copy_without_sig.SerializeAsString()));
 
-            signed_msg.msg = to_span(content_copy_without_sig_payload);
-            pro.status = proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+            pro.status = proof.status(
+                    pro_backend_pubkey,
+                    unix_ts,
+                    to_span(*result.pro_sig),
+                    to_span(content_copy_without_sig_payload));
         }
     }
 
