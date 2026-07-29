@@ -434,7 +434,7 @@ void Decryptor::process_header(std::span<const std::byte, 1 + ENCRYPT_HEADER> hd
     header = true;
 }
 
-void Decryptor::process_chunk(std::span<const std::byte> chunk, bool is_final) {
+void Decryptor::process_chunk(std::span<const std::byte> chunk, [[maybe_unused]] bool is_final) {
     if (hit_final) {
         failed = true;
         return;
