@@ -188,18 +188,12 @@ GenerateProProofResponse parse_pro_proof(std::string_view json);
 /// request (this one included) binds the account's unbound payments before answering; there is no
 /// separate "add payment" step. This pairs a (new) rotating key to a freshly-issued proof.
 ///
-/// `pro_proof_sigs` computes the master+rotating signatures; `pro_proof_request` builds the whole
-/// request (signing internally) and returns the endpoint + JSON body. Both throw on an
-/// incorrectly-sized key.
+/// Builds the whole request, signing internally with the master and rotating keys, and returns the
+/// endpoint + JSON body. Throws on an incorrectly-sized key.
 ///
 /// Inputs:
 /// - `master_privkey` / `rotating_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium private key
 /// - `unix_ts` -- Unix timestamp for the request
-MasterRotatingSignatures pro_proof_sigs(
-        std::span<const uint8_t> master_privkey,
-        std::span<const uint8_t> rotating_privkey,
-        sys_seconds unix_ts);
-
 ProRequest pro_proof_request(
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
@@ -246,21 +240,18 @@ struct GetProRevocationsResponse : ResponseBase {
 GetProRevocationsResponse parse_revocations(std::string_view json);
 
 /// Query a master key's Session Pro status (endpoint `get_pro_status`): the account entitlement
-/// state plus its single latest payment -- the hot "am I Pro?" path. `pro_status_sig` computes the
-/// master signature; `pro_status_request` builds the whole request (signing internally) and returns
-/// the endpoint + JSON body. Both throw on an incorrectly-sized key.
+/// state plus its single latest payment -- the hot "am I Pro?" path. Builds the whole request,
+/// signing internally with the master key, and returns the endpoint + JSON body. Throws on an
+/// incorrectly-sized key.
 ///
 /// Inputs:
 /// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
 /// - `unix_ts` -- Unix timestamp for the request
-array_uc64 pro_status_sig(std::span<const uint8_t> master_privkey, sys_seconds unix_ts);
-
 ProRequest pro_status_request(std::span<const uint8_t> master_privkey, sys_seconds unix_ts);
 
 /// Query a master key's Session Pro payment history (endpoint `get_payment_details`), one keyset
-/// page at a time. `payment_details_sig` computes the master signature; `payment_details_request`
-/// builds the whole request (signing internally) and returns the endpoint + JSON body. Both throw
-/// on an incorrectly-sized key.
+/// page at a time. Builds the whole request, signing internally with the master key, and returns
+/// the endpoint + JSON body. Throws on an incorrectly-sized key.
 ///
 /// Inputs:
 /// - `master_privkey` -- 32-byte Ed25519 seed or 64-byte libsodium master private key
@@ -269,12 +260,6 @@ ProRequest pro_status_request(std::span<const uint8_t> master_privkey, sys_secon
 /// - `before` -- opaque pagination cursor from a previous page's `next_cursor` (see
 ///   PaymentDetailsResponse); the empty string requests the newest page. Pass it through verbatim;
 ///   it must not be parsed or synthesized.
-array_uc64 payment_details_sig(
-        std::span<const uint8_t> master_privkey,
-        sys_seconds unix_ts,
-        uint32_t limit,
-        std::string_view before);
-
 ProRequest payment_details_request(
         std::span<const uint8_t> master_privkey,
         sys_seconds unix_ts,

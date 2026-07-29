@@ -407,15 +407,6 @@ namespace {
 
 }  // namespace
 
-MasterRotatingSignatures pro_proof_sigs(
-        std::span<const uint8_t> master_privkey,
-        std::span<const uint8_t> rotating_privkey,
-        std::chrono::sys_seconds unix_ts) {
-    auto master = normalize_privkey(master_privkey, "master_privkey");
-    auto rotating = normalize_privkey(rotating_privkey, "rotating_privkey");
-    return generate_proof_sign(master, rotating, unix_ts);
-}
-
 ProRequest pro_proof_request(
         std::span<const uint8_t> master_privkey,
         std::span<const uint8_t> rotating_privkey,
@@ -608,12 +599,6 @@ namespace {
 
 }  // namespace
 
-array_uc64 pro_status_sig(
-        std::span<const uint8_t> master_privkey, std::chrono::sys_seconds unix_ts) {
-    auto master = normalize_privkey(master_privkey, "master_privkey");
-    return pro_status_sign(master, unix_ts);
-}
-
 ProRequest pro_status_request(
         std::span<const uint8_t> master_privkey, std::chrono::sys_seconds unix_ts) {
     auto master = normalize_privkey(master_privkey, "master_privkey");
@@ -621,15 +606,6 @@ ProRequest pro_status_request(
     return {get_pro_status_endpoint,
             application_json,
             pro_status_body(pubkey_of(master), sig, unix_ts)};
-}
-
-array_uc64 payment_details_sig(
-        std::span<const uint8_t> master_privkey,
-        std::chrono::sys_seconds unix_ts,
-        uint32_t limit,
-        std::string_view before) {
-    auto master = normalize_privkey(master_privkey, "master_privkey");
-    return payment_details_sign(master, unix_ts, limit, before);
 }
 
 ProRequest payment_details_request(
