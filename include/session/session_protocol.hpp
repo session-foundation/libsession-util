@@ -404,12 +404,11 @@ struct DecodeEnvelopeKey {
 /// - `text_size` -- the size of the message in UTF8 code units to determine if the message requires
 ///   access to the higher character limit available in Session Pro
 ///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
+/// Outputs (a ProFeaturesForMsg):
+/// - `status` -- Success, or the reason evaluation failed (UTF decoding error, or over the character
+///   limit). When not Success, only `error` is meaningful.
+/// - `error` -- On a non-Success `status`, a read-only description of the failure; empty otherwise.
+/// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 ProFeaturesForMsg pro_features_for_utf8(const char* text, size_t text_size);
@@ -425,11 +424,10 @@ ProFeaturesForMsg pro_features_for_utf8(const char* text, size_t text_size);
 /// requires
 ///   access to the higher character limit available in Session Pro
 ///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
+/// Outputs (a ProFeaturesForMsg):
+/// - `status` -- Success, or the reason evaluation failed (UTF decoding error, or over the character
+///   limit). When not Success, only `error` is meaningful.
+/// - `error` -- On a non-Success `status`, a read-only description of the failure; empty otherwise.
 /// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
 /// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
