@@ -206,7 +206,7 @@ class ProProof {
     /// API: pro/Proof::rotating_seed
     ///
     /// Deterministically derive the rotating Session Pro seed for the (weekly) rotation period that
-    /// contains `timestamp`. Because every device derives the same seed for the same period with no
+    /// contains `now`. Because every device derives the same seed for the same period with no
     /// coordination, concurrent proof (re)generations converge on one credential instead of racing.
     /// The seed is the private counterpart of the `rotating_pubkey` a proof for this period
     /// authorizes: it is fed to generate_pro_proof, and once the backend returns a signed proof for
@@ -218,13 +218,14 @@ class ProProof {
     ///   ed25519_pro_privkey_for_ed25519_seed), NOT the session-id seed; its first 32 bytes are
     ///   used. Rooting rotating keys under the Pro master keeps all Pro key material in one
     ///   hierarchy and lets the Pro subsystem avoid ever touching the account's identity seed.
-    /// - `timestamp` -- any time within the desired rotation period; it is floored to the period
-    ///   (7 days) internally, so callers never compute epochs themselves.
+    /// - `now` -- the current time; the seed is for the rotation period that contains it (floored to
+    ///   the 7-day period internally, so callers never compute epochs). Named `now` because the
+    ///   current time is what a caller passes -- there is no reason to derive for another period.
     ///
     /// Outputs:
     /// - The 32-byte rotating seed (secret; zeroed on destruction).
     static cleared_uc32 rotating_seed(
-            std::span<const unsigned char> master_seed, std::chrono::sys_seconds timestamp);
+            std::span<const unsigned char> master_seed, std::chrono::sys_seconds now);
 
     bool operator==(const ProProof& other) const {
         return version == other.version && revocation_tag == other.revocation_tag &&
