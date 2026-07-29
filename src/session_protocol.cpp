@@ -3,7 +3,9 @@
 #include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
 #include <simdutf.h>
+#include <sodium/crypto_core_ed25519.h>
 #include <sodium/crypto_generichash_blake2b.h>
+#include <sodium/crypto_scalarmult_ed25519.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
@@ -486,22 +488,23 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
             envelope.set_content(content.data(), content.size());
 
             // Generate the session pro signature. If there's no pro ed25519 key specified, we still
-            // fill out the pro signature with a valid but unverifiable signature by creating a
-            // throw-away key. This makes pro and non-pro messages indistinguishable on the wire.
+            // fill out the pro signature with a decoy (validly-encoded but unverifiable) signature.
+            // This makes pro and non-pro messages indistinguishable on the wire.
             {
                 std::string* pro_sig = envelope.mutable_prosig();
                 pro_sig->resize(crypto_sign_ed25519_BYTES);
 
                 if (dest_pro_rotating_ed25519_privkey.empty()) {
-                    uc32 ignore_pk;
-                    cleared_uc64 dummy_pro_ed_sk;
-                    crypto_sign_ed25519_keypair(ignore_pk.data(), dummy_pro_ed_sk.data());
-                    crypto_sign_ed25519_detached(
-                            reinterpret_cast<uint8_t*>(pro_sig->data()),
-                            nullptr,
-                            content.data(),
-                            content.size(),
-                            dummy_pro_ed_sk.data());
+                    // No pro key: attach a decoy signature -- a validly-encoded Ed25519 signature
+                    // (R = r·B for a random scalar r, so a prime-order-subgroup point like a real R;
+                    // s a second random scalar) that verifies against nothing. Keeps pro and non-pro
+                    // envelopes indistinguishable on the wire without signing throwaway data. NOT a
+                    // real signature; never verified.
+                    auto* sig = reinterpret_cast<unsigned char*>(pro_sig->data());
+                    std::array<unsigned char, crypto_core_ed25519_SCALARBYTES> r;
+                    crypto_core_ed25519_scalar_random(r.data());
+                    crypto_scalarmult_ed25519_base_noclamp(sig, r.data());
+                    crypto_core_ed25519_scalar_random(sig + crypto_core_ed25519_BYTES);
                 } else {
                     crypto_sign_ed25519_detached(
                             reinterpret_cast<uint8_t*>(pro_sig->data()),
