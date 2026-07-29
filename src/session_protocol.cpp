@@ -308,7 +308,6 @@ std::vector<uint8_t> encode_for_1o1(
 std::vector<uint8_t> encode_for_community_inbox(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
         const array_uc32& community_pubkey,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey) {
@@ -316,7 +315,8 @@ std::vector<uint8_t> encode_for_community_inbox(
     dest.type = DestinationType::CommunityInbox;
     dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey ? *pro_rotating_ed25519_privkey
                                                                      : std::span<const uint8_t>{};
-    dest.sent_timestamp_ms = sent_timestamp;
+    // Unused on the CommunityInbox path (only the envelope-based Group/1o1 path consumes it).
+    dest.sent_timestamp_ms = std::chrono::milliseconds{0};
     dest.recipient_pubkey = recipient_pubkey;
     dest.community_inbox_server_pubkey = community_pubkey;
     std::vector<uint8_t> result = encode_for_destination(plaintext, ed25519_privkey, dest);
@@ -1302,7 +1302,6 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         size_t plaintext_len,
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
-        uint64_t sent_timestamp_ms,
         const bytes33* recipient_pubkey,
         const bytes32* community_pubkey,
         const void* pro_rotating_ed25519_privkey,
@@ -1314,7 +1313,8 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
     dest.type = SESSION_PROTOCOL_DESTINATION_TYPE_COMMUNITY_INBOX;
     dest.pro_rotating_ed25519_privkey = pro_rotating_ed25519_privkey;
     dest.pro_rotating_ed25519_privkey_len = pro_rotating_ed25519_privkey_len;
-    dest.sent_timestamp_ms = sent_timestamp_ms;
+    // Unused on the CommunityInbox path (only the envelope-based Group/1o1 path consumes it).
+    dest.sent_timestamp_ms = 0;
     dest.recipient_pubkey = *recipient_pubkey;
     dest.community_inbox_server_pubkey = *community_pubkey;
 

@@ -883,7 +883,6 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
                         protobuf_content.plaintext.size(),
                         keys.ed_sk0.data(),
                         keys.ed_sk0.size(),
-                        timestamp_ms.time_since_epoch().count(),
                         &recipient_pubkey,
                         &community_pubkey,
                         nullptr,
