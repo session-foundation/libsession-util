@@ -437,7 +437,6 @@ session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
 /// - `ed25519_privkey` -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
-/// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
 /// - `recipient_pubkey` -- The recipient's Session public key (33 bytes).
 /// - `community_pubkey` -- The community inbox server's public key (32 bytes).
 /// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
@@ -473,13 +472,12 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         size_t plaintext_len,
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
-        uint64_t sent_timestamp_ms,
         const cbytes33* recipient_pubkey,
         const cbytes32* community_pubkey,
         OPTIONAL const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
-        size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
+        size_t error_len) NON_NULL_ARG(1, 3, 5, 6);
 
 /// API: session_protocol_encode_for_community
 ///

@@ -443,7 +443,6 @@ std::vector<std::byte> encode_dm_v1(
 ///   not be already encrypted and must not be padded.
 /// - ed25519_privkey -- The sender's Ed25519 private key; accepts a 32-byte seed or 64-byte
 ///   libsodium key. Used to encrypt the plaintext.
-/// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
 /// - recipient_pubkey -- The recipient's Session public key (33 bytes).
 /// - community_pubkey -- The community inbox server's public key (32 bytes).
 /// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
@@ -457,7 +456,6 @@ std::vector<std::byte> encode_dm_v1(
 std::vector<std::byte> encode_for_community_inbox(
         std::span<const std::byte> plaintext,
         const ed25519::PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
         std::span<const std::byte, 33> recipient_pubkey,
         std::span<const std::byte, 32> community_pubkey,
         const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey);

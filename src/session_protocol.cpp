@@ -341,7 +341,6 @@ std::vector<std::byte> encode_for_community(
 std::vector<std::byte> encode_for_community_inbox(
         std::span<const std::byte> plaintext,
         const ed25519::PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
         std::span<const std::byte, 33> recipient_pubkey,
         std::span<const std::byte, 32> community_pubkey,
         const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey) {
@@ -982,7 +981,6 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         size_t plaintext_len,
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
-        uint64_t sent_timestamp_ms,
         const cbytes33* recipient_pubkey,
         const cbytes32* community_pubkey,
         const void* pro_rotating_ed25519_privkey,
@@ -994,7 +992,6 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
                 std::span{static_cast<const std::byte*>(plaintext), plaintext_len},
                 ed25519::PrivKeySpan{
                         static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
-                std::chrono::milliseconds(sent_timestamp_ms),
                 to_byte_span(recipient_pubkey->data),
                 to_byte_span(community_pubkey->data),
                 ed25519::OptionalPrivKeySpan{
