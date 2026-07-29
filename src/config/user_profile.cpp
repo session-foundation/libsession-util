@@ -316,8 +316,8 @@ std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
         return std::nullopt;
 
     // The nudges below are best-effort: they only make it *less likely* that two devices near a
-    // weekly rotation boundary race on the same renewal. A genuine collision still resolves fine
-    // (config is last-writer-wins and re-fetched), so none of this needs to be airtight.
+    // weekly rotation boundary race on the same renewal. A genuine collision is still resolved by
+    // config resolution, so none of this needs to be airtight.
     auto near_boundary = [](std::chrono::sys_seconds t) {
         auto off = t.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
         return off <= 15s || off >= PRO_ROTATING_SEED_PERIOD - 15s;
@@ -329,12 +329,13 @@ std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
     if (near_boundary(target))
         target -= 30s;
 
-    // If the renewal is already due but *now* sits right at a boundary, defer briefly instead of
-    // renewing this instant: it gives a device cleanly on one side time to renew and propagate its
-    // config first, and failing that we re-poll a couple of minutes on, unambiguously past the
-    // boundary. Only while the deferred time would still leave comfortable (>=5min) validity.
-    if (target <= now && near_boundary(now) && expiry - (now + 2min) >= 5min)
-        return now + 2min;
+    // If the renewal is already due but *now* sits right at a boundary, defer it instead of renewing
+    // at the ambiguous instant, so a device cleanly on one side can renew and propagate its config
+    // first; failing that we re-poll past the boundary. Only while the deferred time still leaves
+    // enough of the current proof's validity.
+    if (target <= now && near_boundary(now) &&
+        expiry - (now + PRO_RENEWAL_BOUNDARY_DEFER) >= PRO_RENEWAL_BOUNDARY_MIN_VALIDITY)
+        return now + PRO_RENEWAL_BOUNDARY_DEFER;
 
     return target;
 }

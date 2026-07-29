@@ -223,16 +223,15 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_signature(
 
 /// API: session_protocol/session_protocol_pro_rotating_seed
 ///
-/// Deterministically derive the rotating Session Pro seed for the (weekly) rotation period that
-/// contains `now_unix_ts` (see the C++ ProProof::rotating_seed). Every device on an account derives the
+/// Deterministically derive the rotating Session Pro seed for the weekly rotation period as of
+/// `now_unix_ts` (see the C++ ProProof::rotating_seed). Every device on an account derives the
 /// same 32-byte seed for the same period, so concurrent proof (re)generations converge rather than
 /// racing.
 ///
 /// Inputs:
 /// - `master_seed` -- the account's Session Pro master key/seed (from
 ///   session_ed25519_pro_privkey_for_ed25519_seed), NOT the session-id seed; first 32 bytes used.
-/// - `now_unix_ts` -- the current unix time (seconds); the seed is for the period containing it
-///   (floored internally, so the caller never computes epochs).
+/// - `now_unix_ts` -- the current unix time (seconds; floored to its rotation period internally).
 /// - `rotating_seed_out` -- [out] 32-byte buffer to receive the derived seed.
 LIBSESSION_EXPORT void session_protocol_pro_rotating_seed(
         const unsigned char* master_seed,
