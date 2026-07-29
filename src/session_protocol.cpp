@@ -169,15 +169,15 @@ std::vector<std::byte> ProProof::signed_message() const {
 }
 
 cleared_b32 ProProof::rotating_seed(
-        std::span<const std::byte> master_seed, std::chrono::sys_seconds timestamp) {
+        std::span<const std::byte> master_seed, std::chrono::sys_seconds now) {
     if (master_seed.size() != 32 && master_seed.size() != 64)
         throw std::invalid_argument{
                 "Invalid master_seed: expected a 32-byte Ed25519 seed or 64-byte libsodium key"};
 
-    // Floor the timestamp to the rotation period, then hash master_seed[0:32] ‖ dec(period_start),
+    // Floor `now` to the start of its rotation period, then hash master_seed[0:32] ‖ dec(period_start),
     // where dec() is canonical decimal ASCII -- the same integer encoding the rest of the Pro wire
     // uses (signed_message, §1.1), so there's one integer convention and no endianness to pin.
-    auto period_start = timestamp - timestamp.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
+    auto period_start = now - now.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
     char dec[20];
     auto [ptr, ec] = std::to_chars(dec, dec + sizeof(dec), epoch_seconds(period_start));
     assert(ec == std::errc{});  // dec is large enough for any int64, so this cannot fail
@@ -842,9 +842,10 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
 }
 
 LIBSESSION_C_API void session_protocol_pro_rotating_seed(
-        const unsigned char* master_seed, int64_t unix_ts, unsigned char* rotating_seed_out) {
+        const unsigned char* master_seed, int64_t now_unix_ts, unsigned char* rotating_seed_out) {
     auto seed = session::ProProof::rotating_seed(
-            to_byte_span(master_seed, 32), std::chrono::sys_seconds{std::chrono::seconds{unix_ts}});
+            to_byte_span(master_seed, 32),
+            std::chrono::sys_seconds{std::chrono::seconds{now_unix_ts}});
     std::memcpy(rotating_seed_out, seed.data(), seed.size());
 }
 
