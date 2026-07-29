@@ -341,30 +341,19 @@ namespace {
 
 }  // namespace
 
-MasterRotatingSignatures pro_proof_sigs(
-        const ed25519::PrivKeySpan& master_privkey,
-        const ed25519::PrivKeySpan& rotating_privkey,
-        std::chrono::sys_seconds unix_ts) {
-    auto msg = generate_proof_message(master_privkey.pubkey(), rotating_privkey.pubkey(), unix_ts);
-    MasterRotatingSignatures result = {};
-    result.master_sig = ed25519::sign(master_privkey, msg);
-    result.rotating_sig = ed25519::sign(rotating_privkey, msg);
-    return result;
-}
-
 ProRequest pro_proof_request(
         const ed25519::PrivKeySpan& master_privkey,
         const ed25519::PrivKeySpan& rotating_privkey,
         std::chrono::sys_seconds unix_ts) {
-    auto sigs = pro_proof_sigs(master_privkey, rotating_privkey, unix_ts);
+    auto msg = generate_proof_message(master_privkey.pubkey(), rotating_privkey.pubkey(), unix_ts);
     return {generate_proof_endpoint,
             application_json,
             generate_proof_body(
                     master_privkey.pubkey(),
                     rotating_privkey.pubkey(),
                     unix_ts,
-                    sigs.master_sig,
-                    sigs.rotating_sig)};
+                    ed25519::sign(master_privkey, msg),
+                    ed25519::sign(rotating_privkey, msg))};
 }
 
 ProRequest revocations_request(std::int64_t ticket) {
@@ -522,26 +511,12 @@ namespace {
 
 }  // namespace
 
-b64 pro_status_sig(const ed25519::PrivKeySpan& master_privkey, std::chrono::sys_seconds unix_ts) {
-    auto msg = pro_status_message(master_privkey.pubkey(), unix_ts);
-    return ed25519::sign(master_privkey, msg);
-}
-
 ProRequest pro_status_request(
         const ed25519::PrivKeySpan& master_privkey, std::chrono::sys_seconds unix_ts) {
-    auto sig = pro_status_sig(master_privkey, unix_ts);
+    auto msg = pro_status_message(master_privkey.pubkey(), unix_ts);
     return {get_pro_status_endpoint,
             application_json,
-            pro_status_body(master_privkey.pubkey(), sig, unix_ts)};
-}
-
-b64 payment_details_sig(
-        const ed25519::PrivKeySpan& master_privkey,
-        std::chrono::sys_seconds unix_ts,
-        uint32_t limit,
-        std::string_view before) {
-    auto msg = payment_details_message(master_privkey.pubkey(), unix_ts, limit, before);
-    return ed25519::sign(master_privkey, msg);
+            pro_status_body(master_privkey.pubkey(), ed25519::sign(master_privkey, msg), unix_ts)};
 }
 
 ProRequest payment_details_request(
@@ -549,10 +524,12 @@ ProRequest payment_details_request(
         std::chrono::sys_seconds unix_ts,
         uint32_t limit,
         std::string_view before) {
-    auto sig = payment_details_sig(master_privkey, unix_ts, limit, before);
+    auto msg = payment_details_message(master_privkey.pubkey(), unix_ts, limit, before);
     return {get_payment_details_endpoint,
             application_json,
-            payment_details_body(master_privkey.pubkey(), sig, unix_ts, limit, before)};
+            payment_details_body(
+                    master_privkey.pubkey(), ed25519::sign(master_privkey, msg), unix_ts, limit,
+                    before)};
 }
 
 ProStatusResponse parse_pro_status(std::string_view json) {
