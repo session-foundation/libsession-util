@@ -144,7 +144,8 @@ bool ProProof::is_active(std::chrono::sys_seconds unix_ts) const {
 ProStatus ProProof::status(
         std::span<const std::byte, 32> verify_pubkey,
         std::chrono::sys_seconds unix_ts,
-        const std::optional<ProSignedMessage>& signed_msg) {
+        std::optional<std::span<const std::byte, 64>> user_sig,
+        std::span<const std::byte> signed_msg) {
     ProStatus result = ProStatus::Valid;
     // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
     // issued by an authoritative backend)
@@ -152,8 +153,8 @@ ProStatus ProProof::status(
         result = ProStatus::InvalidProBackendSig;
 
     // Check if the message was signed if the user passed one in to verify against
-    if (result == ProStatus::Valid && signed_msg) {
-        if (!verify_message(signed_msg->sig, signed_msg->msg))
+    if (result == ProStatus::Valid && user_sig) {
+        if (!verify_message(*user_sig, signed_msg))
             result = ProStatus::InvalidUserSig;
     }
 
@@ -566,17 +567,17 @@ static void parse_content_and_pro(
 
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
             // was the message signed validly?)
-            // pro_sig.size() validated == 64 above
-            ProSignedMessage signed_msg = {
-                    .sig = to_byte_span<64>(pro_sig.data()),
-                    .msg = to_span(envelope.content()),
-            };
             // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
             // bytes, this means that we expected the user to have signed the padding as well.
             auto unix_ts = std::chrono::floor<std::chrono::seconds>(
                     std::chrono::sys_time<std::chrono::milliseconds>(
                             std::chrono::milliseconds(content.sigtimestamp())));
-            pro.status = pro.proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+            // pro_sig.size() validated == 64 above
+            pro.status = pro.proof.status(
+                    pro_backend_pubkey,
+                    unix_ts,
+                    to_byte_span<64>(pro_sig.data()),
+                    to_span(envelope.content()));
         }
     }
 }
@@ -772,9 +773,7 @@ DecodedCommunityMessage decode_for_community(
             // a pro signature.
             assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
             pro.status = pro.proof.status(
-                    pro_backend_pubkey,
-                    unix_ts,
-                    ProSignedMessage{*result.pro_sig, result.content_plaintext});
+                    pro_backend_pubkey, unix_ts, *result.pro_sig, result.content_plaintext);
         } else {
             SessionProtos::Content content_copy_without_sig = content;
             assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
@@ -790,7 +789,8 @@ DecodedCommunityMessage decode_for_community(
             pro.status = pro.proof.status(
                     pro_backend_pubkey,
                     unix_ts,
-                    ProSignedMessage{*result.pro_sig, to_span(content_copy_without_sig_payload)});
+                    *result.pro_sig,
+                    to_span(content_copy_without_sig_payload));
         }
     }
 
@@ -886,19 +886,19 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
     if (verify_pubkey_len != 32)
         return SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG;
 
-    std::optional<ProSignedMessage> cpp_signed_msg;
+    std::optional<std::span<const std::byte, 64>> user_sig;
+    std::span<const std::byte> user_msg;
     bool bad_user_sig = false;
     if (signed_msg) {
-        if (signed_msg->sig.size == 64)
-            cpp_signed_msg = ProSignedMessage{
-                    to_byte_span<64>(signed_msg->sig.data),
-                    to_byte_span(signed_msg->msg.data, signed_msg->msg.size)};
-        else
+        if (signed_msg->sig.size == 64) {
+            user_sig = to_byte_span<64>(signed_msg->sig.data);
+            user_msg = to_byte_span(signed_msg->msg.data, signed_msg->msg.size);
+        } else
             bad_user_sig = true;  // a wrong-length signature can never verify
     }
 
     ProStatus status = proof_from_c(*proof).status(
-            to_byte_span<32>(verify_pubkey), as_sys_seconds(ts), cpp_signed_msg);
+            to_byte_span<32>(verify_pubkey), as_sys_seconds(ts), user_sig, user_msg);
 
     // ProProof::status can't see a wrong-length signature (it takes a fixed-size span), so surface
     // the C API's length check here while keeping the ordering: a bad user signature supersedes a
