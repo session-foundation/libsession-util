@@ -36,13 +36,24 @@ class TestSnodePool : public SnodePool {
         // Do nothing (don't want to trigger a cache refresh)
     }
 
-    void queue_post_refresh_callback(std::function<void()> cb) {
+    void debug_queue_post_refresh_callback(std::function<void()> cb) {
         _loop->call_get([this, cb = std::move(cb)]() mutable {
             _after_snode_cache_refresh.push_back(std::move(cb));
+        });
+    }
 
-            // Drop any spare capacity so that a `push_back` during the post-refresh callback run is
-            // guaranteed to reallocate
+    // Removes the spare capacity from the pending-callback vector, so that a callback registering
+    // another callback while they're being run is *guaranteed* to reallocate the vector.  Without
+    // this the re-registration lands in spare capacity, nothing reallocates, and iterating the
+    // vector by reference stays accidentally valid - which is exactly why the real crash only
+    // showed up on some launches.
+    //
+    // `shrink_to_fit` is a non-binding request, so return whether it actually took effect rather
+    // than let the test quietly stop exercising the bug.
+    bool remove_debug_post_refresh_callback_spare_capacity() {
+        return _loop->call_get([this] {
             _after_snode_cache_refresh.shrink_to_fit();
+            return _after_snode_cache_refresh.capacity() == _after_snode_cache_refresh.size();
         });
     }
 
@@ -214,12 +225,13 @@ TEST_CASE("Network", "[network][update_cache]") {
     // what a deferred `get_swarm` does when the refresh left the cache empty) rather than
     // invalidating the vector it's iterating
     std::vector<int> callbacks_run;
-    snode_pool->queue_post_refresh_callback([&] {
+    snode_pool->debug_queue_post_refresh_callback([&] {
         callbacks_run.push_back(0);
-        snode_pool->queue_post_refresh_callback([&] { callbacks_run.push_back(3); });
+        snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(3); });
     });
-    snode_pool->queue_post_refresh_callback([&] { callbacks_run.push_back(1); });
-    snode_pool->queue_post_refresh_callback([&] { callbacks_run.push_back(2); });
+    snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(1); });
+    snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(2); });
+    REQUIRE(snode_pool->remove_debug_post_refresh_callback_spare_capacity());
     snode_pool->update_cache({});
     CHECK(callbacks_run == std::vector<int>{0, 1, 2});
 
