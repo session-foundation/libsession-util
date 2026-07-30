@@ -48,9 +48,11 @@ class TestSnodePool : public SnodePool {
     // vector by reference stays accidentally valid - which is exactly why the real crash only
     // showed up on some launches.
     //
-    // The copy allocates exactly `size()` entries and the move-assign then takes over that buffer;
-    // `shrink_to_fit` would only be a hint that the stdlib is allowed to ignore.  The return value
-    // confirms it took effect rather than letting the test quietly stop exercising the bug.
+    // Copy-then-move-back rather than `shrink_to_fit`, which is only a hint the stdlib may ignore
+    // outright.  The move-assign is required to take over the copy's buffer, so we inherit the
+    // copy's capacity - but that is only guaranteed to be *at least* `size()`, so this is still
+    // best-effort.  The return value is what actually makes it safe: it confirms the capacity
+    // really is tight rather than letting the test quietly stop exercising the bug.
     bool debug_remove_post_refresh_callback_spare_capacity() {
         return _loop->call_get([this] {
             auto exact_sized_copy = _after_snode_cache_refresh;
