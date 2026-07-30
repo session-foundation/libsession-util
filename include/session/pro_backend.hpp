@@ -176,6 +176,16 @@ struct ProRequest {
 /// Session Pro proof. `proof` is the raw parse result, convertible to a config::ProProof.
 struct GenerateProProofResponse : ResponseBase {
     ProProof proof;
+
+    /// The account's true, grace-inclusive subscription entitlement end -- the same value
+    /// `get_pro_status` reports as its `expiry_ts` (pro-wire-protocol.md §2.2). Advisory and
+    /// UNSIGNED: not part of the proof's signed message and never fed into signature verification;
+    /// it rides on the response so a proof fetch also refreshes the client's cached access expiry.
+    /// Distinct from `proof.expiry_at` (the clamped, rolling <=30d proof-validity window). Present
+    /// (and required) on a successful proof, and on a `subscription_expired` failure (a now-past
+    /// value carried top-level on the envelope); nullopt on other outcomes (`not_subscribed`,
+    /// `revoked`, protocol errors).
+    std::optional<std::chrono::sys_seconds> account_expiry;
 };
 
 /// Parse the reply to a generate-proof request. On failure `status` is set to an error state and

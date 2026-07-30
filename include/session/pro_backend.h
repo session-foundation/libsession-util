@@ -139,6 +139,13 @@ typedef struct session_pro_backend_response_header {
 typedef struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
+    /// The account's true, grace-inclusive subscription entitlement end (unix seconds), or 0 if this
+    /// response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2): use for
+    /// display / refreshing the cached access expiry only -- NOT an entitlement authority and NOT
+    /// part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d proof-validity
+    /// window). Populated on a successful proof and on a `subscription_expired` failure (a now-past
+    /// value); 0 on `not_subscribed` / `revoked` / protocol errors.
+    int64_t account_expiry_ts;
 } session_pro_backend_pro_proof_response;
 
 /// API: session_pro_backend/pro_proof_response_free
