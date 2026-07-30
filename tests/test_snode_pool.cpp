@@ -35,6 +35,39 @@ class TestSnodePool : public SnodePool {
             std::function<void()> on_refresh_complete = nullptr) override {
         // Do nothing (don't want to trigger a cache refresh)
     }
+
+    void debug_queue_post_refresh_callback(std::function<void()> cb) {
+        _loop->call_get([this, cb = std::move(cb)]() mutable {
+            _after_snode_cache_refresh.push_back(std::move(cb));
+        });
+    }
+
+    // Removes the spare capacity from the pending-callback vector, so that a callback registering
+    // another callback while they're being run is *guaranteed* to reallocate the vector.  Without
+    // this the re-registration can land in spare capacity, nothing reallocates, and iterating the
+    // vector by reference stays accidentally valid - which is exactly why the real crash only
+    // showed up on some launches.
+    //
+    // Copy-then-move-back rather than `shrink_to_fit`, which is only a hint the stdlib may ignore
+    // outright.  The move-assign is required to take over the copy's buffer, so we inherit the
+    // copy's capacity - but that is only guaranteed to be *at least* `size()`, so this is still
+    // best-effort.  The return value is what actually makes it safe: it confirms the capacity
+    // really is tight rather than letting the test quietly stop exercising the bug.
+    bool debug_remove_post_refresh_callback_spare_capacity() {
+        return _loop->call_get([this] {
+            auto exact_sized_copy = _after_snode_cache_refresh;
+            _after_snode_cache_refresh = std::move(exact_sized_copy);
+            return _after_snode_cache_refresh.capacity() == _after_snode_cache_refresh.size();
+        });
+    }
+
+    size_t pending_post_refresh_callbacks() {
+        return _loop->call_get([this] { return _after_snode_cache_refresh.size(); });
+    }
+
+    // Called from the test thread, so this also covers `_update_cache` being entered from off the
+    // loop thread
+    void update_cache(std::vector<service_node> nodes) { _update_cache("test", std::move(nodes)); }
 };
 }  // namespace session::network
 
@@ -160,4 +193,59 @@ TEST_CASE("Network", "[network][get_unused_nodes]") {
     for (const auto& node : unused_nodes)
         result_subnets.insert(node.ip.to_base(24));
     CHECK(result_subnets.size() == 4);
+}
+
+TEST_CASE("Network", "[network][update_cache]") {
+    session::network::config::SnodePool pool_config = {
+            std::nullopt,
+            std::nullopt,
+            std::chrono::minutes{5},
+            std::chrono::minutes{5},
+            false,  // enforce_subnet_diversity
+            network::opt::retry_delay{50ms, 200ms},
+            opt::netid::Target::testnet,
+            {},
+            0,
+            0,
+            3,  // cache_node_strike_threshold
+            false};
+    auto ed_pk = "4cb76fdc6d32278e3f83dbf608360ecc6b65727934b85d2fb86862ff98c46ab7"_hex_b;
+    std::vector<service_node> snode_cache;
+
+    for (uint16_t i = 0; i < 5; ++i)
+        snode_cache.emplace_back(service_node{
+                ed25519_pubkey::from_bytes(ed_pk),
+                oxen::quic::ipv4{"192.168.0.{}"_format(i)},
+                static_cast<uint16_t>(20000 + i),
+                static_cast<uint16_t>(30000 + i),
+                {2, 11, 0},
+                0});
+
+    auto loop = std::make_shared<oxen::quic::Loop>();
+    auto disk_loop = std::make_shared<oxen::quic::Loop>();
+    auto snode_pool = std::make_shared<TestSnodePool>(pool_config, loop, disk_loop);
+
+    // Should tolerate a post-refresh callback registering another post-refresh callback (which is
+    // what a deferred `get_swarm` does when the refresh left the cache empty) rather than
+    // invalidating the vector it's iterating
+    std::vector<int> callbacks_run;
+    snode_pool->debug_queue_post_refresh_callback([&] {
+        callbacks_run.push_back(0);
+        snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(3); });
+    });
+    snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(1); });
+    snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(2); });
+    REQUIRE(snode_pool->debug_remove_post_refresh_callback_spare_capacity());
+    snode_pool->update_cache({});
+    CHECK(callbacks_run == std::vector<int>{0, 1, 2});
+
+    // The callback registered during the run should be kept for the next refresh, not discarded
+    CHECK(snode_pool->pending_post_refresh_callbacks() == 1);
+    snode_pool->update_cache({});
+    CHECK(callbacks_run == std::vector<int>{0, 1, 2, 3});
+    CHECK(snode_pool->pending_post_refresh_callbacks() == 0);
+
+    // Should have stored the nodes by the time it returns
+    snode_pool->update_cache(snode_cache);
+    CHECK(snode_pool->size() == snode_cache.size());
 }
