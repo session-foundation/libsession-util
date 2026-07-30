@@ -317,8 +317,8 @@ std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
         return std::nullopt;
 
     // The nudges below are best-effort: they only make it *less likely* that two devices near a
-    // weekly rotation boundary race on the same renewal. A genuine collision is still resolved by
-    // config resolution, so none of this needs to be airtight.
+    // rotating-seed period boundary race on the same renewal. A genuine collision is still resolved
+    // by config resolution, so none of this needs to be airtight.
     auto near_boundary = [](std::chrono::sys_seconds t) {
         auto off = t.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
         return off <= 15s || off >= PRO_ROTATING_SEED_PERIOD - 15s;

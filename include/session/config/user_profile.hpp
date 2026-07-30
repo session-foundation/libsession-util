@@ -403,7 +403,7 @@ class UserProfile : public ConfigBase {
     /// expiry:
     ///   - no proof, or the proof already expired -> `now` (fetch immediately);
     ///   - a valid proof with access expiry still more than an hour ahead -> an hour before the
-    ///     proof expires (preemptive), nudged off a rotation-period boundary so all devices agree;
+    ///     proof expires (preemptive), nudged off a rotating-seed period boundary so all devices agree;
     ///   - otherwise (valid proof, entitlement ending or unknown) -> nullopt.
     ///
     /// Inputs:
