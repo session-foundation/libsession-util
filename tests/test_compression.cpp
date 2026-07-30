@@ -1,5 +1,6 @@
 
 #include <oxenc/hex.h>
+#include <session/config/base.hpp>
 #include <session/config/encrypt.h>
 #include <session/config/user_profile.h>
 #include <sodium/crypto_sign_ed25519.h>
@@ -8,10 +9,6 @@
 #include <string_view>
 
 #include "utils.hpp"
-
-namespace session::config {
-void compress_message(std::vector<std::byte>& msg, int level);
-}
 
 TEST_CASE("compression", "[config][compression]") {
 

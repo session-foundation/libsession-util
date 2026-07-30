@@ -8,6 +8,7 @@
 #include <session/format.hpp>
 #include <stdexcept>
 
+#include "session/ed25519.h"
 #include "session/export.h"
 #include "session/hash.hpp"
 #include "session/pro_backend.hpp"

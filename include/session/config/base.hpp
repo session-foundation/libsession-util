@@ -1509,6 +1509,6 @@ struct internals final {
 
 // Internal helper: attempts zstd compression of `msg` in-place (with a 'z' prefix byte); leaves
 // `msg` unchanged if compression does not reduce the size.  `level` of 0 disables compression.
-void compress_message(std::vector<unsigned char>& msg, int level);
+void compress_message(std::vector<std::byte>& msg, int level);
 
 }  // namespace session::config

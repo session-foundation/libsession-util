@@ -20,7 +20,7 @@ extern "C" {
 ///
 /// Outputs:
 /// - `bool` -- True if the seed was successfully retrieved, false if failed.
-LIBSESSION_EXPORT bool session_keypair(
+LIBSESSION_EXPORT bool session_ed25519_key_pair(
         unsigned char* ed25519_pk_out, /* 32 byte output buffer */
         unsigned char* ed25519_sk_out /* 64 byte output buffer */);
 
@@ -53,7 +53,7 @@ LIBSESSION_EXPORT bool session_ed25519_key_pair_seed(
 ///
 /// Outputs:
 /// - `bool` -- True if the seed was successfully retrieved, false if failed.
-LIBSESSION_EXPORT bool session_extract_seed(
+LIBSESSION_EXPORT bool session_seed_for_ed_privkey(
         const unsigned char* ed25519_privkey, /* 64 bytes */
         unsigned char* ed25519_seed_out /* 32 byte output buffer */);
 
@@ -108,7 +108,7 @@ LIBSESSION_EXPORT bool session_ed25519_verify(
 ///
 /// Outputs:
 /// - `bool` -- True if the key pair was successfully derived, false if failed.
-LIBSESSION_EXPORT bool session_derive_subkey(
+LIBSESSION_EXPORT bool session_ed25519_pro_privkey_for_ed25519_seed(
         const unsigned char* ed25519_seed, /* 32 bytes */
         unsigned char* ed25519_sk_out /*64 byte output buffer*/);
 
