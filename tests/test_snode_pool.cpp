@@ -50,7 +50,7 @@ class TestSnodePool : public SnodePool {
     //
     // `shrink_to_fit` is a non-binding request, so return whether it actually took effect rather
     // than let the test quietly stop exercising the bug.
-    bool remove_debug_post_refresh_callback_spare_capacity() {
+    bool debug_remove_post_refresh_callback_spare_capacity() {
         return _loop->call_get([this] {
             _after_snode_cache_refresh.shrink_to_fit();
             return _after_snode_cache_refresh.capacity() == _after_snode_cache_refresh.size();
@@ -231,7 +231,7 @@ TEST_CASE("Network", "[network][update_cache]") {
     });
     snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(1); });
     snode_pool->debug_queue_post_refresh_callback([&] { callbacks_run.push_back(2); });
-    REQUIRE(snode_pool->remove_debug_post_refresh_callback_spare_capacity());
+    REQUIRE(snode_pool->debug_remove_post_refresh_callback_spare_capacity());
     snode_pool->update_cache({});
     CHECK(callbacks_run == std::vector<int>{0, 1, 2});
 
