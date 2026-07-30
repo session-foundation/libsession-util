@@ -13,7 +13,7 @@ using namespace session;
 using x_pair = std::pair<b32, b32>;
 
 // Returns X25519 {privkey, pubkey} from an Ed25519 seed
-x_pair to_x_keys(std::span<const std::byte, 32> ed_seed) {
+static x_pair to_x_keys(std::span<const std::byte, 32> ed_seed) {
     auto [ed_pk, ed_sk] = ed25519::keypair(ed_seed);
     return {ed25519::sk_to_x25519(ed_sk), ed25519::pk_to_x25519(ed_pk)};
 }

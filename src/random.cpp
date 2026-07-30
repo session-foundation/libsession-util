@@ -15,9 +15,6 @@ namespace session::random {
 void fill(std::span<std::byte> buf) {
     randombytes_buf(buf.data(), buf.size());
 }
-void fill(std::span<unsigned char> buf) {
-    fill(std::span{reinterpret_cast<std::byte*>(buf.data()), buf.size()});
-}
 void fill(std::span<char> buf) {
     fill(std::span{reinterpret_cast<std::byte*>(buf.data()), buf.size()});
 }

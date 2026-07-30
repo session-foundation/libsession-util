@@ -245,24 +245,6 @@ const ProviderURLs* provider_urls(std::string_view provider_code) {
     return nullptr;
 }
 
-LIBSESSION_C_API session_pro_backend_provider_urls
-session_pro_backend_get_provider_urls(const char* provider_code) {
-    // Each present field is a static, null-terminated literal; an absent one is NULL. `found`
-    // distinguishes an unknown provider ({} -> found == false) from a recognised provider that
-    // simply has some/all URLs absent.
-    auto c = [](const std::optional<std::string_view>& u) -> const char* {
-        return u ? u->data() : nullptr;
-    };
-    if (auto u = provider_urls(provider_code))
-        return {.found = true,
-                .refund_platform_url = c(u->refund_platform_url),
-                .refund_support_url = c(u->refund_support_url),
-                .refund_status_url = c(u->refund_status_url),
-                .update_subscription_url = c(u->update_subscription_url),
-                .cancel_subscription_url = c(u->cancel_subscription_url)};
-    return {};
-}
-
 std::span<const std::string_view> visible_platforms() {
     static const std::array<std::string_view, 2> platforms = {
             PAYMENT_PROVIDER_GOOGLE_PLAY, PAYMENT_PROVIDER_APP_STORE};
@@ -297,20 +279,6 @@ std::optional<ProPlanPeriod> parse_plan_period(std::string_view code) {
     if (ec != std::errc{} || ptr != digits.data() + digits.size())
         return std::nullopt;
     return ProPlanPeriod{count, unit};
-}
-
-LIBSESSION_C_API const char* const* session_pro_backend_visible_platforms(size_t* count) {
-    // Derived from the C++ list (single source); each slug's data() is a static, null-terminated
-    // literal, so the pointer array is safe to hand out as static storage.
-    static const std::vector<const char*> codes = [] {
-        std::vector<const char*> v;
-        for (auto slug : visible_platforms())
-            v.push_back(slug.data());
-        return v;
-    }();
-    if (count)
-        *count = codes.size();
-    return codes.data();
 }
 
 MasterRotatingSignatures add_payment_sigs(
@@ -958,6 +926,38 @@ static session_pro_backend_request c_own_request(ProRequest&& req) {
 // Fill a session_pro_backend_request's error buffer from a caught exception.
 static void c_request_error(session_pro_backend_request& result, const std::exception& e) {
     result.error_count = session::copy_c_str(result.error, sizeof(result.error), e.what()) - 1;
+}
+
+LIBSESSION_C_API session_pro_backend_provider_urls
+session_pro_backend_get_provider_urls(const char* provider_code) {
+    // Each present field is a static, null-terminated literal; an absent one is NULL. `found`
+    // distinguishes an unknown provider ({} -> found == false) from a recognised provider that
+    // simply has some/all URLs absent.
+    auto c = [](const std::optional<std::string_view>& u) -> const char* {
+        return u ? u->data() : nullptr;
+    };
+    if (auto u = provider_urls(provider_code))
+        return {.found = true,
+                .refund_platform_url = c(u->refund_platform_url),
+                .refund_support_url = c(u->refund_support_url),
+                .refund_status_url = c(u->refund_status_url),
+                .update_subscription_url = c(u->update_subscription_url),
+                .cancel_subscription_url = c(u->cancel_subscription_url)};
+    return {};
+}
+
+LIBSESSION_C_API const char* const* session_pro_backend_visible_platforms(size_t* count) {
+    // Derived from the C++ list (single source); each slug's data() is a static, null-terminated
+    // literal, so the pointer array is safe to hand out as static storage.
+    static const std::vector<const char*> codes = [] {
+        std::vector<const char*> v;
+        for (auto slug : visible_platforms())
+            v.push_back(slug.data());
+        return v;
+    }();
+    if (count)
+        *count = codes.size();
+    return codes.data();
 }
 
 LIBSESSION_C_API session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
