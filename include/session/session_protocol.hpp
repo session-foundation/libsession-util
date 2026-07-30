@@ -245,10 +245,7 @@ class ProProof {
 enum class ProFeaturesForMsgStatus {
     Success = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
 
-    /// Message byte stream to classify could not be decoded into a valid UTF8/16 string
-    UTFDecodingError = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR,
-
-    /// Decoded UTF8/16 string exceeded the maximum character limit allowed for Session Pro
+    /// Message exceeded the maximum character limit allowed for Session Pro
     ExceedsCharacterLimit = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
 };
 
@@ -270,7 +267,6 @@ struct ProFeaturesForMsg {
     ProFeaturesForMsgStatus status;
     std::string_view error;
     ProMessageBitset bitset;
-    size_t codepoint_count;
 };
 
 enum class DestinationType {
@@ -403,44 +399,21 @@ struct DecodeEnvelopeKey {
     std::span<std::span<const uint8_t>> decrypt_keys;
 };
 
-/// API: session_protocol/pro_features_for_utf8
+/// API: session_protocol/pro_features_for_message
 ///
-/// Determine the Pro features that are used in a given conversation message.
+/// Determine the Pro features required for a conversation message of a given length.
 ///
 /// Inputs:
-/// - `text` -- the UTF8 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the size of the message in UTF8 code units to determine if the message requires
-///   access to the higher character limit available in Session Pro
+/// - `codepoint_count` -- the number of Unicode codepoints in the message. Callers count this
+///   themselves (every platform's native string type counts codepoints directly).
 ///
 /// Outputs (a ProFeaturesForMsg):
-/// - `status` -- Success, or the reason evaluation failed (UTF decoding error, or over the character
-///   limit). When not Success, only `error` is meaningful.
+/// - `status` -- Success, or ExceedsCharacterLimit if the message is over the maximum limit. When
+///   not Success, only `error` is meaningful.
 /// - `error` -- On a non-Success `status`, a read-only description of the failure; empty otherwise.
 /// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf8(const char* text, size_t text_size);
-
-/// API: session_protocol/pro_features_for_utf16
-///
-/// Determine the Pro features that are used in a given conversation message.
-///
-/// Inputs:
-/// - `text` -- the UTF16 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the size of the message in UTF16 code units to determine if the message
-/// requires
-///   access to the higher character limit available in Session Pro
-///
-/// Outputs (a ProFeaturesForMsg):
-/// - `status` -- Success, or the reason evaluation failed (UTF decoding error, or over the character
-///   limit). When not Success, only `error` is meaningful.
-/// - `error` -- On a non-Success `status`, a read-only description of the failure; empty otherwise.
-/// - `bitset` -- Feature flags suitable for writing directly into the protobuf
-///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf16(const char16_t* text, size_t text_size);
+ProFeaturesForMsg pro_features_for_message(size_t codepoint_count);
 
 /// API: session_protocol/pad_message
 ///

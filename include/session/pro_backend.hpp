@@ -33,7 +33,7 @@
 ///    functions to embed the proof into their messages via the helper functions in the Session
 ///    Protocol header file. This is done by assigning the `ProProof` into the
 ///    `Content.proMessage.proof` protobuf structure. Additionally the caller will use
-///    `pro_features_for_utf8/16` to determine the correct flags to assign the `features` to
+///    `pro_features_for_message` to determine the correct flags to assign the `features` to
 ///    `Content.proMessage.flags` in the protobuf structure.
 ///
 ///    Lastly the high-level libsession encoding functions accept the rotating private key to which
