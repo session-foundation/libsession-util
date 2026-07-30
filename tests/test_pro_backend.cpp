@@ -146,9 +146,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"version", 0},
                     {"expiry_ts", unix_ts},
                     {"revocation_tag", oxenc::to_hex(fake_revocation_tag)},
-                    {"rotating_pkey",
-                     oxenc::to_hex(rotating_pubkey.data, std::end(rotating_pubkey.data))},
-                    {"sig", oxenc::to_hex(master_privkey.data, std::end(master_privkey.data))}};
+                    {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
+                    {"sig", oxenc::to_hex(master_privkey.data)},
+                    {"account_expiry_ts", unix_ts + 90 * 24 * 3600}};
             std::string json = j.dump();
 
             // Valid JSON
@@ -198,6 +198,39 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                 result.proof.sig.data,
                                 result_cpp.proof.sig.data(),
                                 result_cpp.proof.sig.size()) == 0);
+
+                // account_expiry_ts (advisory, unsigned): surfaced by both the C and C++ parses,
+                // and distinct from the proof's own expiry_ts.
+                REQUIRE(result.account_expiry_ts == unix_ts + 90 * 24 * 3600);
+                REQUIRE(result_cpp.account_expiry.has_value());
+                REQUIRE(result_cpp.account_expiry->time_since_epoch().count() ==
+                        result.account_expiry_ts);
+
+                // Required on success: a proof response missing it is treated as malformed.
+                nlohmann::json j_no_ae = j;
+                j_no_ae["result"].erase("account_expiry_ts");
+                REQUIRE(parse_pro_proof(j_no_ae.dump()).error.has_value());
+
+                // It also rides a subscription_expired failure (top-level, now-past value) so the
+                // client can refresh its cached horizon without a separate status call.
+                nlohmann::json j_exp;
+                j_exp["status"] = "fail";
+                j_exp["error_code"] = "subscription_expired";
+                j_exp["error"] = "expired";
+                j_exp["account_expiry_ts"] = unix_ts - 24 * 3600;
+                auto exp = parse_pro_proof(j_exp.dump());
+                REQUIRE(exp.error_code == "subscription_expired");
+                REQUIRE(exp.account_expiry.has_value());
+                REQUIRE(exp.account_expiry->time_since_epoch().count() == unix_ts - 24 * 3600);
+
+                // Other failures (e.g. not_subscribed) carry no horizon.
+                nlohmann::json j_ns;
+                j_ns["status"] = "fail";
+                j_ns["error_code"] = "not_subscribed";
+                j_ns["error"] = "no";
+                auto ns = parse_pro_proof(j_ns.dump());
+                REQUIRE(ns.error_code == "not_subscribed");
+                REQUIRE_FALSE(ns.account_expiry.has_value());
             }
 
             // After freeing

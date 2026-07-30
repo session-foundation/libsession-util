@@ -342,6 +342,12 @@ namespace {
         json_require_fixed_bytes_from_hex(
                 result_obj, "rotating_pkey", errs, result.proof.rotating_pubkey);
         json_require_fixed_bytes_from_hex(result_obj, "sig", errs, result.proof.sig);
+
+        // Advisory and unsigned (pro-wire-protocol.md §2.2) -- never fed into signature
+        // verification -- but required: a proof response without it can't refresh the cached access
+        // expiry, which breaks renewal, so treat a missing value as a malformed response.
+        auto account_expiry_ts = json_require<int64_t>(result_obj, "account_expiry_ts", errs);
+        result.account_expiry = std::chrono::sys_seconds(std::chrono::seconds(account_expiry_ts));
     }
 }  // namespace
 
@@ -352,6 +358,17 @@ GenerateProProofResponse parse_pro_proof(std::string_view json) {
     if (!result || !errs.empty()) {
         if (!errs.empty())
             set_protocol_error(result, errs.front());
+        // On a subscription_expired failure the account's (now-past) true expiry rides top-level on
+        // the envelope (pro-wire-protocol.md §2.2 / §5.1) so the client can refresh its cached
+        // horizon / access expiry without a separate get_pro_status. Advisory -- read leniently.
+        else if (result.error_code == "subscription_expired") {
+            std::vector<std::string> ignore;
+            auto j = json_parse(json, ignore);
+            if (auto it = j.find("account_expiry_ts");
+                it != j.end() && it->is_number_integer())
+                result.account_expiry =
+                        std::chrono::sys_seconds(std::chrono::seconds(it->get<int64_t>()));
+        }
         return result;
     }
     fill_proof(result_obj, result, errs);
@@ -906,6 +923,8 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
                 p.rotating_pubkey.data(),
                 p.rotating_pubkey.size());
         std::memcpy(result.proof.sig.data, p.sig.data(), p.sig.size());
+        result.account_expiry_ts =
+                owned->account_expiry ? session::epoch_seconds(*owned->account_expiry) : 0;
     } catch (const std::exception&) {
         delete static_cast<GenerateProProofResponse*>(result.header.internal_);
         result = {};
