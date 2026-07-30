@@ -44,15 +44,17 @@ class TestSnodePool : public SnodePool {
 
     // Removes the spare capacity from the pending-callback vector, so that a callback registering
     // another callback while they're being run is *guaranteed* to reallocate the vector.  Without
-    // this the re-registration lands in spare capacity, nothing reallocates, and iterating the
+    // this the re-registration can land in spare capacity, nothing reallocates, and iterating the
     // vector by reference stays accidentally valid - which is exactly why the real crash only
     // showed up on some launches.
     //
-    // `shrink_to_fit` is a non-binding request, so return whether it actually took effect rather
-    // than let the test quietly stop exercising the bug.
+    // The copy allocates exactly `size()` entries and the move-assign then takes over that buffer;
+    // `shrink_to_fit` would only be a hint that the stdlib is allowed to ignore.  The return value
+    // confirms it took effect rather than letting the test quietly stop exercising the bug.
     bool debug_remove_post_refresh_callback_spare_capacity() {
         return _loop->call_get([this] {
-            _after_snode_cache_refresh.shrink_to_fit();
+            auto exact_sized_copy = _after_snode_cache_refresh;
+            _after_snode_cache_refresh = std::move(exact_sized_copy);
             return _after_snode_cache_refresh.capacity() == _after_snode_cache_refresh.size();
         });
     }
