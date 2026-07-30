@@ -674,10 +674,6 @@ bool ConfigBase::needs_push() const {
     return !is_clean();
 }
 
-// Tries to compresses the message; if the compressed version (including the 'z' prefix tag) is
-// smaller than the source message then we modify `msg` to contain the 'z'-prefixed compressed
-// message, otherwise we leave it as-is.  Returns true if compression was beneficial and `msg` has
-// been compressed; false if compression did not reduce the size and msg was left as-is.
 void compress_message(std::vector<std::byte>& msg, int level) {
     if (!level)
         return;
