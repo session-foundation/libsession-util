@@ -837,7 +837,9 @@ void SnodePool::_on_refresh_complete(
 }
 
 void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> nodes) {
-    _loop->call([this, refresh_id, &nodes] {
+    // Use 'call_get' to force this to be synchronous; a plain 'call' would queue when we aren't
+    // already on the loop thread, and the captured `nodes` reference would dangle
+    _loop->call_get([this, refresh_id, &nodes] {
         // Shuffle the nodes so we don't have a specific order
         std::ranges::shuffle(nodes, csrng);
         log::info(
@@ -864,20 +866,25 @@ void SnodePool::_update_cache(std::string refresh_id, std::vector<service_node> 
         });
 
         // Trigger any callbacks
+        //
+        // These must be moved out of the member before being run: a callback can re-enter the pool
+        // and register another post-refresh callback (`get_swarm` does exactly that if the cache is
+        // still empty), which would reallocate the vector we're iterating and leave us calling
+        // through a freed `std::function`. Anything registered while we're here accumulates in the
+        // now-empty member and runs after the next refresh instead of being silently discarded.
         if (!_after_snode_cache_refresh.empty()) {
-            log::debug(
-                    cat, "Executing {} post-refresh callbacks.", _after_snode_cache_refresh.size());
+            auto callbacks = std::move(_after_snode_cache_refresh);
+            _after_snode_cache_refresh.clear();  // A moved-from vector is valid but unspecified
 
-            for (const auto& cb : _after_snode_cache_refresh) {
+            log::debug(cat, "Executing {} post-refresh callbacks.", callbacks.size());
+
+            for (const auto& cb : callbacks) {
                 try {
                     cb();
                 } catch (const std::exception& e) {
                     log::error(cat, "Exception thrown in a post-refresh callback: {}", e.what());
                 }
             }
-
-            // Clear the callbacks
-            _after_snode_cache_refresh.clear();
         }
     });
 }
