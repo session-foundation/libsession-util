@@ -402,7 +402,10 @@ class UserProfile : public ConfigBase {
     /// renewal should be attempted -- if it is <= the caller's clock, renew now; a future value can
     /// be scheduled -- or nullopt when no renewal is needed. Given the stored proof and access
     /// expiry:
-    ///   - no proof, or the proof already expired -> `now` (fetch immediately);
+    ///   - a present-but-expired proof -> `now` (always re-check; the backend may have auto-renewed,
+    ///     and if it authoritatively reports not-Pro the client clears the credential and pushes it);
+    ///   - no proof at all but a purchase in flight (prepaid marker) -> `now`;
+    ///   - no proof and no purchase in flight -> nullopt (the account isn't Pro);
     ///   - a valid proof with access expiry still more than an hour ahead -> an hour before the
     ///     proof expires (preemptive), nudged off a rotating-seed period boundary so all devices agree;
     ///   - otherwise (valid proof, entitlement ending or unknown) -> nullopt.

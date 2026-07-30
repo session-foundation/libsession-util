@@ -701,8 +701,14 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     {
         session::config::UserProfile pr{seed, std::nullopt};
 
-        // No proof yet -> renew immediately.
+        // No proof and no purchase in flight -> not Pro, nothing to fetch.
+        CHECK_FALSE(pr.pro_renewal_target(now).has_value());
+
+        // No proof but a purchase in flight (prepaid) -> fetch immediately.
+        pr.set_pro_prepaid(now - 1h);
+        REQUIRE(pr.get_pro_prepaid().has_value());
         CHECK(pr.pro_renewal_target(now) == now);
+        pr.set_pro_prepaid(std::nullopt);
 
         auto store_proof = [&](std::chrono::sys_seconds expiry) {
             session::config::ProConfig pc = {};
@@ -734,8 +740,8 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
         store_proof(now - 1h);
         CHECK(pr.pro_renewal_target(now) == now);
 
-        // Near-boundary deferral: when renewal is already due and `now` sits at a weekly rotation
-        // boundary, defer by PRO_RENEWAL_BOUNDARY_DEFER as long as that leaves at least
+        // Near-boundary deferral: when renewal is already due and `now` sits at a rotating-seed
+        // period boundary, defer by PRO_RENEWAL_BOUNDARY_DEFER as long as that leaves at least
         // PRO_RENEWAL_BOUNDARY_MIN_VALIDITY of proof validity; otherwise just renew now.
         auto at_boundary = now - now.time_since_epoch() % session::PRO_ROTATING_SEED_PERIOD;
         pr.set_pro_access_expiry(at_boundary + 30 * 24h);

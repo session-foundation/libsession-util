@@ -302,11 +302,24 @@ void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) 
 std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
         std::chrono::sys_seconds now) const {
     auto pro = get_pro_config();
-    if (!pro)
-        return now;  // no proof yet -> request one immediately
+    if (!pro) {
+        // No credential on the account at all. Only fetch if a purchase is in flight (the prepaid
+        // marker); otherwise the account simply isn't Pro. An entitled account carries its proof in
+        // config `s` (synced from whichever device obtained it), so genuinely having no proof means
+        // there's none to renew. The prepaid marker ages out via its 1-week read gate, so a
+        // purchase that never lands self-terminates the acquire loop.
+        if (get_pro_prepaid())
+            return now;
+        return std::nullopt;
+    }
     auto expiry = pro->proof.expiry_at;
     if (expiry <= now)
-        return now;  // proof expired -> request one immediately
+        // Expired proof: always re-check with the backend. The subscription may have auto-renewed
+        // (possibly without this device's knowledge -- our cached access expiry can't be trusted to
+        // reflect a renewal we were offline for), so E is not a reliable gate here. If the backend
+        // authoritatively reports the account is not Pro, the client clears the config credential
+        // and pushes that, ending the loop (next evaluation: no proof, no prepaid -> nullopt).
+        return now;
 
     // Otherwise renew preemptively PRO_RENEWAL_LEAD before the proof expires, but only while
     // entitlement clearly continues (access expiry at least that far ahead); a still-valid proof
