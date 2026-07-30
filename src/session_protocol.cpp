@@ -1,7 +1,6 @@
 #include <fmt/core.h>
 #include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
-#include <simdutf.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
@@ -195,48 +194,20 @@ cleared_b32 ProProof::rotating_seed(
 
 };  // namespace session
 
-namespace {
-
-session::ProFeaturesForMsg pro_features_check(
-        const simdutf::result& validation, size_t codepoints) {
-    session::ProFeaturesForMsg result = {};
-    if (validation.is_ok()) {
-        result.status = session::ProFeaturesForMsgStatus::Success;
-        result.codepoint_count = codepoints;
-
-        if (result.codepoint_count > session::STANDARD_CHARACTER_LIMIT) {
-            if (result.codepoint_count <= session::PRO_HIGHER_CHARACTER_LIMIT) {
-                result.flags |= session::ProMessageFlags::CharLimit10k;
-            } else {
-                result.error = "Message exceeds the maximum character limit allowed";
-                result.status = session::ProFeaturesForMsgStatus::ExceedsCharacterLimit;
-            }
-        }
-    } else {
-        result.status = session::ProFeaturesForMsgStatus::UTFDecodingError;
-        result.error = simdutf::error_to_string(validation.error);
-    }
-    return result;
-}
-
-}  // namespace
-
 namespace session {
 
-ProFeaturesForMsg pro_features_for_utf8(std::span<const std::byte> msg) {
-    auto v = simdutf::validate_utf8_with_errors(msg);
-    return pro_features_check(v, v.is_ok() ? simdutf::count_utf8(msg) : 0);
-}
-ProFeaturesForMsg pro_features_for_utf8(std::u8string_view msg) {
-    return pro_features_for_utf8({reinterpret_cast<const std::byte*>(msg.data()), msg.size()});
-}
-ProFeaturesForMsg pro_features_for_utf8(std::string_view msg) {
-    return pro_features_for_utf8({reinterpret_cast<const std::byte*>(msg.data()), msg.size()});
-}
-
-ProFeaturesForMsg pro_features_for_utf16(std::u16string_view msg) {
-    auto v = simdutf::validate_utf16_with_errors(msg);
-    return pro_features_check(v, v.is_ok() ? simdutf::count_utf16(msg) : 0);
+ProFeaturesForMsg pro_features_for_message(size_t codepoint_count) {
+    ProFeaturesForMsg result = {};
+    result.status = ProFeaturesForMsgStatus::Success;
+    if (codepoint_count > STANDARD_CHARACTER_LIMIT) {
+        if (codepoint_count <= PRO_HIGHER_CHARACTER_LIMIT) {
+            result.flags |= ProMessageFlags::CharLimit10k;
+        } else {
+            result.error = "Message exceeds the maximum character limit allowed";
+            result.status = ProFeaturesForMsgStatus::ExceedsCharacterLimit;
+        }
+    }
+    return result;
 }
 
 constexpr std::byte PADDING_TERMINATING_BYTE{0x80};
@@ -904,27 +875,13 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 }
 
 LIBSESSION_C_API
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        const char* msg, size_t msg_size) {
-    auto result_cpp = pro_features_for_utf8({msg, msg_size});
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_message(
+        size_t codepoint_count) {
+    auto result_cpp = pro_features_for_message(codepoint_count);
     return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = result_cpp.error.data(),
             .bitset = static_cast<uint64_t>(result_cpp.flags),
-            .codepoint_count = result_cpp.codepoint_count,
-    };
-}
-
-LIBSESSION_C_API
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        const uint16_t* msg, size_t msg_size) {
-    auto result_cpp = pro_features_for_utf16(
-            {std::launder(reinterpret_cast<const char16_t*>(msg)), msg_size});
-    return session_protocol_pro_features_for_msg{
-            .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
-            .error = result_cpp.error.data(),
-            .bitset = static_cast<uint64_t>(result_cpp.flags),
-            .codepoint_count = result_cpp.codepoint_count,
     };
 }
 

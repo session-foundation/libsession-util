@@ -94,7 +94,6 @@ extern const uint64_t SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT;
 
 typedef enum SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS {  // See session::ProFeaturesForMsgStatus
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
-    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR,
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
 } SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS;
 
@@ -315,50 +314,25 @@ typedef struct session_protocol_pro_features_for_msg {
     /// there is no error.
     const char* error;
     uint64_t bitset;  // Mask of SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_* bits
-    size_t codepoint_count;
 } session_protocol_pro_features_for_msg;
 
-/// API: session_protocol/session_protocol_get_pro_features_for_utf8
+/// API: session_protocol/session_protocol_pro_features_for_message
 ///
-/// Determine the Pro features that are used in a given UTF8 message.
-///
-/// Inputs:
-/// - `text` -- the UTF8 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the number of code units (aka. bytes) the string has
-///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
-///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-LIBSESSION_EXPORT
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        char const* text, size_t text_size) NON_NULL_ARG(1);
-
-/// API: session_protocol/session_protocol_get_pro_features_for_utf16
-///
-/// Determine the Pro features that are used in a given UTF16 message.
+/// Determine the Pro features required for a message of the given length.
 ///
 /// Inputs:
-/// - `text` -- the UTF16 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the number of code units (aka. bytes) the string has
+/// - `codepoint_count` -- the number of Unicode codepoints in the message. Callers count this
+///   themselves (every platform's native string type counts codepoints directly).
 ///
 /// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
+/// - `status` -- Success, or EXCEEDS_CHARACTER_LIMIT when over the maximum. When not Success, only
+///   `error` is meaningful.
+/// - `error` -- On a non-Success status, a read-only diagnostic string; NULL otherwise.
+/// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        uint16_t const* text, size_t text_size) NON_NULL_ARG(1);
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_message(
+        size_t codepoint_count);
 
 /// API: session_protocol_encode_dm_v1
 ///

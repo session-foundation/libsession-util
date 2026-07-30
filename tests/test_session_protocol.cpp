@@ -87,57 +87,41 @@ static SerialisedProtobufContentWithProForTesting build_protobuf_content_with_se
 TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
 
     // Do tests that require no setup
-    SECTION("Ensure get pro fetaures detects large message") {
-        // Try a message below the size threshold
+    SECTION("Ensure get pro features detects large message") {
+        // Below the size threshold
         {
-            auto msg = std::string(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT, 'a');
             session_protocol_pro_features_for_msg pro_msg =
-                    session_protocol_pro_features_for_utf8(msg.data(), msg.size());
+                    session_protocol_pro_features_for_message(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT);
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE(pro_msg.bitset == 0);
-            REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
-        // Try an invalid message
+        // Exceeding the standard size threshold
         {
-            std::string_view msg = "\xFF";
             session_protocol_pro_features_for_msg pro_msg =
-                    session_protocol_pro_features_for_utf8(msg.data(), msg.size());
-            REQUIRE(pro_msg.status ==
-                    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR);
-            REQUIRE(pro_msg.error != nullptr);
-            REQUIRE(pro_msg.error[0] != '\0');
-        }
-
-        // Try a message exceeding the standard size threshold
-        {
-            auto msg = std::string(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT + 1, 'a');
-            session_protocol_pro_features_for_msg pro_msg =
-                    session_protocol_pro_features_for_utf8(msg.data(), msg.size());
+                    session_protocol_pro_features_for_message(
+                            SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT + 1);
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE((pro_msg.bitset & SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT));
-            REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
-        // Try a message at the max size threshold
+        // At the max size threshold
         {
-            auto msg = std::string(SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT, 'a');
             session_protocol_pro_features_for_msg pro_msg =
-                    session_protocol_pro_features_for_utf8(msg.data(), msg.size());
+                    session_protocol_pro_features_for_message(
+                            SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT);
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE((pro_msg.bitset & SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT));
-            REQUIRE(pro_msg.codepoint_count == msg.size());
         }
 
-        // Try a message at the (max size + 1) threshold
+        // Over the max size threshold
         {
-            auto msg = std::string(SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT + 1, 'a');
             session_protocol_pro_features_for_msg pro_msg =
-                    session_protocol_pro_features_for_utf8(msg.data(), msg.size());
+                    session_protocol_pro_features_for_message(
+                            SESSION_PROTOCOL_PRO_HIGHER_CHARACTER_LIMIT + 1);
             REQUIRE(pro_msg.status ==
                     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT);
             REQUIRE(pro_msg.bitset == 0);
-            REQUIRE(pro_msg.codepoint_count == msg.size());
         }
     }
 
@@ -407,7 +391,7 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         large_message.resize(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT + 1);
 
         session_protocol_pro_features_for_msg pro_msg =
-                session_protocol_pro_features_for_utf8(large_message.data(), large_message.size());
+                session_protocol_pro_features_for_message(large_message.size());
         REQUIRE((pro_msg.bitset & SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT));
 
         uint64_t profile_bitset = 0;
