@@ -316,8 +316,16 @@ std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
         return std::nullopt;
 
     // The nudges below are best-effort: they only make it *less likely* that two devices near a
-    // weekly rotation boundary race on the same renewal. A genuine collision is still resolved by
-    // config resolution, so none of this needs to be airtight.
+    // rotating-seed period boundary race on the same renewal. A genuine collision is still resolved
+    // by config resolution, so none of this needs to be airtight.
+    //
+    // TODO: investigate adding renewal-time jitter here, skewed per device using the account's
+    // device count (the same multi-device-account information that drives PFS key rotation) so that
+    // the first-order statistic -- the earliest device's renewal time, which is what an observer
+    // actually sees -- is uniformly distributed regardless of N. Naive per-device i.i.d. jitter
+    // would instead publicly leak N, since the min of N jitters has an N-dependent distribution.
+    // dev cannot do this (device count unknown there) and deliberately accepts the lesser,
+    // backend-only leak instead of a public one.
     auto near_boundary = [](std::chrono::sys_seconds t) {
         auto off = t.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
         return off <= 15s || off >= PRO_ROTATING_SEED_PERIOD - 15s;
