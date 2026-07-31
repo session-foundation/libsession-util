@@ -13,7 +13,7 @@ Run with the backend clone's venv python. Requires env:
   PRO_BACKEND_DIR           path to the backend clone (for importing base/backend/db)
 
 Usage:
-  seed_payment.py payment --provider {google_play,app_store,rangeproof} --payment-id ID
+  seed_payment.py payment --provider {google_play,app_store,stf} --payment-id ID
                           --master-pubkey HEX64 [--plan 1m|3m|1y] [--expiry-days N]
   seed_payment.py revoke  --provider {google_play,app_store} --payment-id ID
 """
@@ -58,9 +58,9 @@ def _payment_tx(provider, payment_id):
         tx.apple_tx_id = payment_id
         tx.apple_original_tx_id = payment_id
         tx.apple_web_line_order_tx_id = ""
-    elif provider == "rangeproof":
-        tx.provider = base.PaymentProvider.Rangeproof
-        tx.rangeproof_order_id = payment_id
+    elif provider == "stf":
+        tx.provider = base.PaymentProvider.SessionFoundation
+        tx.stf_order_id = payment_id
     else:
         sys.exit(f"seed: unknown provider {provider}")
     return tx
@@ -144,7 +144,7 @@ def main():
 
     p = sub.add_parser("payment", help="seed a witnessed-unredeemed payment")
     p.add_argument("--provider", required=True,
-                   choices=["google_play", "app_store", "rangeproof"])
+                   choices=["google_play", "app_store", "stf"])
     p.add_argument("--payment-id", required=True)
     p.add_argument("--master-pubkey", required=True, help="64 hex chars")
     p.add_argument("--plan", default="1m")

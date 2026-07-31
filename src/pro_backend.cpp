@@ -168,8 +168,8 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_
         PAYMENT_PROVIDER_GOOGLE_PLAY.data();
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE =
         PAYMENT_PROVIDER_APP_STORE.data();
-LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF =
-        PAYMENT_PROVIDER_RANGEPROOF.data();
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_STF =
+        PAYMENT_PROVIDER_STF.data();
 }
 
 using namespace std::literals;
@@ -200,7 +200,7 @@ const ProviderURLs* provider_urls(std::string_view provider_code) {
         return &google_play_urls;
     if (provider_code == PAYMENT_PROVIDER_APP_STORE)
         return &app_store_urls;
-    // rangeproof and unknown providers have no applicable URLs
+    // STF and unknown providers have no applicable URLs
     return nullptr;
 }
 

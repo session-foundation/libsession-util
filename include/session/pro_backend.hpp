@@ -87,7 +87,8 @@ constexpr std::string_view URL = "https://pro.session.codes";
 /// valid on the wire and passes through as an opaque string.
 constexpr std::string_view PAYMENT_PROVIDER_GOOGLE_PLAY = "google_play";
 constexpr std::string_view PAYMENT_PROVIDER_APP_STORE = "app_store";
-constexpr std::string_view PAYMENT_PROVIDER_RANGEPROOF = "rangeproof";
+// STF = the Session Technology Foundation's out-of-band grant (not a purchasable store).
+constexpr std::string_view PAYMENT_PROVIDER_STF = "stf";
 
 /// Domain used with ed25519::derive_subkey to derive the Session Pro signing keypair from the
 /// account's root Ed25519 seed.
@@ -142,12 +143,12 @@ struct ProviderURLs {
 /// Look up the support/management URLs for a provider code (see
 /// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*). Returns a pointer to a static per-provider
 /// constant, or nullptr for a provider with no applicable URLs at all (an unknown code, or e.g.
-/// rangeproof); within a returned set each field is present or std::nullopt per that provider.
+/// STF); within a returned set each field is present or std::nullopt per that provider.
 const ProviderURLs* provider_urls(std::string_view provider_code);
 
 /// The user-visible purchasable platforms, as provider-code slugs (a subset of the
 /// SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* values — currently "google_play" and "app_store").
-/// Order is not significant; clients pick their own. Hidden mechanisms (e.g. rangeproof) are
+/// Order is not significant; clients pick their own. Hidden mechanisms (e.g. STF) are
 /// excluded — they surface only for users who already hold them — so this is the set that drives a
 /// "purchase via …" store list.
 std::span<const std::string_view> visible_platforms();
