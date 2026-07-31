@@ -340,7 +340,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"payment_provider", SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY},
                     {"auto_renewing", false},
                     {"purchased_ts", unix_ts - 3600 + 0.5},
-                    {"redeemed_ts", unix_ts - 3600},
                     {"expiry_ts", unix_ts},
                     {"grace_period_duration", 1001},
                     {"platform_refund_expiry_ts", unix_ts + 1},
@@ -356,7 +355,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY);
             // Sub-second precision preserved through sys_ms (0.5s = 500ms) round-trips exactly
             REQUIRE(item.purchased_ts == unix_ts - 3600 + 0.5);
-            REQUIRE(item.redeemed_ts == unix_ts - 3600);
             REQUIRE(item.expiry_ts == unix_ts);
             REQUIRE(item.grace_period_duration == 1001);
             REQUIRE(item.platform_refund_expiry_ts == unix_ts + 1);
