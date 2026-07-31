@@ -236,7 +236,7 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
         if (data["I"].exists())
             data["I"].erase();
         if (auto* R = data["R"].integer(); R && std::chrono::sys_seconds{std::chrono::seconds{*R}} <
-                                                          clock_now_s() - std::chrono::weeks{1})
+                                                        clock_now_s() - std::chrono::weeks{1})
             data["R"].erase();
     }
 }
@@ -345,15 +345,15 @@ std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
     };
 
     auto target = expiry - PRO_RENEWAL_LEAD;
-    // The scheduled target is shared (derived from the proof's expiry), so nudging it off a boundary
-    // keeps every device on the same side of it when the renewal comes due.
+    // The scheduled target is shared (derived from the proof's expiry), so nudging it off a
+    // boundary keeps every device on the same side of it when the renewal comes due.
     if (near_boundary(target))
         target -= 30s;
 
-    // If the renewal is already due but *now* sits right at a boundary, defer it instead of renewing
-    // at the ambiguous instant, so a device cleanly on one side can renew and propagate its config
-    // first; failing that we re-poll past the boundary. Only while the deferred time still leaves
-    // enough of the current proof's validity.
+    // If the renewal is already due but *now* sits right at a boundary, defer it instead of
+    // renewing at the ambiguous instant, so a device cleanly on one side can renew and propagate
+    // its config first; failing that we re-poll past the boundary. Only while the deferred time
+    // still leaves enough of the current proof's validity.
     if (target <= now && near_boundary(now) &&
         expiry - (now + PRO_RENEWAL_BOUNDARY_DEFER) >= PRO_RENEWAL_BOUNDARY_MIN_VALIDITY)
         return now + PRO_RENEWAL_BOUNDARY_DEFER;
@@ -566,7 +566,8 @@ LIBSESSION_C_API void user_profile_set_pro_prepaid(config_object* conf, int64_t 
         unbox<UserProfile>(conf)->set_pro_prepaid(as_sys_seconds(prepaid_ts));
 }
 
-LIBSESSION_C_API int64_t user_profile_get_pro_renewal_target(const config_object* conf, int64_t now) {
+LIBSESSION_C_API int64_t
+user_profile_get_pro_renewal_target(const config_object* conf, int64_t now) {
     if (auto t = unbox<UserProfile>(conf)->pro_renewal_target(as_sys_seconds(now)))
         return epoch_seconds(*t);
     return 0;

@@ -314,8 +314,7 @@ GenerateProProofResponse parse_pro_proof(std::string_view json) {
         else if (result.error_code == "subscription_expired") {
             std::vector<std::string> ignore;
             auto j = json_parse(json, ignore);
-            if (auto it = j.find("account_expiry_ts");
-                it != j.end() && it->is_number_integer())
+            if (auto it = j.find("account_expiry_ts"); it != j.end() && it->is_number_integer())
                 result.account_expiry = as_sys_seconds(it->get<int64_t>());
         }
         return result;
@@ -544,7 +543,10 @@ ProRequest payment_details_request(
     return {get_payment_details_endpoint,
             application_json,
             payment_details_body(
-                    master_privkey.pubkey(), ed25519::sign(master_privkey, msg), unix_ts, limit,
+                    master_privkey.pubkey(),
+                    ed25519::sign(master_privkey, msg),
+                    unix_ts,
+                    limit,
                     before)};
 }
 
@@ -976,7 +978,6 @@ session_pro_backend_get_payment_details_response_parse(const char* json, size_t 
     }
     return result;
 }
-
 
 LIBSESSION_C_API void session_pro_backend_request_free(session_pro_backend_request* request) {
     if (request) {

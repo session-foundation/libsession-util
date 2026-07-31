@@ -63,15 +63,16 @@ inline constexpr auto PRO_ROTATING_SEED_PERIOD = 7 * 24h;
 /// doing. See UserProfile::pro_renewal_target.
 ///
 /// Do NOT increase this beyond 60min without a coordinating backend change: the Pro backend sizes
-/// the padding on its proof-expiry grid around exactly this 1h lead, so `expiry_ts - PRO_RENEWAL_LEAD`
-/// lands just after the subscription's grace-inclusive true end. Renewing any earlier than 1h before
-/// expiry would reach the upstream store before its final chance to report a renewal, yielding a
-/// spurious `subscription_expired` on a subscription that is in fact renewing.
+/// the padding on its proof-expiry grid around exactly this 1h lead, so a client that begins
+/// renewing at the lead always reaches the backend after the subscription's grace-inclusive true
+/// end. Renewing earlier than 1h before expiry would arrive before the upstream store's final
+/// chance to report a renewal, yielding a spurious `subscription_expired` on a subscription that is
+/// in fact renewing.
 inline constexpr auto PRO_RENEWAL_LEAD = 60min;
 
 /// When a renewal has come due but the current time lands right at a rotating-seed period boundary,
-/// pro_renewal_target defers it by this long rather than renewing at the ambiguous instant, giving a
-/// device cleanly on one side of the boundary a chance to renew first. Best-effort collision
+/// pro_renewal_target defers it by this long rather than renewing at the ambiguous instant, giving
+/// a device cleanly on one side of the boundary a chance to renew first. Best-effort collision
 /// avoidance only.
 inline constexpr auto PRO_RENEWAL_BOUNDARY_DEFER = 1min;
 
@@ -207,12 +208,11 @@ class ProProof {
     /// Deterministically derive the rotating Session Pro seed for the 7-day seed period containing
     /// `now`. Every device deriving "as of `now`" gets the same seed with no coordination, so
     /// concurrent proof (re)generations converge on one credential instead of racing. The 7-day
-    /// quantization is a property of this derivation only; it is NOT the key-rotation cadence, which
-    /// is dictated by the backend via the proof expiry.
-    /// The seed is the private counterpart of the `rotating_pubkey` a proof for this period
-    /// authorizes: it is fed to generate_pro_proof, and once the backend returns a signed proof for
-    /// it the same seed is persisted in the config credential (its `r`) and is what subsequently
-    /// signs Pro messages.
+    /// quantization is a property of this derivation only; it is NOT the key-rotation cadence,
+    /// which is dictated by the backend via the proof expiry. The seed is the private counterpart
+    /// of the `rotating_pubkey` a proof for this period authorizes: it is fed to
+    /// generate_pro_proof, and once the backend returns a signed proof for it the same seed is
+    /// persisted in the config credential (its `r`) and is what subsequently signs Pro messages.
     ///
     /// Inputs:
     /// - `master_seed` -- the account's Session Pro *master* key/seed (as produced by
@@ -550,7 +550,8 @@ std::vector<std::byte> encode_for_group(
 /// - `sender_ed25519_pubkey` -- The sender's ed25519 public key embedded in the encrypted payload.
 /// - `sender_x25519_pubkey` -- The sender's x25519 public key, derived from the sender's ed25519
 ///   key.
-/// - `pro` -- Optional object that is set if there was pro metadata associated with the envelope, if
+/// - `pro` -- Optional object that is set if there was pro metadata associated with the envelope,
+/// if
 ///   any. The `status` field in the decoded pro object should be used to determine whether or not
 ///   the caller can respect the contents of the `proof` and `features`.
 ///

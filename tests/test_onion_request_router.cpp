@@ -196,8 +196,7 @@ namespace {
                 override {
             func_called("verify_connectivity");
         }
-        void add_failure_listener(
-                const ed25519_pubkey&, std::function<void()>) override {
+        void add_failure_listener(const ed25519_pubkey&, std::function<void()>) override {
             func_called("add_failure_listener");
         }
         void remove_failure_listeners(const ed25519_pubkey&) override {

@@ -31,8 +31,8 @@ using namespace std::literals;
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
 /// E - user pro access expiry unix timestamp (in seconds). Note: This can be different from the pro
-///     proof expiry which can be sooner. (Some (unreleased) testing clients stored this in milliseconds; the getter
-///     migrates any such value on read -- see get_pro_access_expiry.)
+///     proof expiry which can be sooner. (Some (unreleased) testing clients stored this in
+///     milliseconds; the getter migrates any such value on read -- see get_pro_access_expiry.)
 /// R - unix timestamp (seconds) at which the user requested a refund of their current Session Pro
 ///     subscription, for cross-device sync of the refund-requested state.  Omitted when no refund
 ///     has been requested; cleared by the client when a new subscription begins.  Values more than
@@ -343,8 +343,8 @@ class UserProfile : public ConfigBase {
     /// API: user_profile/UserProfile::get_refund_requested
     ///
     /// Retrieves the timestamp at which the user requested a refund of their current Session Pro
-    /// subscription, if any.  This is synced across the user's devices so that a refund requested on
-    /// one device is reflected on the others; it does not go through the Pro backend.
+    /// subscription, if any.  This is synced across the user's devices so that a refund requested
+    /// on one device is reflected on the others; it does not go through the Pro backend.
     ///
     /// A stored value more than a week in the past is ignored (returns nullopt), so that a
     /// refund-requested flag some client neglected to clear cannot linger indefinitely.
@@ -402,12 +402,13 @@ class UserProfile : public ConfigBase {
     /// renewal should be attempted -- if it is <= the caller's clock, renew now; a future value can
     /// be scheduled -- or nullopt when no renewal is needed. Given the stored proof and access
     /// expiry:
-    ///   - a present-but-expired proof -> `now` (always re-check; the backend may have auto-renewed,
-    ///     and if it authoritatively reports not-Pro the client clears the credential and pushes it);
+    ///   - a present-but-expired proof -> `now` (always re-check with the backend; it may have
+    ///     auto-renewed, and an authoritative not-Pro then clears the credential);
     ///   - no proof at all but a purchase in flight (prepaid marker) -> `now`;
     ///   - no proof and no purchase in flight -> nullopt (the account isn't Pro);
     ///   - a valid proof with access expiry still more than an hour ahead -> an hour before the
-    ///     proof expires (preemptive), nudged off a rotating-seed period boundary so all devices agree;
+    ///     proof expires (preemptive), nudged off a rotating-seed period boundary so all devices
+    ///     agree;
     ///   - otherwise (valid proof, entitlement ending or unknown) -> nullopt.
     ///
     /// Inputs:

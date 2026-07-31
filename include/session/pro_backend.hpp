@@ -81,8 +81,8 @@ static_assert(PUBKEY_X25519.size() == 32);
 constexpr std::string_view URL = "https://pro.session.codes";
 
 /// Canonical payment-provider code strings — the `payment_provider` value the backend reports on a
-/// payment item (§5.2) and the slug clients key their store/display logic on. Reference these rather
-/// than hardcoding the slug so client code cannot drift from what libsession parses. The C
+/// payment item (§5.2) and the slug clients key their store/display logic on. Reference these
+/// rather than hardcoding the slug so client code cannot drift from what libsession parses. The C
 /// `SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*` symbols point at these. An unknown code is still
 /// valid on the wire and passes through as an opaque string.
 constexpr std::string_view PAYMENT_PROVIDER_GOOGLE_PLAY = "google_play";
@@ -109,9 +109,9 @@ struct ResponseBase {
     ResponseStatus status = ResponseStatus::Ok;
 
     /// On non-Ok, a stable machine-readable slug identifying the outcome (spec §5.1), e.g.
-    /// "not_subscribed", "subscription_expired", "stale_request". std::nullopt on success. Opaque and
-    /// forward-compatible: map known slugs to localized text; for an unrecognized one fall back to
-    /// `error` / the `status` category. (libsession synthesizes "invalid_response" if it cannot
+    /// "not_subscribed", "subscription_expired", "stale_request". std::nullopt on success. Opaque
+    /// and forward-compatible: map known slugs to localized text; for an unrecognized one fall back
+    /// to `error` / the `status` category. (libsession synthesizes "invalid_response" if it cannot
     /// parse the backend's reply at all.)
     std::optional<std::string> error_code;
 
@@ -128,8 +128,8 @@ struct ResponseBase {
 /// Per-provider support/management URLs (from provider_urls()). These are identical for every user
 /// (not translation data), so libsession owns them as the single source of truth rather than each
 /// client duplicating them; the human-readable provider/store *names* are translation data and
-/// remain the client's job. Each field is std::nullopt when that provider has no such URL -- clients
-/// test the optional rather than an empty-string sentinel. Present views point at static,
+/// remain the client's job. Each field is std::nullopt when that provider has no such URL --
+/// clients test the optional rather than an empty-string sentinel. Present views point at static,
 /// null-terminated string literals.
 struct ProviderURLs {
     std::optional<std::string_view> refund_platform_url;  ///< Native store refund flow
@@ -156,7 +156,8 @@ std::span<const std::string_view> visible_platforms();
 /// returned by the `*_request()` helpers below. Callers relay `data` verbatim under `content_type`
 /// and never inspect or assume its format -- libsession owns the wire encoding.
 struct ProRequest {
-    /// Endpoint path relative to the backend base URL, e.g. "generate_pro_proof". As returned from a
+    /// Endpoint path relative to the backend base URL, e.g. "generate_pro_proof". As returned from
+    /// a
     /// `*_request()` function this points at a static, null-terminated string, so using
     /// `endpoint.data()` as a C string is valid.
     std::string_view endpoint;
@@ -343,8 +344,8 @@ struct ProPaymentItem {
     /// sends it as a float of seconds.
     sys_ms revoked_at;
 
-    /// Opaque, backend-owned payment identifier (§5.2). Store and compare it for equality, but never
-    /// parse it -- libsession does not interpret it. Confidential; store appropriately.
+    /// Opaque, backend-owned payment identifier (§5.2). Store and compare it for equality, but
+    /// never parse it -- libsession does not interpret it. Confidential; store appropriately.
     std::string payment_id;
 };
 

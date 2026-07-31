@@ -82,7 +82,8 @@ TEST_CASE("Pro", "[config][pro]") {
         CHECK(loaded_pro.rotating_privkey == pro_cpp.rotating_privkey);
         CHECK(loaded_pro.proof.version == session::ProProofVersion_v0);  // never persisted
         CHECK(loaded_pro.proof.revocation_tag == pro_cpp.proof.revocation_tag);
-        CHECK(loaded_pro.proof.rotating_pubkey == pro_cpp.proof.rotating_pubkey);  // derived from seed
+        CHECK(loaded_pro.proof.rotating_pubkey ==
+              pro_cpp.proof.rotating_pubkey);  // derived from seed
         CHECK(loaded_pro.proof.expiry_at == pro_cpp.proof.expiry_at);
         CHECK(loaded_pro.proof.sig == pro_cpp.proof.sig);
         CHECK(loaded_pro.proof.verify_signature(signing_pk));

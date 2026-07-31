@@ -5,7 +5,6 @@
 #include <sodium/randombytes.h>
 
 #include <charconv>
-
 #include <oxen/log.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
@@ -173,9 +172,10 @@ cleared_b32 ProProof::rotating_seed(
         throw std::invalid_argument{
                 "Invalid master_seed: expected a 32-byte Ed25519 seed or 64-byte libsodium key"};
 
-    // Floor `now` to the start of its rotation period, then hash master_seed[0:32] ‖ dec(period_start),
-    // where dec() is canonical decimal ASCII -- the same integer encoding the rest of the Pro wire
-    // uses (signed_message, §1.1), so there's one integer convention and no endianness to pin.
+    // Floor `now` to the start of its rotation period, then hash master_seed[0:32] ‖
+    // dec(period_start), where dec() is canonical decimal ASCII -- the same integer encoding the
+    // rest of the Pro wire uses (signed_message, §1.1), so there's one integer convention and no
+    // endianness to pin.
     auto period_start = now - now.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
     char dec[20];
     auto [ptr, ec] = std::to_chars(dec, dec + sizeof(dec), epoch_seconds(period_start));
