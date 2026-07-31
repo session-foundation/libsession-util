@@ -37,7 +37,6 @@ def main():
     mpk, rpk = master.verify_key, rotating.verify_key
 
     ts = datetime.datetime.fromtimestamp(1700000000, datetime.timezone.utc)
-    refund = datetime.datetime.fromtimestamp(1700000123, datetime.timezone.utc)
     expiry = datetime.datetime.fromtimestamp(1704067200, datetime.timezone.utc)
     limit = 10
     before_cursor = "0a1b2c3d4e5f"  # opaque to the signed input; any fixed non-empty string works
@@ -54,8 +53,6 @@ def main():
     # a non-empty `before` appends the opaque cursor verbatim as the final field (no trailing sep).
     details_empty_msg = backend.make_get_payment_details_message(mpk, ts, limit, "")
     details_cursor_msg = backend.make_get_payment_details_message(mpk, ts, limit, before_cursor)
-    ref_msg = backend.signed_message(
-        backend.SET_PAYMENT_REFUND_REQUESTED_DOMAIN, mpk, ts, refund, provider.value, pid)
     prf_msg = backend.build_proof_message(rtag, rpk, expiry)
 
     print("master_pkey  =", hx(mpk.encode()))
@@ -64,7 +61,7 @@ def main():
     print()
     for name, m in [("add", add_msg), ("gen", gen_msg), ("status", status_msg),
                     ("details_empty", details_empty_msg), ("details_cursor", details_cursor_msg),
-                    ("refund", ref_msg), ("proof", prf_msg)]:
+                    ("proof", prf_msg)]:
         print(f"{name}_msg_hex = {hx(m)}")
         print(f"    repr     = {m!r}")
     print()

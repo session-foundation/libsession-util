@@ -6,10 +6,9 @@
 #include <chrono>
 #include <exception>
 #include <fstream>
-#include <ranges>
-
 #include <oxen/log.hpp>
 #include <oxen/log/format.hpp>
+#include <ranges>
 
 #include "session/file.hpp"
 #include "session/hash.hpp"
@@ -2245,7 +2244,11 @@ void OnionRequestRouter::_rotate_path(const std::string& path_id, PathCategory c
             pending_rotation.new_path,
             std::move(info_request),
             [weak_self = weak_from_this(), this, new_path_id, rotate_at = std::move(rotate_at)](
-                    bool success, bool timeout, int16_t status, auto headers, auto response) {
+                    bool success,
+                    bool timeout,
+                    int16_t status,
+                    auto /*headers*/,
+                    auto /*response*/) {
                 auto self = weak_self.lock();
                 if (!self)
                     return;

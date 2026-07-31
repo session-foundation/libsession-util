@@ -1004,7 +1004,7 @@ void Network::_launch_next_clock_out_of_sync_request(
                     bool success,
                     bool timeout,
                     int16_t status_code,
-                    std::vector<std::pair<std::string, std::string>> headers,
+                    std::vector<std::pair<std::string, std::string>> /*headers*/,
                     std::optional<std::string> response) {
                 auto end_steady = std::chrono::steady_clock::now();
                 auto end_system = clock_now_ms();
@@ -1070,7 +1070,7 @@ void Network::_launch_next_clock_out_of_sync_request(
             });
 }
 
-void Network::_on_clock_resync_complete(const uint8_t total_requests) {
+void Network::_on_clock_resync_complete(const uint8_t /*total_requests*/) {
 
     auto raw_results = std::move(_clock_resync_results);
     auto refresh_id = std::move(*_current_clock_resync_id);
@@ -1542,7 +1542,7 @@ LIBSESSION_C_API void session_network_set_network_info_changed_callback(
 }
 
 LIBSESSION_C_API void session_network_callbacks_respond(
-        network_object* network,
+        network_object* /*network*/,
         session_response_handle_t* response_handle,
         bool success,
         bool timeout,
@@ -1600,7 +1600,7 @@ LIBSESSION_C_API void session_network_get_active_paths(
         size_t total_metadata_size = 0;
         for (const auto& p : cpp_paths) {
             std::visit(
-                    [&]<typename T>(const T& md) {
+                    [&]<typename T>(const T&) {
                         if constexpr (std::is_same_v<T, OnionPathMetadata>)
                             total_metadata_size += sizeof(session_onion_path_metadata);
                         else {
@@ -1909,7 +1909,7 @@ LIBSESSION_C_API session_download_handle_t* session_network_download(
         int64_t stall_timeout_ms,
         int64_t request_timeout_ms,
         int64_t overall_timeout_ms,
-        int64_t partial_min_interval_ms,
+        int64_t /*partial_min_interval_ms*/,
         int8_t desired_path_index) {
 
     if (!network || !download_url || !callbacks)

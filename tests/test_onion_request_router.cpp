@@ -153,16 +153,16 @@ namespace {
         }
 
         void refresh_if_needed(
-                const std::vector<service_node>& in_use_nodes,
-                std::function<void()> on_refresh_complete = nullptr) override {
+                const std::vector<service_node>& /*in_use_nodes*/,
+                std::function<void()> /*on_refresh_complete*/ = nullptr) override {
             func_called("refresh_if_needed");
             // Do nothing (don't want to trigger a cache refresh)
         }
 
         void get_swarm(
-                session::network::x25519_pubkey swarm_pubkey,
-                bool ignore_strike_count,
-                std::function<void(swarm::swarm_id_t, std::vector<service_node>)> callback)
+                session::network::x25519_pubkey /*swarm_pubkey*/,
+                bool /*ignore_strike_count*/,
+                std::function<void(swarm::swarm_id_t, std::vector<service_node>)> /*callback*/)
                 override {
             func_called("get_swarm");
             // Do nothing (don't want to trigger a cache refresh)
@@ -183,28 +183,27 @@ namespace {
     class TestTransport : public ITransport, public CallTracker {
       public:
         void suspend() override { func_called("suspend"); };
-        void resume(bool automatically_reconnect = true) override { func_called("resume"); };
+        void resume(bool /*automatically_reconnect*/ = true) override { func_called("resume"); };
         void close_connections() override { func_called("close_connections"); };
 
         ConnectionStatus get_status() const override { return ConnectionStatus::unknown; };
         void verify_connectivity(
-                service_node node,
-                std::chrono::milliseconds timeout,
-                const std::string& request_id,
-                const RequestCategory category,
-                std::function<void(bool success, std::optional<uint64_t> error_code)> callback)
+                service_node,
+                std::chrono::milliseconds /*timeout*/,
+                const std::string& /*request_id*/,
+                const RequestCategory,
+                std::function<void(bool success, std::optional<uint64_t> error_code)> /*callback*/)
                 override {
             func_called("verify_connectivity");
         }
-        void add_failure_listener(
-                const ed25519_pubkey& pubkey, std::function<void()> listener) override {
+        void add_failure_listener(const ed25519_pubkey&, std::function<void()>) override {
             func_called("add_failure_listener");
         }
-        void remove_failure_listeners(const ed25519_pubkey& pubkey) override {
+        void remove_failure_listeners(const ed25519_pubkey&) override {
             func_called("remove_failure_listeners");
         }
 
-        void send_request(Request request, network_response_callback_t callback) override {
+        void send_request(Request, network_response_callback_t) override {
             func_called("send_request");
         }
     };

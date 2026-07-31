@@ -1,10 +1,10 @@
 #include <fmt/core.h>
 #include <oxenc/hex.h>
 #include <session/config/groups/keys.h>
-#include <simdutf.h>
 #include <sodium/crypto_sign_ed25519.h>
 #include <sodium/randombytes.h>
 
+#include <charconv>
 #include <oxen/log.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
@@ -142,7 +142,8 @@ bool ProProof::is_active(std::chrono::sys_seconds unix_ts) const {
 ProStatus ProProof::status(
         std::span<const std::byte, 32> verify_pubkey,
         std::chrono::sys_seconds unix_ts,
-        const std::optional<ProSignedMessage>& signed_msg) {
+        std::optional<std::span<const std::byte, 64>> user_sig,
+        std::span<const std::byte> signed_msg) const {
     ProStatus result = ProStatus::Valid;
     // Verify the at the proof is verified by the Session Pro Backend key (e.g.: It was
     // issued by an authoritative backend)
@@ -150,8 +151,8 @@ ProStatus ProProof::status(
         result = ProStatus::InvalidProBackendSig;
 
     // Check if the message was signed if the user passed one in to verify against
-    if (result == ProStatus::Valid && signed_msg) {
-        if (!verify_message(signed_msg->sig, signed_msg->msg))
+    if (result == ProStatus::Valid && user_sig) {
+        if (!verify_message(*user_sig, signed_msg))
             result = ProStatus::InvalidUserSig;
     }
 
@@ -165,50 +166,48 @@ std::vector<std::byte> ProProof::signed_message() const {
     return proof_signed_message(revocation_tag, rotating_pubkey, session::epoch_seconds(expiry_at));
 }
 
-};  // namespace session
+cleared_b32 ProProof::rotating_seed(
+        std::span<const std::byte> master_seed, std::chrono::sys_seconds now) {
+    if (master_seed.size() != 32 && master_seed.size() != 64)
+        throw std::invalid_argument{
+                "Invalid master_seed: expected a 32-byte Ed25519 seed or 64-byte libsodium key"};
 
-namespace {
+    // Floor `now` to the start of its rotation period, then hash master_seed[0:32] ‖
+    // dec(period_start), where dec() is canonical decimal ASCII -- the same integer encoding the
+    // rest of the Pro wire uses (signed_message, §1.1), so there's one integer convention and no
+    // endianness to pin.
+    auto period_start = now - now.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
+    char dec[20];
+    auto [ptr, ec] = std::to_chars(dec, dec + sizeof(dec), epoch_seconds(period_start));
+    assert(ec == std::errc{});  // dec is large enough for any int64, so this cannot fail
+    std::string_view dec_sv{dec, static_cast<size_t>(ptr - dec)};
 
-session::ProFeaturesForMsg pro_features_check(
-        const simdutf::result& validation, size_t codepoints) {
-    session::ProFeaturesForMsg result = {};
-    if (validation.is_ok()) {
-        result.status = session::ProFeaturesForMsgStatus::Success;
-        result.codepoint_count = codepoints;
+    // Unkeyed, personalised (salt=null) BLAKE2b-256 -- byte-for-byte the libsodium
+    // crypto_generichash_blake2b_salt_personal this replaces; the wrapper concatenates its args.
+    auto out = session::hash::blake2b_pers<32>(
+            "ProRotatingSeed_"_b2b_pers, master_seed.first(32), dec_sv);
 
-        if (result.codepoint_count > session::STANDARD_CHARACTER_LIMIT) {
-            if (result.codepoint_count <= session::PRO_HIGHER_CHARACTER_LIMIT) {
-                result.flags |= session::ProMessageFlags::CharLimit10k;
-            } else {
-                result.error = "Message exceeds the maximum character limit allowed";
-                result.status = session::ProFeaturesForMsgStatus::ExceedsCharacterLimit;
-            }
-        }
-    } else {
-        result.status = session::ProFeaturesForMsgStatus::UTFDecodingError;
-        result.error = simdutf::error_to_string(validation.error);
-    }
+    cleared_b32 result = {};
+    std::memcpy(result.data(), out.data(), result.size());
     return result;
 }
 
-}  // namespace
+};  // namespace session
 
 namespace session {
 
-ProFeaturesForMsg pro_features_for_utf8(std::span<const std::byte> msg) {
-    auto v = simdutf::validate_utf8_with_errors(msg);
-    return pro_features_check(v, v.is_ok() ? simdutf::count_utf8(msg) : 0);
-}
-ProFeaturesForMsg pro_features_for_utf8(std::u8string_view msg) {
-    return pro_features_for_utf8({reinterpret_cast<const std::byte*>(msg.data()), msg.size()});
-}
-ProFeaturesForMsg pro_features_for_utf8(std::string_view msg) {
-    return pro_features_for_utf8({reinterpret_cast<const std::byte*>(msg.data()), msg.size()});
-}
-
-ProFeaturesForMsg pro_features_for_utf16(std::u16string_view msg) {
-    auto v = simdutf::validate_utf16_with_errors(msg);
-    return pro_features_check(v, v.is_ok() ? simdutf::count_utf16(msg) : 0);
+ProFeaturesForMsg pro_features_for_message(size_t codepoint_count) {
+    ProFeaturesForMsg result = {};
+    result.status = ProFeaturesForMsgStatus::Success;
+    if (codepoint_count > STANDARD_CHARACTER_LIMIT) {
+        if (codepoint_count <= PRO_HIGHER_CHARACTER_LIMIT) {
+            result.flags |= ProMessageFlags::CharLimit10k;
+        } else {
+            result.error = "Message exceeds the maximum character limit allowed";
+            result.status = ProFeaturesForMsgStatus::ExceedsCharacterLimit;
+        }
+    }
+    return result;
 }
 
 constexpr std::byte PADDING_TERMINATING_BYTE{0x80};
@@ -250,20 +249,14 @@ static std::span<const std::byte> unpad_message(std::span<const std::byte> paylo
     return payload.first(size_without_padding);
 }
 
-// Attaches a Session Pro signature to an envelope.  If no pro key is provided, a dummy
-// (unverifiable) signature from a throwaway key is used so that pro and non-pro messages are
-// indistinguishable on the wire.
+// Attaches a Session Pro signature to an envelope. With no pro key a decoy signature is attached
+// instead, so that pro and non-pro messages are indistinguishable on the wire (see
+// ed25519::decoy_signature).
 static void attach_pro_sig_to_envelope(
         SessionProtos::Envelope& envelope,
         std::span<const std::byte> content,
         const ed25519::OptionalPrivKeySpan& pro_key) {
-    b64 signature;
-    if (!pro_key) {
-        auto [dummy_pk, dummy_sk] = ed25519::keypair();
-        signature = ed25519::sign(dummy_sk, content);
-    } else {
-        signature = ed25519::sign(*pro_key, content);
-    }
+    b64 signature = pro_key ? ed25519::sign(*pro_key, content) : ed25519::decoy_signature();
     std::string* pro_sig = envelope.mutable_prosig();
     pro_sig->assign(reinterpret_cast<const char*>(signature.data()), signature.size());
 }
@@ -313,7 +306,6 @@ std::vector<std::byte> encode_for_community(
 std::vector<std::byte> encode_for_community_inbox(
         std::span<const std::byte> plaintext,
         const ed25519::PrivKeySpan& ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
         std::span<const std::byte, 33> recipient_pubkey,
         std::span<const std::byte, 32> community_pubkey,
         const ed25519::OptionalPrivKeySpan& pro_rotating_ed25519_privkey) {
@@ -539,17 +531,17 @@ static void parse_content_and_pro(
 
             // Evaluate the pro status given the extracted components (was it signed, is it expired,
             // was the message signed validly?)
-            // pro_sig.size() validated == 64 above
-            ProSignedMessage signed_msg = {
-                    .sig = to_byte_span<64>(pro_sig.data()),
-                    .msg = to_span(envelope.content()),
-            };
             // Note that we sign the envelope content wholesale. For 1o1 which are padded to 160
             // bytes, this means that we expected the user to have signed the padding as well.
             auto unix_ts = std::chrono::floor<std::chrono::seconds>(
                     std::chrono::sys_time<std::chrono::milliseconds>(
                             std::chrono::milliseconds(content.sigtimestamp())));
-            pro.status = pro.proof.status(pro_backend_pubkey, unix_ts, signed_msg);
+            // pro_sig.size() validated == 64 above
+            pro.status = pro.proof.status(
+                    pro_backend_pubkey,
+                    unix_ts,
+                    to_byte_span<64>(pro_sig.data()),
+                    to_span(envelope.content()));
         }
     }
 }
@@ -745,9 +737,7 @@ DecodedCommunityMessage decode_for_community(
             // a pro signature.
             assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
             pro.status = pro.proof.status(
-                    pro_backend_pubkey,
-                    unix_ts,
-                    ProSignedMessage{*result.pro_sig, result.content_plaintext});
+                    pro_backend_pubkey, unix_ts, *result.pro_sig, result.content_plaintext);
         } else {
             SessionProtos::Content content_copy_without_sig = content;
             assert(content_copy_without_sig.has_prosigforcommunitymessageonly());
@@ -763,7 +753,8 @@ DecodedCommunityMessage decode_for_community(
             pro.status = pro.proof.status(
                     pro_backend_pubkey,
                     unix_ts,
-                    ProSignedMessage{*result.pro_sig, to_span(content_copy_without_sig_payload)});
+                    *result.pro_sig,
+                    to_span(content_copy_without_sig_payload));
         }
     }
 
@@ -821,6 +812,14 @@ LIBSESSION_C_API bool session_protocol_pro_proof_verify_signature(
     return ed25519::verify(to_byte_span(proof->sig.data), to_byte_span<32>(verify_pubkey), msg);
 }
 
+LIBSESSION_C_API void session_protocol_pro_rotating_seed(
+        const unsigned char* master_seed, int64_t now_unix_ts, unsigned char* rotating_seed_out) {
+    auto seed = session::ProProof::rotating_seed(
+            to_byte_span(master_seed, 32),
+            std::chrono::sys_seconds{std::chrono::seconds{now_unix_ts}});
+    std::memcpy(rotating_seed_out, seed.data(), seed.size());
+}
+
 LIBSESSION_C_API bool session_protocol_pro_proof_verify_message(
         session_protocol_pro_proof const* proof,
         uint8_t const* sig,
@@ -852,19 +851,19 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
     if (verify_pubkey_len != 32)
         return SESSION_PROTOCOL_PRO_STATUS_INVALID_PRO_BACKEND_SIG;
 
-    std::optional<ProSignedMessage> cpp_signed_msg;
+    std::optional<std::span<const std::byte, 64>> user_sig;
+    std::span<const std::byte> user_msg;
     bool bad_user_sig = false;
     if (signed_msg) {
-        if (signed_msg->sig.size == 64)
-            cpp_signed_msg = ProSignedMessage{
-                    to_byte_span<64>(signed_msg->sig.data),
-                    to_byte_span(signed_msg->msg.data, signed_msg->msg.size)};
-        else
+        if (signed_msg->sig.size == 64) {
+            user_sig = to_byte_span<64>(signed_msg->sig.data);
+            user_msg = to_byte_span(signed_msg->msg.data, signed_msg->msg.size);
+        } else
             bad_user_sig = true;  // a wrong-length signature can never verify
     }
 
     ProStatus status = proof_from_c(*proof).status(
-            to_byte_span<32>(verify_pubkey), as_sys_seconds(ts), cpp_signed_msg);
+            to_byte_span<32>(verify_pubkey), as_sys_seconds(ts), user_sig, user_msg);
 
     // ProProof::status can't see a wrong-length signature (it takes a fixed-size span), so surface
     // the C API's length check here while keeping the ordering: a bad user signature supersedes a
@@ -876,27 +875,13 @@ LIBSESSION_C_API SESSION_PROTOCOL_PRO_STATUS session_protocol_pro_proof_status(
 }
 
 LIBSESSION_C_API
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        const char* msg, size_t msg_size) {
-    auto result_cpp = pro_features_for_utf8({msg, msg_size});
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_message(
+        size_t codepoint_count) {
+    auto result_cpp = pro_features_for_message(codepoint_count);
     return session_protocol_pro_features_for_msg{
             .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
             .error = result_cpp.error.data(),
             .bitset = static_cast<uint64_t>(result_cpp.flags),
-            .codepoint_count = result_cpp.codepoint_count,
-    };
-}
-
-LIBSESSION_C_API
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        const uint16_t* msg, size_t msg_size) {
-    auto result_cpp = pro_features_for_utf16(
-            {std::launder(reinterpret_cast<const char16_t*>(msg)), msg_size});
-    return session_protocol_pro_features_for_msg{
-            .status = static_cast<SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS>(result_cpp.status),
-            .error = result_cpp.error.data(),
-            .bitset = static_cast<uint64_t>(result_cpp.flags),
-            .codepoint_count = result_cpp.codepoint_count,
     };
 }
 
@@ -948,7 +933,6 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         size_t plaintext_len,
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
-        uint64_t sent_timestamp_ms,
         const cbytes33* recipient_pubkey,
         const cbytes32* community_pubkey,
         const void* pro_rotating_ed25519_privkey,
@@ -960,7 +944,6 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
                 std::span{static_cast<const std::byte*>(plaintext), plaintext_len},
                 ed25519::PrivKeySpan{
                         static_cast<const unsigned char*>(ed25519_privkey), ed25519_privkey_len},
-                std::chrono::milliseconds(sent_timestamp_ms),
                 to_byte_span(recipient_pubkey->data),
                 to_byte_span(community_pubkey->data),
                 ed25519::OptionalPrivKeySpan{

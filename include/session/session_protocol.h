@@ -94,7 +94,6 @@ extern const uint64_t SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_10K_CHARACTER_LIMIT;
 
 typedef enum SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS {  // See session::ProFeaturesForMsgStatus
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
-    SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR,
     SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
 } SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS;
 
@@ -221,6 +220,23 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_signature(
         uint8_t const* verify_pubkey,
         size_t verify_pubkey_len) NON_NULL_ARG(1, 2);
 
+/// API: session_protocol/session_protocol_pro_rotating_seed
+///
+/// Deterministically derive the rotating Session Pro seed for the 7-day seed period containing
+/// `now_unix_ts` (see the C++ ProProof::rotating_seed). Every device on an account derives the
+/// same 32-byte seed for the same period, so concurrent proof (re)generations converge rather than
+/// racing. The 7-day quantization is a property of the derivation only, NOT the key-rotation
+/// cadence (which the backend dictates via the proof expiry).
+///
+/// Inputs:
+/// - `master_seed` -- the account's Session Pro master key/seed (from
+///   session_ed25519_pro_privkey_for_ed25519_seed), NOT the session-id seed; first 32 bytes used.
+/// - `now_unix_ts` -- the current unix time (seconds; floored to the 7-day seed period internally).
+/// - `rotating_seed_out` -- [out] 32-byte buffer to receive the derived seed.
+LIBSESSION_EXPORT void session_protocol_pro_rotating_seed(
+        const unsigned char* master_seed, int64_t now_unix_ts, unsigned char* rotating_seed_out)
+        NON_NULL_ARG(1, 3);
+
 /// API: session_protocol/session_protocol_pro_proof_verify_message
 ///
 /// Check if the `rotating_pubkey` in the proof was the signatory of the message and signature
@@ -298,50 +314,25 @@ typedef struct session_protocol_pro_features_for_msg {
     /// there is no error.
     const char* error;
     uint64_t bitset;  // Mask of SESSION_PROTOCOL_PRO_MESSAGE_FEATURE_* bits
-    size_t codepoint_count;
 } session_protocol_pro_features_for_msg;
 
-/// API: session_protocol/session_protocol_get_pro_features_for_utf8
+/// API: session_protocol/session_protocol_pro_features_for_message
 ///
-/// Determine the Pro features that are used in a given UTF8 message.
-///
-/// Inputs:
-/// - `text` -- the UTF8 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the number of code units (aka. bytes) the string has
-///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
-///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-LIBSESSION_EXPORT
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf8(
-        char const* text, size_t text_size) NON_NULL_ARG(1);
-
-/// API: session_protocol/session_protocol_get_pro_features_for_utf16
-///
-/// Determine the Pro features that are used in a given UTF16 message.
+/// Determine the Pro features required for a message of the given length.
 ///
 /// Inputs:
-/// - `text` -- the UTF16 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the number of code units (aka. bytes) the string has
+/// - `codepoint_count` -- the number of Unicode codepoints in the message. Callers count this
+///   themselves (every platform's native string type counts codepoints directly).
 ///
 /// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
+/// - `status` -- Success, or EXCEEDS_CHARACTER_LIMIT when over the maximum. When not Success, only
+///   `error` is meaningful.
+/// - `error` -- On a non-Success status, a read-only diagnostic string; NULL otherwise.
+/// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
 LIBSESSION_EXPORT
-session_protocol_pro_features_for_msg session_protocol_pro_features_for_utf16(
-        uint16_t const* text, size_t text_size) NON_NULL_ARG(1);
+session_protocol_pro_features_for_msg session_protocol_pro_features_for_message(
+        size_t codepoint_count);
 
 /// API: session_protocol_encode_dm_v1
 ///
@@ -419,7 +410,6 @@ session_protocol_encoded_for_destination session_protocol_encode_dm_v1(
 /// - `ed25519_privkey` -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
 /// - `ed25519_privkey_len` -- The length of the ed25519_privkey buffer in bytes (32 or 64).
-/// - `sent_timestamp_ms` -- The timestamp to assign to the message envelope, in milliseconds.
 /// - `recipient_pubkey` -- The recipient's Session public key (33 bytes).
 /// - `community_pubkey` -- The community inbox server's public key (32 bytes).
 /// - `pro_rotating_ed25519_privkey` -- Optional rotating Session Pro Ed25519 key (64-bytes or
@@ -455,13 +445,12 @@ session_protocol_encoded_for_destination session_protocol_encode_for_community_i
         size_t plaintext_len,
         const void* ed25519_privkey,
         size_t ed25519_privkey_len,
-        uint64_t sent_timestamp_ms,
         const cbytes33* recipient_pubkey,
         const cbytes32* community_pubkey,
         OPTIONAL const void* pro_rotating_ed25519_privkey,
         size_t pro_rotating_ed25519_privkey_len,
         OPTIONAL char* error,
-        size_t error_len) NON_NULL_ARG(1, 3, 6, 7);
+        size_t error_len) NON_NULL_ARG(1, 3, 5, 6);
 
 /// API: session_protocol_encode_for_community
 ///

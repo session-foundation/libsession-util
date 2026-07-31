@@ -1,11 +1,11 @@
 
 #include <oxenc/hex.h>
-#include <session/config/base.hpp>
 #include <session/config/encrypt.h>
 #include <session/config/user_profile.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <session/config/base.hpp>
 #include <string_view>
 
 #include "utils.hpp"

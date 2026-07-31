@@ -234,6 +234,11 @@ std::optional<std::string_view> maybe_sv(const session::config::dict& d, const c
 // string view is only valid as long as the dict stays unchanged.
 std::string_view sv_or_empty(const session::config::dict& d, const char* key);
 
+// Digs into a config `dict` to get out a std::span<const std::byte>; nullopt if not there (or
+// not string)
+std::optional<std::span<const std::byte>> maybe_span(
+        const session::config::dict& d, const char* key);
+
 // Digs into a config `dict` to get out a std::vector<std::byte>; nullopt if not there (or not
 // string)
 std::optional<std::vector<std::byte>> maybe_vector(const session::config::dict& d, const char* key);

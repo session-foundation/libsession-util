@@ -1,8 +1,9 @@
+#include "session/curve25519.h"
+
 #include <cstring>
 
 #include "session/crypto/ed25519.hpp"
 #include "session/crypto/x25519.hpp"
-#include "session/curve25519.h"
 #include "session/export.h"
 #include "session/util.hpp"
 

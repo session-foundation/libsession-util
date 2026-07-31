@@ -160,15 +160,11 @@ namespace convo {
         base::load(info_dict);
 
         auto pro_expiry = int_or_0(info_dict, "e");
-        std::optional<std::vector<std::byte>> maybe_pro_revocation_tag =
-                maybe_vector(info_dict, "g");
-        if (pro_expiry > 0 && maybe_pro_revocation_tag && maybe_pro_revocation_tag->size() == 32) {
+        auto tag = maybe_span(info_dict, "g");
+        if (pro_expiry > 0 && tag && tag->size() == 32) {
             pro_expiry_at = as_sys_seconds(pro_expiry);
             pro_revocation_tag.emplace();
-            std::memcpy(
-                    pro_revocation_tag->data(),
-                    maybe_pro_revocation_tag->data(),
-                    pro_revocation_tag->size());
+            std::memcpy(pro_revocation_tag->data(), tag->data(), pro_revocation_tag->size());
         }
     }
 

@@ -136,7 +136,7 @@ void UserProfile::set_blinded_msgreqs(std::optional<bool> value) {
 }
 
 std::optional<bool> UserProfile::get_blinded_msgreqs() const {
-    if (auto* M = data["M"].integer(); M)
+    if (auto* M = data["M"].integer())
         return static_cast<bool>(*M);
     return std::nullopt;
 }
@@ -152,7 +152,7 @@ std::chrono::sys_seconds UserProfile::get_profile_updated() const {
 
 std::optional<ProConfig> UserProfile::get_pro_config() const {
     std::optional<ProConfig> result = {};
-    if (const config::dict* s = data["s"].dict()) {
+    if (auto* s = data["s"].string()) {
         ProConfig pro = {};
         if (pro.load(*s))
             result = std::move(pro);
@@ -163,20 +163,19 @@ std::optional<ProConfig> UserProfile::get_pro_config() const {
 void UserProfile::set_pro_config(const ProConfig& pro) {
     std::optional<ProConfig> curr = get_pro_config();
     if (!curr || *curr != pro) {
-        auto root = data["s"];
-        root["r"] = std::span<const std::byte>(
-                pro.rotating_privkey.data(), crypto_sign_ed25519_SEEDBYTES);
-
-        auto proof_dict = root["p"];
-        proof_dict["@"] = pro.proof.version;
-        proof_dict["g"] = pro.proof.revocation_tag;
-        proof_dict["e"] = epoch_seconds(pro.proof.expiry_at);
-        proof_dict["s"] = pro.proof.sig;
+        // Store the whole credential as one opaque, bt-encoded value so it merges atomically: a
+        // proof split across sibling config keys could have its signature stitched onto a different
+        // update's fields (see ProConfig). A single string swap can't slice.
+        data["s"] = pro.serialize();
 
         const auto target_timestamp =
                 (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
         data[target_timestamp] = clock_now_s();
     }
+
+    // A live proof means any in-flight purchase has resolved: clear the prepaid marker.
+    if (pro.proof.expiry_at > clock_now_s() && data["I"].exists())
+        data["I"].erase();
 }
 
 bool UserProfile::remove_pro_config() {
@@ -213,8 +212,15 @@ void UserProfile::set_animated_avatar(bool enabled) {
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_pro_access_expiry() const {
-    if (auto* E = data["E"].integer(); E)
-        return std::chrono::sys_seconds{std::chrono::seconds{*E}};
+    if (auto* E = data["E"].integer()) {
+        int64_t secs = *E;
+        // Backwards compatibility: older clients stored this as epoch *milliseconds*. A seconds
+        // value won't reach 1e12 until the year ~33658, while a millisecond value is ~1.7e12 today,
+        // so treat anything past that threshold as milliseconds and convert.
+        if (secs > 1'000'000'000'000)
+            secs /= 1000;
+        return std::chrono::sys_seconds{std::chrono::seconds{secs}};
+    }
     return std::nullopt;
 }
 
@@ -223,6 +229,136 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
         data["E"] = epoch_seconds(*access_expiry_ts);
     else
         data["E"].erase();
+
+    // Confirming a live entitlement means any in-flight purchase resolved, and any long-stale
+    // refund request is moot -- opportunistically clear both (we're already writing E anyway).
+    if (access_expiry_ts && *access_expiry_ts > clock_now_s()) {
+        if (data["I"].exists())
+            data["I"].erase();
+        if (auto* R = data["R"].integer(); R && std::chrono::sys_seconds{std::chrono::seconds{*R}} <
+                                                        clock_now_s() - std::chrono::weeks{1})
+            data["R"].erase();
+    }
+}
+
+std::optional<std::chrono::sys_seconds> UserProfile::get_refund_requested() const {
+    if (auto* R = data["R"].integer()) {
+        std::chrono::sys_seconds when{std::chrono::seconds{*R}};
+        // Ignore stale values: a request more than a week old is treated as absent, so a flag some
+        // client forgot to clear cannot linger indefinitely across the account's devices.
+        if (when >= clock_now_s() - std::chrono::weeks{1})
+            return when;
+    }
+    return std::nullopt;
+}
+
+void UserProfile::set_refund_requested(std::optional<std::chrono::sys_seconds> when) {
+    if (when)
+        data["R"] = epoch_seconds(*when);
+    else
+        data["R"].erase();
+
+    // Stamp the profile-updated timestamp so the change is time-ordered across devices.
+    const auto target_timestamp = (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+    data[target_timestamp] = clock_now_s();
+}
+
+std::optional<std::chrono::sys_seconds> UserProfile::get_pro_prepaid() const {
+    if (auto* I = data["I"].integer()) {
+        std::chrono::sys_seconds when{std::chrono::seconds{*I}};
+        // Ignore a stale marker (a purchase that never propagated) so devices don't poll forever.
+        if (when >= clock_now_s() - std::chrono::weeks{1})
+            return when;
+    }
+    return std::nullopt;
+}
+
+void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) {
+    bool changed = false;
+    if (!when) {
+        if (data["I"].exists()) {
+            data["I"].erase();
+            changed = true;
+        }
+    } else {
+        // Only mark a purchase pending if the account isn't already entitled to Pro (a live proof
+        // or a still-future access expiry); otherwise there's nothing to poll for.
+        bool already_pro = get_pro_config().has_value();
+        if (!already_pro)
+            if (auto e = get_pro_access_expiry(); e && *e > clock_now_s())
+                already_pro = true;
+        if (!already_pro) {
+            data["I"] = epoch_seconds(*when);
+            changed = true;
+        }
+    }
+    if (changed) {
+        const auto target_timestamp =
+                (data["t"].integer_or(0) >= data["T"].integer_or(0) ? "t" : "T");
+        data[target_timestamp] = clock_now_s();
+    }
+}
+
+std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
+        std::chrono::sys_seconds now) const {
+    auto pro = get_pro_config();
+    if (!pro) {
+        // No credential on the account at all. Only fetch if a purchase is in flight (the prepaid
+        // marker); otherwise the account simply isn't Pro. An entitled account carries its proof in
+        // config `s` (synced from whichever device obtained it), so genuinely having no proof means
+        // there's none to renew. The prepaid marker ages out via its 1-week read gate, so a
+        // purchase that never lands self-terminates the acquire loop.
+        if (get_pro_prepaid())
+            return now;
+        return std::nullopt;
+    }
+    auto expiry = pro->proof.expiry_at;
+    if (expiry <= now)
+        // Expired proof: always re-check with the backend. The subscription may have auto-renewed
+        // (possibly without this device's knowledge -- our cached access expiry can't be trusted to
+        // reflect a renewal we were offline for), so E is not a reliable gate here. If the backend
+        // authoritatively reports the account is not Pro, the client clears the config credential
+        // and pushes that, ending the loop (next evaluation: no proof, no prepaid -> nullopt).
+        return now;
+
+    // Otherwise renew preemptively PRO_RENEWAL_LEAD before the proof expires, but only while
+    // entitlement clearly continues (access expiry at least that far ahead); a still-valid proof
+    // with no continuing entitlement is left to ride out.
+    auto access = get_pro_access_expiry();
+    if (!access || *access - now <= PRO_RENEWAL_LEAD)
+        return std::nullopt;
+
+    // The nudges below are best-effort: they only make it *less likely* that two devices near a
+    // rotating-seed period boundary race on the same renewal. A genuine collision is still resolved
+    // by config resolution, so none of this needs to be airtight.
+    //
+    // TODO: investigate adding renewal-time jitter here, skewed per device using the account's
+    // device count (the same multi-device-account information that drives PFS key rotation) so that
+    // the first-order statistic -- the earliest device's renewal time, which is what an observer
+    // actually sees -- is uniformly distributed regardless of N. Naive per-device i.i.d. jitter
+    // would instead publicly leak N, since the min of N jitters has an N-dependent distribution.
+    // dev cannot do this (device count unknown there) and deliberately accepts the lesser,
+    // backend-only leak instead of a public one.
+    auto near_boundary = [](std::chrono::sys_seconds t) {
+        auto off = t.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
+        return off <= 15s || off >= PRO_ROTATING_SEED_PERIOD - 15s;
+    };
+
+    auto target = expiry - PRO_RENEWAL_LEAD;
+    // The scheduled target is shared (derived from the proof's expiry), so nudging it off a
+    // boundary keeps every device on the same side of it when the renewal comes due.
+    if (near_boundary(target))
+        target -= 30s;
+
+    // If the renewal is already due but *now* sits right at a boundary, defer it instead of
+    // renewing at the ambiguous instant, so a device cleanly on one side can renew and propagate
+    // its config first; failing that we re-poll past the boundary. Only while the deferred time
+    // still leaves enough of the current proof's validity.
+    if (target <= now && near_boundary(now) &&
+        expiry - (now + PRO_RENEWAL_BOUNDARY_DEFER) >= PRO_RENEWAL_BOUNDARY_MIN_VALIDITY)
+        return now + PRO_RENEWAL_BOUNDARY_DEFER;
+
+    return target;
 }
 
 extern "C" {
@@ -259,7 +395,7 @@ LIBSESSION_C_API int user_profile_set_name(config_object* conf, const char* name
 
 LIBSESSION_C_API user_profile_pic user_profile_get_pic(const config_object* conf) {
     user_profile_pic p;
-    if (auto pic = unbox<UserProfile>(conf)->get_profile_pic(); pic) {
+    if (auto pic = unbox<UserProfile>(conf)->get_profile_pic()) {
         copy_c_str(p.url, pic.url);
         std::memcpy(p.key, pic.key.data(), 32);
     } else {
@@ -332,7 +468,7 @@ LIBSESSION_C_API int64_t user_profile_get_profile_updated(config_object* conf) {
 }
 
 LIBSESSION_C_API bool user_profile_get_pro_config(const config_object* conf, pro_pro_config* pro) {
-    if (auto val = unbox<UserProfile>(conf)->get_pro_config(); val) {
+    if (auto val = unbox<UserProfile>(conf)->get_pro_config()) {
         static_assert(sizeof pro->proof.revocation_tag == sizeof(val->proof.revocation_tag));
         static_assert(sizeof pro->proof.rotating_pubkey == sizeof(val->proof.rotating_pubkey));
         static_assert(sizeof pro->proof.sig == sizeof(val->proof.sig));
@@ -402,6 +538,39 @@ LIBSESSION_C_API void user_profile_set_pro_access_expiry(
         unbox<UserProfile>(conf)->set_pro_access_expiry(std::nullopt);
     else
         unbox<UserProfile>(conf)->set_pro_access_expiry(as_sys_seconds(access_expiry_ts));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_refund_requested(const config_object* conf) {
+    if (auto when = unbox<UserProfile>(conf)->get_refund_requested())
+        return epoch_seconds(*when);
+    return 0;
+}
+
+LIBSESSION_C_API void user_profile_set_refund_requested(config_object* conf, int64_t refund_ts) {
+    if (refund_ts <= 0)
+        unbox<UserProfile>(conf)->set_refund_requested(std::nullopt);
+    else
+        unbox<UserProfile>(conf)->set_refund_requested(as_sys_seconds(refund_ts));
+}
+
+LIBSESSION_C_API int64_t user_profile_get_pro_prepaid(const config_object* conf) {
+    if (auto when = unbox<UserProfile>(conf)->get_pro_prepaid())
+        return epoch_seconds(*when);
+    return 0;
+}
+
+LIBSESSION_C_API void user_profile_set_pro_prepaid(config_object* conf, int64_t prepaid_ts) {
+    if (prepaid_ts <= 0)
+        unbox<UserProfile>(conf)->set_pro_prepaid(std::nullopt);
+    else
+        unbox<UserProfile>(conf)->set_pro_prepaid(as_sys_seconds(prepaid_ts));
+}
+
+LIBSESSION_C_API int64_t
+user_profile_get_pro_renewal_target(const config_object* conf, int64_t now) {
+    if (auto t = unbox<UserProfile>(conf)->pro_renewal_target(as_sys_seconds(now)))
+        return epoch_seconds(*t);
+    return 0;
 }
 
 }  // extern "C"

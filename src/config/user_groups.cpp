@@ -228,7 +228,7 @@ void group_info::load(const dict& info_dict) {
     else
         name.clear();
 
-    if (auto seed = maybe_vector(info_dict, "K"); seed && seed->size() == 32) {
+    if (auto seed = maybe_span(info_dict, "K"); seed && seed->size() == 32) {
         auto [pk, sk] = ed25519::keypair(std::span{*seed}.first<32>());
         if (id != "03{:x}"_format(pk))
             secretkey.clear();
