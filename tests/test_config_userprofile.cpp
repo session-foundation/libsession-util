@@ -682,7 +682,8 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     CHECK_FALSE(profile.get_refund_requested().has_value());
 
     // Pro-prepaid ("purchase in flight") marker: insert-only-if-not-pro, 1-week read gate, and
-    // auto-clear when entitlement lands. (No proof, access expiry in the past -> not currently pro.)
+    // auto-clear when entitlement lands. (No proof, access expiry in the past -> not currently
+    // pro.)
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
 
     auto prepaid_at = now - 1h;

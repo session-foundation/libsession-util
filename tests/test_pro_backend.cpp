@@ -533,7 +533,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             session_pro_backend_get_payment_details_response_free(&pay_response);
             REQUIRE(pay_response.header.internal_ == nullptr);
         }
-
     }
 }
 

@@ -302,9 +302,8 @@ LIBSESSION_EXPORT bool session_protocol_pro_proof_verify_signature(
 /// - `now_unix_ts` -- the current unix time (seconds; floored to the 7-day seed period internally).
 /// - `rotating_seed_out` -- [out] 32-byte buffer to receive the derived seed.
 LIBSESSION_EXPORT void session_protocol_pro_rotating_seed(
-        const unsigned char* master_seed,
-        int64_t now_unix_ts,
-        unsigned char* rotating_seed_out) NON_NULL_ARG(1, 3);
+        const unsigned char* master_seed, int64_t now_unix_ts, unsigned char* rotating_seed_out)
+        NON_NULL_ARG(1, 3);
 
 /// API: session_protocol/session_protocol_pro_proof_verify_message
 ///

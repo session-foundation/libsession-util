@@ -1,8 +1,8 @@
+#include <oxenc/hex.h>
 #include <session/blinding.h>
 #include <sodium/crypto_sign_ed25519.h>
 
 #include <catch2/catch_test_macros.hpp>
-#include <oxenc/hex.h>
 #include <session/blinding.hpp>
 #include <session/pro_backend.hpp>
 #include <session/random.hpp>
@@ -106,7 +106,8 @@ TEST_CASE("Session protocol helpers C API", "[session-protocol][helpers]") {
         // Below the size threshold
         {
             session_protocol_pro_features_for_msg pro_msg =
-                    session_protocol_pro_features_for_message(SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT);
+                    session_protocol_pro_features_for_message(
+                            SESSION_PROTOCOL_STANDARD_CHARACTER_LIMIT);
             REQUIRE(pro_msg.status == SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS);
             REQUIRE(pro_msg.bitset.data == 0);
         }

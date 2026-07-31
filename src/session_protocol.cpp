@@ -9,15 +9,14 @@
 #include <sodium/randombytes.h>
 
 #include <charconv>
-#include <string_view>
-#include <vector>
-
 #include <oxen/log.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <session/util.hpp>
+#include <string_view>
+#include <vector>
 
 #include "SessionProtos.pb.h"
 #include "WebSocketResources.pb.h"
@@ -191,9 +190,10 @@ cleared_uc32 ProProof::rotating_seed(
         throw std::invalid_argument{
                 "Invalid master_seed: expected a 32-byte Ed25519 seed or 64-byte libsodium key"};
 
-    // Floor `now` to the start of its rotation period, then hash master_seed[0:32] ‖ dec(period_start),
-    // where dec() is canonical decimal ASCII -- the same integer encoding the rest of the Pro wire
-    // uses (signed_message, §1.1), so there's one integer convention and no endianness to pin.
+    // Floor `now` to the start of its rotation period, then hash master_seed[0:32] ‖
+    // dec(period_start), where dec() is canonical decimal ASCII -- the same integer encoding the
+    // rest of the Pro wire uses (signed_message, §1.1), so there's one integer convention and no
+    // endianness to pin.
     auto period_start = now - now.time_since_epoch() % PRO_ROTATING_SEED_PERIOD;
     char dec[20];
     auto [ptr, ec] = std::to_chars(dec, dec + sizeof(dec), epoch_seconds(period_start));
@@ -468,10 +468,10 @@ static EncryptedForDestinationInternal encode_for_destination_internal(
 
                 if (dest_pro_rotating_ed25519_privkey.empty()) {
                     // No pro key: attach a decoy signature -- a validly-encoded Ed25519 signature
-                    // (R = r·B for a random scalar r, so a prime-order-subgroup point like a real R;
-                    // s a second random scalar) that verifies against nothing. Keeps pro and non-pro
-                    // envelopes indistinguishable on the wire without signing throwaway data. NOT a
-                    // real signature; never verified.
+                    // (R = r·B for a random scalar r, so a prime-order-subgroup point like a real
+                    // R; s a second random scalar) that verifies against nothing. Keeps pro and
+                    // non-pro envelopes indistinguishable on the wire without signing throwaway
+                    // data. NOT a real signature; never verified.
                     auto* sig = reinterpret_cast<unsigned char*>(pro_sig->data());
                     std::array<unsigned char, crypto_core_ed25519_SCALARBYTES> r;
                     crypto_core_ed25519_scalar_random(r.data());
@@ -1052,7 +1052,10 @@ DecodedCommunityMessage decode_for_community(
             // a pro signature.
             assert(result.envelope->flags & SESSION_PROTOCOL_ENVELOPE_FLAGS_PRO_SIG);
             pro.status = proof.status(
-                    pro_backend_pubkey, unix_ts, to_span(*result.pro_sig), result.content_plaintext);
+                    pro_backend_pubkey,
+                    unix_ts,
+                    to_span(*result.pro_sig),
+                    result.content_plaintext);
         } else {
             SessionProtos::Content content_copy_without_sig = content;
             assert(content_copy_without_sig.has_prosigforcommunitymessageonly());

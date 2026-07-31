@@ -364,8 +364,7 @@ GenerateProProofResponse parse_pro_proof(std::string_view json) {
         else if (result.error_code == "subscription_expired") {
             std::vector<std::string> ignore;
             auto j = json_parse(json, ignore);
-            if (auto it = j.find("account_expiry_ts");
-                it != j.end() && it->is_number_integer())
+            if (auto it = j.find("account_expiry_ts"); it != j.end() && it->is_number_integer())
                 result.account_expiry =
                         std::chrono::sys_seconds(std::chrono::seconds(it->get<int64_t>()));
         }

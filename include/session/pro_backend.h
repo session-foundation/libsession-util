@@ -11,12 +11,12 @@
 extern "C" {
 #endif
 
-/// Canonical payment-provider `code` strings — the `payment_provider` value the backend reports on a
-/// payment item (§5.2) and the slug clients key their store/display logic on. Reference these rather
-/// than hardcoding the slug so client code cannot drift from what libsession parses. Unknown codes
-/// (e.g. a future provider) are still valid on the wire and pass through as opaque strings. Each
-/// points at the C++ `session::pro_backend::PAYMENT_PROVIDER_*` value (defined there — the primary;
-/// C references).
+/// Canonical payment-provider `code` strings — the `payment_provider` value the backend reports on
+/// a payment item (§5.2) and the slug clients key their store/display logic on. Reference these
+/// rather than hardcoding the slug so client code cannot drift from what libsession parses. Unknown
+/// codes (e.g. a future provider) are still valid on the wire and pass through as opaque strings.
+/// Each points at the C++ `session::pro_backend::PAYMENT_PROVIDER_*` value (defined there — the
+/// primary; C references).
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
@@ -139,12 +139,12 @@ typedef struct session_pro_backend_response_header {
 typedef struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
-    /// The account's true, grace-inclusive subscription entitlement end (unix seconds), or 0 if this
-    /// response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2): use for
+    /// The account's true, grace-inclusive subscription entitlement end (unix seconds), or 0 if
+    /// this response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2): use for
     /// display / refreshing the cached access expiry only -- NOT an entitlement authority and NOT
-    /// part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d proof-validity
-    /// window). Populated on a successful proof and on a `subscription_expired` failure (a now-past
-    /// value); 0 on `not_subscribed` / `revoked` / protocol errors.
+    /// part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d
+    /// proof-validity window). Populated on a successful proof and on a `subscription_expired`
+    /// failure (a now-past value); 0 on `not_subscribed` / `revoked` / protocol errors.
     int64_t account_expiry_ts;
 } session_pro_backend_pro_proof_response;
 
@@ -214,8 +214,8 @@ typedef struct session_pro_backend_pro_payment_item {
     /// Provider revocation instant, fractional UNIX seconds (millisecond-precise; 0 if not revoked)
     double revoked_ts;
 
-    /// Opaque, backend-owned payment identifier (§5.2): store and compare for equality, never parse.
-    /// NUL-terminated; points into the response's `internal_`.
+    /// Opaque, backend-owned payment identifier (§5.2): store and compare for equality, never
+    /// parse. NUL-terminated; points into the response's `internal_`.
     const char* payment_id;
 } session_pro_backend_pro_payment_item;
 

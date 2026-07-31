@@ -463,7 +463,8 @@ LIBSESSION_EXPORT void user_profile_set_pro_prepaid(config_object* conf, int64_t
 ///
 /// Outputs:
 /// - `int64_t` - the renewal-target unix timestamp, or 0 for "no renewal needed".
-LIBSESSION_EXPORT int64_t user_profile_get_pro_renewal_target(const config_object* conf, int64_t now);
+LIBSESSION_EXPORT int64_t
+user_profile_get_pro_renewal_target(const config_object* conf, int64_t now);
 
 #ifdef __cplusplus
 }  // extern "C"
