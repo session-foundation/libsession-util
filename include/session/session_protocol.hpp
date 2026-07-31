@@ -61,6 +61,12 @@ inline constexpr auto PRO_ROTATING_SEED_PERIOD = 7 * 24h;
 /// How long before a proof's expiry a client preemptively renews it -- and, correspondingly, the
 /// minimum remaining entitlement (access expiry beyond now) that makes a preemptive renewal worth
 /// doing. See UserProfile::pro_renewal_target.
+///
+/// Do NOT increase this beyond 60min without a coordinating backend change: the Pro backend sizes
+/// the padding on its proof-expiry grid around exactly this 1h lead, so `expiry_ts - PRO_RENEWAL_LEAD`
+/// lands just after the subscription's grace-inclusive true end. Renewing any earlier than 1h before
+/// expiry would reach the upstream store before its final chance to report a renewal, yielding a
+/// spurious `subscription_expired` on a subscription that is in fact renewing.
 inline constexpr auto PRO_RENEWAL_LEAD = 60min;
 
 /// When a renewal has come due but the current time lands right at a rotating-seed period boundary,
