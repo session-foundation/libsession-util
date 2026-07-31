@@ -371,4 +371,28 @@ TEST_CASE("Communities session id blinded id matching", "[blinding][matching]") 
     CHECK_THROWS_AS(
             session_id_matches_blinded_id(session_id1, b15_1, invalid_server_pk),
             std::invalid_argument);
+
+    auto invalid_b25_prefix = "9"s + b25_1.substr(1);
+    auto invalid_b25_hex = b25_1;
+    invalid_b25_hex.back() = 'g';
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, invalid_b25_prefix, server_pks[0]),
+            std::invalid_argument);
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, b25_1.substr(0, 65), server_pks[0]),
+            std::invalid_argument);
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, invalid_b25_hex, server_pks[0]),
+            std::invalid_argument);
+
+    // Regression: a standard (05-prefixed) session id has '5' at index 1, which the old prefix
+    // check erroneously accepted; it must now be rejected as a blinded id:
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, session_id1, server_pks[0]),
+            std::invalid_argument);
+
+    // A well-formed blinded id that simply doesn't match must return false, not throw (covers both
+    // the 15 and 25 branches actually running the comparison rather than being rejected up front):
+    CHECK_FALSE(session_id_matches_blinded_id(session_id1, b25_2, server_pks[0]));
+    CHECK_FALSE(session_id_matches_blinded_id(session_id1, b15_2, server_pks[0]));
 }
