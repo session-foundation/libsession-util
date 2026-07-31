@@ -350,9 +350,25 @@ TEST_CASE("Communities session id blinded id matching", "[blinding][matching]") 
     CHECK(session_id_matches_blinded_id(session_id1, b25_6, server_pks[5]));
 
     auto invalid_session_id = "9"s + session_id1.substr(1);
-    auto invalid_blinded_id = "9"s + b15_1.substr(1);
+    auto invalid_blinded_prefix = "9"s + b15_1.substr(1);
+    auto invalid_blinded_hex = b15_1;
+    invalid_blinded_hex.back() = 'g';
     auto invalid_server_pk = server_pks[0].substr(0, 60);
-    CHECK_THROWS(session_id_matches_blinded_id(invalid_session_id, b15_1, server_pks[0]));
-    CHECK_THROWS(session_id_matches_blinded_id(session_id1, invalid_blinded_id, server_pks[0]));
-    CHECK_THROWS(session_id_matches_blinded_id(session_id1, invalid_blinded_id, invalid_server_pk));
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(invalid_session_id, b15_1, server_pks[0]),
+            std::invalid_argument);
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, invalid_blinded_prefix, server_pks[0]),
+            std::invalid_argument);
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, ""sv, server_pks[0]), std::invalid_argument);
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, b15_1.substr(0, 65), server_pks[0]),
+            std::invalid_argument);
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, invalid_blinded_hex, server_pks[0]),
+            std::invalid_argument);
+    CHECK_THROWS_AS(
+            session_id_matches_blinded_id(session_id1, b15_1, invalid_server_pk),
+            std::invalid_argument);
 }
