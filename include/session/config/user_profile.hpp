@@ -25,10 +25,21 @@ using namespace std::literals;
 ///     omitted if the setting has not been explicitly set (or has been explicitly cleared for some
 ///     reason).
 /// f - session pro features bitset
+/// s - session pro credential (rotating seed + proof) as a single opaque bt-encoded string, stored
+///     as one value so it merges atomically; see config/pro.hpp.
 /// t - The unix timestamp (seconds) that the user last explicitly updated their profile information
 ///     (automatically updates when changing `name`, `profile_pic` or `set_blinded_msgreqs`).
-/// E - user pro access expiry unix timestamp (in milliseconds). Note: This can be different from
-///     the pro proof expiry which can be sooner.
+/// E - user pro access expiry unix timestamp (in seconds). Note: This can be different from the pro
+///     proof expiry which can be sooner. (Some (unreleased) testing clients stored this in
+///     milliseconds; the getter migrates any such value on read -- see get_pro_access_expiry.)
+/// R - unix timestamp (seconds) at which the user requested a refund of their current Session Pro
+///     subscription, for cross-device sync of the refund-requested state.  Omitted when no refund
+///     has been requested; cleared by the client when a new subscription begins.  Values more than
+///     a week in the past are ignored on read (treated as if unset).
+/// I - unix timestamp (seconds) at which a Session Pro purchase was initiated ("purchase in
+///     flight"), so all the account's devices poll the backend to pull the entitlement through.
+///     Inserted only when not already pro; cleared automatically when entitlement lands; values
+///     more than a week in the past are ignored on read.
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
 /// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
 ///     when `T > t`).
@@ -327,6 +338,84 @@ class UserProfile : public ConfigBase {
     /// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
     /// will expire, or nullopt to remove the value.
     void set_pro_access_expiry(std::optional<sys_seconds> access_expiry_ts);
+
+    /// API: user_profile/UserProfile::get_refund_requested
+    ///
+    /// Retrieves the timestamp at which the user requested a refund of their current Session Pro
+    /// subscription, if any.  This is synced across the user's devices so that a refund requested
+    /// on one device is reflected on the others; it does not go through the Pro backend.
+    ///
+    /// A stored value more than a week in the past is ignored (returns nullopt), so that a
+    /// refund-requested flag some client neglected to clear cannot linger indefinitely.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::optional<sys_seconds>` - the unix timestamp (seconds) at which a refund was
+    /// requested, or nullopt if no refund has been requested (or the stored value is stale).
+    std::optional<sys_seconds> get_refund_requested() const;
+
+    /// API: user_profile/UserProfile::set_refund_requested
+    ///
+    /// Records (or clears) that the user has requested a refund of their current Session Pro
+    /// subscription.  Setting this propagates the refund-requested state to the user's other
+    /// devices via config sync.  The client is responsible for clearing it (passing nullopt) when a
+    /// new subscription begins so a future subscription does not inherit a stale value.
+    ///
+    /// Inputs:
+    /// - `when` -- the timestamp (unix epoch seconds) at which the refund was requested, or nullopt
+    /// to clear the refund-requested state.
+    void set_refund_requested(std::optional<sys_seconds> when);
+
+    /// API: user_profile/UserProfile::get_pro_prepaid
+    ///
+    /// Retrieves the timestamp at which a Session Pro purchase was initiated (the "purchase in
+    /// flight" marker), synced across the user's devices so that any device can drive the backend
+    /// redemption to completion. A stored value more than a week in the past is ignored (returns
+    /// nullopt) so a purchase that never propagated doesn't make devices poll forever.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `std::optional<sys_seconds>` - the unix timestamp (seconds) at which a purchase was
+    /// initiated, or nullopt if none is pending (or the stored value is stale).
+    std::optional<sys_seconds> get_pro_prepaid() const;
+
+    /// API: user_profile/UserProfile::set_pro_prepaid
+    ///
+    /// Records (or clears) that a Session Pro purchase is in flight, propagating it to the user's
+    /// other devices so they poll the backend to pull the new entitlement through. Setting is a
+    /// no-op if the account is already entitled to Pro (there would be nothing to poll for); it is
+    /// otherwise cleared automatically once entitlement lands (see set_pro_config /
+    /// set_pro_access_expiry), or explicitly by passing nullopt.
+    ///
+    /// Inputs:
+    /// - `when` -- the timestamp (unix epoch seconds) at which the purchase was initiated, or
+    /// nullopt to clear the marker.
+    void set_pro_prepaid(std::optional<sys_seconds> when);
+
+    /// API: user_profile/UserProfile::pro_renewal_target
+    ///
+    /// Decide when the client should (re)request a Session Pro proof, centralising logic clients
+    /// previously each implemented (and got inconsistently wrong). Returns the timestamp at which a
+    /// renewal should be attempted -- if it is <= the caller's clock, renew now; a future value can
+    /// be scheduled -- or nullopt when no renewal is needed. Given the stored proof and access
+    /// expiry:
+    ///   - a present-but-expired proof -> `now` (always re-check with the backend; it may have
+    ///     auto-renewed, and an authoritative not-Pro then clears the credential);
+    ///   - no proof at all but a purchase in flight (prepaid marker) -> `now`;
+    ///   - no proof and no purchase in flight -> nullopt (the account isn't Pro);
+    ///   - a valid proof with access expiry still more than an hour ahead -> an hour before the
+    ///     proof expires (preemptive), nudged off a rotating-seed period boundary so all devices
+    ///     agree;
+    ///   - otherwise (valid proof, entitlement ending or unknown) -> nullopt.
+    ///
+    /// Inputs:
+    /// - `now` -- the caller's current time.
+    ///
+    /// Outputs:
+    /// - `std::optional<sys_seconds>` - when to renew, or nullopt for "no renewal needed".
+    std::optional<sys_seconds> pro_renewal_target(sys_seconds now) const;
 };
 
 }  // namespace session::config

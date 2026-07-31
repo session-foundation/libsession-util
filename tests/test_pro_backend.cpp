@@ -28,67 +28,11 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
     crypto_sign_ed25519_keypair(rotating_pubkey.data, rotating_privkey.data);
 
     {
-        std::array<uint8_t, 8> fake_google_payment_token;
-        randombytes_buf(fake_google_payment_token.data(), fake_google_payment_token.size());
-        std::array<uint8_t, 8> fake_google_order_id;
-        randombytes_buf(fake_google_order_id.data(), fake_google_order_id.size());
-        // Google's composite payment_id is "<payment_token>|<order_id>"; libsession treats the
-        // whole thing as one opaque value.
-        std::string fake_payment_id = "DEV." + oxenc::to_hex(fake_google_payment_token) + "|DEV." +
-                                      oxenc::to_hex(fake_google_order_id);
-
-        const char* provider_code = SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
-        auto payment_id = reinterpret_cast<const uint8_t*>(fake_payment_id.data());
-        size_t payment_id_len = fake_payment_id.size();
-
         int64_t unix_ts = 1698765432;  // Arbitrary timestamp (unix epoch seconds)
 
-        SECTION("session_pro_backend_add_pro_payment_request_build") {
-            auto result = session_pro_backend_add_pro_payment_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data),
-                    rotating_privkey.data,
-                    sizeof(rotating_privkey.data),
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            {
-                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
-                INFO(result.error);
-                REQUIRE(result.success);
-                REQUIRE(result.data.data != nullptr);
-                REQUIRE(result.data.size > 0);
-
-                // Matches the C++ free-function implementation end to end.
-                auto cpp = add_payment_request(
-                        master_privkey.data,
-                        rotating_privkey.data,
-                        provider_code,
-                        std::span<const uint8_t>(payment_id, payment_id_len));
-                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
-                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT);
-                REQUIRE(std::string_view(result.content_type) == cpp.content_type);
-                REQUIRE(cpp.content_type == "application/json");
-                REQUIRE(span_u8_equals(result.data, cpp.data));
-            }
-
-            // After freeing
-            REQUIRE(result.data.data == nullptr);
-            REQUIRE(result.data.size == 0);
-
-            // Invalid key size -> failure, no allocation
-            result = session_pro_backend_add_pro_payment_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data) - 1,
-                    rotating_privkey.data,
-                    sizeof(rotating_privkey.data),
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            REQUIRE(!result.success);
-            REQUIRE(result.error_count > 0);
-            REQUIRE(result.data.data == nullptr);
-        }
+        // Opaque, backend-owned payment identifier as it appears on a payment item (§5.2): the
+        // client stores and compares it for equality but never parses it.
+        std::string fake_payment_id = "DEV.opaque-payment-id-0123456789";
 
         SECTION("session_pro_backend_generate_pro_proof_request_build") {
             auto result = session_pro_backend_generate_pro_proof_request_build(
@@ -202,9 +146,9 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"version", 0},
                     {"expiry_ts", unix_ts},
                     {"revocation_tag", oxenc::to_hex(fake_revocation_tag)},
-                    {"rotating_pkey",
-                     oxenc::to_hex(rotating_pubkey.data, std::end(rotating_pubkey.data))},
-                    {"sig", oxenc::to_hex(master_privkey.data, std::end(master_privkey.data))}};
+                    {"rotating_pkey", oxenc::to_hex(rotating_pubkey.data)},
+                    {"sig", oxenc::to_hex(master_privkey.data)},
+                    {"account_expiry_ts", unix_ts + 90 * 24 * 3600}};
             std::string json = j.dump();
 
             // Valid JSON
@@ -236,7 +180,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Here we also create the CPP version, we will run the conversion functions into
                 // pro proofs (both C and CPP variants) and then compare the two structures to make
                 // sure the conversion functions are sound.
-                auto result_cpp = parse_add_payment(json);
+                auto result_cpp = parse_pro_proof(json);
 
                 // Validate C and CPP variants
                 REQUIRE(result.proof.version == result_cpp.proof.version);
@@ -254,6 +198,39 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                                 result.proof.sig.data,
                                 result_cpp.proof.sig.data(),
                                 result_cpp.proof.sig.size()) == 0);
+
+                // account_expiry_ts (advisory, unsigned): surfaced by both the C and C++ parses,
+                // and distinct from the proof's own expiry_ts.
+                REQUIRE(result.account_expiry_ts == unix_ts + 90 * 24 * 3600);
+                REQUIRE(result_cpp.account_expiry.has_value());
+                REQUIRE(result_cpp.account_expiry->time_since_epoch().count() ==
+                        result.account_expiry_ts);
+
+                // Required on success: a proof response missing it is treated as malformed.
+                nlohmann::json j_no_ae = j;
+                j_no_ae["result"].erase("account_expiry_ts");
+                REQUIRE(parse_pro_proof(j_no_ae.dump()).error.has_value());
+
+                // It also rides a subscription_expired failure (top-level, now-past value) so the
+                // client can refresh its cached horizon without a separate status call.
+                nlohmann::json j_exp;
+                j_exp["status"] = "fail";
+                j_exp["error_code"] = "subscription_expired";
+                j_exp["error"] = "expired";
+                j_exp["account_expiry_ts"] = unix_ts - 24 * 3600;
+                auto exp = parse_pro_proof(j_exp.dump());
+                REQUIRE(exp.error_code == "subscription_expired");
+                REQUIRE(exp.account_expiry.has_value());
+                REQUIRE(exp.account_expiry->time_since_epoch().count() == unix_ts - 24 * 3600);
+
+                // Other failures (e.g. not_subscribed) carry no horizon.
+                nlohmann::json j_ns;
+                j_ns["status"] = "fail";
+                j_ns["error_code"] = "not_subscribed";
+                j_ns["error"] = "no";
+                auto ns = parse_pro_proof(j_ns.dump());
+                REQUIRE(ns.error_code == "not_subscribed");
+                REQUIRE_FALSE(ns.account_expiry.has_value());
             }
 
             // After freeing
@@ -368,7 +345,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"grace_period_duration", 1001},
                     {"platform_refund_expiry_ts", unix_ts + 1},
                     {"revoked_ts", unix_ts + 3600 + 0.75},
-                    {"refund_requested_ts", unix_ts + 3601},
                     {"payment_id", std::move(payment_id)}};
         };
         auto check_payment_item = [&](const session_pro_backend_pro_payment_item& item,
@@ -385,7 +361,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             REQUIRE(item.grace_period_duration == 1001);
             REQUIRE(item.platform_refund_expiry_ts == unix_ts + 1);
             REQUIRE(item.revoked_ts == unix_ts + 3600 + 0.75);  // 750ms preserved
-            REQUIRE(item.refund_requested_ts == unix_ts + 3601);
             REQUIRE(std::string_view(item.payment_id) == payment_id);
         };
 
@@ -398,7 +373,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     {"auto_renewing", true},
                     {"expiry_ts", unix_ts + 2},
                     {"grace_period_duration", 1000},
-                    {"refund_requested_ts", unix_ts + 3602},
                     {"latest_payment",
                      make_payment_item(
                              std::string(fake_payment_id.data(), fake_payment_id.size()))}};
@@ -421,7 +395,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.auto_renewing == true);
                 REQUIRE(result.grace_period_duration == 1000);
                 REQUIRE(result.expiry_ts == unix_ts + 2);
-                REQUIRE(result.refund_requested_ts == unix_ts + 3602);
                 REQUIRE(result.has_latest_payment);
                 check_payment_item(result.latest_payment, fake_payment_id);
             }
@@ -560,92 +533,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             session_pro_backend_get_payment_details_response_free(&pay_response);
             REQUIRE(pay_response.header.internal_ == nullptr);
         }
-
-        SECTION("session_pro_backend_set_payment_refund_requested_request_build") {
-            auto result = session_pro_backend_set_payment_refund_requested_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data),
-                    unix_ts,
-                    unix_ts + 1,
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            {
-                scope_exit result_free{[&]() { session_pro_backend_request_free(&result); }};
-                REQUIRE(result.success);
-                REQUIRE(result.data.size > 0);
-
-                auto cpp = refund_request(
-                        master_privkey.data,
-                        session::as_sys_seconds(unix_ts),
-                        session::as_sys_seconds(unix_ts + 1),
-                        provider_code,
-                        std::span<const uint8_t>(payment_id, payment_id_len));
-                REQUIRE(std::string_view(result.endpoint) == cpp.endpoint);
-                REQUIRE(cpp.endpoint == SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT);
-                REQUIRE(span_u8_equals(result.data, cpp.data));
-            }
-            REQUIRE(result.data.data == nullptr);
-
-            // Invalid key size
-            result = session_pro_backend_set_payment_refund_requested_request_build(
-                    master_privkey.data,
-                    sizeof(master_privkey.data) - 1,
-                    unix_ts,
-                    unix_ts + 1,
-                    provider_code,
-                    payment_id,
-                    payment_id_len);
-            REQUIRE(!result.success);
-            REQUIRE(result.error_count > 0);
-        }
-
-        SECTION("session_pro_backend_set_payment_refund_requested_response_parse") {
-            nlohmann::json j;
-            j["status"] = "ok";
-            j["result"]["updated"] = true;
-            std::string json = j.dump();
-
-            // Valid JSON
-            auto result = session_pro_backend_set_payment_refund_requested_response_parse(
-                    json.data(), json.size());
-            {
-                scope_exit result_free{[&]() {
-                    session_pro_backend_set_payment_refund_requested_response_free(&result);
-                }};
-                if (result.header.error)
-                    INFO(result.header.error);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error == nullptr);
-                REQUIRE(result.updated);
-            }
-
-            // After freeing
-            REQUIRE(result.header.internal_ == nullptr);
-
-            // Invalid JSON
-            json = "{invalid}";
-            {
-                result = session_pro_backend_set_payment_refund_requested_response_parse(
-                        json.data(), json.size());
-                scope_exit result_free{[&]() {
-                    session_pro_backend_set_payment_refund_requested_response_free(&result);
-                }};
-                REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-                REQUIRE(result.header.error_code != nullptr);
-                REQUIRE(result.header.error_code != nullptr);
-            }
-
-            // After freeing
-            REQUIRE(result.header.internal_ == nullptr);
-
-            // Null JSON
-            result = session_pro_backend_set_payment_refund_requested_response_parse(nullptr, 0);
-            REQUIRE(result.header.status != SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
-            REQUIRE(result.header.error_code != nullptr);
-            REQUIRE(result.header.error_code != nullptr);
-        }
     }
 }
 
@@ -740,8 +627,7 @@ TEST_CASE("Pro Backend parse_plan_period (closed grammar)", "[pro_backend]") {
 // answer.
 //
 // Fixed inputs: keypairs from 32-byte seeds 0x01.. / 0x02.. (backend key 0x03..), ts=1700000000,
-// refund_ts=1700000123, expiry=1704067200, count=10, provider="google_play",
-// payment_id="test-payment-id-123", revocation_tag=0x11 x32.
+// expiry=1704067200, count=10, revocation_tag=0x11 x32.
 TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     auto keypair = [](unsigned char seed_byte) {
         std::array<unsigned char, 32> pk{};
@@ -757,31 +643,18 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     (void)backend_sk;
 
     const auto ts = session::as_sys_seconds(1700000000);
-    const auto refund_ts = session::as_sys_seconds(1700000123);
     const auto expiry = session::as_sys_seconds(1704067200);
-    const std::string provider = "google_play";
-    const std::string payment_id = "test-payment-id-123";
-    auto pid_span = [&]() {
-        return std::span<const uint8_t>{
-                reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()};
-    };
 
     // Expected signed-message bytes (hex), each hand-verified against the spec field layout.
-    const std::string add_msg_hex =
-            "50726f4164645061796d656e745f5f5f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
-            "01"
-            "b40f6f5c8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394676f6f676c655f"
-            "70"
-            "6c617900746573742d7061796d656e742d69642d313233";
     const std::string gen_msg_hex =
             "50726f47656e657261746550726f6f668a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
             "01"
             "b40f6f5c8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b39431373030303030"
             "303030";
-    // get_pro_details is split (§3.4) into get_pro_status (master + ts) and paginated
-    // get_payment_details (master + ts + limit + before). Two details vectors pin the `before`
-    // framing: empty `before` (newest page) ends in the adjacency \0; a non-empty cursor is the
-    // opaque final field (no trailing separator).
+    // The two read requests: get_pro_status (§3.2; master + ts) and paginated get_payment_details
+    // (§3.3; master + ts + limit + before). Two details vectors pin the `before` framing: empty
+    // `before` (newest page) ends in the adjacency \0; a non-empty cursor is the opaque final field
+    // (no trailing separator).
     const std::string status_msg_hex =
             "50726f47657450726f5374617475735f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
             "01b40f6f5c31373030303030303030";
@@ -791,12 +664,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
     const std::string details_cursor_msg_hex =
             "50726f47657450617944657461696c738a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
             "01b40f6f5c3137303030303030303000313000306131623263336434653566";
-    const std::string refund_msg_hex =
-            "50726f536574526566756e645265715f8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf37488"
-            "01"
-            "b40f6f5c31373030303030303030003137303030303031323300676f6f676c655f706c617900746573742d"
-            "70"
-            "61796d656e742d69642d313233";
     const std::string proof_msg_hex =
             "50726f50726f6f665f76305f5f5f5f5f111111111111111111111111111111111111111111111111111111"
             "1111"
@@ -821,16 +688,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
                                            pubkey.data()) == 0;
     };
 
-    SECTION("add_pro_payment") {
-        auto req = add_payment_request(master_sk, rotating_sk, provider, pid_span());
-        CHECK(req.endpoint == SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT);
-        CHECK(sig_covers(req.data, "master_sig", add_msg_hex, master_pk));
-        CHECK(sig_covers(req.data, "rotating_sig", add_msg_hex, rotating_pk));
-        // Determinism pin: the exact master signature is itself a known answer.
-        CHECK(nlohmann::json::parse(req.data).at("master_sig").get<std::string>() ==
-              "746861ae1681d996e837d603dbd21c06c9544c5fc536eb4d3e3cad4f13692b79"
-              "0ef2b1282b729aa42f537d560b3b97b231b7f940be7021c0e16f894817a57609");
-    }
     SECTION("generate_pro_proof") {
         auto req = pro_proof_request(master_sk, rotating_sk, ts);
         CHECK(req.endpoint == SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT);
@@ -851,11 +708,6 @@ TEST_CASE("Pro backend known-answer vectors", "[pro_backend][pro_kat]") {
         auto req = payment_details_request(master_sk, ts, 10, "0a1b2c3d4e5f");
         CHECK(req.endpoint == SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT);
         CHECK(sig_covers(req.data, "master_sig", details_cursor_msg_hex, master_pk));
-    }
-    SECTION("set_payment_refund_requested") {
-        auto req = refund_request(master_sk, ts, refund_ts, provider, pid_span());
-        CHECK(req.endpoint == SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT);
-        CHECK(sig_covers(req.data, "master_sig", refund_msg_hex, master_pk));
     }
     SECTION("pro proof") {
         session::ProProof proof;
@@ -1167,7 +1019,8 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
                                    ? master_hex.substr(0, 16) + "|GPA." + master_hex.substr(16, 12)
                                    : "20000000" + master_hex.substr(0, 10);
 
-    // Seed the witnessed-unredeemed payment; the client's real add_pro_payment (below) redeems it.
+    // Seed the witnessed-unredeemed payment; a subsequent master-signed request (generate_pro_proof
+    // below) binds/redeems it implicitly -- there is no client-submitted add-payment step.
     run_seed_helper(
             {"payment",
              "--provider",
@@ -1181,41 +1034,33 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
 
     auto now = session::sysclock_now_s();
 
-    // 1) add_pro_payment -> signed proof.
-    ProRequest add_req = add_payment_request(
-            master_sk,
-            rotating_sk,
-            provider,
-            std::span<const uint8_t>{
-                    reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()});
-    AddProPaymentResponse add = parse_add_payment(send(onion, add_req));
-    INFO("add_pro_payment" << add.error.value_or(""));
-    REQUIRE(add.status == ResponseStatus::Ok);
-    CHECK(add.status == ResponseStatus::Ok);
-    CHECK(add.proof.verify_signature(backend_pubkey));
-    CHECK(std::memcmp(add.proof.rotating_pubkey.data(), rotating_pk.data(), 32) == 0);
+    // 1) generate_pro_proof: redemption is implicit, so this master-signed request binds the seeded
+    //    payment before answering and returns a signed proof for the paired rotating key.
+    ProRequest gen_req = pro_proof_request(master_sk, rotating_sk, now);
+    GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
+    INFO("generate_pro_proof " << gen.error.value_or(""));
+    REQUIRE(gen.status == ResponseStatus::Ok);
+    CHECK(gen.proof.verify_signature(backend_pubkey));
+    CHECK(std::memcmp(gen.proof.rotating_pubkey.data(), rotating_pk.data(), 32) == 0);
 
-    // 1b) generate_pro_proof: pair a NEW rotating key to the same subscription -> a fresh proof.
+    // 1b) generate_pro_proof again with a NEW rotating key -> a fresh proof for the same
+    //     subscription, so it shares the first proof's revocation_tag (same subscription epoch).
     std::array<unsigned char, 32> rotating2_pk{};
     std::array<unsigned char, 64> rotating2_sk{};
     crypto_sign_ed25519_keypair(rotating2_pk.data(), rotating2_sk.data());
-    ProRequest gen_req = pro_proof_request(master_sk, rotating2_sk, now);
-    GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
-    INFO("generate_pro_proof" << gen.error.value_or(""));
-    REQUIRE(gen.status == ResponseStatus::Ok);
-    CHECK(gen.status == ResponseStatus::Ok);
-    CHECK(gen.proof.verify_signature(backend_pubkey));
-    CHECK(std::memcmp(gen.proof.rotating_pubkey.data(), rotating2_pk.data(), 32) == 0);
-    // Same subscription epoch -> the fresh proof shares the add-payment proof's revocation_tag.
-    CHECK(gen.proof.revocation_tag == add.proof.revocation_tag);
+    ProRequest gen2_req = pro_proof_request(master_sk, rotating2_sk, now);
+    GenerateProProofResponse gen2 = parse_pro_proof(send(onion, gen2_req));
+    INFO("generate_pro_proof(2) " << gen2.error.value_or(""));
+    REQUIRE(gen2.status == ResponseStatus::Ok);
+    CHECK(gen2.proof.verify_signature(backend_pubkey));
+    CHECK(std::memcmp(gen2.proof.rotating_pubkey.data(), rotating2_pk.data(), 32) == 0);
+    CHECK(gen2.proof.revocation_tag == gen.proof.revocation_tag);
 
-    // 2) get_pro_status: account ACTIVE, no refund yet, and the single latest payment
-    //    is our redeemed one.
+    // 2) get_pro_status: account ACTIVE and the single latest payment is our redeemed one.
     ProStatusResponse status = parse_pro_status(send(onion, pro_status_request(master_sk, now)));
     INFO("get_pro_status " << status.error.value_or(""));
     REQUIRE(status.status == ResponseStatus::Ok);
     CHECK(status.user_status == "active");
-    CHECK(status.refund_requested_at.time_since_epoch().count() == 0);  // no refund requested yet
     REQUIRE(status.latest_payment.has_value());
     CHECK(status.latest_payment->payment_id == payment_id);
     CHECK(status.latest_payment->payment_provider == provider);
@@ -1264,32 +1109,6 @@ TEST_CASE("Pro backend live full flow", "[pro_backend][pro_live]") {
         CHECK(page2.items.empty());   // no more payments
         CHECK_FALSE(page2.next_cursor.has_value());  // end of data
     }
-
-    // 4) set_payment_refund_requested. Apple-only at the HTTP layer: app_store -> updated +
-    // reflected
-    //    in get_pro_status; google_play -> rejected (Google refunds are handled out-of-band).
-    ProRequest refund_req = refund_request(
-            master_sk,
-            now,
-            now,
-            provider,
-            std::span<const uint8_t>{
-                    reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()});
-    SetPaymentRefundRequestedResponse refund = parse_refund(send(onion, refund_req));
-    if (provider == SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE) {
-        INFO("refund" << refund.error.value_or(""));
-        REQUIRE(refund.status == ResponseStatus::Ok);
-        CHECK(refund.updated);
-        // The soft "refund requested" marker is now reflected back in get_pro_status.
-        ProStatusResponse status2 =
-                parse_pro_status(send(onion, pro_status_request(master_sk, now)));
-        REQUIRE(status2.status == ResponseStatus::Ok);
-        CHECK(status2.refund_requested_at.time_since_epoch().count() != 0);
-    } else {
-        // The endpoint rejects non-App-Store providers.
-        CHECK_FALSE(refund.updated);
-        CHECK(refund.status != ResponseStatus::Ok);
-    }
 }
 
 // Revocation-list round-trip: seed + redeem a payment, seed a revocation for that generation, then
@@ -1325,15 +1144,13 @@ TEST_CASE("Pro backend live get_pro_revocations", "[pro_backend][pro_live]") {
              master_hex,
              "--plan",
              "1m"});
-    ProRequest add_req = add_payment_request(
-            master_sk,
-            rotating_sk,
-            SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE,
-            std::span<const uint8_t>{
-                    reinterpret_cast<const uint8_t*>(payment_id.data()), payment_id.size()});
-    AddProPaymentResponse add = parse_add_payment(send(onion, add_req));
-    REQUIRE(add.status == ResponseStatus::Ok);
-    CHECK(add.status == ResponseStatus::Ok);
+    // Bind + redeem it implicitly (any master-signed request binds unbound payments) and get a
+    // proof to revoke.
+    ProRequest gen_req = pro_proof_request(master_sk, rotating_sk, session::sysclock_now_s());
+    GenerateProProofResponse gen = parse_pro_proof(send(onion, gen_req));
+    INFO("generate_pro_proof " << gen.error.value_or(""));
+    REQUIRE(gen.status == ResponseStatus::Ok);
+    CHECK(gen.status == ResponseStatus::Ok);
 
     // Revoke that payment's generation (revocation is terminal now -- revoked_at set once, no
     // per-entry expiry), then poll: the list must carry our proof's revocation_tag.
@@ -1347,7 +1164,7 @@ TEST_CASE("Pro backend live get_pro_revocations", "[pro_backend][pro_live]") {
     CHECK_FALSE(rev.items.empty());
     bool found = false;
     for (const auto& it : rev.items)
-        if (it.revocation_tag == add.proof.revocation_tag)
+        if (it.revocation_tag == gen.proof.revocation_tag)
             found = true;
     CHECK(found);
 }

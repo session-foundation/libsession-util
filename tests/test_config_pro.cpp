@@ -23,7 +23,8 @@ TEST_CASE("Pro", "[config][pro]") {
     {
         // CPP
         pro_cpp.rotating_privkey = rotating_sk;
-        pro_cpp.proof.version = 2;
+        // Config never persists the proof version (see ProConfig::load); a loaded proof is v0.
+        pro_cpp.proof.version = session::ProProofVersion_v0;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
         constexpr auto revocation_tag =
@@ -94,54 +95,29 @@ TEST_CASE("Pro", "[config][pro]") {
                 body.size()));
     }
 
-    // Try loading the proof from dict
+    // Round-trip the proof through its bt-encoded config value.
     {
-        const session::ProProof& proof = pro_cpp.proof;
-        // clang-format off
-        session::config::dict good_dict = {
-            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
-            {"p", session::config::dict{
-                /*version*/         {"@", proof.version},
-                /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
-                /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
-                /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
-                /*signature*/       {"s", std::string{reinterpret_cast<const char *>(proof.sig.data()), proof.sig.size()}},
-            }}
-        };
-        // clang-format on
+        std::string encoded = pro_cpp.serialize();
 
         session::config::ProConfig loaded_pro = {};
-        CHECK(loaded_pro.load(good_dict));
+        CHECK(loaded_pro.load(encoded));
         CHECK(loaded_pro.rotating_privkey == pro_cpp.rotating_privkey);
-        CHECK(loaded_pro.proof.version == pro_cpp.proof.version);
+        CHECK(loaded_pro.proof.version == session::ProProofVersion_v0);  // never persisted
         CHECK(loaded_pro.proof.revocation_tag == pro_cpp.proof.revocation_tag);
-        CHECK(loaded_pro.proof.rotating_pubkey == pro_cpp.proof.rotating_pubkey);
+        CHECK(loaded_pro.proof.rotating_pubkey ==
+              pro_cpp.proof.rotating_pubkey);  // derived from seed
         CHECK(loaded_pro.proof.expiry_at == pro_cpp.proof.expiry_at);
         CHECK(loaded_pro.proof.sig == pro_cpp.proof.sig);
         CHECK(loaded_pro.proof.verify_signature(signing_pk));
     }
 
-    // Try loading a proof with a bad signature in it from dict
+    // A tampered signature still loads (load doesn't verify) but fails verify_signature.
     {
-        std::array<uint8_t, 64> broken_sig = pro_cpp.proof.sig;
-        broken_sig[0] = ~broken_sig[0];  // Break the sig
-        const session::ProProof& proof = pro_cpp.proof;
-
-        // clang-format off
-        session::config::dict bad_dict = {
-            {"r", std::string(reinterpret_cast<const char *>(rotating_sk.data()), crypto_sign_ed25519_SEEDBYTES)},
-            {"p", session::config::dict{
-                /*version*/         {"@", proof.version},
-                /*revocation_tag*/  {"g", std::string(reinterpret_cast<const char *>(proof.revocation_tag.data()), proof.revocation_tag.size())},
-                /*rotating pubkey*/ {"r", std::string(reinterpret_cast<const char *>(proof.rotating_pubkey.data()), proof.rotating_pubkey.size())},
-                /*expiry unix ts*/  {"e", proof.expiry_at.time_since_epoch().count()},
-                /*signature*/       {"s", std::string{reinterpret_cast<const char *>(broken_sig.data()), broken_sig.size()}},
-            }}
-        };
-        // clang-format on
+        pro_cpp.proof.sig.data()[0] = ~pro_cpp.proof.sig.data()[0];  // break the sig
+        std::string encoded = pro_cpp.serialize();
 
         session::config::ProConfig loaded_pro = {};
-        CHECK(loaded_pro.load(bad_dict));
+        CHECK(loaded_pro.load(encoded));
         CHECK_FALSE(loaded_pro.proof.verify_signature(signing_pk));
     }
 }

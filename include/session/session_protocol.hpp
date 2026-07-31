@@ -54,6 +54,8 @@
 
 namespace session {
 
+using namespace std::literals;
+
 /// Maximum number of UTF-16 code points a standard (non-Pro) message can use; a longer message must
 /// activate the Session Pro higher-character-limit feature. (The C `SESSION_PROTOCOL_*` symbols
 /// point at these.)
@@ -72,18 +74,40 @@ inline constexpr int COMMUNITY_OR_1O1_MSG_PADDING = 160;
 // bytes (formerly the BLAKE2b personalisation, back when messages were pre-hashed).
 inline constexpr std::string_view GENERATE_PROOF_DOMAIN = "ProGenerateProof";
 inline constexpr std::string_view BUILD_PROOF_DOMAIN = "ProProof_v0_____";
-inline constexpr std::string_view ADD_PRO_PAYMENT_DOMAIN = "ProAddPayment___";
-inline constexpr std::string_view SET_PAYMENT_REFUND_REQUESTED_DOMAIN = "ProSetRefundReq_";
 inline constexpr std::string_view GET_PRO_STATUS_DOMAIN = "ProGetProStatus_";
 inline constexpr std::string_view GET_PAYMENT_DETAILS_DOMAIN = "ProGetPayDetails";
 static_assert(GENERATE_PROOF_DOMAIN.size() == 16);
 static_assert(BUILD_PROOF_DOMAIN.size() == 16);
-static_assert(ADD_PRO_PAYMENT_DOMAIN.size() == 16);
-static_assert(SET_PAYMENT_REFUND_REQUESTED_DOMAIN.size() == 16);
 static_assert(GET_PRO_STATUS_DOMAIN.size() == 16);
 static_assert(GET_PAYMENT_DETAILS_DOMAIN.size() == 16);
 
 enum ProProofVersion { ProProofVersion_v0 };
+
+/// Rotation window for the Session Pro rotating key: ProProof::rotating_seed yields the same seed
+/// for all timestamps within one such period and a fresh one at each boundary.
+inline constexpr auto PRO_ROTATING_SEED_PERIOD = 7 * 24h;
+
+/// How long before a proof's expiry a client preemptively renews it -- and, correspondingly, the
+/// minimum remaining entitlement (access expiry beyond now) that makes a preemptive renewal worth
+/// doing. See UserProfile::pro_renewal_target.
+///
+/// Do NOT increase this beyond 60min without a coordinating backend change: the Pro backend sizes
+/// the padding on its proof-expiry grid around exactly this 1h lead, so a client that begins
+/// renewing at the lead always reaches the backend after the subscription's grace-inclusive true
+/// end. Renewing earlier than 1h before expiry would arrive before the upstream store's final
+/// chance to report a renewal, yielding a spurious `subscription_expired` on a subscription that is
+/// in fact renewing.
+inline constexpr auto PRO_RENEWAL_LEAD = 60min;
+
+/// When a renewal has come due but the current time lands right at a rotating-seed period boundary,
+/// pro_renewal_target defers it by this long rather than renewing at the ambiguous instant, giving
+/// a device cleanly on one side of the boundary a chance to renew first. Best-effort collision
+/// avoidance only.
+inline constexpr auto PRO_RENEWAL_BOUNDARY_DEFER = 1min;
+
+/// The boundary deferral above is skipped (renew now instead) unless the deferred renewal would
+/// still leave at least this much of the current proof's validity.
+inline constexpr auto PRO_RENEWAL_BOUNDARY_MIN_VALIDITY = 5min;
 
 enum class ProStatus {
     // Pro proof sig was not signed by the Pro backend key
@@ -92,11 +116,6 @@ enum class ProStatus {
     InvalidUserSig = SESSION_PROTOCOL_PRO_STATUS_INVALID_USER_SIG,
     Valid = SESSION_PROTOCOL_PRO_STATUS_VALID,      // Proof is verified; has not expired
     Expired = SESSION_PROTOCOL_PRO_STATUS_EXPIRED,  // Proof is verified; has expired
-};
-
-struct ProSignedMessage {
-    std::span<const uint8_t> sig;
-    std::span<const uint8_t> msg;
 };
 
 class ProProof {
@@ -179,17 +198,20 @@ class ProProof {
     ///   they are the original signatory of the proof.
     /// - `unix_ts` -- Unix timestamp to compared against the embedded `expiry_at`
     ///   to determine if the proof has expired or not
-    /// - `signed_msg` -- Optionally set the payload to the message with the signature to verify if
-    ///   the embedded `rotating_pubkey` in the proof signed the given message.
+    /// - `user_sig` -- optionally, the user's 64-byte signature over `signed_msg`; when set, this
+    ///   verifies that the proof's embedded `rotating_pubkey` produced it. Omit (the default) to
+    ///   skip the user-signature check.
+    /// - `signed_msg` -- the message bytes that `user_sig` signs; ignored when `user_sig` is unset.
     ///
     /// Outputs:
-    /// - `ProStatus` - The derived status given the components of the message. If `signed_msg` is
+    /// - `ProStatus` - The derived status given the components of the message. If `user_sig` is
     ///   not set then this function can never return `ProStatus::InvalidUserSig` from the set of
     ///   possible enum values. Otherwise this funtion can return all possible values.
     ProStatus status(
             std::span<const uint8_t> verify_pubkey,
             sys_seconds unix_ts,
-            const std::optional<ProSignedMessage>& signed_msg);
+            std::optional<std::span<const uint8_t>> user_sig = std::nullopt,
+            std::span<const uint8_t> signed_msg = {}) const;
 
     /// API: pro/Proof::signed_message
     ///
@@ -197,6 +219,29 @@ class ProProof {
     /// verification reconstructs to check it (pro-wire-protocol.md §2, per §1.1). The message is
     /// Ed25519-signed directly — there is no pre-hash.
     std::vector<unsigned char> signed_message() const;
+
+    /// API: pro/Proof::rotating_seed
+    ///
+    /// Deterministically derive the rotating Session Pro seed for the 7-day seed period containing
+    /// `now`. Every device deriving "as of `now`" gets the same seed with no coordination, so
+    /// concurrent proof (re)generations converge on one credential instead of racing. The 7-day
+    /// quantization is a property of this derivation only; it is NOT the key-rotation cadence,
+    /// which is dictated by the backend via the proof expiry. The seed is the private counterpart
+    /// of the `rotating_pubkey` a proof for this period authorizes: it is fed to
+    /// generate_pro_proof, and once the backend returns a signed proof for it the same seed is
+    /// persisted in the config credential (its `r`) and is what subsequently signs Pro messages.
+    ///
+    /// Inputs:
+    /// - `master_seed` -- the account's Session Pro *master* key/seed (as produced by
+    ///   ed25519_pro_privkey_for_ed25519_seed), NOT the session-id seed; its first 32 bytes are
+    ///   used. Rooting rotating keys under the Pro master keeps all Pro key material in one
+    ///   hierarchy and lets the Pro subsystem avoid ever touching the account's identity seed.
+    /// - `now` -- the current time (floored to the 7-day seed period internally).
+    ///
+    /// Outputs:
+    /// - The 32-byte rotating seed (secret; zeroed on destruction).
+    static cleared_uc32 rotating_seed(
+            std::span<const unsigned char> master_seed, std::chrono::sys_seconds now);
 
     bool operator==(const ProProof& other) const {
         return version == other.version && revocation_tag == other.revocation_tag &&
@@ -208,10 +253,7 @@ class ProProof {
 enum class ProFeaturesForMsgStatus {
     Success = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_SUCCESS,
 
-    /// Message byte stream to classify could not be decoded into a valid UTF8/16 string
-    UTFDecodingError = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_UTF_DECODING_ERROR,
-
-    /// Decoded UTF8/16 string exceeded the maximum character limit allowed for Session Pro
+    /// Message exceeded the maximum character limit allowed for Session Pro
     ExceedsCharacterLimit = SESSION_PROTOCOL_PRO_FEATURES_FOR_MSG_STATUS_EXCEEDS_CHARACTER_LIMIT,
 };
 
@@ -233,7 +275,6 @@ struct ProFeaturesForMsg {
     ProFeaturesForMsgStatus status;
     std::string_view error;
     ProMessageBitset bitset;
-    size_t codepoint_count;
 };
 
 enum class DestinationType {
@@ -366,46 +407,21 @@ struct DecodeEnvelopeKey {
     std::span<std::span<const uint8_t>> decrypt_keys;
 };
 
-/// API: session_protocol/pro_features_for_utf8
+/// API: session_protocol/pro_features_for_message
 ///
-/// Determine the Pro features that are used in a given conversation message.
-///
-/// Inputs:
-/// - `text` -- the UTF8 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the size of the message in UTF8 code units to determine if the message requires
-///   access to the higher character limit available in Session Pro
-///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
-/// - `features` -- Feature flags suitable for writing directly into the protobuf
-///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf8(const char* text, size_t text_size);
-
-/// API: session_protocol/pro_features_for_utf16
-///
-/// Determine the Pro features that are used in a given conversation message.
+/// Determine the Pro features required for a conversation message of a given length.
 ///
 /// Inputs:
-/// - `text` -- the UTF16 string to count the number of codepoints in to determine if it needs the
-///   higher character limit available in Session Pro
-/// - `text_size` -- the size of the message in UTF16 code units to determine if the message
-/// requires
-///   access to the higher character limit available in Session Pro
+/// - `codepoint_count` -- the number of Unicode codepoints in the message. Callers count this
+///   themselves (every platform's native string type counts codepoints directly).
 ///
-/// Outputs:
-/// - `success` -- True if the message was evaluated successfully for PRO features false otherwise.
-///   When false, all fields except for `error` should be ignored from the result object.
-/// - `error` -- If `success` is false, this is populated with an error code describing the error,
-///   otherwise it's empty. This string is read-only and should not be modified.
+/// Outputs (a ProFeaturesForMsg):
+/// - `status` -- Success, or ExceedsCharacterLimit if the message is over the maximum limit. When
+///   not Success, only `error` is meaningful.
+/// - `error` -- On a non-Success `status`, a read-only description of the failure; empty otherwise.
 /// - `bitset` -- Feature flags suitable for writing directly into the protobuf
 ///   `ProMessage.messageFeatures`
-/// - `codepoint_count` -- Counts the number of unicode codepoints that were in the message.
-ProFeaturesForMsg pro_features_for_utf16(const char16_t* text, size_t text_size);
+ProFeaturesForMsg pro_features_for_message(size_t codepoint_count);
 
 /// API: session_protocol/pad_message
 ///
@@ -463,7 +479,6 @@ std::vector<uint8_t> encode_for_1o1(
 ///   not be already encrypted and must not be padded.
 /// - ed25519_privkey -- The sender's libsodium-style secret key (64 bytes). Can also be passed as
 ///   a 32-byte seed. Used to encrypt the plaintext.
-/// - sent_timestamp -- The timestamp to assign to the message envelope, in milliseconds.
 /// - recipient_pubkey -- The recipient's Session public key (33 bytes).
 /// - community_pubkey -- The community inbox server's public key (32 bytes).
 /// - pro_rotating_ed25519_privkey -- Optional libsodium-style secret key (64 bytes) that is the
@@ -477,7 +492,6 @@ std::vector<uint8_t> encode_for_1o1(
 std::vector<uint8_t> encode_for_community_inbox(
         std::span<const uint8_t> plaintext,
         std::span<const uint8_t> ed25519_privkey,
-        std::chrono::milliseconds sent_timestamp,
         const array_uc33& recipient_pubkey,
         const array_uc32& community_pubkey,
         std::optional<std::span<const uint8_t>> pro_rotating_ed25519_privkey);

@@ -18,6 +18,12 @@ if(WARNINGS_AS_ERRORS)
     endif()
 endif()
 
+# -Wunused-parameter isn't in the default warning set (we don't pass -Wextra), so enable it
+# explicitly. WARNINGS_AS_ERRORS's -Werror (above) then promotes it to an error.
+if(WARN_UNUSED_PARAMETERS AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(common INTERFACE -Wunused-parameter)
+endif()
+
 
 set(export_targets)
 macro(add_libsession_util_library name)

@@ -1209,7 +1209,7 @@ std::pair<std::string, std::vector<unsigned char>> Keys::decrypt_message(
     //
     DecryptGroupMessage decrypt = {};
     bool decrypt_success = false;
-    if (auto pending = pending_key(); pending) {
+    if (auto pending = pending_key()) {
         try {
             std::span<std::span<const uint8_t>> key_list = {&(*pending), 1};
             decrypt = decrypt_group_message(key_list, *_sign_pk, ciphertext);

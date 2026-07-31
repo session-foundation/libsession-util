@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <charconv>
 #include <concepts>
 #include <span>
@@ -17,8 +18,8 @@ namespace session::pro {
 ///   and self-delimiting;
 /// - **integer**: canonical decimal ASCII (`std::to_chars`, base 10, locale-independent — never a
 ///   locale-aware formatter);
-/// - **string_view** (`provider_code`, and the opaque variable-length `payment_id` via
-///   `to_string_view`): its bytes verbatim.
+/// - **string_view** (e.g. the opaque `before` pagination cursor of get_payment_details): its bytes
+///   verbatim.
 ///
 /// A single NUL byte is inserted between two *adjacent* variable-length fields (integer/string);
 /// raw fields need no separator, and the domain prefix (also raw) never precedes one. The message
@@ -35,6 +36,7 @@ std::vector<unsigned char> signed_message(std::string_view domain, const Fields&
                 buf.push_back('\0');
             char tmp[24];  // enough for -9223372036854775808 (20 chars)
             auto [ptr, ec] = std::to_chars(tmp, tmp + sizeof(tmp), field);
+            assert(ec == std::errc{});  // tmp is large enough for any integer, so this cannot fail
             buf.insert(buf.end(), tmp, ptr);
             prev_var = true;
         } else if constexpr (std::convertible_to<const T&, std::string_view>) {

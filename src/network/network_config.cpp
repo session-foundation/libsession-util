@@ -107,7 +107,7 @@ void Config::handle_config_opt(opt::file_server_use_stream_encryption fsuse) {
 
 // MARK: General options
 
-void Config::handle_config_opt(opt::increase_no_file_limit dsd) {
+void Config::handle_config_opt(opt::increase_no_file_limit) {
     increase_no_file_limit = true;
     log::debug(cat, "Network config will attempt to increase the NOFILE limit");
 }
@@ -117,7 +117,7 @@ void Config::handle_config_opt(opt::path_length pl) {
     log::debug(cat, "Network config path length set to {}", pl.length);
 }
 
-void Config::handle_config_opt(opt::disable_subnet_diversity dsd) {
+void Config::handle_config_opt(opt::disable_subnet_diversity) {
     enforce_subnet_diversity = false;
     log::debug(cat, "Network config disabled subnet diversity");
 }
@@ -235,7 +235,7 @@ void Config::handle_config_opt(opt::quic_keep_alive qka) {
     log::debug(cat, "Network config quic keep alive set to {}s", qka.duration.count());
 }
 
-void Config::handle_config_opt(opt::quic_disable_mtu_discovery qdmd) {
+void Config::handle_config_opt(opt::quic_disable_mtu_discovery) {
     quic_disable_mtu_discovery = true;
     log::debug(cat, "Network config disabled MTU discovery for Quic");
 }
@@ -262,12 +262,12 @@ void Config::handle_config_opt(opt::onionreq_min_path_count mpc) {
             mpc.min_count);
 }
 
-void Config::handle_config_opt(opt::onionreq_single_path_mode spm) {
+void Config::handle_config_opt(opt::onionreq_single_path_mode) {
     onionreq_single_path_mode = true;
     log::debug(cat, "Network config onion requests set to single path mode");
 }
 
-void Config::handle_config_opt(opt::onionreq_disable_pre_build_paths dpbp) {
+void Config::handle_config_opt(opt::onionreq_disable_pre_build_paths) {
     onionreq_disable_pre_build_paths = true;
     log::debug(cat, "Network config disabled pre-building onion request paths");
 }

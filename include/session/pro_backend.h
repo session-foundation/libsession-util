@@ -11,12 +11,12 @@
 extern "C" {
 #endif
 
-/// Canonical payment-provider `code` strings — the value transmitted on the wire and folded into
-/// the add-payment / set-refund signed messages (§3). Reference these rather than hardcoding the
-/// slug so a sent code cannot drift from what libsession signs/parses. Unknown codes (e.g. a future
-/// provider) are still valid on the wire and pass through as opaque strings. Each points at the
-/// C++ `session::pro_backend::PAYMENT_PROVIDER_*` value (defined there — the primary; C
-/// references).
+/// Canonical payment-provider `code` strings — the `payment_provider` value the backend reports on
+/// a payment item (§5.2) and the slug clients key their store/display logic on. Reference these
+/// rather than hardcoding the slug so client code cannot drift from what libsession parses. Unknown
+/// codes (e.g. a future provider) are still valid on the wire and pass through as opaque strings.
+/// Each points at the C++ `session::pro_backend::PAYMENT_PROVIDER_*` value (defined there — the
+/// primary; C references).
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
@@ -26,13 +26,10 @@ LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_
 /// The C++ `*_request()` helpers return the matching endpoint alongside the body; C callers read
 /// the constant beside each request's build function. Each is a pointer to the single master string
 /// owned in the C++ implementation (defined once, shared by the C and C++ sides).
-LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_ADD_PRO_PAYMENT_ENDPOINT;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GENERATE_PRO_PROOF_ENDPOINT;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_STATUS_ENDPOINT;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PAYMENT_DETAILS_ENDPOINT;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_GET_PRO_REVOCATIONS_ENDPOINT;
-LIBSESSION_EXPORT extern const char* const
-        SESSION_PRO_BACKEND_SET_PAYMENT_REFUND_REQUESTED_ENDPOINT;
 
 /// The Session Pro Backend's production base URL (POST a request body to `<URL>/<endpoint>`).
 /// Canonical production value; clients may override with a dev/test server. Points at the single
@@ -142,6 +139,13 @@ typedef struct session_pro_backend_response_header {
 typedef struct session_pro_backend_pro_proof_response {
     session_pro_backend_response_header header;
     session_protocol_pro_proof proof;
+    /// The account's true, grace-inclusive subscription entitlement end (unix seconds), or 0 if
+    /// this response carries no horizon. Advisory and unsigned (pro-wire-protocol.md §2.2): use for
+    /// display / refreshing the cached access expiry only -- NOT an entitlement authority and NOT
+    /// part of the proof signature. Distinct from `proof.expiry_ts` (the clamped <=30d
+    /// proof-validity window). Populated on a successful proof and on a `subscription_expired`
+    /// failure (a now-past value); 0 on `not_subscribed` / `revoked` / protocol errors.
+    int64_t account_expiry_ts;
 } session_pro_backend_pro_proof_response;
 
 /// API: session_pro_backend/pro_proof_response_free
@@ -209,11 +213,9 @@ typedef struct session_pro_backend_pro_payment_item {
     int64_t platform_refund_expiry_ts;
     /// Provider revocation instant, fractional UNIX seconds (millisecond-precise; 0 if not revoked)
     double revoked_ts;
-    int64_t refund_requested_ts;
 
-    /// Opaque payment identifier (the value passed at add-payment; multi-part providers fold their
-    /// parts in per the backend-defined composite -- libsession does not interpret it).
-    /// NUL-terminated; points into the response's `internal_`.
+    /// Opaque, backend-owned payment identifier (§5.2): store and compare for equality, never
+    /// parse. NUL-terminated; points into the response's `internal_`.
     const char* payment_id;
 } session_pro_backend_pro_payment_item;
 
@@ -226,7 +228,6 @@ typedef struct session_pro_backend_get_pro_status_response {
     bool auto_renewing;
     int64_t expiry_ts;
     int64_t grace_period_duration;
-    int64_t refund_requested_ts;
     /// True if the account has at least one payment, in which case `latest_payment` is populated
     /// with the most recent one; false means the account has no payments and `latest_payment` is
     /// unset.
@@ -261,41 +262,6 @@ typedef struct session_pro_backend_get_payment_details_response {
 LIBSESSION_EXPORT
 void session_pro_backend_get_payment_details_response_free(
         session_pro_backend_get_payment_details_response* response);
-
-typedef struct session_pro_backend_set_payment_refund_requested_response {
-    session_pro_backend_response_header header;
-    bool updated;
-} session_pro_backend_set_payment_refund_requested_response;
-
-/// API: session_pro_backend/set_payment_refund_requested_response_free
-///
-/// Frees the response.
-LIBSESSION_EXPORT
-void session_pro_backend_set_payment_refund_requested_response_free(
-        session_pro_backend_set_payment_refund_requested_response* response);
-
-/// API: session_pro_backend/add_pro_payment_request_build
-///
-/// Builds the add-payment request to POST, as a session_pro_backend_request (endpoint +
-/// content_type + opaque data). Free it with `session_pro_backend_request_free`. On a key-size
-/// error `success` is false and `error`/`error_count` describe it.
-///
-/// Inputs:
-/// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
-/// libsodium).
-/// - `rotating_privkey` / `rotating_privkey_len` -- Ed25519 rotating private key (32 or 64-byte).
-/// - `provider_code` -- null-terminated provider code
-/// (SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*).
-/// - `payment_id` / `payment_id_len` -- opaque provider payment identifier.
-LIBSESSION_EXPORT
-session_pro_backend_request session_pro_backend_add_pro_payment_request_build(
-        const uint8_t* master_privkey,
-        size_t master_privkey_len,
-        const uint8_t* rotating_privkey,
-        size_t rotating_privkey_len,
-        const char* provider_code,
-        const uint8_t* payment_id,
-        size_t payment_id_len) NON_NULL_ARG(1, 3, 5, 6);
 
 /// API: session_pro_backend/generate_pro_proof_request_build
 ///
@@ -410,42 +376,6 @@ session_pro_backend_get_pro_status_response session_pro_backend_get_pro_status_r
 LIBSESSION_EXPORT
 session_pro_backend_get_payment_details_response
 session_pro_backend_get_payment_details_response_parse(const char* json, size_t json_len);
-
-/// API: session_pro_backend/set_payment_refund_requested_request_build
-///
-/// Builds the set-refund-requested request to POST, as a session_pro_backend_request (endpoint +
-/// content_type + opaque data). Free it with `session_pro_backend_request_free`. On a key-size
-/// error `success` is false and `error`/`error_count` describe it.
-///
-/// Inputs:
-/// - `master_privkey` / `master_privkey_len` -- Ed25519 master private key (32 or 64-byte
-/// libsodium).
-/// - `ts` -- Unix timestamp (seconds) for the request.
-/// - `refund_requested_ts` -- Unix timestamp (seconds) to record the refund request at.
-/// - `provider_code` -- null-terminated provider code
-/// (SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_*).
-/// - `payment_id` / `payment_id_len` -- opaque provider payment identifier.
-LIBSESSION_EXPORT
-session_pro_backend_request session_pro_backend_set_payment_refund_requested_request_build(
-        const uint8_t* master_privkey,
-        size_t master_privkey_len,
-        int64_t ts,
-        int64_t refund_requested_ts,
-        const char* provider_code,
-        const uint8_t* payment_id,
-        size_t payment_id_len) NON_NULL_ARG(1, 5, 6);
-
-/// API: session_pro_backend/set_payment_refund_requested_response_parse
-///
-/// Parses a JSON string into a GetProPaymentsResponse struct.
-/// The caller must free the response using
-/// `session_pro_backend_set_payment_refund_requested_response_free`.
-///
-/// Inputs:
-/// - `json` -- JSON string to parse.
-/// - `json_len` -- Length of the JSON string.
-LIBSESSION_EXPORT session_pro_backend_set_payment_refund_requested_response
-session_pro_backend_set_payment_refund_requested_response_parse(const char* json, size_t json_len);
 
 #ifdef __cplusplus
 }  // extern "C"

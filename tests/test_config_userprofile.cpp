@@ -616,7 +616,9 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     {
         // CPP
         pro_cpp.rotating_privkey = rotating_sk;
-        pro_cpp.proof.version = 2;
+        // The config does not persist the proof version (dicts merge per-key, so an in-dict version
+        // can't reliably describe its sibling fields); a config-loaded proof is always v0.
+        pro_cpp.proof.version = session::ProProofVersion_v0;
         pro_cpp.proof.rotating_pubkey = rotating_pk;
         pro_cpp.proof.expiry_at = std::chrono::sys_seconds(1s);
         constexpr auto revocation_tag =
@@ -651,4 +653,128 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     auto access_expiry = std::chrono::sys_seconds{std::chrono::seconds{500}};
     profile.set_pro_access_expiry(access_expiry);
     CHECK(profile.get_pro_access_expiry() == access_expiry);
+
+    // Refund-requested flag (synced via config, not the Pro backend)
+    CHECK_FALSE(profile.get_refund_requested().has_value());
+
+    const auto now = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+
+    // A recent request is returned as-is, and stamps the profile-updated timestamp so it
+    // time-orders across devices.
+    UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{456s});
+    auto refund_at = now - 1h;
+    profile.set_refund_requested(refund_at);
+    CHECK(profile.get_refund_requested() == refund_at);
+    CHECK(profile.get_profile_updated().time_since_epoch().count() != 456);
+
+    {
+        // Round-trips through a dump/reload.
+        session::config::UserProfile profile2{std::span<const unsigned char>{seed}, profile.dump()};
+        CHECK(profile2.get_refund_requested() == refund_at);
+    }
+
+    // A stored value more than a week old is ignored on read (treated as absent).
+    profile.set_refund_requested(now - std::chrono::weeks{2});
+    CHECK_FALSE(profile.get_refund_requested().has_value());
+
+    // Clearing removes it entirely.
+    profile.set_refund_requested(std::nullopt);
+    CHECK_FALSE(profile.get_refund_requested().has_value());
+
+    // Pro-prepaid ("purchase in flight") marker: insert-only-if-not-pro, 1-week read gate, and
+    // auto-clear when entitlement lands. (No proof, access expiry in the past -> not currently
+    // pro.)
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    auto prepaid_at = now - 1h;
+    profile.set_pro_prepaid(prepaid_at);
+    CHECK(profile.get_pro_prepaid() == prepaid_at);
+
+    // A stale (>1wk) marker is ignored on read.
+    profile.set_pro_prepaid(now - std::chrono::weeks{2});
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // Confirming a live access expiry clears the marker (entitlement arrived).
+    profile.set_pro_prepaid(prepaid_at);
+    REQUIRE(profile.get_pro_prepaid().has_value());
+    profile.set_pro_access_expiry(now + 1h);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // While pro (live access expiry), setting the marker is a no-op.
+    profile.set_pro_prepaid(prepaid_at);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // A landed (still-valid) proof also clears it: back to not-pro, mark pending, store a proof.
+    profile.set_pro_access_expiry(std::nullopt);
+    profile.set_pro_prepaid(prepaid_at);
+    REQUIRE(profile.get_pro_prepaid().has_value());
+    pro_cpp.proof.expiry_at = now + 1h;
+    profile.set_pro_config(pro_cpp);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // Explicit clear via nullopt.
+    profile.remove_pro_config();
+    profile.set_pro_prepaid(prepaid_at);
+    REQUIRE(profile.get_pro_prepaid().has_value());
+    profile.set_pro_prepaid(std::nullopt);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // pro_renewal_target: centralised "when to renew" decision.
+    {
+        session::config::UserProfile pr{std::span<const unsigned char>{seed}, std::nullopt};
+
+        // No proof and no purchase in flight -> not Pro, nothing to fetch.
+        CHECK_FALSE(pr.pro_renewal_target(now).has_value());
+
+        // No proof but a purchase in flight (prepaid) -> fetch immediately.
+        pr.set_pro_prepaid(now - 1h);
+        REQUIRE(pr.get_pro_prepaid().has_value());
+        CHECK(pr.pro_renewal_target(now) == now);
+        pr.set_pro_prepaid(std::nullopt);
+
+        auto store_proof = [&](std::chrono::sys_seconds expiry) {
+            session::config::ProConfig pc = {};
+            pc.rotating_privkey = rotating_sk;  // any valid 64-byte key (only sizes matter here)
+            pc.proof.version = session::ProProofVersion_v0;
+            pc.proof.rotating_pubkey = rotating_pk;
+            pc.proof.expiry_at = expiry;
+            pr.set_pro_config(pc);
+        };
+
+        // Valid proof (10 days out), entitlement a month out -> preemptive ~1h before expiry.
+        auto expiry = now + 10 * 24h;
+        store_proof(expiry);
+        pr.set_pro_access_expiry(now + 30 * 24h);
+        auto target = pr.pro_renewal_target(now);
+        REQUIRE(target.has_value());
+        CHECK(*target <= expiry - 59min);
+        CHECK(*target >= expiry - 61min);
+
+        // Same proof but entitlement ending within the hour -> don't renew.
+        pr.set_pro_access_expiry(now + 30min);
+        CHECK_FALSE(pr.pro_renewal_target(now).has_value());
+
+        // No access expiry at all -> don't preemptively renew.
+        pr.set_pro_access_expiry(std::nullopt);
+        CHECK_FALSE(pr.pro_renewal_target(now).has_value());
+
+        // Expired proof -> renew immediately, regardless of entitlement.
+        store_proof(now - 1h);
+        CHECK(pr.pro_renewal_target(now) == now);
+
+        // Near-boundary deferral: when renewal is already due and `now` sits at a rotating-seed
+        // period boundary, defer by PRO_RENEWAL_BOUNDARY_DEFER as long as that leaves at least
+        // PRO_RENEWAL_BOUNDARY_MIN_VALIDITY of proof validity; otherwise just renew now.
+        auto at_boundary = now - now.time_since_epoch() % session::PRO_ROTATING_SEED_PERIOD;
+        pr.set_pro_access_expiry(at_boundary + 30 * 24h);
+        store_proof(at_boundary + 30min);  // due (within lead), plenty of validity left
+        CHECK(pr.pro_renewal_target(at_boundary) ==
+              at_boundary + session::PRO_RENEWAL_BOUNDARY_DEFER);
+
+        // Expiry only MIN_VALIDITY out: after any defer, < MIN_VALIDITY remains -> renew now.
+        store_proof(at_boundary + session::PRO_RENEWAL_BOUNDARY_MIN_VALIDITY);
+        auto r = pr.pro_renewal_target(at_boundary);
+        REQUIRE(r.has_value());
+        CHECK(*r <= at_boundary);
+    }
 }
