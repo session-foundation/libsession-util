@@ -73,7 +73,7 @@ createdb -h "$WORK" -p "$PORT" -U "$USER" pro_backend
 
 export SESH_PRO_BACKEND_DB_URL="postgresql:///pro_backend?host=$WORK&port=$PORT&user=$USER"
 export SESH_PRO_BACKEND_KEY_PATH="$KEYFILE"
-# Stub all payment-provider egress so a real add_pro_payment redeems (google/app_store/rangeproof)
+# Stub all payment-provider egress so a real add_pro_payment redeems (google/app_store/stf)
 # without contacting Google/Apple. Landed backend-side (base.PROVIDER_DRY_RUN). No platform creds and
 # no with_platform_* needed: the provider comes from the seeded row, not from platform config.
 export SESH_PRO_BACKEND_PROVIDER_DRY_RUN=1
