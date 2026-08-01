@@ -465,8 +465,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             // End-of-data: null next_cursor, and payment_id is opaque so a different provider's
             // value passes through unchanged.
             j["result"]["items"][0]["payment_provider"] =
-                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
-            j["result"]["items"][0]["payment_id"] = "rangeproof-opaque-id";
+                    SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_STF;
+            j["result"]["items"][0]["payment_id"] = "stf-opaque-id";
             j["result"]["next_cursor"] = nullptr;
             json = j.dump();
             auto result_end = session_pro_backend_get_payment_details_response_parse(
@@ -479,8 +479,8 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                     INFO(result_end.header.error);
                 REQUIRE(result_end.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(std::string_view(result_end.items[0].payment_provider) ==
-                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF);
-                REQUIRE(std::string_view(result_end.items[0].payment_id) == "rangeproof-opaque-id");
+                        SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_STF);
+                REQUIRE(std::string_view(result_end.items[0].payment_id) == "stf-opaque-id");
                 REQUIRE(result_end.next_cursor == nullptr);  // end-of-data
             }
 
@@ -546,9 +546,7 @@ TEST_CASE("Pro Backend X25519 pubkey matches the converted Ed25519 pubkey", "[pr
             0);
 }
 
-TEST_CASE(
-        "Pro Backend visible_platforms lists purchasable stores, excludes rangeproof",
-        "[pro_backend]") {
+TEST_CASE("Pro Backend visible_platforms lists purchasable stores, excludes stf", "[pro_backend]") {
     auto platforms = visible_platforms();
     auto has = [](std::span<const std::string_view> v, std::string_view s) {
         for (auto x : v)
@@ -559,7 +557,7 @@ TEST_CASE(
     REQUIRE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY));
     REQUIRE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE));
     // Hidden mechanisms are handled but never listed.
-    REQUIRE_FALSE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF));
+    REQUIRE_FALSE(has(platforms, SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_STF));
     REQUIRE(platforms.size() == 2);
 
     // The C export returns the same slugs, in the same order (it is derived from the C++ list).

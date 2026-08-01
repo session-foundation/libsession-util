@@ -19,7 +19,7 @@ extern "C" {
 /// primary; C references).
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_GOOGLE_PLAY;
 LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_APP_STORE;
-LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_RANGEPROOF;
+LIBSESSION_EXPORT extern const char* const SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_STF;
 
 /// Endpoint path (relative to the backend base URL) that each request type is POSTed to. libsession
 /// owns the body<->route pairing, so reference these rather than hardcoding the path client-side.
@@ -53,7 +53,7 @@ LIBSESSION_EXPORT extern const unsigned char* const SESSION_PRO_BACKEND_PUBKEY_X
 /// code from a known provider that simply has no URLs.
 typedef struct session_pro_backend_provider_urls {
     /// True if `provider_code` is a recognised provider; false if it is unknown (or e.g.
-    /// rangeproof), in which case every URL field below is NULL. A recognised provider may still
+    /// STF), in which case every URL field below is NULL. A recognised provider may still
     /// leave any or all URL fields NULL.
     bool found;
     const char* refund_platform_url;      /// Native store refund flow
@@ -76,7 +76,7 @@ session_pro_backend_get_provider_urls(const char* provider_code) NON_NULL_ARG(1)
 ///
 /// Returns the user-visible purchasable platforms as an array of `*count` provider-code C strings
 /// (a subset of the SESSION_PRO_BACKEND_PAYMENT_PROVIDER_CODE_* values). Order is not significant;
-/// clients pick their own. Hidden mechanisms (e.g. rangeproof) are excluded. The returned array and
+/// clients pick their own. Hidden mechanisms (e.g. STF) are excluded. The returned array and
 /// its strings are static storage owned by libsession — do not free.
 LIBSESSION_EXPORT const char* const* session_pro_backend_visible_platforms(size_t* count);
 
