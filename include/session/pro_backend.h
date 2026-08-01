@@ -191,8 +191,8 @@ typedef enum SESSION_PRO_BACKEND_PLAN_UNIT {
 } SESSION_PRO_BACKEND_PLAN_UNIT;
 
 typedef struct session_pro_backend_pro_payment_item {
-    /// Opaque payment lifecycle status code (e.g. "unredeemed"/"redeemed"/"expired"/"revoked");
-    /// unknown values pass through as-is. NUL-terminated; points into the response's `internal_`.
+    /// Opaque payment lifecycle status code (e.g. "redeemed"/"expired"/"revoked"); unknown values
+    /// pass through as-is. NUL-terminated; points into the response's `internal_`.
     const char* status;
     /// Parsed billing period (pro-wire-protocol.md §1). `plan_count` is the period count
     /// (>= 1 for periodic units); for `plan_unit == ..._LIFETIME` it is 0 and not meaningful
@@ -207,7 +207,6 @@ typedef struct session_pro_backend_pro_payment_item {
     /// Provider purchase time, fractional UNIX seconds. Millisecond-precise: the value passes
     /// through a millisecond-resolution representation, so sub-millisecond digits are not retained.
     double purchased_ts;
-    int64_t redeemed_ts;
     int64_t expiry_ts;
     int64_t grace_period_duration;
     int64_t platform_refund_expiry_ts;

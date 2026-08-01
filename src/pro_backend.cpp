@@ -589,7 +589,6 @@ namespace {
         // carrying sub-second precision (kept as millisecond-precision sys_ms). All other
         // timestamps are whole-second integers.
         auto purchased_ts = json_require_number(obj, "purchased_ts", errs);
-        auto redeemed_ts = json_require<int64_t>(obj, "redeemed_ts", errs);
         auto expiry_ts = json_require<int64_t>(obj, "expiry_ts", errs);
         auto grace_period_duration = json_require<int64_t>(obj, "grace_period_duration", errs);
         auto platform_refund_expiry_ts =
@@ -604,7 +603,6 @@ namespace {
         item.payment_id = std::move(payment_id);
         item.auto_renewing = auto_renewing;
         item.purchased_at = sys_ms_from_seconds(purchased_ts);
-        item.redeemed_at = std::chrono::sys_seconds(std::chrono::seconds(redeemed_ts));
         item.expiry_at = std::chrono::sys_seconds(std::chrono::seconds(expiry_ts));
         item.grace_period_duration = std::chrono::seconds(grace_period_duration);
         item.platform_refund_expiry_at =
@@ -780,7 +778,6 @@ static session_pro_backend_pro_payment_item to_c(ProPaymentItem& src) {
             .payment_provider = src.payment_provider.c_str(),
             .auto_renewing = src.auto_renewing,
             .purchased_ts = epoch_seconds_double(src.purchased_at),
-            .redeemed_ts = session::epoch_seconds(src.redeemed_at),
             .expiry_ts = session::epoch_seconds(src.expiry_at),
             .grace_period_duration = src.grace_period_duration.count(),
             .platform_refund_expiry_ts = session::epoch_seconds(src.platform_refund_expiry_at),

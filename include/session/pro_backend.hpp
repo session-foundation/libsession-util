@@ -323,9 +323,6 @@ struct ProPaymentItem {
     /// sends it as a float of seconds.
     sys_ms purchased_at;
 
-    /// Unix timestamp of when the payment was redeemed. 0 if not activated
-    sys_seconds redeemed_at;
-
     /// Unix timestamp of when the payment was expiry. 0 if not activated
     sys_seconds expiry_at;
 
