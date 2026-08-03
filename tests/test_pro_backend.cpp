@@ -367,7 +367,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
             j["status"] = "ok";
             j["result"] = {
                     {"user_status", "expired"},
-                    {"error_report", SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR},
                     {"auto_renewing", true},
                     {"expiry_ts", unix_ts + 2},
                     {"grace_period_duration", 1000},
@@ -388,8 +387,6 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 REQUIRE(result.header.status == SESSION_PRO_BACKEND_RESPONSE_STATUS_OK);
                 REQUIRE(result.header.error == nullptr);
                 REQUIRE(std::string_view(result.status) == "expired");
-                REQUIRE(result.error_report ==
-                        SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR);
                 REQUIRE(result.auto_renewing == true);
                 REQUIRE(result.grace_period_duration == 1000);
                 REQUIRE(result.expiry_ts == unix_ts + 2);
