@@ -925,59 +925,45 @@ DecryptGroupMessage decrypt_group_message(
 
     oxenc::bt_dict_consumer dict{to_string_view(plain)};
 
-    if (!dict.skip_until(""))
-        throw std::runtime_error{"group message version tag (\"\") is missing"};
-    if (auto v = dict.consume_integer<int>(); v != 1)
+    if (auto v = dict.require<int>(""); v != 1)
         throw std::runtime_error{
                 fmt::format("group message version tag ({}) is not compatible (we support v1)", v)};
 
-    if (!dict.skip_until("a"))
-        throw std::runtime_error{"missing message author pubkey"};
-    auto ed_pk = to_span(dict.consume_string_view());
-    if (ed_pk.size() != 32)
-        throw std::runtime_error{
-                fmt::format("message author pubkey size ({}) is invalid", ed_pk.size())};
-
-    auto x_pk = ed25519::pk_to_x25519(ed_pk.first<32>());
+    auto ed_pk = dict.require_span<std::byte, 32>("a");
+    auto x_pk = ed25519::pk_to_x25519(ed_pk);
 
     session_id = "05{:x}"_format(x_pk);
 
-    std::span<const std::byte> raw_data;
-    if (dict.skip_until("d")) {
-        raw_data = to_span(dict.consume_string_view());
-        if (raw_data.empty())
-            throw std::runtime_error{"uncompressed message data (\"d\") cannot be empty"};
-    }
+    auto plain_data = dict.maybe<std::span<const std::byte>>("d");
+    if (plain_data && plain_data->empty())
+        throw std::runtime_error{"uncompressed message data (d) cannot be empty"};
 
-    if (!dict.skip_until("s"))
-        throw std::runtime_error{"message signature is missing"};
-    auto ed_sig = to_span(dict.consume_string_view());
-    if (ed_sig.size() != 64)
-        throw std::runtime_error{
-                fmt::format("message signature size ({}) is invalid", ed_sig.size())};
+    auto ed_sig = dict.require_span<std::byte, 64>("s");
 
     bool compressed = false;
-    if (dict.skip_until("z")) {
-        if (!raw_data.empty())
+    auto comp_data = dict.maybe<std::span<const std::byte>>("z");
+    if (comp_data) {
+        if (comp_data->empty())
+            throw std::runtime_error{"compressed message data (z) cannot be empty"};
+        if (plain_data)
             throw std::runtime_error{
                     "message signature cannot contain both compressed (z) and uncompressed (d) "
                     "data"};
-        raw_data = to_span(dict.consume_string_view());
-        if (raw_data.empty())
-            throw std::runtime_error{"compressed message data (\"z\") cannot be empty"};
 
         compressed = true;
-    } else if (raw_data.empty())
+    } else if (!plain_data)
         throw std::runtime_error{"message must contain compressed (z) or uncompressed (d) data"};
+
+    auto raw_data = comp_data ? *comp_data : *plain_data;
 
     // The value we verify is the raw data *followed by* the group Ed25519 pubkey.  (See the comment
     // in encrypt_message).
-    std::vector<std::byte> to_verify(raw_data.size() + group_ed25519_pubkey.size());
-    std::memcpy(to_verify.data(), raw_data.data(), raw_data.size());
-    std::memcpy(
-            to_verify.data() + raw_data.size(),
-            group_ed25519_pubkey.data(),
-            group_ed25519_pubkey.size());
+    std::vector<std::byte> to_verify;
+    to_verify.reserve(raw_data.size() + group_ed25519_pubkey.size());
+
+    to_verify.insert(to_verify.end(), raw_data.begin(), raw_data.end());
+    to_verify.insert(to_verify.end(), group_ed25519_pubkey.begin(), group_ed25519_pubkey.end());
+
     if (!ed25519::verify(ed_sig.first<64>(), ed_pk.first<32>(), to_verify))
         throw std::runtime_error{"message signature failed validation"};
 
