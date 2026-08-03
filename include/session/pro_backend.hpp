@@ -356,11 +356,6 @@ struct ProStatusResponse : ResponseBase {
     /// has no payments. (The full payment history is a separate query -- parse_payment_details.)
     std::optional<ProPaymentItem> latest_payment;
 
-    /// Error code that indicates that the Session Pro Backend encountered an error book-keeping
-    /// Session Pro entitlement for the user. If this value is not `SUCCESS` implementing clients
-    /// can optionally prompt the user that they should contact support for investigation.
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
-
     /// Flag to indicate if the user will automatically renew their subscription.
     bool auto_renewing;
 
