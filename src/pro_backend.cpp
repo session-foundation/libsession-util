@@ -649,15 +649,6 @@ ProStatusResponse parse_pro_status(std::string_view json) {
     // parse. (Wire key `user_status`, disambiguated from the envelope `status` -- spec §5.2.)
     result.user_status = json_require<std::string>(result_obj, "user_status", errs);
 
-    uint32_t error_report = json_require<uint32_t>(result_obj, "error_report", errs);
-    if (error_report >= SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_COUNT) {
-        errs.push_back(fmt::format("Error report value was out-of-bounds: {}", error_report));
-        set_protocol_error(result, errs.front());
-        return result;
-    }
-    result.error_report =
-            static_cast<SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT>(error_report);
-
     result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", errs);
 
     result.expiry_at = std::chrono::sys_seconds(
@@ -981,7 +972,6 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
         fill_c_header(result.header, *owned);
 
         result.status = owned->user_status.c_str();
-        result.error_report = owned->error_report;
         result.auto_renewing = owned->auto_renewing;
         result.expiry_ts = epoch_seconds(owned->expiry_at);
         result.grace_period_duration = owned->grace_period_duration.count();

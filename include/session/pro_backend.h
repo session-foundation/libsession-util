@@ -105,12 +105,6 @@ typedef struct session_pro_backend_request {
 LIBSESSION_EXPORT
 void session_pro_backend_request_free(session_pro_backend_request* request);
 
-typedef enum SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT {
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_SUCCESS,
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_GENERIC_ERROR,
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT_COUNT,
-} SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT;
-
 /// Response outcome (wire `status`, spec §5). CLOSED/exhaustive: the backend will never add a
 /// value, so an unrecognized wire status is reported as a protocol error (RESPONSE_STATUS_ERROR +
 /// error_code "invalid_response"). Mirrors C++ session::pro_backend::ResponseStatus.
@@ -223,7 +217,6 @@ typedef struct session_pro_backend_get_pro_status_response {
     /// Opaque account Pro status code ("never"/"active"/"expired"); unknown values pass through.
     /// NUL-terminated; points into the response's `internal_`.
     const char* status;
-    SESSION_PRO_BACKEND_GET_PRO_STATUS_ERROR_REPORT error_report;
     bool auto_renewing;
     int64_t expiry_ts;
     int64_t grace_period_duration;
