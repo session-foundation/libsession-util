@@ -99,9 +99,9 @@ def cmd_payment(args):
             payment_tx=_payment_tx(args.provider, args.payment_id),
             plan=plan,
             purchased_at=now,
-            expires_at=base.round_datetime_to_next_day(now)
+            expiry_at=base.round_datetime_to_next_day(now)
             + datetime.timedelta(days=args.expiry_days),
-            platform_refund_expires_at=base.EPOCH,
+            platform_refund_expiry_at=base.EPOCH,
             platform_obfuscated_account_id=_obfuscated_id(args.provider, vk),
             err=err,
         )
