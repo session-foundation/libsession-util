@@ -209,7 +209,7 @@ TEST_CASE("Pro Backend C API", "[pro_backend]") {
                 // Required on success: a proof response missing it is treated as malformed.
                 nlohmann::json j_no_ae = j;
                 j_no_ae["result"].erase("account_expiry_ts");
-                REQUIRE(parse_pro_proof(j_no_ae.dump()).error.has_value());
+                REQUIRE_THROWS_AS(parse_pro_proof(j_no_ae.dump()), parse_error);
 
                 // It also rides a subscription_expired failure (top-level, now-past value) so the
                 // client can refresh its cached horizon without a separate status call.

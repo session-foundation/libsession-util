@@ -7,6 +7,7 @@
 #include <charconv>
 #include <chrono>
 #include <concepts>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <session/pro_backend.hpp>
 #include <session/session_encrypt.hpp>
@@ -17,68 +18,55 @@
 #include "pro_message.hpp"
 
 namespace {
-const nlohmann::json json_parse(std::string_view json, std::vector<std::string>& errors) {
-    nlohmann::json result;
+
+using session::pro_backend::parse_error;
+
+nlohmann::json json_parse(std::string_view json) {
     try {
-        result = nlohmann::json::parse(json);
+        return nlohmann::json::parse(json);
     } catch (const std::exception& e) {
-        errors.push_back(fmt::format("Invalid JSON received, parse failed: {}", e.what()));
+        throw parse_error{fmt::format("Invalid JSON received, parse failed: {}", e.what())};
     }
-    return result;
 }
 
 template <typename T>
-const T json_require(
-        const nlohmann::json& j, std::string_view key, std::vector<std::string>& errors) {
-    T result = {};
-    auto it = j.find(key);
-    if (it == j.end()) {
-        errors.push_back(fmt::format("Key '{}' is missing", key));
-    } else {
-        bool success = false;
-        std::string_view type;
-        if constexpr (std::floating_point<T>) {
-            type = "a float";
-            success = it->is_number_float();
-        } else if constexpr (std::same_as<T, bool>) {
-            type = "a boolean";
-            success = it->is_boolean();
-        } else if constexpr (std::integral<T>) {
-            type = "a number";
-            success = it->is_number();
-        } else if constexpr (session::is_one_of<T, std::string, std::string_view>) {
-            type = "a string";
-            success = it->is_string();
-        } else if constexpr (std::same_as<T, nlohmann::json::array_t>) {
-            type = "an array";
-            success = it->is_array();
-        } else {
-            static_assert(std::same_as<T, nlohmann::json::object_t>);
-            type = "an object";
-            success = it->is_object();
-        }
-
-        if (success)
-            it->get_to<T>(result);
-        else
-            errors.push_back(fmt::format("Key value ({}, {}) was not {}", key, it->dump(1), type));
-    }
-    return result;
-}
-
-// Reads a JSON number that may be an integer *or* a float, as a double. Used for the two
-// upstream-provider event instants (`purchased_ts`, `revoked_ts`) which the backend emits as floats
-// carrying the provider's sub-second precision (pro-wire-protocol.md §1).
-double json_require_number(
-        const nlohmann::json& j, std::string_view key, std::vector<std::string>& errors) {
+T json_require(const nlohmann::json& j, std::string_view key) {
     auto it = j.find(key);
     if (it == j.end())
-        errors.push_back(fmt::format("Key '{}' is missing", key));
-    else if (it->is_number())
-        return it->get<double>();
-    else
-        errors.push_back(fmt::format("Key value ({}, {}) was not a number", key, it->dump(1)));
-    return 0;
+        throw parse_error{fmt::format("Key '{}' is missing", key)};
+
+    bool success = false;
+    std::string_view type;
+    if constexpr (std::floating_point<T>) {
+        // An integer is a valid float value, so accept any JSON number: is_number_float() alone
+        // would wrongly reject an integer-valued number.
+        type = "a number";
+        success = it->is_number();
+    } else if constexpr (std::same_as<T, bool>) {
+        type = "a boolean";
+        success = it->is_boolean();
+    } else if constexpr (std::integral<T>) {
+        // is_number_integer() (not is_number()) so a fractional wire value is rejected rather than
+        // silently truncated by get_to. True for both signed and unsigned integer storage.
+        type = "an integer";
+        success = it->is_number_integer();
+    } else if constexpr (session::is_one_of<T, std::string, std::string_view>) {
+        type = "a string";
+        success = it->is_string();
+    } else if constexpr (std::same_as<T, nlohmann::json::array_t>) {
+        type = "an array";
+        success = it->is_array();
+    } else {
+        static_assert(std::same_as<T, nlohmann::json::object_t>);
+        type = "an object";
+        success = it->is_object();
+    }
+    if (!success)
+        throw parse_error{fmt::format("Key value ({}, {}) was not {}", key, it->dump(1), type)};
+
+    T result = {};
+    it->get_to<T>(result);
+    return result;
 }
 
 // Fractional UNIX seconds (double) -> millisecond-precision system time, preserving the provider's
@@ -94,32 +82,23 @@ double epoch_seconds_double(session::sys_ms t) {
     return std::chrono::duration<double>(t.time_since_epoch()).count();
 }
 
-bool json_require_fixed_bytes_from_hex(
-        const nlohmann::json& j,
-        std::string_view key,
-        std::vector<std::string>& errors,
-        std::span<uint8_t> dest) {
-    auto hex = json_require<std::string_view>(j, key, errors);
+void json_require_hex(const nlohmann::json& j, std::string_view key, std::span<uint8_t> dest) {
+    auto hex = json_require<std::string_view>(j, key);
     if (hex.starts_with("0X") || hex.starts_with("0x"))
         hex = hex.substr(2);
 
     size_t hex_avail = dest.size() * 2;
-    if (hex.size() != hex_avail) {
-        errors.push_back(fmt::format(
+    if (hex.size() != hex_avail)
+        throw parse_error{fmt::format(
                 "Hex -> bytes failed ({}, {}). {} hex chars capacity (requires {})",
                 key,
                 hex,
                 hex_avail,
-                hex.size()));
-        return false;
-    }
+                hex.size())};
 
-    bool result = oxenc::is_hex(hex);
-    if (result)
-        oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
-    else
-        errors.push_back(fmt::format("Key value string was not hex: '{}': '{}'", key, hex));
-    return result;
+    if (!oxenc::is_hex(hex))
+        throw parse_error{fmt::format("Key value string was not hex: '{}': '{}'", key, hex)};
+    oxenc::from_hex(hex.begin(), hex.end(), dest.begin());
 }
 };  // namespace
 
@@ -295,84 +274,63 @@ namespace {
     // missing/unrecognized status). Distinct from any backend error_code slug.
     constexpr std::string_view invalid_response_code = "invalid_response";
 
-    // Put a ResponseBase into a protocol-error state (a libsession-side parse failure, distinct
-    // from a backend-reported fail/error).
-    void set_protocol_error(ResponseBase& result, std::string message) {
-        result.status = ResponseStatus::Error;
-        result.error_code = std::string(invalid_response_code);
-        result.error = std::move(message);
-    }
-
     // Read the response envelope (spec §5) into `result`: string `status` -> ResponseStatus (a
-    // CLOSED set -- an unrecognized value is a protocol error, never passed through) and, on
-    // non-ok, `error_code` + `error`. Returns the `result` object to read the payload from when
-    // status is "ok" (an empty object otherwise; the caller returns early). libsession-side parse
-    // problems accumulate in `errs` for the caller to fold into a protocol error.
-    nlohmann::json::object_t read_envelope(
-            std::string_view json, ResponseBase& result, std::vector<std::string>& errs) {
-        nlohmann::json j = json_parse(json, errs);
-        auto status = json_require<std::string>(j, "status", errs);
-        if (!errs.empty())
-            return {};
+    // CLOSED set -- an unrecognized value throws, never passed through) and, on non-ok,
+    // `error_code`
+    // + `error`. Returns the `result` object to read the payload from when status is "ok" (an empty
+    // object otherwise; the caller returns early on `!result`). Throws parse_error on a malformed
+    // envelope.
+    nlohmann::json::object_t read_envelope(std::string_view json, ResponseBase& result) {
+        nlohmann::json j = json_parse(json);
+        auto status = json_require<std::string>(j, "status");
         if (status == "ok") {
             result.status = ResponseStatus::Ok;
-            return json_require<nlohmann::json::object_t>(j, "result", errs);
+            return json_require<nlohmann::json::object_t>(j, "result");
         }
         if (status == "fail" || status == "error") {
             result.status = status == "fail" ? ResponseStatus::Fail : ResponseStatus::Error;
-            result.error_code = json_require<std::string>(j, "error_code", errs);
-            result.error = json_require<std::string>(j, "error", errs);
+            result.error_code = json_require<std::string>(j, "error_code");
+            result.error = json_require<std::string>(j, "error");
             return {};
         }
-        errs.push_back(fmt::format("Unrecognized response status: '{}'", status));
-        return {};
+        throw parse_error{fmt::format("Unrecognized response status: '{}'", status)};
     }
 
     // Fills the common proof payload (add-payment and generate-proof both reply with exactly a
     // proof) from the already-extracted `result` object.
-    void fill_proof(
-            const nlohmann::json::object_t& result_obj,
-            GenerateProProofResponse& result,
-            std::vector<std::string>& errs) {
-        result.proof.version = json_require<uint8_t>(result_obj, "version", errs);
-        auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts", errs);
+    void fill_proof(const nlohmann::json::object_t& result_obj, GenerateProProofResponse& result) {
+        result.proof.version = json_require<uint8_t>(result_obj, "version");
+        auto expiry_ts = json_require<int64_t>(result_obj, "expiry_ts");
         result.proof.expiry_at = std::chrono::sys_seconds(std::chrono::seconds(expiry_ts));
-        json_require_fixed_bytes_from_hex(
-                result_obj, "revocation_tag", errs, result.proof.revocation_tag);
-        json_require_fixed_bytes_from_hex(
-                result_obj, "rotating_pkey", errs, result.proof.rotating_pubkey);
-        json_require_fixed_bytes_from_hex(result_obj, "sig", errs, result.proof.sig);
+        json_require_hex(result_obj, "revocation_tag", result.proof.revocation_tag);
+        json_require_hex(result_obj, "rotating_pkey", result.proof.rotating_pubkey);
+        json_require_hex(result_obj, "sig", result.proof.sig);
 
         // Advisory and unsigned (pro-wire-protocol.md §2.2) -- never fed into signature
         // verification -- but required: a proof response without it can't refresh the cached access
         // expiry, which breaks renewal, so treat a missing value as a malformed response.
-        auto account_expiry_ts = json_require<int64_t>(result_obj, "account_expiry_ts", errs);
+        auto account_expiry_ts = json_require<int64_t>(result_obj, "account_expiry_ts");
         result.account_expiry = std::chrono::sys_seconds(std::chrono::seconds(account_expiry_ts));
     }
 }  // namespace
 
 GenerateProProofResponse parse_pro_proof(std::string_view json) {
     GenerateProProofResponse result = {};
-    std::vector<std::string> errs;
-    auto result_obj = read_envelope(json, result, errs);
-    if (!result || !errs.empty()) {
-        if (!errs.empty())
-            set_protocol_error(result, errs.front());
+    auto result_obj = read_envelope(json, result);
+    if (!result) {
         // On a subscription_expired failure the account's (now-past) true expiry rides top-level on
         // the envelope (pro-wire-protocol.md §2.2 / §5.1) so the client can refresh its cached
-        // horizon / access expiry without a separate get_pro_status. Advisory -- read leniently.
-        else if (result.error_code == "subscription_expired") {
-            std::vector<std::string> ignore;
-            auto j = json_parse(json, ignore);
+        // horizon / access expiry without a separate get_pro_status. Advisory -- read leniently
+        // (the envelope already parsed, so this re-parse can't throw).
+        if (result.error_code == "subscription_expired") {
+            auto j = json_parse(json);
             if (auto it = j.find("account_expiry_ts"); it != j.end() && it->is_number_integer())
                 result.account_expiry =
                         std::chrono::sys_seconds(std::chrono::seconds(it->get<int64_t>()));
         }
         return result;
     }
-    fill_proof(result_obj, result, errs);
-    if (!errs.empty())
-        set_protocol_error(result, errs.front());
+    fill_proof(result_obj, result);
     return result;
 }
 
@@ -448,18 +406,14 @@ ProRequest revocations_request(std::int64_t ticket) {
 
 GetProRevocationsResponse parse_revocations(std::string_view json) {
     GetProRevocationsResponse result = {};
-    std::vector<std::string> errs;
-    auto result_obj = read_envelope(json, result, errs);
-    if (!result || !errs.empty()) {
-        if (!errs.empty())
-            set_protocol_error(result, errs.front());
+    auto result_obj = read_envelope(json, result);
+    if (!result)
         return result;
-    }
 
     // Parse payload
-    result.ticket = json_require<int64_t>(result_obj, "ticket", errs);
-    result.retry_in = std::chrono::seconds(json_require<int64_t>(result_obj, "retry_in", errs));
-    result.retain_for = std::chrono::seconds(json_require<int64_t>(result_obj, "retain_for", errs));
+    result.ticket = json_require<int64_t>(result_obj, "ticket");
+    result.retry_in = std::chrono::seconds(json_require<int64_t>(result_obj, "retry_in"));
+    result.retain_for = std::chrono::seconds(json_require<int64_t>(result_obj, "retain_for"));
 
     // Clamp values against non-sensical/catastrophic values: retry_in of very small would result in
     // excess retries, and an overly long retry (e.g. 10 years) would make the client not properly
@@ -468,32 +422,21 @@ GetProRevocationsResponse parse_revocations(std::string_view json) {
     result.retry_in = std::clamp<std::chrono::seconds>(result.retry_in, 60s, 48h);
     result.retain_for = std::clamp<std::chrono::seconds>(result.retain_for, 24h, 365 * 24h);
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", errs);
+    auto array = json_require<nlohmann::json::array_t>(result_obj, "items");
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
-        if (!it.is_object()) {
-            errs.push_back(fmt::format(
-                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
-            break;
-        }
+        if (!it.is_object())
+            throw parse_error{fmt::format(
+                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1))};
 
-        // Parse revocation item
         auto obj = it.get<nlohmann::json::object_t>();
-        auto effective_ts = json_require<int64_t>(obj, "effective_ts", errs);
-
         ProRevocationItem item = {};
-        item.effective_at = as_sys_seconds(effective_ts);
-        json_require_fixed_bytes_from_hex(obj, "revocation_tag", errs, item.revocation_tag);
-
-        // Handle parsing result
-        if (errs.size())
-            break;
+        item.effective_at = as_sys_seconds(json_require<int64_t>(obj, "effective_ts"));
+        json_require_hex(obj, "revocation_tag", item.revocation_tag);
         result.items.emplace_back(std::move(item));
     }
 
-    if (!errs.empty())
-        set_protocol_error(result, errs.front());
     return result;
 }
 
@@ -572,33 +515,29 @@ namespace {
     }
 
     // Parse one payment item object (shared by get-pro-status's `latest_payment` and
-    // get-payment-details's `items`). Appends to `errs` and returns a best-effort item on any
-    // field error; the caller checks `errs`.
-    ProPaymentItem parse_payment_item(
-            const nlohmann::json::object_t& obj, std::vector<std::string>& errs) {
-        auto status = json_require<std::string>(obj, "status", errs);
-        auto plan_code = json_require<std::string>(obj, "plan", errs);
+    // get-payment-details's `items`). Throws parse_error on any malformed field.
+    ProPaymentItem parse_payment_item(const nlohmann::json::object_t& obj) {
+        auto status = json_require<std::string>(obj, "status");
+        auto plan_code = json_require<std::string>(obj, "plan");
         auto plan = parse_plan_period(plan_code);
         if (!plan)
-            errs.push_back(
-                    fmt::format("'plan' is not a recognized billing-period code: '{}'", plan_code));
-        auto payment_provider = json_require<std::string>(obj, "payment_provider", errs);
-        auto payment_id = json_require<std::string>(obj, "payment_id", errs);
-        auto auto_renewing = json_require<bool>(obj, "auto_renewing", errs);
+            throw parse_error{
+                    fmt::format("'plan' is not a recognized billing-period code: '{}'", plan_code)};
+        auto payment_provider = json_require<std::string>(obj, "payment_provider");
+        auto payment_id = json_require<std::string>(obj, "payment_id");
+        auto auto_renewing = json_require<bool>(obj, "auto_renewing");
         // purchased_ts and revoked_ts are upstream-provider event instants: floats on the wire
         // carrying sub-second precision (kept as millisecond-precision sys_ms). All other
         // timestamps are whole-second integers.
-        auto purchased_ts = json_require_number(obj, "purchased_ts", errs);
-        auto expiry_ts = json_require<int64_t>(obj, "expiry_ts", errs);
-        auto grace_period_duration = json_require<int64_t>(obj, "grace_period_duration", errs);
-        auto platform_refund_expiry_ts =
-                json_require<int64_t>(obj, "platform_refund_expiry_ts", errs);
-        auto revoked_ts = json_require_number(obj, "revoked_ts", errs);
+        auto purchased_ts = json_require<double>(obj, "purchased_ts");
+        auto expiry_ts = json_require<int64_t>(obj, "expiry_ts");
+        auto grace_period_duration = json_require<int64_t>(obj, "grace_period_duration");
+        auto platform_refund_expiry_ts = json_require<int64_t>(obj, "platform_refund_expiry_ts");
+        auto revoked_ts = json_require<double>(obj, "revoked_ts");
 
         ProPaymentItem item = {};
         item.status = std::move(status);
-        if (plan)
-            item.plan = *plan;
+        item.plan = *plan;
         item.payment_provider = std::move(payment_provider);
         item.payment_id = std::move(payment_id);
         item.auto_renewing = auto_renewing;
@@ -636,89 +575,63 @@ ProRequest payment_details_request(
 
 ProStatusResponse parse_pro_status(std::string_view json) {
     ProStatusResponse result = {};
-    std::vector<std::string> errs;
-    auto result_obj = read_envelope(json, result, errs);
-    if (!result || !errs.empty()) {
-        if (!errs.empty())
-            set_protocol_error(result, errs.front());
+    auto result_obj = read_envelope(json, result);
+    if (!result)
         return result;
-    }
 
     // Parse payload. The account Pro status is an opaque string code ("never"/"active"/"expired");
     // an unknown value passes through unchanged (§1: enums are codes) rather than failing the
     // parse. (Wire key `user_status`, disambiguated from the envelope `status` -- spec §5.2.)
-    result.user_status = json_require<std::string>(result_obj, "user_status", errs);
-
-    result.auto_renewing = json_require<bool>(result_obj, "auto_renewing", errs);
-
+    result.user_status = json_require<std::string>(result_obj, "user_status");
+    result.auto_renewing = json_require<bool>(result_obj, "auto_renewing");
     result.expiry_at = std::chrono::sys_seconds(
-            std::chrono::seconds(json_require<int64_t>(result_obj, "expiry_ts", errs)));
+            std::chrono::seconds(json_require<int64_t>(result_obj, "expiry_ts")));
     result.grace_period_duration =
-            std::chrono::seconds(json_require<int64_t>(result_obj, "grace_period_duration", errs));
+            std::chrono::seconds(json_require<int64_t>(result_obj, "grace_period_duration"));
 
     // `latest_payment` is a single payment item, or null when the account has no payments.
-    if (auto it = result_obj.find("latest_payment"); it == result_obj.end()) {
-        errs.push_back("Key 'latest_payment' is missing");
-    } else if (it->second.is_null()) {
+    if (auto it = result_obj.find("latest_payment"); it == result_obj.end())
+        throw parse_error{"Key 'latest_payment' is missing"};
+    else if (it->second.is_null()) {
         // No payments: latest_payment stays std::nullopt.
-    } else if (it->second.is_object()) {
-        auto obj = it->second.get<nlohmann::json::object_t>();
-        auto item = parse_payment_item(obj, errs);
-        if (errs.empty())
-            result.latest_payment = std::move(item);
-    } else {
-        errs.push_back(fmt::format(
-                "Key value (latest_payment, {}) was not an object or null", it->second.dump(1)));
-    }
+    } else if (it->second.is_object())
+        result.latest_payment = parse_payment_item(it->second.get<nlohmann::json::object_t>());
+    else
+        throw parse_error{fmt::format(
+                "Key value (latest_payment, {}) was not an object or null", it->second.dump(1))};
 
-    if (!errs.empty())
-        set_protocol_error(result, errs.front());
     return result;
 }
 
 PaymentDetailsResponse parse_payment_details(std::string_view json) {
     PaymentDetailsResponse result = {};
-    std::vector<std::string> errs;
-    auto result_obj = read_envelope(json, result, errs);
-    if (!result || !errs.empty()) {
-        if (!errs.empty())
-            set_protocol_error(result, errs.front());
+    auto result_obj = read_envelope(json, result);
+    if (!result)
         return result;
-    }
 
-    result.payments_total = json_require<uint32_t>(result_obj, "payments_total", errs);
+    result.payments_total = json_require<uint32_t>(result_obj, "payments_total");
 
-    auto array = json_require<nlohmann::json::array_t>(result_obj, "items", errs);
+    auto array = json_require<nlohmann::json::array_t>(result_obj, "items");
     result.items.reserve(array.size());
     for (size_t index = 0; index < array.size(); index++) {
         const auto& it = array[index];
-        if (!it.is_object()) {
-            errs.push_back(fmt::format(
-                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1)));
-            break;
-        }
-
-        auto obj = it.get<nlohmann::json::object_t>();
-        auto item = parse_payment_item(obj, errs);
-        if (!errs.empty())
-            break;
-        result.items.emplace_back(std::move(item));
+        if (!it.is_object())
+            throw parse_error{fmt::format(
+                    "Aborting parse, 'items[{}]' was not an object: {}", index, it.dump(1))};
+        result.items.emplace_back(parse_payment_item(it.get<nlohmann::json::object_t>()));
     }
 
     // `next_cursor` is the opaque keyset cursor (§5.3), or null at end-of-data.
-    if (auto it = result_obj.find("next_cursor"); it == result_obj.end()) {
-        errs.push_back("Key 'next_cursor' is missing");
-    } else if (it->second.is_null()) {
+    if (auto it = result_obj.find("next_cursor"); it == result_obj.end())
+        throw parse_error{"Key 'next_cursor' is missing"};
+    else if (it->second.is_null()) {
         // End of data: next_cursor stays std::nullopt.
-    } else if (it->second.is_string()) {
+    } else if (it->second.is_string())
         result.next_cursor = it->second.get<std::string>();
-    } else {
-        errs.push_back(fmt::format(
-                "Key value (next_cursor, {}) was not a string or null", it->second.dump(1)));
-    }
+    else
+        throw parse_error{fmt::format(
+                "Key value (next_cursor, {}) was not a string or null", it->second.dump(1))};
 
-    if (!errs.empty())
-        set_protocol_error(result, errs.front());
     return result;
 }
 
@@ -748,6 +661,27 @@ static void fill_c_header(session_pro_backend_response_header& header, const Res
     header.status = c_response_status(cpp.status);
     header.error_code = cpp.error_code ? cpp.error_code->c_str() : nullptr;
     header.error = cpp.error ? cpp.error->c_str() : nullptr;
+}
+
+// Translate a parse_error (or any std::exception) caught at the C boundary into an
+// "invalid_response" protocol error on the C header. Heap-owns a response of concrete type `Owned`
+// (deriving from ResponseBase) to carry the diagnostic `what` so it outlives the call and is freed
+// by the response's *_free. Falls back to static strings if even that holder can't be allocated.
+template <std::derived_from<ResponseBase> Owned>
+static void set_c_protocol_error(session_pro_backend_response_header& header, const char* what) {
+    try {
+        auto owned = std::make_unique<Owned>();
+        owned->status = ResponseStatus::Error;
+        owned->error_code = std::string(invalid_response_code);
+        owned->error = what;
+        fill_c_header(header, *owned);
+        header.internal_ = owned.release();
+    } catch (...) {
+        header.internal_ = nullptr;
+        header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
+        header.error_code = C_INVALID_RESPONSE_CODE;
+        header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
+    }
 }
 
 // Project a parsed C++ item to its C view. The string members are pointers into `src` (valid while
@@ -802,13 +736,13 @@ static void c_free_response(Response* response) {
 // ProRequest and point endpoint/content_type/data into it (zero copy). Released by
 // session_pro_backend_request_free.
 static session_pro_backend_request c_own_request(ProRequest&& req) {
-    auto* owned = new ProRequest(std::move(req));
+    auto owned = std::make_unique<ProRequest>(std::move(req));
     session_pro_backend_request result = {};
-    result.internal_ = owned;
     result.endpoint = owned->endpoint.data();
     result.content_type = owned->content_type.data();
     result.data = span_u8{reinterpret_cast<uint8_t*>(owned->data.data()), owned->data.size()};
     result.success = true;
+    result.internal_ = owned.release();
     return result;
 }
 
@@ -895,8 +829,7 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
     }
 
     try {
-        auto* owned = new GenerateProProofResponse(parse_pro_proof({json, json_len}));
-        result.header.internal_ = owned;
+        auto owned = std::make_unique<GenerateProProofResponse>(parse_pro_proof({json, json_len}));
         fill_c_header(result.header, *owned);
 
         // Success and error responses fold into one path -- different fields populated.
@@ -912,12 +845,11 @@ session_pro_backend_pro_proof_response_parse(const char* json, size_t json_len) 
         std::memcpy(result.proof.sig.data, p.sig.data(), p.sig.size());
         result.account_expiry_ts =
                 owned->account_expiry ? session::epoch_seconds(*owned->account_expiry) : 0;
-    } catch (const std::exception&) {
-        delete static_cast<GenerateProProofResponse*>(result.header.internal_);
+        // All C fields aliased into *owned; hand ownership to the response (freed by *_free).
+        result.header.internal_ = owned.release();
+    } catch (const std::exception& e) {
         result = {};
-        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-        result.header.error_code = C_INVALID_RESPONSE_CODE;
-        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
+        set_c_protocol_error<GenerateProProofResponse>(result.header, e.what());
     }
     return result;
 }
@@ -933,8 +865,8 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
     }
 
     try {
-        auto* owned = new GetProRevocationsCResponse{parse_revocations({json, json_len}), {}};
-        result.header.internal_ = owned;
+        auto owned =
+                std::make_unique<GetProRevocationsCResponse>(parse_revocations({json, json_len}));
         fill_c_header(result.header, *owned);
         result.ticket = owned->ticket;
         result.retry_in = owned->retry_in.count();
@@ -945,12 +877,10 @@ session_pro_backend_get_pro_revocations_response_parse(const char* json, size_t 
             owned->item_views.push_back(to_c(src));
         result.items = owned->item_views.data();
         result.items_count = owned->item_views.size();
-    } catch (const std::exception&) {
-        delete static_cast<GetProRevocationsCResponse*>(result.header.internal_);
+        result.header.internal_ = owned.release();
+    } catch (const std::exception& e) {
         result = {};
-        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-        result.header.error_code = C_INVALID_RESPONSE_CODE;
-        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
+        set_c_protocol_error<GetProRevocationsCResponse>(result.header, e.what());
     }
     return result;
 }
@@ -967,8 +897,7 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
 
     try {
         using session::epoch_seconds;
-        auto* owned = new ProStatusResponse(parse_pro_status({json, json_len}));
-        result.header.internal_ = owned;
+        auto owned = std::make_unique<ProStatusResponse>(parse_pro_status({json, json_len}));
         fill_c_header(result.header, *owned);
 
         result.status = owned->user_status.c_str();
@@ -978,12 +907,10 @@ session_pro_backend_get_pro_status_response_parse(const char* json, size_t json_
         result.has_latest_payment = owned->latest_payment.has_value();
         if (owned->latest_payment)
             result.latest_payment = to_c(*owned->latest_payment);
-    } catch (const std::exception&) {
-        delete static_cast<ProStatusResponse*>(result.header.internal_);
+        result.header.internal_ = owned.release();
+    } catch (const std::exception& e) {
         result = {};
-        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-        result.header.error_code = C_INVALID_RESPONSE_CODE;
-        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
+        set_c_protocol_error<ProStatusResponse>(result.header, e.what());
     }
     return result;
 }
@@ -999,8 +926,8 @@ session_pro_backend_get_payment_details_response_parse(const char* json, size_t 
     }
 
     try {
-        auto* owned = new GetPaymentDetailsCResponse{parse_payment_details({json, json_len}), {}};
-        result.header.internal_ = owned;
+        auto owned = std::make_unique<GetPaymentDetailsCResponse>(
+                parse_payment_details({json, json_len}));
         fill_c_header(result.header, *owned);
 
         result.payments_total = owned->payments_total;
@@ -1011,12 +938,10 @@ session_pro_backend_get_payment_details_response_parse(const char* json, size_t 
             owned->item_views.push_back(to_c(src));
         result.items = owned->item_views.data();
         result.items_count = owned->item_views.size();
-    } catch (const std::exception&) {
-        delete static_cast<GetPaymentDetailsCResponse*>(result.header.internal_);
+        result.header.internal_ = owned.release();
+    } catch (const std::exception& e) {
         result = {};
-        result.header.status = SESSION_PRO_BACKEND_RESPONSE_STATUS_ERROR;
-        result.header.error_code = C_INVALID_RESPONSE_CODE;
-        result.header.error = C_PARSE_ERROR_OUT_OF_MEMORY;
+        set_c_protocol_error<GetPaymentDetailsCResponse>(result.header, e.what());
     }
     return result;
 }
