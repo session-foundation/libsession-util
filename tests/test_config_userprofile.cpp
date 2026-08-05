@@ -681,9 +681,8 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     profile.set_refund_requested(std::nullopt);
     CHECK_FALSE(profile.get_refund_requested().has_value());
 
-    // Pro-prepaid ("purchase in flight") marker: insert-only-if-not-pro, 1-week read gate, and
-    // auto-clear when entitlement lands. (No proof, access expiry in the past -> not currently
-    // pro.)
+    // Pro-prepaid ("purchase in flight") marker: insert-only-if-no-credential, 1-week read gate,
+    // and auto-clear when a proof lands. (No proof, access expiry in the past -> no credential.)
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
 
     auto prepaid_at = now - 1h;
@@ -694,22 +693,38 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     profile.set_pro_prepaid(now - std::chrono::weeks{2});
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
 
-    // Confirming a live access expiry clears the marker (entitlement arrived).
+    // A live access expiry alone does NOT clear the marker. Entitlement and credential are
+    // independent: the backend can report an account entitled while no device has ever minted a
+    // proof (a server-side grant, or a store subscription recovered without a purchase flow), and
+    // that is the state the acquire loop exists to resolve. Clearing on E alone stopped acquisition
+    // before it started, on every status refresh.
     profile.set_pro_prepaid(prepaid_at);
     REQUIRE(profile.get_pro_prepaid().has_value());
     profile.set_pro_access_expiry(now + 1h);
-    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+    CHECK(profile.get_pro_prepaid() == prepaid_at);
 
-    // While pro (live access expiry), setting the marker is a no-op.
+    // For the same reason the marker can be SET while entitled but credential-less.
+    profile.set_pro_prepaid(std::nullopt);
+    REQUIRE_FALSE(profile.get_pro_prepaid().has_value());
     profile.set_pro_prepaid(prepaid_at);
-    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+    CHECK(profile.get_pro_prepaid() == prepaid_at);
 
-    // A landed (still-valid) proof also clears it: back to not-pro, mark pending, store a proof.
+    // A landed (still-valid) proof DOES clear it -- that, not E, is what proves the purchase
+    // resolved: back to no entitlement, mark pending, store a proof.
     profile.set_pro_access_expiry(std::nullopt);
     profile.set_pro_prepaid(prepaid_at);
     REQUIRE(profile.get_pro_prepaid().has_value());
     pro_cpp.proof.expiry_at = now + 1h;
     profile.set_pro_config(pro_cpp);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // With a live proof stored, writing a live E clears the marker too (the merge case: a proof can
+    // arrive by config sync rather than through set_pro_config, so the check is repeated there).
+    profile.set_pro_access_expiry(now + 1h);
+    CHECK_FALSE(profile.get_pro_prepaid().has_value());
+
+    // And with a credential present, the marker stays unsettable -- there is nothing to poll for.
+    profile.set_pro_prepaid(prepaid_at);
     CHECK_FALSE(profile.get_pro_prepaid().has_value());
 
     // Explicit clear via nullopt.

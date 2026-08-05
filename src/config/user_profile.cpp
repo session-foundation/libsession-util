@@ -230,11 +230,22 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
     else
         data["E"].erase();
 
-    // Confirming a live entitlement means any in-flight purchase resolved, and any long-stale
-    // refund request is moot -- opportunistically clear both (we're already writing E anyway).
+    // A live entitlement makes any long-stale refund request moot, and a live *proof* means an
+    // in-flight purchase resolved -- opportunistically clear both (we're already writing E anyway).
+    //
+    // The purchase marker is deliberately NOT cleared on a live E alone. Entitlement and credential
+    // are independent: an account can be entitled (E in the future, per the backend) while no device
+    // has ever minted a proof -- a server-side grant such as a promotional/complimentary
+    // subscription, or a store subscription recovered after an account hold, where no purchase flow
+    // runs on the device. That is exactly the state the acquire loop exists to resolve, so clearing
+    // the marker on E alone stops acquisition before it can start, on every status refresh.
+    //
+    // `set_pro_config` clears the marker when a proof lands; the check is repeated here because a
+    // proof can also arrive by config merge from another device rather than through that setter.
     if (access_expiry_ts && *access_expiry_ts > ts_now()) {
-        if (data["I"].exists())
-            data["I"].erase();
+        if (auto pro = get_pro_config(); pro && pro->proof.expiry_at > ts_now())
+            if (data["I"].exists())
+                data["I"].erase();
         if (auto* R = data["R"].integer(); R && std::chrono::sys_seconds{std::chrono::seconds{*R}} <
                                                         ts_now() - std::chrono::weeks{1})
             data["R"].erase();
@@ -281,12 +292,16 @@ void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) 
             changed = true;
         }
     } else {
-        // Only mark a purchase pending if the account isn't already entitled to Pro (a live proof
-        // or a still-future access expiry); otherwise there's nothing to poll for.
+        // Only mark a purchase pending if the account already holds a credential; otherwise there
+        // is nothing to poll for.
+        //
+        // A still-future access expiry deliberately does NOT count as "already pro" here.
+        // Entitlement and credential are independent, and "entitled with no proof" is the exact
+        // state the acquire loop exists to resolve -- a server-side grant (promotional or
+        // complimentary), or a store subscription recovered after an account hold, where no purchase
+        // flow ever runs on the device. Treating a live E as already-pro made the marker unsettable
+        // in precisely the case that needs it, leaving the account permanently unable to prove Pro.
         bool already_pro = get_pro_config().has_value();
-        if (!already_pro)
-            if (auto e = get_pro_access_expiry(); e && *e > ts_now())
-                already_pro = true;
         if (!already_pro) {
             data["I"] = epoch_seconds(*when);
             changed = true;
