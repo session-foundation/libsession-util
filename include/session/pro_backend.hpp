@@ -10,6 +10,7 @@
 #include <session/session_protocol.hpp>
 #include <session/types.hpp>
 #include <span>
+#include <stdexcept>
 #include <string>
 
 /// Helper functions to construct payloads to communicate with the Session Pro Backend. The data
@@ -60,6 +61,14 @@
 /// See the unit tests for examples of using the APIs mentioned.
 
 namespace session::pro_backend {
+
+/// Thrown by the parse_* functions when the backend's reply cannot be understood: malformed JSON, a
+/// missing or wrong-typed field, an unrecognized envelope status, or bad hex. This is distinct from
+/// a well-formed backend *failure* (envelope status "fail"/"error" carrying an error_code), which
+/// is not an error to the parser -- it is returned normally with `status`/`error_code` populated.
+struct parse_error : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
 
 /// The Session Pro Backend's Ed25519 public key: verify that a proof was issued by the backend by
 /// checking its signature against this key (see ProProof::verify_signature). This is the current
@@ -190,8 +199,9 @@ struct GenerateProProofResponse : ResponseBase {
     std::optional<std::chrono::sys_seconds> account_expiry;
 };
 
-/// Parse the reply to a generate-proof request. On failure `status` is set to an error state and
-/// `errors` is populated; on success `proof` holds the issued proof.
+/// Parse the reply to a generate-proof request. On success `proof` holds the issued proof; a
+/// well-formed backend failure is returned with `status`/`error_code` set. Throws `parse_error` if
+/// the reply is malformed.
 GenerateProProofResponse parse_pro_proof(std::string_view json);
 
 /// Request a new Session Pro proof from the backend (endpoint `generate_pro_proof`). The master key
@@ -246,8 +256,8 @@ struct GetProRevocationsResponse : ResponseBase {
     std::vector<ProRevocationItem> items;
 };
 
-/// Parse the reply to a `revocations_request`. On failure `status` is set to an error state and
-/// `errors` is populated.
+/// Parse the reply to a `revocations_request`. A well-formed backend failure is returned with
+/// `status`/`error_code` set. Throws `parse_error` if the reply is malformed.
 GetProRevocationsResponse parse_revocations(std::string_view json);
 
 /// Query a master key's Session Pro status (endpoint `get_pro_status`): the account entitlement
@@ -408,11 +418,11 @@ struct PaymentDetailsResponse : ResponseBase {
     std::optional<std::string> next_cursor;
 };
 
-/// Parse the reply to a `pro_status_request`. On failure `status` is set to an error state and
-/// `errors` is populated.
+/// Parse the reply to a `pro_status_request`. A well-formed backend failure is returned with
+/// `status`/`error_code` set. Throws `parse_error` if the reply is malformed.
 ProStatusResponse parse_pro_status(std::string_view json);
 
-/// Parse the reply to a `payment_details_request`. On failure `status` is set to an error state and
-/// `errors` is populated.
+/// Parse the reply to a `payment_details_request`. A well-formed backend failure is returned with
+/// `status`/`error_code` set. Throws `parse_error` if the reply is malformed.
 PaymentDetailsResponse parse_payment_details(std::string_view json);
 }  // namespace session::pro_backend
