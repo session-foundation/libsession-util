@@ -379,8 +379,7 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
             [this, net, sid = std::move(sid), params, x25519_pub](auto, auto swarm) {
                 if (swarm.empty()) {
                     log::debug(cat, "prefetch_pfs_keys: get_swarm returned empty swarm");
-                    if (callbacks.pfs_keys_fetched)
-                        callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
+                    _pfs_fetch_done(sid, PfsKeyFetch::failed);
                     return;
                 }
 
@@ -401,8 +400,7 @@ PfsKeyStatus Core::prefetch_pfs_keys(std::span<const std::byte, 33> session_id) 
                                         timeout ? "timed out"
                                         : body  ? *body
                                                 : "request failed");
-                                if (callbacks.pfs_keys_fetched)
-                                    callbacks.pfs_keys_fetched(sid, PfsKeyFetch::failed);
+                                _pfs_fetch_done(sid, PfsKeyFetch::failed);
                                 return;
                             }
 
@@ -521,15 +519,12 @@ void Core::_handle_pfs_response(std::span<const std::byte, 33> sid, std::string 
                     "prefetch_pfs_keys: no valid account pubkey message "
                     "found in response");
             _store_pfs_nak(sid);
-            if (callbacks.pfs_keys_fetched)
-                callbacks.pfs_keys_fetched(sid, PfsKeyFetch::not_found);
+            _pfs_fetch_done(sid, PfsKeyFetch::not_found);
             return;
         }
 
         bool changed = _store_pfs_keys(sid, *pk_x25519, *pk_mlkem768);
-        if (callbacks.pfs_keys_fetched)
-            callbacks.pfs_keys_fetched(
-                    sid, changed ? PfsKeyFetch::new_key : PfsKeyFetch::unchanged);
+        _pfs_fetch_done(sid, changed ? PfsKeyFetch::new_key : PfsKeyFetch::unchanged);
     } catch (const std::exception& e) {
         log::warning(cat, "Failed to process PFS key fetch response: {}", e.what());
     }
@@ -687,6 +682,12 @@ void Core::_do_send_dm(
     }
 }
 
+void Core::_pfs_fetch_done(std::span<const std::byte, 33> session_id, PfsKeyFetch result) {
+    if (callbacks.pfs_keys_fetched)
+        callbacks.pfs_keys_fetched(session_id, result);
+    _flush_pending_sends(session_id);
+}
+
 void Core::_flush_pending_sends(std::span<const std::byte, 33> session_id) {
     auto it = _pending_sends.begin();
     while (it != _pending_sends.end()) {
@@ -740,7 +741,7 @@ int64_t Core::send_dm(
         _do_send_dm(id, recipient_session_id, content, sent_timestamp, pro_privkey, ttl, force_v2);
     } else if (_network) {
         // No cache entry at all: need to fetch keys first.  Queue the send and initiate a
-        // prefetch.  The pfs_keys_fetched callback will flush it.
+        // prefetch; _pfs_fetch_done() releases it when the fetch settles, whatever the outcome.
         PendingSend pending;
         pending.id = id;
         std::ranges::copy(recipient_session_id, pending.recipient.begin());
@@ -756,15 +757,6 @@ int64_t Core::send_dm(
 
         if (callbacks.message_send_status)
             callbacks.message_send_status(id, MessageSendStatus::awaiting_keys);
-
-        // Wire up flushing: wrap the existing callback to also flush pending sends.
-        auto existing_cb = callbacks.pfs_keys_fetched;
-        callbacks.pfs_keys_fetched =
-                [this, existing_cb](std::span<const std::byte, 33> sid, PfsKeyFetch result) {
-                    if (existing_cb)
-                        existing_cb(sid, result);
-                    _flush_pending_sends(sid);
-                };
 
         prefetch_pfs_keys(recipient_session_id);
     } else {

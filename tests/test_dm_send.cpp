@@ -413,3 +413,83 @@ TEST_CASE("send_dm: Content overload rejects a mismatched sigTimestamp", "[core]
 
     CHECK_THROWS_AS(sender->send_dm(DUMMY_SID, content, ts), std::invalid_argument);
 }
+
+// ── Sends queued behind a PFS key fetch ─────────────────────────────────────────────────────────
+
+TEST_CASE("send_dm: a send queued behind a key fetch is released when the fetch settles",
+          "[core][send_dm]") {
+    std::vector<MessageSendStatus> statuses;
+    std::vector<PfsKeyFetch> fetches;
+    std::vector<std::byte> captured;
+
+    callbacks cbs;
+    cbs.message_send_status = [&](int64_t, MessageSendStatus s) { statuses.push_back(s); };
+    cbs.pfs_keys_fetched = [&](std::span<const std::byte, 33>, PfsKeyFetch r) {
+        fetches.push_back(r);
+    };
+    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
+                            config::Namespace,
+                            std::vector<std::byte> payload,
+                            std::chrono::milliseconds,
+                            std::function<void(bool)> on_stored) {
+        captured = std::move(payload);
+        on_stored(true);
+    };
+
+    TempCore sender{cbs};
+    auto mock = std::make_shared<MockNetwork>();
+    sender->set_network(mock);
+
+    // Nothing cached for this recipient, so the send is queued behind a key fetch.
+    sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
+
+    REQUIRE(statuses.size() == 1);
+    CHECK(statuses[0] == MessageSendStatus::awaiting_keys);
+    CHECK(captured.empty());
+    REQUIRE(mock->sent_requests.size() == 1);
+    CHECK(mock->sent_requests[0].request.endpoint == "retrieve");
+
+    // A *failed* fetch must still release the send rather than stranding it forever.
+    mock->sent_requests[0].callback(false, true, 0, {}, std::nullopt);
+
+    REQUIRE(fetches.size() == 1);
+    CHECK(fetches[0] == PfsKeyFetch::failed);
+    CHECK(!captured.empty());
+    REQUIRE(statuses.size() >= 2);
+    CHECK(statuses.back() == MessageSendStatus::success);
+}
+
+TEST_CASE("send_dm: every send queued for one recipient is released by a single fetch",
+          "[core][send_dm]") {
+    std::vector<PfsKeyFetch> fetches;
+    int stored = 0;
+
+    callbacks cbs;
+    cbs.pfs_keys_fetched = [&](std::span<const std::byte, 33>, PfsKeyFetch r) {
+        fetches.push_back(r);
+    };
+    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
+                            config::Namespace,
+                            std::vector<std::byte>,
+                            std::chrono::milliseconds,
+                            std::function<void(bool)> on_stored) {
+        stored++;
+        on_stored(true);
+    };
+
+    TempCore sender{cbs};
+    auto mock = std::make_shared<MockNetwork>();
+    sender->set_network(mock);
+
+    for (int i = 0; i < 3; i++)
+        sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
+
+    CHECK(stored == 0);
+    REQUIRE(!mock->sent_requests.empty());
+
+    // Settling one fetch drains the whole queue for that recipient.
+    mock->sent_requests[0].callback(false, true, 0, {}, std::nullopt);
+
+    CHECK(stored == 3);
+    CHECK(fetches.size() == 1);
+}

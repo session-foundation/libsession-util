@@ -254,6 +254,12 @@ class Core {
     // Drains pending sends whose PFS key fetch has completed.
     void _flush_pending_sends(std::span<const std::byte, 33> session_id);
 
+    // Called on every terminal outcome of a PFS key fetch: notifies the application and then
+    // releases any sends that were queued waiting on those keys.  All fetch completion paths must
+    // go through here rather than firing the callback directly, or queued sends for that recipient
+    // are never dispatched.
+    void _pfs_fetch_done(std::span<const std::byte, 33> session_id, PfsKeyFetch result);
+
     // Encrypts, envelopes, and dispatches a single DM.  Called from send_dm() and from
     // _flush_pending_sends() when a queued send is ready.  Fires the message_send_status
     // callback on completion.
