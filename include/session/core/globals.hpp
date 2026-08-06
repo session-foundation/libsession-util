@@ -80,6 +80,12 @@ class Globals final : detail::CoreComponent {
     void set(std::string_view key, std::string_view text);
     void set(std::string_view key, std::span<const std::byte> blob);
 
+    /// Removes a key from the globals table.
+    ///
+    /// Returns true if the key existed and was removed, false if it was not set in the first
+    /// place.  Erasing a key that was never set is not an error.
+    bool erase(std::string_view key);
+
     /// RAII accessor returned by account_seed().  Holds the underlying secure buffer open for
     /// reading while alive; the buffer becomes unreadable again when the last copy is destroyed.
     struct AccountSeedAccess {

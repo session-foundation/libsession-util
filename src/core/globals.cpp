@@ -117,6 +117,10 @@ void Globals::set(std::string_view key, std::span<const std::byte> blob) {
     conn().prepared_exec(SET_VAL, key, blob);
 }
 
+bool Globals::erase(std::string_view key) {
+    return conn().prepared_exec("DELETE FROM globals WHERE key = ?"s, key) > 0;
+}
+
 void Globals::init() {
     auto c = conn();
     SQLite::Transaction tx{c.sql};
