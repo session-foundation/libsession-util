@@ -1,4 +1,5 @@
 #include <oxenc/base64.h>
+#include <oxenc/bt_producer.h>
 #include <oxenc/endian.h>
 #include <oxenc/hex.h>
 #include <session/config/contacts.h>
@@ -1087,4 +1088,281 @@ TEST_CASE(
     pseudo_client reloaded{
             member_seed, false, group_pk.data(), std::nullopt, std::nullopt, std::nullopt, dump};
     CHECK(reloaded.keys.active_hashes().count("keyhash1b"));
+}
+
+// Recovery support: `Keys` retains the raw bytes of each active keys message so that a message
+// which has expired from the swarm can be re-stored *verbatim*.  Verbatim is the whole point — a
+// keys message carries an admin signature and junk padding derived from the group secret key, so a
+// member cannot regenerate one, but it can push back bytes it already holds.
+namespace {
+
+// Rebuilds a Keys dump with the "C" (retained message bytes) key stripped, i.e. the format written
+// before this feature existed.  Used to check an old dump still loads.
+std::vector<unsigned char> strip_retained_messages(std::span<const unsigned char> dump) {
+    // Re-emit the raw sub-encodings rather than re-serialising values, so what comes out is
+    // byte-for-byte what the old code would have written.
+    oxenc::bt_dict_consumer d{dump};
+    std::string out = "d";
+    REQUIRE(d.skip_until("A"));
+    out += "1:A";
+    out += d.consume_list_data();
+    if (d.skip_until("C"))
+        d.consume_dict_data();  // drop it
+    REQUIRE(d.skip_until("L"));
+    out += "1:L";
+    out += d.consume_list_data();
+    if (d.skip_until("P")) {
+        out += "1:P";
+        out += d.consume_dict_data();
+    }
+    out += "e";
+    return session::to_vector(out);
+}
+
+}  // namespace
+
+TEST_CASE("Group Keys - retained message bytes", "[config][groups][keys][recovery]") {
+
+    const std::vector<unsigned char> group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> member_seed =
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes;
+    const std::vector<unsigned char> member2_seed =
+            "00011122435111155566677788811263446552465222efff0123456789abcdef"_hexbytes;
+
+    std::array<unsigned char, 32> group_pk;
+    std::array<unsigned char, 64> group_sk;
+    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+
+    pseudo_client admin{admin_seed, true, group_pk.data(), group_sk.data()};
+    pseudo_client member{member_seed, false, group_pk.data(), std::nullopt};
+    pseudo_client member2{member2_seed, false, group_pk.data(), std::nullopt};
+
+    // Put the admin and member1 in the group, then rekey so member1 can actually read the message.
+    for (const auto* c : {&admin, &member}) {
+        auto m = admin.members.get_or_construct(c->session_id);
+        m.admin = (c == &admin);
+        admin.members.set(m);
+    }
+    auto rekey1 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+
+    constexpr int64_t t0 = 1'700'000'000'000;
+
+    // The admin has to load its own rekey back to confirm it; until it does, the key is only
+    // pending and the generation doesn't advance.
+    REQUIRE(admin.keys.load_key_message("keyhash1", rekey1, t0, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message("keyhash1", rekey1, t0, member.info, member.members));
+
+    SECTION("bytes are retained verbatim, and survive a dump/reload") {
+        auto held = member.keys.active_key_messages();
+        REQUIRE(held.size() == 1);
+        REQUIRE(held.count("keyhash1"));
+        CHECK(to_hex(session::to_vector(held.at("keyhash1"))) == to_hex(rekey1));
+
+        // Every hash we advertise for renewal has bytes behind it.
+        CHECK(as_set(member.keys.active_hashes()) == std::set<std::string>{{"keyhash1"s}});
+
+        auto dump = member.keys.dump();
+        pseudo_client reloaded{
+                member_seed,
+                false,
+                group_pk.data(),
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                dump};
+
+        auto held2 = reloaded.keys.active_key_messages();
+        REQUIRE(held2.size() == 1);
+        REQUIRE(held2.count("keyhash1"));
+        CHECK(to_hex(session::to_vector(held2.at("keyhash1"))) == to_hex(rekey1));
+    }
+
+    SECTION("a supplemental is retained alongside the full message of the same generation") {
+        // This is why storage is keyed by hash rather than generation: one generation carries the
+        // full rekey plus every supplemental issued against it, and a member that receives only
+        // the supplemental does not get the key.
+        auto supp = admin.keys.key_supplement(member2.session_id);
+        // False here just means "no key in it for us" -- it is addressed to member2.  We still
+        // retain it, which is the point: this is the path where a message is recorded against the
+        // generation without contributing a key, and a member who receives only the supplemental
+        // needs the full message too.
+        CHECK_FALSE(member.keys.load_key_message(
+                "keyhash2", supp, t0 + 1000, member.info, member.members));
+
+        auto held = member.keys.active_key_messages();
+        REQUIRE(held.size() == 2);
+        REQUIRE(held.count("keyhash1"));
+        REQUIRE(held.count("keyhash2"));
+        CHECK(to_hex(session::to_vector(held.at("keyhash1"))) == to_hex(rekey1));
+        CHECK(to_hex(session::to_vector(held.at("keyhash2"))) == to_hex(supp));
+
+        // Both belong to the same generation, and both are advertised for renewal.
+        CHECK(as_set(member.keys.active_hashes()) ==
+              std::set<std::string>{{"keyhash1"s, "keyhash2"s}});
+
+        // ...and both survive a dump/reload, which is what recovery after a restart depends on.
+        auto dump = member.keys.dump();
+        pseudo_client reloaded{
+                member_seed,
+                false,
+                group_pk.data(),
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                dump};
+        auto held2 = reloaded.keys.active_key_messages();
+        REQUIRE(held2.size() == 2);
+        CHECK(to_hex(session::to_vector(held2.at("keyhash1"))) == to_hex(rekey1));
+        CHECK(to_hex(session::to_vector(held2.at("keyhash2"))) == to_hex(supp));
+    }
+
+    SECTION("pruning: bytes are dropped when their generation expires") {
+        // The generation-erase branch of remove_expired().  Expiry is driven by the swarm-provided
+        // message timestamps, not the system clock, so we just hand it messages far enough apart.
+        auto rekey2 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+        REQUIRE(admin.keys.load_key_message(
+                "keyhash2", rekey2, t0 + 1000, admin.info, admin.members));
+        REQUIRE(member.keys.load_key_message(
+                "keyhash2", rekey2, t0 + 1000, member.info, member.members));
+        CHECK(member.keys.active_key_messages().size() == 2);
+
+        // A third generation, more than KEY_EXPIRY (60d) after the second, retires the first.
+        constexpr int64_t past_expiry = t0 + 1000 + 61 * 24 * 60 * 60 * 1000LL;
+        auto rekey3 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+        REQUIRE(admin.keys.load_key_message(
+                "keyhash3", rekey3, past_expiry, admin.info, admin.members));
+        REQUIRE(member.keys.load_key_message(
+                "keyhash3", rekey3, past_expiry, member.info, member.members));
+
+        auto held = member.keys.active_key_messages();
+        CHECK_FALSE(held.count("keyhash1"));
+
+        // The invariant that bounds this cache: it holds exactly the hashes we still advertise.
+        std::set<std::string> held_hashes;
+        for (const auto& [h, _] : held)
+            held_hashes.insert(h);
+        CHECK(held_hashes == as_set(member.keys.active_hashes()));
+
+        // And the shrink is real on disk, not just in memory.
+        auto dump = member.keys.dump();
+        pseudo_client reloaded{
+                member_seed,
+                false,
+                group_pk.data(),
+                std::nullopt,
+                std::nullopt,
+                std::nullopt,
+                dump};
+        CHECK_FALSE(reloaded.keys.active_key_messages().count("keyhash1"));
+    }
+
+    SECTION("pruning: bytes are dropped when we hold no keys at all") {
+        // The other branch of remove_expired(): `keys_` empty means we aren't keeping any of the
+        // group's history, so active_msgs_ is cleared outright.  member2 was never given the keys,
+        // so it reaches this by loading a supplemental addressed to somebody else.
+        auto supp = admin.keys.key_supplement(member.session_id);
+
+        REQUIRE(member2.keys.size() == 0);
+        CHECK_FALSE(member2.keys.load_key_message(
+                "keyhash9", supp, t0 + 1000, member2.info, member2.members));
+
+        CHECK(member2.keys.active_hashes().empty());
+        CHECK(member2.keys.active_key_messages().empty());
+    }
+
+    SECTION("dump compatibility, both directions") {
+        auto supp = admin.keys.key_supplement(member2.session_id);
+        // False here just means "no key in it for us" -- it is addressed to member2.  We still
+        // retain it, which is the point: this is the path where a message is recorded against the
+        // generation without contributing a key, and a member who receives only the supplemental
+        // needs the full message too.
+        CHECK_FALSE(member.keys.load_key_message(
+                "keyhash2", supp, t0 + 1000, member.info, member.members));
+        auto dump = member.keys.dump();
+
+        SECTION("an old dump loads under new code") {
+            auto old_dump = strip_retained_messages(dump);
+            pseudo_client reloaded{
+                    member_seed,
+                    false,
+                    group_pk.data(),
+                    std::nullopt,
+                    std::nullopt,
+                    std::nullopt,
+                    old_dump};
+
+            // The hashes still load; we simply have no bytes for them, which is exactly the
+            // position of every group that predates this feature.
+            CHECK(as_set(reloaded.keys.active_hashes()) ==
+                  std::set<std::string>{{"keyhash1"s, "keyhash2"s}});
+            CHECK(reloaded.keys.active_key_messages().empty());
+
+            // Still fully functional: it can decrypt with the keys it loaded.
+            CHECK(reloaded.keys.size() == member.keys.size());
+        }
+
+        SECTION("a new dump loads under old code") {
+            // Old code reads with skip_until over "A", "L", "P" and never asks for "C", so the
+            // unknown key is skipped.  Parsing the new dump the way the old code does must still
+            // yield the same "A" and "L".
+            oxenc::bt_dict_consumer d{dump};
+            REQUIRE(d.skip_until("A"));
+            auto active = d.consume_list_consumer();
+            std::set<std::string> hashes;
+            while (!active.is_finished()) {
+                auto lst = active.consume_list_consumer();
+                lst.consume_integer<int64_t>();  // generation
+                while (!lst.is_finished())
+                    hashes.insert(lst.consume_string());
+            }
+            CHECK(hashes == std::set<std::string>{{"keyhash1"s, "keyhash2"s}});
+
+            // "C" sorts between "A" and "L", so a consumer that skips straight to "L" must still
+            // find it -- this is the assertion that would fail if the new key were misplaced.
+            REQUIRE(d.skip_until("L"));
+            auto keys = d.consume_list_consumer();
+            CHECK_FALSE(keys.is_finished());
+        }
+    }
+
+    SECTION("C API") {
+        auto dump = member.keys.dump();
+        config_group_keys* conf;
+        config_object* info_conf;
+        config_object* mem_conf;
+        char err[256];
+        REQUIRE(groups_info_init(&info_conf, group_pk.data(), nullptr, nullptr, 0, err) == 0);
+        REQUIRE(groups_members_init(&mem_conf, group_pk.data(), nullptr, nullptr, 0, err) == 0);
+
+        auto member_sk = sk_from_seed(member_seed);
+        REQUIRE(groups_keys_init(
+                        &conf,
+                        member_sk.data(),
+                        group_pk.data(),
+                        nullptr,
+                        info_conf,
+                        mem_conf,
+                        dump.data(),
+                        dump.size(),
+                        err) == 0);
+
+        const unsigned char* data = nullptr;
+        size_t datalen = 0;
+        CHECK(groups_keys_active_message(conf, "keyhash1", &data, &datalen));
+        REQUIRE(data);
+        CHECK(to_hex(std::vector<unsigned char>{data, data + datalen}) == to_hex(rekey1));
+
+        // A hash we don't hold bytes for is a plain "no", not an error.
+        const unsigned char* missing = nullptr;
+        size_t missinglen = 0;
+        CHECK_FALSE(groups_keys_active_message(conf, "nosuchhash", &missing, &missinglen));
+        CHECK(missing == nullptr);
+
+        groups_keys_free(conf);
+        config_free(info_conf);
+        config_free(mem_conf);
+    }
 }
