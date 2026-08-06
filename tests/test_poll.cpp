@@ -166,3 +166,45 @@ TEST_CASE(
         CHECK(p["last_hash"] == "xyz");
     }
 }
+
+TEST_CASE("Poll: the sync cursor advances only after the batch is handled", "[core][poll]") {
+    auto mock_net = std::make_shared<MockNetwork>();
+    mock_net->current_node.remote_pubkey[0] = std::byte{0x01};
+
+    core::Core* core_ptr = nullptr;
+    std::optional<std::string> hash_during_callback;
+    bool called = false;
+
+    // Observe the stored cursor from inside the handler.  If it has already advanced by the time
+    // the batch is being handled, then a handler that fails -- or a crash at that moment -- loses
+    // the batch permanently, because the swarm filters on last_hash.
+    core::callbacks cbs;
+    cbs.device_link_request =
+            [&](int, const core::device::Info&, std::span<const std::string_view>) {
+                called = true;
+                hash_during_callback = TestHelper::namespace_last_hash(
+                        *core_ptr, 21, mock_net->current_node.remote_pubkey);
+            };
+
+    TempCore core{cbs};
+    core_ptr = &*core;
+    core->set_network(mock_net);
+
+    cleared_b32 seed_bytes;
+    {
+        auto seed_acc = core->globals.account_seed();
+        std::ranges::copy(std::as_bytes(seed_acc.seed()), seed_bytes.begin());
+    }
+    TempCore linker{core::predefined_seed{std::span<const std::byte, 32>{seed_bytes}}};
+    auto outer_msg = linker->devices.build_link_request().message;
+
+    TestHelper::poll(*core);
+    REQUIRE(mock_net->sent_requests.size() == 1);
+    mock_net->sent_requests[0].callback(
+            true, false, 200, {}, make_response(21, outer_msg, "hash1").dump());
+
+    REQUIRE(called);
+    CHECK(!hash_during_callback);
+    CHECK(TestHelper::namespace_last_hash(*core, 21, mock_net->current_node.remote_pubkey) ==
+          "hash1");
+}

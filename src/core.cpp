@@ -289,6 +289,12 @@ void Core::_handle_poll_response(
             }
 
             if (!swarm_messages.empty()) {
+                receive_messages(swarm_messages, ns, true);
+
+                // Only advance the cursor once the batch has been handled: the swarm filters on
+                // last_hash, so advancing past messages that threw would drop them permanently.
+                // Handling then dying before this point re-delivers the batch instead, so message
+                // handlers must tolerate seeing a message twice.
                 if (!newest_hash.empty())
                     conn.prepared_exec(
                             R"(
@@ -298,7 +304,6 @@ ON CONFLICT(namespace, sn_pubkey) DO UPDATE SET last_hash = excluded.last_hash
                             ns_val,
                             sn_pubkey,
                             newest_hash);
-                receive_messages(swarm_messages, ns, true);
             }
         }
     } catch (const std::exception& e) {
