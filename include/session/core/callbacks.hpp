@@ -1,5 +1,4 @@
 #pragma once
-#include <array>
 #include <chrono>
 #include <functional>
 #include <optional>

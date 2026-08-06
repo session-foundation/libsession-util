@@ -135,11 +135,13 @@ target_link_libraries(
     core
     PUBLIC
     crypto
+    # core.hpp holds a sqlite::Database by value and takes DatabaseOptions in its constructor, so
+    # consumers need the SQLiteCpp headers.
+    session::SQLite
     PRIVATE
     config
     sessiondep::libsodium
     nlohmann_json::nlohmann_json
-    session::SQLite
     mlkem_native::mlkem768
     oxen::quic
 )

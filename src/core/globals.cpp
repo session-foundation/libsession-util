@@ -154,6 +154,8 @@ void Globals::init() {
         set("_seed", rw.buf.first(32));
     }
 
+    tx.commit();
+
     log::info(cat, "Initialized with Session ID: {}", _session_id_hex);
 }
 
