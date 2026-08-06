@@ -241,6 +241,17 @@ void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> 
     }
 }
 
+bool UserProfile::get_pro_auto_renewing() const {
+    return data["A"].integer_or(0) != 0;
+}
+
+void UserProfile::set_pro_auto_renewing(bool auto_renewing) {
+    // Presence-only: store 1 when auto-renewing, erase otherwise (absent == terminal/unknown). No
+    // t/T bump -- this is backend-derived pro state (like E/I/R), not a user-initiated profile
+    // edit.
+    set_nonzero_int(data["A"], auto_renewing);
+}
+
 std::optional<std::chrono::sys_seconds> UserProfile::get_refund_requested() const {
     if (auto* R = data["R"].integer()) {
         std::chrono::sys_seconds when{std::chrono::seconds{*R}};
@@ -539,6 +550,14 @@ LIBSESSION_C_API void user_profile_set_pro_access_expiry(
         unbox<UserProfile>(conf)->set_pro_access_expiry(std::nullopt);
     else
         unbox<UserProfile>(conf)->set_pro_access_expiry(as_sys_seconds(access_expiry_ts));
+}
+
+LIBSESSION_C_API int user_profile_get_pro_auto_renewing(const config_object* conf) {
+    return unbox<UserProfile>(conf)->get_pro_auto_renewing() ? 1 : 0;
+}
+
+LIBSESSION_C_API void user_profile_set_pro_auto_renewing(config_object* conf, int auto_renewing) {
+    unbox<UserProfile>(conf)->set_pro_auto_renewing(auto_renewing != 0);
 }
 
 LIBSESSION_C_API int64_t user_profile_get_refund_requested(const config_object* conf) {
