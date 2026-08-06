@@ -134,6 +134,12 @@ namespace session {
 class TestHelper;
 }
 
+// Forward declared rather than including SessionProtos.pb.h so that consumers of this header do not
+// inherit a protobuf include dependency; only the send_dm() Content overload needs the full type.
+namespace SessionProtos {
+class Content;
+}
+
 namespace session::core {
 
 using namespace std::literals;
@@ -375,6 +381,26 @@ class Core {
     int64_t send_dm(
             std::span<const std::byte, 33> recipient_session_id,
             std::span<const std::byte> content,
+            sys_ms sent_timestamp,
+            const ed25519::OptionalPrivKeySpan& pro_privkey = std::nullopt,
+            std::chrono::milliseconds ttl = 14 * 24h,
+            bool force_v2 = false);
+
+    /// Overload of send_dm() taking an unserialised Content protobuf, which is serialised and
+    /// forwarded to the span version above.  Callers using this overload need to include
+    /// <SessionProtos.pb.h> and link libsession::protos themselves.
+    ///
+    /// This overload additionally maintains the invariant that the span version only documents:
+    /// the Content's `sigTimestamp` and `sent_timestamp` must agree, because the v1 fallback path
+    /// puts `sent_timestamp` in the (unauthenticated) Envelope while the signature covers the
+    /// `sigTimestamp` inside the Content.  If `sigTimestamp` is unset it is filled in from
+    /// `sent_timestamp`; if it is set to a different value that is a caller bug and throws.
+    ///
+    /// @throws std::invalid_argument if content.sigTimestamp() is set and disagrees with
+    /// sent_timestamp.
+    int64_t send_dm(
+            std::span<const std::byte, 33> recipient_session_id,
+            const SessionProtos::Content& content,
             sys_ms sent_timestamp,
             const ed25519::OptionalPrivKeySpan& pro_privkey = std::nullopt,
             std::chrono::milliseconds ttl = 14 * 24h,

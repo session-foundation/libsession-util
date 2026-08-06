@@ -1,3 +1,4 @@
+#include <SessionProtos.pb.h>
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -773,6 +774,39 @@ int64_t Core::send_dm(
     }
 
     return id;
+}
+
+int64_t Core::send_dm(
+        std::span<const std::byte, 33> recipient_session_id,
+        const SessionProtos::Content& content,
+        sys_ms sent_timestamp,
+        const ed25519::OptionalPrivKeySpan& pro_privkey,
+        std::chrono::milliseconds ttl,
+        bool force_v2) {
+
+    auto ts = static_cast<uint64_t>(sent_timestamp.time_since_epoch().count());
+
+    std::string serialized;
+    if (!content.has_sigtimestamp()) {
+        auto stamped = content;
+        stamped.set_sigtimestamp(ts);
+        serialized = stamped.SerializeAsString();
+    } else {
+        if (content.sigtimestamp() != ts)
+            throw std::invalid_argument{fmt::format(
+                    "send_dm: Content sigTimestamp ({}) disagrees with sent_timestamp ({})",
+                    content.sigtimestamp(),
+                    ts)};
+        serialized = content.SerializeAsString();
+    }
+
+    return send_dm(
+            recipient_session_id,
+            to_span<std::byte>(serialized),
+            sent_timestamp,
+            pro_privkey,
+            ttl,
+            force_v2);
 }
 
 void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {

@@ -140,6 +140,7 @@ target_link_libraries(
     session::SQLite
     PRIVATE
     config
+    libsession::protos
     sessiondep::libsodium
     nlohmann_json::nlohmann_json
     mlkem_native::mlkem768

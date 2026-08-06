@@ -1,3 +1,5 @@
+#include <SessionProtos.pb.h>
+
 #include <catch2/catch_test_macros.hpp>
 #include <session/clock.hpp>
 #include <session/config/namespaces.hpp>
@@ -322,4 +324,92 @@ TEST_CASE("send_dm: dispatches via network when send_to_swarm is not set", "[cor
 
     REQUIRE(statuses.size() == 2);
     CHECK(statuses[1] == MessageSendStatus::success);
+}
+
+// ── Content protobuf overload ───────────────────────────────────────────────────────────────────
+
+TEST_CASE("send_dm: Content overload round-trip", "[core][send_dm]") {
+    std::vector<ReceivedMessage> received;
+    std::vector<std::byte> captured_payload;
+
+    callbacks sender_cbs;
+    sender_cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
+                                   config::Namespace,
+                                   std::vector<std::byte> payload,
+                                   std::chrono::milliseconds,
+                                   std::function<void(bool)> on_stored) {
+        captured_payload = std::move(payload);
+        on_stored(true);
+    };
+
+    callbacks recip_cbs;
+    recip_cbs.message_received = [&](ReceivedMessage&& m) { received.push_back(std::move(m)); };
+
+    TempCore sender{sender_cbs};
+    TempCore recipient{recip_cbs};
+
+    recipient->devices.active_account_keys();
+    auto [x25519_pub, mlkem_pub] = TestHelper::active_account_pubkeys(*recipient);
+    auto recip_sid = sid_bytes(*recipient);
+    TestHelper::seed_pfs_cache(*sender, recip_sid, x25519_pub, mlkem_pub);
+
+    auto ts = clock_now_ms();
+    SessionProtos::Content content;
+    content.mutable_datamessage()->set_body("hello from the Content overload");
+
+    sender->send_dm(recip_sid, content, ts);
+
+    REQUIRE(!captured_payload.empty());
+    SwarmMessage sm;
+    sm.data = captured_payload;
+    sm.hash = "content_overload_hash";
+    sm.timestamp = ts;
+    sm.expiry = ts + 24h;
+
+    recipient->receive_messages({&sm, 1}, config::Namespace::Default, true);
+
+    REQUIRE(received.size() == 1);
+    SessionProtos::Content decoded;
+    REQUIRE(decoded.ParseFromArray(
+            received[0].content.data(), static_cast<int>(received[0].content.size())));
+    CHECK(decoded.datamessage().body() == "hello from the Content overload");
+
+    // An unset sigTimestamp is filled in from sent_timestamp.
+    CHECK(decoded.sigtimestamp() == static_cast<uint64_t>(ts.time_since_epoch().count()));
+}
+
+TEST_CASE("send_dm: Content overload preserves a matching sigTimestamp", "[core][send_dm]") {
+    std::vector<std::byte> captured_payload;
+
+    callbacks cbs;
+    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
+                            config::Namespace,
+                            std::vector<std::byte> payload,
+                            std::chrono::milliseconds,
+                            std::function<void(bool)> on_stored) {
+        captured_payload = std::move(payload);
+        on_stored(true);
+    };
+
+    TempCore sender{cbs};
+    TestHelper::seed_pfs_nak(*sender, DUMMY_SID);
+
+    auto ts = clock_now_ms();
+    SessionProtos::Content content;
+    content.set_sigtimestamp(static_cast<uint64_t>(ts.time_since_epoch().count()));
+    content.mutable_datamessage()->set_body("explicit timestamp");
+
+    CHECK_NOTHROW(sender->send_dm(DUMMY_SID, content, ts));
+    CHECK(!captured_payload.empty());
+}
+
+TEST_CASE("send_dm: Content overload rejects a mismatched sigTimestamp", "[core][send_dm]") {
+    TempCore sender{};
+
+    auto ts = clock_now_ms();
+    SessionProtos::Content content;
+    content.set_sigtimestamp(static_cast<uint64_t>(ts.time_since_epoch().count()) + 5000);
+    content.mutable_datamessage()->set_body("mismatched");
+
+    CHECK_THROWS_AS(sender->send_dm(DUMMY_SID, content, ts), std::invalid_argument);
 }
