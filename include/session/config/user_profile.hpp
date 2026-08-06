@@ -40,6 +40,10 @@ using namespace std::literals;
 ///     flight"), so all the account's devices poll the backend to pull the entitlement through.
 ///     Inserted only when not already pro; cleared automatically when entitlement lands; values
 ///     more than a week in the past are ignored on read.
+/// A - set to 1 when the current Session Pro subscription is auto-renewing; omitted when it is
+///     terminal (will not renew), unknown, or the account isn't Pro. Backend-derived
+///     (get_pro_status.auto_renewing) and synced across devices; the client sets it alongside `E`
+///     and clears it (sets false) when the subscription lapses.
 /// P - user profile url after re-uploading (should take precedence over `p` when `T > t`).
 /// Q - user profile decryption key (binary) after re-uploading (should take precedence over `q`
 ///     when `T > t`).
@@ -338,6 +342,28 @@ class UserProfile : public ConfigBase {
     /// - `access_expiry_ts` -- The timestamp (unix epoch seconds) that the users Session Pro access
     /// will expire, or nullopt to remove the value.
     void set_pro_access_expiry(std::optional<sys_seconds> access_expiry_ts);
+
+    /// API: user_profile/UserProfile::get_pro_auto_renewing
+    ///
+    /// Returns whether the account's current Session Pro subscription is auto-renewing (true) or
+    /// terminal/unknown (false). Backend-derived (the `auto_renewing` field on /get_pro_status);
+    /// the client sets it alongside `set_pro_access_expiry`. Only a `true` value is stored, so an
+    /// account that isn't Pro, or whose renewal status has not been learned, reads as false.
+    ///
+    /// Inputs: None
+    ///
+    /// Outputs:
+    /// - `bool` -- true iff the subscription is known to be auto-renewing.
+    bool get_pro_auto_renewing() const;
+
+    /// API: user_profile/UserProfile::set_pro_auto_renewing
+    ///
+    /// Records whether the current Session Pro subscription is auto-renewing. `true` stores the
+    /// flag; `false` erases it -- which is also how it is cleared when the subscription lapses.
+    ///
+    /// Inputs:
+    /// - `auto_renewing` -- true if the subscription auto-renews; false to clear the flag.
+    void set_pro_auto_renewing(bool auto_renewing);
 
     /// API: user_profile/UserProfile::get_refund_requested
     ///

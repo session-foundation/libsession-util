@@ -399,6 +399,32 @@ LIBSESSION_EXPORT int64_t user_profile_get_pro_access_expiry(const config_object
 LIBSESSION_EXPORT void user_profile_set_pro_access_expiry(
         config_object* conf, int64_t access_expiry_ts);
 
+/// API: user_profile/user_profile_get_pro_auto_renewing
+///
+/// Returns whether the account's current Session Pro subscription is auto-renewing. Backend-derived
+/// (the `auto_renewing` field on /get_pro_status); set alongside the access expiry.
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+///
+/// Outputs:
+/// - `int` -- 1 if the subscription is known to be auto-renewing, otherwise 0 (terminal, unknown,
+///   or not Pro).
+LIBSESSION_EXPORT int user_profile_get_pro_auto_renewing(const config_object* conf);
+
+/// API: user_profile/user_profile_set_pro_auto_renewing
+///
+/// Records whether the current Session Pro subscription is auto-renewing: nonzero stores the flag,
+/// 0 clears it (which is also how it is cleared when the subscription lapses).
+///
+/// Inputs:
+/// - `conf` -- [in] Pointer to the config object
+/// - `auto_renewing` -- [in] nonzero if auto-renewing, 0 to clear
+///
+/// Outputs:
+/// - `void`
+LIBSESSION_EXPORT void user_profile_set_pro_auto_renewing(config_object* conf, int auto_renewing);
+
 /// API: user_profile/user_profile_get_refund_requested
 ///
 /// Retrieves the timestamp at which the user requested a refund of their current Session Pro
