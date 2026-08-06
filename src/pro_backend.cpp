@@ -625,10 +625,25 @@ static session_pro_backend_pro_payment_item to_c(ProPaymentItem& src) {
 // Owns the parsed C++ response object that a C response's fields point into, plus the C item-view
 // array. `header.internal_` points here; the response's *_free deletes it. (Item-less responses own
 // the bare C++ object directly.)
+//
+// Each takes an explicit base-slice constructor rather than relying on aggregate initialization:
+// the *_parse functions build these with std::make_unique from a parsed base response, and
+// make_unique initializes with parentheses, which only aggregate-initializes under P0960R3
+// (C++20). GCC implements that, but the Apple Clang used by the macOS CI runners does not, so it
+// looks for a constructor and finds none. The defaulted default constructor is kept because
+// set_c_protocol_error<Owned> default-constructs these to carry a diagnostic.
 struct GetProRevocationsCResponse : GetProRevocationsResponse {
+    GetProRevocationsCResponse() = default;
+    explicit GetProRevocationsCResponse(GetProRevocationsResponse&& base) :
+            GetProRevocationsResponse{std::move(base)} {}
+
     std::vector<session_pro_backend_pro_revocation_item> item_views;
 };
 struct GetPaymentDetailsCResponse : PaymentDetailsResponse {
+    GetPaymentDetailsCResponse() = default;
+    explicit GetPaymentDetailsCResponse(PaymentDetailsResponse&& base) :
+            PaymentDetailsResponse{std::move(base)} {}
+
     std::vector<session_pro_backend_pro_payment_item> item_views;
 };
 
