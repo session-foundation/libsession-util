@@ -80,9 +80,7 @@ namespace {
 }  // namespace
 
 bytes<64> sign(
-        std::span<const unsigned char> curve25519_privkey, std::span<const unsigned char> msg) {
-
-    assert(curve25519_privkey.size() == 32);
+        std::span<const unsigned char, 32> curve25519_privkey, std::span<const unsigned char> msg) {
 
     bytes<32> A;
     // Convert the x25519 privkey to an ed25519 pubkey:
@@ -117,26 +115,36 @@ bytes<64> sign(
 }
 
 std::string sign(std::string_view curve25519_privkey, std::string_view msg) {
-    auto sig = sign(to_span(curve25519_privkey), to_span(msg));
+    auto privkey = to_span(curve25519_privkey);
+    if (privkey.size() != 32)
+        throw std::invalid_argument{"Invalid curve25519_privkey: expected 32 bytes"};
+
+    auto sig = sign(privkey.first<32>(), to_span(msg));
     return std::string{reinterpret_cast<const char*>(sig.data()), sig.size()};
 }
 
 bool verify(
-        std::span<const unsigned char> signature,
-        std::span<const unsigned char> curve25519_pubkey,
+        std::span<const unsigned char, 64> signature,
+        std::span<const unsigned char, 32> curve25519_pubkey,
         std::span<const unsigned char> msg) {
-    assert(signature.size() == crypto_sign_ed25519_BYTES);
-    assert(curve25519_pubkey.size() == 32);
     auto ed_pubkey = pubkey(curve25519_pubkey);
     return 0 == crypto_sign_ed25519_verify_detached(
                         signature.data(), msg.data(), msg.size(), ed_pubkey.data());
 }
 
 bool verify(std::string_view signature, std::string_view curve25519_pubkey, std::string_view msg) {
-    return verify(to_span(signature), to_span(curve25519_pubkey), to_span(msg));
+    auto sig = to_span(signature);
+    if (sig.size() != crypto_sign_ed25519_BYTES)
+        throw std::invalid_argument{"Invalid signature: expected 64 bytes"};
+
+    auto pubkey = to_span(curve25519_pubkey);
+    if (pubkey.size() != 32)
+        throw std::invalid_argument{"Invalid curve25519_pubkey: expected 32 bytes"};
+
+    return verify(sig.first<64>(), pubkey.first<32>(), to_span(msg));
 }
 
-std::array<unsigned char, 32> pubkey(std::span<const unsigned char> curve25519_pubkey) {
+std::array<unsigned char, 32> pubkey(std::span<const unsigned char, 32> curve25519_pubkey) {
     fe25519 u, y;
     crypto_internal_fe25519_frombytes(u, curve25519_pubkey.data());
     fe25519_montx_to_edy(y, u);
@@ -148,7 +156,11 @@ std::array<unsigned char, 32> pubkey(std::span<const unsigned char> curve25519_p
 }
 
 std::string pubkey(std::string_view curve25519_pubkey) {
-    auto ed_pk = pubkey(to_span(curve25519_pubkey));
+    auto x_pk = to_span(curve25519_pubkey);
+    if (x_pk.size() != 32)
+        throw std::invalid_argument{"Invalid curve25519_pubkey: expected 32 bytes"};
+
+    auto ed_pk = pubkey(x_pk.first<32>());
     return std::string{reinterpret_cast<const char*>(ed_pk.data()), ed_pk.size()};
 }
 
@@ -163,7 +175,8 @@ LIBSESSION_C_API bool session_xed25519_sign(
         size_t msg_len) {
     assert(signature != NULL);
     try {
-        auto sig = session::xed25519::sign({curve25519_privkey, 32}, {msg, msg_len});
+        auto sig = session::xed25519::sign(
+                std::span<const unsigned char, 32>{curve25519_privkey, 32}, {msg, msg_len});
         std::memcpy(signature, sig.data(), sig.size());
         return true;
     } catch (...) {
@@ -176,14 +189,18 @@ LIBSESSION_C_API bool session_xed25519_verify(
         const unsigned char* pubkey,
         const unsigned char* msg,
         size_t msg_len) {
-    return session::xed25519::verify({signature, 64}, {pubkey, 32}, {msg, msg_len});
+    return session::xed25519::verify(
+            std::span<const unsigned char, 64>{signature, 64},
+            std::span<const unsigned char, 32>{pubkey, 32},
+            {msg, msg_len});
 }
 
 LIBSESSION_C_API bool session_xed25519_pubkey(
         unsigned char* ed25519_pubkey, const unsigned char* curve25519_pubkey) {
     assert(ed25519_pubkey != NULL);
     try {
-        auto edpk = session::xed25519::pubkey({curve25519_pubkey, 32});
+        auto edpk = session::xed25519::pubkey(
+                std::span<const unsigned char, 32>{curve25519_pubkey, 32});
         std::memcpy(ed25519_pubkey, edpk.data(), edpk.size());
         return true;
     } catch (...) {
