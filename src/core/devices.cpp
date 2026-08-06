@@ -1375,7 +1375,7 @@ void Devices::parse_device_messages(std::span<const SwarmMessage> messages, bool
             }
             c.prepared_exec("UPDATE devices SET processing = NULL WHERE id = ?", item.row_id);
         } catch (const std::exception& e) {
-            log::warning(
+            log::error(
                     cat,
                     "Exception in {} device callback for device {}: {}",
                     item.processing,

@@ -613,7 +613,7 @@ void Core::_do_send_dm(
             try {
                 callbacks.message_send_status(message_id, status);
             } catch (const std::exception& e) {
-                log::warning(cat, "message_send_status callback threw: {}", e.what());
+                log::error(cat, "message_send_status callback threw: {}", e.what());
             }
         }
     };
@@ -678,7 +678,7 @@ void Core::_do_send_dm(
                                     success ? MessageSendStatus::success
                                             : MessageSendStatus::network_error);
                         } catch (const std::exception& e) {
-                            log::warning(cat, "message_send_status callback threw: {}", e.what());
+                            log::error(cat, "message_send_status callback threw: {}", e.what());
                         }
                     }
                 });
@@ -688,8 +688,14 @@ void Core::_do_send_dm(
 }
 
 void Core::_pfs_fetch_done(std::span<const std::byte, 33> session_id, PfsKeyFetch result) {
-    if (callbacks.pfs_keys_fetched)
-        callbacks.pfs_keys_fetched(session_id, result);
+    if (callbacks.pfs_keys_fetched) {
+        try {
+            callbacks.pfs_keys_fetched(session_id, result);
+        } catch (const std::exception& e) {
+            // Contained so that a misbehaving callback cannot strand the queued sends below.
+            log::error(cat, "pfs_keys_fetched callback threw: {}", e.what());
+        }
+    }
     _flush_pending_sends(session_id);
 }
 
@@ -825,7 +831,7 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
         try {
             callbacks.message_received(std::move(out));
         } catch (const std::exception& e) {
-            log::warning(cat, "message_received callback threw: {}", e.what());
+            log::error(cat, "message_received callback threw: {}", e.what());
         }
     };
 
@@ -835,7 +841,7 @@ void Core::_handle_direct_messages(std::span<const SwarmMessage> messages) {
         try {
             callbacks.message_decrypt_failed(msg, reason);
         } catch (const std::exception& e) {
-            log::warning(cat, "message_decrypt_failed callback threw: {}", e.what());
+            log::error(cat, "message_decrypt_failed callback threw: {}", e.what());
         }
     };
 

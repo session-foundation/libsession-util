@@ -493,3 +493,33 @@ TEST_CASE("send_dm: every send queued for one recipient is released by a single 
     CHECK(stored == 3);
     CHECK(fetches.size() == 1);
 }
+
+TEST_CASE("send_dm: a throwing pfs_keys_fetched callback does not strand queued sends",
+          "[core][send_dm]") {
+    int stored = 0;
+
+    callbacks cbs;
+    // Callbacks are not permitted to throw, but a buggy one must not take the queued sends with
+    // it: the flush happens regardless.
+    cbs.pfs_keys_fetched = [](std::span<const std::byte, 33>, PfsKeyFetch) {
+        throw std::runtime_error{"buggy application callback"};
+    };
+    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
+                            config::Namespace,
+                            std::vector<std::byte>,
+                            std::chrono::milliseconds,
+                            std::function<void(bool)> on_stored) {
+        stored++;
+        on_stored(true);
+    };
+
+    TempCore sender{cbs};
+    auto mock = std::make_shared<MockNetwork>();
+    sender->set_network(mock);
+
+    sender->send_dm(DUMMY_SID, content_bytes(), clock_now_ms());
+    REQUIRE(!mock->sent_requests.empty());
+
+    CHECK_NOTHROW(mock->sent_requests[0].callback(false, true, 0, {}, std::nullopt));
+    CHECK(stored == 1);
+}
