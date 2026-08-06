@@ -13,6 +13,7 @@
 #include "core/devices.hpp"
 #include "core/globals.hpp"
 #include "core/pro.hpp"
+#include "core/schema/schema_registry.hpp"
 #include "session/network/key_types.hpp"
 
 /// The "Core" class is intended to be used by a Session account instance to hold account state.  It
@@ -174,13 +175,41 @@ struct predefined_seed {
             std::span<const std::string_view> words, std::string_view lang_name = "English");
 };
 
+/// Additional database migrations to apply during Core construction, on behalf of a layer built on
+/// top of Core (such as a Client holding conversations and message history in the same database).
+///
+/// May be passed more than once, and each set is applied in the order given, after all of Core's
+/// own migrations.  Two consequences of that ordering:
+///
+/// - Extension migrations may depend on Core's tables; Core's may never depend on an extension's.
+/// - A Core migration added later runs *after* an extension's on an already-populated database,
+///   but before it on a fresh one.  Only the rule above makes both orders safe.
+///
+/// Extension migrations run from apply_migrations(), i.e. before any Core component's init() has
+/// run: the Core they are handed is constructed but not yet initialised, so (for example) the
+/// account seed is not loaded and globals::session_id() is unavailable.  The layer that supplied
+/// them does not exist at all yet.
+struct schema_extension {
+    /// Distinguishes these migrations from Core's and from other extensions' in the
+    /// migrations_applied table.  Must be non-empty, must not contain ':', and must never change
+    /// once released: it forms part of the recorded identity of an applied migration, so changing
+    /// it re-runs the entire set.
+    std::string_view owner;
+
+    /// The migrations themselves.  Not copied, but only referenced while the Core constructor
+    /// runs, so this need only outlive construction.
+    std::span<const schema::Migration> migrations;
+};
+
 /// Concept satisfied by any type usable as a Core constructor option: a sqlite database option
-/// (encryption, behaviour), or a Core-specific option tag (predefined_seed, callbacks).  All
-/// options can be passed in any order after the db_path positional argument.
+/// (encryption, behaviour), or a Core-specific option tag (predefined_seed, callbacks,
+/// schema_extension).  All options can be passed in any order after the db_path positional
+/// argument.
 template <typename T>
 concept CoreOption = sqlite::DatabaseOption<std::remove_cvref_t<T>> ||
                      std::same_as<std::remove_cvref_t<T>, predefined_seed> ||
-                     std::same_as<std::remove_cvref_t<T>, callbacks>;
+                     std::same_as<std::remove_cvref_t<T>, callbacks> ||
+                     std::same_as<std::remove_cvref_t<T>, schema_extension>;
 
 class Core {
     friend class session::TestHelper;  // for unit tests
@@ -202,6 +231,10 @@ class Core {
     // Called during the constructor: the database is opened and all members are constructed, but
     // `init()` hasn't called called yet.
     void apply_migrations();
+
+    // Extra migration sets supplied via schema_extension options, in the order given.  Cleared once
+    // applied, so that the spans they hold are not retained beyond construction.
+    std::vector<schema_extension> _schema_extensions;
 
     std::list<detail::CoreComponent*> _comp_init;
     void register_comp_init(detail::CoreComponent* c);
@@ -303,6 +336,20 @@ class Core {
         }
     }
 
+    // Collects every option of type T from a pack, in the order given.  Unlike _maybe_instance
+    // this is for options that may meaningfully be repeated.
+    template <typename T, typename... Opts>
+    static std::vector<T> _all_instances(Opts&&... opts) {
+        std::vector<T> found;
+        (
+                [&]<typename Opt>(Opt&& o) {
+                    if constexpr (std::same_as<std::remove_cvref_t<Opt>, T>)
+                        found.push_back(std::forward<Opt>(o));
+                }(std::forward<Opts>(opts)),
+                ...);
+        return found;
+    }
+
     // Constructs a sqlite::Database from the subset of opts that satisfy sqlite::DatabaseOption.
     template <CoreOption... Opts>
     static sqlite::Database _make_db(std::filesystem::path path, Opts&&... opts) {
@@ -328,6 +375,7 @@ class Core {
             callbacks{_maybe_instance<core::callbacks>(std::forward<Opts>(opts)...)
                               .value_or(core::callbacks{})},
             db{_make_db(std::move(db_path), std::forward<Opts>(opts)...)} {
+        _schema_extensions = _all_instances<schema_extension>(std::forward<Opts>(opts)...);
         if (auto s = _maybe_instance<predefined_seed>(std::forward<Opts>(opts)...))
             globals._predefined_seed = std::move(s->bytes);
         init();

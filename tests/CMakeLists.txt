@@ -7,6 +7,7 @@ endif()
 set(LIB_SESSION_UTESTS_SOURCES
     test_core_devices.cpp
     test_core_globals.cpp
+    test_core_schema.cpp
     test_dm_receive.cpp
     test_dm_send.cpp
     test_attachment_encrypt.cpp

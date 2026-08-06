@@ -980,26 +980,51 @@ CREATE TABLE IF NOT EXISTS migrations_applied (
     }
 
     log::debug(cat, "Checking schema migrations");
-    for (const auto& [name, apply] : schema::MIGRATIONS) {
-        if (applied.count(name)) {
-            log::debug(cat, "Schema migration {} already applied", name);
-            continue;
+
+    // Core's own migrations record their bare name; an extension's are recorded as "owner:name" so
+    // that two sets cannot collide.  A collision would not error, it would silently mark the second
+    // migration as already applied.  Core's names deliberately stay unprefixed: prefixing them now
+    // would re-run every migration on every existing database.
+    auto apply_set = [&](std::string_view owner, std::span<const schema::Migration> migrations) {
+        for (const auto& [name, apply] : migrations) {
+            auto key = owner.empty() ? name : "{}:{}"_format(owner, name);
+            if (applied.count(key)) {
+                log::debug(cat, "Schema migration {} already applied", key);
+                continue;
+            }
+
+            try {
+                log::info(cat, "Applying database schema migration {}", key);
+
+                SQLite::Transaction tx{conn.sql};
+
+                apply(conn, *this);
+                conn.prepared_exec("INSERT INTO migrations_applied (name) VALUES (?)", key);
+
+                tx.commit();
+            } catch (const std::exception& e) {
+                log::critical(cat, "Database schema migration '{}' failed: {}", key, e.what());
+                throw;
+            }
         }
+    };
 
-        try {
-            log::info(cat, "Applying database schema migration {}", name);
+    apply_set("", schema::MIGRATIONS);
 
-            SQLite::Transaction tx{conn.sql};
-
-            apply(conn, *this);
-            conn.prepared_exec("INSERT INTO migrations_applied (name) VALUES (?)", name);
-
-            tx.commit();
-        } catch (const std::exception& e) {
-            log::critical(cat, "Database schema migration '{}' failed: {}", name, e.what());
-            throw;
-        }
+    std::unordered_set<std::string_view> owners;
+    for (const auto& ext : _schema_extensions) {
+        if (ext.owner.empty() || ext.owner.find(':') != std::string_view::npos)
+            throw std::invalid_argument{
+                    "schema_extension owner must be non-empty and must not contain ':' (got '{}')"_format(
+                            ext.owner)};
+        if (!owners.insert(ext.owner).second)
+            throw std::invalid_argument{
+                    "duplicate schema_extension owner '{}': migration names would collide"_format(
+                            ext.owner)};
+        apply_set(ext.owner, ext.migrations);
     }
+    _schema_extensions.clear();
+
     log::debug(cat, "All schema migrations are applied");
 }
 

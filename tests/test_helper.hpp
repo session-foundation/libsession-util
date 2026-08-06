@@ -87,6 +87,16 @@ class TestHelper {
   public:
     static void poll(core::Core& core) { core._poll(); }
 
+    static sqlite::Connection db_conn(core::Core& core) { return core.db.conn(); }
+
+    // Returns whether the given migration name is recorded as applied.
+    static bool migration_applied(core::Core& core, std::string_view name) {
+        return core.db.conn()
+                .prepared_maybe_get<std::string>(
+                        "SELECT name FROM migrations_applied WHERE name = ?", name)
+                .has_value();
+    }
+
     // Returns the last_hash stored for the given namespace+sn_pubkey pair (or nullopt if none).
     static std::optional<std::string> namespace_last_hash(
             core::Core& core, int16_t ns, const network::ed25519_pubkey& sn_pubkey) {
