@@ -63,6 +63,17 @@ namespace {
         crypto_core_ed25519_scalar_reduce(S, hram.data());
     }
 
+    // The string_view overloads are the only place a caller can get the length wrong: the binary
+    // API takes fixed-extent spans, so a bad size there is a compile error.  `name` is the
+    // parameter name as it appears in the public API, for the exception message.
+    template <size_t N>
+    std::span<const std::byte, N> require_bytes(std::string_view val, std::string_view name) {
+        if (val.size() != N)
+            throw std::invalid_argument{
+                    "Invalid " + std::string{name} + ": expected " + std::to_string(N) + " bytes"};
+        return to_byte_span<N>(val.data());
+    }
+
 }  // namespace
 
 b64 sign(std::span<const std::byte, 32> curve25519_privkey, std::span<const std::byte> msg) {
@@ -103,12 +114,8 @@ b64 sign(std::span<const std::byte, 32> curve25519_privkey, std::span<const std:
 }
 
 std::string sign(std::string_view curve25519_privkey, std::string_view msg) {
-    if (curve25519_privkey.size() != 32)
-        throw std::invalid_argument{"curve25519 privkey must be 32 bytes"};
     auto sig = sign(
-            std::span<const std::byte, 32>{
-                    reinterpret_cast<const std::byte*>(curve25519_privkey.data()), 32},
-            to_span<std::byte>(msg));
+            require_bytes<32>(curve25519_privkey, "curve25519_privkey"), to_span<std::byte>(msg));
     return std::string{reinterpret_cast<const char*>(sig.data()), sig.size()};
 }
 
@@ -125,23 +132,16 @@ bool verify(
 }
 
 bool verify(std::string_view signature, std::string_view curve25519_pubkey, std::string_view msg) {
-    if (signature.size() != 64 || curve25519_pubkey.size() != 32)
-        return false;
     return verify(
-            std::span<const std::byte, 64>{
-                    reinterpret_cast<const std::byte*>(signature.data()), 64},
-            std::span<const std::byte, 32>{
-                    reinterpret_cast<const std::byte*>(curve25519_pubkey.data()), 32},
+            require_bytes<64>(signature, "signature"),
+            require_bytes<32>(curve25519_pubkey, "curve25519_pubkey"),
             to_span<std::byte>(msg));
 }
 
 // pubkey(...) is in xed25519-tweetnacl.cpp
 
 std::string pubkey(std::string_view curve25519_pubkey) {
-    if (curve25519_pubkey.size() != 32)
-        throw std::invalid_argument{"Invalid X25519 pubkey"};
-    auto ed_pk = pubkey(std::span<const std::byte, 32>{
-            reinterpret_cast<const std::byte*>(curve25519_pubkey.data()), 32});
+    auto ed_pk = pubkey(require_bytes<32>(curve25519_pubkey, "curve25519_pubkey"));
     return std::string{reinterpret_cast<const char*>(ed_pk.data()), ed_pk.size()};
 }
 

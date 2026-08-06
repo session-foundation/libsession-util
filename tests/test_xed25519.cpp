@@ -1,6 +1,7 @@
 #include <oxenc/hex.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <stdexcept>
 
 #include "session/crypto/ed25519.hpp"
 #include "session/util.hpp"
@@ -83,6 +84,26 @@ TEST_CASE("XEd25519 verification", "[xed25519][verify]") {
     // a second should give us a different signature:
     auto xed_sig1b = xed25519::sign(xsk1, msg);
     REQUIRE(oxenc::to_hex(xed_sig1b) != oxenc::to_hex(xed_sig1));
+}
+
+TEST_CASE("XEd25519 string overloads reject invalid input sizes", "[xed25519]") {
+    std::string short_key(31, '\0');
+    std::string key(32, '\0');
+    std::string long_key(33, '\0');
+    std::string short_signature(63, '\0');
+    std::string signature(64, '\0');
+    std::string long_signature(65, '\0');
+
+    CHECK_THROWS_AS(xed25519::sign(short_key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::sign(long_key, "hello world"), std::invalid_argument);
+
+    CHECK_THROWS_AS(xed25519::verify(short_signature, key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::verify(long_signature, key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::verify(signature, short_key, "hello world"), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::verify(signature, long_key, "hello world"), std::invalid_argument);
+
+    CHECK_THROWS_AS(xed25519::pubkey(short_key), std::invalid_argument);
+    CHECK_THROWS_AS(xed25519::pubkey(long_key), std::invalid_argument);
 }
 
 TEST_CASE("XEd25519 pubkey conversion (C wrapper)", "[xed25519][pubkey][c]") {

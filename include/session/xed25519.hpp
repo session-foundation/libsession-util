@@ -13,7 +13,8 @@ namespace session::xed25519 {
 /// XEd25519-signs a message given the curve25519 privkey and message.
 b64 sign(std::span<const std::byte, 32> curve25519_privkey, std::span<const std::byte> msg);
 
-/// "Softer" version that takes and returns strings of regular chars
+/// "Softer" version that takes and returns strings of regular chars.  Throws invalid_argument if
+/// the privkey is not 32 bytes.
 std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string_view msg);
 
 /// Verifies a curve25519 message allegedly signed by the given curve25519 pubkey
@@ -22,7 +23,9 @@ std::string sign(std::string_view curve25519_privkey /* 32 bytes */, std::string
         std::span<const std::byte, 32> curve25519_pubkey,
         std::span<const std::byte> msg);
 
-/// "Softer" version that takes strings of regular chars
+/// "Softer" version that takes strings of regular chars.  Throws invalid_argument if the signature
+/// is not 64 bytes or the pubkey is not 32 bytes (a wrong-sized input is a caller bug, not a failed
+/// verification, so it is not reported as a false return).
 [[nodiscard]] bool verify(
         std::string_view signature /* 64 bytes */,
         std::string_view curve25519_pubkey /* 32 bytes */,
