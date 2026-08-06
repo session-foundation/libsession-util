@@ -1037,3 +1037,54 @@ TEST_CASE("Group Keys promotion", "[config][groups][keys][promotion]") {
 
     CHECK(admin.info.get_name() == "new name");
 }
+
+TEST_CASE(
+        "Group Keys - the same key under a second message hash",
+        "[config][groups][keys][recovery]") {
+
+    // insert_key's early-return path: we already hold this key, but this is a *different* message
+    // carrying it.  Both copies want renewing, so the new hash has to be recorded -- and persisted,
+    // or it is silently lost on the next restart and that message stops being renewed.
+    const std::vector<unsigned char> group_seed =
+            "0123456789abcdeffedcba98765432100123456789abcdeffedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> admin_seed =
+            "0123456789abcdef0123456789abcdeffedcba9876543210fedcba9876543210"_hexbytes;
+    const std::vector<unsigned char> member_seed =
+            "000111222333444555666777888999aaabbbcccdddeeefff0123456789abcdef"_hexbytes;
+
+    std::array<unsigned char, 32> group_pk;
+    std::array<unsigned char, 64> group_sk;
+    crypto_sign_ed25519_seed_keypair(group_pk.data(), group_sk.data(), group_seed.data());
+
+    pseudo_client admin{admin_seed, true, group_pk.data(), group_sk.data()};
+    pseudo_client member{member_seed, false, group_pk.data(), std::nullopt};
+
+    for (const auto* c : {&admin, &member}) {
+        auto m = admin.members.get_or_construct(c->session_id);
+        m.admin = (c == &admin);
+        admin.members.set(m);
+    }
+    auto rekey1 = session::to_vector(admin.keys.rekey(admin.info, admin.members));
+
+    constexpr int64_t t0 = 1'700'000'000'000;
+    REQUIRE(admin.keys.load_key_message("keyhash1", rekey1, t0, admin.info, admin.members));
+    REQUIRE(member.keys.load_key_message("keyhash1", rekey1, t0, member.info, member.members));
+
+    member.keys.dump();  // clear needs_dump
+    REQUIRE_FALSE(member.keys.needs_dump());
+
+    CHECK(member.keys.load_key_message("keyhash1b", rekey1, t0, member.info, member.members));
+    CHECK(member.keys.active_hashes().count("keyhash1b"));
+    CHECK(member.keys.needs_dump());
+
+    // Re-loading a message we already know changes nothing, so it must not ask for a dump.
+    member.keys.dump();
+    CHECK(member.keys.load_key_message("keyhash1b", rekey1, t0, member.info, member.members));
+    CHECK_FALSE(member.keys.needs_dump());
+
+    // The second copy survives the round trip, so it is still renewable after a restart.
+    auto dump = member.keys.dump();
+    pseudo_client reloaded{
+            member_seed, false, group_pk.data(), std::nullopt, std::nullopt, std::nullopt, dump};
+    CHECK(reloaded.keys.active_hashes().count("keyhash1b"));
+}
