@@ -71,6 +71,8 @@ target_link_libraries(test_libs INTERFACE
 target_link_libraries(test_libs INTERFACE libsession::network)
 
 add_executable(testAll main.cpp ${LIB_SESSION_UTESTS_SOURCES})
+target_include_directories(testAll PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_subdirectory(schema)
 target_link_libraries(testAll PRIVATE
     test_libs
     Catch2::Catch2)

@@ -28,6 +28,7 @@ set(LIBSESSION_LIBVERSION ${PROJECT_VERSION})
 include(GNUInstallDirs)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
+include(SessionSchema)
 
 # No in-source building
 include(MacroEnsureOutOfSourceBuild)
