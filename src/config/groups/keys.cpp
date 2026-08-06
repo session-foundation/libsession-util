@@ -843,7 +843,11 @@ void Keys::insert_key(std::string_view msg_hash, key_info&& new_key) {
             });
     for (auto it = gen_begin; it != gen_end; ++it)
         if (it->key == new_key.key) {
-            active_msgs_[new_key.generation].emplace(msg_hash);
+            // We already have this key, but this may be a *different* message carrying it, in
+            // which case we want to keep renewing this copy too.  Flag a dump only when the hash
+            // is actually new, so re-loading a message we already know stays free.
+            if (active_msgs_[new_key.generation].emplace(msg_hash).second)
+                needs_dump_ = true;
             return;
         }
 
