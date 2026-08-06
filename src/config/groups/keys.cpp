@@ -87,6 +87,15 @@ std::vector<unsigned char> Keys::make_dump() const {
     }
 
     {
+        // Raw bytes of the messages named in "A", so they can be re-stored verbatim if they expire
+        // from the swarm.  `key_msgs_` is a std::map, so this comes out in the sorted order bt_dict
+        // requires.  Old dumps simply won't have this key, and old code skips it.
+        auto msgs = d.append_dict("C");
+        for (const auto& [hash, data] : key_msgs_)
+            msgs.append(hash, to_string_view(data));
+    }
+
+    {
         auto keys = d.append_list("L");
         for (auto& k : keys_) {
             auto ki = keys.append_dict();
@@ -121,6 +130,16 @@ void Keys::load_dump(std::span<const unsigned char> dump) {
         }
     } else {
         throw config_value_error{"Invalid Keys dump: `active` not found"};
+    }
+
+    // Optional: absent in dumps written before we retained message bytes, in which case we simply
+    // have hashes we cannot re-store.  Not an error.
+    if (d.skip_until("C")) {
+        auto msgs = d.consume_dict_consumer();
+        while (!msgs.is_finished()) {
+            auto [hash, data] = msgs.next_string();
+            key_msgs_.emplace(hash, to_vector(data));
+        }
     }
 
     if (d.skip_until("L")) {
@@ -176,6 +195,17 @@ void Keys::load_dump(std::span<const unsigned char> dump) {
                     std::to_string(pk.size()) + ")"};
         std::memcpy(pending_key_.data(), pk.data(), pending_key_.size());
     }
+
+    // `key_msgs_` must never outlive the hashes in `active_msgs_`; enforce that on the way in too,
+    // so a hand-written or corrupted dump can't seed an entry that nothing will ever prune.
+    prune_key_msgs();
+}
+
+void Keys::prune_key_msgs() {
+    if (key_msgs_.empty())
+        return;
+    auto keep = active_hashes();
+    std::erase_if(key_msgs_, [&](const auto& item) { return !keep.count(item.first); });
 }
 
 size_t Keys::size() const {
@@ -833,7 +863,8 @@ std::optional<std::span<const unsigned char>> Keys::pending_config() const {
     return std::span<const unsigned char>{pending_key_config_.data(), pending_key_config_.size()};
 }
 
-void Keys::insert_key(std::string_view msg_hash, key_info&& new_key) {
+void Keys::insert_key(
+        std::string_view msg_hash, std::span<const unsigned char> msg_data, key_info&& new_key) {
     // Find all keys with the same generation and see if our key is in there (that is: we are
     // deliberately ignoring timestamp so that we don't add the same key with slight timestamp
     // variations).
@@ -843,10 +874,14 @@ void Keys::insert_key(std::string_view msg_hash, key_info&& new_key) {
             });
     for (auto it = gen_begin; it != gen_end; ++it)
         if (it->key == new_key.key) {
-            // We already have this key, but this may be a *different* message carrying it, in
-            // which case we want to keep renewing this copy too.  Flag a dump only when the hash
-            // is actually new, so re-loading a message we already know stays free.
-            if (active_msgs_[new_key.generation].emplace(msg_hash).second)
+            // We already have this key, but this may be a *different* message carrying it (the
+            // same key can arrive again under another hash), in which case we want to renew and be
+            // able to re-store this copy too.  Flag a dump only when something actually changed,
+            // so re-loading a message we already know stays free.
+            bool new_hash = active_msgs_[new_key.generation].emplace(msg_hash).second;
+            bool new_bytes =
+                    key_msgs_.try_emplace(std::string{msg_hash}, to_vector(msg_data)).second;
+            if (new_hash || new_bytes)
                 needs_dump_ = true;
             return;
         }
@@ -860,6 +895,7 @@ void Keys::insert_key(std::string_view msg_hash, key_info&& new_key) {
         return;
 
     active_msgs_[new_key.generation].emplace(msg_hash);
+    key_msgs_.insert_or_assign(std::string{msg_hash}, to_vector(msg_data));
     keys_.insert(it, std::move(new_key));
     remove_expired();
     needs_dump_ = true;
@@ -1106,14 +1142,18 @@ bool Keys::load_key_message(
 
     if (!new_keys.empty()) {
         for (auto& k : new_keys)
-            insert_key(hash, std::move(k));
+            insert_key(hash, data, std::move(k));
 
         auto new_key_list = group_keys();
         members.replace_keys(new_key_list, /*dirty=*/false);
         info.replace_keys(new_key_list, /*dirty=*/false);
         return true;
     } else if (max_gen) {
+        // A valid keys message that held no key for us — a supplemental aimed at other members,
+        // typically.  Still worth retaining: it is part of the generation, and a member who gets
+        // only some of a generation's messages doesn't get the key.
         active_msgs_[*max_gen].emplace(hash);
+        key_msgs_.insert_or_assign(std::string{hash}, to_vector(data));
         remove_expired();
         needs_dump_ = true;
     }
@@ -1126,6 +1166,13 @@ std::unordered_set<std::string> Keys::active_hashes() const {
     for (const auto& [g, hash] : active_msgs_)
         hashes.insert(hash.begin(), hash.end());
     return hashes;
+}
+
+std::map<std::string, std::span<const unsigned char>> Keys::active_key_messages() const {
+    std::map<std::string, std::span<const unsigned char>> msgs;
+    for (const auto& [hash, data] : key_msgs_)
+        msgs.emplace(hash, std::span<const unsigned char>{data.data(), data.size()});
+    return msgs;
 }
 
 void Keys::remove_expired() {
@@ -1174,6 +1221,11 @@ void Keys::remove_expired() {
         // something) and so it isn't really up to us to keep them alive, since that's a history of
         // the group we apparently don't have access to.
         active_msgs_.clear();
+
+    // Retained message bytes follow the hashes exactly, for both of the above branches.  This is
+    // what bounds the size of `key_msgs_` (and hence of the dump) to the same KEY_EXPIRY window as
+    // the keys themselves; without it an expired generation's bytes would live forever on disk.
+    prune_key_msgs();
 }
 
 bool Keys::needs_rekey() const {
@@ -1468,6 +1520,21 @@ LIBSESSION_C_API bool groups_keys_load_message(
 
 LIBSESSION_C_API config_string_list* groups_keys_active_hashes(const config_group_keys* conf) {
     return make_string_list(unbox(conf).active_hashes());
+}
+
+LIBSESSION_C_API bool groups_keys_active_message(
+        const config_group_keys* conf,
+        const char* msg_hash,
+        const unsigned char** data,
+        size_t* datalen) {
+    assert(msg_hash && data && datalen);
+    auto msgs = unbox(conf).active_key_messages();
+    if (auto it = msgs.find(msg_hash); it != msgs.end()) {
+        *data = it->second.data();
+        *datalen = it->second.size();
+        return true;
+    }
+    return false;
 }
 
 LIBSESSION_C_API bool groups_keys_needs_rekey(const config_group_keys* conf) {
