@@ -301,18 +301,24 @@ void UserProfile::set_pro_prepaid(std::optional<std::chrono::sys_seconds> when) 
 
 std::optional<std::chrono::sys_seconds> UserProfile::pro_renewal_target(
         std::chrono::sys_seconds now) const {
-    auto pro = get_pro_config();
-    if (!pro) {
-        // No credential on the account at all. Only fetch if a purchase is in flight (the prepaid
-        // marker); otherwise the account simply isn't Pro. An entitled account carries its proof in
-        // config `s` (synced from whichever device obtained it), so genuinely having no proof means
-        // there's none to renew. The prepaid marker ages out via its 1-week read gate, so a
-        // purchase that never lands self-terminates the acquire loop.
+    auto pro_config = get_pro_config();
+    if (!pro_config) {
+        // No proof credential to renew, but still (re)fetch if entitlement is signalled another
+        // way:
+        //  - a purchase in flight (the prepaid marker), or
+        //  - a still-future cached access expiry: we're entitled yet hold no proof to attach. `s`
+        //    (the credential) and `E` (the access horizon) are independent config keys, so `s` can
+        //    be dropped or merge-lost while `E` still carries a live horizon.
+        // Otherwise the account simply isn't Pro. Both signals self-terminate the acquire loop: the
+        // prepaid marker ages out via its 1-week read gate; a stale-but-future `E` resolves when a
+        // fetch returns not_subscribed and the client clears `E` (which does not self-age).
         if (get_pro_prepaid())
+            return now;
+        if (auto access = get_pro_access_expiry(); access && *access > now)
             return now;
         return std::nullopt;
     }
-    auto expiry = pro->proof.expiry_at;
+    auto expiry = pro_config->proof.expiry_at;
     if (expiry <= now)
         // Expired proof: always re-check with the backend. The subscription may have auto-renewed
         // (possibly without this device's knowledge -- our cached access expiry can't be trusted to
