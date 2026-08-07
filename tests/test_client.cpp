@@ -1,0 +1,682 @@
+#include <SessionProtos.pb.h>
+
+#include <catch2/catch_test_macros.hpp>
+#include <session/client.hpp>
+#include <session/clock.hpp>
+#include <session/config/namespaces.hpp>
+#include <session/crypto/ed25519.hpp>
+#include <session/format.hpp>
+#include <session/random.hpp>
+#include <session/session_protocol.hpp>
+
+#include "test_helper.hpp"
+
+using namespace session;
+using namespace session::client;
+using namespace std::literals;
+using namespace oxenc::literals;
+
+namespace {
+
+struct SenderKeys {
+    b32 ed_pk;
+    b64 ed_sk;
+    b33 session_id;
+
+    SenderKeys() {
+        ed25519::keypair(ed_pk, ed_sk);
+        ed25519::pk_to_session_id(session_id, ed_pk);
+    }
+};
+
+/// RAII Client over a unique temporary database, mirroring TempCore.  Unlike TempCore this can
+/// close and reopen the same file, which is how the restart behaviour is exercised.
+struct TempClient {
+    std::filesystem::path path;
+    std::unique_ptr<Client> client;
+
+    template <core::CoreOption... Opts>
+    explicit TempClient(Opts&&... opts) :
+            path{std::filesystem::temp_directory_path() /
+                 fmt::format("{}.db", random::unique_id("test_client", 7))},
+            client{std::make_unique<Client>(path, std::forward<Opts>(opts)...)} {}
+
+    template <core::CoreOption... Opts>
+    void reopen(Opts&&... opts) {
+        client.reset();
+        client = std::make_unique<Client>(path, std::forward<Opts>(opts)...);
+    }
+
+    ~TempClient() {
+        client.reset();
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+    }
+
+    Client* operator->() { return client.get(); }
+    Client& operator*() { return *client; }
+};
+
+b33 own_sid(Client& c) {
+    b33 out;
+    std::ranges::copy(c.core.globals.session_id(), out.begin());
+    return out;
+}
+
+/// Builds, encrypts and delivers a v1 DM into `to` as if it had arrived from the swarm.
+void deliver(
+        Client& to,
+        const SenderKeys& from,
+        std::string_view body,
+        sys_ms ts,
+        std::string hash,
+        std::string_view display_name = "") {
+    SessionProtos::Content content;
+    content.set_sigtimestamp(static_cast<uint64_t>(ts.time_since_epoch().count()));
+    auto* data = content.mutable_datamessage();
+    data->set_body(std::string{body});
+    if (!display_name.empty())
+        data->mutable_profile()->set_displayname(std::string{display_name});
+
+    auto plaintext = content.SerializeAsString();
+    auto encoded = encode_dm_v1(
+            std::as_bytes(std::span{plaintext}), from.ed_sk, ts, own_sid(to), std::nullopt);
+
+    core::SwarmMessage sm{encoded, std::move(hash), ts, from_epoch_ms(1'000'000'000'000)};
+    to.core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+}
+
+}  // namespace
+
+// ── ConversationId ──────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("ConversationId: round-trips through its string form", "[client][convo_id]") {
+    constexpr auto sid =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    constexpr auto gid =
+            "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+
+    auto dm = ConversationId::dm(sid);
+    CHECK(dm.type() == ConversationId::Type::dm);
+    CHECK(dm.to_string() == oxenc::to_hex(sid));
+    CHECK(ConversationId::parse(dm.to_string()) == dm);
+    CHECK(std::ranges::equal(dm.session_id(), sid));
+
+    auto group = ConversationId::group(gid);
+    CHECK(group.type() == ConversationId::Type::group);
+    CHECK(ConversationId::parse(group.to_string()) == group);
+    CHECK(std::ranges::equal(group.group_id(), gid));
+
+    // Same 32-byte body, different prefix: distinct conversations.
+    CHECK(dm != group);
+
+    auto com = ConversationId::community("http://example.com", "room");
+    CHECK(com.type() == ConversationId::Type::community);
+    CHECK(com.to_string() == "community:http://example.com/room");
+    CHECK(ConversationId::parse(com.to_string()) == com);
+    auto [url, room] = com.community();
+    CHECK(url == "http://example.com");
+    CHECK(room == "room");
+}
+
+TEST_CASE("ConversationId: normalises community URLs and rooms", "[client][convo_id]") {
+    auto a = ConversationId::community("http://Example.COM/", "Room");
+    auto b = ConversationId::community("http://example.com", "room");
+    CHECK(a == b);
+
+    CHECK_THROWS_AS(ConversationId::community("", "room"), std::invalid_argument);
+    CHECK_THROWS_AS(ConversationId::community("http://x.com", ""), std::invalid_argument);
+    CHECK_THROWS_AS(ConversationId::community("http://x.com", "a/b"), std::invalid_argument);
+}
+
+TEST_CASE("ConversationId: rejects bad input and mistyped access", "[client][convo_id]") {
+    constexpr auto sid =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    constexpr auto bad_prefix =
+            "07fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+
+    CHECK_THROWS_AS(ConversationId::dm(bad_prefix), std::invalid_argument);
+    CHECK_THROWS_AS(ConversationId::group(bad_prefix), std::invalid_argument);
+
+    CHECK_THROWS_AS(ConversationId::parse(""), std::invalid_argument);
+    CHECK_THROWS_AS(ConversationId::parse("nonsense"), std::invalid_argument);
+    CHECK_THROWS_AS(ConversationId::parse(oxenc::to_hex(bad_prefix)), std::invalid_argument);
+    CHECK_THROWS_AS(ConversationId::parse("05zz"), std::invalid_argument);
+    CHECK_THROWS_AS(ConversationId::parse("community:noroom"), std::invalid_argument);
+
+    // Extracting the wrong kind is a programming error, not a parse error.
+    auto dm = ConversationId::dm(sid);
+    CHECK_THROWS_AS(dm.group_id(), std::logic_error);
+    CHECK_THROWS_AS(dm.community(), std::logic_error);
+}
+
+// ── Schema ──────────────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: applies its migrations under the client owner", "[client][schema]") {
+    TempClient c;
+
+    CHECK(TestHelper::migration_applied(c->core, "client:000_conversations"));
+    // Core's own migrations stay unprefixed.
+    CHECK(TestHelper::migration_applied(c->core, "000_globals"));
+
+    // Not Connection::table_exists(): its query in session-sqlite is missing a closing paren and
+    // throws "incomplete input" for every caller.
+    auto has_table = [&](std::string_view name) {
+        return c->core.database()
+                .conn()
+                .prepared_maybe_get<std::string>(
+                        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", name)
+                .has_value();
+    };
+    CHECK(has_table("conversations"));
+    CHECK(has_table("messages"));
+    // Client's tables live in Core's database, not a second file.
+    CHECK(has_table("globals"));
+}
+
+// ── Receiving ───────────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: a received DM creates a conversation and a message", "[client][receive]") {
+    TempClient c;
+    SenderKeys sender;
+
+    deliver(*c, sender, "hello there", from_epoch_ms(5000), "hash1", "Obi-Wan");
+
+    auto convos = c->conversations();
+    REQUIRE(convos.size() == 1);
+    CHECK(convos[0].id == ConversationId::dm(sender.session_id));
+    CHECK(convos[0].display_name == "Obi-Wan");
+    CHECK(convos[0].last_message == "hello there");
+    CHECK(convos[0].last_activity == from_epoch_ms(5000));
+    CHECK(convos[0].unread == 1);
+
+    auto msgs = c->messages(convos[0].id);
+    REQUIRE(msgs.size() == 1);
+    CHECK(msgs[0].body == "hello there");
+    CHECK_FALSE(msgs[0].outgoing);
+    CHECK(msgs[0].sender == sender.session_id);
+    CHECK(msgs[0].timestamp == from_epoch_ms(5000));
+    CHECK(msgs[0].hash == "hash1");
+    CHECK_FALSE(msgs[0].send_state.has_value());
+
+    CHECK(c->message(msgs[0].id)->body == "hello there");
+    CHECK_FALSE(c->message(msgs[0].id + 1000).has_value());
+}
+
+TEST_CASE("Client: redelivery of the same swarm hash is ignored", "[client][receive]") {
+    TempClient c;
+    SenderKeys sender;
+
+    deliver(*c, sender, "only once", from_epoch_ms(5000), "dup");
+    deliver(*c, sender, "only once", from_epoch_ms(5000), "dup");
+
+    auto convo = ConversationId::dm(sender.session_id);
+    CHECK(c->messages(convo).size() == 1);
+    CHECK(c->conversation(convo)->unread == 1);
+
+    // A genuinely different message from the same sender still lands.
+    deliver(*c, sender, "and again", from_epoch_ms(6000), "notdup");
+    CHECK(c->messages(convo).size() == 2);
+}
+
+TEST_CASE("Client: a later profile name updates the conversation", "[client][receive]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
+    CHECK(c->conversation(convo)->display_name.empty());
+    // With no name known, name_or_id() falls back to the id rather than an empty string.
+    CHECK(c->conversation(convo)->name_or_id() == convo.to_string());
+
+    deliver(*c, sender, "two", from_epoch_ms(2000), "h2", "Padmé");
+    CHECK(c->conversation(convo)->display_name == "Padmé");
+    CHECK(c->conversation(convo)->name_or_id() == "Padmé");
+
+    // A message with no profile does not erase the name we already have.
+    deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
+    CHECK(c->conversation(convo)->display_name == "Padmé");
+}
+
+TEST_CASE("Client: non-conversation content does not create a conversation", "[client][receive]") {
+    TempClient c;
+    SenderKeys sender;
+
+    auto deliver_content = [&](const SessionProtos::Content& content, std::string hash) {
+        auto plaintext = content.SerializeAsString();
+        auto encoded = encode_dm_v1(
+                std::as_bytes(std::span{plaintext}),
+                sender.ed_sk,
+                from_epoch_ms(1000),
+                own_sid(*c),
+                std::nullopt);
+        core::SwarmMessage sm{encoded, std::move(hash), from_epoch_ms(1000), from_epoch_ms(99999)};
+        c->core.receive_messages({&sm, 1}, config::Namespace::Default, true);
+    };
+
+    // A typing indicator: valid Content, but nothing that belongs in message history.
+    SessionProtos::Content typing;
+    typing.set_sigtimestamp(1000);
+    typing.mutable_typingmessage()->set_timestamp(1000);
+    typing.mutable_typingmessage()->set_action(SessionProtos::TypingMessage::STARTED);
+    deliver_content(typing, "typing");
+
+    // A DataMessage carrying only a profile update, with no body.
+    SessionProtos::Content bodyless;
+    bodyless.set_sigtimestamp(1000);
+    bodyless.mutable_datamessage()->mutable_profile()->set_displayname("Ghost");
+    deliver_content(bodyless, "bodyless");
+
+    CHECK(c->conversations().empty());
+}
+
+// ── Ordering, unread, drafts ────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: conversations are ordered by most recent activity", "[client][convos]") {
+    TempClient c;
+    SenderKeys alice, bob;
+
+    deliver(*c, alice, "first", from_epoch_ms(1000), "a1");
+    deliver(*c, bob, "second", from_epoch_ms(2000), "b1");
+
+    auto convos = c->conversations();
+    REQUIRE(convos.size() == 2);
+    CHECK(convos[0].id == ConversationId::dm(bob.session_id));
+    CHECK(convos[1].id == ConversationId::dm(alice.session_id));
+
+    // Alice speaking again moves her back to the top.
+    deliver(*c, alice, "third", from_epoch_ms(3000), "a2");
+    convos = c->conversations();
+    CHECK(convos[0].id == ConversationId::dm(alice.session_id));
+    CHECK(convos[0].last_message == "third");
+}
+
+TEST_CASE("Client: unread counting and the read watermark", "[client][unread]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
+    deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
+    deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
+    CHECK(c->conversation(convo)->unread == 3);
+
+    c->mark_read(convo, from_epoch_ms(2000));
+    CHECK(c->conversation(convo)->unread == 1);
+
+    // The watermark never moves backwards.
+    c->mark_read(convo, from_epoch_ms(1000));
+    CHECK(c->conversation(convo)->unread == 1);
+
+    c->mark_read(convo);
+    CHECK(c->conversation(convo)->unread == 0);
+
+    // A new arrival after a full read is unread again: "read everything" must not mean "read
+    // everything that will ever arrive".
+    deliver(*c, sender, "four", from_epoch_ms(4000), "h4");
+    CHECK(c->conversation(convo)->unread == 1);
+
+    // Even one that arrives late, bearing a timestamp older than what we already read to.
+    c->mark_read(convo);
+    deliver(*c, sender, "late", from_epoch_ms(3500), "h5");
+    CHECK(c->conversation(convo)->unread == 0);  // known limitation of a timestamp watermark
+
+    // Marking read on a conversation with nothing to read is a no-op, not an error.
+    auto empty = ConversationId::dm(
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b);
+    c->create_conversation(empty);
+    CHECK_NOTHROW(c->mark_read(empty));
+    CHECK(c->conversation(empty)->unread == 0);
+}
+
+TEST_CASE("Client: drafts and explicit conversation creation", "[client][convos]") {
+    TempClient c;
+    constexpr auto sid =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    auto convo = ConversationId::dm(sid);
+
+    CHECK_FALSE(c->conversation(convo).has_value());
+
+    auto created = c->create_conversation(convo);
+    CHECK(created.id == convo);
+    CHECK(created.unread == 0);
+    CHECK(created.last_message.empty());
+    CHECK(c->conversations().size() == 1);
+
+    // Creating an existing conversation is not an error and does not duplicate it.
+    c->create_conversation(convo);
+    CHECK(c->conversations().size() == 1);
+
+    c->set_draft(convo, "half a thought");
+    CHECK(c->conversation(convo)->draft == "half a thought");
+    c->set_draft(convo, "");
+    CHECK(c->conversation(convo)->draft.empty());
+}
+
+// ── Paging ──────────────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: message history pages backwards by cursor", "[client][messages]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    for (int i = 1; i <= 10; i++)
+        deliver(*c, sender, "msg{}"_format(i), from_epoch_ms(i * 1000), "h{}"_format(i));
+
+    auto page1 = c->messages(convo, 4);
+    REQUIRE(page1.size() == 4);
+    CHECK(page1[0].body == "msg10");
+    CHECK(page1[3].body == "msg7");
+
+    auto page2 = c->messages(convo, 4, page1.back().cursor());
+    REQUIRE(page2.size() == 4);
+    CHECK(page2[0].body == "msg6");
+    CHECK(page2[3].body == "msg3");
+
+    auto page3 = c->messages(convo, 4, page2.back().cursor());
+    REQUIRE(page3.size() == 2);
+    CHECK(page3[0].body == "msg2");
+    CHECK(page3[1].body == "msg1");
+
+    CHECK(c->messages(convo, 4, page3.back().cursor()).empty());
+}
+
+TEST_CASE("Client: paging is stable across equal timestamps", "[client][messages]") {
+    TempClient c;
+    SenderKeys sender;
+    auto convo = ConversationId::dm(sender.session_id);
+
+    // Three messages sharing one timestamp: only the id tiebreak keeps paging from repeating or
+    // skipping rows.
+    for (int i = 1; i <= 3; i++)
+        deliver(*c, sender, "same{}"_format(i), from_epoch_ms(1000), "same_h{}"_format(i));
+
+    std::vector<std::string> seen;
+    std::optional<MessageCursor> cursor;
+    while (true) {
+        auto page = c->messages(convo, 1, cursor);
+        if (page.empty())
+            break;
+        seen.push_back(page[0].body);
+        cursor = page[0].cursor();
+    }
+
+    CHECK(seen == std::vector<std::string>{"same3", "same2", "same1"});
+}
+
+// ── Sending ─────────────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: send_message stores, dispatches and reaches sent", "[client][send]") {
+    std::vector<std::byte> payload;
+    core::callbacks cbs;
+    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
+                            config::Namespace ns,
+                            std::vector<std::byte> p,
+                            std::chrono::milliseconds,
+                            std::function<void(bool)> on_stored) {
+        CHECK(ns == config::Namespace::Default);
+        payload = std::move(p);
+        on_stored(true);
+    };
+
+    TempClient c{cbs};
+    constexpr auto peer =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    auto convo = ConversationId::dm(peer);
+
+    // No PFS keys published for the peer, so this falls back to a v1 send without needing network.
+    TestHelper::seed_pfs_nak(c->core, peer);
+
+    auto id = c->send_message(convo, "general kenobi");
+    CHECK_FALSE(payload.empty());
+
+    auto msg = c->message(id);
+    REQUIRE(msg.has_value());
+    CHECK(msg->body == "general kenobi");
+    CHECK(msg->outgoing);
+    CHECK(msg->sender == own_sid(*c));
+    CHECK(msg->send_state == SendState::sent);
+
+    // The conversation was created by the send and shows the outgoing message as its preview.
+    auto convos = c->conversations();
+    REQUIRE(convos.size() == 1);
+    CHECK(convos[0].last_message == "general kenobi");
+    // Our own message is never unread.
+    CHECK(convos[0].unread == 0);
+}
+
+TEST_CASE("Client: a failed send is recorded as failed", "[client][send]") {
+    core::callbacks cbs;
+    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
+                           config::Namespace,
+                           std::vector<std::byte>,
+                           std::chrono::milliseconds,
+                           std::function<void(bool)> on_stored) { on_stored(false); };
+
+    TempClient c{cbs};
+    constexpr auto peer =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    TestHelper::seed_pfs_nak(c->core, peer);
+
+    auto id = c->send_message(ConversationId::dm(peer), "into the void");
+    CHECK(c->message(id)->send_state == SendState::failed);
+}
+
+TEST_CASE("Client: sending to a non-DM conversation is rejected", "[client][send]") {
+    TempClient c;
+    constexpr auto gid =
+            "03fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    CHECK_THROWS_AS(
+            c->send_message(ConversationId::group(gid), "hi"), std::invalid_argument);
+}
+
+TEST_CASE("Client: an in-flight send becomes interrupted after a restart", "[client][send]") {
+    // Never completing the store leaves the message mid-flight, which is exactly the state a
+    // crash would leave behind.
+    core::callbacks cbs;
+    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
+                           config::Namespace,
+                           std::vector<std::byte>,
+                           std::chrono::milliseconds,
+                           std::function<void(bool)>) {};
+
+    TempClient c{cbs};
+    constexpr auto peer =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    TestHelper::seed_pfs_nak(c->core, peer);
+
+    auto id = c->send_message(ConversationId::dm(peer), "did this land?");
+    CHECK(c->message(id)->send_state == SendState::sending);
+
+    c.reopen();
+
+    // Not "failed": we genuinely do not know whether the swarm stored it.
+    CHECK(c->message(id)->send_state == SendState::interrupted);
+    CHECK(c->message(id)->body == "did this land?");
+}
+
+// ── Signals ─────────────────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: subscribers are told what changed", "[client][signals]") {
+    TempClient c;
+    SenderKeys sender;
+
+    std::vector<Change> changes;
+    auto sub = c->subscribe([&](const Change& ch) { changes.push_back(ch); });
+
+    deliver(*c, sender, "ping", from_epoch_ms(1000), "h1");
+
+    auto convo = ConversationId::dm(sender.session_id);
+    REQUIRE(changes.size() == 3);
+    CHECK(changes[0].type == ChangeType::conversation_added);
+    CHECK(changes[1].type == ChangeType::new_message);
+    CHECK(changes[2].type == ChangeType::conversation_updated);
+    for (const auto& ch : changes)
+        CHECK(ch.conversation == convo);
+
+    REQUIRE(changes[1].message_id.has_value());
+    CHECK(c->message(*changes[1].message_id)->body == "ping");
+    CHECK_FALSE(changes[0].message_id.has_value());
+
+    // A second message on an existing conversation does not re-announce the conversation.
+    changes.clear();
+    deliver(*c, sender, "pong", from_epoch_ms(2000), "h2");
+    REQUIRE(changes.size() == 2);
+    CHECK(changes[0].type == ChangeType::new_message);
+    CHECK(changes[1].type == ChangeType::conversation_updated);
+}
+
+TEST_CASE("Client: state is committed before the signal fires", "[client][signals]") {
+    TempClient c;
+    SenderKeys sender;
+
+    std::optional<std::string> body_seen_from_handler;
+    auto sub = c->subscribe([&](const Change& ch) {
+        if (ch.type == ChangeType::new_message)
+            body_seen_from_handler = c->message(*ch.message_id)->body;
+    });
+
+    deliver(*c, sender, "readable already", from_epoch_ms(1000), "h1");
+    CHECK(body_seen_from_handler == "readable already");
+}
+
+TEST_CASE("Client: multiple independent subscribers each get every change", "[client][signals]") {
+    TempClient c;
+    SenderKeys sender;
+
+    int a = 0, b = 0;
+    auto sub_a = c->subscribe([&](const Change&) { a++; });
+    {
+        auto sub_b = c->subscribe([&](const Change&) { b++; });
+        deliver(*c, sender, "one", from_epoch_ms(1000), "h1");
+        CHECK(a == 3);
+        CHECK(b == 3);
+    }
+
+    // sub_b is out of scope: dropping the handle unsubscribes.
+    deliver(*c, sender, "two", from_epoch_ms(2000), "h2");
+    CHECK(a == 5);
+    CHECK(b == 3);
+
+    sub_a.reset();
+    deliver(*c, sender, "three", from_epoch_ms(3000), "h3");
+    CHECK(a == 5);
+}
+
+TEST_CASE("Client: a subscription may be moved and outlive its Client", "[client][signals]") {
+    int count = 0;
+    Subscription moved;
+    CHECK_FALSE(static_cast<bool>(moved));
+
+    {
+        TempClient c;
+        SenderKeys sender;
+
+        auto sub = c->subscribe([&](const Change&) { count++; });
+        CHECK(static_cast<bool>(sub));
+
+        moved = std::move(sub);
+        CHECK(static_cast<bool>(moved));
+
+        deliver(*c, sender, "hi", from_epoch_ms(1000), "h1");
+        CHECK(count == 3);
+    }
+
+    // Destroying `moved` after the Client is gone must not touch freed memory.
+    CHECK_FALSE(static_cast<bool>(moved));
+    moved.reset();
+}
+
+TEST_CASE("Client: a throwing handler does not break the others", "[client][signals]") {
+    TempClient c;
+    SenderKeys sender;
+
+    int after = 0;
+    auto bad = c->subscribe([](const Change&) { throw std::runtime_error{"deliberate"}; });
+    auto good = c->subscribe([&](const Change&) { after++; });
+
+    CHECK_NOTHROW(deliver(*c, sender, "still fine", from_epoch_ms(1000), "h1"));
+    CHECK(after == 3);
+    CHECK(c->messages(ConversationId::dm(sender.session_id)).size() == 1);
+}
+
+TEST_CASE("Client: send status changes are reported as message_updated", "[client][signals]") {
+    std::function<void(bool)> finish_store;
+    core::callbacks cbs;
+    cbs.send_to_swarm = [&](std::span<const std::byte, 33>,
+                            config::Namespace,
+                            std::vector<std::byte>,
+                            std::chrono::milliseconds,
+                            std::function<void(bool)> on_stored) {
+        finish_store = std::move(on_stored);
+    };
+
+    TempClient c{cbs};
+    constexpr auto peer =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    TestHelper::seed_pfs_nak(c->core, peer);
+
+    std::vector<Change> changes;
+    auto sub = c->subscribe([&](const Change& ch) { changes.push_back(ch); });
+
+    auto id = c->send_message(ConversationId::dm(peer), "hello");
+    changes.clear();
+
+    REQUIRE(finish_store);
+    finish_store(true);
+
+    REQUIRE(changes.size() == 1);
+    CHECK(changes[0].type == ChangeType::message_updated);
+    CHECK(changes[0].message_id == id);
+    CHECK(c->message(id)->send_state == SendState::sent);
+}
+
+// ── Core interoperability ───────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Client: the application's own Core callbacks still fire", "[client][callbacks]") {
+    std::vector<core::ReceivedMessage> app_received;
+    std::vector<core::MessageSendStatus> app_statuses;
+
+    core::callbacks cbs;
+    cbs.message_received = [&](core::ReceivedMessage&& m) { app_received.push_back(std::move(m)); };
+    cbs.message_send_status = [&](int64_t, core::MessageSendStatus s) {
+        app_statuses.push_back(s);
+    };
+    cbs.send_to_swarm = [](std::span<const std::byte, 33>,
+                           config::Namespace,
+                           std::vector<std::byte>,
+                           std::chrono::milliseconds,
+                           std::function<void(bool)> on_stored) { on_stored(true); };
+
+    TempClient c{cbs};
+    SenderKeys sender;
+
+    deliver(*c, sender, "seen by both", from_epoch_ms(1000), "h1");
+
+    // Client handled it *and* passed it on intact.
+    REQUIRE(app_received.size() == 1);
+    CHECK(app_received[0].hash == "h1");
+    CHECK(app_received[0].sender_session_id == sender.session_id);
+    CHECK(c->messages(ConversationId::dm(sender.session_id)).size() == 1);
+
+    constexpr auto peer =
+            "05fe94b7ad4b7f1cc1bb92671f1f0d243f226e115b33770465e82b503fc3e96e1f"_hex_b;
+    TestHelper::seed_pfs_nak(c->core, peer);
+    c->send_message(ConversationId::dm(peer), "outbound");
+
+    REQUIRE(app_statuses.size() >= 1);
+    CHECK(app_statuses.back() == core::MessageSendStatus::success);
+}
+
+TEST_CASE("Client: Core is usable directly through the Client", "[client][callbacks]") {
+    TempClient c;
+
+    // The account state is Core's, and reachable without Client wrapping any of it.
+    CHECK(c->core.globals.session_id()[0] == std::byte{0x05});
+    CHECK_FALSE(c->core.devices.device_id().empty());
+
+    // Globals set through Core survive a Client restart, i.e. it really is one database.
+    c->core.globals.set("client_test_key", "value"sv);
+    c.reopen();
+    CHECK(c->core.globals.get_text("client_test_key") == "value");
+}

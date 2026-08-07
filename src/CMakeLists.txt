@@ -131,6 +131,23 @@ add_libsession_util_library(core
 add_subdirectory(core/schema)
 add_subdirectory(mnemonics)
 
+# Conversation-level data model built on top of core.  The dependency is one-directional by
+# design: core neither knows nor links this.
+add_libsession_util_library(client
+    client/client.cpp
+    client/conversation_id.cpp
+    client/signals.cpp
+)
+add_subdirectory(client/schema)
+
+target_link_libraries(
+    client
+    PUBLIC
+    core
+    PRIVATE
+    libsession::protos
+)
+
 target_link_libraries(
     core
     PUBLIC

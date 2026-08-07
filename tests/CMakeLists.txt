@@ -5,6 +5,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 
 set(LIB_SESSION_UTESTS_SOURCES
+    test_client.cpp
     test_core_devices.cpp
     test_core_globals.cpp
     test_core_schema.cpp
@@ -59,6 +60,7 @@ list(APPEND LIB_SESSION_UTESTS_SOURCES
 add_library(test_libs INTERFACE)
 
 target_link_libraries(test_libs INTERFACE
+    libsession::client
     libsession::config
     libsession::core
     libsession::crypto
