@@ -30,13 +30,13 @@ TEST_CASE(
         Core core{path, schema_extension{"testext", session::test::schema::MIGRATIONS}};
 
         CHECK(table_exists(core, "ext_thing"));
-        // Core's own 000_globals must still have run despite the extension reusing the name.
+        // Core's own schema must still be present despite the extension reusing a name.
         CHECK(table_exists(core, "globals"));
         CHECK(table_exists(core, "ext_globals"));
 
         CHECK(TestHelper::migration_applied(core, "testext:000_ext_thing"));
         CHECK(TestHelper::migration_applied(core, "testext:000_globals"));
-        CHECK(TestHelper::migration_applied(core, "000_globals"));
+        CHECK(TestHelper::migration_applied(core, "@created"));
         CHECK(!TestHelper::migration_applied(core, "000_ext_thing"));
     }
 

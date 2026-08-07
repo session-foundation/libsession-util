@@ -153,9 +153,9 @@ TEST_CASE("ConversationId: rejects bad input and mistyped access", "[client][con
 TEST_CASE("Client: applies its migrations under the client owner", "[client][schema]") {
     TempClient c;
 
-    CHECK(TestHelper::migration_applied(c->core, "client:000_conversations"));
-    // Core's own migrations stay unprefixed.
-    CHECK(TestHelper::migration_applied(c->core, "000_globals"));
+    // Both schemas are created from their full_schema.sql, each marking its own owner.
+    CHECK(TestHelper::migration_applied(c->core, "client:@created"));
+    CHECK(TestHelper::migration_applied(c->core, "@created"));
 
     // Not Connection::table_exists(): its query in session-sqlite is missing a closing paren and
     // throws "incomplete input" for every caller.
@@ -172,42 +172,6 @@ TEST_CASE("Client: applies its migrations under the client owner", "[client][sch
     CHECK(has_table("message_raw_content"));
     // Client's tables live in Core's database, not a second file.
     CHECK(has_table("globals"));
-}
-
-TEST_CASE("Client: full_schema matches replaying the migrations", "[client][schema]") {
-    // Client's schema exercises what the fixture schema in tests/schema/ does not: CHECK
-    // constraints, a partial index, foreign keys and triggers.  Those are the parts the pragmas
-    // cannot describe, so this is where the fingerprint's text-recovered half earns its place.
-    auto build = [](std::string_view full_schema) {
-        auto path = std::filesystem::temp_directory_path() /
-                    fmt::format("{}.db", random::unique_id("test_client_drift", 7));
-        std::filesystem::remove(path);
-
-        std::string fingerprint;
-        {
-            core::Core c{
-                    path,
-                    core::schema_extension{"client", client::schema::MIGRATIONS, full_schema}};
-            auto conn = TestHelper::db_conn(c);
-            fingerprint = session::test::schema_fingerprint(conn);
-        }
-
-        std::error_code ec;
-        std::filesystem::remove(path, ec);
-        return fingerprint;
-    };
-
-    auto from_full = build(client::schema::FULL_SCHEMA);
-    auto from_chain = build("");
-
-    CHECK(from_full == from_chain);
-
-    // The features that only the text-recovered half of the fingerprint covers; if these stop
-    // appearing, the comparison above has quietly stopped checking them.
-    CHECK(from_full.find("check ") != std::string::npos);
-    CHECK(from_full.find("where ") != std::string::npos);
-    CHECK(from_full.find("trigger messages_insert") != std::string::npos);
-    CHECK(from_full.find("fk sender -> accounts.id") != std::string::npos);
 }
 
 // ── Receiving ───────────────────────────────────────────────────────────────────────────────────

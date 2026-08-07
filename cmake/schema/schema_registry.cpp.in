@@ -6,7 +6,9 @@
 
 namespace @SCHEMA_NAMESPACE@ {
 
-static std::array migrations = {
+// Explicitly sized rather than deduced: a directory with a full_schema.sql and no deltas yet has
+// no migrations at all, and class template argument deduction cannot cope with an empty list.
+static const std::array<session::core::schema::Migration, @SCHEMA_COUNT@> migrations = {
 @SCHEMA_ENTRIES@
 };
 

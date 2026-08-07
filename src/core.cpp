@@ -992,14 +992,24 @@ CREATE TABLE IF NOT EXISTS migrations_applied (
             return owner.empty() ? std::string{name} : "{}:{}"_format(owner, name);
         };
 
-        // With none of this set applied there is nothing to migrate *from*, so build the schema in
-        // one step and record the migrations as applied without running them.  This is not merely
-        // an optimisation: it is what lets full_schema.sql be the readable statement of the current
-        // schema, instead of that only existing as the result of replaying every migration.
+        // full_schema.sql creates the schema outright; the migrations beside it are deltas that
+        // upgrade a database built from an *older* full_schema.  Nothing builds the schema from
+        // nothing, and that is the point: a CREATE lives in one place rather than being duplicated
+        // into an initial migration that then never changes.
         //
-        // Keyed on this owner's own migrations rather than on the database being new, so an
-        // extension added to an existing database takes this path too, which is equally correct.
-        if (!full_schema.empty() && std::ranges::none_of(migrations, [&](const auto& m) {
+        // So a database with no record of this owner is built from the full schema, with the
+        // migrations recorded as applied without running.  Keyed on the owner rather than on the
+        // database being new, so an extension added to an existing database takes this path too.
+        //
+        // The marker is a row of its own rather than being inferred from the migration list,
+        // because that list is legitimately empty until the first delta is written -- "none of this
+        // owner's migrations are applied" would then be vacuously true on every open, re-running
+        // the full schema against tables that already exist.  Migration names all begin with a
+        // digit, so this cannot collide with one.
+        auto created_key = owner.empty() ? std::string{"@created"} : "{}:@created"_format(owner);
+
+        if (!full_schema.empty() && !applied.count(created_key) &&
+            std::ranges::none_of(migrations, [&](const auto& m) {
                 return applied.count(key_for(m.name)) > 0;
             })) {
             try {
@@ -1009,6 +1019,7 @@ CREATE TABLE IF NOT EXISTS migrations_applied (
                 SQLite::Transaction tx{conn.sql};
 
                 conn.sql.exec(std::string{full_schema});
+                conn.prepared_exec("INSERT INTO migrations_applied (name) VALUES (?)", created_key);
                 for (const auto& m : migrations)
                     conn.prepared_exec(
                             "INSERT INTO migrations_applied (name) VALUES (?)", key_for(m.name));

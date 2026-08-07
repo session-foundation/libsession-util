@@ -51,6 +51,8 @@ function(session_schema_dir)
     list(TRANSFORM SCHEMA_DECORATED REPLACE "^[^${SCHEMA_SEP}]*${SCHEMA_SEP}" ""
         OUTPUT_VARIABLE SCHEMA_FILES)
 
+    list(LENGTH SCHEMA_FILES SCHEMA_COUNT)
+
     set(DECLARATIONS "")
     set(SCHEMA_ENTRIES "")
     set(SCHEMA_SOURCES "")

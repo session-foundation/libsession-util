@@ -1,3 +1,11 @@
+-- Core's schema with every migration in src/core/schema/ applied.  A database with none of them
+-- applied is built from this in one step and they are all recorded without running, so this file
+-- -- not the migration chain -- is where the current schema is read.
+--
+-- Keep in step with the migrations: test_core_schema.cpp builds a database both ways and
+-- compares them.
+
+-- from 000_devices.sql
 
 -- Table storing all the device group info
 CREATE TABLE devices (
@@ -93,3 +101,44 @@ BEGIN
           LIMIT 1) AS winner
     WHERE device_account_keys.rotated IS NULL AND device_account_keys.id != winner.id;
 END;
+
+-- from 000_globals.sql
+
+CREATE TABLE globals (
+    key TEXT PRIMARY KEY NOT NULL,
+    value ANY NOT NULL
+) STRICT;
+
+
+-- from 000_namespaces.sql
+CREATE TABLE namespace_sync (
+    namespace INTEGER NOT NULL,
+    sn_pubkey BLOB NOT NULL CHECK(length(sn_pubkey) = 32),
+    last_hash TEXT NOT NULL,
+    PRIMARY KEY (namespace, sn_pubkey)
+) STRICT;
+
+-- from 000_pfs_key_cache.sql
+-- Cache of remote account public keys (X25519 + ML-KEM-768) used for PFS+PQ message encryption.
+-- Keys are considered fresh for PFS_KEY_FRESH_DURATION (24h) and expire after
+-- PFS_KEY_EXPIRY_DURATION (48h); stale entries (24-48h old) are still usable as a fallback.
+--
+-- nak_at is set whenever a successful fetch returns no valid keys, and is never cleared.  It
+-- suppresses re-fetching for PFS_KEY_NAK_DURATION (1h) when no valid keys exist.  When valid
+-- keys are present nak_at may coexist with them (the keys are still usable as a fallback).
+-- In SQLite, CHECK constraints with a NULL argument evaluate to NULL (not FALSE), so the length
+-- checks do not reject NULL pubkeys.
+CREATE TABLE pfs_key_cache (
+    session_id BLOB NOT NULL PRIMARY KEY CHECK(length(session_id) = 33),
+    fetched_at INTEGER,           -- unix timestamp (seconds) of last fetch with valid keys; NULL if none
+    nak_at INTEGER,               -- unix timestamp of last fetch returning no keys; NULL if none
+    pubkey_x25519 BLOB CHECK(length(pubkey_x25519) = 32),
+    pubkey_mlkem768 BLOB CHECK(length(pubkey_mlkem768) = 1184)
+) STRICT;
+
+-- from 000_pro_revocations.sql
+CREATE TABLE pro_revocations (
+    revocation_tag BLOB PRIMARY KEY NOT NULL,
+    effective_ts INTEGER NOT NULL,  -- unix seconds; a matching proof is revoked once the clock reaches this
+    seen_at INTEGER NOT NULL        -- unix seconds when last seen in a fetched list (for retain_for aging)
+) STRICT
