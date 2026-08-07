@@ -11,6 +11,16 @@ using namespace session::literals;
 
 namespace session {
 
+// Counts the run of trailing `value` elements at the end of a range.  For a non-resizable range
+// such as a span, pair this with `.first(size() - count_trailing(...))`.
+template <std::ranges::bidirectional_range R>
+    requires std::equality_comparable<std::ranges::range_value_t<R>>
+auto count_trailing(const R& r, const std::ranges::range_value_t<R>& value = {}) {
+    return std::ranges::distance(
+            r | std::views::reverse |
+            std::views::take_while([&value](const auto& v) { return v == value; }));
+}
+
 // Trims any run of trailing `trim` values off the end of a resizable container, in place.  A
 // container consisting entirely of `trim` values is left empty.
 //
@@ -21,10 +31,7 @@ template <std::ranges::bidirectional_range Container>
     requires std::ranges::sized_range<Container> &&
              std::equality_comparable<std::ranges::range_value_t<Container>>
 void trim_trailing(Container& c, const std::ranges::range_value_t<Container>& trim = {}) {
-    auto trailing = std::ranges::distance(
-            c | std::views::reverse |
-            std::views::take_while([&trim](const auto& v) { return v == trim; }));
-    c.resize(c.size() - trailing);
+    c.resize(c.size() - count_trailing(c, trim));
 }
 
 // Copies `msg` into `buf`, truncating if necessary, always null-terminating.  Returns the number

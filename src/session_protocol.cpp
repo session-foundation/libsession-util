@@ -229,24 +229,15 @@ std::vector<std::byte> pad_message(std::span<const std::byte> payload) {
 }
 
 static std::span<const std::byte> unpad_message(std::span<const std::byte> payload) {
-    // Strip padding from content
-    size_t size_without_padding = payload.size();
-    while (size_without_padding) {
-        std::byte ch = payload[size_without_padding - 1];
-        if (ch != std::byte{0} && ch != PADDING_TERMINATING_BYTE) {
-            // Non-zero padding encountered, terminate the loop and assume message is not
-            // padded
-            // TODO: We should enforce this but no client enforces it right now.
-            break;
-        }
+    auto size = payload.size() - count_trailing(payload);
 
-        size_without_padding--;
-        if (ch == PADDING_TERMINATING_BYTE)
-            break;
-    }
+    // The 0x80 terminator is required by the padding scheme, so its absence means the message was
+    // not padded at all.
+    // TODO: We should enforce this but no client enforces it right now.
+    if (size > 0 && payload[size - 1] == PADDING_TERMINATING_BYTE)
+        size--;
 
-    assert(size_without_padding <= payload.size());
-    return payload.first(size_without_padding);
+    return payload.first(size);
 }
 
 // Attaches a Session Pro signature to an envelope. With no pro key a decoy signature is attached
@@ -433,8 +424,10 @@ static void parse_envelope_fields(
         // This can be removed after a while once we want to stop supporting old clients.
         const std::string& source = envelope.source();
         if (source.size() != 0 && source.size() != (result.envelope.source.max_size() * 2) /*hex*/)
-            throw std::runtime_error(fmt::format(
-                    "Parse envelope failed, source had unexpected size ({} bytes)", source.size()));
+            throw std::runtime_error(
+                    fmt::format(
+                            "Parse envelope failed, source had unexpected size ({} bytes)",
+                            source.size()));
 
         if (source.size()) {
             oxenc::from_hex(source.begin(), source.end(), result.envelope.source.data());
@@ -664,9 +657,10 @@ DecodedCommunityMessage decode_for_community(
                 // send in the source is a Session public key (see: encode_for_destination)
                 const std::string& source = pb_envelope.source();
                 if (source.size() != envelope.source.max_size())
-                    throw std::runtime_error(fmt::format(
-                            "Parse envelope failed, source had unexpected size ({} bytes)",
-                            source.size()));
+                    throw std::runtime_error(
+                            fmt::format(
+                                    "Parse envelope failed, source had unexpected size ({} bytes)",
+                                    source.size()));
                 std::memcpy(envelope.source.data(), source.data(), source.size());
                 envelope.flags |= SESSION_PROTOCOL_ENVELOPE_FLAGS_SOURCE;
             }
