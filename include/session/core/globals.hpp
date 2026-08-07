@@ -17,6 +17,8 @@
 namespace session::core {
 
 class Core;
+// Defined in core.hpp, which includes this header; only referenced here as a parameter type.
+struct predefined_seed;
 
 // Core component contains one-off global values that don't make sense storing in a table, typically
 // because the value is highly special purpose or is only used in one single place.  If you ever
@@ -28,11 +30,26 @@ class Core;
 // but "pubkey" is a terrible one.  All internal libsession keys in this table begin with an
 // underscore, and should never be accesses outside libsession itself.
 //
+/// Thrown when something requiring the account's identity is used before there is one.  Only
+/// reachable when the Core was constructed with defer_account: without it, construction either
+/// finds a seed, is given one, or generates one.
+struct no_account : std::logic_error {
+    no_account() :
+            std::logic_error{
+                    "This Session account has no identity yet; call create_account() or "
+                    "restore_account() first"} {}
+};
+
 class Globals final : detail::CoreComponent {
 
   private:
     friend class Core;
     explicit Globals(Core& c) : detail::CoreComponent{c} {}
+
+    void _require_account() const {
+        if (!_have_account)
+            throw no_account{};
+    }
 
     // Holds the account seed; loaded during initialization (created if it doesn't exist).  A new
     // account seed is generated during initialization if the database doesn't contain one (e.g. if
@@ -50,6 +67,41 @@ class Globals final : detail::CoreComponent {
     // If set by the Core constructor before init(), used as the initial account seed when the
     // database does not yet contain one.  Cleared after use in init().
     std::optional<cleared_b32> _predefined_seed;
+
+    // Set by the Core constructor from the defer_account option: suppresses generating an account
+    // during init() when the database has none.
+    bool _defer_account = false;
+
+    // False between construction and the account being resolved, which only happens when
+    // defer_account was given and the database held no seed.
+    bool _have_account = false;
+
+    // Derives and caches the key material for `seed`, and stores the seed if `persist`.
+    void _adopt_seed(const cleared_b32& seed, bool persist);
+
+  public:
+    /// Whether this account has an identity yet.
+    ///
+    /// Only ever false when the Core was constructed with defer_account and the database held no
+    /// seed.  Until it is true, everything needing the account -- session_id(), account_seed(),
+    /// send_dm(), attaching a network -- throws no_account.
+    bool have_account() const { return _have_account; }
+
+    /// Generates a fresh account and stores it.
+    ///
+    /// @throws std::logic_error if this account already has an identity: adopting a second one
+    /// would orphan every message and key already stored against the first.
+    void create_account();
+
+    /// Adopts an existing account seed, as typed from a recovery phrase or transferred from
+    /// another device, and stores it.
+    ///
+    /// This is also the first half of linking a new device to an existing account: a link request
+    /// is encrypted to the account root key, so the seed must be adopted before
+    /// devices.build_link_request() can be called.
+    ///
+    /// @throws std::logic_error if this account already has an identity.
+    void restore_account(const predefined_seed& seed);
 
   public:
     // Retrieval methods.  These query for the given key and, if the type matches, return the given
@@ -109,15 +161,31 @@ class Globals final : detail::CoreComponent {
         std::span<const std::byte, 32> x25519_key() const&& = delete;
     };
 
+    // Each of these needs an identity, so each throws no_account when there is not one yet.  That
+    // is only reachable via defer_account; without it an account always exists by the time the
+    // Core constructor returns.
     AccountSeedAccess account_seed() {
+        _require_account();
         auto acc = _account_seed.access();
         return AccountSeedAccess{acc};
     }
     // These are computed from the account_seed during construction:
-    std::span<const std::byte, 33> session_id() { return _session_id; }
-    const std::string& session_id_hex() const { return _session_id_hex; }
-    const network::ed25519_pubkey& pubkey_ed25519() const { return _pubkey_ed25519; }
-    const network::x25519_pubkey& pubkey_x25519() const { return _pubkey_x25519; }
+    std::span<const std::byte, 33> session_id() {
+        _require_account();
+        return _session_id;
+    }
+    const std::string& session_id_hex() const {
+        _require_account();
+        return _session_id_hex;
+    }
+    const network::ed25519_pubkey& pubkey_ed25519() const {
+        _require_account();
+        return _pubkey_ed25519;
+    }
+    const network::x25519_pubkey& pubkey_x25519() const {
+        _require_account();
+        return _pubkey_x25519;
+    }
 
     /// Returns the account seed as a mnemonic word list with checksum, stored in secure memory.
     ///

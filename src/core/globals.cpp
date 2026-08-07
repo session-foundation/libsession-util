@@ -3,6 +3,7 @@
 
 #include <concepts>
 #include <oxen/log.hpp>
+#include <session/core.hpp>
 #include <session/core/globals.hpp>
 #include <session/crypto/ed25519.hpp>
 #include <session/format.hpp>
@@ -121,49 +122,81 @@ bool Globals::erase(std::string_view key) {
     return conn().prepared_exec("DELETE FROM globals WHERE key = ?"s, key) > 0;
 }
 
-void Globals::init() {
-    auto c = conn();
-    SQLite::Transaction tx{c.sql};
-    cleared_b32 seed;
-    bool have_seed = get_blob_to("_seed", seed);
-    const cleared_b32* seed_to_use = &seed;
-    if (!have_seed) {
-        if (_predefined_seed) {
-            // Use the predefined seed directly, avoiding an extra copy+clear.
-            seed_to_use = &*_predefined_seed;
-        } else {
-            // FIXME: we should allow full 32-byte seeds here, but for now this is compatible with
-            // the 16-byte/128-bit seed that Session accounts use which is 16 random bytes followed
-            // by 16 0s:
-            random::fill(std::span{seed}.first<16>());
-            std::memset(seed.data() + 16, 0, 16);
-        }
-    }
-
+void Globals::_adopt_seed(const cleared_b32& seed, bool persist) {
     // Layout: [ed25519_sk(64) | x25519_sk(32)] = 96 bytes
     auto rw = _account_seed.resize(96);
 
-    ed25519::seed_keypair(_pubkey_ed25519, rw.buf.first<64>(), *seed_to_use);
-    ed25519::sk_to_x25519(rw.buf.last<32>(), *seed_to_use);
+    ed25519::seed_keypair(_pubkey_ed25519, rw.buf.first<64>(), seed);
+    ed25519::sk_to_x25519(rw.buf.last<32>(), seed);
 
-    _predefined_seed.reset();  // Clear now that it has been consumed
     ed25519::pk_to_x25519(_pubkey_x25519, _pubkey_ed25519);
 
     _session_id[0] = std::byte{0x05};
     std::copy(_pubkey_x25519.begin(), _pubkey_x25519.end(), _session_id.data() + 1);
     _session_id_hex = oxenc::to_hex(_session_id);
 
-    if (!have_seed) {
-        log::info(cat, "Generated new Session account seed");
+    if (persist)
         set("_seed", rw.buf.first(32));
-    }
 
-    tx.commit();
+    _have_account = true;
 
     log::info(cat, "Initialized with Session ID: {}", _session_id_hex);
 }
 
+// Generates the 16-byte/128-bit seed that Session accounts use: 16 random bytes followed by 16
+// zeros.
+// FIXME: we should allow full 32-byte seeds here.
+static cleared_b32 generate_seed() {
+    cleared_b32 seed;
+    random::fill(std::span{seed}.first<16>());
+    std::memset(seed.data() + 16, 0, 16);
+    return seed;
+}
+
+void Globals::init() {
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+
+    cleared_b32 seed;
+    if (get_blob_to("_seed", seed)) {
+        _adopt_seed(seed, false);
+    } else if (_predefined_seed) {
+        _adopt_seed(*_predefined_seed, true);
+        _predefined_seed.reset();  // Clear now that it has been consumed
+    } else if (!_defer_account) {
+        log::info(cat, "Generated new Session account seed");
+        _adopt_seed(generate_seed(), true);
+    } else {
+        // defer_account, and nothing stored: the application chooses an identity before this
+        // account can do anything.  Nothing else in Core needs the seed at init time -- Devices
+        // only stores its own device id, and polling does not start until a network is attached.
+        log::info(cat, "Opened with no account; awaiting create_account() or restore_account()");
+    }
+
+    tx.commit();
+}
+
+void Globals::create_account() {
+    if (_have_account)
+        throw std::logic_error{"This account already has an identity"};
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+    log::info(cat, "Generated new Session account seed");
+    _adopt_seed(generate_seed(), true);
+    tx.commit();
+}
+
+void Globals::restore_account(const predefined_seed& seed) {
+    if (_have_account)
+        throw std::logic_error{"This account already has an identity"};
+    auto c = conn();
+    SQLite::Transaction tx{c.sql};
+    _adopt_seed(seed.bytes, true);
+    tx.commit();
+}
+
 mnemonics::secure_mnemonic Globals::seed_mnemonic(const mnemonics::Mnemonics& lang, bool force_24) {
+    _require_account();
     auto seed = _account_seed.access();
     // _account_seed stores the 96-byte key material; the first 32 bytes are the account seed.
     // A Session account uses 128-bit entropy when the last 16 bytes of that seed are all zero;

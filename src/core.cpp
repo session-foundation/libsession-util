@@ -113,6 +113,12 @@ void Core::register_comp_init(detail::CoreComponent* c) {
 }
 
 void Core::set_network(std::shared_ptr<network::Network> network) {
+    // Polling signs its retrieve requests with the account key, so attaching a network before the
+    // account has an identity would fail inside a background poll rather than here.  Refuse at the
+    // call site, where the ordering mistake actually is.
+    if (network && !globals.have_account())
+        throw no_account{};
+
     _network = std::move(network);
     _update_polling();
 }

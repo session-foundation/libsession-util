@@ -214,6 +214,20 @@ struct predefined_seed {
             std::span<const std::string_view> words, std::string_view lang_name = "English");
 };
 
+/// Opens the account without inventing an identity for it.
+///
+/// Ordinarily a Core with no stored seed and no predefined_seed generates one, which gives an
+/// application no way to *ask* whether a database already holds an account: finding out has already
+/// answered it.  With this option that database opens with no account, globals.have_account()
+/// reports which case it is, and the application resolves it with globals.create_account() or
+/// globals.restore_account().
+///
+/// Between construction and that call the account has no identity, so anything needing one --
+/// session_id(), account_seed(), send_dm(), attaching a network -- throws no_account.  Nothing
+/// else in Core needs it that early: components initialise fine without it and polling does not
+/// start until a network is attached.
+struct defer_account {};
+
 /// Additional database migrations to apply during Core construction, on behalf of a layer built on
 /// top of Core (such as a Client holding conversations and message history in the same database).
 ///
@@ -257,6 +271,7 @@ template <typename T>
 concept CoreOption = sqlite::DatabaseOption<std::remove_cvref_t<T>> ||
                      std::same_as<std::remove_cvref_t<T>, predefined_seed> ||
                      std::same_as<std::remove_cvref_t<T>, callbacks> ||
+                     std::same_as<std::remove_cvref_t<T>, defer_account> ||
                      std::same_as<std::remove_cvref_t<T>, schema_extension>;
 
 class Core {
@@ -391,6 +406,8 @@ class Core {
         _schema_extensions = detail::all_instances<schema_extension>(std::forward<Opts>(opts)...);
         if (auto s = detail::maybe_instance<predefined_seed>(std::forward<Opts>(opts)...))
             globals._predefined_seed = std::move(s->bytes);
+        globals._defer_account =
+                detail::maybe_instance<defer_account>(std::forward<Opts>(opts)...).has_value();
         init();
     }
 
