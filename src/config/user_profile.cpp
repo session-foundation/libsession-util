@@ -227,8 +227,16 @@ std::optional<std::chrono::sys_seconds> UserProfile::get_pro_access_expiry() con
 void UserProfile::set_pro_access_expiry(std::optional<std::chrono::sys_seconds> access_expiry_ts) {
     if (access_expiry_ts)
         data["E"] = epoch_seconds(*access_expiry_ts);
-    else
+    else {
         data["E"].erase();
+        // `G` is only meaningful as `E - G`, so it must never outlive the `E` it was paired with:
+        // a stranded `G` would silently pair with whatever the *next* `E` write happens to be, and
+        // that next write is usually a proof outcome, which carries no grace of its own to correct
+        // it with.  Enforced here rather than left to callers because clearing `E` is the common
+        // case (the proof-outcome clears), and a rule spread across every call site is one a new
+        // call site inherits wrongly.
+        data["G"].erase();
+    }
 
     // Confirming a live entitlement means any in-flight purchase resolved, and any long-stale
     // refund request is moot -- opportunistically clear both (we're already writing E anyway).
@@ -250,6 +258,17 @@ void UserProfile::set_pro_auto_renewing(bool auto_renewing) {
     // t/T bump -- this is backend-derived pro state (like E/I/R), not a user-initiated profile
     // edit.
     set_nonzero_int(data["A"], auto_renewing);
+}
+
+std::chrono::seconds UserProfile::get_pro_grace_period() const {
+    return std::chrono::seconds{data["G"].integer_or(0)};
+}
+
+void UserProfile::set_pro_grace_period(std::chrono::seconds grace) {
+    // Omitted when zero: the backend sends 0 whenever the subscription isn't auto-renewing, and
+    // `E - 0 == E`, so an absent key and a stored zero describe the same account.  Set alongside
+    // `E`; no t/T bump -- backend-derived pro state, like E/I/R/A.
+    set_nonzero_int(data["G"], grace.count() > 0 ? grace.count() : 0);
 }
 
 std::optional<std::chrono::sys_seconds> UserProfile::get_refund_requested() const {
@@ -558,6 +577,15 @@ LIBSESSION_C_API int user_profile_get_pro_auto_renewing(const config_object* con
 
 LIBSESSION_C_API void user_profile_set_pro_auto_renewing(config_object* conf, int auto_renewing) {
     unbox<UserProfile>(conf)->set_pro_auto_renewing(auto_renewing != 0);
+}
+
+LIBSESSION_C_API int64_t user_profile_get_pro_grace_period(const config_object* conf) {
+    return unbox<UserProfile>(conf)->get_pro_grace_period().count();
+}
+
+LIBSESSION_C_API void user_profile_set_pro_grace_period(
+        config_object* conf, int64_t grace_seconds) {
+    unbox<UserProfile>(conf)->set_pro_grace_period(std::chrono::seconds{grace_seconds});
 }
 
 LIBSESSION_C_API int64_t user_profile_get_refund_requested(const config_object* conf) {

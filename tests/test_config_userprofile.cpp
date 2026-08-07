@@ -342,6 +342,18 @@ TEST_CASE("user profile C API", "[config][user_profile][c]") {
     CHECK(user_profile_get_pro_auto_renewing(conf2) == 1);
     user_profile_set_pro_auto_renewing(conf2, 0);
     CHECK(user_profile_get_pro_auto_renewing(conf2) == 0);
+
+    CHECK(user_profile_get_pro_grace_period(conf2) == 0);
+    user_profile_set_pro_grace_period(conf2, 3600);
+    CHECK(user_profile_get_pro_grace_period(conf2) == 3600);
+    // Zero erases and reads back as 0 -- unset and zero are the same account state here, which is
+    // why there is deliberately no presence check to go with it.
+    user_profile_set_pro_grace_period(conf2, 0);
+    CHECK(user_profile_get_pro_grace_period(conf2) == 0);
+    // Negative clears rather than storing a negative duration.
+    user_profile_set_pro_grace_period(conf2, -5);
+    CHECK(user_profile_get_pro_grace_period(conf2) == 0);
+
     UserProfileTester::set_profile_updated(conf2, std::chrono::sys_seconds{124s});
 
     // Both have changes, so push need a push
@@ -669,6 +681,40 @@ TEST_CASE("UserProfile Pro Storage", "[config][user_profile][pro]") {
     CHECK(profile.get_profile_updated().time_since_epoch().count() == 456);
     profile.set_pro_auto_renewing(false);
     CHECK_FALSE(profile.get_pro_auto_renewing());
+
+    // Grace period: synced so any device can derive the paid-through instant as `E - G`. The
+    // backend folds grace INTO the stored expiry for auto-renewing subscriptions, so `E` is the end
+    // of coverage rather than the renewal-due date -- deriving that is the whole reason this key
+    // exists.
+    CHECK(profile.get_pro_grace_period() == 0s);
+    UserProfileTester::set_profile_updated(profile, std::chrono::sys_seconds{456s});
+    profile.set_pro_grace_period(1h);
+    CHECK(profile.get_pro_grace_period() == 1h);
+    // Backend-derived, like E/I/R/A: no profile-updated bump.
+    CHECK(profile.get_profile_updated().time_since_epoch().count() == 456);
+    // The property the key exists for: coverage end minus grace is the paid-through instant.
+    profile.set_pro_access_expiry(std::chrono::sys_seconds{5000s});
+    CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
+          std::chrono::sys_seconds{5000s} - 1h);
+    // Zero clears; unset and zero are indistinguishable *and* equivalent (`E - 0 == E`).
+    profile.set_pro_grace_period(0s);
+    CHECK(profile.get_pro_grace_period() == 0s);
+    CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
+          std::chrono::sys_seconds{5000s});
+
+    // Clearing `E` also clears `G`: the pair is only meaningful as `E - G`, so a `G` that outlived
+    // its `E` would silently pair with the NEXT `E` write -- and that write is typically a proof
+    // outcome, which carries no grace to correct it with. Enforced in the setter, not at call
+    // sites.
+    profile.set_pro_grace_period(1h);
+    CHECK(profile.get_pro_grace_period() == 1h);
+    profile.set_pro_access_expiry(std::nullopt);
+    CHECK_FALSE(profile.get_pro_access_expiry().has_value());
+    CHECK(profile.get_pro_grace_period() == 0s);
+    // ...and a later `E` write therefore cannot inherit the stale grace.
+    profile.set_pro_access_expiry(std::chrono::sys_seconds{9000s});
+    CHECK(*profile.get_pro_access_expiry() - profile.get_pro_grace_period() ==
+          std::chrono::sys_seconds{9000s});
 
     // Refund-requested flag (synced via config, not the Pro backend)
     CHECK_FALSE(profile.get_refund_requested().has_value());
