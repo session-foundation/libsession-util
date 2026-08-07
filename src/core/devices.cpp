@@ -708,7 +708,7 @@ namespace {
     constexpr auto PERS_DEV_NONCE = "SessionDevDNonce"_b2b_pers;
     constexpr auto PERS_KEY_NONCE = "SessionDevKNonce"_b2b_pers;
     constexpr auto PERS_KEY_KEY = "SessionDevKeyKey"_b2b_pers;
-    constexpr auto PERS_KEY_KEY_IND = "SessionDevKeyInd"_b2b_pers;
+    constexpr auto PERS_KEY_KEY_IDX = "SessionDevKeyIdx"_b2b_pers;
     constexpr auto PERS_ACC_KEY_ROT = "SessionAccKeyRot"_b2b_pers;
 
     constexpr int bt_bytes_encoded(int x) {
@@ -850,7 +850,7 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
 
         // Hash a bunch of stuff together as a checksum to let decryption skip most not-for-me
         // values.
-        hash::blake2b_pers(eind, PERS_KEY_KEY_IND, A, B, info.pk_mlkem768, ct, ekey);
+        hash::blake2b_pers(eind, PERS_KEY_KEY_IDX, A, B, info.pk_mlkem768, ct, ekey);
     }
     // Fill padding entries with randomness:
     for (; i < padded_count; i++) {
@@ -1124,7 +1124,7 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
             // a key other than our own (only 1/65535 chance of collision), and so we can short
             // circuit and save a bunch of calculations.
             if (!std::ranges::equal(
-                        hash::blake2b_pers<2>(PERS_KEY_KEY_IND, A, B, M, ct, ekey), eind))
+                        hash::blake2b_pers<2>(PERS_KEY_KEY_IDX, A, B, M, ct, ekey), eind))
                 continue;
 
             if (!x25519::scalarmult(aB, b, A)) {
