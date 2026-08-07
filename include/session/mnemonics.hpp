@@ -130,8 +130,10 @@ struct secure_mnemonic {
  * @param bytes The input byte span. Its length must be a multiple of 4.
  * @param lang The language to use for the mnemonic.
  * @param checksum If true (the default), append a checksum word after the encoded words.  The
- *        checksum word is the seed word at position (sum of all word indices) % N, where N is
- *        the number of encoded words.
+ *        checksum word repeats one of the seed words, chosen by a CRC-32 over their concatenated
+ *        prefixes (the first `prefix_len` codepoints of each) modulo the word count.  This matches
+ *        the Monero/Electrum scheme that Session clients use.
+ *
  * @return A secure_mnemonic containing the words, plus a checksum word if requested.
  * @throws std::invalid_argument if the input length is not a multiple of 4.
  */

@@ -1,3 +1,6 @@
+#include <fmt/ranges.h>
+#include <oxenc/hex.h>
+
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <random>
@@ -8,6 +11,7 @@
 #include "utils.hpp"
 
 using namespace session::mnemonics;
+using namespace oxenc::literals;
 
 // Test vectors: SHA-512("libsession-util mnemonic test vector") encoded as 48 words per language.
 // These pin the exact word list contents and ordering; if any word list changes this test fails.
@@ -278,27 +282,12 @@ TEST_CASE("Mnemonic checksum", "[mnemonics]") {
     auto words4 = bytes_to_words(data, *english);
     REQUIRE(words4.size() == 4);
 
-    SECTION("Checksum word is correct position duplicate") {
-        // sum of indices % 3 gives the position whose word is duplicated
+    SECTION("Checksum word duplicates one of the seed words") {
+        // Which one is chosen is pinned by the reference vectors below; the invariant here is that
+        // it is always a repeat of a seed word rather than an independent thirteenth word.
         auto s3 = words3.open();
         auto s4 = words4.open();
-        int i0 = 0, i1 = 0, i2 = 0;
-        for (size_t i = 0; i < 3; i++) {
-            int idx = 0;
-            for (size_t j = 0; j < english->words.size(); j++)
-                if (english->words[j] == s3[i]) {
-                    idx = j;
-                    break;
-                }
-            if (i == 0)
-                i0 = idx;
-            else if (i == 1)
-                i1 = idx;
-            else
-                i2 = idx;
-        }
-        size_t expected_pos = (i0 + i1 + i2) % 3;
-        CHECK(s4[3] == s3[expected_pos]);
+        CHECK((s4[3] == s3[0] || s4[3] == s3[1] || s4[3] == s3[2]));
     }
 
     SECTION("Checksum round-trip") {
@@ -307,9 +296,17 @@ TEST_CASE("Mnemonic checksum", "[mnemonics]") {
     }
 
     SECTION("Bad checksum throws checksum_error") {
-        // Replace the checksum word with a different valid word
+        // A known word that is not any of the seed words cannot be the checksum word, whichever of
+        // them the CRC selects.
         auto s4 = words4.open();
-        std::vector<std::string_view> bad = {s4[0], s4[1], s4[2], s4[2] == s4[0] ? s4[1] : s4[0]};
+        std::string_view other;
+        for (auto w : english->words)
+            if (w != s4[0] && w != s4[1] && w != s4[2]) {
+                other = w;
+                break;
+            }
+        REQUIRE(!other.empty());
+        std::vector<std::string_view> bad = {s4[0], s4[1], s4[2], other};
         CHECK_THROWS_AS(words_to_bytes(bad, *english), checksum_error);
     }
 
@@ -350,5 +347,218 @@ TEST_CASE("Mnemonic error handling", "[mnemonics]") {
         // 0 + 0 + 1625*1626² = 4,296,298,500 > UINT32_MAX — must be rejected
         std::vector<std::string_view> words = {"abbey", "abbey", "zoom"};
         CHECK_THROWS_AS(words_to_bytes(words, *english), std::invalid_argument);
+    }
+}
+
+// ── Checksum word ───────────────────────────────────────────────────────────────────────────────
+//
+// The checksum word repeats one of the seed words, selected by a CRC-32 over their concatenated
+// prefixes modulo the word count.  The vectors below were produced from that algorithm as it is
+// implemented in oxen-core's electrum-words.cpp (boost::crc_32_type over the trimmed words) and,
+// independently, session-ios' Mnemonic.swift -- the two shipping implementations libsession has to
+// interoperate with.
+TEST_CASE("mnemonics: checksum word matches the reference algorithm", "[mnemonics][checksum]") {
+    constexpr auto seed16 = "000102030405060708090a0b0c0d0e0f"_hex_b;
+    constexpr auto seed32 =
+            "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"_hex_b;
+
+    auto words_of = [](std::span<const std::byte> seed) {
+        auto m = session::mnemonics::bytes_to_words(seed, "English");
+        auto opened = m.open();
+        return std::vector<std::string>{opened.begin(), opened.end()};
+    };
+
+    SECTION("13 words") {
+        auto w = words_of(seed16);
+        REQUIRE(w.size() == 13);
+        CHECK(fmt::format("{}", fmt::join(w, " ")) ==
+              "amaze buffet cake entrance symptoms tiger lamb maze nestle python dusted faxed "
+              "faxed");
+        // The checksum word is a repeat of one of the seed words, not a thirteenth distinct one.
+        CHECK(w.back() == w[11]);
+    }
+
+    SECTION("25 words") {
+        auto w = words_of(seed32);
+        REQUIRE(w.size() == 25);
+        CHECK(fmt::format("{}", fmt::join(w, " ")) ==
+              "amaze buffet cake entrance symptoms tiger lamb maze nestle python dusted faxed "
+              "update vague zinger boxes ornament renting glass gained island nabbing afield "
+              "calamity boxes");
+        CHECK(w.back() == w[15]);
+    }
+
+    SECTION("an all-zero seed still checksums") {
+        auto w = words_of("00000000000000000000000000000000"_hex_b);
+        REQUIRE(w.size() == 13);
+        for (const auto& word : w)
+            CHECK(word == "abbey");
+    }
+}
+
+TEST_CASE("mnemonics: phrases round-trip through the checksum", "[mnemonics][checksum]") {
+    for (auto hex :
+         {"000102030405060708090a0b0c0d0e0f",
+          "ffffffffffffffffffffffffffffffff",
+          "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f"}) {
+        auto seed = oxenc::from_hex(std::string_view{hex});
+        auto bytes = std::as_bytes(std::span{seed});
+
+        auto m = session::mnemonics::bytes_to_words(bytes, "English");
+        auto back = session::mnemonics::words_to_bytes(
+                m.open().words, session::mnemonics::get_language("English"));
+        auto acc = back.access();
+        CHECK(std::ranges::equal(std::span{acc.buf}, bytes));
+    }
+}
+
+TEST_CASE("mnemonics: only the significant prefix matters", "[mnemonics][checksum]") {
+    // English uses a 3-codepoint prefix, so anything past the third letter is decoration: a phrase
+    // stays valid when the tail of a word is mistyped, or truncated to just the prefix.  This is
+    // the property that makes the word list usable at all, and it has to hold for the checksum word
+    // as well as the seed words, since the checksum is computed over prefixes too.
+    constexpr auto seed = "000102030405060708090a0b0c0d0e0f"_hex_b;
+    auto expected = std::vector<std::byte>{seed.begin(), seed.end()};
+
+    auto decodes_to_seed = [&](std::vector<std::string_view> w) {
+        auto back =
+                session::mnemonics::words_to_bytes(w, session::mnemonics::get_language("English"));
+        auto acc = back.access();
+        return std::ranges::equal(std::span{acc.buf}, expected);
+    };
+
+    // amaze buffet cake entrance symptoms tiger lamb maze nestle python dusted faxed | faxed
+    SECTION("typos past the third letter") {
+        CHECK(decodes_to_seed(
+                {"amazing",
+                 "buffalo",
+                 "cakewalk",
+                 "entropy",
+                 "symbol",
+                 "tigger",
+                 "lambda",
+                 "mazurka",
+                 "nestling",
+                 "pythons",
+                 "dustpan",
+                 "faxing",
+                 "faxing"}));
+    }
+
+    SECTION("words truncated to their prefix") {
+        CHECK(decodes_to_seed(
+                {"ama",
+                 "buf",
+                 "cak",
+                 "ent",
+                 "sym",
+                 "tig",
+                 "lam",
+                 "maz",
+                 "nes",
+                 "pyt",
+                 "dus",
+                 "fax",
+                 "fax"}));
+    }
+
+    SECTION("a mistyped tail on the checksum word alone") {
+        CHECK(decodes_to_seed(
+                {"amaze",
+                 "buffet",
+                 "cake",
+                 "entrance",
+                 "symptoms",
+                 "tiger",
+                 "lamb",
+                 "maze",
+                 "nestle",
+                 "python",
+                 "dusted",
+                 "faxed",
+                 "faxidermy"}));
+    }
+}
+
+TEST_CASE("mnemonics: rejects bad phrases", "[mnemonics][checksum]") {
+    auto lang = std::cref(session::mnemonics::get_language("English"));
+    auto decode = [&](std::vector<std::string_view> w) {
+        return session::mnemonics::words_to_bytes(w, lang.get());
+    };
+
+    // Correct phrase, for reference:
+    // amaze buffet cake entrance symptoms tiger lamb maze nestle python dusted faxed | faxed
+    SECTION("wrong checksum word") {
+        CHECK_THROWS_AS(
+                decode({"amaze",
+                        "buffet",
+                        "cake",
+                        "entrance",
+                        "symptoms",
+                        "tiger",
+                        "lamb",
+                        "maze",
+                        "nestle",
+                        "python",
+                        "dusted",
+                        "faxed",
+                        "amaze"}),
+                session::mnemonics::checksum_error);
+    }
+
+    SECTION("two seed words transposed") {
+        // Same words, so a sum-of-indices checksum would not notice; a CRC over the ordered
+        // prefixes does.
+        CHECK_THROWS_AS(
+                decode({"buffet",
+                        "amaze",
+                        "cake",
+                        "entrance",
+                        "symptoms",
+                        "tiger",
+                        "lamb",
+                        "maze",
+                        "nestle",
+                        "python",
+                        "dusted",
+                        "faxed",
+                        "faxed"}),
+                session::mnemonics::checksum_error);
+    }
+
+    SECTION("one seed word altered before the prefix boundary") {
+        CHECK_THROWS_AS(
+                decode({"amaze",
+                        "buffet",
+                        "cake",
+                        "entrance",
+                        "symptoms",
+                        "tiger",
+                        "lamb",
+                        "maze",
+                        "nestle",
+                        "python",
+                        "dusted",
+                        "gagged",
+                        "faxed"}),
+                session::mnemonics::checksum_error);
+    }
+
+    SECTION("a word that is not in the list at all") {
+        CHECK_THROWS_AS(
+                decode({"amaze",
+                        "buffet",
+                        "cake",
+                        "entrance",
+                        "symptoms",
+                        "tiger",
+                        "lamb",
+                        "maze",
+                        "nestle",
+                        "python",
+                        "dusted",
+                        "faxed",
+                        "zzzzz"}),
+                session::mnemonics::unknown_word_error);
     }
 }
