@@ -1,0 +1,7 @@
+# Revisions to skip in schema_history_check.sh, one short hash per line with a reason.
+#
+# For commits whose full_schema.sql was broken or mid-rework and was never released, so no database
+# can have been created from it.  A file rather than a flag so that removing an entry is a
+# reviewable change rather than a silent one.
+#
+# Format:  <short-hash>  <reason>

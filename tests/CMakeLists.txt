@@ -94,10 +94,19 @@ target_link_libraries(testLogging PRIVATE
     test_libs
     Catch2::Catch2WithMain)
 
+# Driven by schema_history_check.sh rather than being a unit test: it needs schemas out of git
+# history, since a previous full_schema.sql is the only thing a database can be upgraded *from*.
+add_executable(schema-upgrade-check schema_upgrade_check.cpp)
+target_link_libraries(schema-upgrade-check PRIVATE
+    libsession::client
+    test_libs)
+
 if(NOT TARGET check)
     add_custom_target(check
         COMMAND testLogging
-        COMMAND testAll)
+        COMMAND testAll
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/schema_history_check.sh" $<TARGET_FILE:schema-upgrade-check>
+        DEPENDS schema-upgrade-check)
 endif()
 
 option(BUILD_LIVE_TESTS "Build the live testnet integration tests" ON)
