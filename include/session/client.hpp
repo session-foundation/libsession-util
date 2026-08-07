@@ -140,7 +140,7 @@ class Client {
                  _intercept_callbacks(
                          core::detail::maybe_instance<core::callbacks>(std::forward<Opts>(opts)...)
                                  .value_or(core::callbacks{})),
-                 core::schema_extension{"client", schema::MIGRATIONS},
+                 core::schema_extension{"client", schema::MIGRATIONS, schema::FULL_SCHEMA},
                  std::forward<Opts>(opts)...} {
         _init();
     }

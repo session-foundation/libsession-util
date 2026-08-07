@@ -13,29 +13,6 @@ It is recommended that migrations defined here use the format `NNN_description_o
 such as `000_device_tables.sql`.  Updates that depend on earlier migrations having happend must then
 ensure that they use a larger `NNN` value than the update that they depend on.  Migrations that
 depend on no other database components at all should start at 000.
-
-
-Iterating on a branch
----------------------
-
-While developing a schema change you generally want to keep applying updates to a database you have
-already been using, rather than recreating it after every edit.  To do that, name the first
-migration what the finished one will be called, and add addenda alongside it as you go:
-
-    001_new_feature.sql
-    001_new_feature+001.sql
-    001_new_feature+002.sql
-
-Before merging, fold the addenda back into `001_new_feature.sql` and delete them.  Because your
-database already recorded `001_new_feature` when you first created that file, the squashed migration
-is seen as applied and is not re-run: your development database survives the squash.  The orphaned
-`001_new_feature+NNN` rows left in `migrations_applied` are ignored, since only names present in the
-registry are ever consulted.
-
-If you skip this and name the first file something you later rename, the squash will leave your
-development database out of step and you will have to recreate it -- a nuisance rather than a
-problem, but easily avoided.
-
 There are two sorts of migrations permitted here: SQL and C++.
 
 SQL migrations are simply a file of queries to execute.  If the queries execute successfully, the
@@ -57,3 +34,25 @@ It is not permitted to use the same base filename for both SQL and C++ migration
 007_bond_james_bond.sql and 007_bond_james_bond.cpp): if a migration wants to use both, use a
 different numeric prefix or some sort of suffix (either of which will also defines the order the two
 migrations would be applied).
+
+
+Iterating on a branch
+---------------------
+
+While developing a schema change you generally want to keep updating a database you have already
+been using, rather than recreating it after every edit.  To do that, name the first migration what
+the finished one will be called, and add addenda alongside it as you go:
+
+    001_new_feature.sql
+    001_new_feature+001.sql
+    001_new_feature+002.sql
+
+Before merging, fold the addenda back into `001_new_feature.sql` and delete them.  Because your
+database recorded `001_new_feature` when you first created that file, the squashed migration is
+already applied and is not re-run: your development database survives the squash.  The orphaned
+`001_new_feature+NNN` rows left in `migrations_applied` are ignored, since only names present in the
+registry are ever consulted.
+
+If instead you name the first file something you later rename, the squash leaves your development
+database out of step and you have to recreate it -- a nuisance rather than a problem, but easily
+avoided.

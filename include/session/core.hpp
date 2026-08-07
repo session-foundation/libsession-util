@@ -238,6 +238,15 @@ struct schema_extension {
     /// The migrations themselves.  Not copied, but only referenced while the Core constructor
     /// runs, so this need only outlive construction.
     std::span<const schema::Migration> migrations;
+
+    /// Optional: the schema with every one of the above applied, as generated into the registry's
+    /// FULL_SCHEMA.  When a database has none of this owner's migrations applied it is built from
+    /// this in one step and they are all recorded without running, which is both faster than
+    /// replaying the chain and the reason a readable current schema can exist at all.
+    ///
+    /// Anything a migration does beyond DDL — seeding rows, say — must therefore also be in here,
+    /// since on a fresh database that migration never runs.
+    std::string_view full_schema;
 };
 
 /// Concept satisfied by any type usable as a Core constructor option: a sqlite database option

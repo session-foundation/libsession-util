@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <session/core.hpp>
 
+#include "schema_fingerprint.hpp"
 #include "test_helper.hpp"
 #include "test_schema_registry.hpp"
 
@@ -64,6 +65,76 @@ TEST_CASE("schema_extension: migrations order by name, not filename", "[core][sc
 
     auto cols = TestHelper::db_conn(core).get_columns("ext_ordering");
     CHECK(std::ranges::any_of(cols, [](const auto& c) { return c.name == "added_later"; }));
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+TEST_CASE("schema_extension: full_schema matches replaying the migrations", "[core][schema]") {
+    // The whole point of full_schema.sql: it must land in exactly the same place the migration
+    // chain does, or fresh installs and upgraded ones diverge -- silently, since whoever makes the
+    // change already has an upgraded database and never sees the fresh path.
+    auto build = [](std::string_view full_schema) {
+        auto path = std::filesystem::temp_directory_path() /
+                    fmt::format("{}.db", session::random::unique_id("test_drift", 7));
+        std::filesystem::remove(path);
+
+        std::string fingerprint;
+        {
+            Core core{
+                    path,
+                    schema_extension{"testext", session::test::schema::MIGRATIONS, full_schema}};
+            auto conn = TestHelper::db_conn(core);
+            fingerprint = session::test::schema_fingerprint(conn);
+        }
+
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return fingerprint;
+    };
+
+    auto from_full = build(session::test::schema::FULL_SCHEMA);
+    auto from_chain = build("");  // no full schema, so every migration runs
+
+    CHECK(from_full == from_chain);
+
+    // Guard against the comparison passing because both sides are empty.
+    CHECK(from_full.find("table ext_ordering") != std::string::npos);
+    CHECK(from_full.find("added_later") != std::string::npos);
+}
+
+TEST_CASE(
+        "schema_extension: full_schema records migrations without running them", "[core][schema]") {
+    auto path = std::filesystem::temp_directory_path() /
+                fmt::format("{}.db", session::random::unique_id("test_drift", 7));
+    std::filesystem::remove(path);
+
+    {
+        Core core{
+                path,
+                schema_extension{
+                        "testext",
+                        session::test::schema::MIGRATIONS,
+                        session::test::schema::FULL_SCHEMA}};
+
+        // Every migration is marked applied even though none ran, so a later reopen -- and any
+        // migration added after this point -- behaves as if the chain had been replayed.
+        CHECK(TestHelper::migration_applied(core, "testext:000_ext_thing"));
+        CHECK(TestHelper::migration_applied(core, "testext:001_ordering"));
+        CHECK(TestHelper::migration_applied(core, "testext:001_ordering+002"));
+        CHECK(table_exists(core, "ext_ordering"));
+    }
+
+    // Reopening must not now try to run any of them against the already-built schema.
+    {
+        Core core{
+                path,
+                schema_extension{
+                        "testext",
+                        session::test::schema::MIGRATIONS,
+                        session::test::schema::FULL_SCHEMA}};
+        CHECK(table_exists(core, "ext_ordering"));
+    }
 
     std::error_code ec;
     std::filesystem::remove(path, ec);

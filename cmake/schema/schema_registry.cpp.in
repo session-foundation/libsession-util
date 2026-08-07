@@ -12,4 +12,6 @@ static std::array migrations = {
 
 const std::span<const session::core::schema::Migration> MIGRATIONS{migrations};
 
+const std::string_view FULL_SCHEMA = R"_SQL_DELIM_(@SCHEMA_FULL@)_SQL_DELIM_";
+
 }  // namespace @SCHEMA_NAMESPACE@

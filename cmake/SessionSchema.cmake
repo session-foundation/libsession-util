@@ -82,6 +82,17 @@ function(session_schema_dir)
         string(APPEND SCHEMA_ENTRIES "    session::core::schema::Migration{\"${basename}\", &${FUNC_NAME}},\n")
     endforeach()
 
+    # An optional full_schema.sql holds the schema as it stands after every migration above.  A
+    # database with none of this owner's migrations applied is built from it directly and has them
+    # all recorded without running, so the file -- not the accumulated migration chain -- is what
+    # anyone reads to see the current schema.  It has no numeric prefix, so the glob above skips it.
+    set(SCHEMA_FULL "")
+    set(full_schema "${CMAKE_CURRENT_SOURCE_DIR}/full_schema.sql")
+    if(EXISTS "${full_schema}")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${full_schema}")
+        file(READ "${full_schema}" SCHEMA_FULL)
+    endif()
+
     configure_file("${SESSION_SCHEMA_TEMPLATE_DIR}/schema_migrations.hpp.in"
         "${CMAKE_CURRENT_BINARY_DIR}/schema_migrations.hpp" @ONLY)
     configure_file("${SESSION_SCHEMA_TEMPLATE_DIR}/schema_registry.cpp.in"

@@ -985,9 +985,48 @@ CREATE TABLE IF NOT EXISTS migrations_applied (
     // that two sets cannot collide.  A collision would not error, it would silently mark the second
     // migration as already applied.  Core's names deliberately stay unprefixed: prefixing them now
     // would re-run every migration on every existing database.
-    auto apply_set = [&](std::string_view owner, std::span<const schema::Migration> migrations) {
+    auto apply_set = [&](std::string_view owner,
+                         std::span<const schema::Migration> migrations,
+                         std::string_view full_schema) {
+        auto key_for = [&owner](std::string_view name) {
+            return owner.empty() ? std::string{name} : "{}:{}"_format(owner, name);
+        };
+
+        // With none of this set applied there is nothing to migrate *from*, so build the schema in
+        // one step and record the migrations as applied without running them.  This is not merely
+        // an optimisation: it is what lets full_schema.sql be the readable statement of the current
+        // schema, instead of that only existing as the result of replaying every migration.
+        //
+        // Keyed on this owner's own migrations rather than on the database being new, so an
+        // extension added to an existing database takes this path too, which is equally correct.
+        if (!full_schema.empty() && std::ranges::none_of(migrations, [&](const auto& m) {
+                return applied.count(key_for(m.name)) > 0;
+            })) {
+            try {
+                log::info(
+                        cat, "Creating {} schema from full_schema", owner.empty() ? "core" : owner);
+
+                SQLite::Transaction tx{conn.sql};
+
+                conn.sql.exec(std::string{full_schema});
+                for (const auto& m : migrations)
+                    conn.prepared_exec(
+                            "INSERT INTO migrations_applied (name) VALUES (?)", key_for(m.name));
+
+                tx.commit();
+            } catch (const std::exception& e) {
+                log::critical(
+                        cat,
+                        "Creating {} schema from full_schema failed: {}",
+                        owner.empty() ? "core" : owner,
+                        e.what());
+                throw;
+            }
+            return;
+        }
+
         for (const auto& [name, apply] : migrations) {
-            auto key = owner.empty() ? name : "{}:{}"_format(owner, name);
+            auto key = key_for(name);
             if (applied.count(key)) {
                 log::debug(cat, "Schema migration {} already applied", key);
                 continue;
@@ -1009,7 +1048,7 @@ CREATE TABLE IF NOT EXISTS migrations_applied (
         }
     };
 
-    apply_set("", schema::MIGRATIONS);
+    apply_set("", schema::MIGRATIONS, schema::FULL_SCHEMA);
 
     std::unordered_set<std::string_view> owners;
     for (const auto& ext : _schema_extensions) {
@@ -1021,7 +1060,7 @@ CREATE TABLE IF NOT EXISTS migrations_applied (
             throw std::invalid_argument{
                     "duplicate schema_extension owner '{}': migration names would collide"_format(
                             ext.owner)};
-        apply_set(ext.owner, ext.migrations);
+        apply_set(ext.owner, ext.migrations, ext.full_schema);
     }
     _schema_extensions.clear();
 

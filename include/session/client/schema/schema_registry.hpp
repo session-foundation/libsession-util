@@ -2,6 +2,7 @@
 
 #include <session/core/schema/schema_registry.hpp>
 #include <span>
+#include <string_view>
 
 /// Migrations for Client's tables, generated from src/client/schema/ and applied via Core's
 /// schema_extension option under the owner name "client".
@@ -11,5 +12,8 @@
 namespace session::client::schema {
 
 extern const std::span<const session::core::schema::Migration> MIGRATIONS;
+
+/// See session::core::schema::FULL_SCHEMA.
+extern const std::string_view FULL_SCHEMA;
 
 }  // namespace session::client::schema
