@@ -10,6 +10,10 @@
 -- Once Core carries the Contacts config, that config is reconciled *into* this table rather than
 -- replacing it: the config is the synced representation, this is the queryable one, and it also
 -- holds local-only fields the config knows nothing about.
+--
+-- Approval state arrives with it -- whether we have accepted messages from this account and whether
+-- they have accepted ours -- and belongs here rather than on conversations, because it is a
+-- property of the account.  It is what separates a conversation from a message request.
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
     session_id BLOB NOT NULL UNIQUE,    -- 33 bytes, 0x05-prefixed

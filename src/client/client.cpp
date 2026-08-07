@@ -560,6 +560,16 @@ void Client::_on_message_received(core::ReceivedMessage&& msg) {
         auto c = core.database().conn();
         SQLite::Transaction tx{c.sql};
 
+        // Every incoming DM materialises a visible conversation.  Session's actual behaviour gates
+        // this: a message from an account you have not approved belongs in the message requests
+        // list, and only becomes an ordinary conversation once you approve it.
+        //
+        // Worth knowing before implementing that: the gate is not "do not create the conversation".
+        // The message still needs somewhere to live, and a request is shown as a real conversation
+        // once opened -- so it is classification, not suppression.  Approval state belongs on the
+        // accounts row, reconciled from the Contacts config; conversations() then filters on it and
+        // a separate accessor lists the requests.  Unread splits the same way, Session counting
+        // request unreads separately from the conversation badge.
         auto convo = ensure_conversation(c, convo_id, ts);
         created = convo.created;
         auto sender = account_id(c, msg.sender_session_id);

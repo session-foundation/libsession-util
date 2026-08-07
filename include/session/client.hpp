@@ -152,6 +152,9 @@ class Client {
     // -- Conversations ------------------------------------------------------------------------
 
     /// All conversations, most recently active first.
+    ///
+    /// Currently that means every conversation.  Once message requests exist this returns only
+    /// approved ones, with the rest reached through their own accessor.
     std::vector<Conversation> conversations();
 
     /// A single conversation, or nullopt if it does not exist locally.
@@ -214,8 +217,7 @@ class Client {
   private:
     // Declared before `core` so that they are constructed before it and destroyed after it: Core's
     // callbacks capture `this` and may fire for as long as Core is alive.
-    std::shared_ptr<detail::SignalRegistry> _signals =
-            std::make_shared<detail::SignalRegistry>();
+    std::shared_ptr<detail::SignalRegistry> _signals = std::make_shared<detail::SignalRegistry>();
 
     // Core's send ids are per-process (its counter restarts at 1 on every run), so this mapping
     // must not be persisted or a stale row would capture a later run's status updates.
