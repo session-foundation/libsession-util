@@ -28,6 +28,8 @@
 #include <session/xed25519.hpp>
 #include <stdexcept>
 
+#include "../internal-util.hpp"
+
 namespace session::core {
 
 using namespace fmt::literals;
@@ -711,6 +713,13 @@ namespace {
     constexpr auto PERS_KEY_KEY_IDX = "SessionDevKeyIdx"_b2b_pers;
     constexpr auto PERS_ACC_KEY_ROT = "SessionAccKeyRot"_b2b_pers;
 
+    // Device group payloads are null-padded to a multiple of this before encryption so that the
+    // encrypted size reveals only which bucket the device count falls in, not the count itself.
+    // 1600 is a deliberate overestimate of a ~1341-byte device record, four records to a bucket, so
+    // any group of up to 4 devices encrypts to the same size.  The padded ciphertext/key slot lists
+    // hide the count in the key list; without this the payload length would give it away anyway.
+    constexpr size_t DEVICE_PAYLOAD_PADDING = 4 * 1600;
+
     constexpr int bt_bytes_encoded(int x) {
         int sz = 1 + x;
 
@@ -812,6 +821,10 @@ std::vector<std::byte> Devices::encrypt_device_data(const device::map& devices) 
     }
 
     auto plaintext_devices = encode_group_payload(devices, acc_keys);
+    plaintext_devices.resize(
+            (plaintext_devices.size() + DEVICE_PAYLOAD_PADDING - 1) / DEVICE_PAYLOAD_PADDING *
+            DEVICE_PAYLOAD_PADDING);
+
     std::vector<std::byte> enc_devices;
     enc_devices.resize(plaintext_devices.size() + encryption::XCHACHA20_ABYTES);
     encryption::xchacha20poly1305_encrypt(enc_devices, to_span(plaintext_devices), nonce, key_base);
@@ -1167,6 +1180,10 @@ std::vector<std::byte> Devices::decrypt_device_data(std::span<const std::byte> e
         log::warning(cat, "Failed to decrypt incoming device data");
         throw device::decryption_failed{"Failed to decrypt incoming device data"};
     }
+
+    // Strip the padding appended before encryption.  The payload is a bt-encoded dict, which always
+    // ends in 'e', so trailing null bytes are unambiguously padding rather than content.
+    trim_trailing(plaintext_devices);
 
     return plaintext_devices;
 }

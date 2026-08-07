@@ -106,6 +106,18 @@ class TestHelper {
                 sn_pubkey);
     }
 
+    // Device group payload encryption/decryption.  These are private to Devices and currently have
+    // no production caller (nothing yet builds or pushes a device group message), so tests are the
+    // only thing exercising them.
+    static std::vector<std::byte> encrypt_device_data(
+            core::Devices& d, const core::device::map& devices) {
+        return d.encrypt_device_data(devices);
+    }
+    static std::vector<std::byte> decrypt_device_data(
+            core::Devices& d, std::span<const std::byte> data) {
+        return d.decrypt_device_data(data);
+    }
+
     // Returns the raw 32-byte seed for the account key identified by the given x25519 public key.
     static cleared_b32 account_key_seed(
             core::Devices& d, std::span<const std::byte, 32> x25519_pub) {

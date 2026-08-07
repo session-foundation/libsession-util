@@ -219,6 +219,71 @@ TEST_CASE("Devices - device keys", "[core][devices]") {
     }
 }
 
+TEST_CASE("Devices - device group payload padding", "[core][devices]") {
+    TempCore c;
+
+    // Real keys, not random bytes: ML-KEM encapsulation is performed against each device's pubkey.
+    // Rotating produces distinct valid keypairs, and all of them stay in this device's active key
+    // set, so this Core can also decrypt whatever it encrypts below.
+    std::vector<device::Info> infos;
+    for (int i = 0; i < 5; i++) {
+        auto k = c->devices.rotate_device_keys();
+        auto& info = infos.emplace_back();
+        random::fill(info.id);
+        info.seqno = 1;
+        info.timestamp = clock_now_s();
+        info.type = device::Type::Session_Desktop;
+        info.description = "test device";
+        info.state = device::State::Registered;
+        info.version = {1, 0, 0};
+        info.pk_x25519 = k.x25519_pub;
+        info.pk_mlkem768 = k.mlkem768_pub;
+    }
+
+    auto encrypted_size = [&](size_t n) {
+        device::map m;
+        for (size_t i = 0; i < n; i++)
+            m.emplace(infos[i].id, infos[i]);
+        return TestHelper::encrypt_device_data(c->devices, m).size();
+    };
+
+    SECTION("groups of up to 4 devices are indistinguishable by size") {
+        auto one = encrypted_size(1);
+        CHECK(encrypted_size(2) == one);
+        CHECK(encrypted_size(3) == one);
+        CHECK(encrypted_size(4) == one);
+
+        // The 5th device crosses into the next bucket, which is expected and unavoidable — the
+        // guarantee is bucketing, not constant size.
+        CHECK(encrypted_size(5) > one);
+    }
+
+    SECTION("padding round-trips off again") {
+        device::map m;
+        for (size_t i = 0; i < 3; i++)
+            m.emplace(infos[i].id, infos[i]);
+
+        auto enc = TestHelper::encrypt_device_data(c->devices, m);
+        auto plaintext = TestHelper::decrypt_device_data(c->devices, enc);
+
+        // A bt-encoded dict always ends in 'e'; if any padding survived, it would not.
+        REQUIRE_FALSE(plaintext.empty());
+        CHECK(plaintext.back() == std::byte{'e'});
+
+        // And the recovered payload really is the device dict, not a truncation of it.
+        oxenc::bt_dict_consumer btdc{to_string_view(plaintext)};
+        REQUIRE(btdc.skip_until("D"));
+        auto devs = btdc.consume_dict_consumer();
+        int count = 0;
+        while (!devs.is_finished()) {
+            devs.skip_until(devs.key());
+            devs.consume_dict_consumer();
+            count++;
+        }
+        CHECK(count == 3);
+    }
+}
+
 TEST_CASE("Devices - account keys", "[core][devices]") {
     TempCore c;
 
